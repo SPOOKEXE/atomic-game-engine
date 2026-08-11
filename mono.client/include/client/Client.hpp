@@ -633,15 +633,6 @@ namespace client {
 		// completely different investigations.
 		bool ReportedAdmission = false;
 
-		// A jump seen during a frame, held until the next submission.
-		//
-		// **Because a key press is an edge and a submission is a tick.** Frames
-		// outnumber ticks, so a jump read straight out of `InputState` at
-		// submission time is a jump that lands only when the key happens to go
-		// down in the same frame the tick was polled — which reads as a jump
-		// button that works about one press in three.
-		bool PendingJump = false;
-
 		// Whether F4 has already said there is no network to show. Once, not
 		// once per press.
 		bool ReportedNoNetwork = false;

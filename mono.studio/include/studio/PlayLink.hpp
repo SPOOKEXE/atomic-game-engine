@@ -224,20 +224,6 @@ namespace studio {
 			return Replica_.IsValid();
 		}
 
-		// Remembers that this client's jump key went down.
-		//
-		// **Because a key press is an edge and a step is a tick.** Frames
-		// outnumber ticks, so a jump read straight out of `scene::InputState` at
-		// step time is a jump that lands only when the key happens to go down in
-		// the same frame the step ran — which reads as a jump button that works
-		// about one press in three. `client::Client::PendingJump` is the same
-		// latch for the same reason on a real client.
-		//
-		// Cleared by the step that sends it.
-		void Jump() {
-			PendingJump = true;
-		}
-
 		// The `Player` this client is, in the *authority's* world.
 		//
 		// **The authority's handle, and a replica's handle for the same thing.**
@@ -273,9 +259,6 @@ namespace studio {
 
 		// Frames since this client's player stopped being anywhere.
 		int Missing_ = 0;
-
-		// A jump seen during a frame, held until the next step.
-		bool PendingJump = false;
 
 		LinkReport Last;
 	};

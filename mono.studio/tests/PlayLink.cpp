@@ -603,6 +603,22 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 
 	fixture.Worlds.Enter(fixture.Authority, [](Store &store, engine::ecs::Scheduler &systems) {
 		engine::scene::RegisterSceneClasses();
+
+		// **`InstallPresentation` first, exactly as `Editor::BuildWorld` calls
+		// it, and leaving it out is what made this case pass through the bug it
+		// was written to catch.** It brings `client::InstallControls` with it,
+		// and that installs `character-control` — `scene::UpdateCharacterControl`
+		// running on the *authority*, against a keyboard the authority does not
+		// have.
+		//
+		// A fixture that listed only the calls below had no second writer, so
+		// the humanoid's `MoveDirection` was whatever `PlayLink` last applied
+		// and the character walked. In the editor the local pass ran a few
+		// systems later and wrote its empty direction over it every tick.
+		// Naming the same calls in the same order is not a tidiness rule here;
+		// it is the only reason this test can see the failure at all.
+		client::InstallPresentation(store, systems, 256);
+
 		engine::scene::InstallServices(store);
 
 		engine::physics::PreparePhysicsWorld(store);
@@ -612,7 +628,6 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 		engine::scene::RegisterGravitySystem(systems);
 
 		engine::scene::RegisterOwnershipSystem(systems);
-		engine::physics::RegisterCharacterSystems(systems);
 
 		// Something to stand on. Without it the character falls for the whole
 		// test and `Humanoid::Grounded` is never true, which is a different
@@ -740,10 +755,14 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 		input->Down = {};
 
 		// **An edge, so the previous frame has to not hold it.**
-		// `scene::ReadMoveIntent` asks `WasKeyPressed`, which is the difference
-		// between the two — a key held since the last frame is not a jump.
+		// `scene::ReadMoveIntent` asks for the space bar's *tap*, and a tap is
+		// an edge the writer recorded — a key held since the last frame is not
+		// a jump, and a bit set in `Down` that no `LatchPresses` ever saw is not
+		// a press at all. `Editor::DrivePlayer` ends its frame with that call,
+		// so the harness does too.
 		input->Previous = {};
 		input->Down.Set(engine::scene::KeyCode::Space, true);
+		input->LatchPresses();
 	});
 
 	// **The whole arc, not the first half.** A jump is up *and* down, and the

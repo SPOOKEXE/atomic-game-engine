@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <vector>
 
 namespace engine::scene {
 
@@ -188,7 +189,14 @@ namespace engine::scene {
 		// running diagonally forty per cent quicker — which is the oldest movement
 		// bug there is and the one players find first.
 		intent.Direction = wanted.Magnitude() > 0.0f ? wanted.Unit() : Vector3{};
-		intent.Jump = input->Focused && input->WasKeyPressed(KeyCode::Space);
+
+		// **`WasKeyTapped` and not `WasKeyPressed`**, because this is read on a
+		// tick and the other question is about a frame. See `InputState::Pressed`
+		// — a space bar tapped between two ticks is pressed on a frame no tick
+		// inspects, and reading the frame-shaped edge here is what made both
+		// hosts grow a private `PendingJump` beside this function instead of
+		// through it.
+		intent.Jump = input->Focused && input->WasKeyTapped(KeyCode::Space);
 		return intent;
 	}
 
@@ -224,9 +232,43 @@ namespace engine::scene {
 			mine = character->Humanoid;
 		}
 
+		// **A character somebody owns is never the fallback's to drive**, and
+		// this is the correction that makes a hosted world work at all.
+		//
+		// The fallback above — no `LocalPlayer`, so drive every humanoid — is
+		// right for the worlds it was written for and catastrophic for an
+		// authority. A studio playing both halves, or a dedicated server, has no
+		// `LocalPlayer` and no keyboard: `InputState` sits there unfocused, so
+		// `ReadMoveIntent` returns a zero direction, and the fallback wrote that
+		// zero over the direction a client had just sent through
+		// `game::ApplyMoveInput` — every tick, after the message arrived and
+		// before `StepCharacters` read it. `MoveDirection` was therefore always
+		// zero by the time it mattered and no client could walk.
+		//
+		// **Jump was unaffected, which is what made the bug so hard to place.**
+		// `JumpRequested` below is latched with `||` and survives being written
+		// by a keyboard that is not pressing anything; the direction is assigned
+		// and does not. A character that jumps perfectly and refuses to walk is
+		// the exact signature of this line being missing.
+		//
+		// `Character::Owner` is the test rather than a `Players` lookup: it is
+		// already the field that says "a person at a keyboard somewhere holds
+		// this", and an NPC leaves it null and stays drivable.
+		std::vector<ecs::Entity> spoken;
+		if (local == nullptr) {
+			store.Each<const Character>([&spoken](ecs::Entity, const Character &character) {
+				if (character.Owner != ecs::NULL_ENTITY && character.Humanoid != ecs::NULL_ENTITY) {
+					spoken.push_back(character.Humanoid);
+				}
+			});
+		}
+
 		size_t driven = 0;
 		store.Each<Humanoid>([&](ecs::Entity entity, Humanoid &humanoid) {
 			if (!humanoid.Enabled || (local != nullptr && entity != mine)) {
+				return;
+			}
+			if (local == nullptr && std::find(spoken.begin(), spoken.end(), entity) != spoken.end()) {
 				return;
 			}
 			humanoid.MoveDirection = direction;

@@ -214,9 +214,15 @@ namespace server_replication_test {
 		// Holds a set of keys down on this client, and releases everything else.
 		//
 		// **`Previous` is kept, because a jump is an edge.** `ReadMoveIntent`
-		// asks `WasKeyPressed` for the space bar, which is the difference between
-		// the two masks — so a harness that cleared both would make every frame
-		// look like the first and every held key look like a fresh press.
+		// asks for the space bar's edge, which is the difference between the two
+		// masks — so a harness that cleared both would make every frame look
+		// like the first and every held key look like a fresh press.
+		//
+		// **And `LatchPresses` is called, because that is what a writer does.**
+		// The edge a tick acts on lives in `InputState::Pressed`, and a frame
+		// that only set bits in `Down` is a frame no writer ever recorded. This
+		// is `Client::PumpInput`'s last line, and leaving it out here would make
+		// the harness the one place in the engine where jump worked differently.
 		void Press(std::initializer_list<engine::scene::KeyCode> keys) {
 			auto *input = World.ResourceMutable<engine::scene::InputState>();
 			if (input == nullptr) {
@@ -230,6 +236,7 @@ namespace server_replication_test {
 			for (const engine::scene::KeyCode key : keys) {
 				input->Down.Set(key, true);
 			}
+			input->LatchPresses();
 		}
 
 		// Where the camera is pointing, which is what W is measured against.
@@ -259,7 +266,15 @@ namespace server_replication_test {
 			engine::game::MoveInput move;
 			move.Direction = intent.Direction;
 			move.Jump = intent.Jump;
-			Link->Submit(Link->Applied(), engine::game::EncodeMoveInput(move), Now);
+			if (Link->Submit(Link->Applied(), engine::game::EncodeMoveInput(move), Now)) {
+				// Once it is on the wire, and not before — the same rule
+				// `Client::SubmitMove` follows, for the same reason: a tap
+				// forgotten after a failed send is a jump the server never
+				// heard about.
+				if (auto *input = World.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+					input->ConsumeTaps();
+				}
+			}
 		}
 
 		// Where this client believes its own character's body is.

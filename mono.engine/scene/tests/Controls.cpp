@@ -361,13 +361,18 @@ TEST_CASE("a jump pressed between two ticks is latched, not lost", "[scene][cont
 	const Entity character = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
 	world.Store_.Set(character, Humanoid{});
 
+	// **Through `LatchPresses`, which is what a writer does.** A press only
+	// becomes a tap once the thing filling `Down` has recorded the edge — see
+	// `InputState::Pressed`. Setting the bit alone is a frame nobody wrote.
 	world.Input().Down.Set(KeyCode::Space, true);
+	world.Input().LatchPresses();
 	REQUIRE(UpdateCharacterControl(world.Store_) == 1);
 	CHECK(world.Store_.Get<Humanoid>(character)->JumpRequested);
 
 	// The key goes up before the step runs, and the latch still holds.
 	world.Input().Previous = world.Input().Down;
 	world.Input().Down.Set(KeyCode::Space, false);
+	world.Input().LatchPresses();
 	UpdateCharacterControl(world.Store_);
 	CHECK(world.Store_.Get<Humanoid>(character)->JumpRequested);
 }

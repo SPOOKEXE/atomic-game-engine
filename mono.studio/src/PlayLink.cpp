@@ -5,6 +5,7 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
@@ -174,14 +175,26 @@ namespace studio {
 		if (Player_ != engine::ecs::NULL_ENTITY) {
 			engine::game::MoveInput wanted;
 
-			universe.Enter(Replica_, [this, &wanted](Store &store) {
+			universe.Enter(Replica_, [&wanted](Store &store) {
 				const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
-				wanted.Direction = intent.Direction;
 
-				// The direction is a *hold* and reads correctly from whatever
-				// frame this lands on; the jump is an edge and does not. See
-				// `PlayLink::Jump`.
-				wanted.Jump = intent.Jump || PendingJump;
+				// **Both halves out of one read now.** The direction is a hold
+				// and reads correctly from whatever frame this lands on; the
+				// jump is an edge and used to be smuggled past this call in
+				// `PendingJump` because a frame-shaped edge does not survive to
+				// a tick. `InputState::Pressed` holds it instead, so
+				// `ReadMoveIntent` answers for the whole keyboard.
+				wanted.Direction = intent.Direction;
+				wanted.Jump = intent.Jump;
+
+				// **Consumed here, and only here.** This is the one reader of
+				// the replica's taps per tick, so clearing them is this
+				// function's job — a tap left latched would jump again on the
+				// next tick and a tap cleared by a second reader would not jump
+				// at all.
+				if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+					input->ConsumeTaps();
+				}
 			});
 
 			engine::game::MoveInput arrived;
@@ -189,7 +202,6 @@ namespace studio {
 				universe.Enter(Authority_, [this, &arrived](Store &store) {
 					(void)engine::game::ApplyMoveInput(store, Player_, arrived);
 				});
-				PendingJump = false;
 			}
 		}
 

@@ -148,24 +148,21 @@ namespace studio {
 			}
 
 			input->WheelDelta = io.MouseWheel;
+
+			// **The press edges, kept for the tick that will read them.**
+			// `PlayLink::Step` runs once per tick and frames outnumber ticks, so
+			// a space bar tapped between two ticks lands on a frame no tick ever
+			// looks at. This used to be answered here, by reaching past
+			// `InputState` for imgui's own edge and calling `PlayLink::Jump` on
+			// the link that happened to own this world — a second input path
+			// that only jump travelled, wired by hand to one key.
+			//
+			// `InputState::Pressed` is that latch in the one place both hosts
+			// share, so jump is now an ordinary key: it goes into `Down` with W,
+			// A, S and D above and leaves through `ReadMoveIntent` with them.
+			input->LatchPresses();
 			drove = true;
 		});
-
-		// **Latched here, where every frame is seen.** `PlayLink::Step` runs
-		// once per tick and frames outnumber ticks, so an edge read at step time
-		// is an edge missed most of the time — `PlayLink::Jump` carries the
-		// argument. `IsKeyPressed(false)` is imgui's own edge, which is the same
-		// question `scene::InputState::WasKeyPressed` answers a tick later.
-		if (drove && ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
-			if (WorldRun *run = RunOwning(world); run != nullptr) {
-				for (const std::unique_ptr<PlayLink> &link : run->Links) {
-					if (link != nullptr && link->ReplicaWorld() == world) {
-						link->Jump();
-						break;
-					}
-				}
-			}
-		}
 
 		return drove;
 	}

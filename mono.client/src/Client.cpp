@@ -1074,16 +1074,24 @@ namespace client {
 		// window; copying the whole translator over the resource would throw
 		// that away every frame. `scene::InputState` is the seam in both
 		// directions.
+		// **Two fields survive the overwrite, for two different reasons.** The
+		// pointer mode travels the other way — a script writes it and the window
+		// obeys — and the tap latch is *older than this frame* by design: it is
+		// what a key pressed between two ticks is remembered in, and
+		// `Input.State()` only knows about the frame it just read.
 		const engine::scene::MouseBehavior wanted = state->Behaviour;
+		const engine::scene::KeyBits taps = state->Pressed;
 		*state = Input.State();
 		state->Behaviour = wanted;
+		state->Pressed = taps;
 		PointerMode = wanted;
 
-		// Latched here, where every frame is seen — `PendingJump` says why the
-		// submission cannot read the edge for itself.
-		if (state->Focused && state->WasKeyPressed(engine::scene::KeyCode::Space)) {
-			PendingJump = true;
-		}
+		// Latched here, where every frame is seen. This used to set a private
+		// `PendingJump` on the client, which `SubmitMove` then had to merge back
+		// in by hand — jump was the one key that did not travel through
+		// `scene::InputState`. `LatchPresses` is that latch for every key, in
+		// the state both the client and the studio already share.
+		state->LatchPresses();
 	}
 
 	void Client::SubmitMove(double nowSeconds) {
@@ -1111,6 +1119,7 @@ namespace client {
 			// and the camera it is relative to is this world's.
 			const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
 			move.Direction = intent.Direction;
+			move.Jump = intent.Jump;
 			tick = store.Time().Tick;
 		});
 
@@ -1118,14 +1127,20 @@ namespace client {
 			return;
 		}
 
-		move.Jump = PendingJump;
-
 		// **Sent every tick, including the still ones.** A client that only
 		// spoke when its keys changed would leave a character walking for ever
 		// after a dropped release — an input channel is unreliable by design,
 		// and "still walking" is the failure a state-change protocol produces.
 		if (Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
-			PendingJump = false;
+			// **Cleared once the tap is actually on the wire**, and not when it
+			// was read. A submission that failed has not told the server
+			// anything, and forgetting the jump there is the dropped press this
+			// latch exists to prevent.
+			Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
+				if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+					input->ConsumeTaps();
+				}
+			});
 		}
 	}
 

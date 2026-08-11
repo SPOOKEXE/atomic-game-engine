@@ -1589,8 +1589,18 @@ namespace studio {
 		// `physics/Characters.hpp` states: a keyboard belongs to whoever has
 		// one, and in this editor that is a *viewport* rather than a world. See
 		// `Editor::DrivePlayer`, which writes the client world's `InputState`
-		// and lets that world's own `scene::UpdateCharacterControl` read it.
-		engine::physics::RegisterCharacterSystems(systems);
+		// and lets `PlayLink::Step` read it.
+		//
+		// **And the call itself is not here either, because `InstallControls`
+		// already made it.** Every world this editor builds goes through
+		// `client::InstallPresentation`, which installs the input system and
+		// then `physics::RegisterCharacterSystems` beside it; a second call here
+		// registered the whole chain twice, so `character.link`,
+		// `character.control`, `character.portal` and `character.pose` each ran
+		// twice per tick against the same rows. It was not what stopped a
+		// character walking, but it doubled the ground query and the step for
+		// every character in the editor, and a live `profile_frame` listing the
+		// same system name twice under one phase is how it was found.
 	}
 
 	void Editor::NewGame() {
