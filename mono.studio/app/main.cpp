@@ -5,6 +5,7 @@
 // test binary needs something to link, and a program that is one executable's
 // worth of globbed sources cannot be driven by one.
 
+#include <cstdlib>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Log.hpp>
@@ -33,6 +34,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("viewport2", "Open the second viewport");
 
 	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
+	arguments.Value("rojo", "PATH", "Sync this Rojo project or universe at startup ($ATOMIC_ROJO_PROJECT)");
 	arguments.Value("width", "PX", "Window width (default 1600)");
 	arguments.Value("height", "PX", "Window height (default 900)");
 	arguments.Value("scale", "FACTOR", "Interface scale (default 1.0)");
@@ -122,6 +124,18 @@ int main(int argc, char **argv) {
 
 	if (auto game = arguments.Get("game")) {
 		options.Game = std::filesystem::path(*game);
+	}
+
+	// **The flag, or the variable when there is no flag.** Same reconciliation
+	// as every other option on this page and in the same direction: what
+	// somebody typed for this run wins over what their shell has been carrying
+	// all day. Nothing writes the variable back, so `--rojo` cannot make an
+	// environment sticky.
+	if (auto project = arguments.Get("rojo")) {
+		options.RojoProject = std::filesystem::path(*project);
+	} else if (const char *environment = std::getenv("ATOMIC_ROJO_PROJECT");
+			   environment != nullptr && environment[0] != '\0') {
+		options.RojoProject = std::filesystem::path(environment);
 	}
 	if (auto mode = arguments.Get("run")) {
 		if (*mode == "play") {

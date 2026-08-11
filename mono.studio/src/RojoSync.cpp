@@ -900,6 +900,26 @@ namespace studio {
 			const std::string &keyPrefix,
 			RojoSyncReport &report
 		) {
+			// **A directory holding `default.project.json` *is* that project,
+			// and is not also walked.** Rojo's rule, and the failure it prevents
+			// is quiet rather than loud: every wally package ships one, mapping
+			// its `lib/` or `src/` folder onto the module a game requires. A
+			// sync that followed the project *and* walked the folder beside it
+			// built both — one copy under the name the package publishes and one
+			// under the folder's own — and two copies of a `ModuleScript` are
+			// two modules with two states, which is `mono.studio/AGENTS.md`'s own
+			// rule about a module being keyed by instance.
+			//
+			// Measured on a real project: `raceapet` synced 2012 scripts against
+			// 1643 files that could be one, and the difference was every
+			// installed package counted twice.
+			std::error_code holds;
+			const std::filesystem::path project = directory / "default.project.json";
+			if (std::filesystem::is_regular_file(project, holds)) {
+				BuildProjectFile(store, project, parent, report);
+				return;
+			}
+
 			// **Sorted, because a directory walk is not ordered.** Two syncs of
 			// one tree have to produce the same creation order or the entity ids
 			// differ between them, and an id that moves is a saved reference that
@@ -1033,6 +1053,81 @@ namespace studio {
 			}
 		}
 
+		// Builds whatever a `$path` names into an instance that already exists.
+		//
+		// **One implementation, because two things map a path onto a node.** A
+		// node in a project's tree does it, and so does the *root* of a nested
+		// project — a wally package is `{"tree": {"$path": "lib"}}` and nothing
+		// else, so a nested build that only walked the root's children built
+		// nothing at all for every package a game installs. That failure was
+		// invisible while directories were also walked beside their project
+		// file: the modules appeared, under the folder's name instead of the
+		// package's, and both copies were there.
+		//
+		// @param path Relative to `root`. Empty does nothing, which is what a
+		//        node with only children is.
+		void BuildPathInto(
+			Store &store,
+			const std::filesystem::path &root,
+			const std::string &path,
+			Entity into,
+			RojoSyncReport &report
+		) {
+			if (path.empty() || into == NULL_ENTITY) {
+				return;
+			}
+
+			const std::filesystem::path source = root / path;
+			std::error_code kind;
+
+			if (std::filesystem::is_directory(source, kind)) {
+				BuildDirectory(store, source, into, path + "/", report);
+				return;
+			}
+			if (!std::filesystem::exists(source, kind)) {
+				report.Missing.push_back(path);
+				return;
+			}
+
+			// **The same dispatcher a directory walk uses**, so a `$path` naming
+			// a `.model.json` builds the same instance it would have built one
+			// folder up. Two answers to one mapping is the duplicate this whole
+			// file is written against.
+			//
+			// The prefix is the file's *folder*, because `BuildMapped` appends
+			// the leaf — passing the whole path would key a staged module under
+			// `src/data.json/data.json`.
+			const std::string folder = path.substr(0, path.find_last_of('/') + 1);
+			if (BuildMapped(store, source, into, folder, report)) {
+				return;
+			}
+
+			const ScriptFile file = ClassifyFile(source);
+			if (!file.IsScript) {
+				// The same accounting a directory walk does. A `$path` naming a
+				// `.rbxm` used to produce nothing and say nothing, which is the
+				// one outcome an author cannot act on.
+				const char *unbuilt = UnbuiltKind(source);
+				report.Notes.push_back(
+					path + " is " + (unbuilt != nullptr ? unbuilt : "not a script") + " — skipped"
+				);
+				return;
+			}
+
+			if (!StageProgram(store, source, path)) {
+				return;
+			}
+
+			const Entity script = file.Module
+									  ? engine::script::MakeModule(store, path, file.Name)
+									  : engine::script::MakeScript(store, path, file.Name, file.Local);
+			if (script != NULL_ENTITY) {
+				store.SetParent(script, into);
+				report.Instances++;
+				report.Scripts++;
+			}
+		}
+
 		void BuildNode(
 			Store &store,
 			const RojoNode &node,
@@ -1059,57 +1154,7 @@ namespace studio {
 				}
 			}
 
-			if (!node.Path.empty()) {
-				const std::filesystem::path source = root / node.Path;
-				std::error_code kind;
-
-				if (std::filesystem::is_directory(source, kind)) {
-					BuildDirectory(store, source, node_, node.Path + "/", report);
-				} else if (std::filesystem::exists(source, kind)) {
-					// **The same dispatcher a directory walk uses**, so a
-					// `$path` naming a `.model.json` builds the same instance it
-					// would have built one folder up. Two answers to one mapping
-					// is the duplicate this whole file is written against.
-					//
-					// The prefix is the file's *folder*, because `BuildMapped`
-					// appends the leaf — passing `node.Path` whole would key a
-					// staged module under `src/data.json/data.json`.
-					const std::string folder = node.Path.substr(0, node.Path.find_last_of('/') + 1);
-
-					// **Not a `return`.** The node's declared children are built
-					// after this block, and a project may put both a `$path` and
-					// children on one node.
-					if (!BuildMapped(store, source, node_, folder, report)) {
-
-					const ScriptFile file = ClassifyFile(source);
-					if (!file.IsScript) {
-						// The same accounting a directory walk does. A `$path`
-						// naming a `.rbxm` used to produce nothing and say
-						// nothing, which is the one outcome an author cannot
-						// act on.
-						const char *kind_ = UnbuiltKind(source);
-						report.Notes.push_back(
-							node.Path + " is " +
-							(kind_ != nullptr ? kind_ : "not a script") + " — skipped"
-						);
-					} else if (StageProgram(store, source, node.Path)) {
-						const Entity script =
-							file.Module ? engine::script::MakeModule(store, node.Path, file.Name)
-										: engine::script::MakeScript(
-											  store, node.Path, file.Name, file.Local
-										  );
-						if (script != NULL_ENTITY) {
-							store.SetParent(script, node_);
-							report.Instances++;
-							report.Scripts++;
-						}
-					}
-
-					}
-				} else {
-					report.Missing.push_back(node.Path);
-				}
-			}
+			BuildPathInto(store, root, node.Path, node_, report);
 
 			for (const RojoNode &child : node.Children) {
 				BuildNode(store, child, root, node_, report);
@@ -1165,9 +1210,18 @@ namespace studio {
 
 			loading.push_back(key);
 
-			// **The tree's own children, exactly as a top-level sync builds
-			// them** — and under the *including* node rather than as roots,
-			// because a nested project is a subtree of the one that named it.
+			// **The root's own `$path` first, into the including node.** A
+			// package's project file is a root with a path and no children —
+			// `{"tree": {"$path": "lib"}}` — so a build that started at the
+			// children built nothing for it. The root maps onto the node that
+			// included it rather than onto a new instance: a nested project is a
+			// subtree of the one that named it, and creating an extra level here
+			// would put every package's contents one folder deeper than the name
+			// a game requires.
+			BuildPathInto(store, file.parent_path(), nested.Tree.Path, parent, report);
+
+			// **Then the tree's own children, exactly as a top-level sync builds
+			// them** — and under the *including* node, for the same reason.
 			for (const RojoNode &child : nested.Tree.Children) {
 				BuildNode(store, child, file.parent_path(), parent, report);
 			}

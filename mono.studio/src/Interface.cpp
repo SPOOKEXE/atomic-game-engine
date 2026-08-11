@@ -1687,6 +1687,12 @@ namespace studio {
 		item("Script", 2);
 		item("View", 3);
 
+		// **Always there, whether or not anything is installed.** A tab that
+		// appeared once a plugin loaded would be the answer to "where do
+		// plugins go" only for people who already had one — and the row says
+		// which of the two empty states it is.
+		item("Plugins", 4);
+
 		ImGui::EndTabBar();
 
 		switch (tab) {
@@ -1701,6 +1707,9 @@ namespace studio {
 			break;
 		case 3:
 			DrawViewTools();
+			break;
+		case 4:
+			DrawPluginTools();
 			break;
 		default:
 			// No tab is open only on the frame the bar is first submitted, and

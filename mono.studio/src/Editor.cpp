@@ -308,6 +308,19 @@ namespace studio {
 			NewGame();
 		}
 
+		// **After the game, because a sync builds *into* a scene.** With no game
+		// named that scene is the empty one `NewGame` just made, which is the
+		// case somebody pointing this at a Rojo repository wants: the project is
+		// the whole content of the run.
+		if (!Settings.RojoProject.empty()) {
+			const std::string name = Settings.RojoProject.filename().string();
+			if (name.size() > 14 && name.compare(name.size() - 14, 14, ".universe.json") == 0) {
+				SyncRojoWorlds(Settings.RojoProject);
+			} else {
+				SyncRojo(Settings.RojoProject);
+			}
+		}
+
 		// **The scene a capture was asked for, made the active one.** The
 		// capture photographs whichever world the drawing viewport shows, so
 		// naming one has to move the viewport rather than reach past it — there

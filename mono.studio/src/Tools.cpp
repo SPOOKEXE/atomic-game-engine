@@ -1,4 +1,7 @@
-// The ribbon's four tabs — the manipulators, the steps and the two flags.
+// Four of the ribbon's five tabs — the manipulators, the steps and the two
+// flags. The fifth is `Editor::DrawPluginTools`, which lives beside the rest of
+// the plugin host in `Plugins.cpp` rather than here: what it draws is whatever
+// the installed plugins asked for, and none of it is this editor's own.
 //
 // **Everything here was already reachable and none of it was reachable while
 // working.** The tool modes were keyboard-only, the snap steps were on the

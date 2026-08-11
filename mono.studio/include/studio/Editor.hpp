@@ -68,6 +68,7 @@
 #include <span>
 #include <string>
 #include <studio/Commands.hpp>
+#include <studio/AssetCatalogue.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
@@ -297,6 +298,26 @@ namespace studio {
 
 		// The game file to open at start-up, or empty for a new game.
 		std::filesystem::path Game;
+
+		// A Rojo project or universe file to sync once the scene exists.
+		//
+		// **So that an external project can be checked without a person driving
+		// the menu.** A sync is otherwise a file prompt and two clicks, which
+		// makes "does this repository still sync" a thing nobody verifies —
+		// with this it is one command, and with `--headless --frames` it is one
+		// a build server can run.
+		//
+		// Taken from `--rojo`, or from `ATOMIC_ROJO_PROJECT` when the flag is
+		// absent: the flag is for one run and the variable is for a shell
+		// somebody works in all day, which is `studio/Config.hpp`'s split
+		// applied to an environment rather than to a preferences file. Nothing
+		// writes it back.
+		//
+		// A `*.universe.json` file syncs every world it names; anything else is
+		// read as one project into the active scene.
+		//
+		// @since v0.14
+		std::filesystem::path RojoProject;
 
 		// Read staged data from here instead of from beside the binary.
 		std::filesystem::path Assets;
@@ -1184,8 +1205,10 @@ namespace studio {
 		//        path, so a multi-file drop is several calls.
 		void DropAssetPath(const std::string &path);
 
-		// The published manifest, as a table somebody can filter and copy from.
-		void DrawPublishedList();
+		// One place's contents, as a table somebody can filter and copy from.
+		//
+		// @param tab Which place, and what it holds — see `AssetCatalogue.hpp`.
+		void DrawCatalogueList(const CatalogueTab &tab);
 
 		// How long this editor has been drawing, in seconds.
 		//
@@ -1232,12 +1255,20 @@ namespace studio {
 			float cornerX, float cornerY, float side, const std::string &name, engine::assets::AssetKind kind
 		);
 
-		// Orders the published view by whatever headers were clicked.
+		// Orders a catalogue view by whatever headers were clicked.
 		//
-		// **The view and never `PickerContents`.** That is what the manifest
-		// says, in the order it says it, and every picker reads it — a header
-		// click must not reorder what another panel is looking at.
-		void SortPublished(std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs);
+		// **The view and never `AssetTabs`.** That is what each place said it
+		// holds, in name order, and the merged tab is built from it — a header
+		// click must not reorder what another tab is looking at.
+		//
+		// @param rows The view to order, in place.
+		// @param specs Which headers were clicked, most significant first.
+		// @param showSource Whether the table has the merged tab's extra
+		//        column — which is what decides whether column three is the
+		//        source or the address.
+		void SortCatalogue(
+			std::vector<const CatalogueEntry *> &rows, const ImGuiTableSortSpecs *specs, bool showSource
+		);
 
 		// The same for the raw view.
 		void SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
@@ -1545,12 +1576,36 @@ namespace studio {
 		// @return `false` when it could not be baked. `AssetStatus` says why.
 		bool BakeRawAsset(const std::string &relative, std::string &baked);
 
+		// Bakes one file out of a raw folder and registers it here, now.
+		//
+		// **The unprocessed half of the same idea, for a folder this editor does
+		// not own.** `BakeRawAsset` bakes out of the content store's `raw/`,
+		// which is a place files were *imported* to; this bakes out of somebody's
+		// art directory in place. `ContentSources::MemoryOnly` decides whether
+		// the result also lands in the store's `baked/` — on, which is the
+		// default, nothing is written anywhere.
+		//
+		// **A model's textures are separate files and are not dragged in with
+		// it.** The bake rewrites its references to the names those files would
+		// have, so loading them afterwards — or with `Bake and load` — is what
+		// makes the model textured. Baking a model's whole dependency tree from
+		// one click would be a walk of the folder per asset.
+		//
+		// @param folder   The raw folder, as configured.
+		// @param relative The file inside it, as `RawFolderAssets` reported it.
+		// @return `false` when it could not be baked. `AssetStatus` says why.
+		// @since v0.14
+		bool LoadRawAsset(const std::filesystem::path &folder, const std::string &relative);
+
 		// Hands a freshly baked file to this editor's renderer.
 		//
 		// **So a picked asset appears in the viewport before any publish**,
 		// which is the whole point of baking on demand. Textures and meshes
 		// only; everything else reaches a runtime through a publish.
+		//@{
 		void RegisterBakedAsset(const std::filesystem::path &path, const std::string &name);
+		void RegisterBakedAsset(std::span<const std::byte> bytes, const std::string &name);
+		//@}
 
 		// What is moving between this editor and its origins.
 		//
@@ -1656,6 +1711,19 @@ namespace studio {
 		void LoadPlugins();
 		void PumpPlugins(float delta);
 		void DrawPlugins();
+
+		// The ribbon's Plugins row: every running plugin's toolbars.
+		//
+		// **On the ribbon rather than inside the Plugins panel, since v0.14.**
+		// A plugin's toolbar is a tool — it is pressed while working, next to
+		// the manipulators and the insert buttons — and it used to be reachable
+		// only by opening a panel that is otherwise about *managing* plugins:
+		// what is installed, what faulted, why. Those are two different visits,
+		// and the frequent one was behind the rare one.
+		//
+		// The panel keeps the half it was right about: the table, the reload,
+		// and the checkboxes that reopen a widget somebody closed.
+		void DrawPluginTools();
 
 		// Draws every open plugin panel, each in its own window.
 		void DrawPluginWidgets();
@@ -3589,6 +3657,16 @@ namespace studio {
 		// What is sitting in `raw/`, as of the last refresh.
 		std::vector<cdn::RawEntry> PickerRaw;
 
+		// Every place the assets panel can list, as of the last refresh.
+		//
+		// **Rebuilt with the store rather than per frame**, for the same reason:
+		// a tab per directory source parses that source's manifest, and there is
+		// no more reason to do that every frame than there is to stat `raw/`
+		// every frame. Rebuilt when the panel opens, after an import or a
+		// publish, and when the content sources are edited — which is exactly
+		// when the answer can have changed.
+		std::vector<CatalogueTab> AssetTabs;
+
 		// What the person typed into a picker's filter.
 		std::string PickerFilter;
 
@@ -3629,13 +3707,17 @@ namespace studio {
 		// by coincidence is how this broke in the first place.
 		engine::ecs::PropertyType PickerType = engine::ecs::PropertyType::Opaque;
 
-		// The engine's own meshes, offered beside the store's.
+		// The engine's own assets, offered beside the store's.
 		//
 		// **Separate from `PickerContents` because it means something else.**
 		// That one is the published manifest and its emptiness is a message
-		// somebody acts on; these six exist in every process whether or not
+		// somebody acts on; these exist in every process whether or not
 		// anything has ever been published, so folding them in would make
 		// "nothing published" unsayable.
+		//
+		// Filled from `EngineAssets`, which is also what the assets panel's
+		// engine tab draws — one enumeration, so the two cannot offer different
+		// sets.
 		std::vector<cdn::PublishedEntry> PickerBuiltins;
 
 		// The name a picker is currently offering.

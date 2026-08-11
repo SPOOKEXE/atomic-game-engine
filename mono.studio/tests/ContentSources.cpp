@@ -350,3 +350,52 @@ TEST_CASE("the default survives a save and a load", "[studio][content]") {
 
 	std::filesystem::remove(path);
 }
+
+TEST_CASE("raw folders and the memory-only flag survive a save", "[studio][contentsources]") {
+	const std::filesystem::path file = ScratchFile("atomic-content-raw.ini");
+	std::filesystem::remove(file);
+
+	ContentSources written;
+	written.Sources.push_back(Origin("origin", "127.0.0.1:9080"));
+	written.RawFolders.emplace_back("/art/characters");
+	written.RawFolders.emplace_back("/art/props");
+	written.MemoryOnly = false;
+	REQUIRE(written.Save(file));
+
+	ContentSources read;
+	REQUIRE(read.Load(file));
+	REQUIRE(read.RawFolders.size() == 2);
+	REQUIRE(read.RawFolders[0] == std::filesystem::path("/art/characters"));
+	REQUIRE(read.RawFolders[1] == std::filesystem::path("/art/props"));
+	REQUIRE_FALSE(read.MemoryOnly);
+
+	// **A raw folder is not an origin**, and reading one back as a source would
+	// put a folder of PNGs into the list `delivery::AssetClient` fetches from —
+	// where every name has to be one a signed manifest carries.
+	REQUIRE(read.Sources.size() == 1);
+
+	std::filesystem::remove(file);
+}
+
+TEST_CASE("a file written before raw folders existed still loads", "[studio][contentsources]") {
+	const std::filesystem::path file = ScratchFile("atomic-content-old.ini");
+	{
+		std::ofstream out(file, std::ios::trunc);
+		out << "publisher = ab\n";
+		out << "source = origin | http | 127.0.0.1:9080 | on\n";
+	}
+
+	ContentSources read;
+	read.RawFolders.emplace_back("/left/over");
+	read.MemoryOnly = false;
+	REQUIRE(read.Load(file));
+
+	// **Cleared, and the flag goes back to on rather than staying off.** The
+	// safe answer is the one that writes nothing to somebody's disk, and a
+	// leftover `false` from a previous load would make an editor start baking
+	// into the content store because of a file that never mentioned it.
+	REQUIRE(read.RawFolders.empty());
+	REQUIRE(read.MemoryOnly);
+
+	std::filesystem::remove(file);
+}
