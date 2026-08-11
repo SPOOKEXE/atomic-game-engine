@@ -113,7 +113,6 @@ namespace engine::physics {
 	// that puts the answers back — which is exactly what the pipeline table
 	// means by a `Publish` step that writes back velocities.
 	//
-	// @since v0.4
 	// **The first four fields are the ones a sweep touches, and they are first
 	// on purpose.** The iteration reads and writes two bodies per row at random
 	// offsets, `SOLVER_ITERATIONS` times over, so what decides whether that hits
@@ -122,6 +121,8 @@ namespace engine::physics {
 	// all of them in one line and everything the sweeps never look at in the
 	// next. Scattered — inverse mass sat ninety-six bytes after the velocities —
 	// it was two lines per body per access.
+	//
+	// @since v0.4
 	struct alignas(64) SolverBody {
 		// Metres per second, in world space.
 		core::Vector3 LinearVelocity;
