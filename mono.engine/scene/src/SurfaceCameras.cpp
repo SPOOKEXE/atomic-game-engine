@@ -459,6 +459,142 @@ namespace engine::scene {
 			out.HalfExtent = bounds->HalfExtent;
 			return true;
 		}
+
+		// One end of one pairing, in the terms a segment test wants.
+		//
+		// **Shared by the body pass and the camera arm**, which is the whole
+		// reason it is a type rather than four locals: a character that goes
+		// through a hole and a camera that does not follow it is the same bug
+		// twice, and the only way the two cannot disagree is for them to run the
+		// same test over the same rectangle.
+		struct Hole {
+			// The pane's plane: a point on it and its face's unit normal.
+			//
+			// **The face's normal, not "the outward one".** Which side is
+			// outward is a question about the *crosser*, exactly as it is a
+			// question about the viewer in `AimSurfaceCameras` — a pane can be
+			// walked into from either side and both answers are right. So the
+			// sign is decided per crosser, below.
+			Vector3 Centre;
+			Vector3 Normal;
+
+			// The pane's half-axes in the world, so `Centre ± First ± Second`
+			// is the rectangle. Kept as vectors rather than as extents because
+			// that is what the inside test needs.
+			Vector3 First;
+			Vector3 Second;
+
+			// The far pane's face frame, looking out of itself. The half of the
+			// mapping that does not depend on who is crossing.
+			CFrame Destination;
+		};
+
+		// Every linked portal in the world, as a rectangle and a destination
+		// frame.
+		std::vector<Hole> GatherHoles(Store &store) {
+			std::vector<Hole> holes;
+
+			store.Each<const Portal, const SurfaceCamera>(
+				[&](Entity entity, const Portal &portal, const SurfaceCamera &camera) {
+					if (portal.Destination == NULL_ENTITY || !store.Alive(portal.Destination)) {
+						// An unlinked portal falls back to a mirror, and a mirror
+						// is a wall. Walking into one is walking into a wall.
+						return;
+					}
+
+					// **The pane is the camera's parent, not the camera.** A
+					// `SurfaceCamera` is a `PVInstance` — it has a placement and
+					// no size at all — so a pass that read the camera's own
+					// `Bounds` found none and every portal in the world quietly
+					// had no hole in it. `FaceOf` is what `AimSurfaceCameras`
+					// uses and is the one answer to "which rectangle is this
+					// camera projecting off".
+					Face face;
+					if (!FaceOf(store, entity, camera.Face, face)) {
+						return;
+					}
+
+					const Transform *far = store.Get<Transform>(portal.Destination);
+					const Bounds *farBounds = store.Get<Bounds>(portal.Destination);
+					if (far == nullptr || farBounds == nullptr) {
+						return;
+					}
+
+					// The far pane's own face, chosen the way the source's was:
+					// `SurfaceCamera::Face` names one side of a part, and the far
+					// end of a hole is the matching side of the part it leads to.
+					const Vector3 local = NormalOf(camera.Face);
+					const Vector3 farNormal = far->Frame.VectorToWorldSpace(local).Unit();
+					const Vector3 farCentre =
+						far->Frame.Position + farNormal * ReachOf(*farBounds, camera.Face);
+
+					Hole hole;
+					hole.Centre = face.Centre;
+					hole.Normal = face.Normal;
+					FaceAxes(face.Placement, local, face.HalfExtent, hole.First, hole.Second);
+					hole.Destination = CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
+
+					holes.push_back(hole);
+				}
+			);
+
+			return holes;
+		}
+
+		// Whether a segment goes through one hole, and what carries it there.
+		//
+		// @param hole    The pane to test against.
+		// @param was     Where the segment starts.
+		// @param now     Where it ends.
+		// @param through The map from this side to the far side, written only
+		//                when the answer is true.
+		bool CrossingOf(const Hole &hole, const Vector3 &was, const Vector3 &now, CFrame &through) {
+			// Signed distance either side of the pane's plane. **A crossing is a
+			// change of side and not a place**, which is what makes the test
+			// work at speed: a character walks a quarter of a metre a tick, so
+			// "is it inside the pane now" misses the tick it was on either side
+			// of.
+			//
+			// **Either direction.** A pane is a hole rather than a one-way door,
+			// and which side is "outward" is a question about the crosser —
+			// `AimSurfaceCameras` answers the same question about the viewer, in
+			// the same way, in the same file.
+			const float from = (was - hole.Centre).Dot(hole.Normal);
+			const float to = (now - hole.Centre).Dot(hole.Normal);
+			if ((from > 0.0f) == (to > 0.0f)) {
+				return false;
+			}
+
+			// Where the segment met the plane. The denominator cannot be zero:
+			// the two signs differ, so they differ by something.
+			const float share = from / (from - to);
+			const Vector3 at = was + (now - was) * share;
+
+			// Inside the rectangle, measured along its own half-axes.
+			// **Normalised by the square of each axis' length**, which is the
+			// projection without a square root — `a·b / b·b` is how far along
+			// `b` the point is, in units of `b`.
+			const Vector3 offset = at - hole.Centre;
+			const float alongFirst = offset.Dot(hole.First) / hole.First.Dot(hole.First);
+			const float alongSecond = offset.Dot(hole.Second) / hole.Second.Dot(hole.Second);
+			if (std::abs(alongFirst) > 1.0f || std::abs(alongSecond) > 1.0f) {
+				return false;
+			}
+
+			// The crosser's own side, which is what `facing` is in
+			// `AimSurfaceCameras` — a pane walked into from behind maps through
+			// the frame that faces backwards, and whatever went in comes out of
+			// the destination the same way round.
+			const Vector3 outward = hole.Normal * (from > 0.0f ? 1.0f : -1.0f);
+			const CFrame source = CFrame::LookAt(hole.Centre, hole.Centre + outward, UpFor(outward));
+
+			// `destination · half-turn · source⁻¹`, the same product the camera
+			// goes through — see `AimSurfaceCameras`' `linked` branch for why
+			// the half-turn is what makes it a hole rather than a window onto a
+			// copy.
+			through = hole.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+			return true;
+		}
 	}
 
 	size_t AimSurfaceCameras(Store &store) {
@@ -901,77 +1037,23 @@ namespace engine::scene {
 		return opened;
 	}
 
+	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, CFrame &through) {
+		for (const Hole &hole : GatherHoles(store)) {
+			if (CrossingOf(hole, from, to, through)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	size_t CrossPortals(ecs::Store &store) {
 		// **The portals are gathered before anything is moved.** A body pushed
 		// through one lands somewhere another might also claim, and a single
 		// pass that moved as it walked would let one crossing feed the next
 		// within a tick — a character could be bounced through three holes on
 		// one step, which is neither what the author drew nor reproducible.
-		struct Hole {
-			// The pane's plane: a point on it and its face's unit normal.
-			//
-			// **The face's normal, not "the outward one".** Which side is
-			// outward is a question about the *crosser*, exactly as it is a
-			// question about the viewer in `AimSurfaceCameras` — a pane can be
-			// walked into from either side and both answers are right. So the
-			// sign is decided per body, below.
-			Vector3 Centre;
-			Vector3 Normal;
-
-			// The pane's half-axes in the world, so `Centre ± First ± Second`
-			// is the rectangle. Kept as vectors rather than as extents because
-			// that is what the inside test needs.
-			Vector3 First;
-			Vector3 Second;
-
-			// The far pane's face frame, looking out of itself. The half of the
-			// mapping that does not depend on who is crossing.
-			CFrame Destination;
-		};
-
-		std::vector<Hole> holes;
-
-		store.Each<const Portal, const SurfaceCamera>(
-			[&](ecs::Entity entity, const Portal &portal, const SurfaceCamera &camera) {
-				if (portal.Destination == NULL_ENTITY || !store.Alive(portal.Destination)) {
-					// An unlinked portal falls back to a mirror, and a mirror is
-					// a wall. Walking into one is walking into a wall.
-					return;
-				}
-
-				// **The pane is the camera's parent, not the camera.** A
-				// `SurfaceCamera` is a `PVInstance` — it has a placement and no
-				// size at all — so a pass that read the camera's own `Bounds`
-				// found none and every portal in the world quietly had no hole
-				// in it. `FaceOf` is what `AimSurfaceCameras` uses and is the
-				// one answer to "which rectangle is this camera projecting off".
-				Face face;
-				if (!FaceOf(store, entity, camera.Face, face)) {
-					return;
-				}
-
-				const Transform *far = store.Get<Transform>(portal.Destination);
-				const Bounds *farBounds = store.Get<Bounds>(portal.Destination);
-				if (far == nullptr || farBounds == nullptr) {
-					return;
-				}
-
-				// The far pane's own face, chosen the way the source's was:
-				// `SurfaceCamera::Face` names one side of a part, and the far
-				// end of a hole is the matching side of the part it leads to.
-				const Vector3 local = NormalOf(camera.Face);
-				const Vector3 farNormal = far->Frame.VectorToWorldSpace(local).Unit();
-				const Vector3 farCentre = far->Frame.Position + farNormal * ReachOf(*farBounds, camera.Face);
-
-				Hole hole;
-				hole.Centre = face.Centre;
-				hole.Normal = face.Normal;
-				FaceAxes(face.Placement, local, face.HalfExtent, hole.First, hole.Second);
-				hole.Destination = CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
-
-				holes.push_back(hole);
-			}
-		);
+		const std::vector<Hole> holes = GatherHoles(store);
 
 		if (holes.empty()) {
 			return 0;
@@ -990,52 +1072,10 @@ namespace engine::scene {
 				const Vector3 now = placement.Frame.Position;
 
 				for (const Hole &hole : holes) {
-					// Signed distance either side of the pane's plane. **A
-					// crossing is a change of side and not a place**, which is
-					// what makes the test work at speed: a character walks a
-					// quarter of a metre a tick, so "is it inside the pane now"
-					// misses the tick it was on either side of.
-					//
-					// **Either direction.** A pane is a hole rather than a
-					// one-way door, and which side is "outward" is a question
-					// about the crosser — `AimSurfaceCameras` answers the same
-					// question about the viewer, in the same way, three
-					// functions up.
-					const float from = (was - hole.Centre).Dot(hole.Normal);
-					const float to = (now - hole.Centre).Dot(hole.Normal);
-					if ((from > 0.0f) == (to > 0.0f)) {
+					CFrame through;
+					if (!CrossingOf(hole, was, now, through)) {
 						continue;
 					}
-
-					// Where the segment met the plane. The denominator cannot be
-					// zero: the two signs differ, so they differ by something.
-					const float share = from / (from - to);
-					const Vector3 at = was + (now - was) * share;
-
-					// Inside the rectangle, measured along its own half-axes.
-					// **Normalised by the square of each axis' length**, which
-					// is the projection without a square root — `a·b / b·b` is
-					// how far along `b` the point is, in units of `b`.
-					const Vector3 offset = at - hole.Centre;
-					const float alongFirst = offset.Dot(hole.First) / hole.First.Dot(hole.First);
-					const float alongSecond = offset.Dot(hole.Second) / hole.Second.Dot(hole.Second);
-					if (std::abs(alongFirst) > 1.0f || std::abs(alongSecond) > 1.0f) {
-						continue;
-					}
-
-					// The crosser's own side, which is what `facing` is in
-					// `AimSurfaceCameras` — a pane walked into from behind maps
-					// through the frame that faces backwards, and the body comes
-					// out of the destination the same way round.
-					const Vector3 outward = hole.Normal * (from > 0.0f ? 1.0f : -1.0f);
-					const CFrame source = CFrame::LookAt(hole.Centre, hole.Centre + outward, UpFor(outward));
-
-					// `destination · half-turn · source⁻¹`, the same product the
-					// camera goes through — see the `linked` branch above for
-					// why the half-turn is what makes it a hole rather than a
-					// window onto a copy.
-					const CFrame through =
-						hole.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
 
 					// **The placement and the velocity, by the same transform.**
 					// Forgetting the second is the bug that looks like physics:

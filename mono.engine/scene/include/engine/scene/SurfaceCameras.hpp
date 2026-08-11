@@ -234,6 +234,36 @@ namespace engine::scene {
 	// @since v0.14
 	size_t CrossPortals(ecs::Store &store);
 
+	// Where a straight line ends up when a portal is in the way of it.
+	//
+	// **The segment test `CrossPortals` runs on a body, offered to anything
+	// else that travels in a straight line.** The one caller today is
+	// `PlaceCamera`, and the bug it exists to close is worth naming because it
+	// makes a working portal look broken: a third-person camera sits several
+	// metres behind its subject, so the frame a character walks through a hole
+	// is the frame the *body* is on one side and the *eye* is still on the
+	// other. What that looks like is the character teleporting away from the
+	// camera and turning as it goes — a hole that spits people out sideways
+	// rather than one you walk through. Putting the arm through the same map
+	// carries the eye with it, and the view that results is the one a player
+	// expects for a different reason as well: standing at a hole in third
+	// person, you see yourself in it, from the far side.
+	//
+	// **One hop, and deliberately.** A camera arm that crossed two holes in one
+	// segment would need the map composed in order and the rectangle tested in
+	// the mapped frame; a hole close enough behind another to do that is a hole
+	// the arm is already inside. The first crossing found wins.
+	//
+	// @param store   The world.
+	// @param from    Where the line starts — for a camera, the head.
+	// @param to      Where it would end without a portal in the way.
+	// @param through The map from this side to the far side, written only when
+	//                the answer is true. Apply it to *both* the far end and the
+	//                direction, exactly as a body's placement and velocity are.
+	// @return Whether the segment went through a hole rather than past one.
+	// @since v0.15
+	bool PortalCrossing(ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, core::CFrame &through);
+
 	// Stops a portal's pane from solving contacts, so a body can be inside it.
 	//
 	// **A hole you cannot stand in is a picture of a hole.** The pane is an

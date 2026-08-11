@@ -117,10 +117,15 @@ local GROUND = 240
 local GROUND_TILE = 20
 
 -- Wide rather than square, because a pane is forty by fifteen and a square
--- texture would spend half of itself on nothing. Two holes is two targets
--- against the sixteen `MAX_SURFACES` allows a world, so these can afford to be
--- larger than the six the old scene split them between.
-local SURFACE_SIZE = Vector3.new(1024, 384)
+-- texture would spend half of itself on nothing — the ratio is the pane's, so
+-- a texel is square on the wall.
+--
+-- **Large, because there are two of them.** A hole is not a mirror glimpsed
+-- across a room: you walk up to this one until it fills the screen, and at that
+-- range the far room is magnified from whatever this says. Two targets against
+-- the sixteen `MAX_SURFACES` allows is what pays for it — the six the old scene
+-- had could not have afforded a quarter of this each.
+local SURFACE_SIZE = Vector3.new(2048, 768)
 
 type Checker = { A: Color3, B: Color3 }
 

@@ -14,6 +14,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -29,6 +30,7 @@
 TEST_SUITE_ID("engine.scene.surfacecameras")
 
 using engine::core::CFrame;
+using engine::core::Vector2;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -967,4 +969,75 @@ TEST_CASE("a pane already authored passable is left alone", "[scene][surfacecame
 
 	CHECK(engine::scene::OpenPortals(mirror.World) == 0);
 	CHECK(mirror.World.Get<engine::scene::Collider>(mirror.Pane)->Trigger);
+}
+
+TEST_CASE("a third-person camera goes through the hole its subject went through", "[scene][surfacecameras]") {
+	// **The arm is metres long and the body is a point, which is the whole
+	// bug.** A character crosses on the tick its own step changes side; the eye
+	// behind it does not, so unless the arm is put through the same map the
+	// frame after a crossing is the far room watched from the near one — the
+	// character reads as teleporting away from the camera and turning as it
+	// goes. It was reported as a portal that spits people out sideways, and it
+	// is a camera that stayed behind.
+	//
+	// The pairing is this file's: pane A at the origin with its `Front` face at
+	// `z = -0.2`, pane B a hundred along X and unrotated, so what is in front of
+	// A comes out in front of B.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// The subject half a metre through the hole, walking away from it — where a
+	// character is on the frame after it crossed.
+	const Entity body =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Body");
+	mirror.World.Set<Transform>(body, Transform{CFrame(Vector3{0.0f, 0.0f, -0.7f})});
+
+	engine::scene::CameraController arm;
+	arm.Subject = body;
+
+	// A yaw of zero looks along -Z, so the arm reaches back along +Z — straight
+	// into the pane the subject just came out of.
+	arm.Angles = Vector2{0.0f, 0.0f};
+	arm.Distance = 12.0f;
+	mirror.World.SetResource(arm);
+
+	REQUIRE(engine::scene::PlaceCamera(mirror.World));
+
+	const CFrame placed = mirror.World.Get<Transform>(mirror.Eye)->Frame;
+
+	// **Out in front of the far pane, as far from it as the arm wanted to be
+	// from the near one, looking back at it.** The head is at `y = 1.5` and
+	// `z = -0.7`, so the arm reaches eleven and a half metres past A's face —
+	// and what is through A is what is in front of B, which is where the eye
+	// comes out: `z = -0.2 - 11.5`.
+	//
+	// **Looking back through the hole is the point rather than a side effect.**
+	// The player is looking away from the pane, the camera is behind them, and
+	// behind them is the other side — so the pane fills the frame and what the
+	// pane shows is the character. That is the same view they had a frame
+	// before they crossed, which is what makes a crossing look like walking
+	// rather than like a teleport.
+	CHECK_THAT(placed.Position.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK_THAT(placed.Position.Y, Catch::Matchers::WithinAbs(1.5f, TOLERANCE));
+	CHECK_THAT(placed.Position.Z, Catch::Matchers::WithinAbs(-11.7f, TOLERANCE));
+
+	CHECK_THAT(placed.LookVector().Z, Catch::Matchers::WithinAbs(1.0f, TOLERANCE));
+
+	// **First person has no arm and therefore no crossing.** The eye is the
+	// head, the segment is a point, and a camera inside the character must not
+	// be flung across the world by a pane it is standing in.
+	arm.Distance = 0.0f;
+	arm.Mode = engine::scene::CameraMode::LockFirstPerson;
+	mirror.World.SetResource(arm);
+
+	REQUIRE(engine::scene::PlaceCamera(mirror.World));
+	CHECK_THAT(
+		mirror.World.Get<Transform>(mirror.Eye)->Frame.Position.X,
+		Catch::Matchers::WithinAbs(0.0f, TOLERANCE)
+	);
 }

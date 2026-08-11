@@ -7,6 +7,7 @@
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -119,7 +120,7 @@ namespace engine::scene {
 		// Angles` says why.
 		const float pitch = controller->Angles.X;
 		const float yaw = controller->Angles.Y;
-		const Vector3 forward{
+		Vector3 forward{
 			-std::sin(yaw) * std::cos(pitch),
 			std::sin(pitch),
 			-std::cos(yaw) * std::cos(pitch),
@@ -136,6 +137,25 @@ namespace engine::scene {
 				const Vector3 side{std::cos(yaw), 0.0f, -std::sin(yaw)};
 				eye = eye + side * controller->ShoulderOffset;
 			}
+		}
+
+		// **The arm goes through a portal if one is in the way of it**, and
+		// leaving that out is what makes a hole somebody can walk through look
+		// broken from the outside. The body crosses on the tick its own segment
+		// changes side; the eye is metres behind it and does not, so for as long
+		// as the arm straddles the pane the camera watches its subject from the
+		// room it just left — the character reads as teleporting away and
+		// turning as it goes, which is exactly the report this closes.
+		//
+		// Put through the same map as a body's placement and velocity, so the
+		// eye arrives where the picture in the pane says it should be: behind
+		// the character, on the far side, looking back through the hole. First
+		// person has no arm and therefore no crossing, which is why this is
+		// after the branch above rather than inside it.
+		CFrame carried;
+		if (engine::scene::PortalCrossing(store, head, eye, carried)) {
+			eye = carried.PointToWorldSpace(eye);
+			forward = carried.VectorToWorldSpace(forward);
 		}
 
 		// **`LookAt` towards a point along the forward rather than at the head**,
