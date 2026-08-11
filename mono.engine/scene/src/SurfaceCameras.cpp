@@ -58,8 +58,12 @@ namespace engine::scene {
 			Entity Camera;
 			Entity Part;
 			CFrame Frame;
-			float NearPlane = 0.0f;
-			float FieldOfView = 0.0f;
+
+			// The frustum fitted to the mapped pane, and the plane behind which
+			// nothing draws. Replaces the near plane and field of view this
+			// used to carry: neither can express a frustum that leans, and a
+			// portal needs one that does.
+			SurfaceLens Lens;
 			// Handed out after the walk, by entity id. -1 is a camera past the
 			// renderer's cap, whose pane is left as an ordinary part.
 			int8_t Surface = -1;
@@ -116,30 +120,49 @@ namespace engine::scene {
 		// image rather than on its boundary.
 		constexpr float FIT_MARGIN = 1.02f;
 
-		// The widest frustum worth building, in radians — a whisker under 180°.
-		//
-		// **A limit of the projection rather than a policy.** A pane subtends
-		// half a turn from a point on its own surface, so as the viewer walks
-		// into the glass the frustum needed to cover it approaches 180° and its
-		// tangent approaches infinity. There is no field of view that covers a
-		// plane you are standing on, and clamping is what turns that into a
-		// reflection that stops covering the far corners instead of a projection
-		// matrix full of infinities. An oblique frustum does not escape this
-		// either; it is the geometry, not the parameterisation.
-		constexpr float FIT_MAXIMUM = 3.0f;
-
 		// The closest a corner may be treated as being, in studs.
 		//
-		// **A floor rather than a rejection**, for the reason `FitFieldOfView`
-		// gives at the clamp: a corner at zero depth needs an infinite frustum,
-		// and the useful answer is "the widest one" arrived at *continuously*.
-		// Small enough that a corner this close is already asking for more than
-		// `FIT_MAXIMUM` allows, so the floor never changes an answer that was
-		// not already saturated.
+		// **A floor rather than a rejection**, for the reason `FitExtents`
+		// gives: a corner at zero depth asks for an unbounded extent, and the
+		// useful answer is "very wide" arrived at *continuously*. A viewer
+		// walking into the glass is asking to see a plane they are standing on,
+		// which no frustum covers — the floor is what turns that into a
+		// reflection that stops covering the far corners rather than a matrix
+		// full of infinities.
+		//
+		// **Unlike the field of view it replaces, nothing is clamped on the way
+		// out.** The old fit needed a ceiling just under 180° because it took a
+		// tangent, and that ceiling made it a step function — which is what read
+		// as the mirror flashing once per orbit. An extent has no such limit, so
+		// there is nothing to saturate against.
 		constexpr float MINIMUM_DEPTH = 1e-3f;
 
-		// And the narrowest, so a distant pane still has a frustum with a shape.
-		constexpr float FIT_MINIMUM = 0.02f;
+		// The narrowest frustum worth building, at the near plane.
+		//
+		// A pane seen exactly edge-on projects to a line, and a rectangle with
+		// no area is a projection matrix full of infinities. `EDGE_ON_MARGIN`
+		// catches that case first; this is the floor for everything the margin
+		// is too narrow to have caught.
+		constexpr float FIT_MINIMUM_SPAN = 1e-4f;
+
+		// Half a turn, for the rotation that makes a portal a hole.
+		constexpr float PI = 3.14159265358979323846f;
+
+		// An up vector a `LookAt` can actually use for this direction.
+		//
+		// **A different up for a floor or a ceiling.** `LookAt` builds its
+		// rotation against an up vector and cannot when the two are parallel — a
+		// mirror in the floor faces straight up, which is the one case the
+		// default cannot resolve, and it produces a NaN rotation that spreads
+		// into the frame, the near plane and every bound derived from them.
+		//
+		// Its own function because a portal needs it three times where a mirror
+		// needed it once — the source face, the destination face and the camera
+		// — and three copies of a guard is three places for one of them to be
+		// forgotten.
+		Vector3 UpFor(const Vector3 &forward) {
+			return std::abs(forward.Dot(Vector3::YAxis)) > 0.99f ? Vector3::ZAxis : Vector3::YAxis;
+		}
 
 		// The two half-axes of a face, in the world.
 		//
@@ -170,108 +193,154 @@ namespace engine::scene {
 			second = placement.VectorToWorldSpace(Vector3{0.0f, 1.0f, 0.0f}) * half.Y;
 		}
 
-		// The vertical field of view that just covers a pane, in radians.
+		// Where a surface camera stands, and the rectangle it has to cover.
+		//
+		// **One shape for a mirror and a portal, because they differ in one
+		// step.** Both take the pane, map it somewhere, put the camera in front of
+		// the mapped rectangle and fit a frustum to it. A mirror's map is the
+		// reflection through its own plane — which fixes that plane, so the mapped
+		// rectangle is the pane itself and the arithmetic collapses back to what
+		// planar reflection always was. A portal's map takes it to the far side.
+		//
+		// **The rectangle is the *mapped source* pane and never the destination
+		// part**, and that is the one thing to get right. `opaque.frag` shades a
+		// fragment of the *source* pane by projecting it through this camera's
+		// matrix; that only lines up because the camera and the rectangle were
+		// moved by the same map. Fitting to the destination part instead would be
+		// correct exactly when the two panes are the same size and silently
+		// wrong — an image sliding across the hole — whenever they are not.
+		struct Placement {
+			// Where the camera goes.
+			Vector3 Eye;
+
+			// Which way it looks. Unit, and **also the clip normal**: everything
+			// behind the mapped pane is what has to stop drawing, so the plane to
+			// keep the far side of is the one this points out of.
+			Vector3 Forward;
+
+			// The mapped pane's middle.
+			Vector3 Centre;
+
+			// Its half-axes, so `Centre ± First ± Second` is the four corners.
+			//@{
+			Vector3 First;
+			Vector3 Second;
+			//@}
+
+			// What moved the pane here from where it stands.
+			//
+			// **Carried out of this struct rather than recomputed**, because the
+			// pane has to be mapped by *exactly* this transform again when it
+			// samples the image — `SurfaceLens::Mapping` says why, and a second
+			// derivation of the same matrix is a second chance to disagree with
+			// the placement about a sign.
+			//
+			// Identity for a mirror. See the component's comment for why that is
+			// the reflection's equal on the only points that are shaded with it.
+			CFrame Map;
+		};
+
+		// The frustum extents that just cover a rectangle, at the near plane.
 		//
 		// **The bug this exists for, because it is not obvious from a still
-		// frame.** The reflection is projected back onto the pane per fragment
-		// and `opaque.frag` tests the projected coordinate against the texture's
-		// 0..1 rectangle, falling back to the plain lit pane outside it. So a
-		// frustum that does not cover the whole pane does not stretch or fade —
-		// it draws a hard-edged rectangle of reflection floating on a grey wall.
+		// frame.** The image is projected back onto the pane per fragment and
+		// `opaque.frag` tests the projected coordinate against the texture's 0..1
+		// rectangle, falling back to the plain lit pane outside it. So a frustum
+		// that does not cover the whole pane does not stretch or fade — it draws a
+		// hard-edged rectangle of reflection floating on a grey wall.
 		//
-		// A fixed field of view cannot cover it, and the reason is the whole of
-		// planar reflection: the camera stands as far behind the glass as the
-		// viewer stands in front, so the pane subtends *the same angle from the
-		// camera as it does from the viewer*. Walk towards a mirror and that
-		// angle grows without bound. `Mirrors-1-world.luau` authored 70° with a
-		// comment saying it was "wide enough to still cover the pane when the
-		// viewer walks up to it", which is exactly the thing no constant can be:
-		// at 48 units back the north wall needs 24°, and at 5 units it needs 127°.
+		// No constant covers it, and the reason is the whole of planar reflection:
+		// the camera stands as far behind the glass as the viewer stands in front,
+		// so the pane subtends *the same angle from the camera as from the
+		// viewer*, and walking towards a mirror grows that without bound.
+		// `Mirrors-1-world.luau` authored 70° with a comment calling it "wide
+		// enough", which is the thing no constant can be: that wall needs 24° from
+		// across the room and 127° from five units away.
 		//
-		// So it is fitted, every frame, to the four corners.
+		// **Off-axis, which is what replaced the fitted field of view.** The four
+		// edges are independent, so a viewer off to one side gets a frustum that
+		// leans rather than one widened symmetrically about the view axis — the
+		// same coverage on twice the texels. The symmetric fit had to pay for the
+		// far edge of the pane on both sides.
 		//
-		// **This needs the camera to look along the face normal, and the caller
-		// does.** Every point of the pane is then at the same depth, so each
-		// corner's constraint is finite and none can fall behind the camera. An
-		// aim at the pane's centre puts the near corner behind the camera as soon
-		// as the viewer is close and off to one side, and no angle covers that.
+		// **And there is no clamp any more, which is a consequence rather than an
+		// omission.** The old fit took a *tangent* of a half-angle, which grows
+		// without bound as a corner approaches the camera's plane, so it needed a
+		// floor on the depth and a ceiling just under 180° — and the ceiling made
+		// the fit a step function, which read as the mirror flashing once per
+		// orbit. These extents are a min and a max over four projected positions.
+		// A corner approaching zero depth still sends one of them off to infinity,
+		// so the depth floor stays; but nothing is being clamped back afterwards,
+		// so nothing can step.
 		//
-		// The frustum is symmetric about the axis, so a viewer off to one side
-		// pays for the far edge on both sides — an off-axis frustum would fit the
-		// same corners with none of that waste, and is the better shape once
-		// `SurfaceView` can carry a rectangle rather than a field of view.
-		//
-		// @param frame  Where the camera stands and which way it faces.
-		// @param centre The middle of the pane.
-		// @param first  One half-axis of the pane, in the world.
-		// @param second The other.
-		// @param aspect Width over height of the texture it renders into.
-		// @return A vertical field of view in radians, clamped to something a
-		//         projection can be built from.
-		float FitFieldOfView(
-			const CFrame &frame,
-			const Vector3 &centre,
-			const Vector3 &first,
-			const Vector3 &second,
-			float aspect
-		) {
-			// A texture with no height would divide the horizontal constraint by
-			// zero and hand back a frustum of infinities.
-			if (!(aspect > 0.0f)) {
-				return FIT_MAXIMUM;
-			}
+		// @param placement Where the camera is and what it must cover.
+		// @param up        The camera's up vector, matching the frame the caller
+		//        builds — the two must agree or the extents describe a different
+		//        camera from the one that renders.
+		// @param near      The plane the extents are measured at.
+		// @param lens      Filled with `Left`, `Right`, `Bottom` and `Top`.
+		void FitExtents(const Placement &placement, const Vector3 &up, float near, SurfaceLens &lens) {
+			const Vector3 right = placement.Forward.Cross(up).Unit();
+			const Vector3 above = right.Cross(placement.Forward).Unit();
 
-			const Vector3 eye = frame.Position;
-			const Vector3 forward = frame.LookVector();
-			const Vector3 right = frame.RightVector();
-			const Vector3 up = frame.UpVector();
-
-			float tangent = 0.0f;
+			bool first = true;
 
 			for (int alongFirst = -1; alongFirst <= 1; alongFirst += 2) {
 				for (int alongSecond = -1; alongSecond <= 1; alongSecond += 2) {
-					const Vector3 corner = centre + first * static_cast<float>(alongFirst) +
-										   second * static_cast<float>(alongSecond);
-					const Vector3 toCorner = corner - eye;
+					const Vector3 corner = placement.Centre +
+										   placement.First * static_cast<float>(alongFirst) +
+										   placement.Second * static_cast<float>(alongSecond);
+					const Vector3 toCorner = corner - placement.Eye;
 
-					// **Level with the camera or behind it**, which happens as
-					// the viewer approaches the plane of the pane: the reflected
-					// camera approaches it too, and a corner at ninety degrees is
-					// the 180° case arriving. Nothing finite covers that, so the
-					// widest frustum is the answer.
-					//
-					// **Clamped rather than returned early, and that is the whole
-					// of a bug that read as the mirror flashing.** This used to
-					// bail to `FIT_MAXIMUM` the instant one corner reached zero
-					// depth, which makes the fit a *step function*: orbiting the
-					// camera at a constant distance sweeps the reflected camera
-					// toward the pane's plane, a corner crosses the threshold,
-					// and the field of view jumps from a fitted half-radian to
-					// 172° between one frame and the next — then back. The
-					// projection was never wrong; the fit was discontinuous, and
-					// a discontinuity once per orbit is exactly what a flash is.
-					//
-					// A floor on the depth is continuous instead: as a corner
-					// approaches the plane the tangent grows without bound and
-					// the clamp at the bottom of this function saturates it at
-					// `FIT_MAXIMUM` smoothly. A corner genuinely *behind* the
-					// camera has a negative depth and lands on the same floor,
-					// so it reaches the same answer from the same side rather
-					// than by a different path.
-					const float depth = std::max(toCorner.Dot(forward), MINIMUM_DEPTH);
+					// **A floor rather than a rejection.** A corner level with the
+					// camera, or behind it, asks for an unbounded extent; the useful
+					// answer is "very wide" arrived at continuously, because a
+					// discontinuity once per orbit is what a flash is.
+					const float depth = std::max(toCorner.Dot(placement.Forward), MINIMUM_DEPTH);
+					const float scale = near / depth;
 
-					// The vertical constraint directly, and the horizontal one
-					// divided by the aspect — because `ResolveCamera` builds a
-					// projection from a *vertical* field of view and widens it by
-					// the aspect, so `tan(h/2) = aspect * tan(v/2)` and a corner
-					// off to the side asks for proportionally less of the vertical
-					// angle than one above.
-					tangent = std::max(tangent, std::abs(toCorner.Dot(up)) / depth);
-					tangent = std::max(tangent, std::abs(toCorner.Dot(right)) / depth / aspect);
+					const float x = toCorner.Dot(right) * scale;
+					const float y = toCorner.Dot(above) * scale;
+
+					if (first) {
+						lens.Left = x;
+						lens.Right = x;
+						lens.Bottom = y;
+						lens.Top = y;
+						first = false;
+						continue;
+					}
+
+					lens.Left = std::min(lens.Left, x);
+					lens.Right = std::max(lens.Right, x);
+					lens.Bottom = std::min(lens.Bottom, y);
+					lens.Top = std::max(lens.Top, y);
 				}
 			}
 
-			return std::clamp(2.0f * std::atan(tangent * FIT_MARGIN), FIT_MINIMUM, FIT_MAXIMUM);
+			// A little wider than the pane exactly needs, because the edge of a
+			// frustum is not a safe place to sample: the projection is read back per
+			// fragment and the texture is filtered, so a corner landing precisely on
+			// `u = 1` samples half a texel of whatever `CLAMP_TO_EDGE` hands back.
+			const float middleX = (lens.Left + lens.Right) * 0.5f;
+			const float middleY = (lens.Bottom + lens.Top) * 0.5f;
+
+			lens.Left = middleX + (lens.Left - middleX) * FIT_MARGIN;
+			lens.Right = middleX + (lens.Right - middleX) * FIT_MARGIN;
+			lens.Bottom = middleY + (lens.Bottom - middleY) * FIT_MARGIN;
+			lens.Top = middleY + (lens.Top - middleY) * FIT_MARGIN;
+
+			// A rectangle with no area cannot be a frustum. Widening to something
+			// tiny keeps the matrix finite, which is what lets the surface render
+			// nothing rather than render infinities into every derived bound.
+			if (!(lens.Right - lens.Left > FIT_MINIMUM_SPAN)) {
+				lens.Left = middleX - FIT_MINIMUM_SPAN * 0.5f;
+				lens.Right = middleX + FIT_MINIMUM_SPAN * 0.5f;
+			}
+			if (!(lens.Top - lens.Bottom > FIT_MINIMUM_SPAN)) {
+				lens.Bottom = middleY - FIT_MINIMUM_SPAN * 0.5f;
+				lens.Top = middleY + FIT_MINIMUM_SPAN * 0.5f;
+			}
 		}
 
 		// How thick the face marker is, in studs, on the two axes it is not
@@ -412,7 +481,7 @@ namespace engine::scene {
 		const Vector3 eye = eyeTransform->Frame.Position;
 
 		store.Each<const SurfaceCamera, const Camera, const Transform>(
-			[&](Entity entity, const SurfaceCamera &target, const Camera &, const Transform &) {
+			[&](Entity entity, const SurfaceCamera &target, const Camera &lens, const Transform &) {
 				Face face;
 				if (!FaceOf(store, entity, target.Face, face)) {
 					return;
@@ -421,10 +490,9 @@ namespace engine::scene {
 				const Vector3 unit = face.Normal;
 				const Vector3 centre = face.Centre;
 
-				// **Mirrored through the plane.** The same distance behind the
-				// face as the eye is in front, on the other side — which is the
-				// whole of planar reflection and is why the image lines up with
-				// the pane instead of sliding across it as the viewer moves.
+				// Which side of the face the viewer is on, and how far off it. Both
+				// branches below need it: a mirror reflects across it, and a portal
+				// uses its sign to decide which way out of the far side to look.
 				const float distance = (eye - centre).Dot(unit);
 
 				// **Edge-on renders nothing.** See `EDGE_ON_MARGIN`: this is the
@@ -441,75 +509,158 @@ namespace engine::scene {
 					return;
 				}
 
-				const Vector3 reflected = eye - unit * (2.0f * distance);
-
-				// **Aimed, not merely placed.** An identity rotation looks down
-				// -Z, so a camera put behind a pane faces away from it and
-				// renders empty space. That was the first version of the script
-				// this replaces, and the mirror came out showing the clear
-				// colour.
-				//
-				// **Square on to the pane, and not at its centre.** Aiming at the
-				// middle sounds like the same thing and is not: it tilts the view
-				// axis off the face normal by however far the viewer stands to one
-				// side, and the pane then lies at an angle across the frustum.
-				// Push that far enough — close to the glass and off to the side,
-				// which is a metre from a wall in a room — and the nearest corner
-				// of the pane goes *behind* the camera. Nothing covers a point
-				// behind a camera, so no field of view could rescue it, and the
-				// corner drew as bare wall.
-				//
-				// Looking along the normal puts every point of the pane at the
-				// same depth, so the fit below is always finite and the corners
-				// are always in front. It costs nothing in correctness: the image
-				// is read back by projecting each fragment through this camera's
-				// own matrix, so the orientation decides which texels the pane
-				// lands on and never which part of the world it shows. The
-				// *position* is what makes it a reflection, and that is unchanged.
-				//
-				// Which way along the normal follows from which side the viewer
-				// is on, because a face can be looked at from behind — the sign of
-				// `distance` is exactly that question, already answered.
+				// Which way along the normal the viewer is, because a face can be
+				// looked at from behind — the sign of `distance` is exactly that
+				// question, already answered.
 				const float facing = distance >= 0.0f ? 1.0f : -1.0f;
-				const Vector3 forward = unit * facing;
 
-				// **A different up for a floor or a ceiling.** `LookAt` builds its
-				// rotation against an up vector and cannot when the two are
-				// parallel — a mirror in the floor faces straight up, which is the
-				// one case the default cannot resolve, and it produces a NaN
-				// rotation that spreads into the frame, the near plane and every
-				// bound derived from them.
-				const Vector3 up =
-					std::abs(forward.Dot(Vector3::YAxis)) > 0.99f ? Vector3::ZAxis : Vector3::YAxis;
-
-				Aim aim;
-				aim.Camera = entity;
-				aim.Part = face.Part;
-				aim.Frame = CFrame::LookAt(reflected, reflected + forward, up);
-
-				// The near plane at the glass, which is the poor-man's oblique
-				// clip: everything between the reflected camera and the pane
-				// would otherwise occlude the reflection. A small margin,
-				// because a near plane exactly on the surface z-fights it.
-				aim.NearPlane = std::abs(distance) + 0.3f;
-
-				// **And a frustum fitted to the pane, because a constant one
-				// cannot be.** See `FitFieldOfView`: the reflection is projected
-				// back per fragment and clipped to the texture's rectangle, so a
-				// frustum narrower than the pane draws a hard-edged rectangle of
-				// reflection on a grey wall rather than a smaller or softer image.
 				Vector3 first;
 				Vector3 second;
 				FaceAxes(face.Placement, NormalOf(target.Face), face.HalfExtent, first, second);
 
-				// The texture's shape, which is what `client::CollectSurfaceViews`
-				// hands the renderer and therefore what the projection is widened
-				// by. Taking it from anywhere else would fit a frustum to a
-				// rectangle nothing renders into.
-				const float aspect = static_cast<float>(target.Width) /
-									 static_cast<float>(std::max<uint16_t>(target.Height, 1));
+				Placement placement;
 
-				aim.FieldOfView = FitFieldOfView(aim.Frame, centre, first, second, aspect);
+				// **The one branch that makes a portal a portal.** Everything after
+				// it is shared, because both cases have produced the same five
+				// facts: where the camera stands, which way it looks, and the
+				// rectangle it has to cover.
+				const Portal *portal = store.Get<Portal>(entity);
+				const bool linked = portal != nullptr && portal->Destination != NULL_ENTITY &&
+									store.Alive(portal->Destination) &&
+									store.Get<Transform>(portal->Destination) != nullptr &&
+									store.Get<Bounds>(portal->Destination) != nullptr;
+
+				if (linked) {
+					// The two face frames, each looking *out* of its own pane. A
+					// `LookAt` builds its rotation against an up vector and cannot
+					// when the two are parallel, which is a portal in the floor —
+					// the same case the mirror branch guards below, for the same
+					// reason and with the same answer.
+					const Vector3 outward = unit * facing;
+					const CFrame source = CFrame::LookAt(centre, centre + outward, UpFor(outward));
+
+					const Transform *farPlacement = store.Get<Transform>(portal->Destination);
+					const Bounds *farBounds = store.Get<Bounds>(portal->Destination);
+
+					// The destination's own face, chosen the same way the source's
+					// was: `SurfaceCamera::Face` names one side of a part, and the
+					// far end of a hole is the matching side of the part it leads
+					// to.
+					const Vector3 farNormal = farPlacement->Frame.VectorToWorldSpace(NormalOf(target.Face));
+					const Vector3 farCentre =
+						farPlacement->Frame.Position + farNormal * ReachOf(*farBounds, target.Face);
+					const CFrame destination =
+						CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
+
+					// **`destination · half-turn · source⁻¹`, and the half-turn is
+					// what makes it a hole rather than a window onto a copy.**
+					// Without it the camera arrives at the far pane facing back the
+					// way it came, so the portal shows the room the viewer is
+					// already standing in.
+					//
+					// **Nothing here constrains the two frames to describe one
+					// space, and that is the entire non-Euclidean feature.** A
+					// destination turned, moved or placed anywhere gives a room
+					// bigger on the inside or a corridor that turns through more
+					// than four right angles — with no second mechanism and no
+					// maths past this multiply. `docs/NON-EUCLIDEAN.md` is the
+					// investigation that settled it.
+					const CFrame through = destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+
+					placement.Eye = through.PointToWorldSpace(eye);
+					placement.Centre = through.PointToWorldSpace(centre);
+					placement.First = through.VectorToWorldSpace(first);
+					placement.Second = through.VectorToWorldSpace(second);
+
+					// **Negated, and this is the one sign in the file worth
+					// deriving rather than trying.** `through` is rigid, so it
+					// preserves which side of the pane a point is on: the eye
+					// stands at `+outward` from the source, so the camera lands
+					// at `+outward` from the *mapped* pane. A mirror's camera is
+					// on the far side and looks along the outward normal; a
+					// portal's is on the near side and has to look back through
+					// the rectangle, which is the other way.
+					//
+					// Getting it wrong points the camera away from the hole, so
+					// the portal shows whatever happens to be behind the
+					// destination — which looks like a portal that works and
+					// leads somewhere wrong.
+					placement.Forward = through.VectorToWorldSpace(outward) * -1.0f;
+
+					// And the pane is mapped by the same matrix when it reads
+					// the image back, which is what makes the two line up.
+					placement.Map = through;
+				} else {
+					// **Mirrored through the plane.** The same distance behind the
+					// face as the eye is in front, on the other side — which is the
+					// whole of planar reflection and is why the image lines up with
+					// the pane instead of sliding across it as the viewer moves.
+					//
+					// **The mapped rectangle is the pane itself**, because a
+					// reflection fixes every point of the plane it reflects
+					// through. That is why this branch looks like it is not mapping
+					// anything: it is, and the map happens to be the identity on
+					// exactly the four corners that matter.
+					placement.Eye = eye - unit * (2.0f * distance);
+					placement.Centre = centre;
+					placement.Forward = unit * facing;
+					placement.First = first;
+					placement.Second = second;
+				}
+
+				// **Aimed, not merely placed.** An identity rotation looks down
+				// -Z, so a camera put behind a pane faces away from it and renders
+				// empty space. That was the first version of the script this
+				// replaces, and the mirror came out showing the clear colour.
+				//
+				// **Square on to the rectangle, and not at its centre.** Aiming at
+				// the middle sounds like the same thing and is not: it tilts the
+				// view axis off the normal by however far the viewer stands to one
+				// side, and the pane then lies at an angle across the frustum. Push
+				// that far enough — close to the glass and off to the side, which
+				// is a metre from a wall in a room — and the nearest corner goes
+				// *behind* the camera, which nothing covers.
+				//
+				// Looking along the normal puts every corner at the same depth, so
+				// the fit is always finite and the corners are always in front. It
+				// costs nothing in correctness: the image is read back by projecting
+				// each fragment through this camera's own matrix, so the orientation
+				// decides which texels the pane lands on and never which part of the
+				// world it shows. **Leaning is now the frustum's job**, which is
+				// what an off-axis fit is for and what a symmetric one could not do.
+				const Vector3 up = UpFor(placement.Forward);
+
+				Aim aim;
+				aim.Camera = entity;
+				aim.Part = face.Part;
+				aim.Frame = CFrame::LookAt(placement.Eye, placement.Eye + placement.Forward, up);
+
+				// **The near and far planes are the author's again.** Pushing the
+				// near plane out to the glass was the poor man's oblique clip, and
+				// there is a real one below — so the engine has stopped overwriting
+				// a number it no longer needs to borrow.
+				aim.Lens.NearPlane = lens.NearPlane;
+				aim.Lens.FarPlane = lens.FarPlane;
+
+				FitExtents(placement, up, aim.Lens.NearPlane, aim.Lens);
+
+				// **The real oblique clip, and on a portal it is not optional.**
+				// The destination is set into a wall, so the wall, its back face
+				// and whatever stands behind it are all inside the frustum and
+				// would draw over the view — the hole would show the back of the
+				// wall it leads through. A mirror wants the same thing for a
+				// smaller reason: the frame and the back of the glass would
+				// otherwise occlude the reflection.
+				//
+				// The normal is the look direction, so what is kept is everything
+				// beyond the mapped pane and what is dropped is everything between
+				// it and the camera.
+				aim.Lens.ClipNormal = placement.Forward;
+				aim.Lens.ClipDistance = placement.Forward.Dot(placement.Centre);
+
+				// The map the pane is read back through. Identity for a mirror,
+				// which is what the default already is.
+				aim.Lens.Mapping = placement.Map;
 
 				pending.push_back(aim);
 			}
@@ -587,18 +738,25 @@ namespace engine::scene {
 				}
 			}
 
-			// **Both clip and field of view, and both are the engine's now.** A
-			// surface camera parented to a part has its placement written here
-			// every frame; the frustum that placement implies is no more the
-			// author's to choose than the placement is. A `FieldOfView` set by a
-			// script is honoured on a camera parented to the world, which is the
-			// same line `Transform` is already drawn on.
-			if (const Camera *lens = store.Get<Camera>(aim.Camera); aim.Renders && lens != nullptr) {
-				if (lens->NearPlane != aim.NearPlane) {
-					store.GetMutable<Camera>(aim.Camera)->NearPlane = aim.NearPlane;
-				}
-				if (lens->FieldOfViewRadians != aim.FieldOfView) {
-					store.GetMutable<Camera>(aim.Camera)->FieldOfViewRadians = aim.FieldOfView;
+			// **The frustum is the engine's, and it has stopped borrowing the
+			// author's fields to say so.** A surface camera parented to a part
+			// has its placement written here every frame, and the frustum that
+			// placement implies is no more the author's to choose than the
+			// placement is — so it goes in `SurfaceLens`, which exists for it.
+			//
+			// **`Camera::FieldOfView` and `Camera::NearPlane` are no longer
+			// overwritten**, which is a change an author can see. They used to
+			// be, because there was nowhere else to put a fitted angle and a
+			// near plane pushed out to the glass; a script that set either on a
+			// parented camera had it taken back on the next frame. Now the near
+			// and far planes are read as authored and the fit lives beside them,
+			// so setting `FieldOfView` on a surface camera does nothing rather
+			// than being reverted — the honest outcome for a field the surface
+			// path no longer consults.
+			if (aim.Renders) {
+				const SurfaceLens *existing = store.Get<SurfaceLens>(aim.Camera);
+				if (existing == nullptr || std::memcmp(existing, &aim.Lens, sizeof(SurfaceLens)) != 0) {
+					store.Set(aim.Camera, aim.Lens);
 				}
 			}
 
@@ -687,4 +845,159 @@ namespace engine::scene {
 
 		return appended;
 	}
+
+	size_t CrossPortals(ecs::Store &store) {
+		// **The portals are gathered before anything is moved.** A body pushed
+		// through one lands somewhere another might also claim, and a single
+		// pass that moved as it walked would let one crossing feed the next
+		// within a tick — a character could be bounced through three holes on
+		// one step, which is neither what the author drew nor reproducible.
+		struct Hole {
+			// The pane's plane: a point on it and its face's unit normal.
+			//
+			// **The face's normal, not "the outward one".** Which side is
+			// outward is a question about the *crosser*, exactly as it is a
+			// question about the viewer in `AimSurfaceCameras` — a pane can be
+			// walked into from either side and both answers are right. So the
+			// sign is decided per body, below.
+			Vector3 Centre;
+			Vector3 Normal;
+
+			// The pane's half-axes in the world, so `Centre ± First ± Second`
+			// is the rectangle. Kept as vectors rather than as extents because
+			// that is what the inside test needs.
+			Vector3 First;
+			Vector3 Second;
+
+			// The far pane's face frame, looking out of itself. The half of the
+			// mapping that does not depend on who is crossing.
+			CFrame Destination;
+		};
+
+		std::vector<Hole> holes;
+
+		store.Each<const Portal, const SurfaceCamera>(
+			[&](ecs::Entity entity, const Portal &portal, const SurfaceCamera &camera) {
+				if (portal.Destination == NULL_ENTITY || !store.Alive(portal.Destination)) {
+					// An unlinked portal falls back to a mirror, and a mirror is
+					// a wall. Walking into one is walking into a wall.
+					return;
+				}
+
+				// **The pane is the camera's parent, not the camera.** A
+				// `SurfaceCamera` is a `PVInstance` — it has a placement and no
+				// size at all — so a pass that read the camera's own `Bounds`
+				// found none and every portal in the world quietly had no hole
+				// in it. `FaceOf` is what `AimSurfaceCameras` uses and is the
+				// one answer to "which rectangle is this camera projecting off".
+				Face face;
+				if (!FaceOf(store, entity, camera.Face, face)) {
+					return;
+				}
+
+				const Transform *far = store.Get<Transform>(portal.Destination);
+				const Bounds *farBounds = store.Get<Bounds>(portal.Destination);
+				if (far == nullptr || farBounds == nullptr) {
+					return;
+				}
+
+				// The far pane's own face, chosen the way the source's was:
+				// `SurfaceCamera::Face` names one side of a part, and the far
+				// end of a hole is the matching side of the part it leads to.
+				const Vector3 local = NormalOf(camera.Face);
+				const Vector3 farNormal = far->Frame.VectorToWorldSpace(local).Unit();
+				const Vector3 farCentre = far->Frame.Position + farNormal * ReachOf(*farBounds, camera.Face);
+
+				Hole hole;
+				hole.Centre = face.Centre;
+				hole.Normal = face.Normal;
+				FaceAxes(face.Placement, local, face.HalfExtent, hole.First, hole.Second);
+				hole.Destination = CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
+
+				holes.push_back(hole);
+			}
+		);
+
+		if (holes.empty()) {
+			return 0;
+		}
+
+		size_t crossed = 0;
+
+		// **Anything with a velocity, not only a character.** A portal that
+		// swallowed people and refused a thrown crate would be a portal with a
+		// footnote, and the arithmetic does not care which it is. Anchored
+		// scenery carries no `Motion` and is therefore never a candidate, which
+		// is the archetype doing the filtering rather than a branch.
+		store.Each<Transform, Motion, const PreviousTransform>(
+			[&](ecs::Entity, Transform &placement, Motion &motion, const PreviousTransform &before) {
+				const Vector3 was = before.Frame.Position;
+				const Vector3 now = placement.Frame.Position;
+
+				for (const Hole &hole : holes) {
+					// Signed distance either side of the pane's plane. **A
+					// crossing is a change of side and not a place**, which is
+					// what makes the test work at speed: a character walks a
+					// quarter of a metre a tick, so "is it inside the pane now"
+					// misses the tick it was on either side of.
+					//
+					// **Either direction.** A pane is a hole rather than a
+					// one-way door, and which side is "outward" is a question
+					// about the crosser — `AimSurfaceCameras` answers the same
+					// question about the viewer, in the same way, three
+					// functions up.
+					const float from = (was - hole.Centre).Dot(hole.Normal);
+					const float to = (now - hole.Centre).Dot(hole.Normal);
+					if ((from > 0.0f) == (to > 0.0f)) {
+						continue;
+					}
+
+					// Where the segment met the plane. The denominator cannot be
+					// zero: the two signs differ, so they differ by something.
+					const float share = from / (from - to);
+					const Vector3 at = was + (now - was) * share;
+
+					// Inside the rectangle, measured along its own half-axes.
+					// **Normalised by the square of each axis' length**, which
+					// is the projection without a square root — `a·b / b·b` is
+					// how far along `b` the point is, in units of `b`.
+					const Vector3 offset = at - hole.Centre;
+					const float alongFirst = offset.Dot(hole.First) / hole.First.Dot(hole.First);
+					const float alongSecond = offset.Dot(hole.Second) / hole.Second.Dot(hole.Second);
+					if (std::abs(alongFirst) > 1.0f || std::abs(alongSecond) > 1.0f) {
+						continue;
+					}
+
+					// The crosser's own side, which is what `facing` is in
+					// `AimSurfaceCameras` — a pane walked into from behind maps
+					// through the frame that faces backwards, and the body comes
+					// out of the destination the same way round.
+					const Vector3 outward = hole.Normal * (from > 0.0f ? 1.0f : -1.0f);
+					const CFrame source = CFrame::LookAt(hole.Centre, hole.Centre + outward, UpFor(outward));
+
+					// `destination · half-turn · source⁻¹`, the same product the
+					// camera goes through — see the `linked` branch above for
+					// why the half-turn is what makes it a hole rather than a
+					// window onto a copy.
+					const CFrame through =
+						hole.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+
+					// **The placement and the velocity, by the same transform.**
+					// Forgetting the second is the bug that looks like physics:
+					// the body arrives aimed the way it was aimed in the frame it
+					// left, so it walks out of the destination sideways.
+					placement.Frame = through * placement.Frame;
+					motion.Linear = through.VectorToWorldSpace(motion.Linear);
+
+					crossed++;
+
+					// One hole per body per tick. See the gathering pass above.
+					break;
+				}
+			}
+		);
+
+		return crossed;
+	}
+
 }

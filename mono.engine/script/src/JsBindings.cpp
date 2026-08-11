@@ -6,6 +6,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/world/Postbox.hpp>
@@ -1025,6 +1026,110 @@ namespace engine::script {
 			return sent ? JS_UNDEFINED : error;
 		}
 
+		// TeleportService.Teleport(placeName, player, data?)
+		//
+		// The Luau side in `Services.cpp` carries the argument for every line of
+		// this; what is here is the same operation through QuickJS's calling
+		// convention. **Both languages or neither**: the engine's own record
+		// says a surface promised in a declaration file and missing from one run
+		// time survives two versions before anybody notices, so a
+		// `TeleportService` a Luau script could reach and a JavaScript one could
+		// not is the exact shape of that bug.
+		JSValue Teleport(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			if (argc < 2) {
+				return JS_ThrowTypeError(context, "Teleport needs a place name and a player");
+			}
+
+			const char *place = JS_ToCString(context, argv[0]);
+			if (place == nullptr) {
+				return JS_EXCEPTION;
+			}
+
+			ecs::Store &store = *JsOf(context).World;
+			const ecs::Entity player = JsEntityOf(context, argv[1]);
+
+			if (!store.Alive(player) || !store.IsA(player, scene::PlayerClass())) {
+				JS_FreeCString(context, place);
+				return JS_ThrowTypeError(context, "Teleport: the second argument must be a Player");
+			}
+
+			world::Postbox box(store);
+			if (box.IsReplica() || store.AdoptOnly()) {
+				JS_FreeCString(context, place);
+				return JS_ThrowTypeError(
+					context, "Teleport: this world is a replica and does not decide who is in it"
+				);
+			}
+
+			ScriptValue envelope{ValueTag::Map};
+
+			ScriptValue label{ValueTag::String};
+			const core::Name name = store.InstanceNameOf(player);
+			label.Text = name.IsValid() ? std::string(name.Text()) : std::string("Player");
+			envelope.Entries.emplace_back("Player", std::move(label));
+
+			if (argc >= 3 && !JS_IsUndefined(argv[2]) && !JS_IsNull(argv[2])) {
+				ScriptValue data;
+				CodecStatus why = CodecStatus::Ok;
+				if (!ToScriptValue(context, argv[2], data, 0, why)) {
+					JS_FreeCString(context, place);
+					return JS_ThrowTypeError(
+						context, "Teleport: the data cannot cross a world boundary: %s", Describe(why)
+					);
+				}
+				envelope.Entries.emplace_back("Data", std::move(data));
+			}
+
+			std::vector<std::byte> payload;
+			if (const CodecStatus status = Encode(envelope, payload); status != CodecStatus::Ok) {
+				JS_FreeCString(context, place);
+				return JS_ThrowTypeError(
+					context, "Teleport: the data cannot cross a world boundary: %s", Describe(status)
+				);
+			}
+
+			const bool queued = box.Teleport(place, payload).Value != world::Ticket::NONE;
+			if (!queued) {
+				JSValue error =
+					JS_ThrowTypeError(context, "Teleport: over this world's budget for '%s'", place);
+				JS_FreeCString(context, place);
+				return error;
+			}
+			JS_FreeCString(context, place);
+
+			// Removed here for the reason the Luau side gives: the two worlds
+			// cannot reach each other, so only this one can stop the player
+			// being in both.
+			(void)scene::RemoveCharacter(store, player);
+			store.DestroyInstance(player);
+			return JS_UNDEFINED;
+		}
+
+		// TeleportService.GetLocalPlayerTeleportData()
+		JSValue GetLocalPlayerTeleportData(JSContext *context, JSValueConst, int, JSValueConst *) {
+			ecs::Store &store = *JsOf(context).World;
+
+			const auto *local = store.Resource<scene::LocalPlayer>();
+			if (local == nullptr || !store.Alive(local->Instance)) {
+				return JS_NULL;
+			}
+
+			const ecs::Entity held = store.FindFirstChild(local->Instance, "TeleportData");
+			const auto *text = held == ecs::NULL_ENTITY ? nullptr : store.Get<scene::TextContent>(held);
+			if (text == nullptr || text->Value.empty()) {
+				return JS_NULL;
+			}
+
+			const auto *bytes = reinterpret_cast<const std::byte *>(text->Value.data());
+
+			ScriptValue value;
+			if (Decode({bytes, text->Value.size()}, value) != CodecStatus::Ok) {
+				return JS_NULL;
+			}
+
+			return FromScriptValue(context, value);
+		}
+
 		JSValue SubscribeAsync(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			if (argc < 2 || !JS_IsFunction(context, argv[1])) {
 				return JS_ThrowTypeError(context, "SubscribeAsync needs a topic and a function");
@@ -1496,6 +1601,21 @@ namespace engine::script {
 				JS_NewCFunction(context, SubscribeAsync, "SubscribeAsync", 2)
 			);
 			JS_SetPropertyStr(context, global, "MessagingService", service);
+		}
+
+		// TeleportService — the only bus operation that names a world.
+		{
+			JSValue service = JS_NewObject(context);
+			JS_SetPropertyStr(
+				context, service, "Teleport", JS_NewCFunction(context, Teleport, "Teleport", 3)
+			);
+			JS_SetPropertyStr(
+				context,
+				service,
+				"GetLocalPlayerTeleportData",
+				JS_NewCFunction(context, GetLocalPlayerTeleportData, "GetLocalPlayerTeleportData", 0)
+			);
+			JS_SetPropertyStr(context, global, "TeleportService", service);
 		}
 
 		// `nil`, because this is a Roblox-shaped API and a Roblox author writes

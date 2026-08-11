@@ -11,9 +11,22 @@
 // about pixels and would be worthless, because the whole value of the panel is
 // the difference between the two sides.
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Characters.hpp>
+#include <engine/physics/Pipeline.hpp>
+#include <engine/render/Renderer.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Enums.hpp>
+#include <engine/scene/Gravity.hpp>
+#include <engine/scene/Input.hpp>
+#include <engine/scene/Ownership.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
@@ -21,16 +34,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
-#include <engine/ecs/Classes.hpp>
-#include <engine/render/Renderer.hpp>
-#include <engine/scene/Enums.hpp>
-#include <engine/scene/Part.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
-#include <studio/PlayLink.hpp>
-
 #include <optional>
+#include <imgui.h>
+#include <studio/Editor.hpp>
+#include <studio/PlayLink.hpp>
 
 TEST_SUITE_ID("studio.playlink")
 
@@ -82,6 +92,14 @@ namespace {
 			// `Observed` half of the replication table finds nothing — silently
 			// and for ever, which is exactly the failure `ChangeDetection`
 			// documents.
+			//
+			// **Stated here because this fixture builds no physics, and in a real
+			// world it is physics that states it**: `physics::PreparePhysicsWorld`
+			// observes `scene::Transform`, and `Editor::BuildWorld` calls it for
+			// every world. So this is the fixture standing in for the pipeline it
+			// does not install, rather than a switch production forgot —
+			// `scene::Motion` is the one that genuinely has no observer outside
+			// `mono.server`, and the walking case below is what would notice.
 			Worlds.Enter(Authority, [](Store &store) {
 				store.Observe<Transform>();
 				store.Observe<engine::scene::Motion>();
@@ -330,9 +348,7 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 		store.Set<Bounds>(pane, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
 		store.Set<Visual>(pane, Visual{});
 
-		reflection = store.CreateInstance(
-			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection"
-		);
+		reflection = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection");
 
 		// **No slot set here, because nothing authors one.** A pane is a mirror
 		// because a `SurfaceCamera` is parented to it, and
@@ -468,4 +484,455 @@ TEST_CASE("what the server holds arrives on every client", "[studio][playlink]")
 
 	first.Stop(fixture.Worlds);
 	second.Stop(fixture.Worlds);
+}
+
+TEST_CASE("a play link admits a player and gives it a body", "[studio][playlink]") {
+	// **What made Play "both halves" rather than one half wearing both hats.**
+	// A link has held an authority and a replica since v0.7 and nobody was in
+	// the replica — it received state and had no player, no character and no way
+	// to move one. These are the three facts that changed, and each of them is
+	// silently wrong in a different way if it is missing:
+	//
+	//   * no player, and the client is a spectator;
+	//   * no `LocalPlayer` in the replica, and the client cannot tell which of
+	//     the characters it is looking at is its own;
+	//   * no route for its intent, and the keyboard reaches nothing.
+	Fixture fixture;
+
+	// A furnished world, because a player is a child of the `Players` service —
+	// a scene nobody furnished gets no player, quietly, which is the placeholder
+	// case `mono.server` names too.
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+
+	const Entity player = link.Player();
+	REQUIRE(player != engine::ecs::NULL_ENTITY);
+
+	Entity root;
+	Entity humanoid;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const Entity model = engine::scene::CharacterOf(store, player);
+		REQUIRE(model != engine::ecs::NULL_ENTITY);
+
+		const auto *rig = store.Get<engine::scene::Character>(model);
+		REQUIRE(rig != nullptr);
+		root = rig->Root;
+		humanoid = rig->Humanoid;
+
+		// Handed to the player, which is what makes a client's own movement
+		// authoritative and nobody else's.
+		CHECK(engine::scene::NetworkOwnerOf(store, root) == player);
+	});
+
+	// The replica is told which player is its own. It cannot be replicated — a
+	// resource is one row and the answer differs per client — so this is the
+	// studio's version of `game::JoinNotice`.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [player](Store &store) {
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		REQUIRE(local != nullptr);
+		CHECK(local->Instance == player);
+	});
+
+	// The character crosses whole, which is a stronger claim than "rows
+	// arrived": `Character` names two entities, and a replica holding the
+	// component without the rows it points at is a character with no body.
+	fixture.Step(link, 6);
+	fixture.Worlds.Enter(link.ReplicaWorld(), [player](Store &store) {
+		const Entity model = engine::scene::CharacterOf(store, player);
+		REQUIRE(model != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.Get<engine::scene::Character>(model) != nullptr);
+		CHECK(store.Alive(store.Get<engine::scene::Character>(model)->Root));
+	});
+
+	// --- and the keyboard reaches it -------------------------------------
+	//
+	// `Editor::DrivePlayer` writes the replica's `InputState` and needs a
+	// window; what it writes is an ordinary resource, so a test writes the same
+	// thing and the rest of the path is the real one — `ReadMoveIntent` in the
+	// replica, the codec, `ApplyMoveInput` on the authority.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		REQUIRE(input != nullptr);
+		input->Focused = true;
+		input->Down.Set(engine::scene::KeyCode::W, true);
+	});
+
+	fixture.Step(link);
+
+	fixture.Worlds.Enter(fixture.Authority, [humanoid](Store &store) {
+		const auto *body = store.Get<engine::scene::Humanoid>(humanoid);
+		REQUIRE(body != nullptr);
+
+		// **Non-zero and normalised**, which is the two halves of the contract:
+		// the intent crossed at all, and the host normalised it rather than
+		// trusting whatever length arrived.
+		CHECK_THAT(body->MoveDirection.Magnitude(), Catch::Matchers::WithinAbs(1.0, 0.001));
+	});
+
+	// Stopping takes the player with it, or a body is owned for ever by
+	// somebody who has gone — which is the case `scene.ownership`'s reclaim
+	// exists for and the one this must not create.
+	link.Stop(fixture.Worlds);
+	fixture.Worlds.Enter(fixture.Authority, [player, root](Store &store) {
+		CHECK_FALSE(store.Alive(player));
+		CHECK_FALSE(store.Alive(root));
+	});
+}
+
+TEST_CASE("a played character walks where the keyboard points it", "[studio][playlink]") {
+	// **The half above this one stops at `Humanoid::MoveDirection`.** That is a
+	// field, not a displacement: everything from the key to the field can be
+	// perfect and the character still stand still, because walking needs the
+	// authority to have been furnished with a physics world, a weight, and the
+	// character passes that turn a direction into a velocity. The case above
+	// asserts the field; this one asserts the metres, and the two together are
+	// the whole of what "press W and it walks" means.
+	//
+	// **The world is furnished the way `Editor::BuildWorld` furnishes one**, and
+	// naming the same calls in the same order is the point — a studio that stops
+	// installing one of them is a studio where Play looks exactly like this test
+	// failing.
+	Fixture fixture;
+
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store, engine::ecs::Scheduler &systems) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
+
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(systems);
+
+		engine::scene::RegisterOwnershipSystem(systems);
+		engine::physics::RegisterCharacterSystems(systems);
+
+		// Something to stand on. Without it the character falls for the whole
+		// test and `Humanoid::Grounded` is never true, which is a different
+		// failure wearing the same face.
+		engine::scene::PartDesc floor;
+		floor.Size = Vector3{200.0f, 4.0f, 200.0f};
+		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
+		floor.Anchored = true;
+
+		const Entity ground = engine::scene::MakePart(store, floor);
+		store.SetInstanceName(ground, "SpawnLocation");
+		store.SetParent(ground, engine::scene::WorkspaceOf(store));
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+
+	const Entity player = link.Player();
+	REQUIRE(player != engine::ecs::NULL_ENTITY);
+
+	Entity root;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const auto *rig = store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player));
+		REQUIRE(rig != nullptr);
+		root = rig->Root;
+	});
+
+	// Let it settle onto the floor first, so what is measured below is walking
+	// and not the tail of the drop.
+	fixture.Step(link, 30);
+
+	Vector3 before;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const auto *placement = store.Get<Transform>(root);
+		REQUIRE(placement != nullptr);
+		before = placement->Frame.Position;
+
+		const auto *body = store.Get<engine::scene::Humanoid>(
+			store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player))->Humanoid
+		);
+		REQUIRE(body != nullptr);
+
+		// **Standing on the floor, and this is not a formality.** `Grounded` is
+		// the whole of what gates a jump, and `physics::GroundCharacters` gets it
+		// from a ray that starts inside the character's own collider — so a
+		// version of that function which rejects the caster by comparing the
+		// result rather than by excluding it from the query answers "falling"
+		// while the character rests perfectly still on a plate.
+		CHECK(body->Grounded);
+	});
+
+	// The keyboard, written where `Editor::DrivePlayer` writes it.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		REQUIRE(input != nullptr);
+		input->Focused = true;
+		input->Down.Set(engine::scene::KeyCode::W, true);
+	});
+
+	fixture.Step(link, 30);
+
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const auto *placement = store.Get<Transform>(root);
+		REQUIRE(placement != nullptr);
+
+		const Vector3 walked = placement->Frame.Position - before;
+
+		// **Half a second at `WalkSpeed`, so metres and not millimetres.** A
+		// character that drifted a hair would pass a "not equal" check and would
+		// still be a character that does not walk.
+		CHECK(Vector3{walked.X, 0.0f, walked.Z}.Magnitude() > 2.0f);
+	});
+
+	// **And the client sees it, which is the half somebody actually looks at.**
+	// The authority moving its own row proves the simulation; a person pressing
+	// W is watching a *replica*, and the two are only the same picture if the
+	// new pose is sent. It is not sent unless the authority is observing
+	// `scene::Transform` — the delta for an `Observed` component is built from
+	// the dirty bits and from nothing else — so a world nobody declared that on
+	// replicates its join snapshot and then never moves again. Which is a
+	// character that walks everywhere except on the screen.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		const auto *seen = store.Get<Transform>(root);
+		REQUIRE(seen != nullptr);
+
+		const Vector3 there = seen->Frame.Position;
+		const Vector3 shown = Vector3{there.X - before.X, 0.0f, there.Z - before.Z};
+		CHECK(shown.Magnitude() > 2.0f);
+	});
+
+	// --- and the space bar leaves the ground -----------------------------
+	//
+	// **The other key a player presses, and the one that fails on its own.**
+	// Walking writes a horizontal velocity whatever the ground says; jumping
+	// reads `Humanoid::Grounded` and does nothing without it. So a broken ground
+	// query is invisible to every check above and is the whole of the bug to
+	// somebody holding the space bar.
+	//
+	// **From a standstill, and the wait is the point.** A character that has
+	// just walked is awake, and a jump off an awake body proves nothing about
+	// the commonest case there is: somebody stands still, the solver rests the
+	// body and `physics::Publish` takes its `scene::Motion` away, and *then*
+	// they press space. Jumping is the only input that has to wake a body it did
+	// not already move.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		REQUIRE(input != nullptr);
+		input->Previous = {};
+		input->Down = {};
+	});
+
+	fixture.Step(link, 180);
+
+	bool slept = false;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		slept = !store.Has<engine::scene::Motion>(root);
+	});
+	INFO("the body never came to rest, so this case is not testing what it says");
+	CHECK(slept);
+
+	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		REQUIRE(input != nullptr);
+		input->Down = {};
+
+		// **An edge, so the previous frame has to not hold it.**
+		// `scene::ReadMoveIntent` asks `WasKeyPressed`, which is the difference
+		// between the two — a key held since the last frame is not a jump.
+		input->Previous = {};
+		input->Down.Set(engine::scene::KeyCode::Space, true);
+	});
+
+	float apex = 0.0f;
+	for (int beat = 0; beat < 400; beat++) {
+		fixture.Step(link);
+		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+			const auto *p2 = store.Get<Transform>(root);
+			const auto *m2 = store.Get<engine::scene::Motion>(root);
+			if (beat % 20 == 0 || beat > 390) {
+				std::printf("DBG b=%d y=%f vel=%s\n", beat, p2?p2->Frame.Position.Y:-99.0f,
+					m2 ? std::to_string(m2->Linear.Y).c_str() : "no-motion");
+			}
+		});
+	}
+	for (int beat = 0; beat < 20; beat++) {
+		fixture.Step(link);
+		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+			if (const auto *placement = store.Get<Transform>(root)) {
+				apex = std::max(apex, placement->Frame.Position.Y);
+			}
+		});
+	}
+
+	// Well clear of where it stood, rather than merely different: a character
+	// bobbing on a contact would pass anything tighter.
+	CHECK(apex > before.Y + 2.0f);
+
+	link.Stop(fixture.Worlds);
+}
+
+// --- the studio's own half --------------------------------------------------
+//
+// **The header above says a viewport needs a window and a device, and that is
+// half true.** What a viewport *draws* does. What it does with the keyboard does
+// not: `Editor::DrivePlayer` is imgui state and store writes, and imgui runs
+// perfectly well with a context, a font atlas and no backend at all. So the one
+// step of "press W and the character walks" that had no test — the editor
+// deciding that this panel's keyboard belongs to that client — is testable, and
+// the gap is why "I click the client viewport and nothing happens" could not be
+// reproduced anywhere but by hand.
+
+namespace {
+	// An imgui context with no backend, and a frame open on it.
+	//
+	// The font atlas is built explicitly because `NewFrame` asserts on one that
+	// is not — a backend would have done it while uploading the texture, and
+	// there is no backend here.
+	struct Frame {
+		ImGuiContext *Context = nullptr;
+
+		Frame() {
+			Context = ImGui::CreateContext();
+			ImGuiIO &io = ImGui::GetIO();
+			io.DisplaySize = ImVec2{1280.0f, 720.0f};
+			io.DeltaTime = FRAME_SECONDS;
+
+			unsigned char *pixels = nullptr;
+			int width = 0;
+			int height = 0;
+			io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+			io.Fonts->SetTexID(static_cast<ImTextureID>(1));
+		}
+
+		~Frame() {
+			if (Context != nullptr) {
+				ImGui::DestroyContext(Context);
+			}
+		}
+
+		Frame(const Frame &) = delete;
+		Frame &operator=(const Frame &) = delete;
+
+		// Opens a frame with `key` held, and closes the previous one.
+		void HoldKey(ImGuiKey key, bool down) {
+			ImGui::NewFrame();
+			ImGui::GetIO().AddKeyEvent(key, down);
+			ImGui::EndFrame();
+
+			// A second frame, so the event queued above is in `KeysData` while
+			// the frame is open — which is the state `DrivePlayer` reads.
+			ImGui::NewFrame();
+		}
+	};
+}
+
+TEST_CASE("a client viewport hands its keyboard to the character", "[studio][playlink]") {
+	Frame frame;
+
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+
+	engine::parallel::Jobs::Start(1);
+	engine::scene::RegisterSceneComponents();
+
+	WorldSettings settings;
+	settings.Name = Name("Scene");
+	settings.TickRate = TICK_RATE;
+	const WorldId authority = editor.Universe->Create(settings);
+
+	// Furnished as `Editor::BuildWorld` furnishes one, which is what makes the
+	// answer below an answer about the editor rather than about this fixture.
+	editor.Universe->Enter(authority, [](Store &store, engine::ecs::Scheduler &systems) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(systems);
+		engine::scene::RegisterOwnershipSystem(systems);
+		engine::physics::RegisterCharacterSystems(systems);
+
+		engine::scene::PartDesc floor;
+		floor.Size = Vector3{200.0f, 4.0f, 200.0f};
+		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
+		floor.Anchored = true;
+
+		const Entity ground = engine::scene::MakePart(store, floor);
+		store.SetInstanceName(ground, "SpawnLocation");
+		store.SetParent(ground, engine::scene::WorkspaceOf(store));
+	});
+
+	auto link = std::make_unique<PlayLink>();
+	std::string error;
+	REQUIRE(link->Start(*editor.Universe, authority, TICK_RATE, error, "client 1"));
+
+	const WorldId replica = link->ReplicaWorld();
+
+	// **Recorded as a run, because that is how the editor knows a world is a
+	// client's.** `Editor::IsReplicaWorld` walks `Runs` and nothing else, so a
+	// link the editor is not holding is a panel `DrivePlayer` refuses on its
+	// first line — which is indistinguishable, from the outside, from a
+	// keyboard that is simply ignored.
+	studio::Editor::WorldRun run;
+	run.World = authority;
+	run.Mode = studio::RunMode::Play;
+	run.Links.push_back(std::move(link));
+	editor.Runs.push_back(std::move(run));
+
+	PlayLink &live = *editor.Runs.front().Links.front();
+
+	// The character has to have crossed before the keyboard means anything:
+	// `DrivePlayer` refuses a viewport whose client has no body, deliberately,
+	// so that the panel still flies a free camera in the gap.
+	for (int beat = 0; beat < 8; beat++) {
+		live.Step(*editor.Universe);
+		editor.Universe->Tick(FRAME_SECONDS);
+	}
+
+	editor.Universe->Enter(replica, [](Store &store) {
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		REQUIRE(local != nullptr);
+		INFO("the client never learned which player is its own");
+		REQUIRE(engine::scene::CharacterOf(store, local->Instance) != engine::ecs::NULL_ENTITY);
+	});
+
+	frame.HoldKey(ImGuiKey_W, true);
+
+	// Hovered, which is what a pointer over the panel gives it. Not focused and
+	// not active: the pointer alone has to be enough, because that is the rule
+	// `DriveCamera` resolves the target with.
+	CHECK(editor.DrivePlayer(replica, true, false, false));
+
+	editor.Universe->Enter(replica, [](Store &store) {
+		const auto *input = store.Resource<engine::scene::InputState>();
+		REQUIRE(input != nullptr);
+
+		// **The three facts a character needs and the editor is the only source
+		// of.** Focus, because `ReadMoveIntent` refuses an unfocused world; the
+		// key, because that is the whole message; and an intent that is not
+		// zero, because the first two can both be right and still produce a
+		// direction of nothing if the key table names the wrong code.
+		CHECK(input->Focused);
+		CHECK(input->IsKeyDown(engine::scene::KeyCode::W));
+		CHECK(engine::scene::ReadMoveIntent(store).Direction.Magnitude() > 0.5f);
+	});
+
+	// **And the panel that is not being pointed at drives nobody.** Two client
+	// views in one editor must not both walk on one keyboard — the second would
+	// be a character somebody is not looking at, moving on a key meant for the
+	// first.
+	CHECK_FALSE(editor.DrivePlayer(replica, false, false, false));
+	editor.Universe->Enter(replica, [](Store &store) {
+		CHECK_FALSE(store.Resource<engine::scene::InputState>()->Focused);
+	});
+
+	// A world that is not a client's is never played, whatever is held over it:
+	// the authority's own panel is the server's view and WASD flies its camera.
+	CHECK_FALSE(editor.DrivePlayer(authority, true, false, true));
+
+	editor.Runs.clear();
+	editor.Universe.reset();
+	engine::parallel::Jobs::Stop();
 }

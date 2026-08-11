@@ -1017,6 +1017,17 @@ declare extern type MessagingService with
 	function SubscribeAsync(self, topic: string, handler: (message: any) -> ()): ()
 end
 
+declare extern type TeleportService with
+	-- Sends a player to another world in this universe, with an optional
+	-- payload. The player is removed from *this* world by the call: nothing
+	-- crosses but a name and the data, and the destination rebuilds them.
+	function Teleport(self, placeName: string, player: Instance, data: any?): ()
+
+	-- What arrived with this client's player, or nil. Nil on a server, where
+	-- there is no local player to have arrived.
+	function GetLocalPlayerTeleportData(self): any
+end
+
 declare extern type MemoryStoreService with
 	function GetAsync(self, key: string): (any, BusStatus, number)
 	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
@@ -1099,6 +1110,7 @@ end
 -- --- the globals -----------------------------------------------------------
 
 declare MessagingService: MessagingService
+declare TeleportService: TeleportService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
@@ -1494,6 +1506,7 @@ declare task: {
 		// not in the tree for the walk above to find.
 		out << "\tRunService: RunService,\n";
 		out << "\tMessagingService: MessagingService,\n";
+		out << "\tTeleportService: TeleportService,\n";
 		out << "\tContentService: ContentService,\n";
 		out << "\tMemoryStoreService: MemoryStoreService,\n";
 		out << "\tDataStoreService: DataStoreService,\n";
@@ -1977,6 +1990,11 @@ declare interface MessagingService {
 	SubscribeAsync(topic: string, handler: (message: unknown) => void): void;
 }
 
+declare interface TeleportService {
+	Teleport(placeName: string, player: Instance, data?: unknown): void;
+	GetLocalPlayerTeleportData(): unknown;
+}
+
 declare interface MemoryStoreService {
 	GetAsync(key: string): Promise<StoreReply>;
 	SetAsync(key: string, value: unknown): Promise<StoreReply>;
@@ -1997,6 +2015,7 @@ declare interface RunService {
 // --- the globals -----------------------------------------------------------
 
 declare const MessagingService: MessagingService;
+declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;

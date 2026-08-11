@@ -313,6 +313,157 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 	}
 }
 
+TEST_CASE("every portal shows the room it names", "[examples][scene]") {
+	// **The one thing about a portal a headless test can decide, and it is the
+	// thing that was wrong.** Where the camera stands is `scene`'s to assert and
+	// `scene/tests/SurfaceCameras.cpp` does; what a *scene* gets wrong is which
+	// part it points a hole at, and the failure is silent: `Face` is resolved on
+	// the destination as well, so naming a wall whose matching face points out of
+	// its room places a camera, fits a frustum, renders — and shows the empty
+	// space behind that wall. Every assertion this suite had before would have
+	// passed on it, and it did.
+	//
+	// The invariant that catches it needs no arithmetic from the scene: **the
+	// half-space the oblique clip keeps has to contain the middle of the room the
+	// hole leads to.** A hole aimed outward keeps the half-space on the other
+	// side, so the room it names is behind the camera's clip plane and the sign
+	// flips.
+	const StagedAssets assets;
+
+	Store store("portals");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Portals-1-world.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// Six holes, three of them the ones the viewer stands in front of. The other
+	// three are the far ends, aimed from an eye that is in a different room —
+	// legal, and not something a still frame can be checked against.
+	const engine::core::Vector3 GARDEN{300.0f, 0.0f, 0.0f};
+	const engine::core::Vector3 VAULT{0.0f, 0.0f, 300.0f};
+
+	struct Hole {
+		const char *Pane;
+		const char *Destination;
+		engine::core::Vector3 Room;
+	};
+	const Hole holes[] = {
+		{"HallNorth", "GardenNorth", GARDEN},
+		{"HallEast", "VaultEast", VAULT},
+		{"HallWest", "VaultWest", VAULT},
+		{"GardenNorth", "HallNorth", {}},
+		{"VaultEast", "HallEast", {}},
+		{"VaultWest", "HallWest", {}},
+	};
+
+	// Found by component rather than by name, so renaming a portal in the scene
+	// is not a test failure — what it leads to is.
+	const auto portalOn = [&store](Entity pane) {
+		Entity found = engine::ecs::NULL_ENTITY;
+		store.EachChild(pane, [&](Entity child) {
+			if (found == engine::ecs::NULL_ENTITY && store.Get<engine::scene::Portal>(child) != nullptr) {
+				found = child;
+			}
+		});
+		return found;
+	};
+
+	for (const Hole &hole : holes) {
+		INFO(hole.Pane);
+
+		const Entity pane = InScene(store, hole.Pane);
+		REQUIRE(pane != engine::ecs::NULL_ENTITY);
+
+		const Entity portal = portalOn(pane);
+		REQUIRE(portal != engine::ecs::NULL_ENTITY);
+
+		// **A `Portal` is a `SurfaceCamera`**, which is what makes it cost the
+		// mirror's path and nothing more.
+		CHECK(store.Get<SurfaceCamera>(portal) != nullptr);
+		CHECK(store.Get<engine::scene::Portal>(portal)->Destination == InScene(store, hole.Destination));
+	}
+
+	REQUIRE(engine::scene::AimSurfaceCameras(store) == 6);
+
+	const auto *viewer = store.Get<engine::scene::Transform>(InScene(store, "Viewer"));
+	REQUIRE(viewer != nullptr);
+
+	bool seen[engine::scene::MAX_SURFACES] = {};
+
+	for (const Hole &hole : holes) {
+		INFO(hole.Pane);
+
+		const Entity pane = InScene(store, hole.Pane);
+		const Entity portal = portalOn(pane);
+
+		// A target each, as `MAX_SURFACES` allows sixteen of.
+		const int8_t index = store.Get<SurfaceCamera>(portal)->Surface;
+		REQUIRE(index >= 0);
+		REQUIRE(static_cast<size_t>(index) < engine::scene::MAX_SURFACES);
+		CHECK(store.Get<Visual>(pane)->Surface == index);
+		CHECK_FALSE(seen[index]);
+		seen[index] = true;
+
+		const auto *lens = store.Get<engine::scene::SurfaceLens>(portal);
+		REQUIRE(lens != nullptr);
+
+		// **The oblique clip is doing work, which a mirror's cannot show.** A
+		// portal's destination sits in a wall, so the plane is what stops the far
+		// side of that wall drawing over the whole hole.
+		REQUIRE(lens->ClipNormal.Magnitude() > 0.5f);
+
+		if (hole.Destination[0] == 'H') {
+			// The far ends, aimed from an eye in another room. Nothing about the
+			// half-space they keep is meaningful, so they are only here to be
+			// counted.
+			continue;
+		}
+
+		// The room the hole leads to is in front of the clip plane.
+		const float room = lens->ClipNormal.Dot(hole.Room) - lens->ClipDistance;
+		INFO("clip half-space at the far room's middle: " << room);
+		CHECK(room > 0.0f);
+
+		const auto &placed = store.Get<engine::scene::Transform>(portal)->Frame;
+
+		// And the camera is outside that room looking into it, rather than
+		// standing in it looking out — the other half of the same mistake.
+		CHECK(lens->ClipNormal.Dot(placed.Position) - lens->ClipDistance < 0.0f);
+		CHECK(placed.LookVector().Dot(lens->ClipNormal) > 0.9f);
+
+		// **Rigid, which is what separates a portal from a badly scaled one.**
+		// The map is a rotation and a translation, so the camera stands as far
+		// from the destination's face as the eye does from the source's — and
+		// that is measured here rather than assumed, because a scale slipped into
+		// the matrix would leave every other check in this case passing.
+		const auto *source = store.Get<engine::scene::Transform>(pane);
+		const auto *bounds = store.Get<engine::scene::Bounds>(pane);
+		REQUIRE(source != nullptr);
+		REQUIRE(bounds != nullptr);
+
+		// Every wall in this scene is unrotated, so the face's world normal is
+		// the axis its `NormalId` names and the reach along it is one component
+		// of the half extent.
+		const engine::core::Vector3 normal = engine::scene::NormalOf(store.Get<SurfaceCamera>(portal)->Face);
+		const engine::core::Vector3 reach{
+			std::abs(normal.X) * bounds->HalfExtent.X,
+			std::abs(normal.Y) * bounds->HalfExtent.Y,
+			std::abs(normal.Z) * bounds->HalfExtent.Z,
+		};
+
+		const float eyeToFace =
+			std::abs((viewer->Frame.Position - source->Frame.Position).Dot(normal)) - reach.Magnitude();
+		const float cameraToFarFace = std::abs(lens->ClipNormal.Dot(placed.Position) - lens->ClipDistance);
+		CHECK(cameraToFarFace == Approx(eyeToFace).margin(1e-2f));
+	}
+
+	// Motion on the far side of every hole, six per room. A still portal is
+	// indistinguishable from a painted mural.
+	CHECK(CountNamed(store, "Drifter") == 18);
+}
+
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
 	const StagedAssets assets;
 

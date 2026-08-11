@@ -2,6 +2,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
@@ -176,6 +177,13 @@ namespace server {
 		// reads ownership yet, because the day something does is the day this
 		// being absent is a bug rather than a gap.
 		engine::scene::RegisterOwnershipSystem(scheduler);
+
+		// **A server grounds, steps and poses its own characters.** Until this
+		// the three lived in `mono.client` alone, so a character on a dedicated
+		// server walked and could never jump — `Humanoid::Grounded` had no
+		// writer. The input half stays out: a server has no keyboard, and what
+		// moves a client-owned character here is its submitted `Motion`.
+		engine::physics::RegisterCharacterSystems(scheduler);
 	}
 
 	void RegisterPlaceholderComponents() {

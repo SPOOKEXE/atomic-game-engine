@@ -722,6 +722,18 @@ namespace engine::script {
 	// @param instance The instance to push.
 	void PushInstanceValue(lua_State *state, ecs::Entity instance);
 
+	// Reads an `Instance` argument, raising a type error when it is not one.
+	//
+	// **Shared rather than copied**, because the second copy is the one that
+	// forgets the tag check and reads eight bytes of somebody else's userdata
+	// as an entity handle. `Instances.cpp` owns the tag and this is how anything
+	// else asks it.
+	//
+	// @param state The VM.
+	// @param index The stack index.
+	// @return The entity the instance names.
+	ecs::Entity CheckInstanceArgument(lua_State *state, int index);
+
 	// Installs `Instance`, and the metatable that turns `part.Size = v` into a
 	// property write.
 	//

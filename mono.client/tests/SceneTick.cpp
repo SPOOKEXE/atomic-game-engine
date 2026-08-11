@@ -414,9 +414,11 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// **Nine more at v0.10**, from two installers. `InstallEffects` adds
 	// resolve-attachments and refresh-emitters in `PreSimulation`, step-particles
 	// and record-trails in `Simulation`, and build-ribbons in `PreRender`.
-	// `InstallControls` adds character-control and ground-characters in
-	// `PreSimulation`, step-characters in `Simulation`, and camera-control in
-	// `PreRender`.
+	// `InstallControls` adds character-control in `PreSimulation` and
+	// camera-control in `PreRender`, and `physics::RegisterCharacterSystems`
+	// adds character.ground in `PreSimulation` and character.step in
+	// `Simulation` — those two moved out of this file's installer at v0.14, so
+	// that a dedicated server grounds its characters too.
 	//
 	// Only two of the nine are presentation; the rest are simulation and are here
 	// because this count is over every phase rather than over one.
@@ -438,7 +440,31 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// it — which is right: a `Material` instance's texture is already on the part
 	// from the last tick that did, so a frozen world keeps the material it was
 	// frozen with rather than losing it.
-	REQUIRE(timings.size() == 16);
+	//
+	// **Seventeen since v0.14's `character.pose`, and its question has the
+	// friendliest answer of the three.** It is presentation, so a suspended
+	// scene *does* run it — and that is exactly right: a character's limbs are a
+	// product of where its root is, so a frozen world shows a character standing
+	// still rather than one whose arms are wherever they were when the world
+	// stopped.
+	//
+	// **Eighteen since `character.link`, and its answer is the same as
+	// `resolve-materials`'.** It runs in `PreSimulation`, so a suspended scene
+	// does not run it — which is right: the link between a player and the model
+	// they drive is state, not presentation, and a frozen world showing the
+	// character it was frozen with is exactly what it should show.
+	//
+	// **Eighteen since v0.14's `character.portal`.** It is `PostSimulation`, so
+	// a suspended scene does not run it, and that is right for a stronger reason
+	// than the others: a crossing is the segment between where a body started
+	// the tick and where it finished one, and a world that is not ticking has no
+	// such segment. Running it on a frozen world would compare the same pair of
+	// identical positions every frame and find nothing, for ever.
+	//
+	// **Nineteen since `character.link`**, which rebuilds a rig a client
+	// received over the wire. `PreSimulation`, so a suspended scene does not run
+	// it — and a scene nobody is playing has no client to have received one.
+	REQUIRE(timings.size() == 19);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

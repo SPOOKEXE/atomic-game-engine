@@ -115,6 +115,20 @@ TEST_CASE("the client chooses its own eye, and lenses still cross", "[replicatio
 	// the client whole", which is the case that exists to catch this.
 	CHECK_FALSE(LocalToTheClient("scene.Camera"));
 	CHECK_FALSE(LocalToTheClient("scene.SurfaceCamera"));
+
+	// **And the same line drawn one step further on.** A `SurfaceCamera` is
+	// authored scene content and crosses; the frustum *fitted to its pane* is
+	// made from where the local eye is standing, so the authority's answer is
+	// correct for the authority's camera and wrong for every client watching.
+	// Both ends run `AimSurfaceCameras` and recompute it — what crosses is the
+	// mirror, never the aim.
+	CHECK(LocalToTheClient("scene.SurfaceLens"));
+
+	// Which part a portal leads to is a fact about the scene rather than about
+	// the viewer, so it crosses like any other authored thing. A client that had
+	// to work it out for itself could not: there is nothing local to derive it
+	// from.
+	CHECK_FALSE(LocalToTheClient("scene.Portal"));
 }
 
 TEST_CASE("what a machine works out for itself is not sent", "[replication][defaults]") {

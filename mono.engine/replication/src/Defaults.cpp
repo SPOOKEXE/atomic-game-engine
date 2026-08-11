@@ -79,6 +79,26 @@ namespace engine::replication {
 			return true;
 		}
 
+		// **The same argument as `scene.Camera`'s, arriving one step further
+		// on.** A `SurfaceCamera` crosses because it is authored scene content;
+		// the *frustum fitted to its pane* does not, because that fit is made
+		// from where the local eye is standing. The authority's answer is
+		// correct for the authority's camera and wrong for every client
+		// watching — which is the rule `client/Replicated.hpp` states for the
+		// placement, and a lens is the placement's other half.
+		//
+		// Both ends run `AimSurfaceCameras` and recompute it, so what crosses is
+		// the mirror and never the aim. Replicating it would pay wire to send
+		// every client a frustum aimed at somebody else's eye, which the
+		// receiver then overwrites — wrong *and* wasteful, and wrong in a way
+		// that would only show on a second machine.
+		//
+		// `scene.Portal` is deliberately not here: which part a portal leads to
+		// is a fact about the scene, not about the viewer.
+		if (component == "scene.SurfaceLens") {
+			return true;
+		}
+
 		// Marked as not outliving the run that made it, so replicating it would
 		// be shipping a thing whose whole point is that it is not kept.
 		return component == "scene.Transient";

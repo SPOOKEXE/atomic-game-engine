@@ -12,9 +12,11 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Characters.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
@@ -447,7 +449,7 @@ namespace client {
 		Ordered().clear();
 
 		store.Each<const engine::scene::SurfaceCamera, const engine::scene::Camera, const Transform>(
-			[&views](
+			[&views, &store](
 				Entity entity,
 				const engine::scene::SurfaceCamera &target,
 				const engine::scene::Camera &lens,
@@ -456,9 +458,37 @@ namespace client {
 				engine::render::SurfaceView view;
 				view.Index = target.Surface;
 				view.Frame = placement.Frame;
-				view.Lens = lens;
 				view.Width = target.Width;
 				view.Height = target.Height;
+
+				// **The fitted frustum when there is one, and the plain camera
+				// when there is not.** `AimSurfaceCameras` writes a
+				// `SurfaceLens` for every camera it places — which is every one
+				// parented to a part — and that lens is off-axis and possibly
+				// obliquely clipped, neither of which a field of view can say.
+				//
+				// A surface camera parented to the *world* is placed by whoever
+				// authored it and gets no lens, so it keeps the ordinary
+				// perspective build from its `Camera`. `SurfaceCameras.hpp`
+				// promises that arrangement still works, and this is where the
+				// promise is kept.
+				if (const engine::scene::SurfaceLens *fitted =
+						store.template Get<engine::scene::SurfaceLens>(entity);
+					fitted != nullptr) {
+					view.Projection = engine::scene::SurfaceProjection(*fitted, placement.Frame);
+
+					// **And what took the pane to where that frustum was
+					// fitted**, which for a portal is not nothing. The image is
+					// read back by projecting the pane's own world position, so
+					// a camera fitted three hundred units away needs the pane
+					// carried there too — see `scene::SurfaceLens::Mapping`. A
+					// mirror's is the identity and this line is free.
+					view.Mapping = fitted->Mapping.ToMatrix();
+				} else {
+					const float aspect = static_cast<float>(target.Width) /
+										 static_cast<float>(std::max<uint16_t>(target.Height, 1));
+					view.Projection = engine::scene::ResolveCamera(placement.Frame, lens, aspect).Projection;
+				}
 
 				// **Opacity here, transparency in the component**, and the flip
 				// happens once. `scene::SurfaceCamera::ImageTransparency` is
@@ -643,46 +673,6 @@ namespace client {
 	}
 
 	namespace {
-		// Writes `Humanoid::Grounded` from a downward ray.
-		//
-		// **Here rather than in `scene`, because `scene` may not link
-		// `physics`.** `scene::StepCharacters` reads the flag and never computes
-		// it, which is the same shape `replication::DistancePriority` has: the
-		// arithmetic in the shared module, the query in whatever can run one.
-		void GroundCharacters(Store &store) {
-			store.Each<engine::scene::Humanoid, const Transform>([&store](
-																	 engine::ecs::Entity entity,
-																	 engine::scene::Humanoid &humanoid,
-																	 const Transform &placement
-																 ) {
-				if (!humanoid.Enabled) {
-					return;
-				}
-
-				// From just inside the feet to just below them. **Starting
-				// inside rather than at the surface**, because a ray that
-				// begins exactly on a face is a coin flip about whether it hits
-				// it — and the coin lands differently on two machines, which is
-				// a desync arriving through a character controller.
-				const Vector3 feet = placement.Frame.Position - Vector3{0.0f, humanoid.Height * 0.5f, 0.0f};
-
-				const engine::core::Ray ray{feet + Vector3{0.0f, 0.1f, 0.0f}, Vector3{0.0f, -1.0f, 0.0f}};
-
-				const auto hit = engine::physics::Raycast(store, ray, 0.1f + humanoid.GroundTolerance);
-
-				// **The character's own collider is rejected here rather than
-				// excluded from the query**, because `physics::Raycast` filters
-				// by layer and not by entity. One compare against the nearest
-				// hit is cheaper than a layer per character, and it is right
-				// for the case that matters: a humanoid standing on itself.
-				//
-				// What it does not handle is a *multi-part* character standing
-				// on its own leg. That wants an ignore list on the query, which
-				// is `physics`' to add and not this function's to work around.
-				humanoid.Grounded = hit.has_value() && hit->Owner != entity;
-			});
-		}
-
 		// The three effects systems, installed together because they are one
 		// dependency chain and installing two of the three is a scene where
 		// nothing emits.
@@ -797,11 +787,13 @@ namespace client {
 				(void)engine::scene::UpdateCharacterControl(world);
 			});
 
-			scheduler.Add("ground-characters", Phase::PreSimulation, GroundCharacters);
-
-			scheduler.Add("step-characters", Phase::Simulation, [](Store &world) {
-				(void)engine::scene::StepCharacters(world, static_cast<float>(world.Time().Delta));
-			});
+			// **The other three are `physics`', because grounding needs a
+			// query.** They used to be a static `GroundCharacters` in this file
+			// plus two lambdas beside it, which meant a dedicated server hosting
+			// the same world had no grounding at all and its characters could
+			// never jump. `physics::RegisterCharacterSystems` is the one
+			// installation, and a client, a server and the studio share it.
+			engine::physics::RegisterCharacterSystems(scheduler);
 		}
 
 		// How many particles a world's pool holds when nobody has said.

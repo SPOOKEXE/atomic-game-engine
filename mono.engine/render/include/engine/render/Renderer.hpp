@@ -15,6 +15,11 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
+// `SurfaceView::Projection` is a matrix. glm has always arrived here through
+// `core/types/CFrame.hpp` and `graph/Frustum.hpp`, but a header that names a
+// type should say where it comes from rather than rely on a neighbour.
+#include <glm/mat4x4.hpp>
+
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -86,8 +91,38 @@ namespace engine::render {
 		// Where the surface camera is, in world space.
 		core::CFrame Frame;
 
-		// Its field of view and clipping distances.
-		scene::Camera Lens;
+		// What it renders through, already built.
+		//
+		// **A projection handed in rather than a field of view derived here**,
+		// and the change is what a portal rests on. A surface frustum is fitted
+		// to a pane's four corners and is therefore **off-axis** — the four
+		// edges lean independently, so a viewer standing to one side gets
+		// exactly the pane instead of twice its width; and for a portal it is
+		// also **obliquely clipped**, with the near plane skewed onto the
+		// destination's plane so the wall the hole leads through cannot draw
+		// across it. Neither is expressible as an angle and two distances,
+		// which is what this field used to be.
+		//
+		// Built by `scene::SurfaceProjection` from the `scene::SurfaceLens` that
+		// `scene::AimSurfaceCameras` fits, so the renderer neither measures a
+		// pane nor knows what a portal is.
+		//
+		// @since v0.14
+		glm::mat4 Projection{1.0f};
+
+		// What moved the pane into the space this view was fitted to.
+		//
+		// **A pane samples its image by projecting its own world position, so a
+		// camera that was fitted somewhere else needs the pane taken there
+		// too.** The surface is rendered with the view's own matrix and read
+		// back with that matrix times this one; `scene::SurfaceLens::Mapping` is
+		// where the two are argued out.
+		//
+		// Identity is a mirror, and is what a host that has never heard of a
+		// portal leaves it as — including one filling this struct by hand.
+		//
+		// @since v0.14
+		glm::mat4 Mapping{1.0f};
 
 		// How wide the texture is. Square is not required; a wide mirror wants a
 		// wide target, and giving it a square one wastes half the texels.

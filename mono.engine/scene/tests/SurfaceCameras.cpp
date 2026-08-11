@@ -39,6 +39,7 @@ using engine::scene::Camera;
 using engine::scene::NormalId;
 using engine::scene::NormalOf;
 using engine::scene::SurfaceCamera;
+using engine::scene::SurfaceLens;
 using engine::scene::Transform;
 using engine::scene::Visual;
 
@@ -154,18 +155,68 @@ TEST_CASE("aiming tells the part which surface it shows", "[scene][surfacecamera
 	CHECK(mirror.World.Get<Visual>(mirror.Pane)->Surface == 0);
 }
 
-TEST_CASE("the near plane is pushed out to the glass", "[scene][surfacecameras]") {
+TEST_CASE("the clip plane is the pane itself, not a near plane pushed out to it", "[scene][surfacecameras]") {
+	// **This case used to assert the approximation, and now asserts the thing.**
+	//
+	// The reflected camera is behind the pane looking through it, so everything
+	// between the two — the frame, the back of the pane, whatever the viewer
+	// stands behind — would occlude the reflection. That used to be handled by
+	// shoving the *near plane* out to `|distance| + 0.3`, which clips at a plane
+	// parallel to the face rather than on it: correct looking straight at the
+	// glass, and over-clipping at a grazing angle.
+	//
+	// A real oblique clip skews the projection's near plane onto the pane's own
+	// plane, so the near distance is free again and is whatever the author set.
+	// Asserting the old 20.5 here would be asserting that the approximation is
+	// still in place.
 	Mirror mirror;
 
-	AimSurfaceCameras(mirror.World);
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
 
-	// The poor-man's oblique clip: the reflected camera is behind the pane
-	// looking through it, so everything between the two — the frame, the back of
-	// the pane, whatever the viewer stands behind — would occlude the
-	// reflection. Clipping at the plane removes exactly that half of the world.
+	const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+	REQUIRE(fitted != nullptr);
+
+	// The pane faces -Z with its face at z = -0.2, and the eye is at z = +20 —
+	// so it is being looked at *from behind*, the reflected camera lands at
+	// z = -20.4, and it looks back along **+Z** through the glass. The plane to
+	// keep the far side of is therefore `z >= -0.2`, which is the eye's side.
+	CHECK_THAT(fitted->ClipNormal.X, Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+	CHECK_THAT(fitted->ClipNormal.Y, Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+	CHECK_THAT(fitted->ClipNormal.Z, Catch::Matchers::WithinAbs(1.0f, TOLERANCE));
+	CHECK_THAT(fitted->ClipDistance, Catch::Matchers::WithinAbs(-0.2f, TOLERANCE));
+
+	// **Left alone**, which is the change. The engine used to overwrite this
+	// every frame and a script that set it had it taken back.
 	const Camera *lens = mirror.World.Get<Camera>(mirror.Reflection);
 	REQUIRE(lens != nullptr);
-	CHECK_THAT(lens->NearPlane, Catch::Matchers::WithinAbs(20.5f, TOLERANCE));
+	CHECK_THAT(lens->NearPlane, Catch::Matchers::WithinAbs(Camera{}.NearPlane, TOLERANCE));
+	CHECK_THAT(fitted->NearPlane, Catch::Matchers::WithinAbs(Camera{}.NearPlane, TOLERANCE));
+
+	// And the skew actually lands on that plane: a point just behind the pane is
+	// clipped, one just in front of it survives. That is the property the whole
+	// oblique construction exists for, and it is what the parallel-plane
+	// approximation could only manage head-on.
+	const Transform *placed = mirror.World.Get<Transform>(mirror.Reflection);
+	REQUIRE(placed != nullptr);
+
+	const glm::mat4 viewProjection =
+		engine::scene::ResolveSurfaceCamera(
+			placed->Frame, engine::scene::SurfaceProjection(*fitted, placed->Frame)
+		)
+			.ViewProjection;
+
+	// The camera sits at z = -20.4 looking towards +Z, so a point at z = -4 is
+	// *between* it and the glass — the back of the wall, in a real scene — and
+	// one at z = 0.5 is beyond the glass in the room being reflected.
+	const glm::vec4 occluding = viewProjection * glm::vec4(0.0f, 0.0f, -4.0f, 1.0f);
+	const glm::vec4 reflected = viewProjection * glm::vec4(0.0f, 0.0f, 0.5f, 1.0f);
+
+	// Depth is `0..1` here, so clipped by the near plane is a negative z. **This
+	// is the assertion the parallel-plane approximation could not make**: it put
+	// the near plane at a fixed distance and happened to catch this point, where
+	// the skew catches everything on that side of the pane at any angle.
+	CHECK(occluding.z < 0.0f);
+	CHECK(reflected.z > 0.0f);
 }
 
 TEST_CASE("the frustum covers the whole pane, however close the viewer stands", "[scene][surfacecameras]") {
@@ -192,15 +243,18 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 	// its corners are the four combinations of those.
 	const auto cornersAreCovered = [&]() {
 		const Transform *placed = mirror.World.Get<Transform>(mirror.Reflection);
-		const Camera *lens = mirror.World.Get<Camera>(mirror.Reflection);
-		const SurfaceCamera *target = mirror.World.Get<SurfaceCamera>(mirror.Reflection);
+		const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
 		REQUIRE(placed != nullptr);
-		REQUIRE(lens != nullptr);
-		REQUIRE(target != nullptr);
+		REQUIRE(fitted != nullptr);
 
-		const float aspect = static_cast<float>(target->Width) / static_cast<float>(target->Height);
+		// **No aspect ratio.** The fit is to the pane's corners, so the
+		// texture's shape is already inside the extents — which is exactly why
+		// the renderer stopped passing one too.
 		const glm::mat4 viewProjection =
-			engine::scene::ResolveCamera(placed->Frame, *lens, aspect).ViewProjection;
+			engine::scene::ResolveSurfaceCamera(
+				placed->Frame, engine::scene::SurfaceProjection(*fitted, placed->Frame)
+			)
+				.ViewProjection;
 
 		bool covered = true;
 		for (const float x : {-8.0f, 8.0f}) {
@@ -245,7 +299,48 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, 200.0f});
 	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
 	CHECK(cornersAreCovered());
-	CHECK(mirror.World.Get<Camera>(mirror.Reflection)->FieldOfViewRadians < 0.2f);
+
+	// The frustum narrows rather than staying wide. Measured as a span at the
+	// near plane instead of an angle, because the fit no longer produces one.
+	const SurfaceLens *distant = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+	REQUIRE(distant != nullptr);
+	CHECK((distant->Right - distant->Left) / distant->NearPlane < 0.2f);
+}
+
+TEST_CASE(
+	"the frustum leans instead of widening when the viewer is off to one side", "[scene][surfacecameras]"
+) {
+	// **What the off-axis fit buys, and it is texels rather than correctness.**
+	// A symmetric frustum has to reach the far edge of the pane on *both* sides,
+	// so a viewer standing off-centre pays for twice the width they can see and
+	// the mirror is drawn at half the resolution it could be. An off-axis one
+	// puts the same four corners on the same texture with the frustum tilted.
+	//
+	// `SurfaceCameras.hpp` named this as the change it was waiting for, and the
+	// assertion is the definition of asymmetry: the two horizontal edges stop
+	// being mirror images about zero.
+	Mirror mirror(NormalId::Front);
+
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{9.0f, 0.0f, 6.0f});
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+	const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+	REQUIRE(fitted != nullptr);
+
+	const float middle = (fitted->Left + fitted->Right) * 0.5f;
+	const float span = fitted->Right - fitted->Left;
+
+	INFO("left " << fitted->Left << " right " << fitted->Right);
+	CHECK(std::abs(middle) > span * 0.05f);
+
+	// Square on, it is symmetric again — so the lean is a response to where the
+	// viewer is and not a constant skew nobody asked for.
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, 6.0f});
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+	const SurfaceLens *square = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+	REQUIRE(square != nullptr);
+	CHECK_THAT(square->Left + square->Right, Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
 }
 
 TEST_CASE("a pane in the plane of the viewer draws nothing", "[scene][surfacecameras]") {
@@ -432,7 +527,7 @@ TEST_CASE("the reflection follows the eye that is live when it is aimed", "[scen
 	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-40.4f, TOLERANCE));
 }
 
-TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][surfacecameras]") {
+TEST_CASE("orbiting the eye does not step the fitted frustum", "[scene][surfacecameras]") {
 	// **The mirror flashing, as an assertion.**
 	//
 	// `FitFieldOfView` used to bail to `FIT_MAXIMUM` the instant one corner of
@@ -490,11 +585,24 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 			continue;
 		}
 
-		const Camera *camera = mirror.World.Get<Camera>(mirror.Reflection);
-		REQUIRE(camera != nullptr);
+		// **The angle the fitted frustum spans, and no longer a field of view.**
+		// The fit stopped producing an angle when it became off-axis, so reading
+		// `Camera::FieldOfViewRadians` here would read a field nothing writes
+		// any more — a constant, which passes this case without looking at
+		// anything. It did, until this was changed.
+		//
+		// **An angle rather than the raw extents, and that is not cosmetic.**
+		// `Right - Left` is a *tangent*: as the reflected camera approaches the
+		// pane's plane the pane subtends most of a half-turn and the span grows
+		// without bound, so a smooth sweep near the crossing shows enormous
+		// steps in it — this case measured exactly that and reported 13 at the
+		// edge of the blank band. The angle is what the old field of view stood
+		// for, is bounded by π, and is what a viewer would perceive stepping.
+		const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+		REQUIRE(fitted != nullptr);
 
-		// Radians, which is what the fit produces and clamps.
-		const float fov = camera->FieldOfViewRadians;
+		const float fov =
+			std::atan(fitted->Right / fitted->NearPlane) - std::atan(fitted->Left / fitted->NearPlane);
 		REQUIRE(std::isfinite(fov));
 
 		// **The look direction as well as the field of view**, because the two
@@ -522,11 +630,14 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 		hasPrevious = true;
 	}
 
-	INFO("worst single-step change " << worst << " radians of FOV, at " << worstAt << " radians");
+	INFO("worst single-step change " << worst << " radians of frustum angle, at " << worstAt << " radians");
 
-	// **A degree of orbit must not move the field of view by a radian.** The old
-	// step was the whole span between a fitted frustum and the 3.0-radian
-	// maximum, in one sample. A smooth sweep stays far below a tenth of that.
+	// **A degree of orbit must not jump the frustum.** The old fit's step was the
+	// whole distance between a fitted angle and its 3.0-radian ceiling, taken in
+	// one sample, because the ceiling made it a step function. Nothing clamps
+	// now, so there is no edge to step across — but the assertion is kept, and
+	// kept as a bound on the *change* rather than on the value, because the
+	// depth floor is still a place a discontinuity could hide.
 	CHECK(worst < 0.25f);
 
 	// **And here is the flash, fixed rather than measured.** This bound used to
@@ -554,4 +665,239 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 	INFO("blank samples " << blank << " of " << SAMPLES);
 	CHECK(blank > 0);
 	CHECK(blank < SAMPLES / 4);
+}
+
+TEST_CASE("a portal stands at the far pane and looks out of it", "[scene][surfacecameras]") {
+	// **Worked through by hand, not read off the run**, for the reason the
+	// mirror placement case gives: a number taken from what the code printed
+	// would agree with the code about a mistake they were both making.
+	//
+	// Pane A is at the origin with a half extent of 0.2 along Z and its `Front`
+	// face, so that face is at `z = -0.2` with an outward normal of `-Z`. The eye
+	// is at `z = 20`, which is on the *other* side — so `facing` is -1 and the
+	// direction out of the pane towards the viewer is `+Z`. The source frame
+	// looks along that.
+	//
+	// Pane B is a hundred units along X, unrotated and the same size, so its
+	// `Front` face is at `(100, 0, -0.2)` with an outward normal of `-Z` too.
+	//
+	// `destination · half-turn · source⁻¹` takes the eye's 20.2 units of
+	// clearance and puts it on the far side of B: `(100, 0, -0.2)` plus 20.2
+	// along `+Z`, which is `(100, 0, 20)`. The camera then looks back through B
+	// along `-Z`, into the room B faces.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+	const Vector3 placed = mirror.Placed();
+	CHECK_THAT(placed.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK_THAT(placed.Y, Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+	CHECK_THAT(placed.Z, Catch::Matchers::WithinAbs(20.0f, TOLERANCE));
+
+	// **Looking back through the far pane, not away from it.** The camera lands
+	// on the same side of B as the eye was of A, because the map is rigid — so
+	// it has to turn round to see through the hole. Pointing it the other way
+	// gives a portal that works and leads somewhere wrong.
+	const CFrame &frame = mirror.World.Get<Transform>(mirror.Reflection)->Frame;
+	CHECK_THAT(frame.LookVector().Z, Catch::Matchers::WithinAbs(-1.0f, 1e-3f));
+
+	// And the oblique clip is at the far pane's plane, keeping the room B faces
+	// and dropping the wall B is set into. Without this the hole shows the back
+	// of that wall, which is the failure the parallel-plane approximation never
+	// revealed on a mirror.
+	const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+	REQUIRE(fitted != nullptr);
+	CHECK_THAT(fitted->ClipNormal.Z, Catch::Matchers::WithinAbs(-1.0f, 1e-3f));
+	CHECK_THAT(fitted->ClipDistance, Catch::Matchers::WithinAbs(0.2f, 1e-3f));
+}
+
+TEST_CASE("a portal with no destination is a mirror", "[scene][surfacecameras]") {
+	// **The fallback is a mirror rather than a blank**, so a portal whose target
+	// was deleted reads as a surface that stopped working rather than as a pane
+	// that vanished. Same answer for a destination never set.
+	Mirror mirror;
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{});
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-20.4f, TOLERANCE));
+
+	// A destination that existed and was destroyed takes the same path, which is
+	// the case a scene actually hits.
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	REQUIRE_THAT(mirror.Placed().X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+
+	mirror.World.Destroy(far);
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-20.4f, TOLERANCE));
+}
+
+TEST_CASE("a portal pair need not describe one space", "[scene][surfacecameras]") {
+	// **The non-Euclidean claim, as an assertion.** Nothing constrains the two
+	// frames to be consistent: turning the destination turns what comes out of
+	// the hole, which is how a corridor gets to bend more than the room it is in
+	// allows. `docs/NON-EUCLIDEAN.md` is the investigation, and this is the one
+	// line of it that the engine actually had to gain.
+	//
+	// A destination yawed by 90° maps the eye's 20.2 units of clearance along
+	// the far pane's rotated normal instead of along `+Z`, so the camera lands
+	// on a different axis entirely — with no separate feature and no maths past
+	// the matrix multiply.
+	Mirror straight;
+	Mirror turned;
+
+	for (Mirror *mirror : {&straight, &turned}) {
+		const Entity far =
+			mirror->World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+
+		const CFrame frame =
+			mirror == &turned ? CFrame(Vector3{100.0f, 0.0f, 0.0f}) * CFrame::Angles(0.0f, 1.5707963f, 0.0f)
+							  : CFrame(Vector3{100.0f, 0.0f, 0.0f});
+
+		mirror->World.Set<Transform>(far, Transform{frame});
+		mirror->World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+		mirror->World.Set<engine::scene::Portal>(mirror->Reflection, engine::scene::Portal{far});
+
+		REQUIRE(AimSurfaceCameras(mirror->World) == 1);
+	}
+
+	// Square on, the clearance runs along Z. Yawed a quarter turn, it runs along
+	// X — the same portal, the same eye, a different space on the other side.
+	CHECK_THAT(straight.Placed().Z, Catch::Matchers::WithinAbs(20.0f, TOLERANCE));
+	CHECK_THAT(turned.Placed().Z, Catch::Matchers::WithinAbs(0.0f, 1e-3f));
+	CHECK(std::abs(turned.Placed().X - 100.0f) > 15.0f);
+}
+
+TEST_CASE("a body that walks into a portal comes out of the far one", "[scene][surfacecameras]") {
+	// **`D00112`, and what it was waiting for was a body.** A portal has drawn
+	// correctly since v0.14 and nothing could go through one, because nothing in
+	// this engine had a body to move. The cases below are the four things that
+	// are silently wrong if the traversal is written by eye:
+	//
+	//   * the body arrives at the *far* pane rather than at the near one;
+	//   * its velocity is turned with it, or it walks out sideways;
+	//   * a body that passes beside the hole is not swallowed by its plane;
+	//   * a body crossing the other way is not sent back where it came from.
+	//
+	// The geometry is the file's own: pane A at the origin with its `Front`
+	// face at `z = -0.2` and an outward normal of `-Z`; pane B a hundred units
+	// along X, unrotated, so its front face is at `(100, 0, -0.2)` and its
+	// normal is `-Z` too.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// A body walking along -Z, from in front of pane A to behind it. The
+	// previous transform is where the tick started and the current one is where
+	// the solver left it, which is what `CrossPortals` reads.
+	const Entity walker =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+	mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(
+		walker, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, Vector3::Zero}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	// **Out of the far pane, into the space the hole was showing.** The camera
+	// case above puts A's camera at `(100, 0, 20)` looking back through B along
+	// `-Z`, so what A shows is the room in front of B's *front* face — and a
+	// body that walks into A has to arrive in the room it was looking at. One
+	// metre of clearance in front of A becomes one metre in front of B.
+	const Vector3 landed = mirror.World.Get<Transform>(walker)->Frame.Position;
+	CHECK_THAT(landed.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK_THAT(landed.Z, Catch::Matchers::WithinAbs(-1.0f, TOLERANCE));
+
+	// **And still walking away from the pane it came out of**, at the speed it
+	// had. Forgetting to map the velocity is the bug that reads as the portal
+	// spitting people back: the body would arrive aimed the way it was aimed in
+	// the frame it left, which here is straight back into B.
+	const Vector3 speed = mirror.World.Get<engine::scene::Motion>(walker)->Linear;
+	CHECK_THAT(speed.Z, Catch::Matchers::WithinAbs(-16.0f, TOLERANCE));
+	CHECK_THAT(speed.Magnitude(), Catch::Matchers::WithinAbs(16.0f, TOLERANCE));
+
+	// **Once, not once per tick.** The body is now behind B's plane and in front
+	// of nothing, so a second pass moves nobody — a crossing is a change of
+	// side, not a place.
+	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+}
+
+TEST_CASE("a portal swallows only what goes through the hole", "[scene][surfacecameras]") {
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// **Past the edge of the pane, and the pane is eight wide.** A test that
+	// only compared sides of the plane would teleport this one, because a plane
+	// is infinite and a hole is not — which is a wall you fall through fifty
+	// metres from the door.
+	const Entity beside =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Beside");
+	mirror.World.Set<Transform>(beside, Transform{CFrame(Vector3{40.0f, 0.0f, -1.0f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		beside, engine::scene::PreviousTransform{CFrame(Vector3{40.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(beside, engine::scene::Motion{});
+
+	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+	CHECK_THAT(
+		mirror.World.Get<Transform>(beside)->Frame.Position.X, Catch::Matchers::WithinAbs(40.0f, TOLERANCE)
+	);
+
+	// **And a body crossing the other way goes through too**, which is the one
+	// case worth stating out loud because the render half is not symmetric: a
+	// surface camera is placed for whichever side the *viewer* is on, and the
+	// same question about the *crosser* has the same two answers. A pane is a
+	// hole rather than a one-way door, so entering from behind maps through the
+	// frame that faces backwards and lands on the far side just the same.
+	const Entity backwards =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Backwards");
+	mirror.World.Set<Transform>(backwards, Transform{CFrame(Vector3{0.0f, 0.0f, 1.0f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		backwards, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, -1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(backwards, engine::scene::Motion{});
+
+	CHECK(engine::scene::CrossPortals(mirror.World) == 1);
+	CHECK_THAT(
+		mirror.World.Get<Transform>(backwards)->Frame.Position.X,
+		Catch::Matchers::WithinAbs(100.0f, TOLERANCE)
+	);
+
+	// An unlinked portal is a mirror, and a mirror is a wall. Nothing goes
+	// through it however squarely it is hit.
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{});
+	const Entity straight =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Straight");
+	mirror.World.Set<Transform>(straight, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		straight, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(straight, engine::scene::Motion{});
+
+	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 }

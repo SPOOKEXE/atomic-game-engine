@@ -1,8 +1,10 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -909,4 +911,120 @@ TEST_CASE("a publish crosses from one world to another", "[script]") {
 	// Torn down before the universe that owns the stores they point at.
 	speaker.reset();
 	hearer.reset();
+}
+
+TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
+	// **The bus operation that names a world, end to end.** `BusKind::Teleport`,
+	// `Postbox::Teleport` and the router's delivery have all existed since v0.2
+	// — and no script could reach any of it, and `PumpDeliveries` dropped every
+	// arrival on the floor because it only ever looked for `Messaging`. So the
+	// crossing worked and nothing could ask for one or notice one.
+	//
+	// Three claims, and each fails differently on its own:
+	//
+	//   * the player leaves the world they were in, or they are in two places;
+	//   * the player arrives in the destination *with a body*, rebuilt from
+	//     that world's own class table rather than carried across;
+	//   * the data arrives with them, which is the only thing besides a name
+	//     that crosses at all.
+	struct Pool {
+		Pool() {
+			engine::parallel::Jobs::Start(2);
+		}
+		~Pool() {
+			engine::parallel::Jobs::Stop();
+		}
+	} pool;
+
+	engine::world::Universe universe;
+
+	engine::world::WorldSettings lobbySettings;
+	lobbySettings.Name = engine::core::Name("test.lobby");
+	engine::world::WorldSettings arenaSettings;
+	arenaSettings.Name = engine::core::Name("test.arena");
+
+	const engine::world::WorldId lobby = universe.Create(lobbySettings);
+	const engine::world::WorldId arena = universe.Create(arenaSettings);
+	REQUIRE(lobby.IsValid());
+	REQUIRE(arena.IsValid());
+
+	std::unique_ptr<engine::script::Runtime> lobbyScripts;
+	std::unique_ptr<engine::script::Runtime> arenaScripts;
+
+	// Both worlds furnished, because a `Player` is a child of the `Players`
+	// service — an unfurnished destination takes nobody, quietly, which is the
+	// placeholder case and not this one.
+	universe.Enter(lobby, [&](Store &store) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+		lobbyScripts = MakeRuntime(store, Language::Luau);
+	});
+	universe.Enter(arena, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		arenaScripts = MakeRuntime(store, Language::Luau);
+	});
+
+	Entity traveller;
+	universe.Enter(lobby, [&](Store &store) {
+		traveller = engine::scene::AddPlayer(store, "Wanderer");
+		REQUIRE(traveller != engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::scene::LoadCharacter(store, traveller) != engine::ecs::NULL_ENTITY);
+
+		REQUIRE(lobbyScripts->Run(R"(
+			local player = game:GetService('Players'):FindFirstChild('Wanderer')
+			TeleportService:Teleport('test.arena', player, { Score = 7 })
+		)"));
+
+		// **Gone from here on the call, not at the barrier.** The two worlds
+		// cannot reach each other, so only this one can stop the player being
+		// in both — and the router already holds a copy of the bytes.
+		CHECK_FALSE(store.Alive(traveller));
+	});
+
+	// The barrier that carries it across.
+	universe.Tick(1.0f / 60.0f);
+
+	Entity arrived;
+	universe.Enter(arena, [&](Store &store) {
+		// Did the engine carry it? Checked apart from the binding, so a failure
+		// says which half is wrong.
+		REQUIRE(engine::world::Postbox(store).Deliveries().size() == 1);
+
+		// The arrival is admitted by the engine rather than by a script — who
+		// is in a game is the host's business, and a teleport that only worked
+		// in games whose author had written a handler would be a feature with a
+		// footnote.
+		arenaScripts->Heartbeat(1.0f / 60.0f);
+
+		arrived = store.FindFirstChild(engine::scene::PlayersOf(store), "Wanderer");
+		REQUIRE(arrived != engine::ecs::NULL_ENTITY);
+
+		// **With a body, built here.** No entity crossed: this character is the
+		// arena's own rows from the arena's own class table, which is what lets
+		// two worlds disagree about what a `Player` is made of.
+		const Entity character = engine::scene::CharacterOf(store, arrived);
+		REQUIRE(character != engine::ecs::NULL_ENTITY);
+		CHECK(store.Get<engine::scene::Character>(character) != nullptr);
+	});
+
+	// And the data came with them. Read through the same call a game would use,
+	// which needs a `LocalPlayer` — the whole point of the name is that it is
+	// nil on a server.
+	universe.Enter(arena, [&](Store &store) {
+		store.SetResource(engine::scene::LocalPlayer{arrived});
+		REQUIRE(arenaScripts->Run(R"(
+			local data = TeleportService:GetLocalPlayerTeleportData()
+			local marker = Instance.new('Part')
+			marker.Name = 'score:' .. tostring(data.Score)
+		)"));
+
+		bool found = false;
+		store.Each<const engine::ecs::InstanceName>([&](Entity, const engine::ecs::InstanceName &name) {
+			found = found || name.Value == engine::core::Name("score:7");
+		});
+		CHECK(found);
+	});
+
+	lobbyScripts.reset();
+	arenaScripts.reset();
 }

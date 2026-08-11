@@ -36,6 +36,60 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00116
+
+**A client cannot ask its server to teleport it, so `TeleportService` is
+server-only and says so.** The binding refuses on a replica — `Postbox::Teleport`
+is an authority operation and `world/Postbox.hpp` has said so since v0.2 — and
+that refusal is currently the whole of the story: there is no request channel a
+`LocalScript` could use to ask for one.
+
+**The shape it would take is already in the tree and is deliberately not
+generalised yet.** `replication::MessageKind::User` carries `game::JoinNotice`
+down and `Connector::Submit` carries `game::MoveInput` up; a client-initiated
+teleport is a third message on the same two channels. What stops it being written
+now is that a request is not an act — the host has to decide whether to honour
+it, and "who may ask to be moved where" is a game's policy rather than an
+engine's. A binding that queued the request and left the policy unwritten would
+be an engine deciding it by default.
+
+**Reopen trigger: a game that wants a client to start a teleport.** Every
+teleport this engine has a use for is decided by a server script — a pad, a
+round ending, a matchmaker — and all of those already work.
+
+### [_] D00115
+
+**Replication filters by component and not by entity, so a character's limbs pay
+wire for transforms that are overwritten the moment they land.** A character is
+six parts and one of them moves: `scene::PoseCharacters` derives the other five
+from the root, on whichever machine draws, precisely so that they cannot come
+apart at speed. The offsets have to cross once. The *transforms* do not, and they
+cross every tick anyway, because `replication::Authority::Replicate` names
+`scene.Transform` for the whole world rather than for a set of rows.
+
+**Measured shape rather than a measured number.** Five extra rows per character
+per tick, each a ten-byte quantised `CFrame` — so about fifty bytes a character a
+tick before framing, against roughly ten for the root alone. At thirty ticks and
+twenty players that is on the order of thirty kilobytes a second of state the
+receiver discards on arrival. Real, and not urgent: `replication::DistancePriority`
+already bounds what a tick sends, so the cost lands as *other* rows arriving later
+rather than as bandwidth nobody budgeted.
+
+**Why it is not fixed by moving the limbs off `scene.`** They are `Part`
+instances and authored content — they are in the save file, the explorer and the
+properties panel — and a component prefix is how a module says what is shared.
+Renaming to dodge the filter would make a character's parts a different kind of
+thing from every other part.
+
+**What it wants is a per-entity opt-out on the authority**, which is a change to
+`Authority` rather than to `scene`: something like a `NotReplicated` tag the
+delta pass skips rows for. That is a wire-format-adjacent decision and worth
+making once, with a second consumer to check it against — a rag-doll, a particle
+proxy, anything else derived on the receiver.
+
+**Reopen trigger: a second thing derived on the receiver that also crosses, or a
+bandwidth measurement that names limbs.**
+
 ### [_] D00114
 
 **The script editor's completion does not infer types, and the one shape it does
@@ -101,35 +155,48 @@ divergence would be in the part nobody tests: the cycle guard or the hash.
 
 ### [_] D00112
 
-**Portals, and the non-Euclidean spaces they buy.** `docs/NON-EUCLIDEAN.md` is
-the investigation v0.14 filed; this is what it decided.
+**Portals can be walked through; the frame you cross on still shows the wrong
+side.** `docs/NON-EUCLIDEAN.md` filed six rows of work at v0.14 and this entry
+carried the last two. Traversal closed at v0.14; the seam did not.
 
-**The camera half exists.** A portal is a `SurfaceCamera` whose placement rule is
-`destination · source⁻¹` instead of a reflection, and the surface pass, the
-projected sampling in `opaque.frag`, the per-surface tag filter and the recursion
-are all already there. The impossible-space trick is that nothing constrains the
-pair of frames to describe one space.
+**Traversal, which this entry said was blocked and now is not.** It was waiting
+on a body to move — the character controller was `ROADMAP.md` v0.15 and arrived
+early. `scene::CrossPortals` is the whole of it: the crossing is the segment
+between `PreviousTransform` and `Transform`, tested for a change of side through
+the pane's plane inside the pane's rectangle, and a body that crosses is
+multiplied by `destination · half-turn · source⁻¹` — the *same* product
+`AimSurfaceCameras` puts the camera through. The velocity is mapped by it too,
+without which the body arrives aimed the way it was aimed in the frame it left
+and walks out sideways.
 
-**Three small changes stand between here and a demonstrable portal**, and two of
-them are wanted anyway:
+**Two decisions inside it worth not relitigating.** The transform is derived
+rather than read off `SurfaceLens::Mapping`, because that component is
+presentation — fitted to the local eye, kept off the wire by
+`replication::LocalToTheClient` — and a dedicated server never aims a surface at
+all, so a traversal that read it would work in the editor and not on a server.
+And a pane is crossed from **either** side, mapping through the crosser's own
+face frame, for the same reason `AimSurfaceCameras` picks a side per *viewer*: a
+hole is not a one-way door and both answers are right.
 
-- `SurfaceView::Lens` is a field of view, so there is nowhere to put a skewed
-  projection. It has to become a projection the renderer is handed.
-- An off-axis frustum fitted to the pane, which `SurfaceCameras.hpp` already
-  names as what it is waiting on — a symmetric fit wastes half a mirror's texels.
-- A real oblique near plane at the destination. Without it a portal draws the
-  wall it leads through, which the mirror's parallel-plane approximation does not
-  reveal.
+**The seam is what is left, and it is a rendering decision rather than a
+feature.** A surface's texture is last frame's, which is what breaks the
+dependency cycle between a surface and the scene it shows. On a mirror that is
+invisible; on a hole somebody walks through, at 60 fps, on the frame they cross,
+it is a visible seam. Removing it means rendering the portal chain inside the
+frame, deepest first — the one property the surface pass trades away for being
+cheap, and a change that belongs with the render-graph work `ROADMAP.md` files
+behind a prototype project.
 
-**Two things are genuinely blocked.** Traversal needs a body to move and a camera
-rig to move with it, and neither exists until v0.15's character controller —
-`world::Postbox::Teleport` is cross-*world* and is not this. And removing the
-seam somebody sees on the frame they cross means rendering the portal chain
-inside the frame, deepest first, which is the one property the current surface
-pass trades away for being cheap.
+**Two smaller things worth knowing before building on this.** Sixteen surfaces
+per world, shared with mirrors, which is a reasonable limit for this kind of
+level and not for a world dotted with holes. And physics has no per-region
+filter, so two rooms genuinely occupying the same coordinates would share one
+broadphase — `SurfaceCamera::TagFilter` already covers the rendering half.
+Placing the regions apart and letting the portals lie avoids both, and is what
+the demo does.
 
 **What must not happen is a second renderer.** Anything beginning with a portal
-pass of its own would be a copy of the surface pass with a different name, and
+pass of its own would be a copy of the surface pass under a different name, and
 the two would drift on the first lighting change.
 
 ### [_] D00111
@@ -644,7 +711,8 @@ through it — so two viewports each update at half the rate.**
 - **The flat spelling still resolves everywhere**, so this is a cosmetic gap with a workaround rather than a broken surface: `Enum_Material` is what the declaration file declares and what the editor understands.
 - **Three ways to close it, and none is obviously right yet.** Teach luau-lsp the prefix, which means a patch to a vendored tool and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork. Switch `luau-lsp.platform.type` to `roblox`, which makes the editor typecheck against Roblox's class tree rather than this engine's — worse than the squiggle. Or generate an `Enum.luau` module and have scripts `require` it, which works in both and costs a line at the top of every file.
 - **Re-examined at v0.13 and deliberately left as it is, because all three ways out cost more than the problem.** Patching luau-lsp is a fork to maintain against a moving target for a cosmetic squiggle. Switching to the `roblox` platform typechecks against the wrong class tree. And generating an `Enum.luau` to require has a hazard the entry did not name: `local Enum = require(...)` **shadows the runtime `Enum` global**, so every value use — `Enum.Material.Plastic` — would then resolve through the module rather than the engine, and the fix for the annotation would break the thing the annotation is about. `scriptcheck` reports 35 enums reachable as `Enum.<Name>` in a type position, so the build is not what is wrong; one editor is.
-- **Reopen trigger: somebody writing enum annotations often enough to be annoyed.** The engine's own scripts have three.
+- **v0.14 settled which spelling authored scripts use, and it is the dotted one.** An enum is `Enum.<set>.<member>` as a value, so it is `Enum.<set>` as a type, and a script that spelled the type `Enum_NormalId` would be naming the declaration file's internal vocabulary rather than the language's. `Portals-1-world.luau` is the first to write one. The build checks it — `scriptcheck` reports 36 enums reachable under the prefix — so what is left is one editor disagreeing with one line, which is what this entry has always been about rather than a choice still to make.
+- **Reopen trigger: an editor squiggle somebody actually trips over.** The engine's own scripts have four annotations between them, and one of them is dotted.
 
 ### [_] D00030
 

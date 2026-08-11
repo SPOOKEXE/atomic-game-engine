@@ -137,22 +137,73 @@ level and not for a world dotted with them.
 
 ## What it would take, in order
 
-| Step | Size | Why in this order |
+**The first four rows landed at v0.14.** Left in place rather than rewritten,
+because the ordering argument is the useful part of this document and it held:
+each row genuinely unblocked the next, and the fourth turned out to be the small
+one the table said it was.
+
+| Step | Size | Status |
 |---|---|---|
-| `SurfaceView` carries a projection rather than a field of view | small | unblocks both of the next two, and pays for itself in mirror texels |
-| Off-axis frustum fitted to the pane's rectangle | small | already wanted; makes a portal a *window* rather than a cone |
-| Oblique near plane at the destination | small | without it a portal shows the wall it leads through |
-| `Portal` component pairing two parts, placed like a surface camera | small | the whole non-Euclidean trick is this matrix |
-| Traversal — cross the plane, move the body, remap velocity | medium | needs the v0.15 character controller to exist |
-| In-frame recursion, deepest first | large | the only way to remove the crossing seam |
+| `SurfaceView` carries a projection rather than a field of view | small | **done** |
+| Off-axis frustum fitted to the pane's rectangle | small | **done** |
+| Oblique near plane at the destination | small | **done** |
+| `Portal` component pairing two parts, placed like a surface camera | small | **done** |
+| Traversal — cross the plane, move the body, remap velocity | medium | blocked on v0.15's character controller |
+| In-frame recursion, deepest first | large | open, and a rendering decision |
 
-The first four are one change of a few hundred lines and produce something
-demonstrable: a wall you can see through into somewhere that is not behind it,
-with a room bigger on the inside. The fifth needs v0.15. The sixth is a rendering
-decision, not a feature, and belongs with the render-graph work `ROADMAP.md`
-already files behind a prototype project.
+### What building it actually taught
 
----
+**The four steps are one code path, not four.** Every one of them is a special
+case of *take a placement transform, map the pane by it, and fit the camera to
+the mapped rectangle*. A mirror's transform is the reflection through its own
+plane — which **fixes** that plane, so the mapped corners are the pane's own
+corners and the mapped plane is the pane's own plane. The reflection arithmetic
+that was already here falls out of the general rule rather than sitting beside
+it, and the portal branch is a few lines choosing a different map.
+
+**The rectangle must be the mapped *source* pane and never the destination
+part.** `opaque.frag` shades a fragment of the source pane by projecting it
+through the camera's matrix, and that lines up only because the camera and the
+rectangle were moved by the same transform. Fitting to the destination is correct
+exactly when the two panes are the same size and silently wrong — an image
+sliding across the hole — whenever they are not. This is the one place the design
+could have been plausibly wrong and passed a screenshot.
+
+**The oblique clip has a depth-range trap.** Lengyel's published derivation maps
+the near plane to `-1`, so it substitutes `C · 2/(C·Q)` and subtracts the `w`
+row. `GLM_FORCE_DEPTH_ZERO_TO_ONE` is pinned engine-wide in `core`'s build, where
+near is `0`, and the substitution is `C/(C·Q)` with nothing subtracted. The wrong
+form compiles, runs, and reads as z-fighting rather than as a matrix mistake —
+which `scene::CameraMatrices` already warned about for an unrelated reason.
+
+**The one mistake the engine cannot catch is authoring, and the demo made it.**
+`Face` is resolved on the destination as well as on the source — the far frame is
+the portal's own `Face` applied to the destination's transform — so a hole shows
+whatever *that* face points at. Aim it at a wall whose matching face points out
+of its room and every part of the machinery is satisfied: the camera is placed,
+the frustum fits the mapped rectangle, the oblique clip is built, the pane is
+given a surface index, and the picture is the empty space behind the far wall.
+The first version of `Portals-1-world.luau` paired each room's north wall with
+the far room's *south* wall — which is what a corridor looks like on paper — and
+all four holes rendered nothing at all.
+
+Two things follow. The rule for an author is that a destination must be a part
+whose matching face points at the space the hole should show, which for unrotated
+rooms is the wall on the *same* side of the far room and in general is a rotation.
+And the test that catches it cannot be about where the camera stands, because
+that was right: the invariant is that **the half-space the oblique clip keeps
+contains the middle of the room the hole names**, which needs nothing from the
+scene but the room's own centre. `examples/tests/Scene.cpp` asserts it per hole.
+
+**Removing the field of view removed a clamp, and the clamp was a bug.** The old
+symmetric fit took a *tangent* of a half-angle, so it needed a ceiling just under
+180° — and that ceiling made the fit a step function, which is what read as the
+mirror flashing once per orbit. Off-axis extents are a min and a max over four
+projected positions; there is nothing to saturate against, so the clamp is gone
+rather than retuned. The regression test that measured this had to move from an
+angle to an angle *derived from the extents*: measuring the raw extents instead
+reports enormous steps near the crossing, because a span is a tangent and
+legitimately grows without bound there.
 
 ## Recommendation
 
@@ -165,3 +216,15 @@ second copy of the surface pass.
 
 What must not be promised until the sixth row above is done is a portal somebody
 walks through without seeing a seam. Filed as `D00112`.
+
+**Taken, at v0.14, and the estimate held.** The recommendation said "after v0.15"
+on the strength of traversal being the point; the first four rows turned out to
+be worth having on their own, because looking through a hole into somewhere that
+is not behind it is the part that demonstrates the idea. The pairing was indeed
+one branch and one component, and the three rows in front of it were indeed what
+cost the work — exactly as this document predicted, and for the reason it gave:
+they are the surface camera's own outstanding debts, and a portal is what made
+paying them urgent rather than tidy.
+
+What is still not promised is a portal somebody walks through without a seam, and
+that is now the whole of `D00112`.

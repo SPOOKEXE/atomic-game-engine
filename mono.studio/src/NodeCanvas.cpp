@@ -637,7 +637,12 @@ namespace studio::nodes {
 		ToScreen(node.X + placed.X, node.Y + placed.Y, corner.x, corner.y);
 		ToScreen(node.X + placed.X + placed.Width, node.Y + placed.Y + placed.Height, far.x, far.y);
 
-		draw->AddRectFilled(corner, far, Look.Widget, 3.0f * Scale);
+		// **Every kind but the toggle gets the track.** The filled slab is what
+		// makes a row read as something with a range in it, and a boolean has no
+		// range — a switch paints its own and leaves the rest of the row bare.
+		if (spec.Kind != WidgetKind::Toggle) {
+			draw->AddRectFilled(corner, far, Look.Widget, 3.0f * Scale);
+		}
 
 		std::string text = spec.Label;
 		switch (spec.Kind) {
@@ -657,14 +662,29 @@ namespace studio::nodes {
 		case WidgetKind::Number:
 			text += "  " + Number(value.Number, spec.Precision);
 			break;
-		case WidgetKind::Toggle:
-			text += value.Flag ? "  on" : "  off";
-			if (value.Flag) {
-				draw->AddRectFilled(
-					ImVec2(far.x - (far.y - corner.y), corner.y), far, Look.WidgetFill, 3.0f * Scale
-				);
-			}
+		case WidgetKind::Toggle: {
+			// A switch at the right of the row: a pill track with the knob at one
+			// end of it. **No "on"/"off" beside the label**, because the knob's
+			// side already says which it is and the word is what made the row look
+			// like a slider with a value in it.
+			const float height = far.y - corner.y;
+			const float track = height * 0.62f;
+			const float radius = track * 0.5f;
+			const float margin = 4.0f * Scale;
+			const float right = far.x - margin;
+			const float top = corner.y + (height - track) * 0.5f;
+			const ImVec2 from(right - track * 1.85f, top);
+			const ImVec2 to(right, top + track);
+
+			draw->AddRectFilled(from, to, value.Flag ? Look.WidgetFill : Look.Widget, radius);
+			draw->AddRect(from, to, Look.NodeBorder, radius);
+			draw->AddCircleFilled(
+				ImVec2(value.Flag ? to.x - radius : from.x + radius, top + radius),
+				std::max(radius - 1.5f * Scale, 1.0f),
+				value.Flag ? Look.Text : Look.Muted
+			);
 			break;
+		}
 		case WidgetKind::Select:
 		case WidgetKind::Text:
 			text += "  " + value.Text;
@@ -1642,10 +1662,16 @@ namespace studio::nodes {
 				}
 
 				if (widget != nullptr) {
+					// **Only the drag is started here; the value is left to the
+					// held-widget block below**, which runs later in this same
+					// frame and so already applies the click. Editing it here too
+					// ran the handler twice on the press frame — harmless for a
+					// slider, which lands on the same fraction both times, but a
+					// toggle flipped back to where it started and a select skipped
+					// an option.
 					Drag = Dragging::Widget;
 					DragNode = hit;
 					DragWidget = widget->Key;
-					HandleWidget(graph, hit, *widget, mouseX);
 				} else {
 					// **A double click opens a fold and collapses anything
 					// else.** It is the one gesture over a node body that is not

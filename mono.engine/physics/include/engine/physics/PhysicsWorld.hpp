@@ -489,6 +489,31 @@ namespace engine::physics {
 		//         drives down.
 		size_t SleepingBodies() const;
 
+		// Takes a body out of the resting set, so the next tick simulates it.
+		//
+		// **The verb that was missing, and a character controller is what
+		// noticed.** Everything that woke a body until now was a *contact* — the
+		// solver's wake pass gives a sleeping body back to the dynamic set when
+		// an awake neighbour touches it. That is the whole of the mechanism, and
+		// it cannot express "this body has been told to move": a character
+		// standing still settles, loses its `scene::Motion` to the archetype
+		// move in `Publish`, and from then on has nothing for `scene::
+		// StepCharacters` to write a velocity into. It stands there for ever
+		// with a perfectly good move direction on it.
+		//
+		// **It clears the whole resting record rather than only the flag**, so
+		// the body starts accumulating rest again from zero. Clearing the flag
+		// alone would leave the timer at its threshold, and the body would sleep
+		// again on the very next tick it was not being pushed — which is a
+		// character that walks in single frames.
+		//
+		// Costs a binary search and is a no-op for a body that was already
+		// awake, so calling it every tick for every character is fine.
+		//
+		// @param entity The body to wake.
+		// @return `true` when it was asleep and is not any more.
+		bool Wake(ecs::Entity entity);
+
 		// Records that the static geometry changed and its index must be rebuilt.
 		//
 		// `SyncBroadphase` detects the ordinary cases itself — a static collider

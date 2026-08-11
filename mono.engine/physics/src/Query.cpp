@@ -145,8 +145,13 @@ namespace engine::physics {
 		}
 	}
 
-	std::optional<ColliderHit>
-	Raycast(const ecs::Store &store, const core::Ray &ray, float maxDistance, spatial::LayerMask mask) {
+	std::optional<ColliderHit> Raycast(
+		const ecs::Store &store,
+		const core::Ray &ray,
+		float maxDistance,
+		spatial::LayerMask mask,
+		ecs::Entity ignore
+	) {
 		const Indexes indexes = IndexesOf(store);
 		if (!indexes.Valid) {
 			return std::nullopt;
@@ -170,6 +175,16 @@ namespace engine::physics {
 
 				const Candidate candidate = ResolveCandidate(store, index, candidates[at].Id);
 				if (!candidate.Present) {
+					continue;
+				}
+
+				// **Skipped rather than nearest-then-compared**, which is the
+				// whole reason this parameter exists: a caster standing inside
+				// its own collider is always its own nearest hit, so a caller
+				// testing the result has already lost the answer it wanted.
+				// Costs one integer compare per candidate and nothing at all
+				// when nobody passes one.
+				if (ignore != ecs::Entity{} && candidate.Owner == ignore) {
 					continue;
 				}
 

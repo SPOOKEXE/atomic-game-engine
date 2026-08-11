@@ -1,7 +1,10 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
@@ -118,7 +121,36 @@ namespace client {
 		// Per-world state belongs in the store.
 		store.SetResource(SnapshotBuffer{interpolation});
 
+		// **The two resources that make a replica somewhere a player stands
+		// rather than somewhere they watch.** Both are on
+		// `replication::LocalToTheClient`'s list, so nothing arriving from the
+		// server ever overwrites them — which is precisely what makes it safe
+		// to keep this machine's keyboard and this machine's camera in a world
+		// whose every other row is somebody else's answer.
+		store.SetResource(engine::scene::InputState{});
+		store.SetResource(engine::scene::CameraController{});
+
 		// PreRender derives draw data and mirror aim; the replica does not simulate.
+		//
+		// **The camera is the one thing here that is driven and not derived**,
+		// and it is not a simulation: turning the view moves no row the server
+		// owns. `FollowOwnCharacter` between the two halves is what points it at
+		// the body that arrived over the wire — a client never calls
+		// `LoadCharacter`, so there is no spawn moment for it to hook.
+		scheduler.Add("replica-camera", Phase::PreRender, [](Store &store) {
+			(void)engine::scene::UpdateCameraControl(store);
+			(void)engine::scene::FollowOwnCharacter(store);
+			(void)engine::scene::PlaceCamera(store);
+		});
+
+		// **Posed here and never stepped here.** A character's limbs hang off a
+		// root the *server* moved and this machine interpolated, so the product
+		// that places them has to run wherever the picture is made. The step and
+		// the ground query deliberately do not: this world simulates nothing.
+		scheduler.Add("pose-characters", Phase::PreRender, [](Store &store) {
+			(void)engine::scene::PoseCharacters(store);
+		});
+
 		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimReplicatedSurfaces);
 		scheduler.Add("collect-replicated", Phase::PreRender, CollectReplicated);
 	}
@@ -142,6 +174,18 @@ namespace client {
 			engine::scene::ActiveCamera live;
 			live.Entity = camera;
 			store.SetResource(live);
+			return camera;
+		}
+
+		// **A replica with a body of its own places its own camera**, and this
+		// must not fight it. `BuildReplicatedWorld` installs `replica-camera`,
+		// which turns with the mouse and sits behind the character the server
+		// gave this client; the frame passed in is where the *local* world is
+		// looking, which is the right answer only while there is nothing here to
+		// look at. Two writers and the last one wins, so the condition is stated
+		// rather than left to phase order.
+		if (const auto *controller = store.Resource<engine::scene::CameraController>();
+			controller != nullptr && store.Alive(controller->Subject)) {
 			return camera;
 		}
 

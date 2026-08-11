@@ -197,6 +197,23 @@ namespace engine::world {
 		// universe.
 		std::vector<std::vector<Delivery>> Fanout;
 
+		// The world tick each world's inbox was filled at, by world index.
+		//
+		// **Because a barrier is not a tick, in either direction.** A barrier
+		// runs once per host frame and a world's systems run at the world's own
+		// rate — the studio measured 200 barriers against 91 ticks in one world,
+		// and a world owing catch-up ticks is the same mismatch the other way.
+		// Replacing an inbox unconditionally therefore took mail away before any
+		// system had seen it; never replacing it hands the same mail over on
+		// every later tick. This is the stamp that tells the two apart: mail is
+		// dropped once the world's clock has moved past the tick it arrived at,
+		// and kept until then.
+		//
+		// Here rather than on `Inbox` because it is the router's bookkeeping and
+		// not a fact about the world — a field on the resource would ride in
+		// every snapshot and on the wire.
+		std::vector<uint64_t> DeliveredAt;
+
 		// What the last barrier applied, and what the next one should apply
 		// instead of collecting. Kept across barriers so a steady universe
 		// allocates nothing for either.

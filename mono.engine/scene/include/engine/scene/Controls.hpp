@@ -135,6 +135,20 @@ namespace engine::scene {
 	//
 	// @since v0.10
 	struct Humanoid {
+		// The part this steers, or a null entity when it steers the entity it
+		// is on.
+		//
+		// **Roblox puts a `Humanoid` beside the parts rather than on one**, so
+		// the thing that holds the walk speed and the thing the solver pushes
+		// are two different rows — see `Characters.hpp`. A null handle means the
+		// older arrangement, where a single part carries both, and that is what
+		// every scripted NPC in the repository and every case in
+		// `tests/Controls.cpp` still is.
+		//
+		// **Widest first**, so the object representation a snapshot writes holds
+		// no padding between this and the vector below it.
+		ecs::Entity RootPart;
+
 		// Which way the character has been told to go, in world space.
 		//
 		// **A direction and not a velocity**, which is Roblox's `MoveDirection`
@@ -207,6 +221,34 @@ namespace engine::scene {
 	// @param store The world.
 	// @return `true` when a camera was placed.
 	bool PlaceCamera(ecs::Store &store);
+
+	// What the player is asking their character to do this frame.
+	//
+	// @since v0.14
+	struct MoveIntent {
+		// Where they want to go, in world space, already normalised.
+		core::Vector3 Direction;
+
+		// Whether the jump key went down this frame.
+		bool Jump = false;
+	};
+
+	// Reads the keyboard into an intent, and applies it to nothing.
+	//
+	// **Split out of `UpdateCharacterControl` because a connected client needs
+	// the intent without the application.** A client does not simulate its own
+	// character — the host does, and the client sends what it wants through
+	// `game::MoveInput` — so the arithmetic that turns W into "away from the
+	// camera" has to be reachable on its own. The alternative was a second copy
+	// of it in `mono.client`, which is where the diagonal-speed bug would come
+	// back.
+	//
+	// Const, because it writes nothing at all.
+	//
+	// @param store The world.
+	// @return The intent. Zero direction and no jump when the window is not
+	//         focused or the world has no `InputState`.
+	MoveIntent ReadMoveIntent(const ecs::Store &store);
 
 	// Turns this frame's input into a `Humanoid::MoveDirection`.
 	//

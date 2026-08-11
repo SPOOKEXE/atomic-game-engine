@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
@@ -17,6 +16,7 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstring>
@@ -772,15 +772,26 @@ namespace engine::render {
 			bool Ready = false;
 
 			// World to this surface camera's clip space, for the frame just
-			// written. What the screen pass projects with.
+			// written. What the surface pass renders with.
 			glm::mat4 ViewProjection{1.0f};
 
-			// The same, for the frame before — which is the one another surface
-			// pass samples, and it must be projected with the matrix that
-			// *rendered* it. Projecting last frame's texture with this frame's
-			// camera is a reflection that slides as the viewer moves, and it
-			// reads as a mis-aimed camera rather than as a stale matrix.
+			// The same, with the pane's own map folded in. **What a pane
+			// projects with, which is not the matrix the texture was rendered
+			// with.** A mirror's map is the identity and the two are equal; a
+			// portal's takes the pane to where its camera was fitted, and
+			// without it every fragment projects outside the image. See
+			// `scene::SurfaceLens::Mapping`.
+			glm::mat4 Sampling{1.0f};
+
+			// The pair again, for the frame before — which is the one another
+			// surface pass samples, and it must be projected with the matrix
+			// that *rendered* it. Projecting last frame's texture with this
+			// frame's camera is a reflection that slides as the viewer moves,
+			// and it reads as a mis-aimed camera rather than as a stale matrix.
+			//@{
 			glm::mat4 PreviousViewProjection{1.0f};
+			glm::mat4 PreviousSampling{1.0f};
+			//@}
 
 			// How solid this surface's image is, from the view that wrote it.
 			float ImageOpacity = 1.0f;
@@ -1071,6 +1082,22 @@ namespace engine::render {
 		opaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
 		// The cube winds counter-clockwise when seen from outside.
 		opaque.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+
+		// **Clip against the near plane rather than clamping to it, which a
+		// portal depends on and everything else quietly wanted.** SDL zeroes
+		// this field, and false means *clamp*: a fragment in front of the near
+		// plane is not discarded, it is pushed to depth zero and drawn. For an
+		// ordinary camera that is a wall you have walked into filling the screen
+		// instead of vanishing, which reads as a bug nobody files.
+		//
+		// For a portal it is the whole feature failing. The oblique clip works
+		// by skewing the near plane onto the destination's pane, so *everything
+		// the hole should not show is behind the near plane* — the wall the
+		// destination is set into, its back face, and the room behind it.
+		// Clamped, all of it draws at depth zero and fills the hole with the
+		// wall it leads through. The matrix was right, the placement was right,
+		// and the picture was a flat grey wall. See `scene::SurfaceLens`.
+		opaque.rasterizer_state.enable_depth_clip = true;
 		opaque.depth_stencil_state.enable_depth_test = true;
 		opaque.depth_stencil_state.enable_depth_write = true;
 		opaque.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
@@ -3137,6 +3164,11 @@ namespace engine::render {
 			// frame's matrix. See the refresh decision below.
 			glm::mat4 ViewProjection{1.0f};
 
+			// The same with the pane's map folded in, which is what the pane
+			// reads the image back through. `SurfaceView::Mapping` says why they
+			// are two matrices rather than one.
+			glm::mat4 Sampling{1.0f};
+
 			float ImageOpacity = 1.0f;
 
 			// What the pane puts the image through. Carried for the same reason
@@ -3175,13 +3207,16 @@ namespace engine::render {
 
 			claimed[index] = true;
 
-			const float aspect =
-				static_cast<float>(view.Width) / static_cast<float>(std::max(view.Height, 1u));
-
+			// **No aspect ratio, and its absence is load-bearing.** A surface
+			// frustum is fitted to the pane's four corners, so the texture's
+			// shape is already inside the extents that produced this
+			// projection; widening by the aspect again here would apply it
+			// twice and stretch every mirror in the scene.
 			AcceptedView entry;
 			entry.Index = index;
 			entry.View = &view;
-			entry.ViewProjection = scene::ResolveCamera(view.Frame, view.Lens, aspect).ViewProjection;
+			entry.ViewProjection = scene::ResolveSurfaceCamera(view.Frame, view.Projection).ViewProjection;
+			entry.Sampling = entry.ViewProjection * view.Mapping;
 			entry.ImageOpacity = std::clamp(view.ImageOpacity, 0.0f, 1.0f);
 			entry.Effect = view.Effect;
 
@@ -3808,7 +3843,9 @@ namespace engine::render {
 
 				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
 				state.PreviousViewProjection = state.ViewProjection;
+				state.PreviousSampling = state.Sampling;
 				state.ViewProjection = accepted[index].ViewProjection;
+				state.Sampling = accepted[index].Sampling;
 				state.Slot ^= 1u;
 			}
 
@@ -3976,7 +4013,7 @@ namespace engine::render {
 						const FrameUniforms mirrorFrame{
 							state.ViewProjection,
 							lightViewProjection,
-							shown.PreviousViewProjection,
+							shown.PreviousSampling,
 						};
 						LightingUniforms mirrorLighting{
 							glm::vec4{SUN_DIRECTION, 0.0f},
@@ -4310,7 +4347,7 @@ namespace engine::render {
 							const FrameUniforms mirrorFrame{
 								viewProjection,
 								lightViewProjection,
-								shown.ViewProjection,
+								shown.Sampling,
 							};
 							LightingUniforms mirrored{
 								glm::vec4{SUN_DIRECTION, 0.0f},

@@ -472,3 +472,47 @@ TEST_CASE("a shape cast sweeps a rotated shape by its own bound", "[physics][que
 	REQUIRE(result.Written == 1);
 	CHECK(found[0] == beside);
 }
+
+TEST_CASE("a raycast can look straight through the thing casting it", "[physics][query]") {
+	// **The case a character controller is, and it is not an edge case.** A
+	// humanoid asks what is under its feet by casting from just *inside* them —
+	// a ray that begins exactly on a face is a coin flip about whether it hits
+	// it, and the coin lands differently on two machines, which is a desync
+	// arriving through a character controller. With a root collider the full
+	// height of the character, that origin is inside its own box, so the nearest
+	// hit is always itself.
+	//
+	// **Testing the answer afterwards cannot recover it**, which is the whole
+	// point of this parameter and the reason the studio found it as a character
+	// resting perfectly still on a plate it could not jump off: `Raycast`
+	// returns the nearest hit and the floor was never in the answer.
+	Store store("query.ignore");
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity caster =
+		Place(store, Placed{.Position = Vector3{0.0f, 2.5f, 0.0f}, .Extent = Vector3{1.0f, 2.5f, 0.5f}});
+	const Entity floor = Place(
+		store,
+		Placed{.Position = Vector3{0.0f, -2.0f, 0.0f}, .Extent = Vector3{50.0f, 2.0f, 50.0f}, .Moving = false}
+	);
+	Index(store);
+
+	// From a tenth of a metre above the caster's own sole, straight down.
+	const Ray under{Vector3{0.0f, 0.1f, 0.0f}, Vector3{0.0f, -1.0f, 0.0f}};
+
+	const std::optional<ColliderHit> itself = Raycast(store, under, 0.25f);
+	REQUIRE(itself.has_value());
+	CHECK(itself->Owner == caster);
+
+	const std::optional<ColliderHit> ground = Raycast(store, under, 0.25f, LayerMask::All(), caster);
+	REQUIRE(ground.has_value());
+	CHECK(ground->Owner == floor);
+
+	// **Ignoring something that is not in the way changes nothing**, and a null
+	// entity ignores nobody — which is what makes the parameter safe to default.
+	const std::optional<ColliderHit> unaffected = Raycast(store, under, 0.25f, LayerMask::All(), floor);
+	REQUIRE(unaffected.has_value());
+	CHECK(unaffected->Owner == caster);
+
+	CHECK(Raycast(store, under, 0.25f, LayerMask::All(), Entity{})->Owner == caster);
+}

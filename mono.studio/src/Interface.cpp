@@ -1,6 +1,6 @@
 #include <engine/core/Log.hpp>
-#include <engine/core/Profiling.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
@@ -10,15 +10,15 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
-#include <cstring>
-#include <span>
-#include <vector>
 #include <cstdio>
+#include <cstring>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <span>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
+#include <vector>
 
 namespace studio {
 
@@ -73,28 +73,10 @@ namespace studio {
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,
-			VIEWPORT2,
-			EXPLORER,
-			WORLDS,
-			PROPERTIES,
-			SCRIPTS,
-			OUTPUT,
-			"Command Bar",
-			SETTINGS,
-			STATISTICS,
-			FRAMEGRAPH,
-			"History",
-			"Assets",
-			"Network",
-			"Team Create",
-			"Control (MCP)",
-			"Plugins",
-			"Bus",
-			"Find Instances",
-			"Script Profile",
-			"Changes",
-			"Debugger",
+			VIEWPORT,		  VIEWPORT2,		EXPLORER,	   WORLDS,			PROPERTIES, SCRIPTS,
+			OUTPUT,			  "Command Bar",	SETTINGS,	   STATISTICS,		FRAMEGRAPH, "History",
+			"Assets",		  "Network",		"Team Create", "Control (MCP)", "Plugins",	"Bus",
+			"Find Instances", "Script Profile", "Changes",	   "Debugger",
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -118,7 +100,8 @@ namespace studio {
 			// edge. Splitting them across the window makes every edit a
 			// diagonal mouse journey.
 			ImGuiID centre = dockspace;
-			const ImGuiID right = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.24f, nullptr, &centre);
+			const ImGuiID right =
+				ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.24f, nullptr, &centre);
 			const ImGuiID bottom =
 				ImGui::DockBuilderSplitNode(centre, ImGuiDir_Down, 0.28f, nullptr, &centre);
 
@@ -520,6 +503,23 @@ namespace studio {
 		ViewportState *view = ExtraAt(target);
 		const bool focused = FocusedIsViewport && FocusedViewport == target;
 
+		// **A viewport showing a client with a body in it is played, not
+		// flown.** Both readings of WASD are legitimate and only one can have
+		// the frame; the presence of a character settles it, which is
+		// discoverable without a menu — you press Play, you walk. A client view
+		// that has not received its character yet still flies, so the panel is
+		// usable in the gap.
+		//
+		// The free camera is skipped entirely rather than driven as well: two
+		// things moving on one key is the state where neither works.
+		{
+			const bool hovered = view != nullptr ? view->Hovered : ViewportHovered;
+			const bool active = view != nullptr ? view->Active : ViewportActive;
+			if (DrivePlayer(ViewportWorld(target), hovered, active, focused)) {
+				return;
+			}
+		}
+
 		if (view == nullptr) {
 			DriveCameraFor(
 				CameraFrame,
@@ -535,7 +535,13 @@ namespace studio {
 		}
 
 		DriveCameraFor(
-			view->Frame, view->Yaw, view->Pitch, view->Speed, view->Hovered, view->Active, view->Panning,
+			view->Frame,
+			view->Yaw,
+			view->Pitch,
+			view->Speed,
+			view->Hovered,
+			view->Active,
+			view->Panning,
 			focused
 		);
 	}
@@ -743,9 +749,8 @@ namespace studio {
 
 		// No padding, so the image is the panel rather than a picture inside it.
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		const bool shown = ImGui::Begin(
-			title, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
-		);
+		const bool shown =
+			ImGui::Begin(title, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		ImGui::PopStyleVar();
 
 		// **A `+` at the end of the tabs this panel is docked in.** Another view
@@ -768,9 +773,7 @@ namespace studio {
 				if (first && ImGui::DockNodeBeginAmendTabBar(node)) {
 					TabbedNodes.push_back(node->ID);
 
-					if (ImGui::TabItemButton(
-							"+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip
-						)) {
+					if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
 						// **Recorded, not done here.** This is inside an amended
 						// tab bar and inside this panel's `Begin`; opening a
 						// window from in here would nest one window inside
@@ -850,10 +853,7 @@ namespace studio {
 		if (void *texture = Renderer.SceneTexture(index); texture != nullptr) {
 			const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
 			ImGui::Image(
-				reinterpret_cast<ImTextureID>(texture),
-				size,
-				ImVec2(0.0f, 0.0f),
-				ImVec2(extent.U, extent.V)
+				reinterpret_cast<ImTextureID>(texture), size, ImVec2(0.0f, 0.0f), ImVec2(extent.U, extent.V)
 			);
 		} else {
 			// The first frame, and any frame after a resize the renderer has not
@@ -942,8 +942,8 @@ namespace studio {
 		// window from a click on a non-interactive item — so without this the
 		// toolbar went on describing whichever panel imgui happened to focus
 		// last, which is exactly what it did. See `FocusedViewport`.
-		if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
-						ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
+		if (hovered &&
+			(ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 			ImGui::SetWindowFocus();
 			FocusedViewport = index;
 
@@ -973,40 +973,38 @@ namespace studio {
 		// window nor the font, and was exactly what this cost once.
 		ImGui::BeginGroup();
 		{
-			const engine::ui::ScopedFont small(
-				engine::ui::Typeface::Interface, engine::ui::TextSize::Small
-			);
+			const engine::ui::ScopedFont small(engine::ui::Typeface::Interface, engine::ui::TextSize::Small);
 
-		const engine::core::Name scene =
-			Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
-		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-		ImGui::Text(
-			"%s   %u x %u   %u draw   %llu tris   %u culled",
-			scene.IsValid() ? Label(scene) : "(no scene)",
-			target.Width,
-			target.Height,
-			LastFrame.DrawCalls,
-			static_cast<unsigned long long>(LastFrame.Triangles),
-			LastFrame.Culled
-		);
-		ImGui::PopStyleColor();
-
-		// **This panel's world, not "the" mode.** With scenes running
-		// independently, a viewport showing an edited world must not warn that
-		// Stop will throw the edits away — and one showing a running world must,
-		// whatever the other panels are doing. An author who has forgotten which
-		// of two scenes is live is exactly who this line is for.
-		if (const RunMode panelMode = ModeOf(ViewportWorld(index)); panelMode != RunMode::Edit) {
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::Text("%s - Stop restores this scene", Describe(panelMode));
-			ImGui::PopStyleColor();
-		}
-
-		if (ViewportActive) {
+			const engine::core::Name scene =
+				Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-			ImGui::Text("WASD / QE   %.0f u/s   wheel to change", static_cast<double>(CameraSpeed));
+			ImGui::Text(
+				"%s   %u x %u   %u draw   %llu tris   %u culled",
+				scene.IsValid() ? Label(scene) : "(no scene)",
+				target.Width,
+				target.Height,
+				LastFrame.DrawCalls,
+				static_cast<unsigned long long>(LastFrame.Triangles),
+				LastFrame.Culled
+			);
 			ImGui::PopStyleColor();
-		}
+
+			// **This panel's world, not "the" mode.** With scenes running
+			// independently, a viewport showing an edited world must not warn that
+			// Stop will throw the edits away — and one showing a running world must,
+			// whatever the other panels are doing. An author who has forgotten which
+			// of two scenes is live is exactly who this line is for.
+			if (const RunMode panelMode = ModeOf(ViewportWorld(index)); panelMode != RunMode::Edit) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				ImGui::Text("%s - Stop restores this scene", Describe(panelMode));
+				ImGui::PopStyleColor();
+			}
+
+			if (ViewportActive) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::Text("WASD / QE   %.0f u/s   wheel to change", static_cast<double>(CameraSpeed));
+				ImGui::PopStyleColor();
+			}
 		}
 
 		ImGui::EndGroup();
@@ -1181,9 +1179,8 @@ namespace studio {
 			// wrong guess builds a game into one world.
 			if (ImGui::MenuItem("Sync Rojo Universe...")) {
 				AskingRojoUniverse = true;
-				PathBuffer = GamePath.empty()
-								 ? std::string("main.universe.json")
-								 : (GamePath.parent_path() / "main.universe.json").string();
+				PathBuffer = GamePath.empty() ? std::string("main.universe.json")
+											  : (GamePath.parent_path() / "main.universe.json").string();
 			}
 
 			ImGui::Separator();
@@ -1198,10 +1195,9 @@ namespace studio {
 			}
 			if (ImGui::MenuItem("Save As...", Keybinds::Of(Action::SaveAs).Text().c_str())) {
 				AskingSaveAs = true;
-				PathBuffer =
-					GamePath.empty()
-						? std::string(Label(GameName)) + std::string(engine::game::GAME_EXTENSION)
-						: GamePath.string();
+				PathBuffer = GamePath.empty()
+								 ? std::string(Label(GameName)) + std::string(engine::game::GAME_EXTENSION)
+								 : GamePath.string();
 			}
 
 			ImGui::Separator();
@@ -1221,8 +1217,8 @@ namespace studio {
 			}
 			if (ImGui::MenuItem("Export Active World...", nullptr, false, Active.IsValid())) {
 				AskingExport = true;
-				PathBuffer = std::string(Label(Universe->NameOf(Active))) +
-							 std::string(engine::game::WORLD_EXTENSION);
+				PathBuffer =
+					std::string(Label(Universe->NameOf(Active))) + std::string(engine::game::WORLD_EXTENSION);
 			}
 
 			// **Beside the world export rather than beside Save As**, because
@@ -1231,8 +1227,7 @@ namespace studio {
 			// extension is what tells them apart afterwards.
 			if (ImGui::MenuItem("Export Universe...", nullptr, false, Universe->Count() > 0)) {
 				AskingExportUniverse = true;
-				PathBuffer =
-					std::string(Label(GameName, "Game")) + std::string(engine::game::GAME_EXTENSION);
+				PathBuffer = std::string(Label(GameName, "Game")) + std::string(engine::game::GAME_EXTENSION);
 			}
 
 			ImGui::Separator();
@@ -1270,7 +1265,8 @@ namespace studio {
 
 				// The reason, on hover, for a greyed row. A menu item that is
 				// disabled and silent is one somebody clicks twice.
-				if (!state.Ready && !state.Reason.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				if (!state.Ready && !state.Reason.empty() &&
+					ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 					ImGui::SetTooltip("%s", state.Reason.c_str());
 				}
 			};
@@ -1351,13 +1347,13 @@ namespace studio {
 			const RunMode mode = ModeOf(scope);
 
 			if (ImGui::MenuItem(
-					"Play (server + client)", Keybinds::Of(Action::Play).Text().c_str(),
-					mode == RunMode::Play
+					"Play (server + client)", Keybinds::Of(Action::Play).Text().c_str(), mode == RunMode::Play
 				)) {
 				SetRunMode(scope, mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
 			}
 			if (ImGui::MenuItem(
-					"Run (server only)", Keybinds::Of(Action::RunServer).Text().c_str(),
+					"Run (server only)",
+					Keybinds::Of(Action::RunServer).Text().c_str(),
 					mode == RunMode::Server
 				)) {
 				SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
@@ -1429,8 +1425,8 @@ namespace studio {
 		if (Keybinds::Fired(Action::Save)) {
 			if (GamePath.empty()) {
 				AskingSaveAs = true;
-				PathBuffer = std::string(Label(GameName, "Untitled")) +
-							 std::string(engine::game::GAME_EXTENSION);
+				PathBuffer =
+					std::string(Label(GameName, "Untitled")) + std::string(engine::game::GAME_EXTENSION);
 			} else {
 				SaveGame(GamePath);
 			}
@@ -1547,9 +1543,8 @@ namespace studio {
 		// The panel that owns the focused window, which is the window itself
 		// unless focus landed on a child of it — a combo or a popup inside the
 		// viewport is still the viewport for this purpose.
-		const ImGuiWindow *focused = context->NavWindow->RootWindow != nullptr
-										 ? context->NavWindow->RootWindow
-										 : context->NavWindow;
+		const ImGuiWindow *focused =
+			context->NavWindow->RootWindow != nullptr ? context->NavWindow->RootWindow : context->NavWindow;
 
 		// **Which panel the keyboard is in, decided in the same place and from
 		// the same window.** A binding scoped to the tree must not fire while
@@ -1670,6 +1665,42 @@ namespace studio {
 			SetRunMode(scope, RunMode::Edit);
 		}
 		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+
+		// **Players, and they are what turn Run into Play one at a time.** A
+		// `RunMode::Server` run is a dedicated server with nobody in it; Spawn
+		// Player admits somebody, gives them a character and opens a viewport
+		// they can see it from. A Play run gains a second client, which is the
+		// arrangement that shows a bug two clients disagree about and the one a
+		// single replica cannot.
+		//
+		// **Scoped to the viewport you are in, like every other button here.**
+		// `RunOwning` is what makes that work from a *client* panel as well as
+		// from the server's — pressing Remove Player while looking at a client
+		// removes that one, which is the only reading somebody would expect.
+		ImGui::BeginDisabled(!running);
+		if (ImGui::Button("Spawn Player")) {
+			(void)SpawnPlayer(ViewportWorld(FocusedViewport));
+		}
+		ImGui::SameLine();
+
+		const WorldRun *record = RunOwning(ViewportWorld(FocusedViewport));
+		const size_t players = record == nullptr ? 0 : record->Links.size();
+
+		ImGui::BeginDisabled(players == 0);
+		if (ImGui::Button("Remove Player")) {
+			(void)RemovePlayer(ViewportWorld(FocusedViewport));
+		}
+		ImGui::EndDisabled();
+		ImGui::EndDisabled();
+
+		if (running) {
+			ImGui::SameLine();
+			ImGui::TextDisabled("%zu player%s", players, players == 1 ? "" : "s");
+		}
 
 		ImGui::SameLine();
 		ImGui::TextDisabled("|");
@@ -2036,9 +2067,7 @@ namespace studio {
 			// **Monospace, because this is a log.** A stack trace, a table of
 			// numbers and a printed table all line up in one and none of them do
 			// in a proportional face.
-			const engine::ui::ScopedFont code(
-				engine::ui::Typeface::Monospace, engine::ui::TextSize::Small
-			);
+			const engine::ui::ScopedFont code(engine::ui::Typeface::Monospace, engine::ui::TextSize::Small);
 
 			// **Scales the font rather than the interface.** `Options::Scale`
 			// rebuilds every metric in the editor and needs a restart to
@@ -2066,7 +2095,7 @@ namespace studio {
 
 				shown++;
 
-				const unsigned int colour = isError	  ? engine::ui::ErrorColour()
+				const unsigned int colour = isError		? engine::ui::ErrorColour()
 											: isWarning ? engine::ui::WarningColour()
 														: 0u;
 
@@ -2083,9 +2112,7 @@ namespace studio {
 				// pointer rather than only the one the press started on.
 				ImGui::PushID(static_cast<int>(message.Serial));
 				ImGui::Selectable(
-					message.Text.c_str(),
-					OutputSelected(message.Serial),
-					ImGuiSelectableFlags_AllowOverlap
+					message.Text.c_str(), OutputSelected(message.Serial), ImGuiSelectableFlags_AllowOverlap
 				);
 
 				if (ImGui::IsItemClicked()) {
@@ -2190,7 +2217,7 @@ namespace studio {
 		// hide a scene running behind you. A count is the honest summary; the
 		// toolbar and the Worlds panel say which.
 		const size_t live = Runs.size();
-		const std::string state = live == 0	 ? std::string("Edit")
+		const std::string state = live == 0	  ? std::string("Edit")
 								  : live == 1 ? std::string(Describe(Runs.front().Mode)) + " (1 scene)"
 											  : std::to_string(live) + " scenes running";
 

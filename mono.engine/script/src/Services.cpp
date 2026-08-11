@@ -1,6 +1,11 @@
 #include "Bindings.hpp"
 #include "Codec.hpp"
 
+#include <engine/core/Log.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/scene/Characters.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cstring>
@@ -12,6 +17,7 @@
 namespace engine::script {
 
 	namespace {
+		namespace scene = engine::scene;
 		using ecs::Store;
 		using world::BusKind;
 		using world::BusStatus;
@@ -452,6 +458,195 @@ namespace engine::script {
 			return "Unknown";
 		}
 
+		// --- TeleportService --------------------------------------------------
+		//
+		// **The one bus operation that names a world, and no script could reach
+		// it.** `world::BusKind::Teleport` and `Postbox::Teleport` have existed
+		// since v0.2 with a router that delivers and an inbox that receives —
+		// and `PumpDeliveries` dropped every arrival on the floor, because it
+		// only ever looked for `Messaging`. So the crossing worked and nothing
+		// could ask for one or notice one.
+		//
+		// **What crosses is a name and a payload, never an entity.** That is
+		// rule 3 and it is also what makes the feature work: the destination
+		// rebuilds the player from its *own* class definitions, so two worlds
+		// never have to agree about what a `Player` is made of. Roblox works the
+		// same way and for the same reason — the far side is another server.
+
+		// The child a teleported player carries their data in.
+		//
+		// **A `StringValue` under the player rather than a component of its
+		// own.** The data is an arbitrary script value; a component holding one
+		// would need a type, a serialiser and a wire form for something the
+		// engine never reads. A `StringValue` is authored content that already
+		// round-trips, already replicates, and is already something a script can
+		// see in the explorer — which is worth more here than tidiness.
+		constexpr const char *TELEPORT_DATA = "TeleportData";
+
+		// Builds the payload one world hands another.
+		//
+		// The player's *name* and nothing else about them: the destination has
+		// its own `Players` service, its own class table and its own spawn.
+		std::vector<std::byte> PackTeleport(lua_State *state, std::string_view name, int dataIndex) {
+			ScriptValue label{ValueTag::String};
+			label.Text = std::string(name);
+
+			ScriptValue envelope{ValueTag::Map};
+			envelope.Entries.emplace_back("Player", std::move(label));
+
+			if (!lua_isnoneornil(state, dataIndex)) {
+				ScriptValue data;
+				CodecStatus why = CodecStatus::Ok;
+				if (!ToScriptValue(state, dataIndex, data, 0, why)) {
+					luaL_errorL(state, "Teleport: the data cannot cross a world boundary: %s", Describe(why));
+				}
+				envelope.Entries.emplace_back("Data", std::move(data));
+			}
+
+			std::vector<std::byte> bytes;
+			if (const CodecStatus status = Encode(envelope, bytes); status != CodecStatus::Ok) {
+				luaL_errorL(state, "Teleport: the data cannot cross a world boundary: %s", Describe(status));
+			}
+			return bytes;
+		}
+
+		// TeleportService:Teleport(placeName, player, data?)
+		int Teleport(lua_State *state) {
+			Store &store = StoreOfUpvalue(state);
+			Postbox box(store);
+
+			const char *place = luaL_checkstring(state, 2);
+			const ecs::Entity player = CheckInstanceArgument(state, 3);
+
+			if (!store.Alive(player) || !store.IsA(player, scene::PlayerClass())) {
+				luaL_errorL(state, "Teleport: the second argument must be a Player");
+			}
+
+			if (WritesBelongElsewhere(box, store)) {
+				// **A replica may not move anybody.** A client asking a server
+				// to teleport somebody is a request, not an act — and there is
+				// no request channel for it yet, so the honest answer is a
+				// refusal a script can see rather than a silent no-op.
+				luaL_errorL(state, "Teleport: this world is a replica and does not decide who is in it");
+			}
+
+			const core::Name name = store.InstanceNameOf(player);
+			const std::vector<std::byte> payload =
+				PackTeleport(state, name.IsValid() ? name.Text() : "Player", 4);
+
+			// **A ticket rather than a bool, and the reply is deliberately not
+			// awaited.** `NONE` means the world spent its allowance this tick;
+			// anything else means the envelope is queued, and the only thing a
+			// reply could say is that the destination does not exist — which is
+			// a delivery this world will never see the far side of anyway.
+			if (box.Teleport(place, payload).Value == world::Ticket::NONE) {
+				luaL_errorL(state, "Teleport: over this world's budget for '%s'", place);
+			}
+
+			// **Removed here rather than when the arrival lands**, because the
+			// two happen in different worlds and only this one can do it. A
+			// player left behind would be in both places at once — and the
+			// destination has no way to reach back and tidy up, which is
+			// exactly the cross-world reference rule 3 forbids.
+			//
+			// **The router has already taken a copy.** `Postbox::Teleport`
+			// queues an envelope holding the bytes, so destroying the instance
+			// on the next line cannot lose the message.
+			(void)scene::RemoveCharacter(store, player);
+			store.DestroyInstance(player);
+			return 0;
+		}
+
+		// TeleportService:GetLocalPlayerTeleportData()
+		int GetLocalPlayerTeleportData(lua_State *state) {
+			Store &store = StoreOfUpvalue(state);
+
+			const auto *local = store.Resource<scene::LocalPlayer>();
+			if (local == nullptr || !store.Alive(local->Instance)) {
+				// **Nil on a server, which is the point of the name.** Roblox's
+				// is a client call; a `Script` reaching for it gets nothing
+				// rather than somebody else's data.
+				lua_pushnil(state);
+				return 1;
+			}
+
+			const ecs::Entity held = store.FindFirstChild(local->Instance, TELEPORT_DATA);
+			const auto *text = held == ecs::NULL_ENTITY ? nullptr : store.Get<scene::TextContent>(held);
+			if (text == nullptr || text->Value.empty()) {
+				lua_pushnil(state);
+				return 1;
+			}
+
+			const auto *bytes = reinterpret_cast<const std::byte *>(text->Value.data());
+
+			ScriptValue value;
+			if (Decode({bytes, text->Value.size()}, value) != CodecStatus::Ok) {
+				lua_pushnil(state);
+				return 1;
+			}
+
+			PushScriptValue(state, value);
+			return 1;
+		}
+
+		// Rebuilds an arriving player in this world.
+		//
+		// **The engine admits them, not a script.** Who is in a game is the
+		// host's business — `scene::AddPlayer` says so — and a teleport that
+		// only worked in games whose author had written an arrival handler
+		// would be a feature with a footnote. `Players.PlayerAdded` fires from
+		// the parenting, so a game that *wants* to react already can.
+		void AdmitArrival(ecs::Store &store, const Delivery &delivery) {
+			ScriptValue envelope;
+			if (Decode(delivery.Payload, envelope) != CodecStatus::Ok || envelope.Tag != ValueTag::Map) {
+				return;
+			}
+
+			std::string name = "Player";
+			const ScriptValue *data = nullptr;
+			for (const auto &entry : envelope.Entries) {
+				if (entry.first == "Player" && entry.second.Tag == ValueTag::String) {
+					name = entry.second.Text;
+				} else if (entry.first == "Data") {
+					data = &entry.second;
+				}
+			}
+
+			const ecs::Entity player = scene::AddPlayer(store, name);
+			if (player == ecs::NULL_ENTITY) {
+				// A world with no `Players` service takes nobody. Quiet rather
+				// than an error, for `mono.server`'s reason: that is the
+				// placeholder scene and it is furnished by nobody.
+				return;
+			}
+
+			(void)scene::LoadCharacter(store, player);
+
+			if (data == nullptr) {
+				return;
+			}
+
+			// A copy, because `Encode` sorts a map's entries in place and the
+			// delivery's tree is not this function's to reorder.
+			ScriptValue carried = *data;
+
+			std::vector<std::byte> bytes;
+			if (Encode(carried, bytes) != CodecStatus::Ok) {
+				return;
+			}
+
+			const ecs::Entity held =
+				store.CreateInstance(ecs::Classes::Find(core::Name("StringValue")), TELEPORT_DATA);
+			if (held == ecs::NULL_ENTITY) {
+				return;
+			}
+
+			scene::TextContent text;
+			text.Value.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+			store.Set(held, text);
+			store.SetParent(held, player);
+		}
+
 		void
 		InstallService(lua_State *state, LuauContext &context, const char *name, const luaL_Reg *methods) {
 			lua_newtable(state);
@@ -506,7 +701,14 @@ namespace engine::script {
 			{nullptr, nullptr}
 		};
 
+		static const luaL_Reg teleport[] = {
+			{"Teleport", Teleport},
+			{"GetLocalPlayerTeleportData", GetLocalPlayerTeleportData},
+			{nullptr, nullptr}
+		};
+
 		InstallService(state, context, "MessagingService", messaging);
+		InstallService(state, context, "TeleportService", teleport);
 		InstallService(state, context, "MemoryStoreService", memoryStore);
 		InstallService(state, context, "DataStoreService", dataStore);
 	}
@@ -581,6 +783,15 @@ namespace engine::script {
 				}
 
 				lua_unref(state, reference);
+				continue;
+			}
+
+			// **An arrival, which nothing was reading.** Every non-messaging
+			// delivery used to fall through this test and be dropped — which is
+			// how a teleport could be sent, routed, delivered, and have no
+			// effect anywhere.
+			if (delivery.Bus == BusKind::Teleport) {
+				AdmitArrival(store, delivery);
 				continue;
 			}
 

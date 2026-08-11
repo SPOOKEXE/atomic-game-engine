@@ -1620,4 +1620,8 @@ namespace engine::script {
 		lua_newtable(state);
 		lua_setfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");
 	}
+	ecs::Entity CheckInstanceArgument(lua_State *state, int index) {
+		return CheckInstance(state, index);
+	}
+
 }

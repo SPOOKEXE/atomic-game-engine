@@ -1,10 +1,12 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -143,11 +145,11 @@ namespace engine::scene {
 		return true;
 	}
 
-	size_t UpdateCharacterControl(ecs::Store &store) {
+	MoveIntent ReadMoveIntent(const ecs::Store &store) {
 		const auto *input = store.Resource<InputState>();
 		const auto *controller = store.Resource<CameraController>();
 		if (input == nullptr) {
-			return 0;
+			return {};
 		}
 
 		// **Relative to the camera's yaw**, which is why this reads the
@@ -179,17 +181,52 @@ namespace engine::scene {
 			}
 		}
 
+		MoveIntent intent;
+
 		// **Normalised, so diagonal movement is not faster.** Two keys held gives
 		// a vector of length √2, and a controller that used it directly would make
 		// running diagonally forty per cent quicker — which is the oldest movement
 		// bug there is and the one players find first.
-		const Vector3 direction = wanted.Magnitude() > 0.0f ? wanted.Unit() : Vector3{};
+		intent.Direction = wanted.Magnitude() > 0.0f ? wanted.Unit() : Vector3{};
+		intent.Jump = input->Focused && input->WasKeyPressed(KeyCode::Space);
+		return intent;
+	}
 
-		const bool jump = input->Focused && input->WasKeyPressed(KeyCode::Space);
+	size_t UpdateCharacterControl(ecs::Store &store) {
+		if (store.Resource<InputState>() == nullptr) {
+			return 0;
+		}
+
+		const MoveIntent intent = ReadMoveIntent(store);
+		const Vector3 direction = intent.Direction;
+		const bool jump = intent.Jump;
+
+		// **Which humanoid this keyboard is allowed to move**, and getting this
+		// wrong is not cosmetic: with two clients in one world, a `Each` over
+		// every humanoid means each machine walks *both* characters and the two
+		// fight over one body every tick.
+		//
+		// **A world with no `LocalPlayer` drives all of them**, which is not a
+		// second behaviour bolted on — it is the case where the question has no
+		// answer. A test world, a single-part scripted character, an examples
+		// scene: none of them has a `Players` service, so "the local player's
+		// character" names nothing and driving what is there is the only useful
+		// reading. The moment a host admits a player it stops applying.
+		const LocalPlayer *local = store.Resource<LocalPlayer>();
+		ecs::Entity mine = ecs::NULL_ENTITY;
+		if (local != nullptr) {
+			const Character *character = store.Get<Character>(CharacterOf(store, local->Instance));
+			if (character == nullptr) {
+				// A local player between a death and a respawn has no body, and
+				// keys pressed into that gap must not reach somebody else's.
+				return 0;
+			}
+			mine = character->Humanoid;
+		}
 
 		size_t driven = 0;
-		store.Each<Humanoid>([&](ecs::Entity, Humanoid &humanoid) {
-			if (!humanoid.Enabled) {
+		store.Each<Humanoid>([&](ecs::Entity entity, Humanoid &humanoid) {
+			if (!humanoid.Enabled || (local != nullptr && entity != mine)) {
 				return;
 			}
 			humanoid.MoveDirection = direction;
@@ -207,10 +244,23 @@ namespace engine::scene {
 		(void)delta;
 
 		size_t moved = 0;
-		store.Each<Humanoid, Motion>([&](ecs::Entity, Humanoid &humanoid, Motion &motion) {
+		store.Each<Humanoid>([&](ecs::Entity entity, Humanoid &humanoid) {
 			if (!humanoid.Enabled) {
 				return;
 			}
+
+			// **The body is not always the row.** A character rig puts the
+			// humanoid beside the parts and names one of them; a scripted NPC
+			// puts the humanoid on the part itself. `Humanoid::RootPart` says
+			// which arrangement this is, and resolving it here is what lets both
+			// go through one function.
+			const ecs::Entity body = humanoid.RootPart == ecs::NULL_ENTITY ? entity : humanoid.RootPart;
+
+			Motion *found = store.GetMutable<Motion>(body);
+			if (found == nullptr) {
+				return;
+			}
+			Motion &motion = *found;
 
 			const Vector3 wanted = humanoid.MoveDirection * humanoid.WalkSpeed;
 
@@ -226,6 +276,15 @@ namespace engine::scene {
 				motion.Linear.Y = humanoid.JumpSpeed;
 				humanoid.Grounded = false;
 			}
+
+			// **Upright, and this is the line that stops a character lying
+			// down.** Nothing here runs a balance controller, so a body free to
+			// spin tips over the first time a corner catches it — and a
+			// character face-down on the floor still walks, which reads as a
+			// physics bug rather than a missing feature. Zeroing the rate is
+			// enough: a box that is never given angular velocity never acquires
+			// an angle, so there is no orientation to correct afterwards.
+			motion.Angular = Vector3{};
 
 			// **Cleared whether or not it was used.** A request that survived
 			// being on the ground would fire the moment the character landed,

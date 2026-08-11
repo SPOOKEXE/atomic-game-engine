@@ -2,6 +2,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
@@ -581,6 +582,41 @@ namespace engine::scene {
 		// Appended, like every addition here: a component id is registration
 		// order and it decides column order in a snapshot.
 		ecs::Components::Register<AwakeWorld>("scene.AwakeWorld");
+
+		// **Authored data, so it crosses.** Which part a portal leads to is a
+		// fact about the scene rather than about whoever is looking at it —
+		// the same side of the line `scene.SurfaceCamera` is already on, and
+		// `replication::LocalToTheClient` names both.
+		//
+		// The generated form: the field is an `Entity`, which is a directory
+		// index a snapshot and a replica both restore exactly.
+		ecs::Components::Register<Portal>("scene.Portal");
+
+		// **Derived data, so it does not.** A surface camera's frustum is fitted
+		// to its pane *as seen from the local eye*, so the authority's answer is
+		// wrong for every client watching — `client/Replicated.hpp` gives that
+		// argument for the placement and this is the same fact one step on.
+		// `LocalToTheClient` keeps it off the wire and `AimSurfaceCameras`
+		// recomputes it on both ends.
+		ecs::Components::Register<SurfaceLens>("scene.SurfaceLens");
+
+		// **The three rows a character is held together by**, appended for the
+		// ordering reason this list keeps repeating. All three are the generated
+		// form: an `Entity` is a directory index a snapshot and a replica both
+		// restore exactly, and a `CFrame` is its own object representation —
+		// `scene.Pivot` is already registered on that argument.
+		//
+		// **All three cross the wire, and `CharacterLimb` is the one worth
+		// stating.** A client poses its own limbs from the root it interpolated,
+		// so the *offsets* have to arrive once — but the limb transforms that
+		// come with them are overwritten by `PoseCharacters` on the frame they
+		// land. That is wire spent on nothing, and it is the cost of
+		// `replication` filtering by component rather than by entity;
+		// `docs/DEFERRED.md` carries it as an item rather than as a comment
+		// nobody will find.
+		ecs::Components::Register<Character>("scene.Character");
+		ecs::Components::Register<CharacterLimb>("scene.CharacterLimb");
+		ecs::Components::Register<PlayerCharacter>("scene.PlayerCharacter");
 	}
 
 	void RegisterSceneClasses() {

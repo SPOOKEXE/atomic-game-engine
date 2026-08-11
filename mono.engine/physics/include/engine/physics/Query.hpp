@@ -109,13 +109,30 @@ namespace engine::physics {
 	//                    nothing.
 	// @param mask        Which layers to consider. A collider is a candidate
 	//                    when it shares any layer with this.
+	// @param ignore      One collider to look straight through, or a null
+	//                    entity. **The caster itself, which is the only thing
+	//                    this is for and is why it is one entity rather than a
+	//                    list.** A character asking what is under its feet has
+	//                    to start the ray inside its own capsule — a ray that
+	//                    begins exactly on a face is a coin flip about whether
+	//                    it hits it, and the coin lands differently on two
+	//                    machines — so the nearest hit is always itself and the
+	//                    floor is never reached. Comparing the *result* against
+	//                    the caster cannot fix that: the answer has already
+	//                    been thrown away.
+	//
+	//                    A general ignore list is deliberately not offered.
+	//                    Every caller that has wanted one has wanted exactly
+	//                    this, and a span would put an allocation and a loop on
+	//                    the inner test for a case nobody has.
 	// @return The nearest hit, or nothing. There is no "invalid hit".
 	// @threadsafe
 	std::optional<ColliderHit> Raycast(
 		const ecs::Store &store,
 		const core::Ray &ray,
 		float maxDistance,
-		spatial::LayerMask mask = spatial::LayerMask::All()
+		spatial::LayerMask mask = spatial::LayerMask::All(),
+		ecs::Entity ignore = ecs::Entity{}
 	);
 
 	// Finds every collider whose exact shape overlaps an axis-aligned box.

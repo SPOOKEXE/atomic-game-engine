@@ -900,6 +900,92 @@ namespace studio {
 		// imgui can answer and only while a frame is open.
 		void DriveCamera();
 
+		// Feeds a viewport's keys and mouse to the client world it is playing.
+		//
+		// **A viewport showing a replica with a character in it is a viewport
+		// you are playing, not one you are flying**, and that is the whole rule.
+		// Both readings of WASD are legitimate and they cannot both have the
+		// frame: an author flying through a scene wants the editor camera, and
+		// somebody who has just pressed Play wants to walk. The presence of a
+		// body settles it — a client view with no character is still a view, and
+		// flies.
+		//
+		// Writes `scene::InputState` into that world, which is where every
+		// consumer already reads from: `scene::UpdateCameraControl` turns the
+		// view, `scene::ReadMoveIntent` walks the character, and a `LocalScript`
+		// polling `UserInputService` sees the same keys a real client's would.
+		//
+		// **Public, alone among the viewport drivers, because it is the one seam
+		// in "press W and the character walks" that a test can reach.** Every
+		// other step has one — the codec, `ReadMoveIntent`, `ApplyMoveInput`, the
+		// physics — and this step had none, so "I click the client viewport and
+		// nothing happens" was reproducible only by hand. It needs an imgui
+		// context and no window, no device and no frame loop, which is exactly
+		// what `studio.playlink` gives it.
+		//
+		// @param world   The world the viewport is showing.
+		// @param hovered Whether the pointer is over the panel.
+		// @param active  Whether a drag started in it is still held.
+		// @param focused Whether the keyboard is in it.
+		// @return `true` when this took the frame, so the free camera must not.
+	  public:
+		bool DrivePlayer(WorldId world, bool hovered, bool active, bool focused);
+
+	  private:
+
+		// Adds a client to whatever run the given world belongs to.
+		//
+		// **What turns Run into Play one player at a time.** A `RunMode::Server`
+		// run is a dedicated server with nobody in it; this admits somebody,
+		// gives them a character and opens a viewport they can see it from — and
+		// a Play run that already has one client gains a second, which is the
+		// arrangement that shows a bug two clients disagree about.
+		//
+		// @param world The world, or a replica of it.
+		// @return `true` when a client was added.
+		bool SpawnPlayer(WorldId world);
+
+		// Removes a client from whatever run the given world belongs to.
+		//
+		// **Removes the one the viewport is showing when it is showing one.**
+		// Pressing it while looking at a client view means "not this one"; while
+		// looking at the server's view it means "one fewer", and the last to
+		// arrive is the one that goes.
+		//
+		// @param world The world, or a replica of it.
+		// @return `true` when a client was removed.
+		bool RemovePlayer(WorldId world);
+
+		// Moves a client view to whichever world its player teleported into.
+		//
+		// **What makes `TeleportService` work in the studio without a second
+		// program.** A teleport destroys the player in the world they left and
+		// the destination rebuilds them from the arriving bytes — nothing
+		// crosses but a name — so a client view pinned to the world they left is
+		// a view of a world they are no longer in. This is the editor noticing
+		// and following.
+		//
+		// **A name is all there is to follow by**, which is not a shortcut: rule
+		// 3 says nothing crossing a world boundary is a pointer, so the player
+		// in the destination is a *different entity* that happens to be the same
+		// person. `PlayLink::PlayerName` is the only thing the two share.
+		//
+		// Cheap when nothing has moved: one aliveness check per client.
+		void FollowTeleports();
+
+		// Whether some client is already living in this player.
+		//
+		// **What separates an arrival from a namesake.** Every run names its
+		// clients the same way, so a universe with a client in each of seven
+		// worlds holds seven players called "client 1" — and a teleport followed
+		// by name alone lands in whichever world was created first. A player a
+		// live link is already using is not somebody who has just arrived.
+		//
+		// @param world  The world to look in.
+		// @param player The `Player` instance.
+		// @return `true` when a running link already holds it.
+		bool Claimed(WorldId world, Entity player) const;
+
 		// The camera rules, over whichever viewport the pointer is in.
 		//
 		// **One driver rather than one per panel.** Right-drag to look,
@@ -2737,6 +2823,17 @@ namespace studio {
 		// @param world The scene to ask about.
 		// @return The record, or null.
 		//@{
+		// The run a world belongs to, whether it is the authority or a replica.
+		//
+		// **`RunOf` answers for the authority alone**, because a run is recorded
+		// against the scene it is a run of. A client view is a world in the same
+		// universe with no record of its own, so a caller holding one — which is
+		// every caller that starts from a viewport — needs this instead.
+		//
+		// @param world The world, or a replica of it.
+		// @return The run, or null when that world is not part of one.
+		WorldRun *RunOwning(WorldId world);
+
 		WorldRun *RunOf(WorldId world);
 		const WorldRun *RunOf(WorldId world) const;
 		//@}

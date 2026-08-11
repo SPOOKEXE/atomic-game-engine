@@ -328,8 +328,7 @@ namespace engine::scene {
 					*static_cast<float *>(out) = 0.0f;
 					return true;
 				}
-				*static_cast<float *>(out) =
-					MassOf(*collider, *body, store.Get<PhysicsProperties>(instance));
+				*static_cast<float *>(out) = MassOf(*collider, *body, store.Get<PhysicsProperties>(instance));
 				return true;
 			};
 
@@ -557,6 +556,59 @@ namespace engine::scene {
 				}
 
 				surface->Effect = static_cast<SurfaceEffect>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
+		// Destination: the part on the far side of a portal.
+		//
+		// **A reference, because both ends are in one world.** Rule 3 forbids a
+		// handle that crosses a world boundary and this never does — a portal
+		// pairs two parts of one store, which is the case `PropertyType::Reference`
+		// exists for. `CurrentCameraProperty` in `Services.cpp` is the same shape.
+		//
+		// **Refused for anything that is not a part in space**, because that is
+		// the whole of what the aim needs: a `Transform` to build the far face
+		// frame from, and `Bounds` to find where that face is. Pointing a portal
+		// at a `Folder` would be a portal that silently stayed a mirror, and a
+		// mistake refused where it was made beats one discovered by looking at
+		// the wall.
+		//
+		// **Clearing is allowed** — `portal.Destination = nil` turns it back
+		// into a mirror, which is also what a deleted destination does.
+		PropertyDescriptor DestinationProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Destination");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(ecs::Entity);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Portal>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Portal *portal = store.Get<Portal>(instance);
+				if (portal == nullptr) {
+					return false;
+				}
+				*static_cast<ecs::Entity *>(out) = portal->Destination;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Portal *portal = store.GetMutable<Portal>(instance);
+				if (portal == nullptr) {
+					return false;
+				}
+
+				const auto destination = *static_cast<const ecs::Entity *>(value);
+				if (destination != ecs::NULL_ENTITY && (store.Get<Transform>(destination) == nullptr ||
+														store.Get<Bounds>(destination) == nullptr)) {
+					return false;
+				}
+
+				portal->Destination = destination;
 				return true;
 			};
 
@@ -1160,6 +1212,14 @@ namespace engine::scene {
 			// set would land static geometry in the dynamic archetype.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});
 
+			// **A `Model` is a `PVInstance` and adds nothing.** It is a
+			// container with a place in the world, which is exactly what
+			// `PVInstance` already is — so what the class buys is the
+			// vocabulary: `Instance.new("Model")` resolves, `:IsA("Model")`
+			// answers, and a character is a thing rather than six loose parts
+			// under Workspace. `scene::MakeCharacter` is its first caller.
+			(void)ecs::Classes::Register("Model", pvInstance, {});
+
 			// **A `MeshPart` is a `BasePart` whose mesh came from somewhere
 			// else**, and that is the whole of the difference. It adds no
 			// component: `Visual::Mesh` already names a mesh and
@@ -1207,6 +1267,21 @@ namespace engine::scene {
 			const std::array surface{ecs::Components::Of<SurfaceCamera>()};
 			const ecs::ClassId surfaceCameraClass =
 				ecs::Classes::Register("SurfaceCamera", cameraClass, surface);
+
+			// **A `Portal` is a `SurfaceCamera` that has been told where the
+			// other end is, and deriving says exactly that.** Everything a
+			// mirror has it keeps — the face, the surface size, the image
+			// transparency, the effect, the tag filter — because a portal
+			// renders through the same pass, projects onto its pane the same
+			// way, and differs only in where its camera stands.
+			//
+			// **A class rather than a property on `SurfaceCamera`**, so a scene
+			// says which of the two it means. Instantiating one is the whole
+			// declaration: `Instance.new("Portal")` reads as a hole, where a
+			// mirror with a nil destination would read as a mirror somebody had
+			// not finished configuring.
+			const std::array portal{ecs::Components::Of<Portal>()};
+			const ecs::ClassId portalClass = ecs::Classes::Register("Portal", surfaceCameraClass, portal);
 
 			// **A sound is an `Instance`, not a `PVInstance`, and the omission
 			// is the design.** It has no place of its own: under `Workspace` it
@@ -1406,9 +1481,7 @@ namespace engine::scene {
 			// `CustomPhysicalProperties` keeps Roblox's name because it is the
 			// one an author looks for, and it is the switch: without it the
 			// three below are ignored and the part feels like its material.
-			ecs::Classes::Property<&PhysicsProperties::Custom>(
-				basePart, "CustomPhysicalProperties"
-			);
+			ecs::Classes::Property<&PhysicsProperties::Custom>(basePart, "CustomPhysicalProperties");
 			ecs::Classes::Property<&PhysicsProperties::Density>(basePart, "Density");
 			ecs::Classes::Property<&PhysicsProperties::Friction>(basePart, "Friction");
 			ecs::Classes::Property<&PhysicsProperties::Elasticity>(basePart, "Elasticity");
@@ -1539,6 +1612,9 @@ namespace engine::scene {
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
 			ecs::Classes::Computed(surfaceCameraClass, SurfaceEffectProperty());
 			ecs::Classes::Computed(surfaceCameraClass, TagFilterProperty());
+
+			// The portal's one, and the whole of the feature is in it.
+			ecs::Classes::Computed(portalClass, DestinationProperty());
 
 			// The sound's six. All plain fields, which is unusual enough here
 			// to be worth saying: nothing about a sound is a doubled

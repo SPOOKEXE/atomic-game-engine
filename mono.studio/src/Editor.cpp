@@ -8,6 +8,7 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
@@ -64,12 +65,22 @@ namespace studio {
 		constexpr std::string_view DEFAULT_GAME = "Untitled";
 		constexpr std::string_view DEFAULT_WORLD = "Start";
 
-		// The two worlds a new game opens with. See `Editor::NewGame` for why
-		// there are two of them and why they are these two.
+		// The worlds a new game opens with. See `Editor::NewGame` for why there
+		// is more than one of them and why they are these.
 		constexpr std::string_view SKYGRID_WORLD = "SkyGrid";
 		constexpr std::string_view MIRROR_WORLD = "Mirrors";
 		constexpr std::string_view MESHGRID_WORLD = "Meshes";
 		constexpr std::string_view SLIDE_WORLD = "Slide";
+		constexpr std::string_view PORTAL_WORLD = "Portals";
+
+		// **The pair, and they are a pair on purpose.** A teleport needs
+		// somewhere to go, and until v0.14 there were five worlds a player could
+		// not be in — no characters, so no players, so a `TeleportService` with
+		// one destination would have been a delete. These two are the smallest
+		// arrangement where pressing Play, walking onto a pad and arriving
+		// somewhere else is a thing an author can do without writing anything.
+		constexpr std::string_view PLAYGROUND_WORLD = "Playground";
+		constexpr std::string_view ARENA_WORLD = "Arena";
 	}
 
 	// The engine log, teed into the Output panel.
@@ -762,6 +773,14 @@ namespace studio {
 
 		Advancing = true;
 		Universe->Tick(frameSeconds);
+
+		// **After the tick, because a teleport is applied at the barrier.** A
+		// script's `TeleportService:Teleport` destroys the player in this world
+		// immediately and the destination rebuilds them when the driver delivers
+		// — which is inside `Universe::Tick`. Looking before it would see the
+		// player gone and the arrival not yet made, and this would drop a client
+		// that was mid-flight.
+		FollowTeleports();
 	}
 
 	void Editor::Present(float frameSeconds) {
@@ -1260,7 +1279,29 @@ namespace studio {
 		// which is a reflection that lags the camera by one frame and reads as
 		// a mirror that is not tracking.
 		if (shown.IsValid() && IsReplicaWorld(shown)) {
-			Universe->Enter(shown, [&](Store &store) { (void)client::AimReplicaViewer(store, eye, lens); });
+			Universe->Enter(shown, [&](Store &store) {
+				const Entity camera = client::AimReplicaViewer(store, eye, lens);
+
+				// **And read it back, which is what makes a client view a
+				// client's view.** A replica with a character places its own
+				// camera — `replica-camera` turns it with the mouse and sits it
+				// behind the body — and `AimReplicaViewer` steps aside when it
+				// does. Continuing to draw from `eye` would show the editor's
+				// free camera looking at a world somebody is walking around in,
+				// which is the picture this panel exists not to be.
+				//
+				// With no character the two are the same value, because `eye` is
+				// what `AimReplicaViewer` just wrote — so this folds both cases
+				// into one read rather than a condition.
+				if (store.Alive(camera)) {
+					if (const auto *placement = store.Get<engine::scene::Transform>(camera)) {
+						eye = placement->Frame;
+					}
+					if (const auto *found = store.Get<engine::scene::Camera>(camera)) {
+						lens = *found;
+					}
+				}
+			});
 		}
 
 		// **And the same for a world that is not a replica, which is the half
@@ -1536,6 +1577,20 @@ namespace studio {
 		// replicated in. A body handed to a player who then leaves would
 		// otherwise be owned by a dead entity for the rest of the session.
 		engine::scene::RegisterOwnershipSystem(systems);
+
+		// **And the characters, for the same reason the ownership reclaim is
+		// here: the studio is an authority.** A world played in this process is
+		// simulated in this process, so the ground query, the step and the pose
+		// belong to it exactly as they belong to `mono.server`. Without them a
+		// character spawned by a `PlayLink` would stand at its spawn point for
+		// ever with a perfectly good move direction on it.
+		//
+		// **The input half is not here**, and that is the split
+		// `physics/Characters.hpp` states: a keyboard belongs to whoever has
+		// one, and in this editor that is a *viewport* rather than a world. See
+		// `Editor::DrivePlayer`, which writes the client world's `InputState`
+		// and lets that world's own `scene::UpdateCharacterControl` read it.
+		engine::physics::RegisterCharacterSystems(systems);
 	}
 
 	void Editor::NewGame() {
@@ -1600,6 +1655,29 @@ namespace studio {
 		// block ahead is the solver. A slide that works looks like a slide.
 		const WorldId slide = AddWorld(Name(SLIDE_WORLD));
 
+		// **A fifth, and it is the one that is not a place.** The other four are
+		// ordinary space seen four ways; this one is three rooms three hundred
+		// units apart with six holes between them, two of which put the same
+		// room through opposite walls of the one being stood in.
+		//
+		// **It is here because a `Portal` is invisible in a properties panel.**
+		// The class is a `SurfaceCamera` with one extra reference on it, so a
+		// template without it leaves the v0.14 headline as a class in the insert
+		// menu and a paragraph in the roadmap — which is the "an API with no
+		// caller" the interface world was added to avoid, one version on.
+		//
+		// It also exercises a rendering path the mirror world cannot reach on
+		// its own: an off-axis frustum whose extents are genuinely asymmetric,
+		// and the oblique clip doing work. A mirror's clip plane is its own pane
+		// and over-clipping there is invisible; a portal's is a wall the camera
+		// stands inside, and getting it wrong draws the back of that wall over
+		// the whole hole.
+		const WorldId portals = AddWorld(Name(PORTAL_WORLD));
+
+		// The two a person actually stands in. See the constants above.
+		const WorldId playground = AddWorld(Name(PLAYGROUND_WORLD));
+		const WorldId arena = AddWorld(Name(ARENA_WORLD));
+
 		Active = grid;
 		SelectionWorld = Active;
 
@@ -1655,6 +1733,28 @@ namespace studio {
 			InstallExampleScript(store, "Slide.luau", "SlideScene");
 		});
 
+		// Three floors, three ceilings and twelve walls, all laid by the script
+		// — and a baseplate under them would be a floor stretched between rooms
+		// that are supposed to have nothing between them.
+		Universe->Enter(portals, [this](Store &store) {
+			InstallExampleScript(store, "Portals-1-world.luau", "PortalScene");
+		});
+
+		// **Two scripts each, and the split is the point.** The world's geometry
+		// is one file and the pad naming the *other* world is another, because a
+		// scene that names a destination only works in a universe that has one —
+		// and `Playground.luau` is also what `scripts/demos/run-local-server.sh`
+		// hosts on its own. `PlaygroundPad.luau` carries the whole argument.
+		Universe->Enter(playground, [this](Store &store) {
+			InstallExampleScript(store, "Playground.luau", "PlaygroundScene");
+			InstallExampleScript(store, "PlaygroundPad.luau", "PlaygroundPadScript");
+		});
+
+		Universe->Enter(arena, [this](Store &store) {
+			InstallExampleScript(store, "Arena.luau", "ArenaScene");
+			InstallExampleScript(store, "ArenaPad.luau", "ArenaPadScript");
+		});
+
 		// **A viewport each, pinned rather than left following the active
 		// world.** An extra viewport with no world of its own draws whatever is
 		// being edited, so two panels would show one scene twice and the
@@ -1672,12 +1772,16 @@ namespace studio {
 		ExpandWorldTree(mirrors);
 		ExpandWorldTree(meshes);
 		ExpandWorldTree(slide);
+		ExpandWorldTree(portals);
+		ExpandWorldTree(playground);
+		ExpandWorldTree(arena);
 
 		// Enough frames to outlast a first-run layout rebuild. See
 		// `FocusWorlds`.
 		FocusWorlds = 4;
 
-		Say("new game: four worlds — skygrid, mirrors, meshes and slide — ticking in parallel");
+		Say("new game: seven worlds — skygrid, mirrors, meshes, slide, portals, "
+			"playground and arena — ticking in parallel");
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
@@ -2432,108 +2536,36 @@ namespace studio {
 			Say("script error: " + failure, LogLevel::Error);
 		}
 
+		Runs.push_back(std::move(run));
+
 		// **The client half, and only for Play.** Run is a dedicated server:
 		// there is no client in the process, so there is nothing to replicate to
 		// and a replica world would be a view of nobody. Play is both halves,
-		// which this is what makes true — until now the difference between the
-		// two modes was which scripts ran and what `IsServer()` answered, and a
-		// property that never crossed a wire looked exactly like one that did.
+		// which this is what makes true.
+		//
+		// **After the run is recorded, because `SpawnPlayer` finds the run by
+		// world.** That ordering is not incidental — it is what makes the Play
+		// path and the Spawn Player button the same path, so there is one place
+		// that admits somebody and one place that can be wrong about it.
 		//
 		// **Started after the scripts**, so the join snapshot describes a world
 		// that has been built rather than an empty one. It would converge either
 		// way — the snapshot is re-sent until it is acknowledged — but a client
 		// view that opens blank and fills in reads as a bug in the link.
+		//
+		// **Two clients is what Play asks for by default**, because two is what
+		// turns "the replica disagrees with the server" into "these two clients
+		// disagree", which is the bug class a play test exists for and the one a
+		// single replica cannot show. `--play-clients` is the knob.
 		if (mode == RunMode::Play) {
-			// **One loop, N clients.** Two clients is what turns "the replica
-			// disagrees with the server" into "these two clients disagree",
-			// which is the bug class a play test exists for and the one a single
-			// replica cannot show. The first is pinned to a viewport; the rest
-			// are ordinary worlds reachable from the scene selector, for the
-			// same reason only one was pinned before — a panel per client is
-			// three pictures nobody asked for and a slice of the centre pane
-			// each.
 			for (int client = 0; client < PlayClients; client++) {
-				auto link = std::make_unique<PlayLink>();
-
-				const std::string label =
-					PlayClients == 1 ? std::string("client") : "client " + std::to_string(client + 1);
-
-				std::string linkError;
-				if (link->Start(*Universe, world, Settings.TickRate, linkError, label)) {
-					// **A viewport pinned to it, or the whole thing is invisible.**
-					// The point of a client view is the *difference* between it and
-					// the server's, and a difference nobody is shown is a feature
-					// that exists in a log line. An extra viewport with no world of
-					// its own draws whatever is being edited, so pinning is what
-					// stops the second panel showing the server's scene twice.
-					//
-					// The first free panel, and one that is already pinned somewhere
-					// is left alone: somebody who put a viewport on another scene
-					// meant it, and taking that panel would be the editor
-					// rearranging their layout when they pressed Play.
-					//
-					// **At most one, and this was over-reach when it was written.**
-					// `--run play` starts every world in the game, so a rule of "one
-					// panel per run" opened a viewport per *world* — three or four
-					// pictures nobody asked for, each one a slice of the centre pane
-					// and a turn in `PresentWorld`'s round robin, so every view also
-					// refreshed a third as often. One client view is the feature;
-					// the rest are reachable from the scene selector like any other
-					// world.
-					const bool anotherIsShown =
-						std::any_of(Runs.begin(), Runs.end(), [](const WorldRun &other) {
-							return std::any_of(
-								other.Links.begin(),
-								other.Links.end(),
-								[](const std::unique_ptr<PlayLink> &link) {
-									return link != nullptr && link->IsRunning();
-								}
-							);
-						});
-
-					// **Hoisted out of the loop it disables.** It cannot change
-					// across iterations, so testing it inside the body made a reader
-					// check every iteration for a mutation that is not there.
-					if (!anotherIsShown) {
-						const WorldId replica = link->ReplicaWorld();
-
-						for (ViewportState &view : Extras) {
-							if (view.World.IsValid() && view.World != replica) {
-								continue;
-							}
-
-							view.World = replica;
-							view.Open = true;
-
-							// Where the main camera is, so the two panels start
-							// looking at the same thing from the same place. Two
-							// views of one game from different angles is a
-							// comparison somebody has to do in their head.
-							view.Frame = CameraFrame;
-							view.Yaw = CameraYaw;
-							view.Pitch = CameraPitch;
-							break;
-						}
-					}
-
-					run.Links.push_back(std::move(link));
-				} else {
-					// **Not fatal, and the run goes on without it.** A Play that
-					// refused to start because its client view could not be made
-					// would be a studio you cannot use to fix whatever broke it —
-					// and the server half is exactly what Run already gives, so
-					// there is a working thing to fall back to.
-					Say("no client view: " + linkError, LogLevel::Warning);
-
-					// And no point asking for the rest: whatever refused the first
-					// one refuses them all, and four copies of one warning is a log
-					// nobody reads.
+				if (!SpawnPlayer(world)) {
+					// Whatever refused the first one refuses them all, and four
+					// copies of one warning is a log nobody reads.
 					break;
 				}
 			}
 		}
-
-		Runs.push_back(std::move(run));
 
 		// **The player goes to the first world started.** A run whose player was
 		// nowhere would have the lifecycle close scenes before anybody had

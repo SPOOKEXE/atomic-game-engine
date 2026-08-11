@@ -25,15 +25,15 @@
 //      side;
 //   2. the camera looks back along the face normal, square on to the pane rather
 //      than at its centre — see below, because the difference is not decorative;
-//   3. the near plane is pushed out to the glass, which is the poor-man's
-//      oblique clip: everything between the reflected camera and the pane — the
-//      frame, the back of the pane, whatever the viewer is standing behind —
-//      would otherwise occlude the reflection;
-//   4. the field of view is fitted to the pane's four corners, because no
-//      constant one covers it — the camera stands as far behind the glass as the
-//      viewer stands in front, so the pane subtends the same angle from the
-//      camera as from the viewer, and that grows without bound as somebody walks
-//      up to a mirror;
+//   3. the near plane is skewed onto the pane's own plane — a real oblique
+//      clip, so everything between the reflected camera and the pane (the
+//      frame, the back of the pane, whatever the viewer stands behind) is
+//      dropped at any angle rather than approximately;
+//   4. an off-axis frustum is fitted to the pane's four corners, because no
+//      constant one covers it — the camera stands as far behind the glass as
+//      the viewer stands in front, so the pane subtends the same angle from the
+//      camera as from the viewer, and that grows without bound as somebody
+//      walks up to a mirror;
 //   5. the part is told which surface it shows, so a mirror is a camera parented
 //      to a part and nothing else.
 //
@@ -44,18 +44,48 @@
 // does not cover the pane does not produce a smaller or a softer image — it
 // produces a hard-edged rectangle of reflection floating on a grey wall, which
 // moves and resizes as the viewer walks. That reads as a mirror aimed at the
-// wrong thing, and it is what a fixed 70° field of view did from anywhere closer
-// than a few pane-widths.
+// wrong thing, and it is what a fixed 70 degree field of view did from anywhere
+// closer than a few pane-widths.
 //
 // Aiming along the normal is what makes the fit possible at all. An aim at the
 // pane's centre tilts the view axis by however far the viewer stands to one
 // side, and once the viewer is close *and* off-centre the nearest corner of the
-// pane falls behind the camera — which no field of view covers. Looking along
-// the normal puts every point of the pane at one depth, so the corners are
-// always in front and the angle needed is always finite. It costs nothing: the
-// image is read back through this camera's own matrix, so its orientation
-// decides which texels the pane lands on and never which part of the world it
-// shows. The position is what makes it a reflection.
+// pane falls behind the camera — which no frustum covers. Looking along the
+// normal puts every point of the pane at one depth, so the corners are always in
+// front and the fit is always finite. **Leaning is the frustum's job**, which is
+// exactly what an off-axis one is for: the four edges move independently, so a
+// viewer off to one side gets the pane and not twice its width. It costs nothing
+// in correctness — the image is read back through this camera's own matrix, so
+// its orientation decides which texels the pane lands on and never which part of
+// the world it shows. The position is what makes it a reflection.
+//
+// ## A portal is step 1 with a different map
+//
+// Everything above generalises, and `Portal` is what uses it. Replace "mirror
+// the eye through the pane's plane" with "map it through `destination · source⁻¹`,
+// with a half-turn so the camera looks out of the far side", and the other four
+// steps are unchanged: the same aim along the mapped normal, the same oblique
+// clip at the mapped plane, the same off-axis fit to the mapped corners, the
+// same slot handed to the same pane.
+//
+// **The rectangle that is fitted and clipped against is the mapped *source*
+// pane, never the destination part.** `opaque.frag` shades a fragment of the
+// source pane by projecting it through this camera's matrix, and that only lines
+// up because the camera and the rectangle moved together. Fitting to the
+// destination would be right exactly when the two panes are the same size, and
+// silently wrong — an image sliding across the hole — whenever they are not.
+//
+// A mirror is the same code with the map's fixed points doing the work: a
+// reflection fixes every point of the plane it reflects through, so the mapped
+// rectangle *is* the pane and the mapped plane *is* its plane.
+//
+// **Nothing constrains the two frames to describe one space.** That is not a
+// loophole, it is the feature: a destination turned, moved or scaled anywhere
+// gives a room bigger on the inside or a corridor that turns through more than
+// four right angles, with no second mechanism and no maths past a matrix
+// multiply. `docs/NON-EUCLIDEAN.md` is the investigation, `D00112` is what
+// remains — traversal, which needs a body to move, and in-frame recursion, which
+// is what would remove the one-frame seam on the frame somebody crosses.
 //
 // **Step 5 is what makes this an instance rather than a configuration.** Setting
 // `Visual::Surface` by hand as well as parenting the camera is one fact recorded
@@ -68,26 +98,30 @@
 // curved. A general reflection needs a cube map or a screen-space trace and
 // neither belongs in a pipeline this size.
 //
-// The oblique case is approximate, in two ways worth telling apart.
+// **Two approximations that used to be here are gone, and what replaced them is
+// worth naming because the old text described them as permanent.** The clip was
+// a near plane pushed out *parallel* to the face, which over-clipped at a
+// grazing angle; it is a real skew onto the plane now, which a portal cannot do
+// without — its destination is set into a wall, and the wall would draw across
+// the hole. And the fit was **symmetric about the face normal**, so a viewer off
+// to one side paid for the far edge of the pane on both sides and the mirror was
+// drawn at half the resolution it could be; it is off-axis now. Correctness was
+// never what the second one traded — the coverage was exact either way — only
+// texels.
 //
-// A real planar reflection skews the projection's near plane onto the mirror,
-// which handles a viewer looking at the pane from the side; this clips at a
-// plane parallel to the face instead, so a steep angle clips slightly too much.
+// **What no frustum escapes** is the geometry rather than the parameterisation.
+// A pane subtends half a turn from a point on its own surface, so walking into
+// the glass asks for something no projection covers. `EDGE_ON_MARGIN` is what
+// turns that into a surface that stops drawing rather than a matrix full of
+// infinities, and an off-axis frustum has exactly the same limit — it simply no
+// longer has to clamp on the way there, which is what used to make the fit a
+// step function and read as the mirror flashing.
 //
-// And the fitted frustum is **symmetric about the face normal**, so a viewer
-// off to one side pays for the far edge of the pane on both sides — the texture
-// covers twice the width it needs and the mirror is drawn at half the resolution
-// it could be. An off-axis frustum fits the same four corners with none of that
-// waste and is the right shape here; it needs `render::SurfaceView` to carry the
-// pane's rectangle rather than a field of view, which is the change this is
-// waiting on. Correctness is not what is being traded — the coverage is exact
-// either way — only texels.
-//
-// Neither is escapable by widening. A pane subtends half a turn from a point on
-// its own surface, so walking into the glass asks for a 180° frustum; the fit
-// clamps just short of that and the far corners stop being covered. That is the
-// geometry rather than the parameterisation, and an off-axis frustum has the
-// same limit.
+// **A portal cannot be walked through.** Seeing through a hole is half the
+// feature and moving a body through it is the other; there is no body until the
+// character controller lands. And a surface's texture is a frame old, so the
+// portal chain resolves over frames rather than within one — invisible on a
+// mirror, a seam on the frame somebody crosses. `D00112` carries both.
 //
 // **A camera with no `BasePart` parent is left exactly where it was put.** That
 // is the script-authored arrangement `Mirrors-1-world.luau` used and it still
@@ -150,6 +184,45 @@ namespace engine::scene {
 	//         not counted, because the caller is asking whether there is a
 	//         reflection rather than whether there is a mirror.
 	size_t AimSurfaceCameras(ecs::Store &store);
+
+	// Moves anything that walked into a portal out of the pane it leads to.
+	//
+	// **`D00112`, and the character controller is what it was waiting for.** A
+	// portal has drawn correctly since v0.14 and nothing could go through one,
+	// because nothing in this engine had a body to move — the deferral says so
+	// in as many words. This is the other half, and it is four lines of
+	// arithmetic because the hard part was already done: the transform that maps
+	// the source pane onto the destination is the *same* one `AimSurfaceCameras`
+	// puts the camera through, so a body crossing is multiplied by exactly what
+	// the picture was.
+	//
+	// **Derived here rather than read off `SurfaceLens::Mapping`.** That
+	// component is presentation — it is fitted to the local eye and
+	// `replication::LocalToTheClient` keeps it off the wire — so a dedicated
+	// server, which never aims a surface at all, has no lens to read. Traversal
+	// is simulation and must not depend on anything a headless host skips.
+	//
+	// **A crossing is a segment, not a position**, which is what makes it work
+	// at speed. A character walking at sixteen metres a second covers a quarter
+	// of a metre a tick, and a test that asked "is it inside the pane now" would
+	// miss the tick it was on either side of. `PreviousTransform` is where it
+	// was when the tick started, and the test is whether the line between the
+	// two changes sign through the pane's plane inside the pane's rectangle.
+	//
+	// **Velocity is mapped too, and forgetting it is the bug that looks like
+	// physics.** The body arrives at the far pane with the speed it had, aimed
+	// the way it was aimed — in the old frame. Without the rotation it walks out
+	// of the destination sideways, or backwards through the hole it just came
+	// out of, which reads as the portal spitting people back.
+	//
+	// **Runs in `PostSimulation`, after the solver has moved the body**, so what
+	// is tested is where the tick actually ended rather than where it was
+	// heading. `physics::RegisterCharacterSystems` installs it.
+	//
+	// @param store The world.
+	// @return How many bodies crossed. Zero in every scene with no portal in it.
+	// @since v0.14
+	size_t CrossPortals(ecs::Store &store);
 
 	// Appends a thin translucent bar lying on each face a surface camera
 	// projects off.

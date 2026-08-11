@@ -1,7 +1,11 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/game/Play.hpp>
 #include <engine/replication/Defaults.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -31,7 +35,8 @@ namespace studio {
 		engine::world::WorldId authority,
 		double tickRate,
 		std::string &error,
-		std::string_view label
+		std::string_view label,
+		engine::ecs::Entity adopt
 	) {
 		if (IsRunning()) {
 			error = "this link is already running";
@@ -78,6 +83,57 @@ namespace studio {
 
 		Handle = Server.Admit();
 
+		// **A player and a body in the authority, and the identity in the
+		// replica.** This is the studio's version of what `mono.server` does on
+		// `OnAdmitted` — a client that is admitted and given nothing to be is a
+		// client that watches. The two halves are the same two halves there:
+		// the world gains a `Player` and a character, and the viewer is told
+		// which player is its own.
+		//
+		// **Told by writing the resource rather than by sending
+		// `game::JoinNotice`.** That message exists because a socket is the only
+		// way to reach another process; here the two worlds are two stores in
+		// one address space and the notice would be a byte buffer encoded and
+		// decoded between two lines of the same function. What crosses a
+		// *world* boundary is still nothing — this writes a resource into each
+		// world while holding it, which is the same discipline every other
+		// studio pass follows.
+		universe.Enter(authority, [this, label, adopt](Store &store) {
+			// **An adopted player is already in the world with a body.** A
+			// teleport rebuilt them there from the arriving payload; admitting a
+			// second would put the same person in twice, which is the one thing
+			// following a teleport must not do.
+			if (adopt != engine::ecs::NULL_ENTITY && store.Alive(adopt)) {
+				Player_ = adopt;
+				return;
+			}
+
+			if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
+				// A world with no `Players` service gets no player, quietly.
+				// `mono.server` says the same: that is the placeholder scene,
+				// which is furnished by nobody.
+				return;
+			}
+
+			Player_ = engine::scene::AddPlayer(store, label);
+			if (Player_ != engine::ecs::NULL_ENTITY) {
+				(void)engine::scene::LoadCharacter(store, Player_);
+			}
+		});
+
+		if (Player_ != engine::ecs::NULL_ENTITY) {
+			universe.Enter(authority, [this](Store &store) {
+				const Name held = store.InstanceNameOf(Player_);
+				PlayerName_ = held.IsValid() ? std::string(held.Text()) : std::string();
+			});
+		}
+
+		if (Player_ != engine::ecs::NULL_ENTITY) {
+			universe.Enter(replica, [this](Store &store) {
+				store.SetResource(engine::scene::LocalPlayer{Player_});
+			});
+		}
+
 		Authority_ = authority;
 		Replica_ = replica;
 		Last = LinkReport{};
@@ -98,6 +154,44 @@ namespace studio {
 		LinkReport report;
 		report.TotalMessages = Last.TotalMessages;
 		report.TotalBytes = Last.TotalBytes;
+
+		// --- what the client wants, going up ---------------------------------
+		//
+		// **Before the publish, so a move made this frame is in the tick this
+		// frame describes.** After it, every input would be one tick late and
+		// the character would answer the keyboard a tick behind — invisible at
+		// sixty ticks and exactly the kind of lag nobody can find by reading the
+		// controller.
+		//
+		// **Through the real codec, even though nothing is being sent.** There
+		// is no socket here — that is the whole point of this class — but
+		// `game::EncodeMoveInput` and `game::DecodeMoveInput` are what a real
+		// client's bytes go through, and running them costs nothing and means
+		// the editor exercises the format rather than a shortcut past it. It
+		// also puts the *validation* on the same side it is on for a real
+		// client: the direction the authority acts on is the normalised, finite
+		// one the decoder produced.
+		if (Player_ != engine::ecs::NULL_ENTITY) {
+			engine::game::MoveInput wanted;
+
+			universe.Enter(Replica_, [this, &wanted](Store &store) {
+				const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
+				wanted.Direction = intent.Direction;
+
+				// The direction is a *hold* and reads correctly from whatever
+				// frame this lands on; the jump is an edge and does not. See
+				// `PlayLink::Jump`.
+				wanted.Jump = intent.Jump || PendingJump;
+			});
+
+			engine::game::MoveInput arrived;
+			if (engine::game::DecodeMoveInput(engine::game::EncodeMoveInput(wanted), arrived)) {
+				universe.Enter(Authority_, [this, &arrived](Store &store) {
+					(void)engine::game::ApplyMoveInput(store, Player_, arrived);
+				});
+				PendingJump = false;
+			}
+		}
 
 		// Publish while the authority store is scoped; its outgoing span is borrowed.
 		universe.Enter(Authority_, [this, &report](Store &store) {
@@ -140,6 +234,21 @@ namespace studio {
 		if (!IsRunning()) {
 			return;
 		}
+
+		// **The player goes before the world it is a player of.** Destroying the
+		// instance is what makes `scene.ownership`'s reclaim fire — a body owned
+		// by an entity that is no longer alive is a body nothing will ever
+		// simulate again — and it takes the character with it, because
+		// `RemoveCharacter` is what `DestroyInstance` on a `Player` cannot do
+		// for itself.
+		if (Player_ != engine::ecs::NULL_ENTITY && Authority_.IsValid()) {
+			const engine::ecs::Entity player = Player_;
+			universe.Enter(Authority_, [player](Store &store) {
+				(void)engine::scene::RemoveCharacter(store, player);
+				store.DestroyInstance(player);
+			});
+		}
+		Player_ = engine::ecs::Entity{};
 
 		// Clear handles before destroying the world; other editor systems inspect them.
 		const engine::world::WorldId replica = Replica_;

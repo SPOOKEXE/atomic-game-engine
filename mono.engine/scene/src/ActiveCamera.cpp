@@ -3,6 +3,8 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cmath>
+
 namespace engine::scene {
 
 	CameraMatrices ResolveCamera(const core::CFrame &frame, const Camera &camera, float aspectRatio) {
@@ -27,6 +29,79 @@ namespace engine::scene {
 		matrices.View = glm::inverse(frame.ToMatrix());
 		matrices.Projection =
 			glm::perspective(camera.FieldOfViewRadians, aspectRatio, camera.NearPlane, camera.FarPlane);
+		matrices.ViewProjection = matrices.Projection * matrices.View;
+		return matrices;
+	}
+
+	glm::mat4 SurfaceProjection(const SurfaceLens &lens, const core::CFrame &frame) {
+		// A degenerate rectangle divides by zero and spreads infinities into
+		// every bound derived from the matrix. Identity is the value a consumer
+		// can draw nothing from safely, which is the same answer `ResolveCamera`
+		// gives a zero aspect ratio.
+		if (!(lens.Right > lens.Left) || !(lens.Top > lens.Bottom) || !(lens.NearPlane > 0.0f) ||
+			!(lens.FarPlane > lens.NearPlane)) {
+			return glm::mat4(1.0f);
+		}
+
+		glm::mat4 projection =
+			glm::frustum(lens.Left, lens.Right, lens.Bottom, lens.Top, lens.NearPlane, lens.FarPlane);
+
+		// No plane means no skew, which is what an unparented surface camera
+		// and a degenerate placement both land on.
+		const float normalLength = lens.ClipNormal.Magnitude();
+		if (!(normalLength > 0.0f)) {
+			return projection;
+		}
+
+		const core::Vector3 unit = lens.ClipNormal / normalLength;
+		const glm::vec4 world(unit.X, unit.Y, unit.Z, -lens.ClipDistance / normalLength);
+
+		// **Into view space by the transpose of the camera's frame, not by its
+		// inverse.** A plane is a covector: points go `p_view = View * p_world`
+		// with `View = inverse(frame)`, so a plane goes by `inverse(View)`
+		// transposed — and `inverse(View)` is the frame matrix itself. Using the
+		// view matrix here instead compiles, runs, and clips against a plane
+		// that is wrong wherever the camera is rotated.
+		const glm::vec4 clip = glm::transpose(frame.ToMatrix()) * world;
+
+		// The camera sits on the plane, so there is no half to keep. Skewing
+		// against it produces a matrix with no volume in front of it and the
+		// surface renders black.
+		constexpr float ON_THE_PLANE = 1.0e-4f;
+		if (std::abs(clip.w) < ON_THE_PLANE) {
+			return projection;
+		}
+
+		// The frustum corner furthest towards the plane, in view space. Scaling
+		// the substituted row by this is what keeps the far plane at 1 instead
+		// of crushing the usable depth range into whatever the skew left.
+		//
+		// glm is column-major, so `projection[column][row]`.
+		const glm::vec4 corner(
+			(std::copysign(1.0f, clip.x) + projection[2][0]) / projection[0][0],
+			(std::copysign(1.0f, clip.y) + projection[2][1]) / projection[1][1],
+			-1.0f,
+			(1.0f + projection[2][2]) / projection[3][2]
+		);
+
+		// **`C / (C · Q)` and nothing subtracted**, which is the `0..1` form.
+		// See the header: the `-1..1` derivation doubles this and subtracts the
+		// `w` row, and using it under `GLM_FORCE_DEPTH_ZERO_TO_ONE` puts the
+		// near plane in the wrong place in a way that looks like z-fighting.
+		const glm::vec4 substituted = clip * (1.0f / glm::dot(clip, corner));
+
+		projection[0][2] = substituted.x;
+		projection[1][2] = substituted.y;
+		projection[2][2] = substituted.z;
+		projection[3][2] = substituted.w;
+
+		return projection;
+	}
+
+	CameraMatrices ResolveSurfaceCamera(const core::CFrame &frame, const glm::mat4 &projection) {
+		CameraMatrices matrices;
+		matrices.View = glm::inverse(frame.ToMatrix());
+		matrices.Projection = projection;
 		matrices.ViewProjection = matrices.Projection * matrices.View;
 		return matrices;
 	}

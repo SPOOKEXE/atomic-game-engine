@@ -862,6 +862,129 @@ namespace engine::scene {
 		uint8_t Reserved[1] = {};
 	};
 
+	// Where a surface camera sends the other end of its hole.
+	//
+	// **A portal is a `SurfaceCamera` with a different rule for where it
+	// stands, and this component is that rule.** Everything downstream is
+	// unchanged: the camera is still placed by `AimSurfaceCameras`, still
+	// rendered by the surface pass, still projected onto the pane by
+	// `opaque.frag`, still filtered by `TagFilter`. What changes is one matrix —
+	// a mirror reflects the eye through its own plane, and a portal maps it
+	// through `destination · source⁻¹`.
+	//
+	// **The non-Euclidean part is that nothing constrains the pair of frames to
+	// describe one space.** A destination rotated, moved or scaled anywhere at
+	// all gives a room bigger on the inside, or a corridor that turns through
+	// more than four right angles — with no separate feature, no exotic maths
+	// and no second renderer. `docs/NON-EUCLIDEAN.md` is the investigation that
+	// settled this, and it is the whole insight of the demo it was filed
+	// against.
+	//
+	// @since v0.14
+	struct Portal {
+		// The part this one leads to.
+		//
+		// **An entity rather than a name, because both ends are in one world.**
+		// Rule 3 forbids a handle that crosses a world boundary and this never
+		// does: a portal pairs two parts of one store, which is exactly the case
+		// `PropertyType::Reference` exists for.
+		//
+		// `NULL_ENTITY`, or a destination that has been deleted, **falls back to
+		// a mirror** rather than to a blank pane. A surface that stopped
+		// reflecting reads as something to go and fix; a pane that vanished
+		// reads as a rendering bug.
+		ecs::Entity Destination;
+	};
+
+	// The frustum a surface camera renders through, fitted to its pane.
+	//
+	// **Derived every frame and never authored**, which is why it is a component
+	// rather than a property: `AimSurfaceCameras` writes it beside the
+	// `Transform` it writes, from the same measurement of the same pane, and a
+	// number here that disagreed with that placement would be a frustum aimed at
+	// somewhere the camera is not.
+	//
+	// **It does not cross the wire.** A reflection is *of the viewer*, so a lens
+	// computed on the authority is correct for the authority's camera and wrong
+	// for every client watching — `client/Replicated.hpp` states that rule for
+	// the placement and this is the same fact. `replication::LocalToTheClient`
+	// names it, and both ends recompute it from the mirror that *does* cross.
+	//
+	// **Off-axis, which is what makes it a window rather than a cone.** The four
+	// extents are independent, so a viewer standing to one side gets a frustum
+	// that leans — covering exactly the pane and nothing else. The symmetric fit
+	// this replaces spent half its texels on the far side of the face normal,
+	// and `SurfaceCameras.hpp` named an off-axis frustum as what it was waiting
+	// for.
+	//
+	// @since v0.14
+	struct SurfaceLens {
+		// The frustum's edges at `NearPlane`, in view space.
+		//
+		// Signed and independent: `Left` is negative and `Right` positive for a
+		// viewer square on, and both slide the same way as the viewer moves
+		// aside. That asymmetry is the point — see the type's comment.
+		//@{
+		float Left = -0.1f;
+		float Right = 0.1f;
+		float Bottom = -0.1f;
+		float Top = 0.1f;
+		//@}
+
+		// Near clipping distance, in metres. The extents above are measured at
+		// this plane, so the two cannot be read apart.
+		float NearPlane = 0.1f;
+
+		// Far clipping distance, in metres.
+		float FarPlane = 500.0f;
+
+		// The plane everything behind is clipped against, in world space.
+		//
+		// **A real oblique clip, and on a portal it is not optional.** The
+		// destination is set into a wall, so the wall itself, its back face and
+		// whatever stands behind it are all inside the frustum and would draw
+		// over the view — the hole would show the back of the wall it leads
+		// through. Skewing the projection's near plane onto this one is
+		// Lengyel's method and is what removes them.
+		//
+		// A mirror wants the same thing for a smaller reason: the pane's own
+		// plane, so the frame and the back of the glass do not occlude the
+		// reflection. That used to be approximated by pushing `NearPlane` out
+		// parallel to the face, which over-clips at grazing angles.
+		//
+		// **A zero normal means no oblique clip**, and the ordinary near plane
+		// is used unmodified. That is what an unparented surface camera gets.
+		core::Vector3 ClipNormal;
+
+		// The plane's distance along `ClipNormal` from the origin, so that a
+		// point `p` is kept when `ClipNormal · p - ClipDistance >= 0`.
+		float ClipDistance = 0.0f;
+
+		// What moved the pane into the space this camera was fitted to.
+		//
+		// **The other half of the portal, and without it a hole shows nothing.**
+		// A pane reads its image by projecting *its own world position* through
+		// the camera's matrix — `opaque.vert` does exactly that. For a mirror
+		// the camera was fitted to the pane where it stands, so the raw position
+		// lands on the image. For a portal the camera was fitted to the pane
+		// **mapped to the destination**, three hundred units away in the demo,
+		// and the raw position projects to somewhere outside the frustum
+		// entirely: every fragment fails the `0..1` test and the pane falls back
+		// to its own colour. That is a portal that places a camera, fits a
+		// frustum, renders a texture and shows none of it.
+		//
+		// So the sampling matrix is `ViewProjection · Mapping` while the surface
+		// is *rendered* with `ViewProjection` alone. The two are one code path
+		// again, because this is the same transform the placement used.
+		//
+		// **Identity for a mirror rather than the reflection**, and the two
+		// agree wherever it matters: a reflection fixes every point of the plane
+		// it reflects through, so on the pane's own face they are the same map.
+		// They differ off it — the sides and back of the pane's box — and
+		// identity is what a mirror has always sampled with there.
+		core::CFrame Mapping;
+	};
+
 	// A point on a part, carried with it.
 	//
 	// **The one exception to "every transform here is world space and nothing

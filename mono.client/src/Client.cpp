@@ -7,16 +7,19 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/game/Play.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -1025,6 +1028,25 @@ namespace client {
 			*Socket, *server, engine::core::Clock::Seconds(), connector
 		);
 
+		// **Which player is this client's, which nothing else can tell it.**
+		// `scene::LocalPlayer` cannot be replicated — a resource is one row and
+		// the answer differs per client — so the host says it once over the user
+		// channel. `game/Play.hpp` carries the whole argument.
+		Connection->OnUserMessage([this](std::span<const std::byte> message) {
+			engine::game::JoinNotice notice;
+			if (!engine::game::DecodeJoinNotice(message, notice)) {
+				// Somebody else's message on a shared channel. Ignored rather
+				// than counted: the tag exists so that this is a non-event.
+				return;
+			}
+
+			Universe_->Enter(Replicated, [notice](engine::ecs::Store &store) {
+				store.SetResource(engine::scene::LocalPlayer{notice.Player});
+			});
+
+			ENGINE_INFO("client: this is player {}", notice.Player.Id);
+		});
+
 		if (Discovery != nullptr) {
 			// The connector owns the drain from here. Rendezvous traffic keeps
 			// arriving on this socket — the registration this client's peer is
@@ -1039,6 +1061,72 @@ namespace client {
 
 		ENGINE_INFO("connecting to {} from {}", server->Text(), Socket->Local().Text());
 		return true;
+	}
+
+	void Client::WriteInput(engine::ecs::Store &store) {
+		auto *state = store.ResourceMutable<engine::scene::InputState>();
+		if (state == nullptr) {
+			return;
+		}
+
+		// **The behaviour is read back, not overwritten.** A script sets
+		// `UserInputService.MouseBehavior` and the client applies it to the
+		// window; copying the whole translator over the resource would throw
+		// that away every frame. `scene::InputState` is the seam in both
+		// directions.
+		const engine::scene::MouseBehavior wanted = state->Behaviour;
+		*state = Input.State();
+		state->Behaviour = wanted;
+		PointerMode = wanted;
+
+		// Latched here, where every frame is seen — `PendingJump` says why the
+		// submission cannot read the edge for itself.
+		if (state->Focused && state->WasKeyPressed(engine::scene::KeyCode::Space)) {
+			PendingJump = true;
+		}
+	}
+
+	void Client::SubmitMove(double nowSeconds) {
+		if (Connection == nullptr || !Connection->Admitted()) {
+			return;
+		}
+
+		engine::game::MoveInput move;
+		uint64_t tick = 0;
+
+		Universe_->Enter(Replicated, [this, &move, &tick](engine::ecs::Store &store) {
+			// **Only once there is a body**, because until the join notice
+			// arrives and the character replicates there is nothing for a move
+			// to mean — and a host that received one would look up a player,
+			// find no character, and do the work of deciding that every tick.
+			if (const auto *local = store.Resource<engine::scene::LocalPlayer>();
+				local == nullptr ||
+				engine::scene::CharacterOf(store, local->Instance) == engine::ecs::NULL_ENTITY) {
+				return;
+			}
+
+			// The same arithmetic a single-player character uses, which is what
+			// `scene::ReadMoveIntent` was split out for: W has to mean "away
+			// from the camera" on a client exactly as it does everywhere else,
+			// and the camera it is relative to is this world's.
+			const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
+			move.Direction = intent.Direction;
+			tick = store.Time().Tick;
+		});
+
+		if (tick == 0) {
+			return;
+		}
+
+		move.Jump = PendingJump;
+
+		// **Sent every tick, including the still ones.** A client that only
+		// spoke when its keys changed would leave a character walking for ever
+		// after a dropped release — an input channel is unreliable by design,
+		// and "still walking" is the failure a state-change protocol produces.
+		if (Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
+			PendingJump = false;
+		}
 	}
 
 	void Client::PollServer(double nowSeconds) {
@@ -1333,6 +1421,11 @@ namespace client {
 			// the systems and made a bad connection read as a slow game.
 			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::Network);
 			PollServer(engine::core::Clock::Seconds());
+
+			// **After the poll, so a move is stamped with the tick this client
+			// has just finished receiving** — a submission tagged with a tick
+			// the server has not reached is one it rewinds against nothing.
+			SubmitMove(engine::core::Clock::Seconds());
 		}
 
 		// After the tick and the replica's apply, so what a script set this
@@ -1380,20 +1473,7 @@ namespace client {
 				// polling `UserInputService` there should get the same answer —
 				// the alternative is input that works in one world and silently
 				// does not in another.
-				Universe_->Enter(id, [this](engine::ecs::Store &store) {
-					if (auto *state = store.ResourceMutable<engine::scene::InputState>()) {
-						// **The behaviour is read back, not overwritten.** A
-						// script sets `UserInputService.MouseBehavior` and the
-						// client applies it to the window; copying the whole
-						// translator over the resource would throw that away every
-						// frame. `scene::InputState` is the seam in both
-						// directions.
-						const engine::scene::MouseBehavior wanted = state->Behaviour;
-						*state = Input.State();
-						state->Behaviour = wanted;
-						PointerMode = wanted;
-					}
-				});
+				Universe_->Enter(id, [this](engine::ecs::Store &store) { WriteInput(store); });
 
 				Universe_->Present(id, delta, Universe_->AlphaOf(id));
 
@@ -1483,6 +1563,14 @@ namespace client {
 			// at where the client stood last frame.
 			if (ReportedJoin) {
 				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
+					// **The replica takes this frame's input like a simulated
+					// world does**, because since v0.14 it has a camera and a
+					// character of its own to drive. It is not in `Simulated` —
+					// it never will be, nothing here is stepped — so it is
+					// written here rather than by widening that loop to mean
+					// something other than what it says.
+					WriteInput(store);
+
 					(void)AimReplicaViewer(store, ComposedFrame, ComposedCamera);
 				});
 
@@ -1493,13 +1581,28 @@ namespace client {
 					if (list == nullptr) {
 						return;
 					}
+
+					// **Read back rather than assumed**, which folds two cases
+					// into one: with no character the replica's camera *is*
+					// `ComposedFrame`, because that is what `AimReplicaViewer`
+					// just put there, and with one it is where the player is
+					// standing. Publishing the composed frame unconditionally
+					// was the version that showed the local scene's viewpoint
+					// over the server's world.
+					engine::core::CFrame frame = ComposedFrame;
+					engine::scene::Camera lens = ComposedCamera;
+
+					if (const auto *active = store.Resource<engine::scene::ActiveCamera>()) {
+						const auto *placement = store.Get<engine::scene::Transform>(active->Entity);
+						const auto *found = store.Get<engine::scene::Camera>(active->Entity);
+						if (placement != nullptr && found != nullptr) {
+							frame = placement->Frame;
+							lens = *found;
+						}
+					}
+
 					Views.Publish(
-						Replicated,
-						ComposedFrame,
-						ComposedCamera,
-						list->Instances,
-						store.Time().Tick,
-						store.Time().Alpha
+						Replicated, frame, lens, list->Instances, store.Time().Tick, store.Time().Alpha
 					);
 				});
 			}

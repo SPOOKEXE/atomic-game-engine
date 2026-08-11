@@ -108,6 +108,57 @@ namespace engine::scene {
 	// @return The resolved view, projection and their product.
 	CameraMatrices ResolveCamera(const core::CFrame &frame, const Camera &camera, float aspectRatio);
 
+	// The projection a surface camera renders through.
+	//
+	// **Off-axis, so it is a window rather than a cone.** The four extents are
+	// independent, so a frustum fitted to a pane from off to one side leans
+	// instead of widening symmetrically about the view axis — which is the same
+	// coverage at twice the texel density, and what `SurfaceCameras.hpp` named
+	// as the change it was waiting for.
+	//
+	// **Then skewed, if the lens carries a clip plane.** Lengyel's oblique
+	// frustum: the near plane is moved onto `SurfaceLens::ClipNormal` so nothing
+	// behind it survives clipping. A mirror wants that for its own pane, so the
+	// frame and the back of the glass cannot occlude the reflection; a portal
+	// *needs* it, because its destination is set into a wall and the wall would
+	// otherwise draw across the hole it leads through.
+	//
+	// **Written for `0..1` depth, and the difference is not cosmetic.**
+	// Lengyel's published derivation maps the near plane to `-1`, so it
+	// substitutes `C·2/(C·Q)` and subtracts the `w` row. `GLM_FORCE_DEPTH_ZERO_TO_ONE`
+	// is pinned engine-wide in `core`'s build, where near is `0` — so the
+	// substitution is `C/(C·Q)` and nothing is subtracted. Using the other form
+	// here would put the near plane half a unit into the scene and read as
+	// z-fighting rather than as a matrix mistake, which is the trap
+	// `CameraMatrices` above already warns about.
+	//
+	// The camera must be on the near side of the clip plane, which is the
+	// arrangement `AimSurfaceCameras` builds: the normal points away from the
+	// camera, into the space being looked at. A camera level with its own clip
+	// plane gets the plain frustum, because there is no half to keep.
+	//
+	// @param lens  The fitted extents and the plane, in world space.
+	// @param frame The camera's world-space placement, which is what takes the
+	//        plane into view space.
+	// @return The projection alone. Compose it with `ResolveSurfaceCamera`.
+	// @since v0.14
+	glm::mat4 SurfaceProjection(const SurfaceLens &lens, const core::CFrame &frame);
+
+	// Builds the matrices for a camera whose projection is already decided.
+	//
+	// **The surface path's `ResolveCamera`.** A surface camera's frustum is not
+	// a field of view — it is fitted to a pane and possibly skewed — so there is
+	// nothing for `ResolveCamera` to derive it from. This exists so the one
+	// convention that still has to be shared, `View = inverse(frame)` and
+	// `ViewProjection = Projection * View`, stays in this file rather than being
+	// repeated wherever a projection is handed in.
+	//
+	// @param frame      The camera's world-space placement.
+	// @param projection The projection to use as given.
+	// @return The resolved view, projection and their product.
+	// @since v0.14
+	CameraMatrices ResolveSurfaceCamera(const core::CFrame &frame, const glm::mat4 &projection);
+
 	// Refreshes the world's `ActiveCamera` matrices from the row it names.
 	//
 	// A `void(Store &)` and nothing else, so it registers as an ordinary

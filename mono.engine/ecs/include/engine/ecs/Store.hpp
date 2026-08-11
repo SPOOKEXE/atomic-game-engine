@@ -1314,6 +1314,42 @@ namespace engine::ecs {
 		//
 		// Does nothing for a component nobody observes, and nothing to a table
 		// with no bits.
+		// Records that one row's component changed, without writing it.
+		//
+		// **For the writer that cannot report its own writes**, and there is
+		// exactly one shape of those: a parallel pass. `Store::EachParallel`
+		// hands out raw references from worker threads, so it cannot mark
+		// anything — marking is a write to a shared bitset and that is the one
+		// thing a parallel body may not do. `physics::IntegrateMotion` is the
+		// pass in question and its comment has said since v0.4 that a consumer
+		// needing a delta out of an integrated world "marks it in its own
+		// publish step". This is what that sentence needed and did not have.
+		//
+		// **Not `MarkAllChanged`, and the difference is the whole point.** That
+		// one claims every row carrying the component moved, including anchored
+		// geometry — which defeats `physics::SyncBroadphase`'s outer gate and
+		// rebuilds the static index every tick, for ever. This claims one row.
+		//
+		// `GetMutable` would also mark it, and calling that for the side effect
+		// is what this replaces: a discarded pointer reads as a mistake and gets
+		// tidied away by somebody who cannot see what it was for.
+		//
+		// A no-op for a dead entity, for a component the row does not carry, and
+		// for a component nobody is observing.
+		//
+		// @param entity The row.
+		// @since v0.14
+		template <class T> void MarkChanged(Entity entity) {
+			RequireOwningThread("MarkChanged");
+			MarkChangedRaw(entity, Components::Of<T>());
+		}
+
+		// `MarkChanged<T>`, for a component named at run time.
+		//
+		// @param entity    The row.
+		// @param component The component.
+		void MarkChangedRaw(Entity entity, ComponentId component);
+
 		template <class T> void MarkAllChanged() {
 			RequireOwningThread("MarkAllChanged");
 			MarkAllChangedRaw(Components::Of<T>());

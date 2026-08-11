@@ -229,6 +229,7 @@ declare namespace Enum {
 	interface ParticleFlipbookMode extends EnumItem { readonly __enum: "ParticleFlipbookMode"; }
 	interface ParticleOrientation extends EnumItem { readonly __enum: "ParticleOrientation"; }
 	interface ScaleType extends EnumItem { readonly __enum: "ScaleType"; }
+	interface ScriptLanguage extends EnumItem { readonly __enum: "ScriptLanguage"; }
 	interface ScrollingDirection extends EnumItem { readonly __enum: "ScrollingDirection"; }
 	interface ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
@@ -425,6 +426,10 @@ declare namespace Enum {
 		readonly Tile: ScaleType;
 		readonly Fit: ScaleType;
 		readonly Crop: ScaleType;
+	};
+	const ScriptLanguage: {
+		readonly Luau: ScriptLanguage;
+		readonly JavaScript: ScriptLanguage;
 	};
 	const ScrollingDirection: {
 		readonly X: ScrollingDirection;
@@ -737,17 +742,27 @@ declare interface BasePart extends PVInstance {
 	AlphaCutoff: number;
 	AlphaMode: Enum.AlphaMode;
 	Anchored: boolean;
+	AngularDamping: number;
 	CanCollide: boolean;
 	CastShadow: boolean;
 	CollisionGroup: string;
 	Color: Color3;
+	CustomPhysicalProperties: boolean;
+	Density: number;
+	Elasticity: number;
+	Friction: number;
+	LinearDamping: number;
 	Locked: boolean;
+	readonly Mass: number;
 	Size: Vector3;
 	Transparency: number;
 	Visible: boolean;
 }
 
 declare interface Part extends BasePart {
+}
+
+declare interface Model extends PVInstance {
 }
 
 declare interface MeshPart extends BasePart {
@@ -768,6 +783,10 @@ declare interface SurfaceCamera extends Camera {
 	Face: Enum.NormalId;
 	ImageTransparency: number;
 	TagFilter: string;
+}
+
+declare interface Portal extends SurfaceCamera {
+	Destination: Instance;
 }
 
 declare interface Sound extends Instance {
@@ -830,7 +849,7 @@ declare interface LocalizationTable extends ValueBase {
 
 declare interface LuaSourceContainer extends Instance {
 	Disabled: boolean;
-	Source: string;
+	Language: Enum.ScriptLanguage;
 }
 
 declare interface Script extends LuaSourceContainer {
@@ -1258,6 +1277,7 @@ declare interface Players extends Service {
 }
 
 declare interface Player extends Instance {
+	Character: Instance;
 }
 
 // --- the bus services ------------------------------------------------------
@@ -1282,6 +1302,11 @@ declare interface MessagingService {
 	SubscribeAsync(topic: string, handler: (message: unknown) => void): void;
 }
 
+declare interface TeleportService {
+	Teleport(placeName: string, player: Instance, data?: unknown): void;
+	GetLocalPlayerTeleportData(): unknown;
+}
+
 declare interface MemoryStoreService {
 	GetAsync(key: string): Promise<StoreReply>;
 	SetAsync(key: string, value: unknown): Promise<StoreReply>;
@@ -1302,6 +1327,7 @@ declare interface RunService {
 // --- the globals -----------------------------------------------------------
 
 declare const MessagingService: MessagingService;
+declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
@@ -1382,9 +1408,11 @@ declare const Instance: {
 		(className: "PVInstance", parent?: Instance): PVInstance;
 		(className: "BasePart", parent?: Instance): BasePart;
 		(className: "Part", parent?: Instance): Part;
+		(className: "Model", parent?: Instance): Model;
 		(className: "MeshPart", parent?: Instance): MeshPart;
 		(className: "Camera", parent?: Instance): Camera;
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
+		(className: "Portal", parent?: Instance): Portal;
 		(className: "Sound", parent?: Instance): Sound;
 		(className: "Attachment", parent?: Instance): Attachment;
 		(className: "Material", parent?: Instance): Material;

@@ -30,6 +30,7 @@ using engine::scene::Collider;
 using engine::scene::MaterialRef;
 using engine::scene::Motion;
 using engine::scene::NormalId;
+using engine::scene::Portal;
 using engine::scene::PreviousTransform;
 using engine::scene::QuickHash;
 using engine::scene::Rendered;
@@ -38,6 +39,7 @@ using engine::scene::ShapeKind;
 using engine::scene::Surface;
 using engine::scene::SurfaceCamera;
 using engine::scene::SurfaceEffect;
+using engine::scene::SurfaceLens;
 using engine::scene::Transform;
 using engine::scene::Visual;
 using engine::scene::WorldBounds;
@@ -58,6 +60,8 @@ TEST_CASE("every component is trivially copyable", "[scene][components]") {
 	CHECK(std::is_trivially_copyable_v<Surface>);
 	CHECK(std::is_trivially_copyable_v<Visual>);
 	CHECK(std::is_trivially_copyable_v<Camera>);
+	CHECK(std::is_trivially_copyable_v<Portal>);
+	CHECK(std::is_trivially_copyable_v<SurfaceLens>);
 	CHECK(std::is_trivially_copyable_v<QuickHash>);
 }
 
@@ -99,6 +103,24 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 									 sizeof(NormalId) + sizeof(SurfaceEffect) + 1
 	);
 	CHECK(offsetof(SurfaceCamera, Reserved) + sizeof(SurfaceCamera::Reserved) == sizeof(SurfaceCamera));
+
+	// **A portal is one handle and no reserve**, because there is nothing a
+	// second field of it could mean: which part the hole leads to is the whole
+	// of the component, and anything else about a portal is already a
+	// `SurfaceCamera` property. An `Entity` is an index and a generation, which
+	// is why this has no padding to name.
+	CHECK(sizeof(Portal) == sizeof(engine::ecs::Entity));
+
+	// **Ten floats and a `CFrame`, and not one byte more.** A fitted frustum is
+	// four extents, two distances and a plane, and the placement the pane was
+	// mapped by rides with it — a portal's frustum is fitted to the *mapped*
+	// source pane, so the transform that mapped it is part of the answer rather
+	// than something to look up again. A `CFrame` is a `Vector3` and a
+	// quaternion, both four-byte aligned, so it opens no hole beside the floats.
+	// A member of another width added here would, and a hole in a component is
+	// uninitialised bytes in a snapshot.
+	CHECK(sizeof(SurfaceLens) == 10 * sizeof(float) + sizeof(engine::core::CFrame));
+	CHECK(offsetof(SurfaceLens, Mapping) + sizeof(engine::core::CFrame) == sizeof(SurfaceLens));
 
 	// A face is one byte, so a component can hold one without the row noticing.
 	CHECK(sizeof(NormalId) == sizeof(uint8_t));

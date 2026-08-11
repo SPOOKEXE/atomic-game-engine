@@ -661,12 +661,47 @@ example, so seeing one is a command rather than a path to look up:
 | `run-interface` | a `ScreenGui` built entirely from a script |
 | `run-mirrors` | one room of mirrors, each with a different effect — the rendering path |
 | `run-mirrors-4-worlds` | four worlds composited into one frame |
+| `run-portals` | three rooms, six holes, and a space that cannot exist |
+| `run-non-euclidean` | six exhibits, each a room that lies about its own size |
 | `run-meshes` | imported meshes and textures. Wants `--cdn` |
 | `run-mesh-grid` | bakes and publishes art, then draws it |
+| `run-local-server` | one server and several clients, all on this machine |
+
+### Somebody to be *(v0.14)*
+
+```sh
+scripts/demos/run-local-server.sh              # a server and two clients
+scripts/demos/run-local-server.sh 4            # four clients instead
+PORT=9100 scripts/demos/run-local-server.sh    # a different port
+SCENE=Slide.luau scripts/demos/run-local-server.sh
+```
+
+**A server hosting `Playground.luau`, and a client window per player.** Each one
+is admitted, given a blocky character on the spawn pad and told which player it
+is; WASD walks it, Space jumps, the right mouse button turns the camera. Every
+client sees every other character move, because the movement happens once — on
+the server — and what crosses is the intent going up and the transform coming
+down.
+
+**This is not `mono.unified_server_client`, and the difference is the reason to
+run it.** That harness cuts `net` out of the middle to prove the
+serialise/deserialise seam; this puts the socket, the handshake, the cipher and
+the bandwidth budget back, and adds the thing neither of them had — more than
+one player. `--net` is on by default in the script because the F4 panel is where
+this demo is read from: two characters that do not move have three explanations,
+and the panel separates them.
+
+**The same arrangement without a second program is the studio.** Press Play and
+the editor hosts both halves in its own viewports: a server view and a client
+view, with a character in the client one. `Spawn Player` and `Remove Player` on
+the ribbon act on the viewport you are in, so a Run becomes a Play one client at
+a time, and two clients is what turns "the replica disagrees with the server"
+into "these two clients disagree". A new game opens with a **Playground** and an
+**Arena**, and a pad in each that teleports you to the other.
 
 ### Things fall *(v0.13)*
 
-A new game opens with four worlds now, and the fourth is **Slide** — a curved
+A new game gained a fourth world at v0.13, and it is **Slide** — a curved
 ramp with blocks that spawn at the top, slide down, launch off the lip and are
 destroyed ten seconds later. It is the first world this engine ever simulated.
 
@@ -784,6 +819,59 @@ answer for what happens when the file is missing on somebody else's machine —
 which is the render graph `ROADMAP.md` puts behind a prototype project, not a
 field. Every effect here is a handful of instructions on the fragment that
 samples an image somebody already rendered.
+
+### Holes that lead somewhere else *(v0.14)*
+
+A `Portal` is a `SurfaceCamera` with one more property on it, and that property
+is the whole feature:
+
+```lua
+local hole = Instance.new("Portal")
+hole.Face = Enum.NormalId.Back
+hole.Destination = someOtherWall   -- and the wall is now a hole
+hole.Parent = pane
+```
+
+A mirror puts its camera where the eye would be reflected through the pane's own
+plane. A portal puts it through `destination · half-turn · source⁻¹` instead.
+Everything after that is the mirror's path unchanged — the same surface pass, the
+same projected sampling in `opaque.frag`, the same per-surface `TagFilter`, the
+same one-frame-old texture — so a hole costs a mirror and nothing else.
+
+**Nothing constrains the two panes to describe one space**, and that is the
+non-Euclidean part. A destination turned, moved, or placed three hundred units
+away is still a legal pair, so a room can be bigger on the inside and a corridor
+can turn through more than four right angles. `run-portals` has three rooms far
+apart in world coordinates with six holes between them: one pair that an ordinary
+adjacency explains, and two that put the same room through opposite walls of the
+room you are standing in. `docs/NON-EUCLIDEAN.md` is the investigation behind it.
+
+**`Face` is resolved on the destination too, and it is the one rule to know.**
+The far frame is built by applying the *portal's own* `Face` to the destination's
+transform, so the destination must be a part whose matching face points at the
+space the hole should show. Aim it at a wall whose matching face points the other
+way and nothing complains — the pane renders, and it shows the empty space behind
+that wall. For unrotated rooms that means the wall on the same side of the far
+room; rotating the destination is the general answer.
+
+**A destination that is missing, cleared or deleted falls back to a mirror**
+rather than to a blank pane. A surface that stopped reflecting reads as something
+to fix; a pane that vanished reads as a broken renderer.
+
+**You can look through these and not walk through them.** Traversal needs a body
+to move and the character controller is v0.15; the seam a walker would see on the
+frame they cross needs the portal chain rendered inside the frame, deepest first.
+Both are `docs/DEFERRED.md` D00112, and neither is promised until it is there.
+
+**`run-non-euclidean` is the catalogue rather than the mechanism.** Six exhibits
+in a row, twelve holes, and the camera sweeps past them: a tunnel shorter inside
+than out and one longer inside than out, a house with four doors onto three
+rooms, a pillar with a different room behind each side, a hill whose bottom
+opens onto its own top, and a cell that holds four times the volume it occupies.
+Every one of them is the same pair of panes with the destination moved — no new
+engine code, which is the point. The one shape it *cannot* express is the tunnel
+that changes your scale, because the map through a portal is rigid; that is
+filed with D00112 as well.
 
 ```sh
 scripts/demos/run-terrain.sh                 # uncapped, held at 165 fps
@@ -1193,7 +1281,7 @@ extra socket and broadcasts nothing.
 ### On the same switch
 
 ```sh
-server --listen 0 --advertise --session-name "Declan's game"
+server --listen 0 --advertise --session-name "User's game"
 client --browse
 ```
 
