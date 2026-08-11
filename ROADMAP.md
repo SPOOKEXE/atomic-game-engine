@@ -36,15 +36,17 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.14
 
-- [_] rojo test project, e.g. ~/Documents/GitHub/raceapet and see if code properly syncs. maybe setup env variable for it (you just set the rojo project json for any path and it auto checks), only check code
-- [_] proper plugins tab
-- [_] convert topbar tools to tab-based
-- [_] also add default assets into engine/resources/[meshes|textures|etc] folder that are within the engine. Put shape meshes in there and a pink and gray checkerboard texture. ensure its registered in assets menu under "engine" tab, put each cdn as a separate tab as well. add a "all" tab.
-- [_] support raw cdn folder without any processing (cache temporarily in memory instead, add a checkbox option for "memory-only" which is enabled by default)
-- [_] create a C++ node library suite via imgui for ~/home/declan~/Documents/GitHub/node-graph-template.
-- [_] setup local cdn tutorial in SETUP-CDN.md. folder-based + setup cdn server on localhost (of which you expose for remote).
-- [_] investigate what it takes to support Non-Euclidean Worlds Engine (transcript for https://www.youtube.com/watch?v=kEB11PQ9Eo8), potentially add? it seems to be possible with just cameras + portal parts
-- [_] variety of default shaders - engine/resources/shaders. Move all of them to here from render/shaders/*.frag *.vert.
+- [x] rojo: `--rojo`/`$ATOMIC_ROJO_PROJECT` syncs any project at startup; checked against raceapet, which found and fixed two build bugs (a package's `default.project.json` was joined to its folder instead of replacing it, and a nested project's root `$path` was ignored)
+- [x] the topbar is tab-based, and the plugins toolbars are a tab of their own rather than a panel
+- [x] default engine assets: the six shape meshes and a pink/grey checkerboard, under an "engine" tab, with a tab per cdn source and an "all" tab
+- [_] deferred `D00111`: listing an HTTP origin's contents — its tab names the address and says why it cannot enumerate
+- [x] raw folders bake on demand into the editor, memory-only by default, with a tab of their own
+- [x] C++ node library suite via imgui in ~/Documents/GitHub/node-graph-template/cpp — model (graph, types, layout, hashing, evaluation, save/load) with no imgui and 93 checks, an imgui canvas over it, and an SDL3 demo
+- [x] SETUP-CDN.md: folder-based, a store served from a folder, an origin on localhost and how to expose one; `cdn --ingest-key` added so the editor's Upload has an origin that can accept
+- [x] investigated non-euclidean worlds: `docs/NON-EUCLIDEAN.md`. cameras + portal parts is right, and `SurfaceCamera` is most of it — three small changes to how a surface view carries its projection, then traversal, which needs v0.15's character controller
+- [_] deferred `D00112`: build the portal once the surface view carries a projection
+- [x] every shader moved to engine/resources/shaders, owned by a module of its own
+- [_] deferred `D00110`: a variety of default shaders, once something can select one
 
 ### v0.15
 

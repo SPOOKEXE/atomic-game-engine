@@ -36,6 +36,92 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00112
+
+**Portals, and the non-Euclidean spaces they buy.** `docs/NON-EUCLIDEAN.md` is
+the investigation v0.14 filed; this is what it decided.
+
+**The camera half exists.** A portal is a `SurfaceCamera` whose placement rule is
+`destination · source⁻¹` instead of a reflection, and the surface pass, the
+projected sampling in `opaque.frag`, the per-surface tag filter and the recursion
+are all already there. The impossible-space trick is that nothing constrains the
+pair of frames to describe one space.
+
+**Three small changes stand between here and a demonstrable portal**, and two of
+them are wanted anyway:
+
+- `SurfaceView::Lens` is a field of view, so there is nowhere to put a skewed
+  projection. It has to become a projection the renderer is handed.
+- An off-axis frustum fitted to the pane, which `SurfaceCameras.hpp` already
+  names as what it is waiting on — a symmetric fit wastes half a mirror's texels.
+- A real oblique near plane at the destination. Without it a portal draws the
+  wall it leads through, which the mirror's parallel-plane approximation does not
+  reveal.
+
+**Two things are genuinely blocked.** Traversal needs a body to move and a camera
+rig to move with it, and neither exists until v0.15's character controller —
+`world::Postbox::Teleport` is cross-*world* and is not this. And removing the
+seam somebody sees on the frame they cross means rendering the portal chain
+inside the frame, deepest first, which is the one property the current surface
+pass trades away for being cheap.
+
+**What must not happen is a second renderer.** Anything beginning with a portal
+pass of its own would be a copy of the surface pass with a different name, and
+the two would drift on the first lighting change.
+
+### [_] D00111
+
+**An HTTP origin has no route that says what it holds.** v0.14 gave the assets
+panel a tab per content source; a `Directory` source is listed by reading the
+manifest in its `processed/` folder, and an `Http` one shows its address and a
+sentence saying it serves by name. That sentence is true of the protocol rather
+than of the panel: `delivery::AssetClient` fetches a manifest through the whole
+priority list and reports what verified, and nothing asks *one* origin what it
+has.
+
+Two ways to close it, and the choice is the work:
+
+- **A client per source.** `MakeAssetClient` over a one-entry `DeliverySettings`
+  would answer honestly with no new protocol, at the cost of a client per tab
+  with its own lifetime, its own pump and its own failure to report. Pumping
+  those only while a tab is open is a state machine the panel does not have
+  today.
+- **A listing route on `cdn::Service`.** Cheaper to consume and a wider origin:
+  anything an origin will enumerate is something an unauthenticated caller can
+  enumerate, so it needs the ingest key's argument made again for reads.
+
+**What must not happen is the panel guessing.** Drawing the live client's
+catalogue under a named origin's tab would attribute every name to whichever
+origin the tab happened to be, and the first time two origins disagreed the
+panel would be confidently wrong about where content came from.
+
+### [_] D00110
+
+**A library of default shaders needs a consumer, and there is not one.** v0.14
+moved every built-in shader into `Engine::resources`, which is the half of that
+roadmap item with a home to move to. The other half — "a variety of default
+shaders" — would be GLSL that nothing loads: a shader reaches the GPU here only
+by being named in `Renderer::Impl::CreatePipelines` or `InterfacePass`, and both
+name a fixed set that matches the files one for one.
+
+The two things that would give a variety somewhere to plug in are both filed
+already and both above this in the stack:
+
+- **`ShaderScript`.** Named in `render/ShaderCompiler.hpp` and in
+  `render/AGENTS.md` as the reason a *runtime* compiler exists, and declared
+  nowhere — there is no class, no property and no path from a world to a
+  compile. Until there is, an author cannot select a shader by name at all.
+- **The render graph as a node system**, which `ROADMAP.md` files under v0.??.
+  That is where a pass gets to say which shader it wants, and where a permutation
+  stops being a file somebody adds by hand.
+
+**Adding the files first is the trap worth naming.** Six unlit/toon/water
+fragments in `resources/shaders/` would compile, stage, pass every test and be
+loaded by nothing — and each would then be a thing a later pipeline design has
+to either adopt or explain. `resources/AGENTS.md` says the same rule for meshes
+and textures: a default that can be generated should not be a file, and a
+default nothing consumes should not exist yet.
+
 ### [_] D00109
 
 **Filed as `D00108` and renumbered, because that number was already taken.**

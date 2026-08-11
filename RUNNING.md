@@ -210,7 +210,7 @@ Each preset writes to `.cache/build/<preset>/`:
 
 ```
 .cache/build/dev/
-├─ client/       the client — binary, SDL3, shaders/render/
+├─ client/       the client — binary, SDL3, shaders/resources/
 ├─ server/       the server — no shaders, no SDL
 ├─ cdn/          the content origin — no shaders, no SDL
 ├─ tools/        testrunner
@@ -299,6 +299,7 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--verbose` | off | log at trace level |
 | `--force-serial-compute` | off | run parallel dispatches on one thread |
 | `--game PATH` | — | open a game file at startup |
+| `--rojo PATH` | `$ATOMIC_ROJO_PROJECT` | sync a Rojo project or universe once the scene exists |
 | `--width`, `--height` | 1600×900 | window size |
 | `--scale FACTOR` | 1.0 | multiplies every font and padding |
 | `--tick-rate HZ` | 60 | simulation rate while running |
@@ -314,6 +315,25 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--idle-close SECONDS` | 300 | close an empty world after this long |
 | `--mcp-port PORT` | off | open the loopback control surface |
 | `--override-assets-directory DIR` | — | read staged data from here |
+
+**`--rojo` is how an external project is checked without driving the menu.**
+Syncing is otherwise a file prompt and two clicks, which makes "does this
+repository still sync" something nobody verifies. With no flag the editor reads
+`ATOMIC_ROJO_PROJECT`, so a shell that works on one game can carry it — the flag
+is for one run and the variable is for a day, and nothing writes the variable
+back. A path ending `.universe.json` syncs every world it names; anything else
+is read as one project into the scene that is open.
+
+```sh
+ATOMIC_ROJO_PROJECT=~/Documents/GitHub/raceapet/default.project.json \
+  ./.cache/build/dev/studio/studio --headless --frames 3
+# synced 1356 instances, 1082 scripts from RaceAPet
+```
+
+The count is the check. It should equal the number of `.luau`, `.lua` and
+`.json` files the project's `$path`s actually reach — a package whose
+`default.project.json` maps `lib` contributes `lib`, and nothing else it was
+published with.
 
 **The editor is not paced by the display.** It starts with vertical sync off and
 a 120 fps ceiling, because sync puts a whole refresh — 16.7 ms on a 60 Hz panel,
@@ -1284,6 +1304,10 @@ Publishing and serving are **two invocations, and the split is deliberate**: the
 signing key belongs to whoever publishes the game and the origin holds none,
 which is what makes it safe to deploy on hardware nobody here owns.
 
+[`SETUP-CDN.md`](SETUP-CDN.md) is the walkthrough — a folder on your own machine,
+a store served from a directory, an origin on localhost, and what it takes to
+reach one from somewhere else. What follows here is the reference.
+
 ### Publish a directory of files
 
 ```sh
@@ -1329,6 +1353,8 @@ curl -o group.zst -H "x-atomic-grant: HEX" http://127.0.0.1:9080/bundle/<root>
 --signing-key HEX        64 hex characters — the Ed25519 seed to sign a publish with
 --grant-key HEX          64 hex characters — the secret shared with the server
 --port N                 Port to listen on (default 9080; 0 binds an ephemeral one)
+--ingest-key SECRET      Accept uploads at /ingest from whoever sends this
+--inbox DIR              Where uploads land (default: the raw/ beside a processed store)
 --upstream NAME=HOST:PORT   An origin to forward a miss to. Repeatable
 --allow-upstream         Forward a miss. Off unless asked for
 --no-local-first         Always ask an upstream — a pure proxy
@@ -2250,7 +2276,7 @@ cp -r .cache/build/dev/client /somewhere/else
 /somewhere/else/client --stats
 ```
 
-The binary finds `libSDL3.so.0` and `shaders/render/` beside itself, not
+The binary finds `libSDL3.so.0` and `shaders/resources/` beside itself, not
 relative to the working directory. If you need it to read data from elsewhere —
 pointing a release build at a working tree, or a test at a fixture directory —
 use `--override-assets-directory`.
