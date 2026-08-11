@@ -46,27 +46,15 @@ namespace engine::physics {
 			return vector - axis * vector.Dot(axis);
 		}
 
-		// The three world axes of a shape's frame, X then Y then Z.
-		struct FrameAxes {
-			core::Vector3 Axis[3];
-		};
-
-		FrameAxes AxesOf(const core::CFrame &frame) {
-			return FrameAxes{
-				{frame.RightVector(), frame.UpVector(), frame.VectorToWorldSpace(core::Vector3::ZAxis)}
-			};
-		}
-
 		// The eight corners of a box, in a fixed order.
 		struct BoxCorners {
 			core::Vector3 Point[8];
 		};
 
 		BoxCorners CornersOf(const ShapeInstance &box) {
-			const FrameAxes axes = AxesOf(box.Frame);
-			const core::Vector3 right = axes.Axis[0] * box.Extent.X;
-			const core::Vector3 up = axes.Axis[1] * box.Extent.Y;
-			const core::Vector3 forward = axes.Axis[2] * box.Extent.Z;
+			const core::Vector3 right = box.Axis[0] * box.Extent.X;
+			const core::Vector3 up = box.Axis[1] * box.Extent.Y;
+			const core::Vector3 forward = box.Axis[2] * box.Extent.Z;
 
 			BoxCorners corners;
 			for (size_t index = 0; index < 8; index++) {
@@ -86,7 +74,7 @@ namespace engine::physics {
 			const float along = offset.Dot(axis);
 			const core::Vector3 radial = Perpendicular(offset, axis);
 			const core::Vector3 outward =
-				radial.MagnitudeSquared() > DEGENERATE_EPSILON ? radial.Unit() : cylinder.Frame.RightVector();
+				radial.MagnitudeSquared() > DEGENERATE_EPSILON ? radial.Unit() : cylinder.Axis[0];
 			const float sign = along >= 0.0f ? 1.0f : -1.0f;
 			return cylinder.Frame.Position + axis * (cylinder.Extent.Y * sign) + outward * cylinder.Extent.X;
 		}
@@ -131,7 +119,10 @@ namespace engine::physics {
 				continue;
 			}
 
-			const core::Vector3 axis = candidate.Direction / std::sqrt(lengthSquared);
+			// Scaled by the reciprocal rather than divided by the length:
+			// `Vector3::operator/` is three divides, and this loop runs up to
+			// twenty-three times per pair.
+			const core::Vector3 axis = candidate.Direction * (1.0f / std::sqrt(lengthSquared));
 			const float separation = offset.Dot(axis);
 			const float overlap =
 				ProjectionRadius(first, axis) + ProjectionRadius(second, axis) - std::abs(separation);
@@ -165,23 +156,20 @@ namespace engine::physics {
 	}
 
 	ContactSolution BoxBox(const ShapeInstance &first, const ShapeInstance &second) {
-		const FrameAxes firstAxes = AxesOf(first.Frame);
-		const FrameAxes secondAxes = AxesOf(second.Frame);
-
 		// Fifteen axes, and for two polytopes that set is provably complete:
 		// six face normals and the nine cross products of their edge
 		// directions. Nothing here is a heuristic.
 		AxisCandidate axes[15];
 		size_t count = 0;
 		for (size_t index = 0; index < 3; index++) {
-			axes[count++] = AxisCandidate{firstAxes.Axis[index], true};
+			axes[count++] = AxisCandidate{first.Axis[index], true};
 		}
 		for (size_t index = 0; index < 3; index++) {
-			axes[count++] = AxisCandidate{secondAxes.Axis[index], true};
+			axes[count++] = AxisCandidate{second.Axis[index], true};
 		}
 		for (size_t left = 0; left < 3; left++) {
 			for (size_t right = 0; right < 3; right++) {
-				axes[count++] = AxisCandidate{firstAxes.Axis[left].Cross(secondAxes.Axis[right]), false};
+				axes[count++] = AxisCandidate{first.Axis[left].Cross(second.Axis[right]), false};
 			}
 		}
 
@@ -244,17 +232,10 @@ namespace engine::physics {
 			}
 		}
 
-		core::Vector3 outward = core::Vector3::Zero;
+		// The face's own axis, signed. One of the frame's three, so it is a
+		// read rather than the rotation of a local unit vector.
 		const float sign = centre[nearest] >= 0.0f ? 1.0f : -1.0f;
-		if (nearest == 0) {
-			outward = core::Vector3{sign, 0.0f, 0.0f};
-		} else if (nearest == 1) {
-			outward = core::Vector3{0.0f, sign, 0.0f};
-		} else {
-			outward = core::Vector3{0.0f, 0.0f, sign};
-		}
-
-		const core::Vector3 normal = first.Frame.VectorToWorldSpace(outward);
+		const core::Vector3 normal = first.Axis[nearest] * sign;
 		return SinglePoint(
 			normal,
 			second.Frame.Position - normal * radius,
@@ -264,7 +245,6 @@ namespace engine::physics {
 	}
 
 	ContactSolution BoxCylinder(const ShapeInstance &first, const ShapeInstance &second) {
-		const FrameAxes boxAxes = AxesOf(first.Frame);
 		const core::Vector3 barrel = BarrelAxis(second);
 		const BoxCorners corners = CornersOf(first);
 
@@ -276,11 +256,11 @@ namespace engine::physics {
 		AxisCandidate axes[23];
 		size_t count = 0;
 		for (size_t index = 0; index < 3; index++) {
-			axes[count++] = AxisCandidate{boxAxes.Axis[index], true};
+			axes[count++] = AxisCandidate{first.Axis[index], true};
 		}
 		axes[count++] = AxisCandidate{barrel, true};
 		for (size_t index = 0; index < 3; index++) {
-			axes[count++] = AxisCandidate{boxAxes.Axis[index].Cross(barrel), false};
+			axes[count++] = AxisCandidate{first.Axis[index].Cross(barrel), false};
 		}
 		for (size_t index = 0; index < 8; index++) {
 			const core::Vector3 corner = corners.Point[index];

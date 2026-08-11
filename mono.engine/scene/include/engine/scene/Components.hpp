@@ -285,6 +285,56 @@ namespace engine::scene {
 		uint16_t Reserved = 0;
 	};
 
+	// What one part overrides about the physics of its own material.
+	//
+	// **Roblox's `CustomPhysicalProperties`, as a component.** `Surface` names a
+	// material and `SurfaceTable` says what that material feels like, which is
+	// the right shape for the ninety-nine parts in a scene made of the same
+	// wood. This is the hundredth: the crate that is deliberately heavier, the
+	// ramp that is deliberately slippery. It is an override of a shared fact and
+	// not a replacement for it.
+	//
+	// **`Custom` decides, and it is a field rather than the component's
+	// presence.** The component is on every `BasePart` — `SurfaceAppearance`
+	// carries the argument for a dense column over an optional one, and a
+	// properties panel that could only show these fields on *some* parts would
+	// be a panel with a hole in it. So the flag is what says "use these numbers
+	// rather than the material's", and a part nobody has touched is four floats
+	// of defaults that nothing reads.
+	//
+	// **Density and not mass.** `RigidBody::Mass` is what the solver wants and
+	// stays the one place a mass is written; this is what a mass is *made* of,
+	// so a part resized after its density was set weighs what its new size says
+	// rather than what it weighed before. `scene::MassOf` is the one rule, and
+	// both the solver and the properties panel ask it.
+	//
+	// **Drag is deliberately not here.** `RigidBody::LinearDamping` and
+	// `AngularDamping` are drag and have been since v0.4; a second pair on this
+	// component would be two places to write one number, and the panel shows the
+	// pair that the integrator actually reads.
+	//
+	// @since v0.14
+	struct PhysicsProperties {
+		// Kilograms per cubic metre, used with the collider's volume when
+		// `Custom` is set. Roblox's default part density.
+		float Density = 0.7f;
+
+		// Coulomb friction, replacing the material's when `Custom` is set.
+		float Friction = 0.5f;
+
+		// Restitution — 0 for a dead stop, 1 for a lossless bounce — replacing
+		// the material's when `Custom` is set.
+		float Elasticity = 0.0f;
+
+		// Whether any of the three above are used at all.
+		bool Custom = false;
+
+		// Explicit padding, for the reason `RigidBody::Reserved` gives: three
+		// uninitialised bytes go straight into a snapshot and make two runs of
+		// one scene differ.
+		uint8_t Reserved[3] = {};
+	};
+
 	// What a thing is made of, as far as a contact is concerned.
 	//
 	// **A name, not coefficients.** Friction and restitution are the same two

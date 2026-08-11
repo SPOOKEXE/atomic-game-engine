@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace engine::physics {
@@ -113,10 +114,15 @@ namespace engine::physics {
 	// means by a `Publish` step that writes back velocities.
 	//
 	// @since v0.4
-	struct SolverBody {
-		// Which entity this is.
-		ecs::Entity Owner;
-
+	// **The first four fields are the ones a sweep touches, and they are first
+	// on purpose.** The iteration reads and writes two bodies per row at random
+	// offsets, `SOLVER_ITERATIONS` times over, so what decides whether that hits
+	// cache is how many lines a body's *hot* half spans. Velocities, correction
+	// and inverse mass are forty bytes; the sixty-four-byte alignment below puts
+	// all of them in one line and everything the sweeps never look at in the
+	// next. Scattered — inverse mass sat ninety-six bytes after the velocities —
+	// it was two lines per body per access.
+	struct alignas(64) SolverBody {
 		// Metres per second, in world space.
 		core::Vector3 LinearVelocity;
 
@@ -143,6 +149,18 @@ namespace engine::physics {
 		// tipped out, which is slower and never wrong.
 		core::Vector3 CorrectionLinear;
 
+		// One over the mass, in reciprocal kilograms. **Zero means immovable**
+		// — static geometry, a kinematic body, or a sleeping one.
+		//
+		// Here rather than beside the other scalars because `ApplyImpulse` reads
+		// it, so it belongs in the hot line with the velocities it scales.
+		float InverseMass = 0.0f;
+
+		// --- everything below is set up once and never read by a sweep -------
+
+		// Which entity this is.
+		ecs::Entity Owner;
+
 		// Where the body turns about — its transform's position, because
 		// nothing in this engine offsets a centre of mass from its origin.
 		core::Vector3 Centre;
@@ -160,10 +178,6 @@ namespace engine::physics {
 		// One over each principal moment of inertia, in the body's own axes.
 		// Zero on every axis for a body the solver may not turn.
 		core::Vector3 InverseInertia;
-
-		// One over the mass, in reciprocal kilograms. **Zero means immovable**
-		// — static geometry, a kinematic body, or a sleeping one.
-		float InverseMass = 0.0f;
 
 		// Coulomb friction, resolved from the body's `scene::Surface` once per
 		// tick. The narrow phase reads the table; the solver reads this.
@@ -223,15 +237,66 @@ namespace engine::physics {
 		}
 	};
 
+	// One direction an impulse may act along at a contact, fully resolved.
+	//
+	// The three of them — the normal and the two friction directions — differ
+	// only in which way they point, so they are one type used three times
+	// rather than three sets of parallel fields. Keeping the direction, the
+	// response it produces and the impulse accumulated along it in one place is
+	// what makes it impossible to apply a magnitude against the wrong response.
+	//
+	// @since v0.14
+	struct ContactAxis {
+		// Which way the impulse acts, unit length. For the normal, pointing
+		// from the first body toward the second.
+		core::Vector3 Direction;
+
+		// The angular velocity each body picks up per unit of impulse: its
+		// world inverse inertia applied to `lever` crossed into `Direction`.
+		//
+		// **Resolved here because no sweep changes it.** A body's inertia and
+		// its lever arms are fixed for the tick, so this is three vectors per
+		// row — but derived inside the iteration it was two inertia products
+		// per body per direction per sweep, which at sixteen sweeps is
+		// ninety-six evaluations of three constants and was the largest single
+		// cost in the solve.
+		core::Vector3 FirstAngular;
+		core::Vector3 SecondAngular;
+
+		// Each body's lever arm crossed into `Direction`.
+		//
+		// The torque a unit impulse applies, and — by the scalar triple product
+		// — also the vector that turns a body's angular velocity into its share
+		// of the closing speed along `Direction`. That second reading is what a
+		// sweep uses: `(w x lever) . Direction` becomes `w . Torque`, so probing
+		// the contact is two dot products instead of two cross products, three
+		// times per row per sweep.
+		core::Vector3 FirstTorque;
+		core::Vector3 SecondTorque;
+
+		// The mass the pair presents along `Direction` at this point. It is the
+		// reciprocal of what the two responses above already add up to, so all
+		// three come out of one calculation.
+		float Mass = 0.0f;
+
+		// The impulse accumulated along `Direction` so far, in newton seconds.
+		float Impulse = 0.0f;
+	};
+
 	// One contact point turned into the numbers an impulse iteration needs.
 	//
 	// **Set up once and read every iteration.** Everything here is constant for
-	// the tick — the lever arms, the effective masses, the friction the two
-	// `scene::Surface` rows combine to, the target speed the penetration asks
-	// for. Recomputing any of it inside the iteration loop would multiply a
-	// square root and a `SurfaceTable` lookup by the iteration count, which is
-	// exactly the "read the surface once" rule in `v02v03v04.md` §3.2 applied
-	// where it bites.
+	// the tick apart from the accumulated impulses — the directions, the
+	// responses each body gives them, the effective masses, the friction the
+	// two `scene::Surface` rows combine to, the target speed the penetration
+	// asks for. Recomputing any of it inside the iteration loop would multiply
+	// it by `SOLVER_ITERATIONS`, which is exactly the "read the surface once"
+	// rule in `v02v03v04.md` §3.2 applied where it bites.
+	//
+	// The lever arms are deliberately **not** here. Everything that needs them
+	// folds them into `Along` during setup, and a field the sweeps would reload
+	// sixteen times without reading is a field that costs cache and nothing
+	// else.
 	//
 	// There is no public accessor for these. They are the solver's working set
 	// and nothing outside the pipeline has a use for one.
@@ -244,32 +309,17 @@ namespace engine::physics {
 		// Index into `Bodies` of the other one.
 		size_t Second = 0;
 
-		// The manifold's normal, pointing from the first body toward the
-		// second.
-		core::Vector3 Normal;
-
-		// Two directions across the normal, for Coulomb friction. Two rather
-		// than one because friction resists sliding in any direction in the
+		// The three directions this contact acts along.
+		//
+		// `NORMAL` is the manifold's normal; `TANGENT` and the slot after it
+		// are the two friction directions across it. Two friction directions
+		// rather than one because friction resists sliding anywhere in the
 		// contact plane, and one direction leaves the perpendicular one free.
-		core::Vector3 Tangent[2];
+		ContactAxis Along[3];
 
-		// From each body's centre to the contact point. What turns an impulse
-		// into a torque, and the reason a four-point manifold holds a box
-		// against rotation.
-		core::Vector3 FirstLever;
-
-		// From the second body's centre to the contact point.
-		core::Vector3 SecondLever;
-
-		// The mass the pair presents along the normal at this point.
-		float NormalMass = 0.0f;
-
-		// The same for the correction, which is translation only — so it is
+		// The mass for the correction, which is translation only — so it is
 		// the two inverse masses and no lever arm at all.
 		float CorrectionMass = 0.0f;
-
-		// The same along each friction direction.
-		float TangentMass[2] = {0.0f, 0.0f};
 
 		// The separating speed the penetration asks for, in metres per second.
 		float Bias = 0.0f;
@@ -279,14 +329,6 @@ namespace engine::physics {
 
 		// The combined Coulomb coefficient for this pair.
 		float Friction = 0.5f;
-
-		// The impulse accumulated along the normal so far, in newton seconds.
-		// Clamped at zero from below: a contact pushes and never pulls.
-		float NormalImpulse = 0.0f;
-
-		// The impulses accumulated along the two friction directions, each
-		// clamped to the friction cone the normal impulse allows.
-		float TangentImpulse[2] = {0.0f, 0.0f};
 
 		// The impulse accumulated against the correction velocities.
 		//
@@ -298,6 +340,11 @@ namespace engine::physics {
 		// The contact's cache key, carried so the tick's answer can be stored
 		// under the same key it was warm-started from.
 		uint32_t Feature = 0;
+
+		// Slots in `Along`. The normal first, so the friction pair is the two
+		// after it and both can be walked with one loop.
+		static constexpr size_t NORMAL = 0;
+		static constexpr size_t TANGENT = 1;
 	};
 
 	// How long one body has been still, and whether it has been put to sleep.
@@ -521,6 +568,18 @@ namespace engine::physics {
 		// What the solver works on, refilled every tick from the manifolds.
 		std::vector<SolverBody> BodyList;
 		std::vector<ContactRow> RowList;
+
+		// The scratch the solver's gather sorts, and where it puts the body
+		// indices it resolves per manifold.
+		//
+		// **Entity ids rather than bodies**, because the gather's sort is over
+		// two entries per manifold and a `SolverBody` is fifteen times the size
+		// of the id the sort is keyed on. Sorting the bodies moved megabytes to
+		// order kilobytes of information.
+		//
+		// Cleared and refilled, never freed, like every other list here.
+		std::vector<ecs::Entity> BodyOwners;
+		std::vector<std::pair<uint32_t, uint32_t>> ManifoldBodies;
 
 		// The impulses, double-buffered: `ImpulseCache` is what this tick's
 		// warm start reads and `ImpulseNext` is what it writes for the tick

@@ -23,6 +23,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Enums.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -35,12 +36,31 @@ namespace engine::physics {
 	// eight or ten times and a store lookup per read is the cost an index
 	// exists to remove.
 	struct ShapeInstance {
+		ShapeInstance() = default;
+
+		// The only way in, and deliberately not an aggregate: `Axis` is derived
+		// from `Frame` and the two must not be able to disagree.
+		ShapeInstance(const core::CFrame &frame, const core::Vector3 &extent, scene::ShapeKind shape);
+
 		// Where it is and how it is turned, in world space.
+		//
+		// **Read-only once built.** Assigning to it leaves `Axis` describing the
+		// old rotation; build a new instance instead.
 		core::CFrame Frame;
 
 		// Its extent, read according to `Shape`. The table at the top of
 		// `Shapes.hpp` is the one definition of what each component means.
 		core::Vector3 Extent;
+
+		// The frame's X, Y and Z as world directions, resolved once here.
+		//
+		// **The whole reason this type is not three plain fields.** `CFrame`
+		// holds a quaternion, so every one of these costs a rotation to derive
+		// — and every question this header answers is a dot product against one
+		// of them. A pair function asks fifteen to twenty-three times over the
+		// same two shapes, and deriving them per question made box-box re-rotate
+		// the same six vectors ninety times.
+		core::Vector3 Axis[3];
 
 		// Which shape `Extent` describes.
 		scene::ShapeKind Shape = scene::ShapeKind::Box;
@@ -84,11 +104,27 @@ namespace engine::physics {
 		uint8_t Id = 0;
 	};
 
+	// The world-space direction of a cylinder's barrel.
+	//
+	// Local +Y, per `Shapes.hpp`. Meaningless for the other two shapes.
+	//
+	// @param shape The cylinder.
+	// @return The unit barrel axis.
+	inline const core::Vector3 &BarrelAxis(const ShapeInstance &shape) {
+		return shape.Axis[1];
+	}
+
 	// Half the width of a shape's shadow on `axis`.
 	//
 	// Exact for every direction, because all three shapes are centrally
 	// symmetric — see the file comment. `axis` must be unit length; nothing
 	// here normalises it, and a longer one scales the answer.
+	//
+	// **Out of line on purpose.** Inlining it into `LeastOverlap` was measured
+	// and was slower: the shape kind is loop-invariant, but the compiler will
+	// not unswitch the loop to prove it, so all thirty calls got their own copy
+	// of the three-way branch and the axis search grew past what its registers
+	// hold.
 	//
 	// @param shape The collider to measure.
 	// @param axis  A unit direction.
@@ -114,16 +150,6 @@ namespace engine::physics {
 	// @param direction A unit direction pointing out of the shape.
 	// @return The feature, with at least one point.
 	SupportFeature FaceTowards(const ShapeInstance &shape, const core::Vector3 &direction);
-
-	// The world-space direction of a cylinder's barrel.
-	//
-	// Local +Y, per `Shapes.hpp`. Meaningless for the other two shapes.
-	//
-	// @param shape The cylinder.
-	// @return The unit barrel axis.
-	inline core::Vector3 BarrelAxis(const ShapeInstance &shape) {
-		return shape.Frame.UpVector();
-	}
 
 	// A world-space point expressed in a shape's own axes.
 	//

@@ -62,10 +62,25 @@ namespace engine::physics {
 		manifolds.clear();
 		PipelineInternals::Events(*world).clear();
 
+		// The pair list is sorted, so every pair that names the same first
+		// collider arrives in one run — a body against the six things around it
+		// is one lookup rather than six. `BroadPhase` sorts for determinism and
+		// this is the second thing that sort buys. The second side varies within
+		// a run and is resolved each time.
+		ecs::Entity resolved;
+		PlacedCollider first;
+
 		for (const CandidatePair &pair : world->Pairs()) {
-			const PlacedCollider first = Resolve(store, pair.A);
+			if (pair.A != resolved) {
+				first = Resolve(store, pair.A);
+				resolved = pair.A;
+			}
+			if (!first.Present) {
+				continue;
+			}
+
 			const PlacedCollider second = Resolve(store, pair.B);
-			if (!first.Present || !second.Present) {
+			if (!second.Present) {
 				continue;
 			}
 

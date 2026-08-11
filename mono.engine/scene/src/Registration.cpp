@@ -421,6 +421,12 @@ namespace engine::scene {
 		ecs::Components::Register<RigidBody>("scene.RigidBody");
 		ecs::Components::Register<Collider>("scene.Collider");
 		ecs::Components::Register<Surface>("scene.Surface", WriteSurfaces, ReadSurfaces);
+
+		// **After `Surface`, because it overrides what `Surface` resolves to**,
+		// and at the end of the physics group rather than in the middle of it:
+		// the order here decides component ids and therefore the order columns
+		// are visited, so new entries go after the ones that were already there.
+		ecs::Components::Register<PhysicsProperties>("scene.PhysicsProperties");
 		ecs::Components::Register<Visual>("scene.Visual", WriteVisuals, ReadVisuals);
 
 		// **A hand-written pair, because it holds a name.** The lesson

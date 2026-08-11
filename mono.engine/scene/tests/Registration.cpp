@@ -53,6 +53,7 @@ namespace registration_test {
 		"scene.RigidBody",
 		"scene.Collider",
 		"scene.Surface",
+		"scene.PhysicsProperties",
 		"scene.Visual",
 		"scene.Camera",
 		"scene.QuickHash",

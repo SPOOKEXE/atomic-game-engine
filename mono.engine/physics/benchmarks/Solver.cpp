@@ -22,15 +22,17 @@
 //
 // | Row | Cost | Per contact |
 // |---|---|---|
-// | 200 stacks of 4 | 2891 us ± 73 | 0.82 us |
-// | 800 stacks of 4 | 14846 us ± 311 | 0.82 us |
-// | 200 stacks of 12 | 8856 us ± 49 | 0.83 us |
-// | 200 stacks of 4, cache emptied | 2783 us ± 40 | 0.79 us |
-// | `Publish`, 200 stacks of 4 | 25 us ± 30 | |
+// | 200 stacks of 4 | 1785 us ± 226 | 0.51 us |
+// | 800 stacks of 4 | 10058 us ± 916 | 0.56 us |
+// | 200 stacks of 12 | 5852 us ± 507 | 0.55 us |
+// | 200 stacks of 4, cache emptied | 1619 us ± 114 | 0.46 us |
+// | `Publish`, 200 stacks of 4 | 26 us ± 262 | |
 //
 // **Flat across scene size and across stack height**, which is what makes it a
 // per-contact figure worth quoting: a scene's solver budget is a
-// multiplication. `Publish` is two orders of magnitude cheaper because it is
+// multiplication. The larger scenes sit a tenth above the smallest because the
+// row array outgrows the cache the sixteen sweeps walk it from, not because a
+// contact costs more. `Publish` is two orders of magnitude cheaper because it is
 // one pass over the bodies and a merge over the pairs, with no iteration at
 // all.
 //
@@ -200,6 +202,35 @@ BENCH("Solve · 800 stacks of 4", 50) {
 BENCH("Solve · 200 stacks of 12", 100) {
 	Store &store = StackedWorld(200, 12);
 	for (int pass = 0; pass < 100; pass++) {
+		KeepAwake(store);
+		Solve(store);
+		Consume(PointCount(store));
+	}
+}
+
+// --- the scale where the answer stops being arithmetic ------------------------
+//
+// Ten thousand bodies, which is `examples/Cube.luau` and roughly the largest
+// pile worth calling a scene. It is here because the rows above cannot see what
+// this one measures: at 3520 contacts the whole row array sits in cache and the
+// cost is the arithmetic, and at ten thousand bodies it does not and the cost is
+// the walk. An optimisation that trades bytes for instructions wins the rows
+// above and can lose this one, so both have to be read together.
+//
+// **This row needs a quiet machine and the ones above do not.** It walks about
+// ten megabytes sixteen times, so it is competing for L3 with whatever else is
+// running: measured against a loaded machine it wandered between 25 and 39 ms
+// for one unchanged binary, where the small rows held to a few per cent. Take
+// its figure only from a run with nothing else on the box, and compare
+// alternatives by running them alternately rather than one after the other.
+//
+// Around 25 ms per call for roughly 40000 contact points, which is 0.6 us each
+// — a fifth above the small rows, and that gap is the cache rather than the
+// arithmetic.
+
+BENCH("Solve · 500 stacks of 20", 10) {
+	Store &store = StackedWorld(500, 20);
+	for (int pass = 0; pass < 10; pass++) {
 		KeepAwake(store);
 		Solve(store);
 		Consume(PointCount(store));

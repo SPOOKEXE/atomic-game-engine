@@ -27,6 +27,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 
 namespace engine::ecs {
@@ -118,6 +119,35 @@ namespace engine::scene {
 	// Nothing else registers these names: `ecs::Classes::RegisterInstanceRoot`
 	// declares `Instance` itself and stops there, so reaching the tree through
 	// it would look up a name nobody had registered and cache the miss.
+	// The volume a collider encloses, in cubic metres.
+	//
+	// **One rule, because two would drift.** A mass derived one way by the
+	// solver and shown another way by a properties panel is a part that weighs
+	// two different amounts depending on who is asking.
+	//
+	// @param collider The shape and its half-extents.
+	// @return The volume, or zero for a shape with no extent.
+	// @since v0.14
+	float VolumeOf(const Collider &collider);
+
+	// What a part weighs, in kilograms.
+	//
+	// **Density wins where it is set, and `RigidBody::Mass` is what is written
+	// down otherwise.** A part with `PhysicsProperties::Custom` weighs its
+	// density times its volume — so resizing it changes what it weighs, which is
+	// what density means — and a part without one weighs whatever was authored.
+	//
+	// **Derived at the point of use rather than written back.** A system that
+	// wrote `Mass` every tick would be a second copy of a fact, dirtying a
+	// replicated component to say a number that had not changed.
+	//
+	// @param collider   The shape it collides as.
+	// @param body       Its rigid body.
+	// @param properties Its overrides, or null for a part that has none.
+	// @return The mass the solver should use. Never negative.
+	// @since v0.14
+	float MassOf(const Collider &collider, const RigidBody &body, const PhysicsProperties *properties);
+
 	void EnsureClassTree();
 
 	// The `Part` class id, registering the whole tree on first call.
