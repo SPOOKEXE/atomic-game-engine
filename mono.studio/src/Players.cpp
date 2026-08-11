@@ -322,11 +322,42 @@ namespace studio {
 
 	bool Editor::Claimed(WorldId world, Entity player) const {
 		for (const WorldRun &run : Runs) {
-			if (run.World != world) {
-				continue;
-			}
 			for (const std::unique_ptr<PlayLink> &link : run.Links) {
-				if (link != nullptr && link->IsRunning() && link->Player() == player) {
+				if (link == nullptr || !link->IsRunning()) {
+					continue;
+				}
+
+				// **The link's world, not the run's, and the difference is a
+				// teleport.** A `WorldRun` names the scene an author pressed
+				// Play on and keeps that name for its whole life; a `PlayLink`
+				// inside it re-homes every time its client walks through a
+				// portal — `FollowTeleports` stops the old one and starts a new
+				// one against the destination, in the same run. So after one
+				// crossing the two disagree, and the run's world is the answer
+				// to a question nobody asked.
+				//
+				// **Filtering by the run's world instead compared entity handles
+				// across a world boundary**, which is the part that made it a
+				// bug rather than an inefficiency. An `ecs::Entity` is an index
+				// and a generation *within one store*: two worlds allocate
+				// independently, so a player in one and a player in another
+				// routinely have the same number — and two worlds built by the
+				// same script in the same order have it near enough always.
+				//
+				// The failure was exactly asymmetric, which is what it looks
+				// like when a guard tests the wrong world. Walking from a run's
+				// own scene to another one worked: no run named the destination,
+				// so the loop skipped everything and the arrival was accepted.
+				// Walking *back* did not: the run did name that world, its link
+				// was tested, and the far world's player id matched the arriving
+				// one — so the arrival read as already claimed, no destination
+				// was found, and the client was dropped as lost after
+				// `LOST_FRAMES`. The character stood there with nobody in it.
+				if (link->AuthorityWorld() != world) {
+					continue;
+				}
+
+				if (link->Player() == player) {
 					return true;
 				}
 			}

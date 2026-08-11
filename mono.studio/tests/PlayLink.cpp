@@ -1336,3 +1336,94 @@ TEST_CASE("a player destroyed by anything else loses its character too", "[studi
 
 	link.Stop(fixture.Worlds);
 }
+
+TEST_CASE("a client that crossed once can be found in the world it came from", "[studio][playlink]") {
+	// **The return leg, which failed while the outbound one worked.** Walking
+	// from the run's own scene into another arrived; walking back reported the
+	// client gone, and the character it left behind stood there with nobody in
+	// it.
+	//
+	// `Editor::Claimed` is what separates an arrival from a namesake — every run
+	// names its clients the same way, so a universe with a client in seven
+	// worlds holds seven players called "client 1". It filtered by the *run's*
+	// world, and a run keeps the scene an author pressed Play on for its whole
+	// life while the link inside it re-homes on every crossing. After one
+	// teleport the two disagree.
+	//
+	// Which turned it into a comparison of `ecs::Entity` handles across a world
+	// boundary. An entity is an index and a generation *within one store*, so
+	// two worlds allocate the same numbers — and two worlds built by the same
+	// script in the same order allocate them in the same order. The arriving
+	// player matched the far world's player by number and read as already
+	// claimed.
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+
+	engine::parallel::Jobs::Start(1);
+	engine::scene::RegisterSceneComponents();
+
+	const auto furnish = [](Store &store) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+		engine::physics::PreparePhysicsWorld(store);
+	};
+
+	WorldSettings first;
+	first.Name = Name("here");
+	first.TickRate = TICK_RATE;
+	const WorldId here = editor.Universe->Create(first);
+	editor.Universe->Enter(here, furnish);
+
+	WorldSettings second;
+	second.Name = Name("there");
+	second.TickRate = TICK_RATE;
+	const WorldId there = editor.Universe->Create(second);
+	editor.Universe->Enter(there, furnish);
+
+	// A link started on `here`, as pressing Play makes one.
+	auto link = std::make_unique<PlayLink>();
+	std::string error;
+	REQUIRE(link->Start(*editor.Universe, here, TICK_RATE, error, "client 1"));
+
+	const Entity mine = link->Player();
+	REQUIRE(mine != engine::ecs::NULL_ENTITY);
+
+	studio::Editor::WorldRun run;
+	run.World = here;
+	run.Mode = studio::RunMode::Play;
+	run.Links.push_back(std::move(link));
+	editor.Runs.push_back(std::move(run));
+
+	// Its own player, in its own world, is claimed. That is the whole job.
+	CHECK(editor.Claimed(here, mine));
+
+	// **And the same number in another world is not.** This is the assertion the
+	// bug failed: nothing about `there` is claimed by a link living in `here`,
+	// however the two stores happen to have numbered their rows.
+	INFO("an entity handle only means something inside the store that minted it");
+	CHECK_FALSE(editor.Claimed(there, mine));
+
+	// Now the crossing: the link re-homes onto `there`, exactly as
+	// `FollowTeleports` re-homes one, while its run keeps naming `here`.
+	editor.Runs.front().Links.front()->Stop(*editor.Universe);
+
+	auto moved = std::make_unique<PlayLink>();
+	REQUIRE(moved->Start(*editor.Universe, there, TICK_RATE, error, "client 1"));
+	const Entity theirs = moved->Player();
+	editor.Runs.front().Links.front() = std::move(moved);
+
+	REQUIRE(editor.Runs.front().World == here);
+	REQUIRE(editor.Runs.front().Links.front()->AuthorityWorld() == there);
+
+	CHECK(editor.Claimed(there, theirs));
+
+	// **The return leg.** A player arriving back in `here` is not this link's,
+	// wherever its number lands — and `theirs` is passed deliberately, because a
+	// handle minted in `there` is exactly what used to match here by accident.
+	INFO("the arrival read as already claimed, so no destination was found");
+	CHECK_FALSE(editor.Claimed(here, theirs));
+
+	editor.Runs.clear();
+	editor.Universe.reset();
+	engine::parallel::Jobs::Stop();
+}

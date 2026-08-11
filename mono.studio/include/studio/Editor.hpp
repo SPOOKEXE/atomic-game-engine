@@ -1005,10 +1005,22 @@ namespace studio {
 		// by name alone lands in whichever world was created first. A player a
 		// live link is already using is not somebody who has just arrived.
 		//
+		// **Matched against each link's own authority world and not its run's**,
+		// because a link re-homes on every crossing and its run does not. An
+		// `ecs::Entity` means something only inside one store, so testing the
+		// wrong world compares handles across a boundary — see the body.
+		//
 		// @param world  The world to look in.
-		// @param player The `Player` instance.
+		// @param player The `Player` instance, in that world.
 		// @return `true` when a running link already holds it.
+		//
+		// **Public for `DrivePlayer`'s reason**, and it is the same reason: what
+		// it answers is only wrong once a client has crossed twice, which no
+		// test can set up from outside without being able to ask.
+	  public:
 		bool Claimed(WorldId world, Entity player) const;
+
+	  private:
 
 		// The camera rules, over whichever viewport the pointer is in.
 		//
