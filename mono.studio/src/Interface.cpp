@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <span>
+#include <vector>
 #include <cstdio>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -100,7 +102,12 @@ namespace studio {
 		// **Only when imgui has no layout of its own.** Rebuilding every run
 		// would throw away wherever somebody dragged a panel to, which is the
 		// single most annoying thing an editor can do.
-		void BuildDefaultLayout(ImGuiID dockspace) {
+		// @param dockspace   The dockspace node to fill.
+		// @param extraTitles The extra viewport panels, in index order. Passed in
+		//                    rather than spelled here because the editor owns
+		//                    both how many there are and what they are called —
+		//                    see `Editor::ResizeViewports`.
+		void BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles) {
 			ImGui::DockBuilderRemoveNode(dockspace);
 			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
 			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
@@ -133,14 +140,15 @@ namespace studio {
 				ImGui::DockBuilderSplitNode(rightHalf, ImGuiDir_Left, 0.5f, nullptr, &rightHalf);
 
 			ImGui::DockBuilderDockWindow(VIEWPORT, leftHalf);
-			ImGui::DockBuilderDockWindow(VIEWPORT2, rightHalf);
 
-			// Three and four share the halves rather than splitting further:
-			// four quarters of a centre pane are four pictures too small to
-			// judge anything by, and a panel can be dragged wherever somebody
-			// actually wants it.
-			ImGui::DockBuilderDockWindow("Viewport 3", leftHalf);
-			ImGui::DockBuilderDockWindow("Viewport 4", rightHalf);
+			// Everything past the second shares the two halves rather than
+			// splitting further: four quarters of a centre pane are four
+			// pictures too small to judge anything by, and a panel can be
+			// dragged wherever somebody actually wants it. They alternate so an
+			// author who opens two more gets one on each side.
+			for (size_t index = 0; index < extraTitles.size(); index++) {
+				ImGui::DockBuilderDockWindow(extraTitles[index], index % 2 == 0 ? rightHalf : leftHalf);
+			}
 			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
 			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
@@ -219,9 +227,18 @@ namespace studio {
 			dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
 		}
 
+		// The panels the layout has to place, gathered once for either branch
+		// below. `ViewportState::Title` owns the strings; this is a view of
+		// them, and it lives no longer than the two calls under it.
+		std::vector<const char *> extraTitles;
+		extraTitles.reserve(Extras.size());
+		for (const ViewportState &view : Extras) {
+			extraTitles.push_back(view.Title.c_str());
+		}
+
 		if (ResetLayout) {
 			ResetLayout = false;
-			BuildDefaultLayout(dockspace);
+			BuildDefaultLayout(dockspace, extraTitles);
 		}
 
 		static bool built = false;
@@ -229,7 +246,7 @@ namespace studio {
 			built = true;
 			if (ImGui::DockBuilderGetNode(dockspace) == nullptr ||
 				ImGui::DockBuilderGetNode(dockspace)->IsLeafNode()) {
-				BuildDefaultLayout(dockspace);
+				BuildDefaultLayout(dockspace, extraTitles);
 			}
 		}
 
@@ -252,7 +269,14 @@ namespace studio {
 		// almost nothing, which is the correct reading rather than an absence.
 		{
 			ENGINE_PROFILE_CAT("viewports", engine::core::ProfileCategory::Render);
-			for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
+
+			// **Every extra panel skins as `VIEWPORT2`, whatever it is called.**
+			// The settings page offers a colour per entry in `SkinnablePanels`,
+			// and one entry per viewport would be a list that grows as panels
+			// are added — so "the main viewport" and "an extra viewport" are the
+			// two things somebody can colour, which is the distinction that was
+			// there when there were exactly two.
+			for (size_t index = 0; index < 1 + Extras.size(); index++) {
 				Skinned(index == 0 ? VIEWPORT : VIEWPORT2, [&] { DrawViewport(index); });
 			}
 		}
@@ -445,7 +469,7 @@ namespace studio {
 		constexpr size_t NONE = ~size_t{0};
 		size_t target = NONE;
 
-		for (size_t index = 1; index <= EXTRA_VIEWPORTS; index++) {
+		for (size_t index = 1; index <= Extras.size(); index++) {
 			const ViewportState &view = Extras[index - 1];
 			if (view.Open && (view.Hovered || view.Active || view.Panning)) {
 				target = index;
@@ -677,16 +701,11 @@ namespace studio {
 		ViewportState *extra = ExtraAt(index);
 		const bool second = extra != nullptr;
 
-		// imgui remembers a window by its title, so the titles are fixed rather
-		// than built per call — a name that changed would be a panel the saved
-		// layout has never heard of.
-		static const char *const TITLES[] = {"Viewport", "Viewport 2", "Viewport 3", "Viewport 4"};
-
-		// **The second panel is a different world by default and says which.**
-		// Two viewports both showing the active world is one view drawn twice;
-		// the reason to open the second is to watch the server's world beside
-		// the client's, or one subarea beside another while both tick.
-		const char *title = TITLES[index < 4 ? index : 0];
+		// imgui remembers a window by its title, so a panel's title is minted
+		// once when the panel is and then never changes — a name that moved
+		// would be a panel the saved layout has never heard of. See
+		// `ViewportState::Title`.
+		const char *title = ViewportTitle(index);
 		bool *open = second ? &extra->Open : &ShowViewport;
 		engine::render::SceneTarget &target = second ? extra->Target : WorldTarget;
 
@@ -932,13 +951,22 @@ namespace studio {
 	void Editor::DrawViewMenu() {
 		ImGui::MenuItem("Viewport", nullptr, &ShowViewport);
 
-		// **The second view, and it is what "server beside client" is made
-		// of.** Off by default: a second viewport halves the refresh rate of
-		// both, so it is a thing somebody opens when they want it rather than
-		// a cost everybody pays.
-		for (size_t index = 0; index < EXTRA_VIEWPORTS; index++) {
-			const char *names[] = {"Viewport 2", "Viewport 3", "Viewport 4"};
-			ImGui::MenuItem(names[index], nullptr, &Extras[index].Open);
+		// **The extra views, and they are what "server beside client" is made
+		// of.** All off by default: N open viewports each refresh at a Nth of
+		// the frame rate, so they are a thing somebody opens when they want them
+		// rather than a cost everybody pays. See `DrawingViewport`.
+		for (ViewportState &view : Extras) {
+			ImGui::MenuItem(view.Title.c_str(), nullptr, &view.Open);
+		}
+
+		// **As many as somebody wants, made here rather than declared in a
+		// header.** There is no number of viewports that is right for every
+		// session — a person comparing six subareas needs six — so the editor
+		// mints one on request instead of shipping a ceiling. `AddViewport`
+		// hands back a closed panel before it makes a new one, so opening and
+		// shutting one does not grow the list.
+		if (ImGui::MenuItem("New Viewport")) {
+			AddViewport();
 		}
 		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
@@ -1477,10 +1505,8 @@ namespace studio {
 			Keybinds::SetScope(Scope::Viewport);
 		}
 
-		static const char *const TITLES[] = {"Viewport", "Viewport 2", "Viewport 3", "Viewport 4"};
-
-		for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
-			const ImGuiWindow *window = ImGui::FindWindowByName(TITLES[index]);
+		for (size_t index = 0; index < 1 + Extras.size(); index++) {
+			const ImGuiWindow *window = ImGui::FindWindowByName(ViewportTitle(index));
 			if (window == nullptr) {
 				continue;
 			}

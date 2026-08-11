@@ -310,7 +310,7 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--uncapped` | off | draw with no frame rate ceiling |
 | `--stats`, `--graph` | off | open the statistics or frame-graph panel |
 | `--assets` | off | open the assets manager |
-| `--viewport2` | off | open the second viewport |
+| `--viewports N` | 1 | open N viewport panels; `--viewport2` is the old spelling of `--viewports 2` |
 | `--profile-snapshot PATH` | — | write a frame-graph snapshot on exit |
 | `--idle-close SECONDS` | 300 | close an empty world after this long |
 | `--mcp-port PORT` | off | open the loopback control surface |
@@ -348,6 +348,48 @@ ceiling for a run, which is what to pass when the number being read is the
 frame's own cost — otherwise the sleep padding each frame out to 8.3 ms is
 measured as that cost. On a device with no immediate present mode the editor says
 so and stays paced by the display.
+
+### The Demo tab *(v0.14)*
+
+The ribbon's last tab, and its one entry is **Demo Nodes** — a typed node graph
+with live evaluation. It changes nothing in the scene; it is there to be looked
+at, and to be the place the two node systems `ROADMAP.md` wants get designed
+against rather than invented twice.
+
+```
+drag port → port      connect. Types must match, or it says why it refused
+drag a wired input    picks the link up and moves it
+drag port → empty     a palette of what would fit there
+right click           the palette anywhere
+middle or alt-drag    pan · wheel zooms to the cursor
+Del · F               delete the selection · fit
+```
+
+What it computes is terrain. **Noise, Ridged, Domain Warp, Terrace, Slope,
+Threshold and Combine** are the sync half — they run inside the frame, so a
+slider drag re-runs the chain between frames. **Colourise** turns a height field
+into an actual picture, which is what the thumbnails on the nodes are drawing.
+
+**Erode** and **Staged Task** are the async half. Erosion is genuinely slow at
+256², so it runs on a worker and the node grows a progress bar and the stage it
+is on; the frame keeps drawing. Two staged tasks in two branches run at once
+because the evaluator starts every node whose inputs are ready — there is no
+scheduler deciding it, readiness *is* the schedule.
+
+Three properties worth knowing while using it:
+
+- **A result is cached against a hash** of the node's parameters and its inputs'
+  hashes, so one slider recomputes exactly the sub-tree below it. Dragging a
+  node recomputes nothing: position is not in the hash.
+- **A node whose input is still being computed waits** rather than running with
+  the unconnected fallback, which would cache a picture of nothing under a hash
+  that claims otherwise.
+- **Live** follows every edit; turn it off and drive it with **Build** when the
+  graph has a six-second task in it.
+
+The inspector down the right-hand side shows the selected node's picture large —
+the same texture the node draws, so it costs one conversion — with its stages and
+whatever number it produced.
 
 ### Driving it with no display
 

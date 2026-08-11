@@ -151,8 +151,8 @@ namespace studio {
 			state = LoadPreviewMesh(HoverShowing);
 
 			if (state == PreviewState::Ready && DrawPreviewViewport(HoverShowing, picture)) {
-				if (void *texture = Renderer.SceneTexture(PREVIEW_SLOT); texture != nullptr) {
-					const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(PREVIEW_SLOT);
+				if (void *texture = Renderer.SceneTexture(PreviewSlot()); texture != nullptr) {
+					const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(PreviewSlot());
 
 					// **Sampled to its extent rather than whole**, for the
 					// viewport panel's reason: the texture is rounded up to a

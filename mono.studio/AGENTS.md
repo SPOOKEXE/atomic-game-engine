@@ -134,6 +134,30 @@ before the renderer runs. That one-frame lag is the same trade
 `world::ViewChannel` and `SurfaceView` already make, and it is what removes the
 cycle between "how big is the panel" and "what is in the texture".
 
+## There is no maximum number of viewports
+
+`Extras` is a vector and "New Viewport" grows it. Anything indexed by panel —
+the viewer cameras, the overlay slots, the compiled GUI lists and their routers
+— is grown in `Editor::ResizeViewports` and nowhere else, because they are one
+thing indexed five ways and growing four of five is a subscript past the end on
+the next frame.
+
+Two things a new panel needs that a fixed array gave for free. Its **title** is
+owned by the `ViewportState` rather than pointed at a literal, because imgui
+keys a window — and the ini keys its dock node — on that string; it is derived
+from the index in `ResizeViewports` so panel 5 is "Viewport 6" in every session.
+And its **renderer slot** is its panel index, so the asset preview's slot is
+`Editor::PreviewSlot()` — computed as one past the last panel rather than a
+constant, because a constant is a cap.
+
+Closing a panel clears `Open` and leaves it in the vector; `AddViewport` hands a
+closed one back before minting a new index. Removing entries would renumber the
+panels above it, and a renumbered panel is one the saved layout has lost.
+
+The cost is honest and unchanged: `PresentWorld` round-robins one panel per
+frame, so N open panels each refresh at a Nth of the frame rate. That is the
+person opening them deciding to pay it, which is why the count is theirs.
+
 ## Every panel is closable, and the View menu is the only way back
 
 A closable panel with no way back is a panel somebody loses permanently.

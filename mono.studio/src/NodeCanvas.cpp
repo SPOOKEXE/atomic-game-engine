@@ -300,15 +300,117 @@ namespace studio::nodes {
 			DrawWidget(node, *type, placed);
 		}
 
+		// --- the picture ------------------------------------------------------
+		//
+		// **Drawn from what the node produced, through the host's sink.** The
+		// payload is converted at most once per result: the key is the hash it
+		// was computed at, so panning, zooming and dragging cost a lookup and
+		// nothing else.
+		if (layout.PreviewSide > 0.0f) {
+			ImVec2 slot;
+			ImVec2 slotFar;
+			ToScreen(node.X + Look.Sizes.Padding, node.Y + layout.PreviewTop, slot.x, slot.y);
+			ToScreen(
+				node.X + Look.Sizes.Padding + layout.PreviewSide,
+				node.Y + layout.PreviewTop + layout.PreviewSide,
+				slotFar.x,
+				slotFar.y
+			);
+
+			void *handle = nullptr;
+			if (Sink && Watching != nullptr) {
+				const std::string port =
+					type->PreviewPort.empty()
+						? (type->Outputs.empty() ? std::string() : type->Outputs.front().Name)
+						: type->PreviewPort;
+
+				if (const std::any *payload = port.empty() ? nullptr : Watching->Output(node.Id, port);
+					payload != nullptr) {
+					const std::any &held = *payload;
+					const auto &convert = type->Preview;
+					handle = Sink(Watching->RanAt(node.Id), [&held, &convert](PreviewImage &image) {
+						return convert(held, image);
+					});
+				}
+			}
+
+			if (handle != nullptr) {
+				draw->AddImage(reinterpret_cast<ImTextureID>(handle), slot, slotFar);
+			} else {
+				// **A frame of the same size rather than nothing.** The slot is
+				// reserved by the layout either way, and an empty node body
+				// reads as a node that does not work rather than as a result
+				// that has not arrived.
+				draw->AddRectFilled(slot, slotFar, 0xFF141414);
+			}
+			draw->AddRect(slot, slotFar, Look.NodeBorder);
+		}
+
+		// --- what it is doing --------------------------------------------------
+
+		const NodeStatus status = Watching != nullptr ? Watching->Status(node.Id) : NodeStatus{};
+
+		if (layout.ProgressHeight > 0.0f) {
+			ImVec2 bar;
+			ImVec2 barFar;
+			ToScreen(node.X + Look.Sizes.Padding, node.Y + layout.ProgressTop, bar.x, bar.y);
+			ToScreen(
+				node.X + layout.Width - Look.Sizes.Padding,
+				node.Y + layout.ProgressTop + layout.ProgressHeight,
+				barFar.x,
+				barFar.y
+			);
+
+			draw->AddRectFilled(bar, barFar, Look.Widget, 2.0f * Scale);
+
+			const float fraction = std::clamp(status.Progress, 0.0f, 1.0f);
+			if (fraction > 0.0f) {
+				draw->AddRectFilled(
+					bar,
+					ImVec2(bar.x + (barFar.x - bar.x) * fraction, barFar.y),
+					status.State == NodeState::Failed ? Look.Refused : Look.WidgetFill,
+					2.0f * Scale
+				);
+			}
+
+			if (small >= 5.0f) {
+				// The step it says it is on, or how long it took once it is
+				// done. A spinner says a node is busy; this says at what.
+				std::string words = status.Note;
+				if (words.empty() && status.State == NodeState::Done) {
+					char text[32];
+					std::snprintf(text, sizeof(text), "%.0f ms", status.Milliseconds);
+					words = text;
+				}
+				if (!words.empty()) {
+					draw->AddText(
+						nullptr, small, ImVec2(bar.x + 4.0f * Scale, bar.y - 1.0f * Scale), Look.Text,
+						words.c_str()
+					);
+				}
+			}
+		}
+
 		// The cached badge, when somebody is watching an evaluator. It is the
 		// one piece of evaluation state worth putting on the canvas: a node that
 		// did not recompute when you expected it to is the first sign that a
 		// hash is wrong.
-		if (Watching != nullptr && small >= 5.0f && Watching->WasCached(node.Id)) {
-			draw->AddText(
-				nullptr, small, ImVec2(far.x - 44.0f * Scale, corner.y + 6.0f * Scale), 0xFF303030,
-				"cached"
-			);
+		if (Watching != nullptr && small >= 5.0f) {
+			const char *badge = status.Cached								 ? "cached"
+								: status.State == NodeState::Running		 ? "working"
+								: status.State == NodeState::Failed			 ? "failed"
+																			 : nullptr;
+			if (badge != nullptr) {
+				const ImVec2 size = ImGui::CalcTextSize(badge);
+				const float width = size.x * (small / ImGui::GetFontSize());
+				draw->AddText(
+					nullptr,
+					small,
+					ImVec2(far.x - width - 8.0f * Scale, corner.y + 6.0f * Scale),
+					0xFF101010,
+					badge
+				);
+			}
 		}
 	}
 

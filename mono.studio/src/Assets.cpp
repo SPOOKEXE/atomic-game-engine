@@ -295,8 +295,8 @@ namespace studio {
 		// So exactly one mesh row is alive at a time and it is the one being
 		// pointed at, which is the row somebody wants to see.
 		if (PreviewIsRendered(kind) && !name.empty() && name == PreviewShowing) {
-			if (void *const slot = Renderer.SceneTexture(PREVIEW_SLOT); slot != nullptr) {
-				const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(PREVIEW_SLOT);
+			if (void *const slot = Renderer.SceneTexture(PreviewSlot()); slot != nullptr) {
+				const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(PreviewSlot());
 
 				// **Sampled to its extent rather than whole.** The target is
 				// rounded up to a block and the render fills the corner, so

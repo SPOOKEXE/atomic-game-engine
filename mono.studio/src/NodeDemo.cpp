@@ -1,28 +1,50 @@
-// The Demo Nodes panel: a working node system, and the node set it runs.
+// The Demo Nodes panel: a working node system, the node set it runs, and the
+// pictures it draws.
 //
 // **A demo and not a feature, said out loud.** Nothing in the engine reads this
-// graph — it computes scalar fields and shows them as numbers — and that is the
-// point of having it before the two node systems the roadmap wants: the render
-// pipeline as a node editor, and `Engine::bakegraph`'s pipeline documents. Both
-// need a registry, a cycle guard, a layout and a canvas, and building either
-// without having built one is how an editor ends up shaped by whichever came
-// first.
+// graph. It is here ahead of the two node systems the roadmap wants — the render
+// pipeline as an editor, and `Engine::bakegraph`'s pipeline documents — because
+// both need the same five things, and this is where they get built and looked
+// at: a registry, a model with a cycle guard, a layout, a canvas, and an
+// evaluator that can run something slow without stopping the frame.
 //
-// **The node set is the smallest one that exercises everything**, rather than a
-// terrain library: two data types, every widget kind that can be edited on a
-// canvas, a node with two inputs, a node with none, and a node with no
-// evaluation at all. Registering one is one call — the palette, the painter, the
-// hit test, the evaluator and the save format all read the same table.
+// ## What the node set is for
+//
+// Three kinds of node, each demonstrating a different half of the machinery:
+//
+// - **Generators and filters** — value-noise fBm, ridged noise, domain warp,
+//   terraces, remap, slope, a threshold mask and a combine. These are sync: they
+//   run inside `Run` and are cheap enough that a slider drag recomputes the
+//   chain between frames.
+// - **A colouriser**, which turns a height field into an actual picture. It is
+//   what makes the thumbnails on the nodes worth having, and it is the same
+//   split the reference implementation draws: a heightfield is data, and turning
+//   it into colour is a node somebody adds rather than something the viewer does
+//   quietly.
+// - **Erosion and a staged task**, which are async. Erosion is genuinely slow —
+//   a few hundred milliseconds at 256² — and the staged task is slow on purpose,
+//   so that two of them in two branches visibly run at once.
+//
+// **Every evaluation here is pure.** Results are cached against a hash of a
+// node's parameters and its inputs' hashes, so a function that read a clock
+// would produce a picture the cache then refuses to recompute — a stale frame
+// that looks like a broken graph. The staged task sleeps rather than reading
+// wall-clock time *into* its result for the same reason.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <engine/assets/Texture.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 #include <imgui.h>
 #include <string>
 #include <studio/Editor.hpp>
 #include <studio/NodeGraph.hpp>
+#include <thread>
 #include <vector>
 
 namespace studio {
@@ -30,12 +52,39 @@ namespace studio {
 	namespace nodes {
 
 		namespace {
-			// A square scalar grid. What flows down a wire is the caller's
-			// business — `Inputs::In` is the only place that knows — so this
-			// type lives here rather than in the library.
+			// A square scalar grid, in 0..1. What flows down a `data.FIELD`
+			// wire — the library never learns what this is, which is what
+			// `Inputs::In` exists for.
 			struct Field {
 				int Side = 0;
 				std::vector<float> Data;
+
+				bool Empty() const {
+					return Side <= 0 || Data.empty();
+				}
+
+				float At(int x, int y) const {
+					const int cx = std::clamp(x, 0, Side - 1);
+					const int cy = std::clamp(y, 0, Side - 1);
+					return Data[static_cast<size_t>(cy) * static_cast<size_t>(Side) +
+								static_cast<size_t>(cx)];
+				}
+
+				float &At(int x, int y) {
+					return Data[static_cast<size_t>(y) * static_cast<size_t>(Side) +
+								static_cast<size_t>(x)];
+				}
+			};
+
+			// A square colour grid. What a `data.IMAGE` wire carries, and what a
+			// thumbnail is made of without further interpretation.
+			struct Image {
+				int Side = 0;
+				std::vector<uint8_t> Rgba;
+
+				bool Empty() const {
+					return Side <= 0 || Rgba.empty();
+				}
 			};
 
 			Field Made(int side) {
@@ -45,10 +94,8 @@ namespace studio {
 				return field;
 			}
 
-			// Value noise. **Deterministic on purpose**: an `Evaluate` that read
-			// a clock or a global would produce a result the cache then refuses
-			// to recompute, which is a stale picture that looks like a broken
-			// graph.
+			// **Deterministic on purpose.** An `Evaluate` that read a clock or a
+			// global would produce a result the cache then refuses to recompute.
 			float Hashed(int x, int y, int seed) {
 				uint32_t value = static_cast<uint32_t>(x) * 374761393u +
 								 static_cast<uint32_t>(y) * 668265263u +
@@ -77,27 +124,153 @@ namespace studio {
 				return top + (bottom - top) * fy;
 			}
 
-			// The average of a field, which is what the Output node reports.
-			// One number is all a demo panel needs to show that the chain ran.
-			float Average(const Field &field) {
-				if (field.Data.empty()) {
-					return 0.0f;
+			// Fractional Brownian motion: octaves of the same noise, each half
+			// the amplitude and twice the frequency of the one before.
+			//
+			// **One function for both generators**, with `ridge` deciding
+			// whether each octave is folded about its middle. Two copies of an
+			// octave loop is where two generators start disagreeing about what
+			// `frequency` means.
+			float Fractal(
+				float x, float y, int seed, int octaves, float frequency, float lacunarity, float gain,
+				bool ridge
+			) {
+				float total = 0.0f;
+				float amplitude = 1.0f;
+				float sum = 0.0f;
+
+				for (int octave = 0; octave < octaves; octave++) {
+					float sample = Noise(x * frequency, y * frequency, seed + octave * 17);
+					if (ridge) {
+						// Fold, so a ridge forms where the noise crosses its
+						// middle — the whole difference between rolling hills
+						// and a mountain range.
+						sample = 1.0f - std::fabs(sample * 2.0f - 1.0f);
+						sample *= sample;
+					}
+					total += sample * amplitude;
+					sum += amplitude;
+					amplitude *= gain;
+					frequency *= lacunarity;
 				}
-				double total = 0.0;
+
+				return sum > 0.0f ? total / sum : 0.0f;
+			}
+
+			int SideOf(const Inputs &in, const char *key) {
+				const std::string chosen = in.Widget(key).Text;
+				return chosen.empty() ? 128 : std::stoi(chosen);
+			}
+
+			// The 0..1 range a field is expected to be in, restored after an
+			// operation that can leave it anywhere.
+			void Normalise(Field &field) {
+				if (field.Empty()) {
+					return;
+				}
+				float low = field.Data.front();
+				float high = low;
 				for (const float sample : field.Data) {
-					total += static_cast<double>(sample);
+					low = std::min(low, sample);
+					high = std::max(high, sample);
 				}
-				return static_cast<float>(total / static_cast<double>(field.Data.size()));
+				const float span = high - low;
+				if (span <= 1e-6f) {
+					return;
+				}
+				for (float &sample : field.Data) {
+					sample = (sample - low) / span;
+				}
+			}
+
+			// --- pictures -------------------------------------------------------
+
+			// How wide a thumbnail is. Bigger than the node draws it, because the
+			// inspector shows the same texture large — one conversion, two sizes.
+			constexpr uint32_t PREVIEW_SIDE = 160;
+
+			// Relief shading: a surface lit from the north-west, which is what
+			// makes a height field read as terrain rather than as a grey cloud.
+			float Relief(const Field &field, int x, int y) {
+				const float dx = field.At(x + 1, y) - field.At(x - 1, y);
+				const float dy = field.At(x, y + 1) - field.At(x, y - 1);
+				const float lit = 0.5f + (dx + dy) * static_cast<float>(field.Side) * 0.06f;
+				return std::clamp(lit, 0.25f, 1.0f);
+			}
+
+			bool PreviewOfField(const std::any &payload, PreviewImage &image) {
+				const Field *field = std::any_cast<Field>(&payload);
+				if (field == nullptr || field->Empty()) {
+					return false;
+				}
+
+				image.Side = PREVIEW_SIDE;
+				image.Rgba.assign(static_cast<size_t>(PREVIEW_SIDE) * PREVIEW_SIDE * 4, 0);
+
+				for (uint32_t y = 0; y < PREVIEW_SIDE; y++) {
+					for (uint32_t x = 0; x < PREVIEW_SIDE; x++) {
+						// Nearest sample. A thumbnail is a glance, and a
+						// bilinear one costs four reads a pixel to say the same
+						// thing at this size.
+						const int sx = static_cast<int>(
+							static_cast<float>(x) / PREVIEW_SIDE * static_cast<float>(field->Side)
+						);
+						const int sy = static_cast<int>(
+							static_cast<float>(y) / PREVIEW_SIDE * static_cast<float>(field->Side)
+						);
+
+						const float height = std::clamp(field->At(sx, sy), 0.0f, 1.0f);
+						const float shade = height * Relief(*field, sx, sy);
+						const auto grey = static_cast<uint8_t>(std::clamp(shade, 0.0f, 1.0f) * 255.0f);
+
+						const size_t at = (static_cast<size_t>(y) * PREVIEW_SIDE + x) * 4;
+						image.Rgba[at] = grey;
+						image.Rgba[at + 1] = grey;
+						image.Rgba[at + 2] = grey;
+						image.Rgba[at + 3] = 255;
+					}
+				}
+				return true;
+			}
+
+			bool PreviewOfImage(const std::any &payload, PreviewImage &image) {
+				const Image *source = std::any_cast<Image>(&payload);
+				if (source == nullptr || source->Empty()) {
+					return false;
+				}
+
+				image.Side = PREVIEW_SIDE;
+				image.Rgba.assign(static_cast<size_t>(PREVIEW_SIDE) * PREVIEW_SIDE * 4, 0);
+
+				for (uint32_t y = 0; y < PREVIEW_SIDE; y++) {
+					for (uint32_t x = 0; x < PREVIEW_SIDE; x++) {
+						const int sx = static_cast<int>(
+							static_cast<float>(x) / PREVIEW_SIDE * static_cast<float>(source->Side)
+						);
+						const int sy = static_cast<int>(
+							static_cast<float>(y) / PREVIEW_SIDE * static_cast<float>(source->Side)
+						);
+						const size_t from =
+							(static_cast<size_t>(sy) * static_cast<size_t>(source->Side) +
+							 static_cast<size_t>(sx)) *
+							4;
+						const size_t at = (static_cast<size_t>(y) * PREVIEW_SIDE + x) * 4;
+						for (size_t channel = 0; channel < 4; channel++) {
+							image.Rgba[at + channel] = source->Rgba[from + channel];
+						}
+					}
+				}
+				return true;
 			}
 
 			bool Registered = false;
 		}
 
 		void RegisterDemoNodes() {
-			// Idempotent, because the panel registers on first open and the
-			// tests register in every case. A second registration replaces in
-			// place, so this is a saving rather than a correctness fix — but a
-			// palette that grew a duplicate row every open would be neither.
+			// Idempotent: the panel registers on first open and every test case
+			// asks. A second registration replaces in place, so this is a saving
+			// rather than a correctness fix — but a palette that grew a
+			// duplicate row every open would be neither.
 			if (Registered) {
 				return;
 			}
@@ -105,8 +278,13 @@ namespace studio {
 
 			DataTypes::Register(DataType{"data.NUMBER", "Number", Colour::Hex(0xF2C14E), "One scalar"});
 			DataTypes::Register(
-				DataType{"data.FIELD", "Field", Colour::Hex(0x4CA6FF), "A square grid of scalars"}
+				DataType{"data.FIELD", "Field", Colour::Hex(0x4CA6FF), "A square grid of heights, 0..1"}
 			);
+			DataTypes::Register(
+				DataType{"data.IMAGE", "Image", Colour::Hex(0xE06C9F), "A square grid of colours"}
+			);
+
+			// --- numbers --------------------------------------------------------
 
 			NodeType constant;
 			constant.Id = "number.constant";
@@ -142,7 +320,7 @@ namespace studio {
 				} else if (op == "multiply") {
 					result = a * b;
 				} else if (op == "divide") {
-					// Zero rather than an infinity. An infinity propagates into
+					// Zero rather than an infinity: an infinity propagates into
 					// a field, a picture and a saved file, and the first place
 					// anybody notices is a blank one.
 					result = b == 0.0 ? 0.0 : a / b;
@@ -154,43 +332,212 @@ namespace studio {
 			};
 			NodeTypes::Register(arithmetic);
 
-			NodeType noise;
-			noise.Id = "field.noise";
-			noise.Title = "Noise";
-			noise.Category = "Generate";
-			noise.Accent = Colour::Hex(0x4CA6FF);
-			noise.Subtitle = "value noise, two octaves";
-			noise.Inputs = {Port("Scale", "data.NUMBER")};
-			noise.Outputs = {Port("Out", "data.FIELD")};
-			noise.Widgets = {
-				Select("resolution", "Resolution", {"64", "128", "256"}, 1),
+			// --- generators -----------------------------------------------------
+
+			NodeType perlin;
+			perlin.Id = "field.perlin";
+			perlin.Title = "Noise";
+			perlin.Category = "Generate";
+			perlin.Accent = Colour::Hex(0x4CA6FF);
+			perlin.Subtitle = "value fBm";
+			perlin.Inputs = {Port("Frequency", "data.NUMBER")};
+			perlin.Outputs = {Port("Out", "data.FIELD")};
+			perlin.Widgets = {
+				Select("resolution", "Resolution", {"64", "128", "256", "512"}, 1),
 				Slider("frequency", "Frequency", 1.0, 16.0, 4.0),
+				Slider("octaves", "Octaves", 1.0, 8.0, 5.0),
+				Slider("gain", "Gain", 0.2, 0.8, 0.5),
 				Number("seed", "Seed", 1.0),
 			};
-			noise.Evaluate = [](const Inputs &in) {
-				const std::string chosen = in.Widget("resolution").Text;
-				const int side = chosen.empty() ? 128 : std::stoi(chosen);
+			perlin.Preview = PreviewOfField;
+			perlin.Evaluate = [](const Inputs &in) {
+				const int side = SideOf(in, "resolution");
 				const auto seed = static_cast<int>(in.Real("seed"));
+				const auto octaves = static_cast<int>(in.Real("octaves"));
+				const auto gain = static_cast<float>(in.Real("gain"));
 
 				// **A wire beats the knob.** The knob is what the node does on
 				// its own; a wire is somebody saying otherwise, and a node that
 				// ignored it would be a wire that does nothing.
-				const auto frequency = static_cast<float>(in.In<double>("Scale", in.Real("frequency")));
+				const auto frequency = static_cast<float>(in.In<double>("Frequency", in.Real("frequency")));
 
 				Field field = Made(side);
 				for (int y = 0; y < side; y++) {
 					for (int x = 0; x < side; x++) {
 						const float u = static_cast<float>(x) / static_cast<float>(side);
 						const float v = static_cast<float>(y) / static_cast<float>(side);
-						const float low = Noise(u * frequency, v * frequency, seed);
-						const float high = Noise(u * frequency * 2.0f, v * frequency * 2.0f, seed + 1);
-						field.Data[static_cast<size_t>(y) * static_cast<size_t>(side) +
-								   static_cast<size_t>(x)] = low * 0.7f + high * 0.3f;
+						field.At(x, y) = Fractal(u, v, seed, octaves, frequency, 2.0f, gain, false);
 					}
+				}
+				Normalise(field);
+				return Outputs{{"Out", field}};
+			};
+			NodeTypes::Register(perlin);
+
+			NodeType ridged = perlin;
+			ridged.Id = "field.ridged";
+			ridged.Title = "Ridged";
+			ridged.Subtitle = "folded fBm — ranges";
+			ridged.Accent = Colour::Hex(0x3D8BD6);
+			ridged.Evaluate = [](const Inputs &in) {
+				const int side = SideOf(in, "resolution");
+				const auto seed = static_cast<int>(in.Real("seed"));
+				const auto octaves = static_cast<int>(in.Real("octaves"));
+				const auto gain = static_cast<float>(in.Real("gain"));
+				const auto frequency = static_cast<float>(in.In<double>("Frequency", in.Real("frequency")));
+
+				Field field = Made(side);
+				for (int y = 0; y < side; y++) {
+					for (int x = 0; x < side; x++) {
+						const float u = static_cast<float>(x) / static_cast<float>(side);
+						const float v = static_cast<float>(y) / static_cast<float>(side);
+						field.At(x, y) = Fractal(u, v, seed, octaves, frequency, 2.0f, gain, true);
+					}
+				}
+				Normalise(field);
+				return Outputs{{"Out", field}};
+			};
+			NodeTypes::Register(ridged);
+
+			// --- filters --------------------------------------------------------
+
+			NodeType warp;
+			warp.Id = "field.warp";
+			warp.Title = "Domain Warp";
+			warp.Category = "Filter";
+			warp.Accent = Colour::Hex(0x6FCF97);
+			warp.Subtitle = "displaces by another field";
+			warp.Inputs = {Port("In", "data.FIELD"), Port("By", "data.FIELD")};
+			warp.Outputs = {Port("Out", "data.FIELD")};
+			warp.Widgets = {Slider("amount", "Amount", 0.0, 0.5, 0.15)};
+			warp.Preview = PreviewOfField;
+			warp.Evaluate = [](const Inputs &in) {
+				const Field source = in.In<Field>("In");
+				const Field by = in.In<Field>("By");
+				if (source.Empty()) {
+					return Outputs{{"Out", source}};
+				}
+
+				const auto amount = static_cast<float>(in.Real("amount")) * static_cast<float>(source.Side);
+				Field out = Made(source.Side);
+
+				for (int y = 0; y < source.Side; y++) {
+					for (int x = 0; x < source.Side; x++) {
+						// **Its own noise when nothing is wired in.** A warp
+						// with no second field would otherwise be an expensive
+						// copy, and the node would look broken rather than
+						// unconnected.
+						const float offset = by.Empty()
+												 ? Noise(
+													   static_cast<float>(x) * 0.05f,
+													   static_cast<float>(y) * 0.05f,
+													   99
+												   )
+												 : by.At(x, y);
+						const auto shift = static_cast<int>((offset - 0.5f) * amount);
+						out.At(x, y) = source.At(x + shift, y + shift);
+					}
+				}
+				return Outputs{{"Out", out}};
+			};
+			NodeTypes::Register(warp);
+
+			NodeType terrace;
+			terrace.Id = "field.terrace";
+			terrace.Title = "Terrace";
+			terrace.Category = "Filter";
+			terrace.Accent = Colour::Hex(0x6FCF97);
+			terrace.Inputs = {Port("In", "data.FIELD")};
+			terrace.Outputs = {Port("Out", "data.FIELD")};
+			terrace.Widgets = {
+				Slider("steps", "Steps", 2.0, 24.0, 8.0),
+				Slider("sharpness", "Sharpness", 0.0, 1.0, 0.6),
+			};
+			terrace.Preview = PreviewOfField;
+			terrace.Evaluate = [](const Inputs &in) {
+				Field field = in.In<Field>("In");
+				if (field.Empty()) {
+					return Outputs{{"Out", field}};
+				}
+
+				const auto steps = std::max(2.0f, static_cast<float>(in.Real("steps")));
+				const auto sharpness = static_cast<float>(in.Real("sharpness"));
+
+				for (float &sample : field.Data) {
+					const float scaled = sample * steps;
+					const float step = std::floor(scaled);
+					const float within = scaled - step;
+
+					// Between the flat step and the untouched slope, so
+					// sharpness is a blend rather than a switch — a terrace that
+					// snapped at 1 and did nothing at 0.99 would be a knob with
+					// one useful position.
+					const float flattened = (step + std::pow(within, 1.0f + sharpness * 6.0f)) / steps;
+					sample = flattened * sharpness + sample * (1.0f - sharpness);
 				}
 				return Outputs{{"Out", field}};
 			};
-			NodeTypes::Register(noise);
+			NodeTypes::Register(terrace);
+
+			NodeType slope;
+			slope.Id = "field.slope";
+			slope.Title = "Slope";
+			slope.Category = "Filter";
+			slope.Accent = Colour::Hex(0x9BD16F);
+			slope.Subtitle = "steepness, 0..1";
+			slope.Inputs = {Port("In", "data.FIELD")};
+			slope.Outputs = {Port("Out", "data.FIELD")};
+			slope.Preview = PreviewOfField;
+			slope.Evaluate = [](const Inputs &in) {
+				const Field source = in.In<Field>("In");
+				if (source.Empty()) {
+					return Outputs{{"Out", source}};
+				}
+
+				Field out = Made(source.Side);
+				for (int y = 0; y < source.Side; y++) {
+					for (int x = 0; x < source.Side; x++) {
+						const float dx = source.At(x + 1, y) - source.At(x - 1, y);
+						const float dy = source.At(x, y + 1) - source.At(x, y - 1);
+						out.At(x, y) = std::sqrt(dx * dx + dy * dy) * static_cast<float>(source.Side) * 0.5f;
+					}
+				}
+				Normalise(out);
+				return Outputs{{"Out", out}};
+			};
+			NodeTypes::Register(slope);
+
+			NodeType mask;
+			mask.Id = "field.mask";
+			mask.Title = "Threshold";
+			mask.Category = "Filter";
+			mask.Accent = Colour::Hex(0x9BD16F);
+			mask.Inputs = {Port("In", "data.FIELD"), Port("Level", "data.NUMBER")};
+			mask.Outputs = {Port("Out", "data.FIELD")};
+			mask.Widgets = {
+				Slider("level", "Level", 0.0, 1.0, 0.5),
+				Slider("softness", "Softness", 0.0, 0.5, 0.08),
+				Toggle("invert", "Invert", false),
+			};
+			mask.Preview = PreviewOfField;
+			mask.Evaluate = [](const Inputs &in) {
+				Field field = in.In<Field>("In");
+				if (field.Empty()) {
+					return Outputs{{"Out", field}};
+				}
+
+				const auto level = static_cast<float>(in.In<double>("Level", in.Real("level")));
+				const auto softness = std::max(1e-4f, static_cast<float>(in.Real("softness")));
+				const bool invert = in.Widget("invert").Flag;
+
+				for (float &sample : field.Data) {
+					float value = std::clamp((sample - (level - softness)) / (softness * 2.0f), 0.0f, 1.0f);
+					value = value * value * (3.0f - 2.0f * value);
+					sample = invert ? 1.0f - value : value;
+				}
+				return Outputs{{"Out", field}};
+			};
+			NodeTypes::Register(mask);
 
 			NodeType combine;
 			combine.Id = "field.combine";
@@ -198,16 +545,23 @@ namespace studio {
 			combine.Category = "Filter";
 			combine.Accent = Colour::Hex(0x6FCF97);
 			combine.Inputs = {
-				Port("A", "data.FIELD"), Port("B", "data.FIELD"), Port("Amount", "data.NUMBER")
+				Port("A", "data.FIELD"),
+				Port("B", "data.FIELD"),
+				Port("Mask", "data.FIELD"),
+				Port("Amount", "data.NUMBER"),
 			};
 			combine.Outputs = {Port("Out", "data.FIELD")};
-			combine.Widgets = {Slider("amount", "Amount", 0.0, 1.0, 0.5)};
+			combine.Widgets = {
+				Select("mode", "Mode", {"blend", "add", "multiply", "minimum", "maximum"}, 0),
+				Slider("amount", "Amount", 0.0, 1.0, 0.5),
+			};
+			combine.Preview = PreviewOfField;
 			combine.Evaluate = [](const Inputs &in) {
 				const Field a = in.In<Field>("A");
 				const Field b = in.In<Field>("B");
-				const auto amount = static_cast<float>(in.In<double>("Amount", in.Real("amount")));
+				const Field masked = in.In<Field>("Mask");
 
-				if (a.Side == 0) {
+				if (a.Empty()) {
 					return Outputs{{"Out", b}};
 				}
 				if (b.Side != a.Side) {
@@ -217,24 +571,327 @@ namespace studio {
 					return Outputs{{"Out", a}};
 				}
 
+				const auto amount = static_cast<float>(in.In<double>("Amount", in.Real("amount")));
+				const std::string mode = in.Widget("mode").Text;
+				const bool usable = masked.Side == a.Side;
+
 				Field out = Made(a.Side);
-				for (size_t index = 0; index < out.Data.size(); index++) {
-					out.Data[index] = a.Data[index] * (1.0f - amount) + b.Data[index] * amount;
+				for (int y = 0; y < a.Side; y++) {
+					for (int x = 0; x < a.Side; x++) {
+						const float left = a.At(x, y);
+						const float right = b.At(x, y);
+
+						float mixed = left * (1.0f - amount) + right * amount;
+						if (mode == "add") {
+							mixed = left + right * amount;
+						} else if (mode == "multiply") {
+							mixed = left * (1.0f - amount + right * amount);
+						} else if (mode == "minimum") {
+							mixed = std::min(left, right);
+						} else if (mode == "maximum") {
+							mixed = std::max(left, right);
+						}
+
+						// A mask decides *where* the combine applies, which is
+						// the difference between blending two terrains and
+						// putting one of them in a valley.
+						const float weight = usable ? masked.At(x, y) : 1.0f;
+						out.At(x, y) = left * (1.0f - weight) + mixed * weight;
+					}
 				}
 				return Outputs{{"Out", out}};
 			};
 			NodeTypes::Register(combine);
 
+			// --- colour ---------------------------------------------------------
+
+			NodeType colourise;
+			colourise.Id = "image.colourise";
+			colourise.Title = "Colourise";
+			colourise.Category = "Colour";
+			colourise.Accent = Colour::Hex(0xE06C9F);
+			colourise.Subtitle = "height becomes a picture";
+			colourise.Inputs = {Port("In", "data.FIELD"), Port("Mask", "data.FIELD")};
+			colourise.Outputs = {Port("Out", "data.IMAGE")};
+			colourise.Widgets = {
+				Select("palette", "Palette", {"alpine", "desert", "volcanic", "depth"}, 0),
+				Slider("sea", "Sea level", 0.0, 0.8, 0.32),
+				Toggle("relief", "Relief", true),
+			};
+			colourise.Preview = PreviewOfImage;
+			colourise.Evaluate = [](const Inputs &in) {
+				const Field field = in.In<Field>("In");
+				if (field.Empty()) {
+					return Outputs{{"Out", Image{}}};
+				}
+
+				const std::string palette = in.Widget("palette").Text;
+				const auto sea = static_cast<float>(in.Real("sea"));
+				const bool relief = in.Widget("relief").Flag;
+				const Field cliffs = in.In<Field>("Mask");
+				const bool usable = cliffs.Side == field.Side;
+
+				// **Stacked bands rather than a gradient texture.** Each is a
+				// colour and a boundary, which is what an author actually
+				// adjusts — and it keeps the whole node four numbers wide
+				// instead of needing a curve editor this canvas does not have.
+				struct Band {
+					float Until;
+					float R;
+					float G;
+					float B;
+				};
+
+				std::vector<Band> bands;
+				if (palette == "desert") {
+					bands = {{0.36f, 0.76f, 0.66f, 0.42f}, {0.55f, 0.84f, 0.71f, 0.45f},
+							 {0.78f, 0.66f, 0.50f, 0.34f}, {1.01f, 0.94f, 0.90f, 0.84f}};
+				} else if (palette == "volcanic") {
+					bands = {{0.34f, 0.12f, 0.10f, 0.12f}, {0.58f, 0.28f, 0.20f, 0.20f},
+							 {0.80f, 0.62f, 0.20f, 0.12f}, {1.01f, 0.98f, 0.82f, 0.36f}};
+				} else if (palette == "depth") {
+					bands = {{0.30f, 0.02f, 0.10f, 0.28f}, {0.55f, 0.06f, 0.32f, 0.56f},
+							 {0.80f, 0.24f, 0.62f, 0.78f}, {1.01f, 0.86f, 0.96f, 1.00f}};
+				} else {
+					bands = {{0.38f, 0.36f, 0.52f, 0.30f}, {0.62f, 0.28f, 0.44f, 0.24f},
+							 {0.82f, 0.48f, 0.44f, 0.40f}, {1.01f, 0.96f, 0.96f, 0.98f}};
+				}
+
+				Image image;
+				image.Side = field.Side;
+				image.Rgba.assign(static_cast<size_t>(field.Side) * static_cast<size_t>(field.Side) * 4, 0);
+
+				for (int y = 0; y < field.Side; y++) {
+					for (int x = 0; x < field.Side; x++) {
+						const float height = std::clamp(field.At(x, y), 0.0f, 1.0f);
+						float r = 0.0f;
+						float g = 0.0f;
+						float b = 0.0f;
+
+						if (height < sea) {
+							// Water, darkening with depth. The sea level is a
+							// knob rather than a node because every palette here
+							// has one and a graph would carry the same wire four
+							// times.
+							const float depth = sea > 0.0f ? height / sea : 0.0f;
+							r = 0.04f + depth * 0.06f;
+							g = 0.12f + depth * 0.22f;
+							b = 0.28f + depth * 0.34f;
+						} else {
+							for (const Band &band : bands) {
+								if (height <= band.Until) {
+									r = band.R;
+									g = band.G;
+									b = band.B;
+									break;
+								}
+							}
+						}
+
+						float lit = relief ? Relief(field, x, y) : 1.0f;
+						if (usable) {
+							// A mask darkens where it is set — a cliff layer, in
+							// the reference implementation's terms.
+							lit *= 1.0f - cliffs.At(x, y) * 0.55f;
+						}
+
+						const size_t at =
+							(static_cast<size_t>(y) * static_cast<size_t>(field.Side) +
+							 static_cast<size_t>(x)) *
+							4;
+						image.Rgba[at] = static_cast<uint8_t>(std::clamp(r * lit, 0.0f, 1.0f) * 255.0f);
+						image.Rgba[at + 1] = static_cast<uint8_t>(std::clamp(g * lit, 0.0f, 1.0f) * 255.0f);
+						image.Rgba[at + 2] = static_cast<uint8_t>(std::clamp(b * lit, 0.0f, 1.0f) * 255.0f);
+						image.Rgba[at + 3] = 255;
+					}
+				}
+				return Outputs{{"Out", image}};
+			};
+			NodeTypes::Register(colourise);
+
+			// --- the async half -------------------------------------------------
+
+			NodeType erode;
+			erode.Id = "field.erode";
+			erode.Title = "Erode";
+			erode.Category = "Simulate";
+			erode.Accent = Colour::Hex(0xD98C4A);
+			erode.Subtitle = "thermal, then hydraulic";
+			erode.Inputs = {Port("In", "data.FIELD")};
+			erode.Outputs = {Port("Out", "data.FIELD")};
+			erode.Widgets = {
+				Slider("thermal", "Thermal passes", 0.0, 120.0, 40.0),
+				Slider("talus", "Talus", 0.001, 0.05, 0.008),
+				Slider("hydraulic", "Rain passes", 0.0, 60.0, 20.0),
+			};
+			erode.Preview = PreviewOfField;
+
+			// **Async, because it is genuinely slow.** Forty thermal passes over
+			// a 256² field is tens of millions of samples; running it inside the
+			// frame would stall the editor every time a slider moved, which is
+			// exactly the case the async path exists for.
+			erode.Async = true;
+			erode.Steps = {"reading", "thermal", "rain", "settling"};
+			erode.Evaluate = [](const Inputs &in) {
+				Field field = in.In<Field>("In");
+				if (field.Empty()) {
+					return Outputs{{"Out", field}};
+				}
+
+				const auto thermal = static_cast<int>(in.Real("thermal"));
+				const auto rain = static_cast<int>(in.Real("hydraulic"));
+				const auto talus = static_cast<float>(in.Real("talus"));
+				const float total = static_cast<float>(std::max(1, thermal + rain));
+
+				if (in.Report) {
+					in.Report(0, 0.0f, "reading");
+				}
+
+				// Thermal: material above the angle of repose slides downhill,
+				// a quarter of the excess to each lower neighbour.
+				for (int pass = 0; pass < thermal; pass++) {
+					if (in.Cancelled()) {
+						return Outputs{{"Out", field}};
+					}
+
+					Field next = field;
+					for (int y = 1; y < field.Side - 1; y++) {
+						for (int x = 1; x < field.Side - 1; x++) {
+							const float here = field.At(x, y);
+							float moved = 0.0f;
+
+							const int dx[] = {1, -1, 0, 0};
+							const int dy[] = {0, 0, 1, -1};
+							for (int side = 0; side < 4; side++) {
+								const float difference = here - field.At(x + dx[side], y + dy[side]);
+								if (difference > talus) {
+									const float slide = (difference - talus) * 0.25f;
+									next.At(x + dx[side], y + dy[side]) += slide;
+									moved += slide;
+								}
+							}
+							next.At(x, y) = next.At(x, y) - moved;
+						}
+					}
+					field = std::move(next);
+
+					if (in.Report) {
+						in.Report(1, static_cast<float>(pass + 1) / total, "thermal");
+					}
+				}
+
+				// Hydraulic, in the crudest form that still carves: rain
+				// dissolves, water runs to the lowest neighbour, sediment lands.
+				for (int pass = 0; pass < rain; pass++) {
+					if (in.Cancelled()) {
+						return Outputs{{"Out", field}};
+					}
+
+					for (int y = 1; y < field.Side - 1; y++) {
+						for (int x = 1; x < field.Side - 1; x++) {
+							int lowestX = x;
+							int lowestY = y;
+							float lowest = field.At(x, y);
+
+							for (int oy = -1; oy <= 1; oy++) {
+								for (int ox = -1; ox <= 1; ox++) {
+									if (field.At(x + ox, y + oy) < lowest) {
+										lowest = field.At(x + ox, y + oy);
+										lowestX = x + ox;
+										lowestY = y + oy;
+									}
+								}
+							}
+
+							if (lowestX == x && lowestY == y) {
+								continue;
+							}
+							const float carried = std::min(0.008f, (field.At(x, y) - lowest) * 0.5f);
+							field.At(x, y) -= carried;
+							field.At(lowestX, lowestY) += carried * 0.8f;
+						}
+					}
+
+					if (in.Report) {
+						in.Report(
+							2, static_cast<float>(thermal + pass + 1) / total, "rain"
+						);
+					}
+				}
+
+				if (in.Report) {
+					in.Report(3, 1.0f, "settling");
+				}
+				Normalise(field);
+				return Outputs{{"Out", field}};
+			};
+			NodeTypes::Register(erode);
+
+			NodeType staged;
+			staged.Id = "task.staged";
+			staged.Title = "Staged Task";
+			staged.Category = "Simulate";
+			staged.Accent = Colour::Hex(0xB07AD6);
+			staged.Subtitle = "five stages, off the frame";
+			staged.Inputs = {Port("After", ANY_TYPE)};
+			staged.Outputs = {Port("Done", "data.NUMBER")};
+			staged.Widgets = {
+				Slider("seconds", "Seconds", 0.2, 6.0, 2.0),
+				Text("label", "Label", "task"),
+			};
+			staged.Async = true;
+			staged.Steps = {"planning", "fetching", "thinking", "writing", "checking"};
+
+			// **Slow on purpose, and it is the honest way to show concurrency.**
+			// Two of these in two branches of a graph run at once because the
+			// evaluator starts every node whose inputs are ready — there is no
+			// scheduler deciding it. Sleeping rather than spinning, so watching
+			// the demo does not cost a core.
+			staged.Evaluate = [](const Inputs &in) {
+				const auto seconds = static_cast<float>(in.Real("seconds"));
+				const auto perStep = std::chrono::duration<float>(seconds / 5.0f);
+				const char *names[] = {"planning", "fetching", "thinking", "writing", "checking"};
+
+				for (size_t step = 0; step < 5; step++) {
+					// **In slices, so a cancelled run stops within a frame or
+					// two** rather than at the end of a whole stage.
+					for (int slice = 0; slice < 10; slice++) {
+						if (in.Cancelled()) {
+							return Outputs{{"Done", 0.0}};
+						}
+						std::this_thread::sleep_for(perStep / 10);
+						if (in.Report) {
+							const float within = static_cast<float>(slice + 1) / 10.0f;
+							in.Report(
+								step, (static_cast<float>(step) + within) / 5.0f, names[step]
+							);
+						}
+					}
+				}
+				return Outputs{{"Done", 1.0}};
+			};
+			NodeTypes::Register(staged);
+
+			// --- output ---------------------------------------------------------
+
 			NodeType readout;
 			readout.Id = "field.readout";
 			readout.Title = "Readout";
 			readout.Category = "Output";
-			readout.Accent = Colour::Hex(0xB07AD6);
+			readout.Accent = Colour::Hex(0x8A8A8A);
 			readout.Subtitle = "the field's average";
 			readout.Inputs = {Port("In", "data.FIELD")};
 			readout.Outputs = {Port("Value", "data.NUMBER")};
 			readout.Evaluate = [](const Inputs &in) {
-				return Outputs{{"Value", static_cast<double>(Average(in.In<Field>("In")))}};
+				const Field field = in.In<Field>("In");
+				if (field.Empty()) {
+					return Outputs{{"Value", 0.0}};
+				}
+				double total = 0.0;
+				for (const float sample : field.Data) {
+					total += static_cast<double>(sample);
+				}
+				return Outputs{{"Value", total / static_cast<double>(field.Data.size())}};
 			};
 			NodeTypes::Register(readout);
 
@@ -255,23 +912,112 @@ namespace studio {
 			RegisterDemoNodes();
 			graph.Clear();
 
-			const NodeId first = graph.Add("field.noise", 60.0f, 90.0f);
-			const NodeId second = graph.Add("field.noise", 60.0f, 300.0f);
-			const NodeId blend = graph.Add("number.constant", 60.0f, 520.0f);
-			const NodeId combine = graph.Add("field.combine", 340.0f, 200.0f);
-			const NodeId readout = graph.Add("field.readout", 620.0f, 210.0f);
-			const NodeId note = graph.Add("graph.note", 620.0f, 340.0f);
+			// A terrain chain on top, an async pair below it. Between them they
+			// use every part: two generators, a warp, a combine with a mask, an
+			// erosion that runs off the frame, a colouriser that makes the
+			// picture, and two staged tasks in branches that do not feed each
+			// other.
+			const NodeId base = graph.Add("field.perlin", 40.0f, 60.0f);
+			const NodeId ranges = graph.Add("field.ridged", 40.0f, 340.0f);
+			const NodeId warp = graph.Add("field.warp", 300.0f, 60.0f);
+			const NodeId blend = graph.Add("field.combine", 560.0f, 120.0f);
+			const NodeId eroded = graph.Add("field.erode", 830.0f, 120.0f);
+			const NodeId steep = graph.Add("field.slope", 1090.0f, 60.0f);
+			const NodeId picture = graph.Add("image.colourise", 1090.0f, 360.0f);
+			const NodeId average = graph.Add("field.readout", 1350.0f, 60.0f);
 
-			graph.Find(second)->Widgets["seed"].Number = 7.0;
-			graph.Find(second)->Widgets["frequency"].Number = 9.0;
-			graph.Find(blend)->Widgets["value"].Number = 0.35;
+			const NodeId first = graph.Add("task.staged", 300.0f, 700.0f);
+			const NodeId second = graph.Add("task.staged", 300.0f, 900.0f);
+			const NodeId both = graph.Add("number.arithmetic", 620.0f, 780.0f);
 
-			graph.Connect(first, "Out", combine, "A");
-			graph.Connect(second, "Out", combine, "B");
-			graph.Connect(blend, "Out", combine, "Amount");
-			graph.Connect(combine, "Out", readout, "In");
-			graph.Connect(readout, "Value", note, "Anything");
+			graph.Find(ranges)->Widgets["seed"].Number = 7.0;
+			graph.Find(ranges)->Widgets["frequency"].Number = 6.0;
+			graph.Find(blend)->Widgets["mode"].Text = "maximum";
+			graph.Find(eroded)->Widgets["thermal"].Number = 30.0;
+			graph.Find(first)->Widgets["label"].Text = "left";
+			graph.Find(second)->Widgets["label"].Text = "right";
+			graph.Find(second)->Widgets["seconds"].Number = 3.0;
+
+			graph.Connect(base, "Out", warp, "In");
+			graph.Connect(ranges, "Out", warp, "By");
+			graph.Connect(warp, "Out", blend, "A");
+			graph.Connect(ranges, "Out", blend, "B");
+			graph.Connect(blend, "Out", eroded, "In");
+			graph.Connect(eroded, "Out", steep, "In");
+			graph.Connect(eroded, "Out", picture, "In");
+			graph.Connect(steep, "Out", picture, "Mask");
+			graph.Connect(steep, "Out", average, "In");
+
+			graph.Connect(first, "Done", both, "A");
+			graph.Connect(second, "Done", both, "B");
 		}
+	}
+
+	void Editor::PumpNodeDemoImages() {
+		// **A ceiling, and it drops the lot rather than the oldest.** Every
+		// preview is a texture in video memory, and a session spent dragging one
+		// slider produces a new result — and so a new key — on every frame it
+		// moves. Thumbnails evict least-recently-drawn because a store is browsed
+		// in one direction; this is a graph whose visible set is small and
+		// rebuilt in a frame, so the simple rule costs one frame of pictures and
+		// needs no bookkeeping to get wrong.
+		//
+		// **Between frames, where `PumpThumbnails` runs**, because a texture
+		// released while a draw list still names it is a use-after-free on the
+		// GPU rather than a missing picture.
+		constexpr size_t PREVIEW_CEILING = 64;
+
+		if (NodeDemoTextures.size() <= PREVIEW_CEILING) {
+			return;
+		}
+		DropNodeDemoImages();
+	}
+
+	void *Editor::NodeDemoImage(uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make) {
+		// **Held under the hash the payload was computed at**, so panning and
+		// zooming cost a lookup, an edit makes a new key rather than overwriting
+		// the old one, and two nodes computing the same thing share one texture.
+		if (const auto found = NodeDemoTextures.find(key); found != NodeDemoTextures.end()) {
+			return found->second;
+		}
+
+		nodes::PreviewImage image;
+		if (!make(image) || !image.Valid()) {
+			// **Remembered as null rather than retried.** A payload with no
+			// picture would otherwise be converted on every frame it is drawn.
+			NodeDemoTextures.emplace(key, nullptr);
+			return nullptr;
+		}
+
+		engine::assets::TextureData texture;
+		texture.Width = image.Side;
+		texture.Height = image.Side;
+		texture.Format = engine::assets::TextureFormat::RGBA8;
+		texture.Pixels.resize(image.Rgba.size());
+		std::memcpy(texture.Pixels.data(), image.Rgba.data(), image.Rgba.size());
+
+		// **Prefixed, so a preview can never be sampled as content** — the same
+		// rule `ThumbnailTextureName` states: the renderer resolves a part's
+		// texture out of this table by name, and an unprefixed key would let a
+		// node's thumbnail become a wall.
+		const engine::core::Name name("studio.nodepreview/" + std::to_string(key));
+		if (!Renderer.AddTexture(name, texture)) {
+			NodeDemoTextures.emplace(key, nullptr);
+			return nullptr;
+		}
+
+		void *handle = Renderer.TextureHandle(name);
+		NodeDemoTextures.emplace(key, handle);
+		NodeDemoTextureNames.emplace(key, name);
+		return handle;
+	}
+
+	void Editor::DropNodeDemoImages() {
+		for (const auto &[key, name] : NodeDemoTextureNames) {
+			Renderer.DropTexture(name);
+		}
+		NodeDemoTextureNames.clear();
+		NodeDemoTextures.clear();
 	}
 
 	void Editor::DrawNodeDemo() {
@@ -291,6 +1037,9 @@ namespace studio {
 		if (NodeDemoGraph.Nodes().empty()) {
 			nodes::BuildDemoGraph(NodeDemoGraph);
 			NodeDemoCanvas.Observe(&NodeDemoRunner);
+			NodeDemoCanvas.Images([this](uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make) {
+				return NodeDemoImage(key, make);
+			});
 			NodeDemoSignature = 0;
 		}
 
@@ -302,27 +1051,50 @@ namespace studio {
 				NodeDemoReport.Skipped
 			);
 
+			if (NodeDemoReport.Running > 0 || NodeDemoReport.Waiting > 0) {
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
+				ImGui::Text(
+					"%zu running  %zu waiting", NodeDemoReport.Running, NodeDemoReport.Waiting
+				);
+				ImGui::PopStyleColor();
+			}
+
+			ImGui::SameLine();
+			ImGui::TextDisabled("|");
+
+			// **Live is the default and Build is the escape.** A graph of cheap
+			// filters wants to follow the slider; one with a six-second task in
+			// it does not want to start over on every twitch, and this is the
+			// switch between those.
+			ImGui::SameLine();
+			ImGui::Checkbox("Live", &NodeDemoLive);
+			ImGui::SameLine();
+			ImGui::BeginDisabled(NodeDemoLive);
+			if (ImGui::SmallButton("Build")) {
+				NodeDemoSignature = 0;
+			}
+			ImGui::EndDisabled();
+
 			ImGui::SameLine();
 			ImGui::TextDisabled("|");
 			ImGui::SameLine();
 			ImGui::TextDisabled("%.0f%%", static_cast<double>(NodeDemoCanvas.Zoom() * 100.0f));
-
 			ImGui::SameLine();
 			if (ImGui::SmallButton("Fit")) {
 				NodeDemoCanvas.Fit(NodeDemoGraph);
 			}
 			ImGui::SameLine();
 			if (ImGui::SmallButton("Forget cache")) {
-				// What the reference implementation's ⌫ Cache does: the thing to
-				// reach for when an `Evaluate` turns out not to be as pure as it
-				// claimed.
 				NodeDemoRunner.Forget();
+				DropNodeDemoImages();
 				NodeDemoSignature = 0;
 			}
 			ImGui::SameLine();
 			if (ImGui::SmallButton("Reset graph")) {
 				nodes::BuildDemoGraph(NodeDemoGraph);
 				NodeDemoRunner.Forget();
+				DropNodeDemoImages();
 				NodeDemoSignature = 0;
 			}
 
@@ -335,39 +1107,156 @@ namespace studio {
 			ImGui::EndMenuBar();
 		}
 
-		// The readouts, above the canvas: what the graph computed, which is the
-		// half a picture of boxes cannot show.
-		for (const nodes::Node &node : NodeDemoGraph.Nodes()) {
-			if (node.Type != "field.readout") {
-				continue;
-			}
-			const std::any *value = NodeDemoRunner.Output(node.Id, "Value");
-			if (value == nullptr) {
-				continue;
-			}
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-			ImGui::Text(
-				"%s = %.4f",
-				node.Label.empty() ? "readout" : node.Label.c_str(),
-				*std::any_cast<double>(value)
-			);
-			ImGui::PopStyleColor();
-			ImGui::SameLine();
+		// The inspector, down the right-hand side: the selected node's picture
+		// large, what it is doing, and what it produced. The canvas says how the
+		// graph is wired; this says what came out of it.
+		const float inspector = engine::ui::Scaled(210.0f);
+		const ImVec2 room = ImGui::GetContentRegionAvail();
+
+		if (ImGui::BeginChild("##nodes", ImVec2(room.x - inspector, 0.0f), ImGuiChildFlags_None)) {
+			NodeDemoCanvas.Draw(NodeDemoGraph);
 		}
-		ImGui::NewLine();
+		ImGui::EndChild();
 
-		NodeDemoCanvas.Draw(NodeDemoGraph);
+		ImGui::SameLine();
 
-		// **Re-run only when the graph's signature moved.** Dragging a node
-		// changes no result, and a graph that recomputed while somebody tidied
-		// it up would make a large one unusable — the signature covers
-		// parameters and topology and deliberately not position.
-		if (const uint64_t now = NodeDemoGraph.Signature(); now != NodeDemoSignature) {
+		if (ImGui::BeginChild("##inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
+			DrawNodeDemoInspector();
+		}
+		ImGui::EndChild();
+
+		// **Re-run when the graph moved, and every frame while anything is
+		// working.** The signature covers parameters and topology and
+		// deliberately not position, so dragging a node recomputes nothing —
+		// while a running node needs a call a frame to collect its result and to
+		// move its bar.
+		const uint64_t now = NodeDemoGraph.Signature();
+		const bool changed = now != NodeDemoSignature;
+
+		if (NodeDemoRunner.Busy() || (changed && NodeDemoLive) || (changed && NodeDemoSignature == 0)) {
 			NodeDemoSignature = now;
 			NodeDemoReport = NodeDemoRunner.Run(NodeDemoGraph);
 		}
 
 		ImGui::End();
+	}
+
+	void Editor::DrawNodeDemoInspector() {
+		const std::vector<nodes::NodeId> &chosen = NodeDemoCanvas.Selection();
+		if (chosen.empty()) {
+			ImGui::TextDisabled("select a node");
+			ImGui::Spacing();
+			ImGui::TextWrapped(
+				"Drag a port to a port to connect. Drop a wire in empty space for a palette. "
+				"Right click for one anywhere. Del removes, F fits."
+			);
+			return;
+		}
+
+		const nodes::Node *node = NodeDemoGraph.Find(chosen.front());
+		if (node == nullptr) {
+			return;
+		}
+		const nodes::NodeType *type = nodes::NodeTypes::Find(node->Type);
+		if (type == nullptr) {
+			ImGui::TextDisabled("%s", node->Type.c_str());
+			ImGui::TextWrapped("no node type of that name is registered");
+			return;
+		}
+
+		ImGui::TextUnformatted(type->Title.c_str());
+		if (!type->Subtitle.empty()) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped("%s", type->Subtitle.c_str());
+			ImGui::PopStyleColor();
+		}
+		ImGui::Separator();
+
+		// The same texture the node draws, at whatever size the panel has. One
+		// conversion, two sizes — which is why the preview is made larger than a
+		// thumbnail needs.
+		if (type->Preview) {
+			const std::string port = type->PreviewPort.empty()
+										 ? (type->Outputs.empty() ? std::string()
+																  : type->Outputs.front().Name)
+										 : type->PreviewPort;
+
+			const std::any *payload =
+				port.empty() ? nullptr : NodeDemoRunner.Output(node->Id, port);
+
+			void *handle = nullptr;
+			if (payload != nullptr) {
+				const std::any &held = *payload;
+				const auto &convert = type->Preview;
+				handle = NodeDemoImage(
+					NodeDemoRunner.RanAt(node->Id),
+					[&held, &convert](nodes::PreviewImage &image) { return convert(held, image); }
+				);
+			}
+
+			const float side = ImGui::GetContentRegionAvail().x;
+			if (handle != nullptr) {
+				ImGui::Image(reinterpret_cast<ImTextureID>(handle), ImVec2(side, side));
+			} else {
+				ImGui::Dummy(ImVec2(side, side));
+				ImGui::TextDisabled("no picture yet");
+			}
+		}
+
+		const nodes::NodeStatus status = NodeDemoRunner.Status(node->Id);
+
+		ImGui::Separator();
+		switch (status.State) {
+		case nodes::NodeState::Running:
+			ImGui::ProgressBar(status.Progress, ImVec2(-1.0f, 0.0f));
+			break;
+		case nodes::NodeState::Failed:
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+			ImGui::TextUnformatted("it raised");
+			ImGui::PopStyleColor();
+			break;
+		case nodes::NodeState::Done:
+			ImGui::Text(status.Cached ? "cached" : "%.1f ms", status.Milliseconds);
+			break;
+		case nodes::NodeState::Idle:
+			ImGui::TextDisabled("%s", status.Note.empty() ? "idle" : status.Note.c_str());
+			break;
+		}
+
+		// The stages, with the one it is on marked. A progress bar says how far;
+		// this says through what — which is the half a percentage cannot carry.
+		if (!type->Steps.empty()) {
+			for (size_t index = 0; index < type->Steps.size(); index++) {
+				const bool current = status.State == nodes::NodeState::Running && index == status.Step;
+				const bool passed = status.State == nodes::NodeState::Done || index < status.Step;
+
+				// **One type through the ternary.** The theme hands back packed
+				// colours and `GetStyleColorVec4` hands back a vector; mixing
+				// them in one expression is a conversion the compiler refuses,
+				// which is the good version of that mistake.
+				ImGui::PushStyleColor(
+					ImGuiCol_Text,
+					current	 ? engine::ui::AccentColour()
+					: passed ? ImGui::GetColorU32(ImGuiCol_Text)
+							 : engine::ui::MutedColour()
+				);
+				ImGui::Text("%s %s", passed && !current ? "done" : current ? " >  " : "    ",
+							type->Steps[index].c_str());
+				ImGui::PopStyleColor();
+			}
+		}
+
+		// What it produced, when that is one number rather than a picture.
+		for (const nodes::PortSpec &port : type->Outputs) {
+			const std::any *value = NodeDemoRunner.Output(node->Id, port.Name);
+			if (value == nullptr) {
+				continue;
+			}
+			if (const double *number = std::any_cast<double>(value); number != nullptr) {
+				ImGui::Separator();
+				ImGui::Text("%s = %.4f", port.Name.c_str(), *number);
+			}
+		}
 	}
 
 	void Editor::DrawDemoTools() {

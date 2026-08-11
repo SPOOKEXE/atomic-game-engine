@@ -39,6 +39,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] rojo: `--rojo`/`$ATOMIC_ROJO_PROJECT` syncs any project at startup; checked against raceapet, which found and fixed two build bugs (a package's `default.project.json` was joined to its folder instead of replacing it, and a nested project's root `$path` was ignored)
 - [x] the topbar is tab-based, and the plugins toolbars are a tab of their own rather than a panel
 - [x] a Demo tab on the ribbon, and a Demo Nodes panel: a typed node graph with a cycle guard, cached evaluation, save/load and an imgui canvas — `studio/NodeGraph.hpp`
+- [x] the full demo: fBm and ridged noise, warp, terrace, slope, threshold and combine; a colouriser and thumbnails on the nodes; erosion and staged tasks that run off the frame with progress, stages and concurrent branches
 - [_] deferred `D00113`: one node graph implementation rather than two
 - [x] default engine assets: the six shape meshes and a pink/grey checkerboard, under an "engine" tab, with a tab per cdn source and an "all" tab
 - [_] deferred `D00111`: listing an HTTP origin's contents — its tab names the address and says why it cannot enumerate
@@ -47,6 +48,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] SETUP-CDN.md: folder-based, a store served from a folder, an origin on localhost and how to expose one; `cdn --ingest-key` added so the editor's Upload has an origin that can accept
 - [x] investigated non-euclidean worlds: `docs/NON-EUCLIDEAN.md`. cameras + portal parts is right, and `SurfaceCamera` is most of it — three small changes to how a surface view carries its projection, then traversal, which needs v0.15's character controller
 - [_] deferred `D00112`: build the portal once the surface view carries a projection
+- [x] as many viewports as somebody wants: the fixed four became a grown list, panels own their imgui titles, and the asset preview's render slot is computed past the last panel rather than fixed — `--viewports N` and a New Viewport menu item
 - [x] every shader moved to engine/resources/shaders, owned by a module of its own
 - [_] deferred `D00110`: a variety of default shaders, once something can select one
 

@@ -376,13 +376,16 @@ namespace studio {
 		// actually bound is logged and reported by `engine_info`.
 		int ControlPort = -1;
 
-		// Open the second viewport at start-up.
+		// How many viewport panels are open at start-up, counting the main one.
 		//
 		// **Reachable without a person, for `Headless`'s reason.** The panels
 		// run headless and only the drawing is skipped, so a flag is what lets
-		// a capture prove that two viewports really do draw two worlds — a
-		// thing no screenshot can show on a machine somebody else is using.
-		bool ShowSecondViewport = false;
+		// a capture prove that N viewports really do draw N worlds — a thing no
+		// screenshot can show on a machine somebody else is using.
+		//
+		// More than the editor has panels for creates them; one or zero leaves
+		// the extras closed. See `Editor::AddViewport`.
+		size_t StartViewports = 1;
 
 		// Write a frame-graph snapshot here when the run ends.
 		//
@@ -1094,7 +1097,7 @@ namespace studio {
 		// is also what makes the gizmo and the pick adjudicate one click against
 		// one matrix.
 		//
-		// @param viewport 0 is the main panel, 1..EXTRA_VIEWPORTS the others.
+		// @param viewport 0 is the main panel, 1..`Extras.size()` the others.
 		// @return The mapping, invalid when that panel did not draw.
 		PanelProjection ProjectionFor(size_t viewport);
 
@@ -1721,6 +1724,26 @@ namespace studio {
 		//@{
 		void DrawDemoTools();
 		void DrawNodeDemo();
+
+		// The panel's right-hand side: the selected node's picture, what it is
+		// doing, and what it produced.
+		void DrawNodeDemoInspector();
+
+		// Turns a node's preview into a texture the interface can draw.
+		//
+		// **Kept under the hash the payload was computed at.** A picture belongs
+		// to a result rather than to a node, so two nodes computing one thing
+		// share a texture and an edit makes a new key instead of overwriting a
+		// live one.
+		void *NodeDemoImage(uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make);
+
+		// Releases every preview texture. Called when the cache is dropped and
+		// when the graph is replaced — a texture per result would otherwise be a
+		// slow leak for as long as somebody keeps editing.
+		void DropNodeDemoImages();
+
+		// Enforces the preview ceiling, between frames.
+		void PumpNodeDemoImages();
 		//@}
 
 		// The ribbon's Plugins row: every running plugin's toolbars.
@@ -2736,7 +2759,7 @@ namespace studio {
 		// that names, so every mirror in the scene quietly started reflecting
 		// from a camera the viewport was not looking through.
 		//
-		// @param viewport 0 is the main panel, 1..EXTRA_VIEWPORTS the others.
+		// @param viewport 0 is the main panel, 1..`Extras.size()` the others.
 		// @param world    The world this panel is showing.
 		// @param eye      Where the panel is looking from.
 		// @param lens     Its field of view and clip planes.
@@ -2791,9 +2814,9 @@ namespace studio {
 		float CameraSpeed = 24.0f;
 		//@}
 
-		// How big a texture the world is drawn into, from the viewport panel's
-		// content rectangle. See `render::SceneTarget`.
-		// One per viewport panel, indexed by `ViewportState::Slot`.
+		// How big a texture the world is drawn into, from the main viewport
+		// panel's content rectangle. See `render::SceneTarget`. Every other
+		// panel keeps its own in `ViewportState::Target`.
 		//
 		// **Separate targets rather than one shared**, because the two panels
 		// are different sizes: a single target would be reallocated twice a
@@ -2838,17 +2861,18 @@ namespace studio {
 			// A `Camera` instance this view looks through, or null for the free
 			// camera. See `Editor::FollowCamera`.
 			Entity Follow;
+
+			// The imgui window title, which is also its identity.
+			//
+			// **Owned rather than pointed at a literal, because the panels are
+			// made on demand now.** imgui keys a window — and the saved layout
+			// keys its dock node — on this string, so it has to outlive the
+			// `Begin` call and it has to be the same text every session for the
+			// same panel. Derived from the index in `ResizeViewports` and never
+			// changed afterwards, which is what makes both true.
+			std::string Title;
 		};
 
-		// The extra viewports. The first is the fields above, which predate them
-		// and which every other panel already reads.
-		//
-		// **Three of them, so a universe of subareas can be watched at once.**
-		// A fixed array rather than a vector: the panels are named windows imgui
-		// remembers by title, so they cannot be created on demand without the
-		// saved layout having a name it has never seen — and a studio with an
-		// unbounded number of viewports is one where the frame rate divides by a
-		// number nobody chose.
 		// What one viewport panel handed the overlay pass this frame.
 		//
 		// **The overlay is deferred rather than drawn where the panel is, and
@@ -2883,20 +2907,42 @@ namespace studio {
 			bool Drawn = false;
 		};
 
-		// How many viewport panels there are beyond the main one.
+		// How many extra panels a fresh editor starts with, beyond the main one.
 		//
-		// A fixed number rather than a growable list, because each costs a scene
-		// target — device memory that exists whether the panel is open or not.
-		static constexpr size_t EXTRA_VIEWPORTS = 3;
+		// **Three, and it is a starting point rather than a ceiling now.** They
+		// exist closed, which costs a `ViewportState` each and no device memory
+		// — a closed panel drops its `SceneTarget` — so having a few ready is
+		// what makes the View menu's first three entries work with no wait.
+		// `AddViewport` makes more.
+		static constexpr size_t DEFAULT_EXTRA_VIEWPORTS = 3;
 
 		// **The slot the asset preview owns, past every viewport panel.**
 		// Sharing one with a viewport would make the preview and that panel
 		// overwrite each other's texture — `PresentWorld` keeps a slot per panel
 		// precisely so two things of different sizes do not reallocate one
 		// target twice a frame.
-		static constexpr size_t PREVIEW_SLOT = 1 + EXTRA_VIEWPORTS;
-		// The extra panels, whether or not they are open.
-		std::array<ViewportState, EXTRA_VIEWPORTS> Extras;
+		//
+		// **It moves when a viewport is added, and that is harmless.** The new
+		// panel takes the slot the preview was using and resizes it on its first
+		// frame; the preview allocates its own on the next hover. Nothing leaks
+		// — the renderer owns every slot and releases the lot at shutdown.
+		//
+		// @return A slot index no viewport panel uses.
+		size_t PreviewSlot() const {
+			return 1 + Extras.size();
+		}
+
+		// The extra panels, whether or not they are open. The main one is the
+		// fields above, which predate them and which every other panel reads.
+		//
+		// **Grown rather than fixed, so a universe of subareas can be watched at
+		// once.** This was an array of three, because the panels are windows
+		// imgui remembers by title and a title had to exist before the layout
+		// could name it — which `ViewportState::Title` now supplies per panel.
+		// The frame rate divides by the number of *open* panels, so the cost of
+		// the fourth is the same as the cost of the second and it is the person
+		// opening them who decides to pay it. See `DrawingViewport`.
+		std::vector<ViewportState> Extras;
 
 		// A panel's own camera instance, and the world it was minted in.
 		//
@@ -2915,11 +2961,11 @@ namespace studio {
 
 		// Indexed the way `DrawingViewport` is: 0 is the main panel, 1.. are the
 		// extras, so a panel index is a subscript rather than a branch.
-		std::array<ViewerCamera, 1 + EXTRA_VIEWPORTS> Viewers;
+		std::vector<ViewerCamera> Viewers;
 
 		// What each panel handed this frame's overlay pass. Cleared as each
 		// panel draws, so a closed one contributes nothing.
-		std::array<OverlaySlot, 1 + EXTRA_VIEWPORTS> Overlays;
+		std::vector<OverlaySlot> Overlays;
 
 		// The game's own UI, compiled per panel and kept between frames.
 		//
@@ -2931,12 +2977,12 @@ namespace studio {
 		// Kept across frames deliberately — that is the whole of what
 		// `gui::Compiled` is for. A fresh one per frame would compute a
 		// signature, find nothing to compare it against and rebuild every time.
-		std::array<engine::gui::Compiled, 1 + EXTRA_VIEWPORTS> GuiLists;
+		std::vector<engine::gui::Compiled> GuiLists;
 
 		// The hover and press state behind those lists, per panel for the same
 		// reason. Editor state, not world state: nobody replicates where a
 		// mouse is.
-		std::array<engine::gui::Router, 1 + EXTRA_VIEWPORTS> GuiRouters;
+		std::vector<engine::gui::Router> GuiRouters;
 
 		// A click in a viewport, waiting to be turned into a selection.
 		//
@@ -3355,11 +3401,55 @@ namespace studio {
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//
-		// @param index 0 is the main viewport, 1..EXTRA_VIEWPORTS the others.
-		// @return The state, or null when the index is the main viewport.
+		// **Also null for `PreviewSlot()`**, which is past the last extra and is
+		// deliberately not a panel — `PresentWorld` rotates it in beside them
+		// and relies on this returning null to tell them apart.
+		//
+		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
+		// @return The state, or null when the index is the main viewport or is
+		//         not a viewport at all.
 		ViewportState *ExtraAt(size_t index) {
-			return index == 0 || index > EXTRA_VIEWPORTS ? nullptr : &Extras[index - 1];
+			return index == 0 || index > Extras.size() ? nullptr : &Extras[index - 1];
 		}
+
+		// The imgui title of a panel index. See `ViewportState::Title`.
+		//
+		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
+		// @return A string valid until the panels are resized, or "Viewport" for
+		//         an index that is not a panel.
+		const char *ViewportTitle(size_t index) const {
+			return index == 0 || index > Extras.size() ? "Viewport"
+													   : Extras[index - 1].Title.c_str();
+		}
+
+		// Makes the editor hold `extras` panels beyond the main one.
+		//
+		// **One call for five containers, because they are one thing indexed
+		// five ways.** A camera, an overlay slot, a compiled GUI list and its
+		// router all belong to a panel; growing `Extras` without the others is a
+		// subscript past the end of four vectors on the next frame.
+		//
+		// Only ever grows in practice — closing a panel clears its `Open` flag
+		// rather than removing it, so the index a docked window was saved under
+		// keeps meaning the same panel.
+		//
+		// @param extras How many panels beyond the main one.
+		void ResizeViewports(size_t extras);
+
+		// Opens another viewport panel, reusing a closed one if there is one.
+		//
+		// **Reuse first, because the alternative grows without bound.** A panel
+		// closed from its title bar is still in `Extras`; handing it back is
+		// what stops "New Viewport" from minting a fresh index every time
+		// somebody opens and shuts one.
+		//
+		// The new panel starts where the main camera is, for the reason
+		// `Initialise` gives: a panel opening at the identity looks past
+		// whatever the world holds and reads as a panel that does not work.
+		//
+		// @return The panel's index, for a caller that wants to pin a world to
+		//         it.
+		size_t AddViewport();
 
 		// Which viewport the toolbar is reporting on.
 		//
@@ -3404,7 +3494,7 @@ namespace studio {
 		// The main viewport is always the active world; it has no pin of its own
 		// because "the world being edited" is what it means.
 		//
-		// @param index 0 is the main viewport, 1..EXTRA_VIEWPORTS the others.
+		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
 		// @return The world it draws, which may be invalid if there is none.
 		WorldId ViewportWorld(size_t index) {
 			const ViewportState *extra = ExtraAt(index);
@@ -3430,6 +3520,14 @@ namespace studio {
 		// Where the rotation is up to, over the *open* panels rather than over
 		// all of them.
 		size_t RoundRobin = 0;
+
+		// This frame's rotation, rebuilt at the top of `PresentWorld`.
+		//
+		// A member rather than a local so its storage survives the frame: the
+		// list is the open panels plus `PreviewSlot()`, and rebuilding it every
+		// frame in a fresh vector would allocate on every frame to say the same
+		// thing it said on the last one.
+		std::vector<size_t> Candidates;
 
 		// --- dialogs -----------------------------------------------------------
 		//
@@ -3831,6 +3929,19 @@ namespace studio {
 		// The signature the demo last evaluated at, so dragging a node does not
 		// recompute a graph that has not changed.
 		uint64_t NodeDemoSignature = 0;
+
+		// Whether an edit re-runs the graph immediately.
+		//
+		// On, because a chain of cheap filters wants to follow the slider. A
+		// graph with a six-second task in it is what the switch is for.
+		bool NodeDemoLive = true;
+
+		// The preview textures, by result hash, and the names they were
+		// registered under so they can be dropped again.
+		//@{
+		std::unordered_map<uint64_t, void *> NodeDemoTextures;
+		std::unordered_map<uint64_t, engine::core::Name> NodeDemoTextureNames;
+		//@}
 		//@}
 
 		// What `DiscoverPlugins` found, in folder order.

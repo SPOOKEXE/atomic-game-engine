@@ -17,7 +17,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <imgui.h>
+#include <thread>
 #include <string>
 #include <studio/NodeGraph.hpp>
 #include <vector>
@@ -120,7 +122,7 @@ TEST_CASE("a link is refused for a specific reason", "[studio][nodegraph]") {
 	Types();
 	Graph graph;
 
-	const NodeId noise = graph.Add("field.noise", 0.0f, 0.0f);
+	const NodeId noise = graph.Add("field.perlin", 0.0f, 0.0f);
 	const NodeId combine = graph.Add("field.combine", 260.0f, 0.0f);
 	const NodeId number = graph.Add("number.constant", 0.0f, 240.0f);
 	REQUIRE(noise != NO_NODE);
@@ -129,10 +131,10 @@ TEST_CASE("a link is refused for a specific reason", "[studio][nodegraph]") {
 	CHECK(graph.Connect(number, "Out", combine, "A") == LinkResult::TypeMismatch);
 	CHECK(graph.Connect(number, "Out", combine, "Amount") == LinkResult::Made);
 	CHECK(graph.Connect(noise, "Out", combine, "Nope") == LinkResult::NoSuchPort);
-	CHECK(graph.Connect(noise, "Out", noise, "Scale") == LinkResult::SameNode);
+	CHECK(graph.Connect(noise, "Out", noise, "Frequency") == LinkResult::SameNode);
 
 	// An input takes one link and the newer one wins.
-	const NodeId second = graph.Add("field.noise", 0.0f, 480.0f);
+	const NodeId second = graph.Add("field.perlin", 0.0f, 480.0f);
 	CHECK(graph.Connect(second, "Out", combine, "A") == LinkResult::Made);
 	REQUIRE(graph.LinkInto(combine, "A") != nullptr);
 	CHECK(graph.LinkInto(combine, "A")->From == second);
@@ -169,7 +171,7 @@ TEST_CASE("a hash covers parameters and inputs and nothing else", "[studio][node
 	Types();
 	Graph graph;
 
-	const NodeId noise = graph.Add("field.noise", 0.0f, 0.0f);
+	const NodeId noise = graph.Add("field.perlin", 0.0f, 0.0f);
 	const NodeId combine = graph.Add("field.combine", 200.0f, 0.0f);
 	REQUIRE(graph.Connect(noise, "Out", combine, "A") == LinkResult::Made);
 
@@ -186,7 +188,7 @@ TEST_CASE("a hash covers parameters and inputs and nothing else", "[studio][node
 	CHECK(graph.Hash(combine) != before);
 
 	// A sideways edit does not touch a node that does not read it.
-	const NodeId lonely = graph.Add("field.noise", 0.0f, 400.0f);
+	const NodeId lonely = graph.Add("field.perlin", 0.0f, 400.0f);
 	const uint64_t lonelyBefore = graph.Hash(lonely);
 	graph.Find(combine)->Widgets["amount"].Number = 0.25;
 	CHECK(graph.Hash(lonely) == lonelyBefore);
@@ -249,12 +251,12 @@ TEST_CASE("a wire beats a knob, and a node with no eval is skipped", "[studio][n
 	Graph graph;
 
 	const NodeId scale = graph.Add("number.constant", 0.0f, 0.0f);
-	const NodeId noise = graph.Add("field.noise", 200.0f, 0.0f);
+	const NodeId noise = graph.Add("field.perlin", 200.0f, 0.0f);
 	const NodeId note = graph.Add("graph.note", 400.0f, 0.0f);
 
 	graph.Find(scale)->Widgets["value"].Number = 12.0;
 	graph.Find(noise)->Widgets["frequency"].Number = 2.0;
-	REQUIRE(graph.Connect(scale, "Out", noise, "Scale") == LinkResult::Made);
+	REQUIRE(graph.Connect(scale, "Out", noise, "Frequency") == LinkResult::Made);
 
 	// The wildcard input takes a number even though nothing declares one.
 	CHECK(graph.Connect(noise, "Out", note, "Anything") == LinkResult::Made);
@@ -278,8 +280,14 @@ TEST_CASE("layout puts every port and widget inside the node", "[studio][nodegra
 	const NodeId combine = graph.Add("field.combine", 0.0f, 0.0f);
 	const NodeLayout layout = LayoutOf(*graph.Find(combine));
 
-	CHECK(layout.Ports.size() == 4);
-	CHECK(layout.Widgets.size() == 1);
+	// Four inputs and one output, and two knobs.
+	CHECK(layout.Ports.size() == 5);
+	CHECK(layout.Widgets.size() == 2);
+
+	// It has a picture, so the layout reserved a square for one.
+	CHECK(layout.PreviewSide > 0.0f);
+	CHECK(layout.PreviewTop > 0.0f);
+	CHECK(layout.PreviewTop + layout.PreviewSide <= layout.Height);
 
 	for (const PlacedPort &port : layout.Ports) {
 		CHECK(port.Y > 0.0f);
@@ -309,7 +317,7 @@ TEST_CASE("a graph survives a save and a load", "[studio][nodegraph]") {
 	Types();
 	Graph graph;
 
-	const NodeId noise = graph.Add("field.noise", 40.0f, 60.0f);
+	const NodeId noise = graph.Add("field.perlin", 40.0f, 60.0f);
 	const NodeId combine = graph.Add("field.combine", 300.0f, 60.0f);
 	graph.Find(noise)->Widgets["frequency"].Number = 7.5;
 	graph.Find(noise)->Widgets["resolution"].Text = "256";
@@ -344,7 +352,7 @@ TEST_CASE("a bad document is refused and a bad line is not fatal", "[studio][nod
 	error.clear();
 	REQUIRE(Load(
 		"nodegraph 1\n"
-		"node | 1 | field.noise | 0 | 0 |\n"
+		"node | 1 | field.perlin | 0 | 0 |\n"
 		"node | 2 | nobody.knows.this | 100 | 0 |\n"
 		"link | 1 | Out | 2 | In\n"
 		"garbage\n",
@@ -367,8 +375,8 @@ TEST_CASE("the canvas draws a graph without tripping imgui", "[studio][nodegraph
 
 	Graph graph;
 	BuildDemoGraph(graph);
-	CHECK(graph.Nodes().size() == 6);
-	CHECK(graph.Links().size() == 5);
+	CHECK(graph.Nodes().size() == 11);
+	CHECK(graph.Links().size() == 11);
 
 	Canvas canvas;
 	Evaluator runner;
@@ -382,8 +390,8 @@ TEST_CASE("the canvas draws a graph without tripping imgui", "[studio][nodegraph
 	}
 
 	// Nothing was drawn into the model by drawing it.
-	CHECK(graph.Nodes().size() == 6);
-	CHECK(graph.Links().size() == 5);
+	CHECK(graph.Nodes().size() == 11);
+	CHECK(graph.Links().size() == 11);
 	CHECK(canvas.Selection().empty());
 }
 
@@ -392,7 +400,7 @@ TEST_CASE("a drag from an output to an input makes the link", "[studio][nodegrap
 	const Context context;
 
 	Graph graph;
-	const NodeId noise = graph.Add("field.noise", 20.0f, 20.0f);
+	const NodeId noise = graph.Add("field.perlin", 20.0f, 20.0f);
 	const NodeId combine = graph.Add("field.combine", 400.0f, 20.0f);
 
 	Canvas canvas;
@@ -451,7 +459,7 @@ TEST_CASE("clicking a node selects it and dragging moves it", "[studio][nodegrap
 	const Context context;
 
 	Graph graph;
-	const NodeId noise = graph.Add("field.noise", 60.0f, 60.0f);
+	const NodeId noise = graph.Add("field.perlin", 60.0f, 60.0f);
 
 	Canvas canvas;
 	Frame(canvas, graph, 0.0f, 0.0f, false);
@@ -471,4 +479,285 @@ TEST_CASE("clicking a node selects it and dragging moves it", "[studio][nodegrap
 	// is what `Hash` leaving position out is for.
 	CHECK(graph.Find(noise)->X > 60.0f);
 	CHECK(graph.Find(noise)->Y > 60.0f);
+}
+
+// --- the async half -----------------------------------------------------------
+
+namespace {
+	// Drives an evaluator until nothing is working, with a ceiling so a case
+	// fails rather than hangs when something never finishes.
+	//
+	// **A poll rather than a wait**, because that is what the panel does: `Run`
+	// is called once a frame, collects whatever landed and returns.
+	RunReport Settle(Evaluator &runner, const Graph &graph, int milliseconds = 8000) {
+		RunReport report = runner.Run(graph);
+		const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+
+		while ((runner.Busy() || report.Waiting > 0) && std::chrono::steady_clock::now() < until) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+			report = runner.Run(graph);
+		}
+		return report;
+	}
+}
+
+TEST_CASE("an async node runs off the caller's thread and reports as it goes", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	const NodeId task = graph.Add("task.staged", 0.0f, 0.0f);
+	REQUIRE(task != NO_NODE);
+	graph.Find(task)->Widgets["seconds"].Number = 0.4;
+
+	Evaluator runner;
+
+	// **The first `Run` returns while the work is still going.** That is the
+	// whole difference from a sync node: if this blocked, the editor would stop
+	// drawing for as long as the node takes.
+	const auto began = std::chrono::steady_clock::now();
+	const RunReport first = runner.Run(graph);
+	const auto returned = std::chrono::steady_clock::now();
+
+	CHECK(first.Started == 1);
+	CHECK(first.Running == 1);
+	CHECK(first.Evaluated == 0);
+	CHECK(runner.Busy());
+	CHECK(std::chrono::duration<double>(returned - began).count() < 0.2);
+
+	// Nothing is published until it finishes — a half-computed result is worse
+	// than none, because the cache would hold it under a hash that says it is
+	// the answer.
+	CHECK(runner.Output(task, "Done") == nullptr);
+	CHECK(runner.Status(task).State == NodeState::Running);
+
+	const RunReport last = Settle(runner, graph);
+	CHECK(last.Running == 0);
+	CHECK_FALSE(runner.Busy());
+
+	REQUIRE(runner.Output(task, "Done") != nullptr);
+	CHECK(std::any_cast<double>(*runner.Output(task, "Done")) == 1.0);
+
+	const NodeStatus status = runner.Status(task);
+	CHECK(status.State == NodeState::Done);
+	CHECK(status.Progress == 1.0f);
+	CHECK(status.Milliseconds > 0.0);
+
+	// And it caches like everything else: the second run recomputes nothing.
+	const RunReport again = runner.Run(graph);
+	CHECK(again.Cached == 1);
+	CHECK(again.Started == 0);
+}
+
+TEST_CASE("two branches that do not feed each other run at once", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	// **Half a second each, and the assertion has a wide margin.** What is being
+	// checked is that these overlap at all — a scheduler that ran them one after
+	// the other would take twice as long, and the bound is far enough from both
+	// numbers that a slow machine does not decide the outcome.
+	const NodeId left = graph.Add("task.staged", 0.0f, 0.0f);
+	const NodeId right = graph.Add("task.staged", 0.0f, 200.0f);
+	graph.Find(left)->Widgets["seconds"].Number = 0.5;
+	graph.Find(right)->Widgets["seconds"].Number = 0.5;
+
+	// **Different labels, so they are two hashes.** Identical nodes are one
+	// piece of work by design — the evaluator makes the second wait on the first
+	// — which is the right behaviour and would make this case measure nothing.
+	graph.Find(left)->Widgets["label"].Text = "left";
+	graph.Find(right)->Widgets["label"].Text = "right";
+
+	Evaluator runner;
+
+	const auto began = std::chrono::steady_clock::now();
+	const RunReport report = Settle(runner, graph);
+	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+
+	CHECK(report.Running == 0);
+	CHECK(runner.Output(left, "Done") != nullptr);
+	CHECK(runner.Output(right, "Done") != nullptr);
+
+	INFO("took " << seconds << "s");
+	CHECK(seconds < 0.85);
+}
+
+TEST_CASE("a node waits for an input that is still being computed", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	const NodeId task = graph.Add("task.staged", 0.0f, 0.0f);
+	const NodeId doubled = graph.Add("number.arithmetic", 240.0f, 0.0f);
+	graph.Find(task)->Widgets["seconds"].Number = 0.4;
+	graph.Find(doubled)->Widgets["op"].Text = "add";
+	REQUIRE(graph.Connect(task, "Done", doubled, "A") == LinkResult::Made);
+
+	Evaluator runner;
+	const RunReport first = runner.Run(graph);
+
+	// **Waiting, not evaluated.** Running it now would read the unconnected
+	// fallback — zero — and cache that under a hash which says the input was the
+	// task's result. The wrong answer would then be permanent.
+	CHECK(first.Waiting == 1);
+	CHECK(first.Evaluated == 0);
+	CHECK(runner.Output(doubled, "Out") == nullptr);
+
+	const RunReport last = Settle(runner, graph);
+	CHECK(last.Waiting == 0);
+	REQUIRE(runner.Output(doubled, "Out") != nullptr);
+
+	// One from the task plus nothing on B.
+	CHECK(std::any_cast<double>(*runner.Output(doubled, "Out")) == 1.0);
+}
+
+TEST_CASE("an evaluator with work in flight can still be destroyed", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	const NodeId task = graph.Add("task.staged", 0.0f, 0.0f);
+	graph.Find(task)->Widgets["seconds"].Number = 6.0;
+
+	const auto began = std::chrono::steady_clock::now();
+	{
+		Evaluator runner;
+		runner.Run(graph);
+		REQUIRE(runner.Busy());
+	}
+	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+
+	// **The editor closes while something long is running, often.** The task
+	// polls `Inputs::Cancelled` between slices, so shutdown costs a slice rather
+	// than the six seconds it was asked for.
+	INFO("shutdown took " << seconds << "s");
+	CHECK(seconds < 1.5);
+}
+
+TEST_CASE("erosion changes the field it is given, and caches the result", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	const NodeId noise = graph.Add("field.perlin", 0.0f, 0.0f);
+	const NodeId eroded = graph.Add("field.erode", 260.0f, 0.0f);
+	graph.Find(noise)->Widgets["resolution"].Text = "64";
+	graph.Find(eroded)->Widgets["thermal"].Number = 6.0;
+	graph.Find(eroded)->Widgets["hydraulic"].Number = 3.0;
+	REQUIRE(graph.Connect(noise, "Out", eroded, "In") == LinkResult::Made);
+
+	Evaluator runner;
+	const RunReport report = Settle(runner, graph);
+
+	CHECK(report.Running == 0);
+	REQUIRE(runner.Output(noise, "Out") != nullptr);
+	REQUIRE(runner.Output(eroded, "Out") != nullptr);
+
+	// The two payloads are the same shape and not the same values — an erosion
+	// that returned its input would pass every check that only looked at types.
+	const std::any &before = *runner.Output(noise, "Out");
+	const std::any &after = *runner.Output(eroded, "Out");
+
+	PreviewImage first;
+	PreviewImage second;
+	const NodeType *type = NodeTypes::Find("field.erode");
+	REQUIRE(type != nullptr);
+	REQUIRE(type->Preview);
+	REQUIRE(type->Preview(before, first));
+	REQUIRE(type->Preview(after, second));
+
+	CHECK(first.Valid());
+	CHECK(second.Valid());
+	CHECK(first.Side == second.Side);
+	CHECK(first.Rgba != second.Rgba);
+
+	// Deterministic: the same hash is the same picture, which is what lets the
+	// canvas key a texture on it.
+	PreviewImage third;
+	REQUIRE(type->Preview(after, third));
+	CHECK(third.Rgba == second.Rgba);
+}
+
+TEST_CASE("a colourised field is a picture and a height field is a grey one", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	const NodeId noise = graph.Add("field.perlin", 0.0f, 0.0f);
+	const NodeId picture = graph.Add("image.colourise", 260.0f, 0.0f);
+	graph.Find(noise)->Widgets["resolution"].Text = "64";
+	REQUIRE(graph.Connect(noise, "Out", picture, "In") == LinkResult::Made);
+
+	Evaluator runner;
+	Settle(runner, graph);
+
+	const NodeType *field = NodeTypes::Find("field.perlin");
+	const NodeType *colour = NodeTypes::Find("image.colourise");
+	REQUIRE(field != nullptr);
+	REQUIRE(colour != nullptr);
+
+	PreviewImage grey;
+	REQUIRE(field->Preview(*runner.Output(noise, "Out"), grey));
+	REQUIRE(grey.Valid());
+
+	// A height field previews as light: every pixel has one value in three
+	// channels, which is the whole reason `image.colourise` is a node rather
+	// than a setting on the viewer.
+	bool coloured = false;
+	for (size_t at = 0; at + 3 < grey.Rgba.size(); at += 4) {
+		coloured = coloured || grey.Rgba[at] != grey.Rgba[at + 1] || grey.Rgba[at + 1] != grey.Rgba[at + 2];
+	}
+	CHECK_FALSE(coloured);
+
+	PreviewImage painted;
+	REQUIRE(colour->Preview(*runner.Output(picture, "Out"), painted));
+	REQUIRE(painted.Valid());
+
+	for (size_t at = 0; at + 3 < painted.Rgba.size(); at += 4) {
+		coloured = coloured || painted.Rgba[at] != painted.Rgba[at + 1] ||
+				   painted.Rgba[at + 1] != painted.Rgba[at + 2];
+	}
+	CHECK(coloured);
+
+	// A preview of something that is not what the node makes answers no rather
+	// than reinterpreting the bytes.
+	PreviewImage refused;
+	CHECK_FALSE(colour->Preview(std::any(42.0), refused));
+	CHECK_FALSE(field->Preview(std::any(std::string("not a field")), refused));
+}
+
+TEST_CASE("the demo graph is wired, and settles", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+	BuildDemoGraph(graph);
+
+	CHECK(graph.Nodes().size() == 11);
+	CHECK(graph.Links().size() == 11);
+
+	// Small, so the case is about the wiring rather than about erosion's cost.
+	for (Node &node : graph.Nodes()) {
+		if (const auto found = node.Widgets.find("resolution"); found != node.Widgets.end()) {
+			found->second.Text = "64";
+		}
+		if (node.Type == "task.staged") {
+			node.Widgets["seconds"].Number = 0.2;
+		}
+		if (node.Type == "field.erode") {
+			node.Widgets["thermal"].Number = 4.0;
+			node.Widgets["hydraulic"].Number = 2.0;
+		}
+	}
+
+	Evaluator runner;
+	const RunReport report = Settle(runner, graph);
+
+	CHECK(report.Running == 0);
+	CHECK(report.Waiting == 0);
+
+	// Every node that computes something has produced it — a chain that stopped
+	// half way would leave a node with no output and nothing saying why.
+	for (const Node &node : graph.Nodes()) {
+		const NodeType *type = NodeTypes::Find(node.Type);
+		REQUIRE(type != nullptr);
+		if (!type->Evaluate || type->Outputs.empty()) {
+			continue;
+		}
+		INFO(node.Type);
+		CHECK(runner.Output(node.Id, type->Outputs.front().Name) != nullptr);
+	}
 }

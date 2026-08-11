@@ -164,7 +164,7 @@ namespace studio {
 		// Safe only because nothing between the passes moves a camera, and
 		// nothing does: `DriveCamera` ran earlier in the `camera` span and this
 		// function only draws.
-		std::array<PanelProjection, 1 + EXTRA_VIEWPORTS> projections;
+		std::vector<PanelProjection> projections(Overlays.size());
 		for (size_t index = 0; index < Overlays.size(); index++) {
 			projections[index] = ProjectionFor(index);
 		}

@@ -488,7 +488,7 @@ namespace studio {
 			{},
 			&Interface,
 			&target,
-			PREVIEW_SLOT
+			PreviewSlot()
 		);
 
 		// **What the slot now holds, so a row can draw it.** There is one slot,
@@ -520,7 +520,7 @@ namespace studio {
 		}
 
 		const engine::core::Name key(ThumbnailTextureName(name));
-		if (!Renderer.CaptureSceneTexture(PREVIEW_SLOT, key)) {
+		if (!Renderer.CaptureSceneTexture(PreviewSlot(), key)) {
 			return;
 		}
 

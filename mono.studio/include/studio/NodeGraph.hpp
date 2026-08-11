@@ -35,8 +35,14 @@
 // @tier client
 
 #include <any>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -144,6 +150,32 @@ namespace studio::nodes {
 		const std::unordered_map<std::string, Value> *Widgets = nullptr;
 		std::unordered_map<std::string, std::any> Ports;
 
+		// Says how far along an async evaluation is.
+		//
+		// **Called from the worker thread, so it must stay cheap and must not
+		// touch the graph.** What it moves is one atomic and one short string
+		// behind a lock; the canvas reads them on the frame thread and draws a
+		// bar. A node that reported by writing into its own outputs would be
+		// publishing a half-computed result, which is the thing a progress bar
+		// exists to avoid.
+		//
+		// Empty for a sync node — calling it is still safe and does nothing, so
+		// one implementation can be either.
+		std::function<void(size_t step, float fraction, std::string_view note)> Report;
+
+		// Set when the editor is closing and a worker should give up.
+		//
+		// **Polled rather than enforced.** A task that ignores it finishes and
+		// its result is dropped, which costs a moment at shutdown rather than a
+		// hang — but a long node that never looks is a long shutdown, so a loop
+		// that runs for more than a frame should check it.
+		const std::atomic<bool> *Stopping = nullptr;
+
+		// Whether the run wants to stop. Safe with no flag set.
+		bool Cancelled() const {
+			return Stopping != nullptr && Stopping->load(std::memory_order_relaxed);
+		}
+
 		Value Widget(const std::string &key) const;
 		double Real(const std::string &key) const;
 
@@ -167,6 +199,25 @@ namespace studio::nodes {
 
 	// What one evaluation produced, by output port name.
 	using Outputs = std::unordered_map<std::string, std::any>;
+
+	// A small square picture of whatever a node produced.
+	//
+	// **The library never learns what a payload is, so a node type says how to
+	// draw one.** A height field becomes a grey ramp, a colour field becomes
+	// itself, and a node carrying a number has no picture at all — which is the
+	// honest answer rather than a grey square.
+	struct PreviewImage {
+		// Pixels a side. Square, because a node's thumbnail slot is.
+		uint32_t Side = 0;
+
+		// `Side * Side * 4` bytes, red first, top row first — what
+		// `assets::TextureData` takes.
+		std::vector<uint8_t> Rgba;
+
+		bool Valid() const {
+			return Side > 0 && Rgba.size() == static_cast<size_t>(Side) * Side * 4;
+		}
+	};
 
 	// One kind of node. Registering one is the whole extension point: the
 	// palette, the painter, the hit test, the evaluator and the save format all
@@ -194,6 +245,38 @@ namespace studio::nodes {
 		// `Inputs` and `Outputs`; unqualified, the member wins and the error
 		// names the alias rather than the shadowing.
 		std::function<nodes::Outputs(const nodes::Inputs &)> Evaluate;
+
+		// Whether that evaluation runs off the calling thread.
+		//
+		// **What makes this two kinds of node rather than one slow one.** A sync
+		// node is evaluated inside `Run` and its result is there when `Run`
+		// returns, which is what a graph of cheap arithmetic wants. An async one
+		// is handed to a worker and collected by a later `Run`, so the editor
+		// keeps drawing while it works and two branches that do not feed each
+		// other run at once.
+		//
+		// **Everything an async node reads is copied before it is dispatched**,
+		// because the graph is edited on the frame thread while the worker runs.
+		// That is the same rule the engine applies to a world boundary and for
+		// the same reason: a payload crossing a thread is a copy or it is a race.
+		bool Async = false;
+
+		// What the stages of an async evaluation are called, in order.
+		//
+		// Drawn under the progress bar as the node works, so "what is it doing"
+		// has an answer that is not a spinner. Ignored by a sync node.
+		std::vector<std::string> Steps;
+
+		// Turns this node's output into a picture, or nothing for a node whose
+		// output has none.
+		//
+		// **Given the payload rather than the node**, so a preview cannot depend
+		// on a widget the evaluation did not read — a thumbnail that disagreed
+		// with the result would be worse than none.
+		std::function<bool(const std::any &, PreviewImage &)> Preview;
+
+		// Which output port the preview reads. Empty takes the first declared.
+		std::string PreviewPort;
 	};
 
 	// Every registered node type.
@@ -349,6 +432,19 @@ namespace studio::nodes {
 		std::vector<PlacedPort> Ports;
 		std::vector<PlacedWidget> Widgets;
 		float WidgetsTop = 0.0f;
+
+		// The thumbnail's square, for a type that has a `Preview`. Zero-sided
+		// when it has none, which is what a node carrying a number gets: an
+		// empty slot would be a picture that never arrives.
+		float PreviewTop = 0.0f;
+		float PreviewSide = 0.0f;
+
+		// The row a progress bar goes in while the node is working. Always
+		// present on an async type, so a node does not change height when it
+		// starts — a graph that reflowed as it ran would be one nobody could
+		// click in.
+		float ProgressTop = 0.0f;
+		float ProgressHeight = 0.0f;
 	};
 
 	// Lays out one node. A node of an unregistered type still gets a body, so it
@@ -365,12 +461,70 @@ namespace studio::nodes {
 		size_t Evaluated = 0;
 		size_t Cached = 0;
 		size_t Skipped = 0;
+
+		// Async nodes handed to a worker by this run.
+		size_t Started = 0;
+
+		// Async results collected by this run.
+		size_t Finished = 0;
+
+		// Async nodes still working when it returned.
+		size_t Running = 0;
+
+		// Nodes waiting on an input that is still being computed.
+		//
+		// **Counted rather than treated as skipped**, because they are two
+		// different facts: a node with no evaluation will never produce
+		// anything, and this one is about to.
+		size_t Waiting = 0;
+	};
+
+	// What a node is doing, as the canvas draws it.
+	enum class NodeState : uint8_t { Idle, Running, Done, Failed };
+
+	// One node's live state.
+	struct NodeStatus {
+		NodeState State = NodeState::Idle;
+
+		// 0 to 1, from the node's own reporting.
+		float Progress = 0.0f;
+
+		// Which of `NodeType::Steps` it says it is on.
+		size_t Step = 0;
+
+		// What it last said it was doing.
+		std::string Note;
+
+		// How long the evaluation took, once it has finished.
+		double Milliseconds = 0.0;
+
+		// Whether the last result came from the cache rather than a run.
+		bool Cached = false;
 	};
 
 	// Runs a graph and holds what it produced.
+	//
+	// **One call a frame, and it never blocks.** `Run` evaluates every sync node
+	// it can, hands every ready async one to a worker, collects whatever
+	// finished since last time, and returns. A node whose input is still being
+	// computed is left for the next call — which is what makes two independent
+	// branches run at once without anything here scheduling them: readiness is
+	// the schedule.
 	class Evaluator {
 	  public:
+		Evaluator();
+		~Evaluator();
+
+		Evaluator(const Evaluator &) = delete;
+		Evaluator &operator=(const Evaluator &) = delete;
+
 		RunReport Run(const Graph &graph);
+
+		// Runs until nothing is left working.
+		//
+		// **For a test and for shutdown, not for a frame.** Blocking the frame
+		// thread on a worker is exactly what the async path exists to avoid.
+		RunReport RunToCompletion(const Graph &graph);
 
 		// What a node's output port produced in the last run, or nullptr.
 		const std::any *Output(NodeId node, const std::string &port) const;
@@ -378,7 +532,21 @@ namespace studio::nodes {
 		// Whether a node's last run came from the cache.
 		bool WasCached(NodeId node) const;
 
-		// Drops every held result.
+		// What a node is doing right now.
+		NodeStatus Status(NodeId node) const;
+
+		// The hash a node last ran at, or zero.
+		//
+		// **What a thumbnail is keyed on.** A picture belongs to a result and
+		// not to a node, so two nodes with one hash share one texture and an
+		// edit makes a new key rather than overwriting the old one.
+		uint64_t RanAt(NodeId node) const;
+
+		// Whether any worker is still busy.
+		bool Busy() const;
+
+		// Drops every held result. In-flight work is left to finish and its
+		// result is kept — it is keyed by a hash that is still correct.
 		void Forget();
 
 		size_t Held() const {
@@ -386,12 +554,47 @@ namespace studio::nodes {
 		}
 
 	  private:
+		// One job on its way to a worker, and its result on the way back.
+		struct Task;
+
+		// The progress one running node publishes. Shared with its worker, so
+		// every field is either atomic or behind the small lock beside them.
+		struct Live {
+			std::atomic<float> Progress{0.0f};
+			std::atomic<size_t> Step{0};
+			std::atomic<bool> Finished{false};
+			std::atomic<bool> Failed{false};
+			std::atomic<double> Milliseconds{0.0};
+			std::mutex Words;
+			std::string Note;
+			Outputs Produced;
+			uint64_t Hash = 0;
+			NodeId Node = NO_NODE;
+		};
+
+		void Begin();
+		void Collect(RunReport &report);
+		void Worker();
+
 		// **Keyed by hash and not by node.** Undoing an edit, or flipping a
 		// value back, then lands on a result that is still there rather than
-		// recomputing it.
+		// recomputing it — and an async result that arrives after its node has
+		// been edited is still correct for the hash it was computed at.
 		std::unordered_map<uint64_t, Outputs> Results;
 		std::unordered_map<NodeId, uint64_t> Ran;
 		std::unordered_map<NodeId, bool> Reused;
+		std::unordered_map<NodeId, NodeStatus> States;
+
+		// What is in flight, by the hash it is computing. A second node with the
+		// same hash waits on the first rather than starting its own copy.
+		std::unordered_map<uint64_t, std::shared_ptr<Live>> Flight;
+
+		std::vector<std::thread> Workers;
+		std::deque<std::function<void()>> Queue;
+		mutable std::mutex Lock;
+		std::condition_variable Waking;
+		std::atomic<bool> Stopping{false};
+		bool Started = false;
 	};
 
 	// --- saving ---------------------------------------------------------------
@@ -427,10 +630,27 @@ namespace studio::nodes {
 		Metrics Sizes;
 	};
 
+	// Turns a preview into something the canvas can draw.
+	//
+	// **The library holds no device**, so the host says how a picture becomes a
+	// texture. `key` is the hash the payload was computed at: a sink is expected
+	// to keep what it made under that key and call `make` only on a miss, which
+	// is what stops a thumbnail being rebuilt sixty times a second.
+	//
+	// @return Whatever the host's ImGui backend takes as a texture id, or null.
+	using ImageSink = std::function<void *(uint64_t key, const std::function<bool(PreviewImage &)> &make)>;
+
 	// A view over one graph. Holds the camera and the drag, and nothing about
 	// the model — two canvases over one graph is two views of one thing.
 	class Canvas {
 	  public:
+		// Where thumbnails come from. Without one, a node with a preview draws
+		// an empty frame rather than nothing at all, so the slot is still
+		// visibly a slot.
+		void Images(ImageSink sink) {
+			Sink = std::move(sink);
+		}
+
 		// Draws and drives the graph inside the current ImGui window.
 		void Draw(Graph &graph);
 
@@ -502,6 +722,7 @@ namespace studio::nodes {
 		bool PaletteOpen = false;
 
 		const Evaluator *Watching = nullptr;
+		ImageSink Sink;
 	};
 
 	// The demo's node types: numbers, fields and an output.

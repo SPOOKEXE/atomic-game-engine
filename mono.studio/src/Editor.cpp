@@ -144,10 +144,54 @@ namespace studio {
 		return "?";
 	}
 
-	Editor::Editor() = default;
+	// **The panels exist before `Initialise`, because a test skips it.** Several
+	// tests drive an `Editor` straight from its constructor; an `Extras` left
+	// empty until start-up would make every panel lookup in those a bounds check
+	// that returns null rather than the main viewport's neighbour.
+	Editor::Editor() {
+		ResizeViewports(DEFAULT_EXTRA_VIEWPORTS);
+	}
 
 	Editor::~Editor() {
 		Shutdown();
+	}
+
+	void Editor::ResizeViewports(size_t extras) {
+		const size_t previous = Extras.size();
+
+		Extras.resize(extras);
+		Viewers.resize(1 + extras);
+		Overlays.resize(1 + extras);
+		GuiLists.resize(1 + extras);
+		GuiRouters.resize(1 + extras);
+
+		// **"Viewport 2" upwards, and the main panel is plain "Viewport".** The
+		// numbering is what a person reads in the View menu and what the saved
+		// layout keys its dock node on, so it is derived from the index and
+		// never from creation order — panel 5 is "Viewport 6" in every session
+		// whether it was made first or last.
+		for (size_t index = previous; index < Extras.size(); index++) {
+			Extras[index].Title = "Viewport " + std::to_string(index + 2);
+
+			// Where the main camera is. See `AddViewport`: a panel left at the
+			// identity opens looking at nothing.
+			Extras[index].Yaw = CameraYaw;
+			Extras[index].Pitch = CameraPitch;
+			Extras[index].Frame = CameraFrame;
+		}
+	}
+
+	size_t Editor::AddViewport() {
+		for (size_t index = 0; index < Extras.size(); index++) {
+			if (!Extras[index].Open) {
+				Extras[index].Open = true;
+				return index + 1;
+			}
+		}
+
+		ResizeViewports(Extras.size() + 1);
+		Extras.back().Open = true;
+		return Extras.size();
 	}
 
 	bool Editor::Initialise(const Options &options) {
@@ -161,7 +205,19 @@ namespace studio {
 		ShowFrameGraph = Settings.ShowFrameGraph;
 		ShowAssets = Settings.ShowAssetsPanel;
 		IdleCloseSeconds = Settings.IdleCloseSeconds;
-		Extras[0].Open = Settings.ShowSecondViewport;
+
+		// **Counted from the main panel, so `--viewports 1` is the default and
+		// `--viewports 6` makes the five it does not already have.** The main
+		// one is always there; only the extras are opened here.
+		if (Settings.StartViewports > 1) {
+			const size_t wanted = Settings.StartViewports - 1;
+			if (wanted > Extras.size()) {
+				ResizeViewports(wanted);
+			}
+			for (size_t index = 0; index < wanted; index++) {
+				Extras[index].Open = true;
+			}
+		}
 
 		// Before anything reads a file. Changing it later would leave whatever
 		// had already loaded pointing at the old tree.
@@ -351,10 +407,14 @@ namespace studio {
 		CameraPitch = -0.45f;
 		CameraFrame = CFrame(Vector3{18.0f, 14.0f, 18.0f});
 
-		// **The second viewport starts where the first does.** Left at the
+		// **Every extra viewport starts where the main one does.** Left at the
 		// identity it sits at the origin looking down an axis, which is inside
 		// or past whatever the world holds — a panel that opens showing nothing
 		// reads as a panel that does not work, and that is exactly how it read.
+		//
+		// This is the pass for the panels that already exist; `ResizeViewports`
+		// does the same for any made later, which is why the camera is placed
+		// just above rather than just below.
 		for (ViewportState &view : Extras) {
 			view.Yaw = CameraYaw;
 			view.Pitch = CameraPitch;
@@ -701,6 +761,10 @@ namespace studio {
 			// for a picture while drawing, and this builds a couple of them in
 			// the gap. See Thumbnails.cpp.
 			PumpThumbnails();
+
+			// The node demo's own previews, bounded the same way and in the same
+			// gap — see `PumpNodeDemoImages`.
+			PumpNodeDemoImages();
 		}
 
 		{
@@ -973,17 +1037,19 @@ namespace studio {
 		// per call, and N open panels therefore take turns. Each keeps its own
 		// target and shows the last texture drawn into it.
 		//
-		// Skipping the closed ones matters: rotating through four slots with
-		// one panel open would redraw it every fourth frame for no reason.
-		size_t candidates[2 + EXTRA_VIEWPORTS];
-		size_t candidateCount = 0;
+		// Skipping the closed ones matters, and matters more the more panels
+		// exist: rotating through every slot with one panel open would redraw
+		// that panel once per slot for no reason.
+		// **Reused between frames rather than built fresh**, because this runs
+		// every frame and the panel count only changes when somebody opens one.
+		Candidates.clear();
 
 		if (ShowViewport) {
-			candidates[candidateCount++] = 0;
+			Candidates.push_back(0);
 		}
-		for (size_t index = 0; index < EXTRA_VIEWPORTS; index++) {
+		for (size_t index = 0; index < Extras.size(); index++) {
 			if (Extras[index].Open) {
-				candidates[candidateCount++] = index + 1;
+				Candidates.push_back(index + 1);
 			}
 		}
 
@@ -1007,7 +1073,7 @@ namespace studio {
 		// updates a second on a thing being looked at, which is not something an
 		// eye can see; a window that stops being drawn is.
 		if (!PreviewWanted.empty()) {
-			candidates[candidateCount++] = PREVIEW_SLOT;
+			Candidates.push_back(PreviewSlot());
 		}
 
 		// **A closed panel gives its camera back, every frame rather than on an
@@ -1015,7 +1081,7 @@ namespace studio {
 		// because imgui says its window is, and it can be shut by the title bar,
 		// by a menu item or by a saved layout arriving from disk. Reconciling
 		// against the list that was just built covers all three, and costs a
-		// walk of four entries on a frame where nothing changed.
+		// walk of the panel list on a frame where nothing changed.
 		//
 		// Without it a session that has opened and closed panels leaves a camera
 		// in the world for each one: undriven, listed in the explorer, saved
@@ -1028,21 +1094,21 @@ namespace studio {
 			}
 		}
 
-		if (candidateCount == 0) {
+		if (Candidates.empty()) {
 			// Nothing to draw into. The frame still runs — the chrome is drawn
 			// and presented — so the editor does not freeze when every viewport
 			// is closed.
 			DrawingViewport = 0;
 		} else {
-			RoundRobin = (RoundRobin + 1) % candidateCount;
-			DrawingViewport = candidates[RoundRobin];
+			RoundRobin = (RoundRobin + 1) % Candidates.size();
+			DrawingViewport = Candidates[RoundRobin];
 		}
 
 		// **This frame belongs to the preview**, and it is spent the same way a
 		// viewport spends one: `Render` owns the swapchain, so whichever slot the
 		// rotation picked gets the whole call. The difference from what this used
 		// to do is only that it had to be *picked*.
-		if (DrawingViewport == PREVIEW_SLOT) {
+		if (DrawingViewport == PreviewSlot()) {
 			if (RenderPreviewSlot()) {
 				PreviewWanted.clear();
 				return;
@@ -1052,7 +1118,7 @@ namespace studio {
 			// entry that has gone. Fall through to the first viewport rather than
 			// spending the frame on nothing.
 			PreviewWanted.clear();
-			DrawingViewport = candidateCount > 1 ? candidates[0] : 0;
+			DrawingViewport = Candidates.size() > 1 ? Candidates[0] : 0;
 		}
 
 		ViewportState *extra = ExtraAt(DrawingViewport);
