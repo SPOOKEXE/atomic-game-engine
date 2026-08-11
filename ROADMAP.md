@@ -71,17 +71,17 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.15
 
-- [_] animation handler
-- [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
-
-### v0.16
-
 - [_] also extra prototype project for rendering pipeline.
 - [_] thoroughly implement all user interface elements + surfacegui + billboardgui
 - [_] thoroughly implement user input system
 - [_] thoroughly implement common services
 - [_] thoroughly implement extra functions like PlayerGui:...
 - [_] add accessories support
+
+### v0.16
+
+- [_] animation handler
+- [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
 
 ### v0.?? (needs prototype project first)
 
