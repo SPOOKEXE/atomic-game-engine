@@ -54,9 +54,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] every shader moved to engine/resources/shaders, owned by a module of its own
 - [_] deferred `D00110`: a variety of default shaders, once something can select one
 
-- [_] add custom physical properties for BasePart but as a separate PhysicsProperties component. need things like friction, drag, density, etc. Make them visible in properties too.
-- [_] create a shared script based but separate LuaSourceContainer and JavaScriptSourceContainer as two separate components.
-- [_] add a way to select between luau and javascript for the code as properties for the Script/LocalScript/ModuleScript. Make it a separate component so we can keep both code containers but swap between them. Maybe CodeSourceContainerSelector? This way we can make CodeSourceContainerSelector scriptable but do not allow editing scripts from other scripts by LuaSourceContainer and JavaScriptSourceContainer.
+- [x] add custom physical properties for BasePart but as a separate PhysicsProperties component. need things like friction, drag, density, etc. Make them visible in properties too.
+- [x] create a shared script based but separate LuaSourceContainer and JavaScriptSourceContainer as two separate components.
+- [x] add a way to select between luau and javascript for the code as properties for the Script/LocalScript/ModuleScript. Make it a separate component so we can keep both code containers but swap between them. Maybe CodeSourceContainerSelector? This way we can make CodeSourceContainerSelector scriptable but do not allow editing scripts from other scripts by LuaSourceContainer and JavaScriptSourceContainer.
 
 ### v0.15
 
