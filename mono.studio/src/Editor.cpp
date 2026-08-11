@@ -296,7 +296,7 @@ namespace studio {
 		}
 
 		// Null when headless, which is what puts the renderer in that mode.
-		if (!Renderer.Initialise(Window)) {
+		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
 			return false;
 		}
 
@@ -2702,11 +2702,10 @@ namespace studio {
 		tab.Instance = instance;
 
 		Universe->Enter(world, [&](Store &store) {
-			const auto *source = store.Get<engine::script::Source>(instance);
-			if (source == nullptr) {
-				return;
-			}
-			tab.Path = source->Path;
+			// **Whichever container the instance is set to run**, so opening a
+			// script that has been switched to JavaScript edits the JavaScript
+			// rather than the Luau it still holds.
+			tab.Path = engine::script::ActiveSourceOf(store, instance);
 
 			if (!tab.Path.IsValid()) {
 				return;
@@ -2748,8 +2747,9 @@ namespace studio {
 				const std::string leaf = name.IsValid() ? std::string(Label(name)) : "Script";
 				tab.Path = Name("Scripts/" + leaf + ".luau");
 
-				const engine::script::Source source{tab.Path};
-				store.Set(tab.Instance, source);
+				// One rule for which container a path belongs in, and the
+				// selector follows it — `script::SetSourcePath`.
+				engine::script::SetSourcePath(store, tab.Instance, tab.Path);
 			}
 
 			auto *cache = store.ResourceMutable<engine::script::SourceCache>();
