@@ -492,9 +492,25 @@ namespace engine::render {
 		// and a headless `Render` with no scene target draws nothing rather than
 		// pretending to.
 		//
+		// **How many frames the CPU may queue ahead of the GPU is a policy, and
+		// the caller owns it.** One means `SDL_SubmitGPUCommandBuffer` blocks
+		// until the GPU has finished the previous frame — the CPU and the GPU
+		// take turns, the picture is as close to the input as this engine can
+		// make it, and a GPU-bound scene loses the rate the overlap was buying.
+		// Two or three let the CPU run ahead and cost a frame or two of latency
+		// for it.
+		//
+		// **The default is one because this is an editor's renderer**, and the
+		// argument is in `Initialise` beside the call. A caller measuring
+		// throughput, or presenting something nobody is dragging, should say so
+		// rather than have this decided for it.
+		//
 		// @param window SDL window to claim, or null for headless.
+		// @param framesInFlight How many frames the CPU may queue ahead.
+		//        Clamped to 1..3; ignored when headless, which has no swapchain
+		//        to be ahead of.
 		// @return True when the device, pipelines and geometry are ready.
-		bool Initialise(SDL_Window *window);
+		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1);
 
 		// Whether this renderer has a window to present to.
 		//

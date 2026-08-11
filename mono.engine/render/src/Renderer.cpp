@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
@@ -2446,7 +2447,7 @@ namespace engine::render {
 		std::abort();
 	}
 
-	bool Renderer::Initialise(SDL_Window *window) {
+	bool Renderer::Initialise(SDL_Window *window, uint32_t framesInFlight) {
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
 		// whoever owns the object and initialised by whoever owns the window —
@@ -2493,7 +2494,13 @@ namespace engine::render {
 		// overlapped now waits, so a GPU-bound scene loses some of its rate —
 		// which is why the measurement that matters here is the one taken by
 		// hand, not the one the profiler reports.
-		if (window != nullptr && !SDL_SetGPUAllowedFramesInFlight(State->Device, 1)) {
+		// **Clamped rather than trusted.** SDL takes 1 to 3 and answers false
+		// for anything else, which would leave the device at its default with
+		// only a warning to say so — a number nobody chose deciding the feel of
+		// the editor.
+		const uint32_t queued = std::clamp<uint32_t>(framesInFlight, 1, 3);
+
+		if (window != nullptr && !SDL_SetGPUAllowedFramesInFlight(State->Device, queued)) {
 			// Not fatal. The default is a working configuration and the only
 			// thing lost is the latency this was trying to save.
 			ENGINE_WARN("SDL_SetGPUAllowedFramesInFlight: {}", SDL_GetError());
