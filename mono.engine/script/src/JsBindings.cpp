@@ -420,11 +420,14 @@ namespace engine::script {
 		// and this is on the path of every property a script reads or writes.
 		// The two surfaces share rules rather than code, and this is one of the
 		// rules.
+		// **A non-scriptable property is not found here either.** The two
+		// surfaces share rules rather than code — `Instances.cpp`'s twin
+		// carries why the answer is "no such member" rather than a refusal.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, const char *name) {
 			const std::string_view key(name);
 			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
 				if (property.Name.Text() == key) {
-					return &property;
+					return property.Scriptable ? &property : nullptr;
 				}
 			}
 			return nullptr;

@@ -423,7 +423,7 @@ TEST_CASE("the service takes a script instance as well as a path", "[debugger]")
 	// with what the VM reports.
 	REQUIRE(runtime->Run(
 		"local probe = workspace.Parent and nil or nil\n"
-		"for _, found in World:Query('script.Source') do probe = found end\n"
+		"for _, found in World:Query('script.LuaSourceContainer') do probe = found end\n"
 		"assert(probe ~= nil, 'the script instance was not found')\n"
 		"BreakpointService:SetBreakpoint(probe, 4)\n"
 	));

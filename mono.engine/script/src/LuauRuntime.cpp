@@ -567,8 +567,8 @@ namespace engine::script {
 				}
 			}
 
-			const Source *source = store.Get<Source>(module);
-			if (source == nullptr || !source->Path.IsValid()) {
+			const core::Name modulePath = ActiveSourceOf(store, module);
+			if (!modulePath.IsValid()) {
 				luaL_errorL(
 					state, "'%s' has no source to require", store.InstanceNameOf(module).Text().data()
 				);
@@ -576,7 +576,7 @@ namespace engine::script {
 
 			std::string program;
 			std::string error;
-			if (!ReadSource(store, source->Path, program, error)) {
+			if (!ReadSource(store, modulePath, program, error)) {
 				luaL_errorL(state, "%s", error.c_str());
 			}
 
@@ -587,7 +587,7 @@ namespace engine::script {
 			size_t bytecodeSize = 0;
 			char *bytecode = luau_compile(program.data(), program.size(), &options, &bytecodeSize);
 			if (bytecode == nullptr) {
-				luaL_errorL(state, "the compiler produced nothing for '%s'", source->Path.Text().data());
+				luaL_errorL(state, "the compiler produced nothing for '%s'", modulePath.Text().data());
 			}
 
 			// The same shape a `Script` gets: its own sandboxed thread, so a
@@ -598,7 +598,7 @@ namespace engine::script {
 			PushInstanceValue(thread, module);
 			lua_setglobal(thread, "script");
 
-			const std::string chunkName = "=" + std::string(source->Path.Text());
+			const std::string chunkName = "=" + std::string(modulePath.Text());
 			const int loaded = luau_load(thread, chunkName.c_str(), bytecode, bytecodeSize, 0);
 			std::free(bytecode);
 
@@ -665,8 +665,10 @@ namespace engine::script {
 	bool LuauRuntime::RunInstance(ecs::Entity instance) {
 		Error.clear();
 
-		const Source *source = Store.Get<Source>(instance);
-		if (source == nullptr || !source->Path.IsValid()) {
+		// **The active container** — `script::CodeSourceContainerSelector` says
+		// which of an instance's programs is the one to run.
+		const core::Name path = ActiveSourceOf(Store, instance);
+		if (!path.IsValid()) {
 			// A script with no path is a no-op rather than an error: an author
 			// makes the instance before choosing the file, and that is a legal
 			// state.
@@ -679,7 +681,7 @@ namespace engine::script {
 		// would be a second place to forget it — and the symptom would be
 		// edited code that runs from one entry point and not another.
 		std::string program;
-		if (!ReadSource(Store, source->Path, program, Error)) {
+		if (!ReadSource(Store, path, program, Error)) {
 			return false;
 		}
 
@@ -698,7 +700,7 @@ namespace engine::script {
 		// invisible to the next, which is exactly the scoping an author expects.
 		ContextOf(State).PendingScript = instance;
 
-		const bool ok = Run(program, source->Path.Text());
+		const bool ok = Run(program, path.Text());
 		ContextOf(State).PendingScript = ecs::NULL_ENTITY;
 		return ok;
 	}

@@ -1894,14 +1894,12 @@ TEST_CASE("a script is an instance with a class and a source", "[scripting][inst
 
 		local program = Instance.new('Script', holder)
 		program.Name = 'Behaviour'
-		program.Source = 'examples/Rings.luau'
 
 		assert(program:IsA('Script'), 'a Script is not a Script')
 		assert(program:IsA('LuaSourceContainer'), 'a Script is not a source container')
 		assert(program:IsA('Instance'), 'everything is an Instance')
 		assert(not program:IsA('BasePart'), 'a Script is drawn')
 
-		assert(program.Source == 'examples/Rings.luau', 'the source did not round-trip')
 		assert(not program.Disabled, 'a fresh script is disabled')
 
 		program.Disabled = true
@@ -1913,7 +1911,88 @@ TEST_CASE("a script is an instance with a class and a source", "[scripting][inst
 
 	const Entity program = store.FindFirstChild(holder, "Behaviour");
 	REQUIRE(program != engine::ecs::NULL_ENTITY);
-	CHECK(store.Get<engine::script::Source>(program) != nullptr);
+	CHECK(store.Get<engine::script::LuaSourceContainer>(program) != nullptr);
+}
+
+// **A script may not read or write anybody's source, including its own.** That
+// is the boundary the split exists for: the step budget, the memory ceiling and
+// the host role all assume the program is the one an author wrote, and a script
+// that could rewrite another one makes all three decorative.
+//
+// The author's path is unaffected — the properties panel, a game file and the
+// Rojo sync write through `Store::SetProperty`, which is what the C++ below
+// stands for.
+TEST_CASE("a script cannot reach another script's source", "[scripting][instances]") {
+	RegisterClasses();
+	(void)engine::script::ScriptClass();
+
+	Store store("script_source_test");
+	engine::scene::InstallServices(store);
+
+	const Entity program = engine::script::MakeScript(store, "examples/Rings.luau", "Behaviour", false);
+	REQUIRE(program != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.SetParent(program, engine::scene::WorkspaceOf(store)));
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// Not a member, rather than a member that refuses: the error message itself
+	// would otherwise tell a program what is there to reach for.
+	MustRun(*runtime, R"(
+		local program = workspace:FindFirstChild('Behaviour')
+		assert(program ~= nil, 'the script is not in the tree')
+
+		local ok = pcall(function() return program.Source end)
+		assert(not ok, 'a script read another script Source')
+
+		ok = pcall(function() program.Source = 'evil.luau' end)
+		assert(not ok, 'a script wrote another script Source')
+
+		ok = pcall(function() program.LuaSource = 'evil.luau' end)
+		assert(not ok, 'a script wrote the Luau container directly')
+
+		ok = pcall(function() program.JavaScriptSource = 'evil.js' end)
+		assert(not ok, 'a script wrote the JavaScript container directly')
+	)");
+
+	// And the author still can, through the same property surface a panel uses.
+	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("examples/Rings.luau"));
+}
+
+// **The selection is the part a script may make**, which is what splitting it
+// out of the containers buys: a mod swapping an implementation needs to choose
+// a language and never needs to read a line of source.
+TEST_CASE("a script may switch which language an instance runs", "[scripting][instances]") {
+	RegisterClasses();
+	(void)engine::script::ScriptClass();
+
+	Store store("script_language_test");
+	engine::scene::InstallServices(store);
+
+	const Entity program = engine::script::MakeScript(store, "examples/Rings.luau", "Behaviour", false);
+	REQUIRE(program != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.SetParent(program, engine::scene::WorkspaceOf(store)));
+
+	// The instance holds a JavaScript program as well, put there by the author.
+	const engine::core::Name javascript("examples/Rings.js");
+	REQUIRE(store.SetProperty(program, engine::core::Name("JavaScriptSource"), &javascript, sizeof(javascript)));
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local program = workspace:FindFirstChild('Behaviour')
+		assert(program.Language == Enum.ScriptLanguage.Luau, 'a fresh script is not Luau')
+
+		program.Language = Enum.ScriptLanguage.JavaScript
+		assert(program.Language == Enum.ScriptLanguage.JavaScript, 'the switch did not take')
+	)");
+
+	// **Both programs are still there**, which is the whole point of two
+	// containers: switching a language is not a destructive edit.
+	CHECK(engine::script::ActiveLanguageOf(store, program) == Language::JavaScript);
+	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("examples/Rings.js"));
+
+	const auto *lua = store.Get<engine::script::LuaSourceContainer>(program);
+	REQUIRE(lua != nullptr);
+	CHECK(lua->Path == engine::core::Name("examples/Rings.luau"));
 }
 
 TEST_CASE("a world's scripts are selected by the host's role", "[scripting][instances]") {

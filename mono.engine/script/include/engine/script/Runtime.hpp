@@ -39,6 +39,7 @@
 #include <engine/gui/Input.hpp>
 #include <engine/script/Debugger.hpp>
 #include <engine/script/Host.hpp>
+#include <engine/script/Language.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -49,30 +50,6 @@
 #include <vector>
 
 namespace engine::script {
-
-	// Which VM runs a script.
-	//
-	// @since v0.5
-	enum class Language : uint8_t {
-		// Luau, from `mono.vendor/luau`.
-		Luau,
-
-		// JavaScript, from `mono.vendor/quickjs`. TypeScript is the typed
-		// authoring surface over this one — it erases its types by design, so
-		// there is nothing else for a "TypeScript VM" to have been.
-		JavaScript,
-	};
-
-	// The language a file's extension names.
-	//
-	// `.luau` and `.lua` are Luau; `.js`, `.mjs` and `.ts` are JavaScript. A
-	// `.ts` file is expected to have been type-stripped already — nothing in
-	// the C++ build compiles TypeScript, and nothing should: the engine loads
-	// what a toolchain emitted.
-	//
-	// @param path The file name or path.
-	// @return The language, defaulting to Luau when the extension says nothing.
-	Language LanguageOf(std::string_view path);
 
 	// Where a script is standing.
 	//

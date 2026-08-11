@@ -237,8 +237,11 @@ namespace engine::script {
 	bool JavaScriptRuntime::RunInstance(ecs::Entity instance) {
 		Error.clear();
 
-		const Source *source = Store.Get<Source>(instance);
-		if (source == nullptr || !source->Path.IsValid()) {
+		// **The active container, not a component of its own.** An instance
+		// may hold a program per language and `ActiveSourceOf` is the one place
+		// that says which one runs — see `script::CodeSourceContainerSelector`.
+		const core::Name path = ActiveSourceOf(Store, instance);
+		if (!path.IsValid()) {
 			return true;
 		}
 
@@ -246,7 +249,7 @@ namespace engine::script {
 		// function the Luau side uses. Two resolvers is two places to forget
 		// the cache, and both VMs load the same game file.
 		std::string program;
-		if (!ReadSource(Store, source->Path, program, Error)) {
+		if (!ReadSource(Store, path, program, Error)) {
 			return false;
 		}
 
@@ -264,7 +267,7 @@ namespace engine::script {
 			JS_FreeValue(Context, global);
 		}
 
-		const bool ok = Run(program, std::string(source->Path.Text()));
+		const bool ok = Run(program, std::string(path.Text()));
 
 		{
 			JSValue global = JS_GetGlobalObject(Context);

@@ -83,10 +83,16 @@ namespace engine::script {
 
 		// Compare the stored spelling directly. Interning each lookup takes the
 		// process-wide registry lock and adds a hash lookup to every property access.
+		// **A non-scriptable property is not found, rather than found and
+		// refused.** `PropertyDescriptor::Scriptable` is about who is asking,
+		// and the honest answer to a script asking for a script's `Source` is
+		// the same one it gets for a member that does not exist — otherwise the
+		// error message itself tells a program what is there to reach for. It
+		// also means the read path needs no second check: this is the one door.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, std::string_view name) {
 			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
 				if (property.Spelling == name) {
-					return &property;
+					return property.Scriptable ? &property : nullptr;
 				}
 			}
 			return nullptr;

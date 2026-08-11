@@ -1262,6 +1262,17 @@ declare task: {
 			// out of the loop below as well, and every class in this file
 			// carried the field twice.
 			for (const PropertyDescriptor &property : OwnProperties(info)) {
+				// **A property a script may not touch is not declared to
+				// scripts.** `PropertyDescriptor::Scriptable` is enforced in
+				// both bindings by answering "no such member"; a declaration
+				// here would tell an author about a member that then does not
+				// exist, which is worse than not mentioning it — a typecheck
+				// that passes and a run that fails is the pairing this file
+				// exists to prevent.
+				if (!property.Scriptable) {
+					continue;
+				}
+
 				out << "\t";
 
 				// **`read` is Luau's `readonly`, and without it the two
@@ -2129,6 +2140,11 @@ declare const task: {
 			// writable — is the right one, and it is the one that survives now
 			// that nothing competes with it.
 			for (const PropertyDescriptor &property : OwnProperties(info)) {
+				// Left out for the reason the Luau half above gives.
+				if (!property.Scriptable) {
+					continue;
+				}
+
 				out << "\t";
 				if (!property.Writable) {
 					out << "readonly ";
