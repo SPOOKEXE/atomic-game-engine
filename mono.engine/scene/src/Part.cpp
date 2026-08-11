@@ -615,6 +615,49 @@ namespace engine::scene {
 			return property;
 		}
 
+		// DestinationWorld: whose contents the pane shows.
+		//
+		// **A `PropertyType::Name` and not a `String`**, for the reason
+		// `TagFilterProperty` records the hard way: `String` marshals a
+		// `std::string` and this getter moves a `core::Name`, and declaring the
+		// wrong one type-checks and fails at the first script that assigns to it.
+		//
+		// Unvalidated on purpose, unlike `Destination` above. A world is looked
+		// up by name at draw time by whoever is drawing, and the destination
+		// world may legitimately not exist yet — a script naming one that a
+		// later `AddWorld` creates is ordinary, and refusing the assignment here
+		// would make authoring order significant for no gain. A name matching
+		// nothing shows this world, which is visible.
+		PropertyDescriptor DestinationWorldProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("DestinationWorld");
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Portal>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Portal *portal = store.Get<Portal>(instance);
+				if (portal == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) = portal->DestinationWorld;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Portal *portal = store.GetMutable<Portal>(instance);
+				if (portal == nullptr) {
+					return false;
+				}
+				portal->DestinationWorld = *static_cast<const core::Name *>(value);
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor FaceProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Face");
@@ -1615,6 +1658,7 @@ namespace engine::scene {
 
 			// The portal's one, and the whole of the feature is in it.
 			ecs::Classes::Computed(portalClass, DestinationProperty());
+			ecs::Classes::Computed(portalClass, DestinationWorldProperty());
 
 			// The sound's six. All plain fields, which is unusual enough here
 			// to be worth saying: nothing about a sound is a doubled

@@ -25,6 +25,7 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -90,6 +91,44 @@ namespace client {
 	// @return How many views were written. Zero is the ordinary case in a scene
 	//         with no mirror in it, and is not a failure.
 	size_t CollectSurfaceViews(engine::ecs::Store &store, std::vector<engine::render::SurfaceView> &views);
+
+	// Points a cross-world portal's surface at the world it names.
+	//
+	// **The half of a portal a store cannot do for itself.** `AimSurfaceCameras`
+	// places the camera and fits its frustum, and both are arithmetic inside one
+	// world; what is *drawn* through that frustum is a draw list, and the draw
+	// list of another world is on the far side of a boundary rule 3 keeps shut.
+	// So the host — which holds the universe and is already outside every store
+	// when it calls the renderer — is the only thing that can join the two.
+	//
+	// **Appends rather than substitutes**, because the renderer uploads one
+	// instance buffer per frame: the far world's instances go on the end of this
+	// world's, and the surface is given that range through
+	// `render::SurfaceView::InstanceFirst`. A frame with no cross-world portal in
+	// it appends nothing and the array is untouched.
+	//
+	// **Reads the far world's published `DrawList` and does not build one.** A
+	// world that is not ticking has whatever its last tick published, which is
+	// right — a suspended destination should look like the moment it stopped
+	// rather than like nothing. `ImmersivePortals.luau` holds both ends awake so
+	// that case does not arise, and says why.
+	//
+	// **A name matching no world is left alone**, so the pane keeps showing this
+	// world. That is the same fallback an unlinked portal already has, and fails
+	// the same visible way rather than as a blank pane.
+	//
+	// @param universe  The worlds, entered one at a time and never nested.
+	// @param world     The world being drawn.
+	// @param instances This world's draw list, appended to.
+	// @param views     The views `CollectSurfaceViews` filled, updated in place.
+	// @return How many surfaces were pointed at another world.
+	// @since v0.14
+	size_t AttachForeignSurfaces(
+		engine::world::Universe &universe,
+		engine::world::WorldId world,
+		std::vector<engine::scene::DrawInstance> &instances,
+		std::vector<engine::render::SurfaceView> &views
+	);
 
 	// Turns a world's particle pool into the batches the renderer draws.
 	//

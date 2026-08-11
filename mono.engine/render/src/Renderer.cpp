@@ -3411,6 +3411,16 @@ namespace engine::render {
 				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].Index);
 				surfaceSignature = MixMatrix(surfaceSignature, accepted[index].ViewProjection);
 				surfaceSignature = MixFloat(surfaceSignature, accepted[index].ImageOpacity);
+
+				// **The foreign range, because moving it is a change nothing
+				// else here would notice.** `SignatureOf(instances)` already
+				// covers the *contents* of the appended tail — the far world
+				// moving redraws the pane, which is the whole point of a live
+				// destination — but a host that reordered two foreign ranges
+				// without changing either world would leave the signature
+				// identical while each surface now names the other's instances.
+				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].View->InstanceFirst);
+				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].View->InstanceCount);
 			}
 
 			for (size_t index = 0; index < acceptedCount; index++) {
@@ -3943,6 +3953,40 @@ namespace engine::render {
 				};
 
 				plainly();
+
+				// **Another world's instances, when the host appended some.**
+				// `SurfaceView::InstanceCount` says why this bypasses the plan:
+				// the plan partitions *this* world's draw list and knows nothing
+				// about the range appended after it, so a foreign surface is one
+				// plain run and no mirror runs at all. That is what lets a portal
+				// in one world show a live second world.
+				//
+				// **`continue`, so the plan-driven draws below are skipped
+				// entirely.** Drawing both would put this world's floor into the
+				// far world's picture, which reads as the two rooms bleeding
+				// into each other.
+				if (accepted[index].View->InstanceCount > 0) {
+					result.DrawCalls += State->DrawSlots(
+						command,
+						pass,
+						accepted[index].View->InstanceFirst,
+						accepted[index].View->InstanceCount,
+						&surfaceLighting,
+						fallback,
+						shadowSampler,
+						surfaceTexture,
+						State->SurfaceSampler,
+						surfaceFilter,
+						result.Triangles
+					);
+
+					// **Ended and left for the sweep below to mark ready**, which
+					// is the invariant this must not shortcut: a surface written
+					// this frame may not be sampled as another surface's
+					// "previous" within the same frame.
+					SDL_EndGPURenderPass(pass);
+					continue;
+				}
 
 				// The world, minus every mirror. `plan.Reflected` is the
 				// non-mirror opaque run.

@@ -166,6 +166,34 @@ namespace engine::render {
 		// it for one surface would be partitioning it for all of them, and the
 		// screen pass would then draw the group instead of the world.
 		uint32_t TagFilter = 0;
+
+		// Which instances this surface draws, when they are not this world's.
+		//
+		// **What makes a portal able to show another world**, and it is a range
+		// rather than a second draw list because the renderer uploads one
+		// instance buffer per frame. A host that wants world B seen through
+		// world A's pane appends B's instances to the array it hands `Render`
+		// and names that range here; the surface pass then draws exactly it.
+		//
+		// **`Count == 0` means "this world", which is every mirror and every
+		// same-world portal.** Those draw the `scene::ScenePlan`'s own runs —
+		// the world minus the pane being rendered, plus every other pane — which
+		// is the arrangement that makes a mirror of a mirror work and is not
+		// something a foreign range can participate in: the plan describes this
+		// world's partitioning and knows nothing about the appended tail.
+		//
+		// So a foreign surface is drawn **plainly and in one run**. A pane in
+		// the far world shows as a flat pane rather than as a recursive image,
+		// which is the same fallback a surface with no frame yet already gets
+		// and is right for the same reason — a hole through a hole into a third
+		// world is a feature nobody has asked for and would need a plan per
+		// world per frame to serve.
+		//
+		// @since v0.14
+		//@{
+		uint32_t InstanceFirst = 0;
+		uint32_t InstanceCount = 0;
+		//@}
 	};
 
 	// How many local lights one frame may carry.

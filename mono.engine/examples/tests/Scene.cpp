@@ -8,6 +8,7 @@
 // world, through the same bindings a game would use.
 
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
@@ -328,6 +329,12 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// hole leads to.** A hole aimed outward keeps the half-space on the other
 	// side, so the room it names is behind the camera's clip plane and the sign
 	// flips.
+	//
+	// This scene makes that easy to get wrong in a second way, which is why the
+	// case ends with a body rather than a camera: its two panes are
+	// perpendicular, so the destination carries a quarter turn, and a turn is
+	// the one part of a pairing that can be right for the picture and backwards
+	// for the walk.
 	const StagedAssets assets;
 
 	Store store("portals");
@@ -338,24 +345,31 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	INFO(error);
 	REQUIRE(loaded);
 
-	// Six holes, three of them the ones the viewer stands in front of. The other
-	// three are the far ends, aimed from an eye that is in a different room —
-	// legal, and not something a still frame can be checked against.
-	const engine::core::Vector3 GARDEN{300.0f, 0.0f, 0.0f};
-	const engine::core::Vector3 VAULT{0.0f, 0.0f, 300.0f};
+	// The middles of the two rooms the pair joins. The third — the library —
+	// has no hole in it, because an ordinary doorway is what the walk uses to
+	// get there and that is the contrast the scene is built on.
+	const engine::core::Vector3 HALL{-20.0f, 7.5f, -20.0f};
+	const engine::core::Vector3 GARDEN{20.0f, 7.5f, 20.0f};
 
 	struct Hole {
 		const char *Pane;
 		const char *Destination;
+
+		// The middle of the room this hole leads to, and whether the scene's own
+		// viewer stands on the side of the pane that shows it.
+		//
+		// **Only one of a pair can be checked from one eye**, and that is a fact
+		// about holes rather than a gap in the test: the two panes are in two
+		// rooms, the surface pass places each from whichever side the viewer is
+		// on, and a pane seen from behind keeps the other half-space. The scene
+		// opens outside the west wall, which is in front of the hall's pane and
+		// behind the garden's.
 		engine::core::Vector3 Room;
+		bool Facing;
 	};
 	const Hole holes[] = {
-		{"HallNorth", "GardenNorth", GARDEN},
-		{"HallEast", "VaultEast", VAULT},
-		{"HallWest", "VaultWest", VAULT},
-		{"GardenNorth", "HallNorth", {}},
-		{"VaultEast", "HallEast", {}},
-		{"VaultWest", "HallWest", {}},
+		{"HallSouth", "GardenWest", GARDEN, true},
+		{"GardenWest", "HallSouth", HALL, false},
 	};
 
 	// Found by component rather than by name, so renaming a portal in the scene
@@ -385,7 +399,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		CHECK(store.Get<engine::scene::Portal>(portal)->Destination == InScene(store, hole.Destination));
 	}
 
-	REQUIRE(engine::scene::AimSurfaceCameras(store) == 6);
+	REQUIRE(engine::scene::AimSurfaceCameras(store) == 2);
 
 	const auto *viewer = store.Get<engine::scene::Transform>(InScene(store, "Viewer"));
 	REQUIRE(viewer != nullptr);
@@ -414,10 +428,9 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		// side of that wall drawing over the whole hole.
 		REQUIRE(lens->ClipNormal.Magnitude() > 0.5f);
 
-		if (hole.Destination[0] == 'H') {
-			// The far ends, aimed from an eye in another room. Nothing about the
-			// half-space they keep is meaningful, so they are only here to be
-			// counted.
+		if (!hole.Facing) {
+			// Aimed from an eye behind this pane. Nothing about the half-space it
+			// keeps is meaningful, so it is only here to be counted.
 			continue;
 		}
 
@@ -443,14 +456,18 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		REQUIRE(source != nullptr);
 		REQUIRE(bounds != nullptr);
 
-		// Every wall in this scene is unrotated, so the face's world normal is
-		// the axis its `NormalId` names and the reach along it is one component
-		// of the half extent.
-		const engine::core::Vector3 normal = engine::scene::NormalOf(store.Get<SurfaceCamera>(portal)->Face);
+		// **Rotated into the world, because one pane in this scene is turned.**
+		// The hall's south wall carries the quarter turn that makes the corner,
+		// so `NormalOf(Face)` is the axis in the *part's* frame and only the
+		// reach is measurable there — a test that treated the local normal as the
+		// world one would measure the wrong gap on exactly the pane the scene
+		// exists to demonstrate.
+		const engine::core::Vector3 local = engine::scene::NormalOf(store.Get<SurfaceCamera>(portal)->Face);
+		const engine::core::Vector3 normal = source->Frame.VectorToWorldSpace(local).Unit();
 		const engine::core::Vector3 reach{
-			std::abs(normal.X) * bounds->HalfExtent.X,
-			std::abs(normal.Y) * bounds->HalfExtent.Y,
-			std::abs(normal.Z) * bounds->HalfExtent.Z,
+			std::abs(local.X) * bounds->HalfExtent.X,
+			std::abs(local.Y) * bounds->HalfExtent.Y,
+			std::abs(local.Z) * bounds->HalfExtent.Z,
 		};
 
 		const float eyeToFace =
@@ -462,6 +479,44 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// Motion on the far side of every hole, six per room. A still portal is
 	// indistinguishable from a painted mural.
 	CHECK(CountNamed(store, "Drifter") == 18);
+
+	// **And the walk closes, which is the claim the pictures cannot make.**
+	// `scene/tests/SurfaceCameras.cpp` proves `CrossPortals` maps a body through
+	// the same matrix as the camera; what is scene-specific — and what a pair of
+	// perpendicular panes can get backwards while every image still looks right
+	// — is *which way round* the two ends are glued. Walk west out of the garden
+	// and the hall has to arrive ahead of you, not behind or beside you.
+	//
+	// It is also what pins the rails camera in the scene file: those legs are
+	// this arithmetic, written out by hand because a script has no `Inverse`.
+	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
+	store.Set<engine::scene::Transform>(
+		walker, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.5f, 6.0f, 20.0f})}
+	);
+	store.Set<engine::scene::PreviousTransform>(
+		walker,
+		engine::scene::PreviousTransform{engine::core::CFrame(engine::core::Vector3{3.0f, 6.0f, 20.0f})}
+	);
+	store.Set<engine::scene::Motion>(
+		walker, engine::scene::Motion{engine::core::Vector3{-16.0f, 0.0f, 0.0f}, engine::core::Vector3::Zero}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(store) == 1);
+
+	// Half a metre past the hall's south face, at the height it left at — the
+	// pane is forty long and the crossing was at its middle, so the arrival is
+	// at the middle of the hall's south wall.
+	const engine::core::Vector3 landed = store.Get<engine::scene::Transform>(walker)->Frame.Position;
+	CHECK(landed.X == Approx(-20.0f).margin(1e-3f));
+	CHECK(landed.Y == Approx(6.0f).margin(1e-3f));
+	CHECK(landed.Z == Approx(-1.5f).margin(1e-3f));
+
+	// **Turned with it, at the speed it had.** West became north, which is the
+	// quarter turn the building is missing. A pair glued the other way round
+	// sends this one south, back into the wall it came out of.
+	const engine::core::Vector3 speed = store.Get<engine::scene::Motion>(walker)->Linear;
+	CHECK(speed.X == Approx(0.0f).margin(1e-3f));
+	CHECK(speed.Z == Approx(-16.0f).margin(1e-3f));
 }
 
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {

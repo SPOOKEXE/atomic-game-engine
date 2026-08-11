@@ -34,25 +34,37 @@
 -- Kept deliberately bare otherwise. A room with furniture in it is a room, and
 -- what is under test here is a single surface and whether you can be inside it.
 --
--- ## Where the two halves meet, and where they do not yet
+-- ## Both halves cross, and they cross by different routes
 --
--- **Traversal is cross-world and works**: walking into the block hands you to
--- `TeleportService`, which is `world::Postbox::Teleport` — the bus that moves a
--- player between *worlds* rather than between two places in one. You arrive in
--- front of the other demo's block, facing back at it, and the brick that greets
--- you is the other colour.
+-- **Traversal** hands you to `TeleportService`, which is `world::Postbox::
+-- Teleport` — the bus that moves a player between *worlds* rather than between
+-- two places in one. You arrive in front of the other demo's block and the
+-- brick that greets you is the other colour.
 --
--- **The image in the pane is this world's**, and that is the piece that is not
--- finished. `client::CollectSurfaceViews` takes one `Store`, and the renderer's
--- surface pass draws "the same scene range" as the main pass — so a surface
--- camera can only ever render the world it is standing in. Showing world 2
--- through world 1's pane means uploading a second world's instances in one frame
--- and giving the surface pass its range, which is a renderer change and not a
--- script one. Until then the pane is aimed at this world's own far side, so the
--- block reads as a hole rather than as a slab, and the *arrival* is what crosses.
+-- **The image** is the other world too, and getting there took a renderer
+-- change. `client::CollectSurfaceViews` takes one `Store` and the surface pass
+-- drew "the same scene range" as the main pass, so a surface camera could only
+-- ever render the world it stood in. Now `render::SurfaceView` carries an
+-- instance range and `client::AttachForeignSurfaces` — which runs in the host,
+-- because only the host holds both worlds — appends the far world's draw list
+-- and points the pane at it.
 --
--- Said here rather than left to be discovered, because a demo whose caption
--- overstates it is worse than one that does not exist.
+-- **Two fields, and the split is the point.** `Portal.Destination` is a part in
+-- *this* world and decides where the camera stands; `Portal.DestinationWorld` is
+-- a name and decides whose instances are drawn through it. The first is
+-- arithmetic a store can do for itself and the second is a draw list across a
+-- boundary rule 3 keeps shut — so one is a handle and the other is a name, which
+-- is the same shape a teleport already uses.
+--
+-- The stand-in below sits where the far world's block sits. That is exact
+-- because both worlds are laid out the same way; a destination laid out
+-- somewhere else wants its offset baked into the stand-in, which is the same lie
+-- a same-world portal already tells and is `docs/NON-EUCLIDEAN.md`'s subject.
+--
+-- **What a foreign pane does not do is recurse.** A surface drawn from another
+-- world is one plain run — the far world's own panes show flat rather than as
+-- images of a third world — because the `scene::ScenePlan` that partitions
+-- mirrors describes one world and knows nothing about the appended tail.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -158,6 +170,19 @@ portal.Face = Enum.NormalId.Front
 portal.SurfaceSize = Vector3.new(1024, 512)
 portal.ImageTransparency = 0
 portal.Destination = beyond
+
+-- **And whose world is drawn through it.** `Portal.Destination` decides where
+-- the camera stands and `DestinationWorld` decides what it sees — the first is
+-- arithmetic inside this store and the second is a draw list on the far side of
+-- a boundary no store may reach across, which is why they are two fields and why
+-- the host resolves the second. `client::AttachForeignSurfaces` is that host
+-- step.
+--
+-- The stand-in above sits where the other demo's block sits, because both worlds
+-- are laid out the same way — so the mapping the camera is placed through is
+-- already the right one and only the *contents* change.
+portal.DestinationWorld = DESTINATION
+
 portal.Parent = block
 
 -- --- the brick that says where you are ----------------------------------------

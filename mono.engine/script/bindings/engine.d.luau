@@ -872,6 +872,7 @@ end
 
 declare extern type Portal extends SurfaceCamera with
 	Destination: Instance
+	DestinationWorld: string
 end
 
 declare extern type Sound extends Instance with

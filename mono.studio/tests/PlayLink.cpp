@@ -1298,6 +1298,16 @@ TEST_CASE("a player destroyed by anything else loses its character too", "[studi
 		engine::scene::RegisterSceneClasses();
 		client::InstallPresentation(store, systems, 256);
 		engine::scene::InstallServices(store);
+
+		// **Prepared even though this case never simulates anything**, and
+		// leaving it out is a fault that lands in a different test. Installing
+		// the character systems installs the ground query, which reaches for
+		// `physics::PhysicsWorld` — and reaching for a component *names* it, so
+		// a world that never prepared one registers the name implicitly. The
+		// next suite to call `PreparePhysicsWorld` then registers it explicitly,
+		// which is an abort: "a type has one name". Catch2 shuffles, so it
+		// aborts in whichever case happened to run afterwards.
+		engine::physics::PreparePhysicsWorld(store);
 	});
 
 	PlayLink link;

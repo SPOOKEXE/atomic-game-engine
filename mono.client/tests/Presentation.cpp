@@ -625,3 +625,144 @@ TEST_CASE("a light on an attachment is placed without a tick", "[client][present
 	CHECK(lights[0].Position.Y == Catch::Approx(stood.Y + raised.Y));
 	CHECK(lights[0].Position.Z == Catch::Approx(stood.Z + raised.Z));
 }
+
+TEST_CASE("a portal naming another world draws that world's instances", "[client][presentation]") {
+	// **The half of a portal that a store cannot do for itself.**
+	// `AimSurfaceCameras` places the camera and fits the frustum, and both are
+	// arithmetic inside one world; what is drawn through that frustum is a draw
+	// list, and another world's draw list is on the far side of a boundary rule
+	// 3 keeps shut. The host is the only thing holding both, so the host is what
+	// joins them — by appending the far world's instances and telling the
+	// surface which range is its own.
+	Universe universe;
+
+	const WorldId here = AddWorld(universe, "here");
+	const WorldId there = AddWorld(universe, "there");
+
+	AddPart(universe, there, "FarThing");
+	AddPart(universe, there, "OtherFarThing");
+
+	universe.Tick(1.0f / 60.0f);
+	universe.Present(there, 1.0f / 60.0f, 0.0f);
+
+	// What the far world published, which is what should end up on the end of
+	// this world's array.
+	size_t published = 0;
+	universe.Enter(there, [&published](Store &store) {
+		if (const auto *list = store.Resource<client::DrawList>()) {
+			published = list->Instances.size();
+		}
+	});
+	REQUIRE(published == 2);
+
+	// A pane with a portal on it, naming the other world. The destination is a
+	// local stand-in — it is what the *camera* is placed against, and this test
+	// is about what is *drawn*.
+	universe.Enter(here, [](Store &store) {
+		const Entity pane = store.CreateInstance(engine::scene::PartClass(), "Pane");
+		store.SetParent(pane, engine::scene::InstallServices(store));
+
+		const Entity stand = store.CreateInstance(engine::scene::PartClass(), "StandIn");
+		store.SetParent(stand, engine::scene::InstallServices(store));
+
+		const Entity camera = store.CreateInstance(
+			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole"
+		);
+		engine::scene::SurfaceCamera target;
+		target.Surface = 3;
+		store.Set(camera, target);
+
+		engine::scene::Portal portal;
+		portal.Destination = stand;
+		portal.DestinationWorld = Name("there");
+		store.Set(camera, portal);
+
+		store.SetParent(camera, pane);
+	});
+
+	universe.Tick(1.0f / 60.0f);
+	universe.Present(here, 1.0f / 60.0f, 0.0f);
+
+	std::vector<engine::scene::DrawInstance> instances;
+	std::vector<engine::render::SurfaceView> views;
+
+	universe.Enter(here, [&instances, &views](Store &store) {
+		if (const auto *list = store.Resource<client::DrawList>()) {
+			instances = list->Instances;
+		}
+		(void)client::CollectSurfaceViews(store, views);
+	});
+
+	const size_t own = instances.size();
+	REQUIRE_FALSE(views.empty());
+
+	// **Nothing is pointed anywhere until the host does it**, which is the
+	// property that keeps every mirror in the engine drawing its own world.
+	for (const engine::render::SurfaceView &view : views) {
+		CHECK(view.InstanceCount == 0);
+	}
+
+	CHECK(client::AttachForeignSurfaces(universe, here, instances, views) == 1);
+
+	// Appended rather than substituted: the renderer uploads one instance buffer
+	// a frame, so the far world's rows go on the end and the surface is given
+	// that range.
+	CHECK(instances.size() == own + published);
+
+	bool found = false;
+	for (const engine::render::SurfaceView &view : views) {
+		if (view.Index != 3) {
+			CHECK(view.InstanceCount == 0);
+			continue;
+		}
+		found = true;
+		CHECK(view.InstanceFirst == own);
+		CHECK(view.InstanceCount == published);
+	}
+	CHECK(found);
+}
+
+TEST_CASE("a portal naming a world that is not there keeps showing its own", "[client][presentation]") {
+	// A name matching nothing is the same fallback an unlinked portal already
+	// has: the pane shows this world, which reads as a mirror and is visible.
+	// Pointing it at an empty range instead would clear the surface to the
+	// pass's own colour, which reads as a hole into nothing.
+	Universe universe;
+	const WorldId here = AddWorld(universe, "here");
+
+	universe.Enter(here, [](Store &store) {
+		const Entity pane = store.CreateInstance(engine::scene::PartClass(), "Pane");
+		store.SetParent(pane, engine::scene::InstallServices(store));
+
+		const Entity camera = store.CreateInstance(
+			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole"
+		);
+		store.Set(camera, engine::scene::SurfaceCamera{});
+
+		engine::scene::Portal portal;
+		portal.DestinationWorld = Name("a world nobody made");
+		store.Set(camera, portal);
+
+		store.SetParent(camera, pane);
+	});
+
+	universe.Tick(1.0f / 60.0f);
+	universe.Present(here, 1.0f / 60.0f, 0.0f);
+
+	std::vector<engine::scene::DrawInstance> instances;
+	std::vector<engine::render::SurfaceView> views;
+	universe.Enter(here, [&instances, &views](Store &store) {
+		if (const auto *list = store.Resource<client::DrawList>()) {
+			instances = list->Instances;
+		}
+		(void)client::CollectSurfaceViews(store, views);
+	});
+
+	const size_t own = instances.size();
+
+	CHECK(client::AttachForeignSurfaces(universe, here, instances, views) == 0);
+	CHECK(instances.size() == own);
+	for (const engine::render::SurfaceView &view : views) {
+		CHECK(view.InstanceCount == 0);
+	}
+}

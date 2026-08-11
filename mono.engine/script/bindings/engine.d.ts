@@ -787,6 +787,7 @@ declare interface SurfaceCamera extends Camera {
 
 declare interface Portal extends SurfaceCamera {
 	Destination: Instance;
+	DestinationWorld: string;
 }
 
 declare interface Sound extends Instance {

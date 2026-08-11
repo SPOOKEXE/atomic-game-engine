@@ -894,6 +894,47 @@ namespace engine::scene {
 		// reflecting reads as something to go and fix; a pane that vanished
 		// reads as a rendering bug.
 		ecs::Entity Destination;
+
+		// Which world's contents the pane shows, or an invalid `Name` for this
+		// one.
+		//
+		// **A name and not a handle, which is the only shape rule 3 allows.** An
+		// `ecs::Entity` names a row in one store and means something else in
+		// every other; a world's name is what already crosses — `Postbox::
+		// Teleport` addresses by it for the same reason — so this is the same
+		// arrangement a teleport uses, applied to what a camera draws instead of
+		// to where a player goes.
+		//
+		// **`Destination` is still read, and still has to be a part in *this*
+		// world.** It is what the camera is placed against: `AimSurfaceCameras`
+		// maps the eye through `destination · source⁻¹` and that arithmetic
+		// needs a `Transform` and `Bounds` it can reach. So a cross-world portal
+		// is authored as a local stand-in placed where the far world's pane is,
+		// and this field then says whose *instances* are drawn through it.
+		//
+		// That is exact when the two worlds share a coordinate frame — which is
+		// the arrangement anybody builds a portal pair in, and the one the
+		// `immersive-portals-demo` scenes use. A far world laid out somewhere
+		// else entirely wants its offset baked into the stand-in's placement,
+		// which is the same lie a same-world portal already tells and is
+		// `docs/NON-EUCLIDEAN.md`'s whole subject.
+		//
+		// **The host resolves it, not `AimSurfaceCameras`.** A store cannot
+		// reach another store; `client::AttachForeignSurfaces` is what looks the
+		// world up, copies its draw list and points the surface at it. A name
+		// that matches no world leaves the pane showing this world, which is the
+		// same fallback an unlinked portal gets and fails the same visible way.
+		//
+		// @since v0.14
+		core::Name DestinationWorld;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		//
+		// An `Entity` is eight bytes and a `Name` is four, so the type's own
+		// alignment leaves four the compiler inserted and nobody declared —
+		// written to a save file by `Column::Write`, which sends `sizeof(T)`
+		// bytes and does not know which of them a member claimed.
+		uint8_t Reserved[4] = {};
 	};
 
 	// The frustum a surface camera renders through, fitted to its pane.

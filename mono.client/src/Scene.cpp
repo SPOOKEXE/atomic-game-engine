@@ -444,6 +444,95 @@ namespace client {
 		}
 	}
 
+	size_t AttachForeignSurfaces(
+		engine::world::Universe &universe,
+		engine::world::WorldId world,
+		std::vector<engine::scene::DrawInstance> &instances,
+		std::vector<engine::render::SurfaceView> &views
+	) {
+		if (views.empty() || !world.IsValid()) {
+			return 0;
+		}
+
+		// Which surface index wants which world, gathered while inside the
+		// source store and used entirely outside it — `Universe::Enter` is not
+		// re-entrant, and the far world has to be entered to be read.
+		struct Wanted {
+			int8_t Surface = 0;
+			engine::core::Name World;
+		};
+
+		std::vector<Wanted> wanted;
+
+		universe.Enter(world, [&wanted](Store &store) {
+			store.Each<const engine::scene::Portal, const engine::scene::SurfaceCamera>(
+				[&wanted](
+					engine::ecs::Entity,
+					const engine::scene::Portal &portal,
+					const engine::scene::SurfaceCamera &camera
+				) {
+					if (!portal.DestinationWorld.IsValid()) {
+						return;
+					}
+					wanted.push_back(Wanted{camera.Surface, portal.DestinationWorld});
+				}
+			);
+		});
+
+		if (wanted.empty()) {
+			return 0;
+		}
+
+		size_t attached = 0;
+
+		for (const Wanted &entry : wanted) {
+			// **The name resolved against the universe, every frame.** A world
+			// created or destroyed between two frames is ordinary in an editor,
+			// and caching the handle would outlive one of those.
+			engine::world::WorldId found;
+			for (const engine::world::WorldId candidate : universe.Worlds()) {
+				if (universe.NameOf(candidate) == entry.World) {
+					found = candidate;
+					break;
+				}
+			}
+
+			// A name matching nothing, or naming the world we are already in,
+			// leaves the surface exactly as `CollectSurfaceViews` left it — this
+			// world's own image, which is a mirror and is visible as one.
+			if (!found.IsValid() || found == world) {
+				continue;
+			}
+
+			const auto first = static_cast<uint32_t>(instances.size());
+			universe.Enter(found, [&instances](Store &store) {
+				if (const auto *list = store.Resource<DrawList>()) {
+					instances.insert(instances.end(), list->Instances.begin(), list->Instances.end());
+				}
+			});
+
+			const auto count = static_cast<uint32_t>(instances.size() - first);
+			if (count == 0) {
+				// A world that has published nothing yet. Left showing this
+				// world rather than pointed at an empty range, because an empty
+				// range clears the surface to the pass's own colour and reads as
+				// a hole into nothing.
+				continue;
+			}
+
+			for (engine::render::SurfaceView &view : views) {
+				if (view.Index != entry.Surface) {
+					continue;
+				}
+				view.InstanceFirst = first;
+				view.InstanceCount = count;
+				attached++;
+			}
+		}
+
+		return attached;
+	}
+
 	size_t CollectSurfaceViews(Store &store, std::vector<engine::render::SurfaceView> &views) {
 		views.clear();
 		Ordered().clear();

@@ -1401,6 +1401,16 @@ namespace studio {
 				// on first sight of the world, and the chosen key went into the
 				// view below. See `client::InstallWorldPipelines`.
 			});
+
+			// **Outside the `Enter`, because it enters other worlds.** A portal
+			// naming another scene needs that scene's draw list, and
+			// `Universe::Enter` is not re-entrant — so this is the one step that
+			// has to happen once the source store has been let go of. It appends
+			// the far world's instances to `drawn` and points the surface at
+			// that range; a frame with no cross-world portal in it does nothing
+			// and touches neither vector.
+			(void)client::AttachForeignSurfaces(*Universe, shown, drawn, Surfaces);
+
 			instances = &drawn;
 		}
 
