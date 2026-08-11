@@ -75,6 +75,17 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] i also realised that i don't have a way to control whether changes are client-sided or server-sided when i edit in the explorer/properties. how could i do this considering multiple clients + server support - with run-mode only and play-mode.
 - [_] fix grid projection in run/play mode - no longer shows up in the world on any viewport.
 - [_] also portals are NOT seamless, they are collidable so you cannot sit inbetween them. should be like this sample [Image #3] image attached that lets you sit in-between them. also, create a immersive-portals-demo-1 and immersive-portals-demo-2 which is a single portal block showing cross-world visualisation and immersive teleporting. force the worlds to NOT paused. add a floating colored brick in each world infront of the portal so you can see it from either side - make them different colored.
+- [_] again to demonstrate the point of previous first seam issue, left side is the side the character is sitting on in the seam,
+  right side is the other side of the portal looking at the character and seeing that its not rendering
+  through (the entity is big enough to fit past the portal, but we don't project it or anytihng like that).
+  this next image demonstrates the other side of the portal - the blue side has the character but
+  its not projecting to the red side's. note: the camera works fine, it projects through the portal and
+  renders the character, however, the character parts do not project through (neither does collisions).
+  atomic-game-engine/temp/NonEuclidean will show how its done. Ensure both visually and physics-wise it
+  propogates through - so even if you sit between the seam, the fact your body has collisions on either side
+  will make it so you do not fall between the world (and in the seam you can do a binary threshold for which 
+  side to handle collisions on where >0.5 = B else A).
+
 
 ### v0.15
 
