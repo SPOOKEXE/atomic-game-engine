@@ -92,7 +92,6 @@
 -- `SkyGrid.luau` and it gives every surface something to slide against.
 
 local RunService = game:GetService("RunService")
-local Lighting = game:GetService("Lighting")
 
 -- ## One grid, and everything measured off it
 --
@@ -126,7 +125,7 @@ local SURFACE_SIZE = Vector3.new(1024, 384)
 type Checker = { A: Color3, B: Color3 }
 
 local GRASS: Checker = { A = Color3.fromRGB(104, 176, 72), B = Color3.fromRGB(142, 204, 96) }
-local STONE: Checker = { A = Color3.fromRGB(158, 158, 158), B = Color3.fromRGB(104, 104, 104) }
+local STONE: Checker = { A = Color3.fromRGB(214, 214, 218), B = Color3.fromRGB(148, 148, 154) }
 local ROOF: Checker = { A = Color3.fromRGB(26, 26, 26), B = Color3.fromRGB(52, 52, 52) }
 
 -- **A floor colour per room, and that is how you tell where you are.** Through
@@ -157,26 +156,24 @@ local HALL: Room = {
 	Floor = BLUE,
 	Accent = Color3.fromRGB(90, 190, 255),
 }
+-- **The library is the one through the doorway and the garden is the one
+-- through the hole**, and their colours are that way round on purpose: the
+-- ordinary adjacency is the quiet green one and the impossible one is the red
+-- that catches the eye from the middle of the hall.
 local LIBRARY: Room = {
 	Name = "Library",
 	Centre = Vector3.new(HALF, 0, -HALF),
-	Floor = RED,
-	Accent = Color3.fromRGB(255, 110, 90),
+	Floor = LIME,
+	Accent = Color3.fromRGB(180, 255, 90),
 }
 local GARDEN: Room = {
 	Name = "Garden",
 	Centre = Vector3.new(HALF, 0, HALF),
-	Floor = LIME,
-	Accent = Color3.fromRGB(180, 255, 90),
+	Floor = RED,
+	Accent = Color3.fromRGB(255, 110, 90),
 }
 
 local ROOMS: { Room } = { HALL, LIBRARY, GARDEN }
-
--- Bright and flat, because every room here is under a ceiling. The sun alone
--- would light the grass and leave the three rooms as three dark boxes, which is
--- a poor look at a scene whose whole subject is what you can see from where.
-Lighting.OutdoorAmbient = Color3.fromRGB(150, 152, 158)
-Lighting.Ambient = Color3.fromRGB(122, 124, 130)
 
 -- **Anchored and shadowless, all of it.** Anchored because scenery the solver
 -- may move is scenery that ends up somewhere else after a character has leaned
@@ -280,6 +277,33 @@ for _, room in ROOMS do
 		1,
 		ROOF
 	)
+
+	-- **A lamp per room, because the renderer's ambient is a constant and the
+	-- sun only reaches faces turned towards it.** A world's `Lighting` service
+	-- round-trips and nothing reads it — `scene::LightingServiceComponent` says
+	-- so in as many words — so a room with a lid over it is lit by the ambient
+	-- term alone and its walls come out near black. A `PointLight` is what the
+	-- renderer does read, and it is the better answer anyway: what a hole shows
+	-- is read by comparing two rooms, and rooms lit from inside differ in the
+	-- way the picture is meant to show them differing.
+	--
+	-- `Range` is clamped at sixty and a room's diagonal is fifty-seven, so one
+	-- fitting in the middle reaches every corner of its own room and none of
+	-- anybody else's.
+	local fitting = block(
+		room.Name .. "Lamp",
+		Vector3.new(TILE / 2, 0.5, TILE / 2),
+		room.Centre + Vector3.new(0, WALL_HEIGHT - 1, 0),
+		Color3.fromRGB(255, 250, 235)
+	)
+	fitting.CanCollide = false
+
+	local bulb = Instance.new("PointLight")
+	bulb.Name = "Bulb"
+	bulb.Color = Color3.fromRGB(255, 248, 232)
+	bulb.Brightness = 1.6
+	bulb.Range = 60
+	bulb.Parent = fitting
 end
 
 -- --- the outside, which is a plain square with one door in it -------------
@@ -313,24 +337,30 @@ tileWall("LibrarySouth", Vector3.new(HALF, 0, 0), ALONG_X, WALL_X, STONE, true)
 -- built out of sixteen blocks would be sixteen holes in a row — sixteen
 -- surfaces against a budget of sixteen, and fifteen seams down the middle of
 -- the picture.
-local gardenWest = block(
-	"GardenWest",
-	Vector3.new(WALL_THICKNESS, WALL_HEIGHT, ROOM),
-	Vector3.new(0, WALL_HEIGHT / 2, HALF),
-	PANE
-)
+--
+-- **Anchored and not collidable, which is a pair and not two settings.**
+-- `scene::OpenPortals` turns a pane's collider into a trigger for exactly this
+-- reason, but it is installed with the *character* systems: a host that never
+-- registers them — the studio's edit view, a scene loaded by a tool, anything
+-- looking at the world rather than simulating a body in it — leaves the pane
+-- solid, and a solid pane is a wall a walker is parked on the face of.
+-- Authoring it here is the same fact stated where it cannot be missed, and
+-- anchored keeps it a wall rather than something the solver drops through the
+-- floor once it stops colliding.
+local function pane(name: string, at: Vector3): Part
+	local part = block(name, Vector3.new(WALL_THICKNESS, WALL_HEIGHT, ROOM), at, PANE)
+	part.CanCollide = false
+	return part
+end
+
+local gardenWest = pane("GardenWest", Vector3.new(0, WALL_HEIGHT / 2, HALF))
 
 -- **The one rotation in this file, and it is the corner itself.** Unrotated,
 -- this slab's `Right` face would point east along the wall's own length, which
 -- names no room at all. Turned a quarter, its +X points north into the hall —
 -- and because `Face` is resolved on the destination too, that is what makes the
 -- garden's west wall show the hall rather than the space behind it.
-local hallSouth = block(
-	"HallSouth",
-	Vector3.new(WALL_THICKNESS, WALL_HEIGHT, ROOM),
-	Vector3.new(-HALF, WALL_HEIGHT / 2, 0),
-	PANE
-)
+local hallSouth = pane("HallSouth", Vector3.new(-HALF, WALL_HEIGHT / 2, 0))
 hallSouth.CFrame = CFrame.new(hallSouth.Position) * CFrame.Angles(0, math.pi / 2, 0)
 
 -- **A pair is two portals and not one**, because a hole you can only see
