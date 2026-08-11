@@ -58,6 +58,22 @@ something. `server` proves the client tier is absent; `cdn` proves the content
 origin needs no graphics stack at all — it configures where there is no Vulkan
 SDK, no SDL and no shader compiler.
 
+**Third-party code is optimised in every preset, and only first-party code is
+not.** `AGENTS.md`'s argument for `-O0` — a profile should measure what this
+engine does rather than what the optimiser rescued — is about this engine, and
+SDL is not it. Measured on the editor: `SDL_SubmitGPUCommandBuffer` is where the
+Vulkan backend turns a recorded command buffer into queue submissions, and the
+`submit` span read **17 ms in a `dev` build against a p50 of 0.2 ms in
+`release`** on one scene and one machine. That is not the renderer being slow;
+it is somebody else's library at `-O0`, and it made every `dev` profile point at
+the wrong thing.
+
+So `MONO_OPTIMISE_VENDOR` is on by default and `mono.vendor` builds at `-O2`
+with its debug information kept. First-party targets append their own `-O0`
+after it and the later flag wins, so `dev` still measures unoptimised engine
+code. Pass `-DMONO_OPTIMISE_VENDOR=OFF` when the thing being debugged *is* a
+vendored library.
+
 The first configure of a client preset builds glslang, SPIRV-Tools and shaderc,
 so that the `glslc` compiling the engine's shaders is pinned rather than
 whatever is on your PATH. It is the slowest part of a fresh build and it happens
@@ -308,6 +324,7 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--headless` | off | run with no window at all; needs `--frames` |
 | `--run MODE` | `edit` | start in `edit`, `server` or `play` |
 | `--uncapped` | off | draw with no frame rate ceiling |
+| `--frames-in-flight N` | 1 | frames the CPU may queue ahead of the GPU, 1 to 3 |
 | `--stats`, `--graph` | off | open the statistics or frame-graph panel |
 | `--assets` | off | open the assets manager |
 | `--viewports N` | 1 | open N viewport panels; `--viewport2` is the old spelling of `--viewports 2` |
@@ -334,6 +351,16 @@ The count is the check. It should equal the number of `.luau`, `.lua` and
 `.json` files the project's `$path`s actually reach — a package whose
 `default.project.json` maps `lib` contributes `lib`, and nothing else it was
 published with.
+
+**`submit` is where the GPU is paid for, and one frame in flight is why.** The
+passes above it only *record* commands; `SDL_SubmitGPUCommandBuffer` is where the
+driver gets the work, and with `--frames-in-flight 1` — the default — it blocks
+until the GPU has finished the previous frame. So a long `submit` on the frame
+graph means the GPU is the limit, not the code above it. Raising it to 2 lets the
+CPU run ahead and costs a frame of latency between the mouse and the picture,
+which is the trade an editor usually wants the other way round. Measured on the
+four-world demo: p99 6.9 ms at one, 6.1 ms at two, and the same 0.21 ms median
+either way.
 
 **The editor is not paced by the display.** It starts with vertical sync off and
 a 120 fps ceiling, because sync puts a whole refresh — 16.7 ms on a 60 Hz panel,

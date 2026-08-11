@@ -256,6 +256,35 @@ BENCH("Solve · 200 stacks of 4, cache emptied each tick", 200) {
 }
 
 // --- the rest of the chain, for context ---------------------------------------
+//
+// The four steps at pile scale, so the share each one takes is a measurement
+// rather than an extrapolation from three differently-shaped scenes. This is
+// the breakdown to read before optimising anything: it says which step a big
+// world's physics budget is actually in, and the answer is not evenly split.
+
+BENCH("SyncBroadphase · 500 stacks of 20", 10) {
+	Store &store = StackedWorld(500, 20);
+	for (int pass = 0; pass < 10; pass++) {
+		SyncBroadphase(store);
+		Consume(store.Resource<PhysicsWorld>()->CellSize());
+	}
+}
+
+BENCH("BroadPhase · 500 stacks of 20", 10) {
+	Store &store = StackedWorld(500, 20);
+	for (int pass = 0; pass < 10; pass++) {
+		BroadPhase(store);
+		Consume(store.Resource<PhysicsWorld>()->Pairs().size());
+	}
+}
+
+BENCH("NarrowPhase · 500 stacks of 20", 10) {
+	Store &store = StackedWorld(500, 20);
+	for (int pass = 0; pass < 10; pass++) {
+		NarrowPhase(store);
+		Consume(PointCount(store));
+	}
+}
 
 BENCH("Publish · 200 stacks of 4", 200) {
 	Store &store = StackedWorld(200, 4);
