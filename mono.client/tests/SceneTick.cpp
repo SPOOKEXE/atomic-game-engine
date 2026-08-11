@@ -471,7 +471,14 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// the integrator that would have moved it, and thrown away with the
 	// `scene::Motion` when the resting body lost it. Composed, the way
 	// `physics.contacts` composes its four steps and for the same reason.
-	REQUIRE(timings.size() == 18);
+	//
+	// **And nineteen again for `portal.open`**, which turns a portal's pane into
+	// a trigger so a body can be inside the hole rather than stopped on its
+	// picture. `PreSimulation`, and it is the one system here that a suspended
+	// scene genuinely does not need to run: what it writes is a property of the
+	// scene rather than of the tick, so a world that resumes gets it on the
+	// first tick it takes and nothing in between could have walked anywhere.
+	REQUIRE(timings.size() == 19);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

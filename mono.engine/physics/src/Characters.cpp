@@ -144,6 +144,20 @@ namespace engine::physics {
 		// send a single key press because it cannot find one.
 		scheduler.Add("character.link", ecs::Phase::PreSimulation, [](ecs::Store &store) {
 			(void)scene::LinkPlayerCharacters(store);
+
+			// **And the reverse, which is the same concern and was nobody's
+			// job.** `LinkPlayerCharacters` releases a player whose model was
+			// destroyed; this destroys a model whose player was. A character is
+			// a `Model` under Workspace rather than a child of the `Player`, so
+			// nothing collects it — and the two places that remembered to call
+			// `RemoveCharacter` by hand were the only reason it ever happened.
+			//
+			// Composed rather than a second `Add`, for the reason
+			// `character.control` below gives at length: the scheduler orders
+			// nothing within a phase, and releasing a player and collecting an
+			// orphan in either order against the same rows is a race worth not
+			// having.
+			(void)scene::ReclaimOrphanedCharacters(store);
 		});
 
 		// **Wake, ground and step are one system, and that is the whole fix.**
@@ -196,6 +210,22 @@ namespace engine::physics {
 		// where it finished it — `scene::CrossPortals` says why a position test
 		// alone misses at walking speed — so this has to run once the body has
 		// actually been moved.
+		// **Before the solver, because it decides what the solver does.** A
+		// portal's pane is an ordinary part and an ordinary part collides, so
+		// a character walked into the picture and stopped there — and
+		// `character.portal` below, which tests whether a body's step *crossed*
+		// the plane, could never fire for a body the solver had parked on it.
+		//
+		// **Its own entry rather than composed, and the phase is what makes
+		// that safe.** Nothing else in `PreSimulation` reads `Collider::Trigger`
+		// — physics reads it in `Simulation` and `PostSimulation` — so the
+		// ordering the scheduler does not give is ordering nothing here needs.
+		// The composition argument below applies to systems that read each
+		// other's writes within a phase, and this reads nobody's.
+		scheduler.Add("portal.open", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			(void)scene::OpenPortals(store);
+		});
+
 		scheduler.Add("character.portal", ecs::Phase::PostSimulation, [](ecs::Store &store) {
 			(void)scene::CrossPortals(store);
 		});

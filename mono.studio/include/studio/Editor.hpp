@@ -1175,7 +1175,17 @@ namespace studio {
 		// **Only while running.** In Edit nothing ticks anyway, so suspending a
 		// world there would be a state change with no effect that an author
 		// would then have to undo by hand.
+		//
+		// **Public for `DrivePlayer`'s reason**, and it is the same reason: the
+		// interesting behaviour is a decision about worlds the editor is not
+		// running, and there is no way to observe it from outside except by
+		// driving a frame of the real editor. A client walking onto a teleport
+		// pad used to end that client, and the case that proves it does not is
+		// three lines long only because it can call this.
+	  public:
 		void UpdateWorldLifecycle();
+
+	  private:
 
 		// Records that a world had a reason to be running, now.
 		//

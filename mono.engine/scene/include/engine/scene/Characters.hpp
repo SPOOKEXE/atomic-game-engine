@@ -229,6 +229,36 @@ namespace engine::scene {
 	// @return How many players were re-linked or released.
 	size_t LinkPlayerCharacters(ecs::Store &store);
 
+	// Destroys characters whose owner is no longer alive.
+	//
+	// **The other direction of `LinkPlayerCharacters`, and the one nothing was
+	// doing.** That function handles a model destroyed under a player. This is a
+	// player destroyed under a model — and a `Character` is not a child of the
+	// `Player`, it is a `Model` under Workspace, so nothing takes it along.
+	//
+	// **A rule rather than a line in each caller, because there were only ever
+	// two callers and both had to remember.** `studio::PlayLink::Stop` and
+	// `TeleportService:Teleport` each call `RemoveCharacter` by hand before
+	// destroying the instance, and the comment in the first says why it must:
+	// *"`RemoveCharacter` is what `DestroyInstance` on a `Player` cannot do for
+	// itself"*. Every other way a player can stop existing — a script calling
+	// `player:Destroy()`, an author deleting one in the explorer, a host
+	// dropping a client that timed out — left a rig standing on the spawn with
+	// a `Humanoid` nobody drives, a root part the solver keeps awake and six
+	// limbs `PoseCharacters` follows for the rest of the session.
+	//
+	// The two hand-written calls stay: releasing the body in the same breath as
+	// the player is tidier than leaving it for the next tick, and this is the
+	// backstop for everything that does not.
+	//
+	// **`Character::Owner` is the test**, which is the same field
+	// `UpdateCharacterControl` reads to decide whose keyboard drives what — an
+	// NPC leaves it null and is never collected.
+	//
+	// @param store The world.
+	// @return How many characters were destroyed.
+	size_t ReclaimOrphanedCharacters(ecs::Store &store);
+
 	// The model a player is driving, or a null entity.
 	//
 	// @param store  The world.

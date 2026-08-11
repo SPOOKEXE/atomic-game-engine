@@ -1120,3 +1120,209 @@ TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]
 	editor.Universe.reset();
 	engine::parallel::Jobs::Stop();
 }
+
+TEST_CASE("a teleport wakes the world it arrives in, even outside the run", "[studio][playlink]") {
+	// **A client walking onto a teleport pad used to end that client**, and the
+	// three facts that make it happen are all ordinary on their own.
+	//
+	// `TeleportService:Teleport` destroys the player in the world they left
+	// before the destination has admitted them — it has to, because only the
+	// source world can, and a player left behind would be in two places at
+	// once. The arrival is a payload sitting in the destination's inbox. And a
+	// world that is not part of the run is suspended, so it never ticks, so it
+	// never drains that inbox.
+	//
+	// The player therefore exists nowhere: destroyed in the source, unbuilt in
+	// the destination. `Editor::FollowTeleports` searches every world for
+	// `LOST_FRAMES`, finds nobody, and reports the client gone — which is what
+	// the studio's own Playground does, because its pad names Arena and Arena
+	// is not the scene being played.
+	//
+	// `UpdateWorldLifecycle` already knew how to answer this: a suspended world
+	// with something in its letterbox is resumed, and it even says so in the
+	// output log. It simply refused to look at a world outside the run before
+	// deciding, which is the ordering this case pins.
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+
+	engine::parallel::Jobs::Start(1);
+	engine::scene::RegisterSceneComponents();
+
+	WorldSettings played;
+	played.Name = Name("Scene");
+	played.TickRate = TICK_RATE;
+	const WorldId authority = editor.Universe->Create(played);
+
+	// The destination, which nobody is playing. Exactly Arena's position in the
+	// studio's new-game template.
+	WorldSettings elsewhere;
+	elsewhere.Name = Name("Arena");
+	elsewhere.TickRate = TICK_RATE;
+	const WorldId destination = editor.Universe->Create(elsewhere);
+
+	editor.Universe->SetState(destination, engine::world::WorldState::Suspended);
+	REQUIRE(editor.Universe->StateOf(destination) == engine::world::WorldState::Suspended);
+
+	studio::Editor::WorldRun run;
+	run.World = authority;
+	run.Mode = studio::RunMode::Play;
+	editor.Runs.push_back(std::move(run));
+
+	// **Nothing has arrived yet, so the closed world stays closed.** Without
+	// this half the case would pass against an editor that simply woke
+	// everything, which is the fix nobody wants: it restarts scenes the author
+	// deliberately stopped.
+	editor.UpdateWorldLifecycle();
+	CHECK(editor.Universe->StateOf(destination) == engine::world::WorldState::Suspended);
+
+	// A teleport, as the router leaves one: a payload in the destination's
+	// inbox, addressed from the world the player left.
+	editor.Universe->Enter(destination, [](Store &store) {
+		engine::world::Delivery arrival;
+		arrival.Bus = engine::world::BusKind::Teleport;
+		arrival.Key = Name("client 1");
+		arrival.From = Name("Scene");
+
+		// The resource itself is the driver's to create, and a world that has
+		// never been delivered anything has none — so the arrival brings it,
+		// exactly as the first delivery would.
+		engine::world::Inbox inbox;
+		inbox.Arrived.push_back(std::move(arrival));
+		store.SetResource(std::move(inbox));
+	});
+
+	editor.UpdateWorldLifecycle();
+
+	INFO("the arrival is still sitting in a world that will never tick to read it");
+	CHECK(editor.Universe->StateOf(destination) == engine::world::WorldState::Active);
+
+	editor.Runs.clear();
+	editor.Universe.reset();
+	engine::parallel::Jobs::Stop();
+}
+
+TEST_CASE("a client that leaves takes its character with it", "[studio][playlink]") {
+	// **A body outstays its owner and nothing ever collects it.** The character
+	// is a `Model` under Workspace, so it is not reachable from the `Player`
+	// once that instance is gone — `RemoveCharacter` is the only thing that
+	// knows the two are connected, and it has to run *before* the player is
+	// destroyed or the link between them is already cut.
+	//
+	// Left behind, it is a rig with a `Humanoid` nobody drives, a root part the
+	// solver keeps awake, and six limbs `PoseCharacters` follows for the rest of
+	// the session. Two clients joining and leaving leave two of them standing on
+	// the spawn.
+	// Furnished as `Editor::BuildWorld` furnishes one, so the rig under test is
+	// the seven-part one a real client gets rather than whatever a bare store
+	// happens to build.
+	Fixture fixture;
+
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store, engine::ecs::Scheduler &systems) {
+		engine::scene::RegisterSceneClasses();
+		client::InstallPresentation(store, systems, 256);
+		engine::scene::InstallServices(store);
+
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(systems);
+		engine::scene::RegisterOwnershipSystem(systems);
+
+		engine::scene::PartDesc floor;
+		floor.Size = Vector3{200.0f, 4.0f, 200.0f};
+		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
+		floor.Anchored = true;
+
+		const Entity ground = engine::scene::MakePart(store, floor);
+		store.SetInstanceName(ground, "SpawnLocation");
+		store.SetParent(ground, engine::scene::WorkspaceOf(store));
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 1"));
+
+	const Entity player = link.Player();
+	REQUIRE(player != engine::ecs::NULL_ENTITY);
+
+	fixture.Step(link, 8);
+
+	Entity model = engine::ecs::NULL_ENTITY;
+	size_t limbs = 0;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		model = engine::scene::CharacterOf(store, player);
+		store.Each<const engine::scene::Humanoid>([&limbs](Entity, const engine::scene::Humanoid &) {
+			limbs++;
+		});
+	});
+	REQUIRE(model != engine::ecs::NULL_ENTITY);
+	REQUIRE(limbs == 1);
+
+	link.Stop(fixture.Worlds);
+
+	// A tick after, because a rig torn down by a destroy has to survive the
+	// systems that walk it — `PoseCharacters` follows a root it may no longer
+	// have, and a limb outliving its model is exactly what this is looking for.
+	fixture.Worlds.Tick(FRAME_SECONDS);
+
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		CHECK_FALSE(store.Alive(player));
+
+		INFO("the character is still standing there with nobody in it");
+		CHECK_FALSE(store.Alive(model));
+
+		// **The limbs and not only the model**, because destroying the root
+		// alone leaves six parts following an entity that is not alive.
+		size_t left = 0;
+		store.Each<const engine::scene::Humanoid>([&left](Entity, const engine::scene::Humanoid &) {
+			left++;
+		});
+		INFO("a humanoid outlived the player it belonged to");
+		CHECK(left == 0);
+	});
+}
+
+TEST_CASE("a player destroyed by anything else loses its character too", "[studio][playlink]") {
+	// **The registration, not the function.** `scene::ReclaimOrphanedCharacters`
+	// has its own cases in `mono.engine/scene/tests/Characters.cpp`; what this
+	// one asks is whether anything ever calls it — which is the failure mode
+	// that produced it, since the rule existed twice as a line two callers had
+	// to remember and nowhere as a rule.
+	//
+	// So the player goes the way a script's `player:Destroy()` or an author
+	// deleting one in the explorer would take it: no `RemoveCharacter`, no
+	// `PlayLink::Stop`, just the instance gone and a tick afterwards.
+	Fixture fixture;
+
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store, engine::ecs::Scheduler &systems) {
+		engine::scene::RegisterSceneClasses();
+		client::InstallPresentation(store, systems, 256);
+		engine::scene::InstallServices(store);
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 1"));
+
+	const Entity player = link.Player();
+	REQUIRE(player != engine::ecs::NULL_ENTITY);
+
+	fixture.Step(link, 4);
+
+	Entity model = engine::ecs::NULL_ENTITY;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		model = engine::scene::CharacterOf(store, player);
+	});
+	REQUIRE(model != engine::ecs::NULL_ENTITY);
+
+	fixture.Worlds.Enter(fixture.Authority, [player](Store &store) { store.DestroyInstance(player); });
+
+	fixture.Worlds.Tick(FRAME_SECONDS);
+
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		INFO("nothing in the tick collects a character whose player is gone");
+		CHECK_FALSE(store.Alive(model));
+	});
+
+	link.Stop(fixture.Worlds);
+}

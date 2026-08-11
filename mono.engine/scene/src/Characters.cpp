@@ -330,6 +330,37 @@ namespace engine::scene {
 		return true;
 	}
 
+	size_t ReclaimOrphanedCharacters(ecs::Store &store) {
+		// **Gathered before anything is destroyed**, for the reason
+		// `LinkPlayerCharacters` gives about its own list: `DestroyInstance`
+		// walks the model's children and removes rows, and doing that under an
+		// `Each` is the iteration invalidating itself. On a settled world the
+		// vector stays empty, which is every tick but the one somebody left on.
+		std::vector<ecs::Entity> orphaned;
+
+		store.Each<const Character>([&](ecs::Entity model, const Character &rig) {
+			// An owner that is null is an NPC and never had a player to lose.
+			if (rig.Owner == ecs::NULL_ENTITY || store.Alive(rig.Owner)) {
+				return;
+			}
+			orphaned.push_back(model);
+		});
+
+		size_t removed = 0;
+		for (const ecs::Entity model : orphaned) {
+			// Alive again on the way out: two `Character` rows naming one dead
+			// owner is not a shape this builds, but a destroy that took a
+			// second model with it as a child would make the handle stale here.
+			if (!store.Alive(model)) {
+				continue;
+			}
+			store.DestroyInstance(model);
+			removed++;
+		}
+
+		return removed;
+	}
+
 	size_t LinkPlayerCharacters(ecs::Store &store) {
 		// **Gathered before anything is written.** `SetPlayerCharacter` adds a
 		// `Character` to a model that had none, and an archetype move under an

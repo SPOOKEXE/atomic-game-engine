@@ -224,6 +224,41 @@ namespace engine::scene {
 	// @since v0.14
 	size_t CrossPortals(ecs::Store &store);
 
+	// Stops a portal's pane from solving contacts, so a body can be inside it.
+	//
+	// **A hole you cannot stand in is a picture of a hole.** The pane is an
+	// ordinary `Part` and an ordinary part collides, so the solver stopped a
+	// character dead on the surface of every portal in the engine. `CrossPortals`
+	// then never fired: it tests whether the segment between where a body started
+	// the tick and where it finished changes sign through the pane, and a body
+	// the solver parked *on* the plane never changes sign. Traversal was
+	// implemented, tested and unreachable — the wall in front of it was the pane
+	// itself.
+	//
+	// What that looks like is the thing to recognise: walking into a portal
+	// stops you at the picture, and the far room stays a painting on a wall. An
+	// immersive portal has to let the body straddle the plane — half in each
+	// space, which is the frame everybody screenshots.
+	//
+	// **`Collider::Trigger` rather than removing the collider**, which is
+	// `CanCollide = false` and exactly what it is for: contacts are still
+	// reported, so a script can know somebody is in the hole, and no impulse is
+	// solved, so nothing pushes them out of it. Removing the collider outright
+	// would also take the pane out of `Raycast`, and `physics::GroundCharacters`
+	// casts through the world — a portal that stopped answering queries is a
+	// portal you fall through the floor beside.
+	//
+	// **A rule and not an authoring note.** It would be one line in each scene
+	// that builds a portal, and every scene would have to know it; a hole that
+	// collides is never what anybody meant. Idempotent, so a settled world pays
+	// one component read per portal per tick and writes nothing.
+	//
+	// @param store The world.
+	// @return How many panes were opened. Zero once every portal in the world
+	//         has been, which is every tick after the first.
+	// @since v0.14
+	size_t OpenPortals(ecs::Store &store);
+
 	// Appends a thin translucent bar lying on each face a surface camera
 	// projects off.
 	//

@@ -81,6 +81,18 @@ namespace studio {
 		// somewhere else is a thing an author can do without writing anything.
 		constexpr std::string_view PLAYGROUND_WORLD = "Playground";
 		constexpr std::string_view ARENA_WORLD = "Arena";
+
+		// **The second pair, and it demonstrates the other kind of crossing.**
+		// The pads above move a player between worlds by standing on a tile;
+		// these move one by walking through a hole, which is the thing a portal
+		// is for and the thing a portal could not do while its pane collided.
+		//
+		// Two worlds rather than one scene with two panes, because what is being
+		// shown is a live destination: `ImmersivePortals.luau` holds both awake
+		// so neither is a frozen picture of the other. See its header for which
+		// half of "cross-world" is finished and which is the renderer's.
+		constexpr std::string_view IMMERSIVE_ONE = "immersive-portals-demo-1";
+		constexpr std::string_view IMMERSIVE_TWO = "immersive-portals-demo-2";
 	}
 
 	// The engine log, teed into the Output panel.
@@ -1688,6 +1700,9 @@ namespace studio {
 		const WorldId playground = AddWorld(Name(PLAYGROUND_WORLD));
 		const WorldId arena = AddWorld(Name(ARENA_WORLD));
 
+		const WorldId immersiveOne = AddWorld(Name(IMMERSIVE_ONE));
+		const WorldId immersiveTwo = AddWorld(Name(IMMERSIVE_TWO));
+
 		Active = grid;
 		SelectionWorld = Active;
 
@@ -1763,6 +1778,22 @@ namespace studio {
 		Universe->Enter(arena, [this](Store &store) {
 			InstallExampleScript(store, "Arena.luau", "ArenaScene");
 			InstallExampleScript(store, "ArenaPad.luau", "ArenaPadScript");
+		});
+
+		// **One script in both, and the world's own name is what it branches
+		// on.** Two files mirroring each other by hand drift; one file cannot
+		// disagree with itself. `Mirrors-4-worlds.luau` settled that argument
+		// and this is the same shape at a smaller count.
+		//
+		// Each lays its own floor, its own spawn and its own block, so neither
+		// wants the editor's baseplate under it for the reason the mirror world
+		// gives: two coplanar surfaces is z-fighting.
+		Universe->Enter(immersiveOne, [this](Store &store) {
+			InstallExampleScript(store, "ImmersivePortals.luau", "ImmersivePortalsScene");
+		});
+
+		Universe->Enter(immersiveTwo, [this](Store &store) {
+			InstallExampleScript(store, "ImmersivePortals.luau", "ImmersivePortalsScene");
 		});
 
 		// **A viewport each, pinned rather than left following the active

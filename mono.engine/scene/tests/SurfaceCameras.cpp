@@ -901,3 +901,70 @@ TEST_CASE("a portal swallows only what goes through the hole", "[scene][surfacec
 
 	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 }
+
+TEST_CASE("a portal's pane stops solving contacts, so a body can be in it", "[scene][surfacecameras]") {
+	// **The wall in front of the feature.** Traversal has been implemented and
+	// tested since v0.14 and no character could reach it: a pane is an ordinary
+	// `Part`, an ordinary part collides, and the solver parked anybody who
+	// walked at a portal on its surface. `CrossPortals` tests whether the
+	// segment a body covered changes sign through the plane — a body stopped
+	// *on* the plane never changes sign, so the hole was a painting.
+	//
+	// What it should be is the frame everybody screenshots: the body straddling
+	// the plane, half in each space.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+
+	// The pane collides, which is what a part built by `MakePart` does.
+	mirror.World.Set<engine::scene::Collider>(
+		mirror.Pane, engine::scene::Collider{Vector3{8.0f, 4.5f, 0.2f}}
+	);
+	REQUIRE_FALSE(mirror.World.Get<engine::scene::Collider>(mirror.Pane)->Trigger);
+
+	// Not a portal yet, so it is a mirror — and a mirror is a wall. Nothing is
+	// opened, which is the half that keeps this from being "make every pane
+	// passable".
+	CHECK(engine::scene::OpenPortals(mirror.World) == 0);
+	CHECK_FALSE(mirror.World.Get<engine::scene::Collider>(mirror.Pane)->Trigger);
+
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	CHECK(engine::scene::OpenPortals(mirror.World) == 1);
+
+	// **A trigger and not a removed collider.** Contacts are still reported, so
+	// a script can tell somebody is in the hole, and `physics::GroundCharacters`
+	// still gets an answer out of `Raycast` — a pane that stopped answering
+	// queries is a portal you fall through the floor beside.
+	const engine::scene::Collider *opened = mirror.World.Get<engine::scene::Collider>(mirror.Pane);
+	REQUIRE(opened != nullptr);
+	CHECK(opened->Trigger);
+	CHECK(opened->Extent.X == 8.0f);
+
+	// Idempotent: every tick after the first writes nothing at all.
+	CHECK(engine::scene::OpenPortals(mirror.World) == 0);
+}
+
+TEST_CASE("a pane already authored passable is left alone", "[scene][surfacecameras]") {
+	// A scene that set `CanCollide = false` on its pane has already said what
+	// this pass says, and writing over it would stamp the row every tick for the
+	// life of the world — which is what `SyncBroadphase` reads to decide the
+	// static index needs rebuilding.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	engine::scene::Collider passable{Vector3{8.0f, 4.5f, 0.2f}};
+	passable.Trigger = true;
+	mirror.World.Set<engine::scene::Collider>(mirror.Pane, passable);
+
+	CHECK(engine::scene::OpenPortals(mirror.World) == 0);
+	CHECK(mirror.World.Get<engine::scene::Collider>(mirror.Pane)->Trigger);
+}

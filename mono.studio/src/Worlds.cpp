@@ -388,15 +388,6 @@ namespace studio {
 		const double now = Clock.Now();
 
 		for (const WorldId world : Universe->Worlds()) {
-			// **A scoped run's suspended worlds are not the lifecycle's to
-			// wake.** Occupancy says an empty world should idle and a visited
-			// one should resume — but a world outside the run scope is empty
-			// *because* it was deliberately stopped, and resuming it would
-			// restart the scene the author chose not to run. See `WorldRun`.
-			if (!IsRunning(world)) {
-				continue;
-			}
-
 			if (Universe->IsRemote(world)) {
 				continue;
 			}
@@ -423,12 +414,39 @@ namespace studio {
 			// races the tick. Read only while suspended, because a running
 			// world replaces its inbox every barrier — so the same read on an
 			// active world would be a coin toss about when the frame landed.
+			//
+			// **Read before the run-scope refusal below, and that ordering is
+			// the fix.** It used to come after, so a world outside the run was
+			// skipped before anybody looked in its letterbox.
 			if (inputs.State == engine::world::WorldState::Suspended) {
 				Universe->Enter(world, [&inputs](Store &store) {
 					if (const auto *inbox = store.Resource<engine::world::Inbox>()) {
 						inputs.InboxWaiting = !inbox->Arrived.empty();
 					}
 				});
+			}
+
+			// **A scoped run's suspended worlds are not the lifecycle's to
+			// wake.** Occupancy says an empty world should idle and a visited
+			// one should resume — but a world outside the run scope is empty
+			// *because* it was deliberately stopped, and resuming it would
+			// restart the scene the author chose not to run. See `WorldRun`.
+			//
+			// **Unless something has arrived for it, which is not the same
+			// thing at all.** A teleport destroys the player in the world they
+			// left *before* the destination has admitted them —
+			// `TeleportService:Teleport` says why it must, and
+			// `PlaygroundPad.luau` says what it costs — so an arrival sitting in
+			// a closed world's inbox is a player who no longer exists anywhere.
+			// Refusing to wake that world does not leave the scene unstarted; it
+			// strands somebody in it, and `Editor::FollowTeleports` then spends
+			// `LOST_FRAMES` looking for them before reporting the client gone.
+			//
+			// Which is exactly what the studio's own Playground does: its pad
+			// sends whoever stands on it to Arena, Arena is not in the run, and
+			// walking onto the pad ended the client every time.
+			if (!IsRunning(world) && !inputs.InboxWaiting) {
+				continue;
 			}
 
 			// Occupied, or being looked at *in either viewport*. Any of those is

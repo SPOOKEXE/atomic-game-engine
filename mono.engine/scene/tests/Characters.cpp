@@ -408,3 +408,68 @@ TEST_CASE("Player.Character is a writable script property", "[scene][characters]
 	CHECK(found->Set(store, player, &model));
 	CHECK(CharacterOf(store, player) == model);
 }
+
+TEST_CASE("a character does not outlive the player it belongs to", "[scene][characters]") {
+	// **The direction `LinkPlayerCharacters` does not cover.** That function
+	// releases a player whose model was destroyed; this is a player destroyed
+	// under a model, and a character is a `Model` under Workspace rather than a
+	// child of the `Player` — so nothing takes it along.
+	//
+	// Only two places ever handled it, and both by hand:
+	// `studio::PlayLink::Stop` and `TeleportService:Teleport` call
+	// `RemoveCharacter` before destroying the instance. Every other way a player
+	// can stop existing left a rig standing on the spawn: a `Humanoid` nobody
+	// drives, a root the solver keeps awake, six limbs `PoseCharacters` follows.
+	World world;
+	Store &store = world.Store_;
+
+	const Entity player = AddPlayer(store, "Player1", true);
+	REQUIRE(player != NULL_ENTITY);
+
+	const Entity model = LoadCharacter(store, player);
+	REQUIRE(model != NULL_ENTITY);
+
+	const Entity root = Limb(store, model, "HumanoidRootPart");
+	REQUIRE(root != NULL_ENTITY);
+
+	// A settled world collects nothing, which is the every-tick case.
+	CHECK(engine::scene::ReclaimOrphanedCharacters(store) == 0);
+
+	// **Destroyed the way everything except those two callers destroys one**:
+	// no `RemoveCharacter`, because the whole point is that they had to
+	// remember and nothing else does.
+	store.DestroyInstance(player);
+	REQUIRE_FALSE(store.Alive(player));
+
+	INFO("the body is still standing there with nobody in it");
+	CHECK(engine::scene::ReclaimOrphanedCharacters(store) == 1);
+
+	CHECK_FALSE(store.Alive(model));
+
+	// **The limbs too**, because destroying the model alone would leave six
+	// parts following an entity that is not alive.
+	CHECK_FALSE(store.Alive(root));
+
+	// Idempotent: a second pass over a collected world finds nothing.
+	CHECK(engine::scene::ReclaimOrphanedCharacters(store) == 0);
+}
+
+TEST_CASE("an NPC is never collected, because it never had an owner", "[scene][characters]") {
+	// `Character::Owner` is the test rather than the presence of a `Character`,
+	// and a scripted character leaves it null. Collecting those would empty
+	// every examples scene in the repository on its first tick.
+	World world;
+	Store &store = world.Store_;
+
+	CharacterDesc desc;
+	desc.Frame = CFrame(Vector3{4.0f, 0.0f, 0.0f});
+	const Entity npc = MakeCharacter(store, desc);
+	REQUIRE(npc != NULL_ENTITY);
+
+	const Character *rig = store.Get<Character>(npc);
+	REQUIRE(rig != nullptr);
+	REQUIRE(rig->Owner == NULL_ENTITY);
+
+	CHECK(engine::scene::ReclaimOrphanedCharacters(store) == 0);
+	CHECK(store.Alive(npc));
+}

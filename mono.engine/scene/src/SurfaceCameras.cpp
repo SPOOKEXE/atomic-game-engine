@@ -846,6 +846,60 @@ namespace engine::scene {
 		return appended;
 	}
 
+	size_t OpenPortals(ecs::Store &store) {
+		// **Gathered before anything is written**, for the reason every other
+		// pass in this file gives: `Store::Set` on a component the row already
+		// has is a plain write, but the gather costs nothing and keeps the shape
+		// the same as its neighbours — and a `Collider` added to a pane that had
+		// none would be an archetype move under an `Each`.
+		std::vector<ecs::Entity> panes;
+
+		store.Each<const Portal, const SurfaceCamera>(
+			[&](ecs::Entity camera, const Portal &, const SurfaceCamera &) {
+				// **The pane is the camera's parent**, which is the same
+				// resolution `CrossPortals` and `AimSurfaceCameras` make — a
+				// `SurfaceCamera` is a `PVInstance` with a placement and no size,
+				// so it is not the thing anybody can walk into.
+				const ecs::Entity pane = store.ParentOf(camera);
+				if (pane == NULL_ENTITY) {
+					return;
+				}
+
+				// A pane with no collider is already something a body passes
+				// through, and a pane already open is the every-tick case. Both
+				// cost one lookup and write nothing.
+				const Collider *collider = store.Get<Collider>(pane);
+				if (collider == nullptr || collider->Trigger) {
+					return;
+				}
+
+				panes.push_back(pane);
+			}
+		);
+
+		size_t opened = 0;
+		for (const ecs::Entity pane : panes) {
+			const Collider *collider = store.Get<Collider>(pane);
+			if (collider == nullptr) {
+				continue;
+			}
+
+			// **`Set` rather than a write through the reference, because this
+			// is a change the broad phase has to see.** `SyncBroadphase` reads
+			// the row's stamp to decide whether static geometry moved, and a
+			// collider that became a trigger without one would keep being solved
+			// against until something else happened to touch the row. It stamps
+			// once per portal for the life of the world, not once per tick —
+			// the guard above is what makes that true.
+			Collider opened_ = *collider;
+			opened_.Trigger = true;
+			store.Set(pane, opened_);
+			opened++;
+		}
+
+		return opened;
+	}
+
 	size_t CrossPortals(ecs::Store &store) {
 		// **The portals are gathered before anything is moved.** A body pushed
 		// through one lands somewhere another might also claim, and a single
