@@ -2,11 +2,13 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Visibility.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -460,39 +462,18 @@ namespace engine::scene {
 			return true;
 		}
 
-		// One end of one pairing, in the terms a segment test wants.
-		//
-		// **Shared by the body pass and the camera arm**, which is the whole
-		// reason it is a type rather than four locals: a character that goes
-		// through a hole and a camera that does not follow it is the same bug
-		// twice, and the only way the two cannot disagree is for them to run the
-		// same test over the same rectangle.
-		struct Hole {
-			// The pane's plane: a point on it and its face's unit normal.
-			//
-			// **The face's normal, not "the outward one".** Which side is
-			// outward is a question about the *crosser*, exactly as it is a
-			// question about the viewer in `AimSurfaceCameras` — a pane can be
-			// walked into from either side and both answers are right. So the
-			// sign is decided per crosser, below.
-			Vector3 Centre;
-			Vector3 Normal;
-
-			// The pane's half-axes in the world, so `Centre ± First ± Second`
-			// is the rectangle. Kept as vectors rather than as extents because
-			// that is what the inside test needs.
-			Vector3 First;
-			Vector3 Second;
-
-			// The far pane's face frame, looking out of itself. The half of the
-			// mapping that does not depend on who is crossing.
-			CFrame Destination;
-		};
+		// Scratch for the passes that gather seams every tick, kept between them
+		// so a scene with a portal in it stops allocating. Thread-local for
+		// `Ordered()`'s reason.
+		std::vector<PortalSeam> &Seams() {
+			static thread_local std::vector<PortalSeam> seams;
+			return seams;
+		}
 
 		// Every linked portal in the world, as a rectangle and a destination
-		// frame.
-		std::vector<Hole> GatherHoles(Store &store) {
-			std::vector<Hole> holes;
+		// frame. The public `GatherPortalSeams` is this into a caller's vector.
+		void GatherSeams(Store &store, std::vector<PortalSeam> &seams) {
+			seams.clear();
 
 			store.Each<const Portal, const SurfaceCamera>(
 				[&](Entity entity, const Portal &portal, const SurfaceCamera &camera) {
@@ -528,17 +509,24 @@ namespace engine::scene {
 					const Vector3 farCentre =
 						far->Frame.Position + farNormal * ReachOf(*farBounds, camera.Face);
 
-					Hole hole;
-					hole.Centre = face.Centre;
-					hole.Normal = face.Normal;
-					FaceAxes(face.Placement, local, face.HalfExtent, hole.First, hole.Second);
-					hole.Destination = CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
+					PortalSeam seam;
+					seam.Centre = face.Centre;
+					seam.Normal = face.Normal;
+					FaceAxes(face.Placement, local, face.HalfExtent, seam.First, seam.Second);
+					seam.Destination = CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
 
-					holes.push_back(hole);
+					// **The pane, which is the camera's parent and not the
+					// camera.** Everything that reads a seam back has to be able
+					// to leave the surface itself alone, and only the walk that
+					// found it knows which entity that was.
+					seam.Pane = store.ParentOf(entity);
+					seam.Far = portal.Destination;
+					seam.Surface = camera.Surface;
+					seam.Crosses = portal.DestinationWorld.IsValid();
+
+					seams.push_back(seam);
 				}
 			);
-
-			return holes;
 		}
 
 		// Whether a segment goes through one hole, and what carries it there.
@@ -548,7 +536,9 @@ namespace engine::scene {
 		// @param now     Where it ends.
 		// @param through The map from this side to the far side, written only
 		//                when the answer is true.
-		bool CrossingOf(const Hole &hole, const Vector3 &was, const Vector3 &now, CFrame &through) {
+		bool CrossingOf(
+			const PortalSeam &hole, const Vector3 &was, const Vector3 &now, CFrame &through, float &share
+		) {
 			// Signed distance either side of the pane's plane. **A crossing is a
 			// change of side and not a place**, which is what makes the test
 			// work at speed: a character walks a quarter of a metre a tick, so
@@ -567,7 +557,7 @@ namespace engine::scene {
 
 			// Where the segment met the plane. The denominator cannot be zero:
 			// the two signs differ, so they differ by something.
-			const float share = from / (from - to);
+			share = from / (from - to);
 			const Vector3 at = was + (now - was) * share;
 
 			// Inside the rectangle, measured along its own half-axes.
@@ -585,16 +575,53 @@ namespace engine::scene {
 			// `AimSurfaceCameras` — a pane walked into from behind maps through
 			// the frame that faces backwards, and whatever went in comes out of
 			// the destination the same way round.
-			const Vector3 outward = hole.Normal * (from > 0.0f ? 1.0f : -1.0f);
-			const CFrame source = CFrame::LookAt(hole.Centre, hole.Centre + outward, UpFor(outward));
-
-			// `destination · half-turn · source⁻¹`, the same product the camera
-			// goes through — see `AimSurfaceCameras`' `linked` branch for why
-			// the half-turn is what makes it a hole rather than a window onto a
-			// copy.
-			through = hole.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+			through = SeamMapping(hole, from);
 			return true;
 		}
+	}
+
+	CFrame SeamMapping(const PortalSeam &seam, float side) {
+		const Vector3 outward = seam.Normal * (side > 0.0f ? 1.0f : -1.0f);
+		const CFrame source = CFrame::LookAt(seam.Centre, seam.Centre + outward, UpFor(outward));
+
+		// `destination · half-turn · source⁻¹`, the same product the camera goes
+		// through — see `AimSurfaceCameras`' `linked` branch for why the
+		// half-turn is what makes it a hole rather than a window onto a copy.
+		return seam.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+	}
+
+	float SeamOffset(const PortalSeam &seam, const Vector3 &at) {
+		return (at - seam.Centre).Dot(seam.Normal);
+	}
+
+	bool SeamStraddled(const PortalSeam &seam, const Vector3 &at, float reach) {
+		if (std::abs(SeamOffset(seam, at)) >= reach) {
+			return false;
+		}
+
+		// Inside the rectangle, measured along its own half-axes and widened by
+		// the body's own reach — the same projection `CrossingOf` makes, plus
+		// the slack a body has that a point does not. **Widened rather than
+		// exact**, because a clone that appears a moment early is invisible
+		// (it is behind the pane) and one that appears a moment late is a body
+		// visibly cut in half, which is the artefact this exists to remove.
+		const Vector3 offset = at - seam.Centre;
+
+		const float firstLength = std::sqrt(seam.First.Dot(seam.First));
+		const float secondLength = std::sqrt(seam.Second.Dot(seam.Second));
+		if (firstLength <= 0.0f || secondLength <= 0.0f) {
+			return false;
+		}
+
+		const float alongFirst = std::abs(offset.Dot(seam.First) / firstLength);
+		const float alongSecond = std::abs(offset.Dot(seam.Second) / secondLength);
+
+		return alongFirst < firstLength + reach && alongSecond < secondLength + reach;
+	}
+
+	size_t GatherPortalSeams(Store &store, std::vector<PortalSeam> &seams) {
+		GatherSeams(store, seams);
+		return seams.size();
 	}
 
 	size_t AimSurfaceCameras(Store &store) {
@@ -983,6 +1010,179 @@ namespace engine::scene {
 		return appended;
 	}
 
+	// The body of both `AppendPortalClones` overloads.
+	//
+	// `surface` names the one pane to clone through, or is negative for "every
+	// pane this world can answer for on its own" — which is every same-world
+	// one. The split is the boundary and not a preference: a cross-world pane's
+	// far side is a draw list only the host can reach, so the host is what asks
+	// for those by name.
+	static size_t CloneThroughSeams(Store &store, int surface, std::vector<DrawInstance> &out) {
+		ENGINE_PROFILE("clone portal seams");
+
+		std::vector<PortalSeam> &seams = Seams();
+		GatherSeams(store, seams);
+
+		// Erase the ones this call may not clone through, so the inner loop is a
+		// plain walk. A world whose only pane is a cross-world one — which
+		// `ImmersivePortals.luau` is — ends up with no seams and pays for one
+		// gather.
+		seams.erase(
+			std::remove_if(
+				seams.begin(),
+				seams.end(),
+				[surface](const PortalSeam &seam) {
+					return surface < 0 ? seam.Crosses : seam.Surface != surface;
+				}
+			),
+			seams.end()
+		);
+
+		if (seams.empty()) {
+			return 0;
+		}
+
+		const float alpha = store.Time().Alpha;
+		size_t appended = 0;
+
+		// One body against every seam, appending a copy of it on the far side.
+		//
+		// **The interpolation is `CollectInstances`' and has to stay it.** A
+		// clone built from the tick transform beside an original built from the
+		// blended one is a body whose two halves are a frame apart — which at
+		// three hundred frames against a sixty hertz tick is a visible seam
+		// running down the middle of the character, and reads as the portal
+		// itself being misaligned.
+		const auto clone = [&](Entity entity,
+							   const Transform &placement,
+							   const PreviousTransform &previous,
+							   const Bounds &bounds,
+							   const Visual &visual,
+							   const SurfaceAppearance &appearance,
+							   const Tags &tags) {
+			const CFrame frame = previous.Frame.NLerp(placement.Frame, alpha);
+
+			// A radius rather than the box, which is the conservative side: the
+			// test is only deciding whether to *offer* a clone, and one offered
+			// early sits behind the destination pane where nothing can see it.
+			const float reach = std::sqrt(bounds.HalfExtent.Dot(bounds.HalfExtent));
+
+			for (const PortalSeam &seam : seams) {
+				// **A pane straddles its own plane, and so does the part its far
+				// end is on.** Cloning either is a portal drawn inside a portal:
+				// the picture recurses and, worse, `CrossPortals` gets a second
+				// copy of the very surface it decides crossings against.
+				if (entity == seam.Pane || entity == seam.Far) {
+					continue;
+				}
+
+				if (!SeamStraddled(seam, frame.Position, reach)) {
+					continue;
+				}
+
+				DrawInstance ghost{
+					SeamMapping(seam, SeamOffset(seam, frame.Position)) * frame,
+					bounds.HalfExtent,
+					visual.Tint,
+					visual.Mesh,
+					appearance.ColourMap,
+					appearance.NormalMap,
+					appearance.RoughnessMap,
+					appearance.OcclusionMap,
+					appearance.EmissiveMap,
+					tags.Mask,
+					visual.Transparency,
+
+					// **Never a surface itself.** A cloned mirror would claim
+					// the slot its original already writes, and the renderer
+					// keeps the first camera to name an index — so the two would
+					// fight over one texture from one frame to the next.
+					static_cast<int8_t>(-1),
+					visual.CastShadow,
+					appearance.Mode,
+				};
+
+				out.push_back(ghost);
+				appended++;
+
+				// **One seam per body.** A body inside two panes at once is a
+				// body in a corner case nobody has drawn, and cloning it through
+				// both would put two of it on two far sides — the same rule, for
+				// the same reason, that `CrossPortals` breaks after one hole.
+				break;
+			}
+		};
+
+		// **Two walks over two small sets, rather than one over the world.**
+		// What goes through a portal is what can move: a dynamic body, or a limb
+		// posed off one. Everything else is the room, and a room cloned through
+		// its own doorway is a second floor inside the first.
+		store.Each<
+			const Motion,
+			const Transform,
+			const PreviousTransform,
+			const Bounds,
+			const Visual,
+			const SurfaceAppearance,
+			const Tags,
+			const Rendered>(
+			[&](Entity entity,
+				const Motion &,
+				const Transform &placement,
+				const PreviousTransform &previous,
+				const Bounds &bounds,
+				const Visual &visual,
+				const SurfaceAppearance &appearance,
+				const Tags &tags,
+				const Rendered &) {
+				clone(entity, placement, previous, bounds, visual, appearance, tags);
+			}
+		);
+
+		// **Anchored, which is why they need their own walk.** `MakeCharacter`
+		// anchors every visible limb and poses it off the root each tick, so the
+		// only part of a character carrying a `Motion` is the root — and the root
+		// is invisible. A character is six boxes this query finds and none the
+		// one above does.
+		store.Each<
+			const CharacterLimb,
+			const Transform,
+			const PreviousTransform,
+			const Bounds,
+			const Visual,
+			const SurfaceAppearance,
+			const Tags,
+			const Rendered>(
+			[&](Entity entity,
+				const CharacterLimb &,
+				const Transform &placement,
+				const PreviousTransform &previous,
+				const Bounds &bounds,
+				const Visual &visual,
+				const SurfaceAppearance &appearance,
+				const Tags &tags,
+				const Rendered &) {
+				// Whatever the first walk already took. Nothing in this engine
+				// carries both today; a rig that did would otherwise be drawn
+				// twice on the far side, exactly on top of itself.
+				if (store.Has<Motion>(entity)) {
+					return;
+				}
+				clone(entity, placement, previous, bounds, visual, appearance, tags);
+			}
+		);
+
+		return appended;
+	}
+
+	size_t AppendPortalClones(Store &store, std::vector<DrawInstance> &out) {
+		return CloneThroughSeams(store, -1, out);
+	}
+
+	size_t AppendPortalClones(Store &store, int8_t surface, std::vector<DrawInstance> &out) {
+		return CloneThroughSeams(store, static_cast<int>(surface), out);
+	}
+
 	size_t OpenPortals(ecs::Store &store) {
 		// **Gathered before anything is written**, for the reason every other
 		// pass in this file gives: `Store::Set` on a component the row already
@@ -1037,14 +1237,149 @@ namespace engine::scene {
 		return opened;
 	}
 
-	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, CFrame &through) {
-		for (const Hole &hole : GatherHoles(store)) {
-			if (CrossingOf(hole, from, to, through)) {
-				return true;
+	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, PortalHop &hop) {
+		std::vector<PortalSeam> &seams = Seams();
+		GatherSeams(store, seams);
+
+		// **The nearest crossing, not the first one gathered.** A segment that
+		// meets two panes has to go through the one it reaches first, and the
+		// gather order is archetype order — which moves whenever anything in the
+		// world changes a component set. A ray that picked the far pane would
+		// come out of a hole it never reached.
+		bool found = false;
+		float nearest = 1.0f;
+
+		for (const PortalSeam &seam : seams) {
+			// A cross-world pane leads somewhere this store cannot describe, so
+			// a segment through one has no far end here to be continued onto.
+			// `CrossPortals` skips them for the matching reason.
+			if (seam.Crosses) {
+				continue;
+			}
+
+			CFrame candidate;
+			float at = 1.0f;
+			if (!CrossingOf(seam, from, to, candidate, at)) {
+				continue;
+			}
+
+			if (!found || at < nearest) {
+				nearest = at;
+				found = true;
+				hop = PortalHop{candidate, at, seam.Pane};
 			}
 		}
 
-		return false;
+		return found;
+	}
+
+	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, CFrame &through) {
+		PortalHop hop;
+		if (!PortalCrossing(store, from, to, hop)) {
+			return false;
+		}
+		through = hop.Through;
+		return true;
+	}
+
+	size_t AppendPortalGhosts(ecs::Store &store, std::vector<DrawInstance> &out) {
+		ENGINE_PROFILE("portal ghosts");
+
+		if (out.empty()) {
+			return 0;
+		}
+
+		// **The same seams the crossing uses**, so a body is ghosted through
+		// exactly the rectangle it will be moved through — two answers to "which
+		// pane is this" is the kind of disagreement that shows up as a ghost
+		// standing somewhere its body never goes.
+		std::vector<PortalSeam> seams;
+		GatherSeams(store, seams);
+		if (seams.empty()) {
+			return 0;
+		}
+
+		size_t appended = 0;
+
+		// **The list as it stands, not as it grows.** Every ghost is itself a
+		// draw instance in `out`, and a walk that saw its own output would ghost
+		// the ghosts — a body near two facing panes would fill the buffer.
+		const size_t drawn = out.size();
+
+		for (size_t index = 0; index < drawn; index++) {
+			const DrawInstance &body = out[index];
+
+			// **A pane never ghosts itself.** It is a hole rather than a thing
+			// in the hole, and a copy of it mapped through its own pairing lands
+			// exactly on the far pane — z-fighting a wall with a picture on it.
+			if (body.Surface >= 0) {
+				continue;
+			}
+
+			// A sphere around the instance rather than its oriented box, which
+			// is conservative in the only direction that costs nothing: a false
+			// positive is a ghost the oblique clip throws away, and a false
+			// negative is the half a body that this whole pass exists to draw.
+			const float radius = body.HalfExtent.Magnitude();
+
+			for (const PortalSeam &seam : seams) {
+				// A cross-world pane leads somewhere this store cannot draw. The
+				// far half of a body in one belongs in the *other world's* list,
+				// which is a host's to append — see the header.
+				if (seam.Crosses) {
+					continue;
+				}
+
+				const Vector3 offset = body.Frame.Position - seam.Centre;
+
+				// Straddling the plane, and within the rectangle it is a hole
+				// in. Both, for `CrossingOf`'s reason: a plane is infinite and a
+				// pane is not, and a body passing the end of one must not
+				// sprout a second copy of itself somewhere else.
+				if (std::abs(offset.Dot(seam.Normal)) > radius) {
+					continue;
+				}
+
+				const float alongFirst = offset.Dot(seam.First) / seam.First.Dot(seam.First);
+				const float alongSecond = offset.Dot(seam.Second) / seam.Second.Dot(seam.Second);
+				const float slackFirst = radius / seam.First.Magnitude();
+				const float slackSecond = radius / seam.Second.Magnitude();
+				if (std::abs(alongFirst) > 1.0f + slackFirst || std::abs(alongSecond) > 1.0f + slackSecond) {
+					continue;
+				}
+
+				// **Which side the body's middle is on decides the map**, the
+				// same question `CrossingOf` asks of a segment and
+				// `AimSurfaceCameras` asks of a viewer. The half that has
+				// crossed belongs in the space the other half is looking into.
+				const float side = offset.Dot(seam.Normal) > 0.0f ? 1.0f : -1.0f;
+				const Vector3 outward = seam.Normal * side;
+				const CFrame source = CFrame::LookAt(seam.Centre, seam.Centre + outward, UpFor(outward));
+				const CFrame through =
+					seam.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+
+				DrawInstance ghost = body;
+				ghost.Frame = through * body.Frame;
+
+				// **Never a surface and never a caster.** A ghost is the far
+				// half of something that is already in the world: a second
+				// shadow would follow a body that is not there, and a ghost that
+				// sampled a surface slot would put the far room's picture on a
+				// copy of a character.
+				ghost.Surface = -1;
+				ghost.CastShadow = false;
+
+				out.push_back(ghost);
+				appended++;
+
+				// One ghost per body. A body in two holes at once is a body at
+				// the cone point where two panes meet, and the second copy would
+				// land on top of the first.
+				break;
+			}
+		}
+
+		return appended;
 	}
 
 	size_t CrossPortals(ecs::Store &store) {
@@ -1053,7 +1388,8 @@ namespace engine::scene {
 		// pass that moved as it walked would let one crossing feed the next
 		// within a tick — a character could be bounced through three holes on
 		// one step, which is neither what the author drew nor reproducible.
-		const std::vector<Hole> holes = GatherHoles(store);
+		std::vector<PortalSeam> &holes = Seams();
+		GatherSeams(store, holes);
 
 		if (holes.empty()) {
 			return 0;
@@ -1071,9 +1407,21 @@ namespace engine::scene {
 				const Vector3 was = before.Frame.Position;
 				const Vector3 now = placement.Frame.Position;
 
-				for (const Hole &hole : holes) {
+				for (const PortalSeam &hole : holes) {
+					// **A cross-world pane is not this pass's to move anybody
+					// through.** Its `Destination` is a stand-in that tells the
+					// camera where to look, so walking through one used to be
+					// answered twice — once by this pass, which put the body a
+					// metre behind the pane it was entering, and once by whoever
+					// owns the world change. Two authorities over one crossing
+					// is what a body flipping about in the seam looks like.
+					if (hole.Crosses) {
+						continue;
+					}
+
 					CFrame through;
-					if (!CrossingOf(hole, was, now, through)) {
+					float share = 1.0f;
+					if (!CrossingOf(hole, was, now, through, share)) {
 						continue;
 					}
 

@@ -702,12 +702,15 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 		CHECK(view.InstanceCount == 0);
 	}
 
-	CHECK(client::AttachForeignSurfaces(universe, here, instances, views) == 1);
+	std::vector<engine::scene::DrawInstance> foreign;
+	CHECK(client::AttachForeignSurfaces(universe, here, foreign, views) == 1);
 
-	// Appended rather than substituted: the renderer uploads one instance buffer
-	// a frame, so the far world's rows go on the end and the surface is given
-	// that range.
-	CHECK(instances.size() == own + published);
+	// **This world's list is not touched**, which is the property the fix
+	// turned on: joined to the far world's, every one of them would be culled
+	// against this camera, sorted into this scene's plan and submitted by the
+	// screen pass — the two rooms drawn on top of each other.
+	CHECK(instances.size() == own);
+	CHECK(foreign.size() == published);
 
 	bool found = false;
 	for (const engine::render::SurfaceView &view : views) {
@@ -716,7 +719,11 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 			continue;
 		}
 		found = true;
-		CHECK(view.InstanceFirst == own);
+
+		// Counted from the start of `foreign`, because nothing out here knows
+		// where this world's rows will end up in the instance buffer. The
+		// renderer moves the range on by that much once it does.
+		CHECK(view.InstanceFirst == 0);
 		CHECK(view.InstanceCount == published);
 	}
 	CHECK(found);
@@ -760,8 +767,10 @@ TEST_CASE("a portal naming a world that is not there keeps showing its own", "[c
 
 	const size_t own = instances.size();
 
-	CHECK(client::AttachForeignSurfaces(universe, here, instances, views) == 0);
+	std::vector<engine::scene::DrawInstance> foreign;
+	CHECK(client::AttachForeignSurfaces(universe, here, foreign, views) == 0);
 	CHECK(instances.size() == own);
+	CHECK(foreign.empty());
 	for (const engine::render::SurfaceView &view : views) {
 		CHECK(view.InstanceCount == 0);
 	}

@@ -135,6 +135,54 @@ namespace engine::physics {
 		ecs::Entity ignore = ecs::Entity{}
 	);
 
+	// The same, carrying on out of the far side of any portal in the way.
+	//
+	// **A body standing in a seam is standing on two floors, and one ray only
+	// ever found one of them.** A pane is a hole — `scene::OpenPortals` takes
+	// its collider out of the solver so a body can be inside it — so a character
+	// halfway through has its feet over the near room's floor for as long as its
+	// centre is on the near side, and over nothing at all the moment the near
+	// room's floor stops at the doorway. `GroundCharacters` then reports "not
+	// grounded" for a character visibly standing on something, which is a
+	// character that falls out of the world in the one metre where it should not.
+	//
+	// So the ray goes through: what it has left when it reaches the glass is
+	// cast again from the far pane, through the same map a crossing body and the
+	// camera go through. The hit comes back with its distance measured from the
+	// *original* origin, so a caller comparing against its own reach needs to
+	// know nothing about the hole.
+	//
+	// **`Position` and `Normal` are on the far side, in the far side's space**,
+	// which is the honest answer and the useful one: a floor's normal is what a
+	// character stands on, and mapping it back would describe a surface that is
+	// not there.
+	//
+	// **One hop, for `scene::PortalCrossing`'s reason.** A second pane close
+	// enough behind the first to be reached by the remainder is a pane the
+	// caster is already inside.
+	//
+	// **Cross-world panes are not followed.** Their far side is another store,
+	// which this query may not reach — rule 3 — so a ray meeting one stops as it
+	// always did.
+	//
+	// @param store       The world to ask.
+	// @param ray         Origin and unit direction.
+	// @param maxDistance How far to travel in total, near side and far side
+	//                    together.
+	// @param mask        Which layers to consider, on both sides.
+	// @param ignore      The caster, skipped on the near side only. Whatever it
+	//                    is, it is not on the far side of the hole.
+	// @return The nearest hit either side, or nothing.
+	// @threadsafe
+	// @since v0.15
+	std::optional<ColliderHit> RaycastThroughPortals(
+		ecs::Store &store,
+		const core::Ray &ray,
+		float maxDistance,
+		spatial::LayerMask mask = spatial::LayerMask::All(),
+		ecs::Entity ignore = ecs::Entity{}
+	);
+
 	// Finds every collider whose exact shape overlaps an axis-aligned box.
 	//
 	// @param store The world to ask.

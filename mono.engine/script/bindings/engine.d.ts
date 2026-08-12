@@ -1306,6 +1306,9 @@ declare interface MessagingService {
 declare interface TeleportService {
 	Teleport(placeName: string, player: Instance, data?: unknown): void;
 	GetLocalPlayerTeleportData(): unknown;
+
+	/** What arrived with this player, or nil for one that walked in the front door. */
+	GetTeleportData(player: Instance): unknown;
 }
 
 declare interface MemoryStoreService {

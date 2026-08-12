@@ -172,8 +172,14 @@ namespace engine::render {
 		// **What makes a portal able to show another world**, and it is a range
 		// rather than a second draw list because the renderer uploads one
 		// instance buffer per frame. A host that wants world B seen through
-		// world A's pane appends B's instances to the array it hands `Render`
-		// and names that range here; the surface pass then draws exactly it.
+		// world A's pane puts B's instances in `Render`'s `foreign` argument and
+		// names that range here; the surface pass then draws exactly it.
+		//
+		// **An offset into `foreign`, not into the world's own list**, and the
+		// two are separate arguments for the reason that split exists: joined,
+		// the far world would be culled, ordered and drawn as part of this one.
+		// The renderer moves the range into buffer space itself, after the
+		// ordering that would otherwise have invalidated it.
 		//
 		// **`Count == 0` means "this world", which is every mirror and every
 		// same-world portal.** Those draw the `scene::ScenePlan`'s own runs —
@@ -860,6 +866,23 @@ namespace engine::render {
 		//                    the one that should be choosing which: the renderer
 		//                    has no idea which lamp matters. `client::CollectLights`
 		//                    picks the nearest to the eye.
+		// @param foreign    Instances belonging to *other* worlds, drawn only
+		//                    through the surfaces that name them by
+		//                    `SurfaceView::InstanceFirst`.
+		//
+		//                    **Separate from `instances` because everything this
+		//                    call does to `instances` is wrong for these.** They
+		//                    are not culled against this camera, not sorted into
+		//                    this view's plan, and never submitted by the screen
+		//                    pass or the shadow pass — a second world is not
+		//                    part of this world's frame, it is a picture hanging
+		//                    in it. They were appended to `instances` by the host
+		//                    until v0.14, and the two rooms drew on top of each
+		//                    other.
+		//
+		//                    They still share the one instance buffer: the
+		//                    renderer copies them in after this world's rows and
+		//                    shifts each surface's range to match.
 		// @return Submitted draw counts and whether the frame was presented.
 		FrameResult Render(
 			const core::CFrame &cameraFrame,
@@ -873,7 +896,8 @@ namespace engine::render {
 			std::span<const ParticleBatch> particles = {},
 			std::span<const effects::RibbonVertex> ribbonVertices = {},
 			std::span<const effects::RibbonRun> ribbonRuns = {},
-			std::span<const SceneLight> lights = {}
+			std::span<const SceneLight> lights = {},
+			std::span<const scene::DrawInstance> foreign = {}
 		);
 
 		// The texture the most recent `Render` drew that slot's world into.

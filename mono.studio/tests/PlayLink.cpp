@@ -1600,3 +1600,85 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		);
 	});
 }
+
+TEST_CASE("stopping a world takes the clients that walked into it too", "[studio][playlink]") {
+	// **A run owns a client and a client plays a world, and a portal is what
+	// makes those two different worlds.** `FollowTeleports` re-homes a
+	// `PlayLink` onto the scene its character walked into and leaves it in the
+	// run an author pressed Play on, so after one crossing the run names one
+	// world and the link plays another — which `Editor::Claimed` already had to
+	// be taught.
+	//
+	// `EndRun` read the run's list, so it stopped the clients that left this
+	// world and not the ones that arrived. Stop the server and its client stays
+	// open: a live replica of an authority that is being destroyed and rebuilt
+	// under it, listed under some other run, named after a scene it is no longer
+	// in. That is the report, and this is it in two worlds.
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+
+	engine::parallel::Jobs::Start(1);
+	engine::scene::RegisterSceneComponents();
+
+	const auto furnish = [](Store &store) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+		engine::physics::PreparePhysicsWorld(store);
+	};
+
+	WorldSettings first;
+	first.Name = Name("here");
+	first.TickRate = TICK_RATE;
+	const WorldId here = editor.Universe->Create(first);
+	editor.Universe->Enter(here, furnish);
+
+	WorldSettings second;
+	second.Name = Name("there");
+	second.TickRate = TICK_RATE;
+	const WorldId there = editor.Universe->Create(second);
+	editor.Universe->Enter(there, furnish);
+
+	// The client that crossed: started on `here`, playing `there`, still in
+	// `here`'s run. This is the shape `FollowTeleports` leaves behind.
+	auto crossed = std::make_unique<PlayLink>();
+	std::string error;
+	REQUIRE(crossed->Start(*editor.Universe, there, TICK_RATE, error, "client 1"));
+
+	const WorldId replica = crossed->ReplicaWorld();
+	REQUIRE(replica.IsValid());
+
+	studio::Editor::WorldRun home;
+	home.World = here;
+	home.Mode = studio::RunMode::Play;
+	home.Links.push_back(std::move(crossed));
+	editor.Runs.push_back(std::move(home));
+
+	// And the run for the world about to be stopped, which owns no client of
+	// its own — the only one in the universe is somebody else's.
+	studio::Editor::WorldRun destination;
+	destination.World = there;
+	destination.Mode = studio::RunMode::Play;
+	editor.Runs.push_back(std::move(destination));
+
+	const auto worldIsAlive = [&editor](WorldId id) {
+		const std::vector<WorldId> &live = editor.Universe->Worlds();
+		return std::find(live.begin(), live.end(), id) != live.end();
+	};
+
+	REQUIRE(worldIsAlive(replica));
+
+	editor.EndRun(there);
+
+	// **The client is gone, and its world with it.** Not "eventually", and not
+	// "when its own run stops" — the authority it was watching is being taken
+	// apart in this call.
+	CHECK_FALSE(worldIsAlive(replica));
+
+	REQUIRE(editor.Runs.size() == 1);
+	CHECK(editor.Runs.front().World == here);
+	CHECK(editor.Runs.front().Links.empty());
+
+	editor.Runs.clear();
+	editor.Universe.reset();
+	engine::parallel::Jobs::Stop();
+}

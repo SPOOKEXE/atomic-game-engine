@@ -1390,6 +1390,11 @@ declare extern type TeleportService with
 	-- What arrived with this client's player, or nil. Nil on a server, where
 	-- there is no local player to have arrived.
 	function GetLocalPlayerTeleportData(self): any
+
+	-- What arrived with this player, or nil for one that walked in the front
+	-- door. The server's half of the call above: the authority decides where an
+	-- arriving character stands and needs to see what the sender wrote.
+	function GetTeleportData(self, player: Instance): any
 end
 
 declare extern type MemoryStoreService with

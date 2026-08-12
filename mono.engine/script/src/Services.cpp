@@ -589,6 +589,47 @@ namespace engine::script {
 			return 1;
 		}
 
+		// TeleportService:GetTeleportData(player)
+		int GetTeleportData(lua_State *state) {
+			Store &store = StoreOfUpvalue(state);
+
+			const ecs::Entity player = CheckInstanceArgument(state, 2);
+			if (!store.Alive(player) || !store.IsA(player, scene::PlayerClass())) {
+				luaL_errorL(state, "GetTeleportData: the argument must be a Player");
+			}
+
+			// **The server's half of the call above, and the reason it exists is
+			// that the payload had no reader on the side that can act on it.**
+			// `GetLocalPlayerTeleportData` is Roblox's and is a *client* call —
+			// it answers for `LocalPlayer` and nobody else, deliberately, so a
+			// script cannot read somebody else's data. But the machine that
+			// decides where an arriving character stands is the authority, and
+			// it had no way to see what the sender wrote. A payload that only
+			// the arriving client can read cannot place the arriving body.
+			//
+			// **Nil rather than an error for a player who walked in the front
+			// door**, because that is the ordinary case and not a mistake: a
+			// game asks every arrival and acts on the ones that came through a
+			// portal.
+			const ecs::Entity held = store.FindFirstChild(player, TELEPORT_DATA);
+			const auto *text = held == ecs::NULL_ENTITY ? nullptr : store.Get<scene::TextContent>(held);
+			if (text == nullptr || text->Value.empty()) {
+				lua_pushnil(state);
+				return 1;
+			}
+
+			const auto *bytes = reinterpret_cast<const std::byte *>(text->Value.data());
+
+			ScriptValue value;
+			if (Decode({bytes, text->Value.size()}, value) != CodecStatus::Ok) {
+				lua_pushnil(state);
+				return 1;
+			}
+
+			PushScriptValue(state, value);
+			return 1;
+		}
+
 		// Rebuilds an arriving player in this world.
 		//
 		// **The engine admits them, not a script.** Who is in a game is the
@@ -704,6 +745,7 @@ namespace engine::script {
 		static const luaL_Reg teleport[] = {
 			{"Teleport", Teleport},
 			{"GetLocalPlayerTeleportData", GetLocalPlayerTeleportData},
+			{"GetTeleportData", GetTeleportData},
 			{nullptr, nullptr}
 		};
 

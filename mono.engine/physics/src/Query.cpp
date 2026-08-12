@@ -15,6 +15,7 @@
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/spatial/Query.hpp>
@@ -200,6 +201,82 @@ namespace engine::physics {
 		}
 
 		return nearest;
+	}
+
+	std::optional<ColliderHit> RaycastThroughPortals(
+		ecs::Store &store,
+		const core::Ray &ray,
+		float maxDistance,
+		spatial::LayerMask mask,
+		ecs::Entity ignore
+	) {
+		std::optional<ColliderHit> blocking = Raycast(store, ray, maxDistance, mask, ignore);
+
+		if (maxDistance <= 0.0f) {
+			return blocking;
+		}
+
+		// Where the whole ray would end, which is the segment `PortalCrossing`
+		// tests — the same one a body's tick is tested as.
+		const core::Vector3 finish = ray.PointAt(maxDistance);
+
+		scene::PortalHop hop;
+		if (!scene::PortalCrossing(store, ray.Origin, finish, hop)) {
+			return blocking;
+		}
+
+		// **The pane is not a wall to a ray that goes through it**, and it is
+		// the nearest thing in front of every hole. `OpenPortals` leaves the
+		// collider in place as a trigger so contacts are still reported, so
+		// without this line every portal ray stops on the glass and the
+		// continuation below never runs once.
+		//
+		// **Only once a crossing is known**, so a ray that meets the pane
+		// outside its rectangle — the frame, the edge, the wall the hole is cut
+		// in — still stops on it, which is what a hole with a border means.
+		if (blocking && blocking->Owner == hop.Pane) {
+			blocking.reset();
+		}
+
+		const float reached = hop.Share * maxDistance;
+
+		// **Anything else solid before the glass settles it.** A wall between the
+		// caster and the pane is a wall, and continuing past it would let a ray
+		// see through geometry — which is the one thing a hole must not make
+		// true of everything else in the room.
+		if (blocking && blocking->Distance <= reached) {
+			return blocking;
+		}
+
+		const float remaining = maxDistance - reached;
+		if (remaining <= 0.0f) {
+			return blocking;
+		}
+
+		// **Both ends mapped, and forgetting the direction is the bug that looks
+		// like the hole being crooked.** A pane pair that turns a corner sends
+		// the remainder off along the axis it came in on, so the ray leaves the
+		// far side aimed the way it entered the near one rather than the way the
+		// far pane faces — see `CrossPortals`, which is the same two lines about
+		// a body's placement and its velocity.
+		const core::Vector3 at = ray.PointAt(reached);
+		const core::Ray beyond(
+			hop.Through.PointToWorldSpace(at), hop.Through.VectorToWorldSpace(ray.Direction)
+		);
+
+		// **Nothing is ignored on the far side.** `ignore` is the caster, and
+		// the caster is on this side of the glass by construction — carrying it
+		// across would name whatever entity happens to share that index over
+		// there, which is nothing in particular.
+		std::optional<ColliderHit> far = Raycast(store, beyond, remaining, mask, ecs::Entity{});
+		if (!far) {
+			return blocking;
+		}
+
+		// Measured from the original origin, so a caller comparing against its
+		// own reach never has to know a hole was involved.
+		far->Distance += reached;
+		return far;
 	}
 
 	spatial::QueryResult OverlapBox(

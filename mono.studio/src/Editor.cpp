@@ -1106,6 +1106,57 @@ namespace studio {
 		);
 	}
 
+	void Editor::PresentPortalDestinations(WorldId shown, float frameSeconds) {
+		if (!shown.IsValid() || Universe == nullptr) {
+			return;
+		}
+
+		// Gathered inside the store and acted on outside it, which is the rule
+		// every cross-world step in this file keeps: `Universe::Enter` is not
+		// re-entrant and presenting a world enters it.
+		//
+		// **By name, because that is what a portal carries.** A destination
+		// world is named rather than handled for the reason `TeleportService`
+		// names one: a handle out of another world is the thing rule 3 exists to
+		// refuse, and a name is resolved against the universe by whoever holds
+		// both — which is this class and nothing below it.
+		std::vector<Name> wanted;
+
+		Universe->Enter(shown, [&wanted](Store &store) {
+			store.Each<const engine::scene::Portal>(
+				[&wanted](engine::ecs::Entity, const engine::scene::Portal &portal) {
+					if (!portal.DestinationWorld.IsValid()) {
+						return;
+					}
+					if (std::find(wanted.begin(), wanted.end(), portal.DestinationWorld) == wanted.end()) {
+						wanted.push_back(portal.DestinationWorld);
+					}
+				}
+			);
+		});
+
+		for (const Name &name : wanted) {
+			for (const WorldId candidate : Universe->Worlds()) {
+				if (candidate == shown || Universe->NameOf(candidate) != name) {
+					continue;
+				}
+
+				// **The same alpha rule as the panel's own world**, which is
+				// `PresentationAlpha`'s whole subject: a world nothing is
+				// advancing has no next tick to interpolate towards, and asking
+				// for its accumulator draws every part at its birthplace.
+				Universe->Present(
+					candidate,
+					frameSeconds,
+					PresentationAlpha(
+						Advancing, Universe->StateOf(candidate), Universe->AlphaOf(candidate)
+					)
+				);
+				break;
+			}
+		}
+	}
+
 	void Editor::PresentWorld(float frameSeconds) {
 		// **Which panel this frame draws.** `Renderer::Render` owns the whole
 		// frame — swapchain, interface, present — so it draws one world per
@@ -1366,6 +1417,11 @@ namespace studio {
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
 		std::vector<engine::scene::DrawInstance> drawn;
 
+		// Whatever *other* worlds this panel's portals look into. Kept apart
+		// from `drawn` all the way to the renderer — see `Renderer::Render`'s
+		// `foreign` argument for what joining them costs.
+		std::vector<engine::scene::DrawInstance> foreign;
+
 		// **Cleared before the world is asked, not inside the ask.** A viewport
 		// with no world would otherwise keep whatever the last world it drew
 		// held — a mirror in a scene that is no longer on screen, rendering into
@@ -1402,14 +1458,43 @@ namespace studio {
 				// view below. See `client::InstallWorldPipelines`.
 			});
 
+			// **The far world draws itself first, and this is the step that was
+			// missing.** `Universe::Present` is what runs `PreRender`, and
+			// `PreRender` is where `collect-instances` builds a world's
+			// `client::DrawList` — so a world builds a draw list exactly when
+			// somebody presents it, and until now the only world presented for a
+			// panel was the one the panel shows.
+			//
+			// A cross-world portal names a scene that is usually *not* on
+			// screen. Its list was therefore whatever it held the last time it
+			// was looked at directly: empty for a world nobody had opened, which
+			// `AttachForeignSurfaces` reads as "nothing published yet" and skips
+			// — leaving the pane showing this world, which is a mirror and is
+			// exactly the "the other side does not render" report. Or, worse,
+			// stale: a still photograph of the far world taken whenever it was
+			// last in a panel, which is the one thing `ImmersivePortals.luau`
+			// holds both worlds awake to avoid.
+			//
+			// **So the destination is presented, and it is presented here.** The
+			// far world renders itself, in its own pass, from its own camera —
+			// and what crosses to this panel is the result rather than the
+			// responsibility. `Present` runs no simulation, so this neither
+			// ticks the far world nor decides anything about it; it asks it for
+			// this frame's picture.
+			//
+			// Immediately before the attach, because the attach reads exactly
+			// what this produces — and outside the `Enter` above, for the reason
+			// the attach gives.
+			PresentPortalDestinations(shown, frameSeconds);
+
 			// **Outside the `Enter`, because it enters other worlds.** A portal
 			// naming another scene needs that scene's draw list, and
 			// `Universe::Enter` is not re-entrant — so this is the one step that
-			// has to happen once the source store has been let go of. It appends
-			// the far world's instances to `drawn` and points the surface at
-			// that range; a frame with no cross-world portal in it does nothing
-			// and touches neither vector.
-			(void)client::AttachForeignSurfaces(*Universe, shown, drawn, Surfaces);
+			// has to happen once the source store has been let go of. It fills
+			// `foreign` with the far world's instances and points the surface at
+			// a range of it; a frame with no cross-world portal in it clears
+			// `foreign` and touches nothing else.
+			(void)client::AttachForeignSurfaces(*Universe, shown, foreign, Surfaces);
 
 			instances = &drawn;
 		}
@@ -1445,7 +1530,12 @@ namespace studio {
 			Surfaces,
 			&Interface,
 			target.IsValid() ? &target : nullptr,
-			DrawingViewport
+			DrawingViewport,
+			{},
+			{},
+			{},
+			{},
+			foreign
 		);
 
 		// **Presented, or simply drawn when there is nowhere to present.**
@@ -2670,6 +2760,49 @@ namespace studio {
 			link->Stop(*Universe);
 		}
 		record->Links.clear();
+
+		// **And every client that is *playing* this world, whoever owns it.**
+		// A `PlayLink` belongs to the run an author pressed Play on and keeps
+		// that home for its whole life, but the world it plays moves: walk a
+		// character through a portal and `FollowTeleports` re-homes the link to
+		// the destination, in the same run. After one crossing the two disagree
+		// — `Claimed` above says the same thing from the other end — so the loop
+		// above, which reads the *run's* list, stops the clients that arrived
+		// from here and not the ones that arrived *at* here.
+		//
+		// What that looked like is the report it came from: stop the server and
+		// its client stays open, watching a world that is about to be destroyed
+		// and rebuilt underneath it, listed in the instances panel under some
+		// other run and named after a scene it left. The lifecycle then had a
+		// live replica of a dead authority, which is the one arrangement none of
+		// `IsReplicaWorld`'s callers can answer for.
+		//
+		// **Before the destroy, exactly like the loop above**, and by authority
+		// world rather than by run because that is the fact that decides whether
+		// a client survives this call.
+		for (WorldRun &other : Runs) {
+			if (other.World == world) {
+				continue;
+			}
+
+			for (auto link = other.Links.begin(); link != other.Links.end();) {
+				if (*link == nullptr || !(*link)->IsRunning() || (*link)->AuthorityWorld() != world) {
+					++link;
+					continue;
+				}
+
+				const WorldId replica = (*link)->ReplicaWorld();
+				for (ViewportState &view : Extras) {
+					if (view.World == replica) {
+						view.World = WorldId{};
+						view.Follow = engine::ecs::NULL_ENTITY;
+					}
+				}
+
+				(*link)->Stop(*Universe);
+				link = other.Links.erase(link);
+			}
+		}
 
 		// **The runtime goes before the restore.** It holds a `Store &` and the
 		// store is the universe's; the world is about to be destroyed, so a

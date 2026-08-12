@@ -101,11 +101,17 @@ namespace client {
 	// So the host — which holds the universe and is already outside every store
 	// when it calls the renderer — is the only thing that can join the two.
 	//
-	// **Appends rather than substitutes**, because the renderer uploads one
-	// instance buffer per frame: the far world's instances go on the end of this
-	// world's, and the surface is given that range through
-	// `render::SurfaceView::InstanceFirst`. A frame with no cross-world portal in
-	// it appends nothing and the array is untouched.
+	// **Fills a list of its own, and that separation is the whole contract.**
+	// The renderer uploads one instance buffer per frame, so the far world's
+	// rows do end up on the end of this world's — but the *appending* is the
+	// renderer's to do, after it has culled, ordered and partitioned this
+	// world's list. Handing the two joined would put the far world into this
+	// world's frustum cull, its scene plan and its main pass: the two rooms
+	// drawn on top of each other, which is exactly what happened until v0.14.
+	//
+	// So `foreign` is indexed from zero and `render::SurfaceView::InstanceFirst`
+	// is an offset into it, not into the world's own draw list. A frame with no
+	// cross-world portal in it appends nothing and leaves both alone.
 	//
 	// **Reads the far world's published `DrawList` and does not build one.** A
 	// world that is not ticking has whatever its last tick published, which is
@@ -117,16 +123,19 @@ namespace client {
 	// world. That is the same fallback an unlinked portal already has, and fails
 	// the same visible way rather than as a blank pane.
 	//
-	// @param universe  The worlds, entered one at a time and never nested.
-	// @param world     The world being drawn.
-	// @param instances This world's draw list, appended to.
-	// @param views     The views `CollectSurfaceViews` filled, updated in place.
+	// @param universe The worlds, entered one at a time and never nested.
+	// @param world    The world being drawn.
+	// @param foreign  Cleared, then filled with every other world's rows this
+	//                 frame needs. Hand it to `render::Renderer::Render` as its
+	//                 `foreign` argument, beside — never joined to — this
+	//                 world's own draw list.
+	// @param views    The views `CollectSurfaceViews` filled, updated in place.
 	// @return How many surfaces were pointed at another world.
 	// @since v0.14
 	size_t AttachForeignSurfaces(
 		engine::world::Universe &universe,
 		engine::world::WorldId world,
-		std::vector<engine::scene::DrawInstance> &instances,
+		std::vector<engine::scene::DrawInstance> &foreign,
 		std::vector<engine::render::SurfaceView> &views
 	);
 

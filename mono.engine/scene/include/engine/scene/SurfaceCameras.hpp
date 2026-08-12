@@ -185,6 +185,104 @@ namespace engine::scene {
 	//         reflection rather than whether there is a mirror.
 	size_t AimSurfaceCameras(ecs::Store &store);
 
+	// One portal, as the rectangle a crossing is tested against.
+	//
+	// **One description of a hole, for the three passes that need one.** A body
+	// walking through (`CrossPortals`), a body *half* through and therefore
+	// drawn on both sides (`client::CollectInstances`), and a body half through
+	// and therefore standing on both floors (`physics::GhostPortalBodies`) are
+	// the same rectangle asked three questions. They disagreed the moment there
+	// were three copies of it, and what that looks like is a character that
+	// falls through a floor it is visibly standing on.
+	//
+	// @since v0.15
+	struct PortalSeam {
+		// The pane's plane: a point on it and its face's unit normal.
+		//
+		// **The face's normal, not "the outward one".** Which side is outward is
+		// a question about the *crosser*, exactly as it is a question about the
+		// viewer in `AimSurfaceCameras` — a pane can be walked into from either
+		// side and both answers are right. `SeamMapping` takes the side.
+		core::Vector3 Centre;
+		core::Vector3 Normal;
+
+		// The pane's half-axes in the world, so `Centre ± First ± Second` is the
+		// rectangle. Vectors rather than extents because that is what the inside
+		// test wants.
+		core::Vector3 First;
+		core::Vector3 Second;
+
+		// The far pane's face frame, looking out of itself. The half of the
+		// mapping that does not depend on who is crossing.
+		core::CFrame Destination;
+
+		// The pane this seam is the face of, and the part the far end is on.
+		//
+		// **Kept so a clone pass can skip them both.** A pane straddles its own
+		// plane by definition, so cloning it through itself is a portal inside a
+		// portal — which recurses in the picture and, worse, gives the solver a
+		// second copy of the very surface it is deciding a crossing against.
+		ecs::Entity Pane = ecs::NULL_ENTITY;
+		ecs::Entity Far = ecs::NULL_ENTITY;
+
+		// Which surface slot the pane samples, from `SurfaceCamera::Surface`.
+		// What lets a host name one portal out of several.
+		int8_t Surface = 0;
+
+		// Whether this portal names another world.
+		//
+		// **A cross-world portal's `Destination` is a camera stand-in and not a
+		// place**, which is exactly the distinction `Portal::DestinationWorld`
+		// documents. Cloning or moving a body through it would put them at the
+		// stand-in — in *this* world, a metre behind the pane they were walking
+		// into — instead of handing them to whoever owns the crossing.
+		bool Crosses = false;
+	};
+
+	// The map from one side of a seam to the far side.
+	//
+	// `destination · half-turn · source⁻¹`, which is the same product
+	// `AimSurfaceCameras` puts the camera through. The half-turn is what makes
+	// it a hole rather than a window onto a copy.
+	//
+	// @param seam The portal.
+	// @param side Which side the thing being mapped is on: positive in front of
+	//             `Normal`, negative behind it. Zero counts as behind.
+	// @return The frame to pre-multiply a placement, a velocity or a direction by.
+	// @since v0.15
+	core::CFrame SeamMapping(const PortalSeam &seam, float side);
+
+	// How far the seam's plane is from a point, signed along `Normal`.
+	//
+	// @param seam The portal.
+	// @param at   The point.
+	// @return Positive in front of the pane, negative behind it.
+	// @since v0.15
+	float SeamOffset(const PortalSeam &seam, const core::Vector3 &at);
+
+	// Whether a box centred on `at` reaches across the seam inside its rectangle.
+	//
+	// **The straddle test, which is not the crossing test.** `CrossPortals` asks
+	// whether a *segment* changed sides between two ticks; this asks whether a
+	// body is in the pane *right now*, which is the state a clone exists for. A
+	// body can be in the seam for a hundred ticks without ever crossing.
+	//
+	// @param seam  The portal.
+	// @param at    The body's centre.
+	// @param reach How far the body extends from `at`. A radius, so it is
+	//              conservative for a box — a clone drawn a little early is
+	//              invisible and one drawn a little late is a body cut in half.
+	// @return Whether the body occupies the pane.
+	// @since v0.15
+	bool SeamStraddled(const PortalSeam &seam, const core::Vector3 &at, float reach);
+
+	// Every linked portal in the world.
+	//
+	// @param seams Cleared, then filled.
+	// @return How many there are.
+	// @since v0.15
+	size_t GatherPortalSeams(ecs::Store &store, std::vector<PortalSeam> &seams);
+
 	// Moves anything that walked into a portal out of the pane it leads to.
 	//
 	// **`D00112`, and the character controller is what it was waiting for.** A
@@ -264,6 +362,41 @@ namespace engine::scene {
 	// @since v0.15
 	bool PortalCrossing(ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, core::CFrame &through);
 
+	// One segment's meeting with one pane, in full.
+	//
+	// **What a ray needs and a body does not.** A body is teleported whole and
+	// wants only the map; a ray has a length it must not exceed, has to know how
+	// much of it was spent reaching the glass, and has to know *which* pane so
+	// it can decline to stop on it — see `physics::RaycastThroughPortals`.
+	//
+	// @since v0.15
+	struct PortalHop {
+		// The map from this side to the far side. `CrossPortals`' `through`.
+		core::CFrame Through;
+
+		// Where along `from`→`to` the plane was met, as a fraction.
+		float Share = 1.0f;
+
+		// The pane that was met.
+		//
+		// **Because a portal's own pane is the one thing a ray through it must
+		// look past.** `OpenPortals` leaves the collider in place as a trigger —
+		// contacts are still reported and `Raycast` still answers with it — so
+		// the nearest thing in front of every hole is the hole.
+		ecs::Entity Pane = ecs::NULL_ENTITY;
+	};
+
+	// The same crossing, described rather than just mapped.
+	//
+	// **The nearest pane wins**, which the plainer form did not have to decide
+	// because nothing could tell its answers apart.
+	//
+	// @param hop Filled when the answer is true, untouched otherwise.
+	// @since v0.15
+	bool PortalCrossing(
+		ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, PortalHop &hop
+	);
+
 	// Stops a portal's pane from solving contacts, so a body can be inside it.
 	//
 	// **A hole you cannot stand in is a picture of a hole.** The pane is an
@@ -298,6 +431,95 @@ namespace engine::scene {
 	//         has been, which is every tick after the first.
 	// @since v0.14
 	size_t OpenPortals(ecs::Store &store);
+
+	// Appends a copy of every body standing in a portal, on the far side of it.
+	//
+	// **Half a character is the artefact this removes.** A pane is a hole and a
+	// body may straddle it — `OpenPortals` exists to allow exactly that — but
+	// the body is one set of parts in one place, so the far room draws nothing
+	// and the near room draws all of it. Standing in the seam, you are whole on
+	// the side you came from and absent on the side you are walking into, which
+	// is the one thing a picture of a hole and a hole must not share.
+	//
+	// A clone is the standard answer and it is cheap here: the map onto the far
+	// side is `SeamMapping`, the same product the camera and a crossing body go
+	// through, and a `DrawInstance` is a frame and a box.
+	//
+	// **A draw instance rather than an entity**, for `AppendSurfaceFaceMarkers`'
+	// reason and more of it: a clone lives for one frame, must never be
+	// selected, saved, found by a script or simulated, and there is one per body
+	// per pane per frame. `physics::GhostPortalBodies` is the collision half and
+	// is deliberately a different mechanism — a picture and a contact have
+	// nothing to share but the seam.
+	//
+	// **Drawn by every pass, which is right rather than tolerated.** A clone is
+	// visible through the pane, and it is also visible to somebody standing in
+	// the far room looking at the far pane — which is what a body sticking out
+	// of a portal looks like, and is what the original does at the near pane.
+	//
+	// **Cross-world panes are skipped.** `Portal::DestinationWorld` says why:
+	// their `Destination` is a camera stand-in in *this* world, so a clone
+	// through one would appear a metre behind the pane the body is walking into
+	// rather than in the world it is walking to. `client::AttachForeignSurfaces`
+	// is where that half is answered.
+	//
+	// @param store The world.
+	// @param out   The draw list to append to. Nothing already in it is touched.
+	// @return How many clones were appended.
+	// @since v0.15
+	size_t AppendPortalClones(ecs::Store &store, std::vector<DrawInstance> &out);
+
+	// The same, through one named pane, whether or not it crosses worlds.
+	//
+	// **What a host calls once it has the far world's draw list in its hands.**
+	// A cross-world pane is skipped by the overload above because its clone does
+	// not belong in this world's list — it belongs beside the *other* world's,
+	// which only something holding the universe can assemble.
+	// `client::AttachForeignSurfaces` is that caller, and it appends the clone
+	// straight after the far world's rows so the two are one range.
+	//
+	// @param store   The world the body is standing in.
+	// @param surface Which surface slot the pane samples.
+	// @param out     The list to append to. Nothing already in it is touched.
+	// @return How many clones were appended.
+	// @since v0.15
+	size_t AppendPortalClones(ecs::Store &store, int8_t surface, std::vector<DrawInstance> &out);
+
+	// Appends the far half of anything standing in a portal.
+	//
+	// **A body in a hole is in two places, and the renderer only knew about
+	// one.** `CrossPortals` moves a body when its step changes side, so for the
+	// ticks it takes to walk through, the body is a single object sitting across
+	// the plane — near half in this room, far half nowhere. What a player sees
+	// is themselves sliced off at the seam: the near half drawn, and the far
+	// half missing from the picture in the pane, because the picture is of a
+	// room the body is not in yet.
+	//
+	// This is the other copy. Every instance straddling a pane's rectangle is
+	// appended again at `destination · half-turn · source⁻¹` — the same map the
+	// camera and the body go through — so the two halves meet at the plane.
+	// Neither copy needs clipping: the pane's own image covers the near half's
+	// overhang, and the surface camera's oblique clip takes the ghost's.
+	//
+	// **A draw instance rather than an entity**, exactly as
+	// `AppendSurfaceFaceMarkers` is one and for the same reason: nothing is
+	// added to the world, so it does not serialise, cannot be selected, and no
+	// script can find a second copy of a character it did not make.
+	//
+	// **Reads the list rather than the world**, so it works on a replica with no
+	// simulation in it, and so a ghost is built from the *interpolated* frame a
+	// client actually drew rather than from the tick position — a ghost half a
+	// frame behind its own body is a seam that opens and closes as you walk.
+	//
+	// Same-world pairs only. A `Portal::DestinationWorld` ghost belongs in the
+	// far world's draw list, which is a host's to append and not a store's.
+	//
+	// @param store The world.
+	// @param out   The draw list to read and append to.
+	// @return How many ghosts were appended. Zero in every scene where nobody is
+	//         standing in a hole, which is nearly every frame.
+	// @since v0.15
+	size_t AppendPortalGhosts(ecs::Store &store, std::vector<DrawInstance> &out);
 
 	// Appends a thin translucent bar lying on each face a surface camera
 	// projects off.

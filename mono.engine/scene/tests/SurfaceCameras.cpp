@@ -19,6 +19,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -26,6 +27,7 @@
 #include <glm/vec4.hpp>
 
 #include <cmath>
+#include <vector>
 
 TEST_SUITE_ID("engine.scene.surfacecameras")
 
@@ -902,6 +904,125 @@ TEST_CASE("a portal swallows only what goes through the hole", "[scene][surfacec
 	mirror.World.Set<engine::scene::Motion>(straight, engine::scene::Motion{});
 
 	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+}
+
+TEST_CASE("a body standing in a portal is drawn on the far side too", "[scene][surfacecameras]") {
+	// **Half a character is what a hole without this looks like.** A pane is
+	// passable — the case below is what makes it so — so a body may straddle
+	// one, and when it does it is one set of parts in one place: whole in the
+	// room it came from and absent from the room it is walking into. The picture
+	// through the glass shows a doorway with nobody in it while the body is
+	// visibly in the doorway.
+	//
+	// Four things are silently wrong if the clone is written by eye, and this
+	// covers all of them:
+	//
+	//   * a body clear of the pane is not cloned at all;
+	//   * a body in the pane is cloned onto the *far* pane, turned;
+	//   * the pane itself is never cloned, or a portal recurses into itself;
+	//   * a cross-world pane clones nothing, because its `Destination` is a
+	//     camera stand-in in this world rather than a place.
+	//
+	// The geometry is this file's: pane A at the origin with its `Front` face at
+	// `z = -0.2`, pane B a hundred units along X.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// What the draw-list query asks for. `Rendered` is written by
+	// `SyncRendered` from the hierarchy in a real world; set directly here
+	// because what is under test is the seam and not the visibility walk.
+	const auto drawable = [&](const Entity entity, const Vector3 &at) {
+		mirror.World.Set<Transform>(entity, Transform{CFrame(at)});
+		mirror.World.Set<engine::scene::PreviousTransform>(
+			entity, engine::scene::PreviousTransform{CFrame(at)}
+		);
+		mirror.World.Set<Bounds>(entity, Bounds{Vector3{0.5f, 1.0f, 0.5f}});
+		mirror.World.Set<engine::scene::Motion>(entity, engine::scene::Motion{});
+		mirror.World.Set<Visual>(entity, Visual{});
+		mirror.World.Set<engine::scene::SurfaceAppearance>(entity, engine::scene::SurfaceAppearance{});
+		mirror.World.Set<engine::scene::Tags>(entity, engine::scene::Tags{});
+		mirror.World.Set<engine::scene::Rendered>(entity, engine::scene::Rendered{1, {}});
+	};
+
+	// Well clear of the pane, and walking nowhere near it.
+	const Entity away =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Away");
+	drawable(away, Vector3{0.0f, 0.0f, 30.0f});
+
+	std::vector<engine::scene::DrawInstance> drawn;
+	CHECK(engine::scene::AppendPortalClones(mirror.World, drawn) == 0);
+	CHECK(drawn.empty());
+
+	// **In the pane, which is the state a clone exists for and is not a
+	// crossing.** `CrossPortals` asks whether a segment changed sides between
+	// two ticks; this body has not moved at all and is standing in the hole,
+	// which it can do for as long as it likes.
+	const Entity inside =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Inside");
+	drawable(inside, Vector3{0.0f, 0.0f, -0.1f});
+
+	drawn.clear();
+	REQUIRE(engine::scene::AppendPortalClones(mirror.World, drawn) == 1);
+
+	// **At the far pane**, which is the whole claim: the body is in pane A and
+	// its copy is in pane B, a hundred units away. The same map a crossing body
+	// goes through, applied to a body that has not crossed.
+	//
+	// **And the same depth into it, which is what makes the two halves meet.**
+	// The map carries the signed distance from the plane across, so a body whose
+	// centre is a tenth of a metre short of A's face has a copy a tenth of a
+	// metre short of B's — poking out of B by exactly as much as it has pushed
+	// through A. Landing it a tenth *past* B instead would be the same body
+	// drawn twice with a fifth of a metre of it missing, which is the join
+	// everybody looks at.
+	CHECK_THAT(drawn[0].Frame.Position.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK_THAT(drawn[0].Frame.Position.Z, Catch::Matchers::WithinAbs(-0.1f, TOLERANCE));
+
+	// Its own size and appearance, because it is the same body seen from
+	// somewhere else rather than a marker standing in for one.
+	CHECK(drawn[0].HalfExtent == Vector3{0.5f, 1.0f, 0.5f});
+
+	// **Never a surface itself.** A cloned pane would claim the slot its
+	// original writes, and the renderer keeps the first camera to name an index
+	// — so the two would fight over one texture from frame to frame.
+	CHECK(drawn[0].Surface == -1);
+
+	// **And the pane is not among them**, though a pane straddles its own plane
+	// by construction. One clone, from the one body.
+	CHECK(drawn.size() == 1);
+
+	// **A cross-world pane clones nothing here.** `Portal::DestinationWorld`
+	// makes `Destination` a stand-in that tells the camera where to look, so a
+	// clone through one would appear a stand-in's distance behind the pane the
+	// body is walking into rather than in the world it is walking to. The host
+	// answers that half — `client::AttachForeignSurfaces` — and it is the same
+	// distinction that stops `CrossPortals` moving anybody through one.
+	engine::scene::Portal crossing{far};
+	crossing.DestinationWorld = engine::core::Name("somewhere else");
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, crossing);
+
+	drawn.clear();
+	CHECK(engine::scene::AppendPortalClones(mirror.World, drawn) == 0);
+
+	// The host asks for that one by name, and gets it.
+	drawn.clear();
+	CHECK(engine::scene::AppendPortalClones(mirror.World, 0, drawn) == 1);
+
+	// **And nobody is moved through it**, which is the bug the two authorities
+	// produced: the engine put the body at the stand-in and the world change put
+	// it in the other world, so a body in the seam was claimed twice a tick.
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		inside, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+	CHECK_THAT(
+		mirror.World.Get<Transform>(inside)->Frame.Position.X, Catch::Matchers::WithinAbs(0.0f, TOLERANCE)
+	);
 }
 
 TEST_CASE("a portal's pane stops solving contacts, so a body can be in it", "[scene][surfacecameras]") {

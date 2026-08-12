@@ -93,6 +93,14 @@ namespace client {
 				"replica.instances", static_cast<double>(drawList->Instances.size())
 			);
 
+			// **A client sees itself in the hole too, and this is where.** The
+			// ghost is built from the list above, which holds interpolated
+			// frames — the ones this machine actually draws — so the far half of
+			// a body lines up with the near half rather than trailing it by
+			// however far the character walked since the last tick. After the
+			// metric for the reason `client::CollectInstances` gives.
+			(void)engine::scene::AppendPortalGhosts(store, drawList->Instances);
+
 			engine::core::Metrics::Count("replica.behind.ticks", buffer->Behind());
 			engine::core::Metrics::Count("replica.stalls", static_cast<double>(buffer->Stats().Stalls));
 

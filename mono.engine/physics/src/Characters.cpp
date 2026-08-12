@@ -50,8 +50,24 @@ namespace engine::physics {
 			//
 			// It cost a studio test to find and the symptom was a character
 			// resting perfectly still on a plate it could not jump off.
-			const auto hit =
-				Raycast(store, ray, 0.1f + humanoid.GroundTolerance, spatial::LayerMask::All(), body);
+			// **Through any pane in the way, which is what keeps a body in the
+			// seam standing on something.** A pane is a hole and a character may
+			// be halfway through one, so the floor under its feet is the far
+			// room's for as long as the near room's stops at the doorway — and a
+			// ray that stopped at the glass reported "not grounded" for a
+			// character everybody can see standing on a floor. What that looks
+			// like is falling out of the world in the one metre where you should
+			// not.
+			//
+			// **Which side is answered by the sign, not by a blend.** The ray
+			// starts at the feet, so a body more than halfway through is a body
+			// whose feet are past the plane and whose ground is the far room's;
+			// one less than halfway keeps the near room's. That is the same
+			// threshold `CrossPortals` moves the body on, and the two agreeing is
+			// what makes the crossing tick look like every other one.
+			const auto hit = RaycastThroughPortals(
+				store, ray, 0.1f + humanoid.GroundTolerance, spatial::LayerMask::All(), body
+			);
 
 			humanoid.Grounded = hit.has_value();
 			tested++;

@@ -334,6 +334,13 @@ namespace engine::render {
 		// Kept on the state rather than made per frame, so a steady scene stops
 		// allocating after its first one — the rule every buffer here follows.
 		std::vector<scene::DrawInstance> Drawable;
+
+		// The same, for the rows belonging to *other* worlds — see `Render`'s
+		// `foreign` argument. A separate buffer rather than a tail on `Drawable`
+		// because every pass but the surface pass must not see these, and a
+		// shared buffer is one `.size()` away from them all seeing them.
+		std::vector<scene::DrawInstance> DrawableForeign;
+
 		std::vector<uint32_t> SceneOrder;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
@@ -2967,7 +2974,8 @@ namespace engine::render {
 		std::span<const ParticleBatch> particles,
 		std::span<const effects::RibbonVertex> ribbonVertices,
 		std::span<const effects::RibbonRun> ribbonRuns,
-		std::span<const SceneLight> lights
+		std::span<const SceneLight> lights,
+		std::span<const scene::DrawInstance> foreign
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
@@ -3124,8 +3132,19 @@ namespace engine::render {
 			scene::KeepLoaded(
 				instances, [this](const core::Name &mesh) { return State->Meshes.Has(mesh); }, State->Drawable
 			);
+
+			// **The other worlds pay the same toll.** A destination whose meshes
+			// have not arrived here would otherwise come up as the field of
+			// cubes described above — seen through a portal, which is the one
+			// place a viewer cannot walk over and check.
+			scene::KeepLoaded(
+				foreign,
+				[this](const core::Name &mesh) { return State->Meshes.Has(mesh); },
+				State->DrawableForeign
+			);
 		}
 		instances = State->Drawable;
+		foreign = State->DrawableForeign;
 
 		// --- uploads --------------------------------------------------------
 
@@ -3407,6 +3426,11 @@ namespace engine::render {
 
 			surfaceSignature = scene::SignatureOf(instances);
 
+			// **And the other worlds, whose whole purpose is to be moving.** A
+			// destination that changed while this world sat still is the case a
+			// live portal exists for, and it is invisible to the line above.
+			surfaceSignature = scene::MixSignature(surfaceSignature, scene::SignatureOf(foreign));
+
 			for (size_t index = 0; index < acceptedCount; index++) {
 				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].Index);
 				surfaceSignature = MixMatrix(surfaceSignature, accepted[index].ViewProjection);
@@ -3439,7 +3463,14 @@ namespace engine::render {
 			}
 		}
 
+		// **This world's rows, then the other worlds' — one buffer, two halves
+		// that never mix.** The head is what every pass in this frame partitions
+		// and submits; the tail exists only so a surface can name a range of it.
+		// Joining them before the plan is what drew two rooms on top of each
+		// other until v0.14, and is why `foreign` is its own argument.
 		State->SceneInstances.assign(instances.begin(), instances.end());
+		const auto ownCount = static_cast<uint32_t>(State->SceneInstances.size());
+		State->SceneInstances.insert(State->SceneInstances.end(), foreign.begin(), foreign.end());
 
 		// **Every range the three scene passes submit, from one call.** The
 		// ordering, the mirror partition and the caster partition are arithmetic
@@ -3447,10 +3478,19 @@ namespace engine::render {
 		// headless suite can get at them. A renderer is the one module a test
 		// cannot exercise, so the counts it hands to a draw call are the last
 		// place they should be computed. See `scene::ScenePlan` for the runs.
+		//
+		// **Given the head alone.** A plan over the tail as well would sort
+		// another world's parts into this one's opaque run, its mirror partition
+		// and its shadow casters — and the ordering it returns is a permutation,
+		// so it would also move the very rows a surface has already named.
 		scene::ScenePlan plan;
 		{
 			ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
-			plan = scene::OrderScene(State->SceneInstances, sceneEye, State->SceneOrder);
+			plan = scene::OrderScene(
+				std::span<const scene::DrawInstance>(State->SceneInstances).first(ownCount),
+				sceneEye,
+				State->SceneOrder
+			);
 		}
 
 		const auto sceneCount = static_cast<uint32_t>(State->SceneInstances.size());
@@ -3553,7 +3593,20 @@ namespace engine::render {
 						out[index] = ToGpu(instance, *record(index, instance));
 					}
 
-					const size_t cameraBase = State->SceneOrder.size();
+					// **The other worlds, in the order they were handed over.**
+					// Nothing sorts them: they are drawn as one plain run by one
+					// surface, so there is no partition to build and no eye to
+					// sort towards — the pane's camera is not this frame's.
+					//
+					// Slot `ownCount + k` therefore holds `foreign[k]`, which is
+					// what lets `SurfaceView::InstanceFirst` survive a plan that
+					// permuted everything before it.
+					for (size_t index = ownCount; index < sceneCount; index++) {
+						const scene::DrawInstance &instance = State->SceneInstances[index];
+						out[index] = ToGpu(instance, *record(index, instance));
+					}
+
+					const size_t cameraBase = sceneCount;
 					auto *camera = out + cameraBase;
 					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
 						const scene::DrawInstance &instance =
@@ -3954,12 +4007,17 @@ namespace engine::render {
 
 				plainly();
 
-				// **Another world's instances, when the host appended some.**
+				// **Another world's instances, when the host handed some over.**
 				// `SurfaceView::InstanceCount` says why this bypasses the plan:
 				// the plan partitions *this* world's draw list and knows nothing
-				// about the range appended after it, so a foreign surface is one
-				// plain run and no mirror runs at all. That is what lets a portal
-				// in one world show a live second world.
+				// about the tail behind it, so a foreign surface is one plain run
+				// and no mirror runs at all. That is what lets a portal in one
+				// world show a live second world.
+				//
+				// **`ownCount` is what turns the host's index into a slot.** The
+				// host counts from zero within its own `foreign` list, because
+				// nothing outside this call knows where this world's rows end or
+				// that the plan reordered them.
 				//
 				// **`continue`, so the plan-driven draws below are skipped
 				// entirely.** Drawing both would put this world's floor into the
@@ -3969,7 +4027,7 @@ namespace engine::render {
 					result.DrawCalls += State->DrawSlots(
 						command,
 						pass,
-						accepted[index].View->InstanceFirst,
+						ownCount + accepted[index].View->InstanceFirst,
 						accepted[index].View->InstanceCount,
 						&surfaceLighting,
 						fallback,

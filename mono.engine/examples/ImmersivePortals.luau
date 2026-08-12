@@ -46,8 +46,21 @@
 -- drew "the same scene range" as the main pass, so a surface camera could only
 -- ever render the world it stood in. Now `render::SurfaceView` carries an
 -- instance range and `client::AttachForeignSurfaces` — which runs in the host,
--- because only the host holds both worlds — appends the far world's draw list
+-- because only the host holds both worlds — gathers the far world's draw list
 -- and points the pane at it.
+--
+-- **Beside this world's list and never joined to it**, which is the whole of
+-- `Renderer::Render`'s `foreign` argument. Joined, the far world was culled
+-- against this camera, sorted into this scene's plan and submitted by the main
+-- pass — so both rooms drew on top of each other in every viewport, the other
+-- world's character stood in this one, and the range the pane had been given
+-- named whatever the sort had moved into those slots. One list, three symptoms.
+--
+-- **And whoever is standing in the pane goes with it.** The far world holds no
+-- copy of a body that is still in this one, so a character halfway through was
+-- whole in the room it was leaving and absent from the picture of the room it
+-- was entering. `scene::AppendPortalClones` is the same answer a same-world
+-- pane gets in `Portals-1-world.luau`, asked across the boundary.
 --
 -- **Two fields, and the split is the point.** `Portal.Destination` is a part in
 -- *this* world and decides where the camera stands; `Portal.DestinationWorld` is
@@ -232,7 +245,89 @@ if not RunService:IsServer() then
 	return
 end
 
+-- --- arriving ------------------------------------------------------------------
+
+-- **Where a body that came through the hole belongs, which is not the spawn
+-- pad.** A same-world portal keeps the crossing continuous — `scene::
+-- CrossPortals` maps the body through `destination · half-turn · source⁻¹`, so
+-- you come out of the far pane where you went into the near one, still walking.
+-- A cross-world one is a `TeleportService` call, and a teleport has always
+-- landed people on `SpawnLocation`: you walk into a hole and appear fourteen
+-- metres away facing a wall, which reads as the portal not working at all.
+--
+-- The map here is the identity, and that is not a shortcut. Both worlds are laid
+-- out the same way with the block at the same place, so "where you were relative
+-- to the block" is the whole of the crossing — the same offset, the same side
+-- carried on through. A destination laid out differently wants its own offset
+-- baked in, which is `docs/NON-EUCLIDEAN.md`'s subject and is a scene's
+-- business rather than the engine's.
+--
+-- **Pushed clear of the plane on arrival.** Landing exactly where you crossed
+-- would put you inside the far block's trigger box, and the next heartbeat
+-- would send you straight back — a portal that bounces you between two worlds
+-- for ever. `THROUGH` is the width of that box, so a little past it is the
+-- first place that is unambiguously *through*.
+local CLEAR = THROUGH + 1.5
+
+local function placeArrival(player: Player)
+	local data = TeleportService:GetTeleportData(player)
+	if typeof(data) ~= "table" then
+		-- Somebody who joined rather than crossed. The spawn pad is right for
+		-- them and this is not an error.
+		return
+	end
+
+	local carried = data :: { Side: number?, Across: number?, Height: number? }
+	local side = carried.Side
+	local across = carried.Across
+	local height = carried.Height
+	if side == nil or across == nil or height == nil then
+		return
+	end
+
+	local character = workspace:FindFirstChild(player.Name)
+	if character == nil then
+		return
+	end
+
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root == nil then
+		return
+	end
+
+	-- **Out of the far side, keeping the way you were going.** `Side` is which
+	-- way the walker was travelling on the block's thin axis, so continuing it
+	-- puts them out of the face they would have come out of.
+	root.CFrame = CFrame.lookAt(
+		block.Position + Vector3.new(across, height, CLEAR * side),
+		block.Position + Vector3.new(across, height, CLEAR * side * 2)
+	)
+end
+
+-- **Polled rather than hooked, because the body arrives after the player
+-- does.** `Players.PlayerAdded` fires from the parenting the engine does in
+-- `AdmitArrival`, and the character is loaded by the host a moment later — so a
+-- handler that reached for `HumanoidRootPart` on that signal would find nothing
+-- on the frame that matters. This asks for one tick, once, per arrival.
+local pending: { Player } = {}
+
+Players.PlayerAdded:Connect(function(joined: Instance)
+	-- Cast, for `FindFirstChild`'s reason — a signal hands over an `Instance`
+	-- and this one only ever fires with a `Player`.
+	table.insert(pending, joined :: Player)
+end)
+
+-- --- walking through ----------------------------------------------------------
+
 RunService.Heartbeat:Connect(function()
+	for index = #pending, 1, -1 do
+		local player = pending[index]
+		if workspace:FindFirstChild(player.Name) ~= nil then
+			placeArrival(player)
+			table.remove(pending, index)
+		end
+	end
+
 	for _, player in Players:GetPlayers() do
 		local character = workspace:FindFirstChild(player.Name)
 		if character then
@@ -249,9 +344,27 @@ RunService.Heartbeat:Connect(function()
 				local within = math.abs(gap.X) < WITHIN and math.abs(gap.Y) < BLOCK_SIZE.Y / 2 + 2
 
 				if through and within then
-					-- The player is removed from this world by the call, so the
-					-- next heartbeat does not find them and send them twice.
-					TeleportService:Teleport(DESTINATION, player, { From = THIS_WORLD })
+					-- **What the far side needs to put them down.** Where they
+					-- were across the block, how high, and which way they were
+					-- going through it — the crossing, in the block's own terms,
+					-- which both worlds share because both blocks are placed the
+					-- same. The player is removed from this world by the call,
+					-- so the next heartbeat does not find them and send them
+					-- twice.
+					TeleportService:Teleport(DESTINATION, player, {
+						From = THIS_WORLD,
+						Across = gap.X,
+						Height = gap.Y,
+						-- **Which side they came from, inverted, because that is
+						-- the side they are going out of.** A `CFrame` in a
+						-- script has no look vector to ask — see
+						-- `script::Values`' `CFrameIndex` — and the approach
+						-- side is the better question anyway: the trigger box
+						-- is three metres deep and a walker covers a quarter of
+						-- that in a tick, so the first frame inside it is
+						-- always on the side they came in from.
+						Side = if gap.Z > 0 then -1 else 1,
+					})
 				end
 			end
 		end

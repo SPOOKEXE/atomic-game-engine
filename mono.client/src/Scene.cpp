@@ -368,6 +368,21 @@ namespace client {
 			// query, so there is no row to size the list against. `push_back`
 			// past the shrink costs one reallocation on the frame a mirror is
 			// created and nothing after it — the capacity stays.
+			// **Before the markers, so a marker is never cloned.** A face bar is
+			// a debugging aid lying on a pane, which means it straddles that
+			// pane by construction — and a bar cloned onto the far side would
+			// mark a face nothing projects off.
+			(void)engine::scene::AppendPortalClones(store, drawList->Instances);
+
+			// **The far half of anybody standing in a hole, before the markers
+			// and after the world.** A ghost is content — it is the other side
+			// of a body that is really there — so it belongs with the instances
+			// rather than with the debugging bar, and it has to be appended
+			// after the metric above for the same reason the bar is: a count
+			// that moved when somebody stepped into a portal would stop being
+			// comparable between runs.
+			(void)engine::scene::AppendPortalGhosts(store, drawList->Instances);
+
 			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 		}
 	}
@@ -447,9 +462,15 @@ namespace client {
 	size_t AttachForeignSurfaces(
 		engine::world::Universe &universe,
 		engine::world::WorldId world,
-		std::vector<engine::scene::DrawInstance> &instances,
+		std::vector<engine::scene::DrawInstance> &foreign,
 		std::vector<engine::render::SurfaceView> &views
 	) {
+		// **Cleared on every path, including the ones that attach nothing.** The
+		// vector is kept between frames so a steady scene stops allocating, and
+		// a host that stopped looking through a portal would otherwise keep
+		// uploading last frame's copy of another world for ever.
+		foreign.clear();
+
 		if (views.empty() || !world.IsValid()) {
 			return 0;
 		}
@@ -504,14 +525,30 @@ namespace client {
 				continue;
 			}
 
-			const auto first = static_cast<uint32_t>(instances.size());
-			universe.Enter(found, [&instances](Store &store) {
+			const auto first = static_cast<uint32_t>(foreign.size());
+			universe.Enter(found, [&foreign](Store &store) {
 				if (const auto *list = store.Resource<DrawList>()) {
-					instances.insert(instances.end(), list->Instances.begin(), list->Instances.end());
+					foreign.insert(foreign.end(), list->Instances.begin(), list->Instances.end());
 				}
 			});
 
-			const auto count = static_cast<uint32_t>(instances.size() - first);
+			// **And whoever is standing in the pane, on the far side of it.**
+			// The far world holds no copy of a body that is still in this one, so
+			// without this a character halfway through a cross-world portal is
+			// whole in the room it is leaving and absent from the picture of the
+			// room it is entering — which is the artefact `AppendPortalClones`
+			// removes for a same-world pane, seen through the one boundary that
+			// pass cannot answer for itself.
+			//
+			// **Appended after the far world's rows, so the two are one range.**
+			// A `SurfaceView` names one span, and a second one would be a second
+			// draw and a second reason for the two to fall out of order.
+			const auto surface = entry.Surface;
+			universe.Enter(world, [&foreign, surface](Store &store) {
+				(void)engine::scene::AppendPortalClones(store, surface, foreign);
+			});
+
+			const auto count = static_cast<uint32_t>(foreign.size() - first);
 			if (count == 0) {
 				// A world that has published nothing yet. Left showing this
 				// world rather than pointed at an empty range, because an empty

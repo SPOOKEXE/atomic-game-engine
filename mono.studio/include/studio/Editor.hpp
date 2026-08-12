@@ -2540,6 +2540,22 @@ namespace studio {
 		// viewport pinned to this world still points at it afterwards.
 		//
 		// @param world The scene to stop. Not running is not an error.
+		// Presents every world this one's portals look into.
+		//
+		// **A world builds its draw list when somebody presents it**, and until
+		// this existed the only world presented for a panel was the one the
+		// panel shows — so a cross-world portal looked into a scene whose list
+		// was empty or was a photograph of whenever it was last on screen. The
+		// far world renders itself here, in its own pass, and what crosses to
+		// the panel is the picture rather than the work.
+		//
+		// Presents nothing when no portal in `shown` names another world, which
+		// is every scene but the immersive-portal pair.
+		//
+		// @param shown        The world about to be drawn.
+		// @param frameSeconds This frame's length, as `Present` wants it.
+		void PresentPortalDestinations(WorldId shown, float frameSeconds);
+
 		void EndRun(WorldId world);
 
 		// Stops every running world. For shutdown, New Game and Open.
