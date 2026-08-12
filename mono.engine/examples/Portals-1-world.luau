@@ -27,7 +27,7 @@
 -- difference is where the camera stands: a mirror reflects the eye through its
 -- own plane, and a portal maps it through `destination · half-turn · source⁻¹`.
 --
--- That one matrix is the whole feature, and `docs/NON-EUCLIDEAN.md` is the
+-- That one matrix is the whole feature, and `NON-EUCLIDEAN.md` is the
 -- investigation that established it. There is no portal renderer, no second
 -- pipeline and no exotic geometry.
 --

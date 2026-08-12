@@ -156,7 +156,7 @@ divergence would be in the part nobody tests: the cycle guard or the hash.
 ### [x] D00112
 
 **Portals can be walked through; the frame you cross on still shows the wrong
-side.** `docs/NON-EUCLIDEAN.md` filed six rows of work at v0.14 and this entry
+side.** `NON-EUCLIDEAN.md` filed six rows of work at v0.14 and this entry
 carried the last two. Traversal closed at v0.14; the seam did not.
 
 **Traversal, which this entry said was blocked and now is not.** It was waiting
@@ -193,7 +193,7 @@ held last frame. Removing it does not need a recursive pass with its own budget 
 it needs the existing pass to run again: each bounce makes the previous one's
 output the read side, and after `n` bounces a chain `n` deep is resolved inside
 the frame, deepest first. The ping-pong pair each slot already carried is what
-makes it safe. `Renderer::SetSurfaceBounces`, two by default, and `NON_EUCLID.md`
+makes it safe. `Renderer::SetSurfaceBounces`, two by default, and `NON-EUCLIDEAN.md`
 is the reading of CodeParade's demo that the work came out of.
 
 **Part of what looked like the seam was not the seam, and is gone.** v0.15 found
@@ -203,7 +203,7 @@ viewer crosses its plane — was being applied to holes as well, so a portal dre
 somebody walking through spends the crossing. A linked portal has no
 discontinuity to blank: the frame the viewer's side flips is the frame the
 viewer is carried through the pane, and the two cancel. What is left of this
-entry is the one-frame staleness above and nothing else. `NON_EUCLID.md` is the
+entry is the one-frame staleness above and nothing else. `NON-EUCLIDEAN.md` is the
 reading of CodeParade's demo that turned it up.
 
 **Two smaller things worth knowing before building on this.** Sixteen surfaces

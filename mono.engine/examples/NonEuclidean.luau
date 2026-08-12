@@ -10,7 +10,7 @@
 -- **Every one of them is the same feature and none costs more than the others.**
 -- A `Portal` is a `SurfaceCamera` with a `Destination`; its camera is placed at
 -- `destination · half-turn · source⁻¹`, and that is the whole of it.
--- `docs/NON-EUCLIDEAN.md` is the investigation and `Portals-1-world.luau` is the
+-- `NON-EUCLIDEAN.md` is the investigation and `Portals-1-world.luau` is the
 -- minimal case. What differs below is *geometry*, not engine.
 --
 -- ## The one authoring rule, and it has two halves

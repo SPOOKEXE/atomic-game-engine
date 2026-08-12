@@ -72,7 +72,7 @@
 -- The stand-in below sits where the far world's block sits. That is exact
 -- because both worlds are laid out the same way; a destination laid out
 -- somewhere else wants its offset baked into the stand-in, which is the same lie
--- a same-world portal already tells and is `docs/NON-EUCLIDEAN.md`'s subject.
+-- a same-world portal already tells and is `NON-EUCLIDEAN.md`'s subject.
 --
 -- **What a foreign pane does not do is recurse.** A surface drawn from another
 -- world is one plain run — the far world's own panes show flat rather than as
@@ -259,7 +259,7 @@ end
 -- out the same way with the block at the same place, so "where you were relative
 -- to the block" is the whole of the crossing — the same offset, the same side
 -- carried on through. A destination laid out differently wants its own offset
--- baked in, which is `docs/NON-EUCLIDEAN.md`'s subject and is a scene's
+-- baked in, which is `NON-EUCLIDEAN.md`'s subject and is a scene's
 -- business rather than the engine's.
 --
 -- **Pushed clear of the plane on arrival.** Landing exactly where you crossed

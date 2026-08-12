@@ -943,7 +943,7 @@ namespace engine::scene {
 	// describe one space.** A destination rotated, moved or scaled anywhere at
 	// all gives a room bigger on the inside, or a corridor that turns through
 	// more than four right angles — with no separate feature, no exotic maths
-	// and no second renderer. `docs/NON-EUCLIDEAN.md` is the investigation that
+	// and no second renderer. `NON-EUCLIDEAN.md` is the investigation that
 	// settled this, and it is the whole insight of the demo it was filed
 	// against.
 	//
@@ -984,7 +984,7 @@ namespace engine::scene {
 		// `immersive-portals-demo` scenes use. A far world laid out somewhere
 		// else entirely wants its offset baked into the stand-in's placement,
 		// which is the same lie a same-world portal already tells and is
-		// `docs/NON-EUCLIDEAN.md`'s whole subject.
+		// `NON-EUCLIDEAN.md`'s whole subject.
 		//
 		// **The host resolves it, not `AimSurfaceCameras`.** A store cannot
 		// reach another store; `client::AttachForeignSurfaces` is what looks the

@@ -4780,7 +4780,7 @@ namespace engine::render {
 		// applied to *that* camera's frame, that camera's own projection skewed
 		// onto the mapped pane — so warps compose down the recursion by
 		// construction, exactly as `Portal::Draw` composes `portalCam.worldView *=
-		// warp->delta`. `NON_EUCLID.md`'s final section is the whole argument.
+		// warp->delta`. `NON-EUCLIDEAN.md`'s Part III is the whole argument.
 		//
 		// **Depth first, and every level's targets survive until the level above
 		// has drawn all of its panes.** That is why the pool is indexed by level

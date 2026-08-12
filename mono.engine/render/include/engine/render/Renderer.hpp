@@ -241,7 +241,7 @@ namespace engine::render {
 	// A portal's sub-camera is derived from the camera the recursion is
 	// *currently* at — the warp applied to that camera's own frame, its own
 	// projection skewed onto the mapped pane — so warps compose down the
-	// recursion by construction. `NON_EUCLID.md`'s final section is the whole
+	// recursion by construction. `NON-EUCLIDEAN.md`'s Part III is the whole
 	// argument and CodeParade's `Portal.cpp` is the model.
 	//
 	// **Same-world only.** A `scene::Portal` naming a `DestinationWorld` is a

@@ -1166,7 +1166,7 @@ namespace engine::scene {
 					// destination turned, moved, resized or placed anywhere gives a
 					// room bigger on the inside or a corridor that turns through
 					// more than four right angles — with no second mechanism and no
-					// maths past this multiply. `docs/NON-EUCLIDEAN.md` is the
+					// maths past this multiply. `NON-EUCLIDEAN.md` is the
 					// investigation that settled it.
 					//
 					// **Built the same way a crossing body's is**, rather than

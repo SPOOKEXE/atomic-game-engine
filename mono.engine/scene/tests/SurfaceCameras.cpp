@@ -829,7 +829,7 @@ TEST_CASE("a portal pair need not describe one space", "[scene][surfacecameras]"
 	// **The non-Euclidean claim, as an assertion.** Nothing constrains the two
 	// frames to be consistent: turning the destination turns what comes out of
 	// the hole, which is how a corridor gets to bend more than the room it is in
-	// allows. `docs/NON-EUCLIDEAN.md` is the investigation, and this is the one
+	// allows. `NON-EUCLIDEAN.md` is the investigation, and this is the one
 	// line of it that the engine actually had to gain.
 	//
 	// A destination yawed by 90° maps the eye's 20.2 units of clearance along

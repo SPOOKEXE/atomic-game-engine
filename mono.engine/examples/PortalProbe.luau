@@ -19,7 +19,7 @@
 --   * **A quarter-turn pair.** Room B is down +X and rotated ninety degrees, so
 --     the map is a rotation and not a translation — a hole that only works when
 --     the two frames are parallel passes a straight-through pair and fails this
---     one. That is the case `docs/NON-EUCLIDEAN.md` records as the authoring
+--     one. That is the case `NON-EUCLIDEAN.md` records as the authoring
 --     mistake nothing in the engine can catch.
 --   * **A floating block on each side, in different colours.** Orange in room A,
 --     cyan in room B. Standing in A looking at the pane, the cyan block is what
@@ -94,7 +94,7 @@ local paneA = pane("PaneA", CFrame.new(Vector3.new(0, 3.5, 0)))
 -- points back down the corridor at room A, so the hole showed room A from a
 -- hundred studs away and looked for all the world like a portal that does not
 -- work. Minus a quarter puts B's front at +X, into its own room. This is the
--- mistake `docs/NON-EUCLIDEAN.md` says the engine cannot catch, made here on
+-- mistake `NON-EUCLIDEAN.md` says the engine cannot catch, made here on
 -- purpose so the scene records it.
 local paneB = pane("PaneB", CFrame.new(Vector3.new(100, 3.5, 0)) * CFrame.Angles(0, -math.pi / 2, 0))
 

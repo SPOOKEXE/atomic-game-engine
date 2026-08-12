@@ -857,7 +857,7 @@ hall's south wall, where the fourth room would have been. The two panes are
 perpendicular, so the pair carries a quarter turn — walk the loop and you make
 three right turns and arrive where you started, facing the way you set off. The
 middle of that building is a cone point with ninety degrees missing.
-`docs/NON-EUCLIDEAN.md` is the investigation behind it.
+`NON-EUCLIDEAN.md` is the investigation behind it.
 
 **`Face` is resolved on the destination too, and it is the one rule to know.**
 The far frame is built by applying the *portal's own* `Face` to the destination's
