@@ -33,28 +33,20 @@ namespace engine::scene {
 		return matrices;
 	}
 
-	glm::mat4 SurfaceProjection(const SurfaceLens &lens, const core::CFrame &frame) {
-		// A degenerate rectangle divides by zero and spreads infinities into
-		// every bound derived from the matrix. Identity is the value a consumer
-		// can draw nothing from safely, which is the same answer `ResolveCamera`
-		// gives a zero aspect ratio.
-		if (!(lens.Right > lens.Left) || !(lens.Top > lens.Bottom) || !(lens.NearPlane > 0.0f) ||
-			!(lens.FarPlane > lens.NearPlane)) {
-			return glm::mat4(1.0f);
-		}
-
-		glm::mat4 projection =
-			glm::frustum(lens.Left, lens.Right, lens.Bottom, lens.Top, lens.NearPlane, lens.FarPlane);
+	glm::mat4 ObliqueProjection(
+		const glm::mat4 &input, const core::CFrame &frame, const core::Vector3 &normal, float distance
+	) {
+		glm::mat4 projection = input;
 
 		// No plane means no skew, which is what an unparented surface camera
 		// and a degenerate placement both land on.
-		const float normalLength = lens.ClipNormal.Magnitude();
+		const float normalLength = normal.Magnitude();
 		if (!(normalLength > 0.0f)) {
 			return projection;
 		}
 
-		const core::Vector3 unit = lens.ClipNormal / normalLength;
-		const glm::vec4 world(unit.X, unit.Y, unit.Z, -lens.ClipDistance / normalLength);
+		const core::Vector3 unit = normal / normalLength;
+		const glm::vec4 world(unit.X, unit.Y, unit.Z, -distance / normalLength);
 
 		// **Into view space by the transpose of the camera's frame, not by its
 		// inverse.** A plane is a covector: points go `p_view = View * p_world`
@@ -96,6 +88,24 @@ namespace engine::scene {
 		projection[3][2] = substituted.w;
 
 		return projection;
+	}
+
+	glm::mat4 SurfaceProjection(const SurfaceLens &lens, const core::CFrame &frame) {
+		// A degenerate rectangle divides by zero and spreads infinities into
+		// every bound derived from the matrix. Identity is the value a consumer
+		// can draw nothing from safely, which is the same answer `ResolveCamera`
+		// gives a zero aspect ratio.
+		if (!(lens.Right > lens.Left) || !(lens.Top > lens.Bottom) || !(lens.NearPlane > 0.0f) ||
+			!(lens.FarPlane > lens.NearPlane)) {
+			return glm::mat4(1.0f);
+		}
+
+		return ObliqueProjection(
+			glm::frustum(lens.Left, lens.Right, lens.Bottom, lens.Top, lens.NearPlane, lens.FarPlane),
+			frame,
+			lens.ClipNormal,
+			lens.ClipDistance
+		);
 	}
 
 	glm::mat4 SurfaceMapping(const SurfaceLens &lens) {

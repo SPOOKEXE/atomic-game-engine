@@ -1,6 +1,8 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 
+#include <cmath>
+
 namespace engine::graph {
 
 	core::AABB BoundsOf(const scene::DrawInstance &instance) {
@@ -166,5 +168,25 @@ namespace engine::graph {
 		}
 
 		return seen;
+	}
+
+	bool VisiblePane(
+		const glm::mat4 &camera,
+		const core::Vector3 &centre,
+		const core::Vector3 &first,
+		const core::Vector3 &second
+	) {
+		// **The absolute half-axes summed, which is `FromOrientedBox` written for
+		// a rectangle.** Whatever way the pane is turned, its box reaches
+		// `|first| + |second|` from the centre on each world axis — and the axis
+		// the rectangle has no thickness on comes out zero, which is exact rather
+		// than something to guard.
+		const core::Vector3 reach{
+			std::abs(first.X) + std::abs(second.X),
+			std::abs(first.Y) + std::abs(second.Y),
+			std::abs(first.Z) + std::abs(second.Z),
+		};
+
+		return Frustum::FromViewProjection(camera).Intersects(core::AABB::FromCentre(centre, reach));
 	}
 }

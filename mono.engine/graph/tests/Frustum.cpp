@@ -388,3 +388,88 @@ TEST_CASE("a surface's coverage is what its resolution is chosen from", "[graph]
 
 	CHECK(alsoCoverage[0] == 1.0f);
 }
+
+TEST_CASE("a portal pane is culled per level rather than once for the eye", "[graph][cull]") {
+	// **The whole reason `VisiblePane` is not `VisibleSurfaces`.** A surface
+	// camera is placed from the eye, so its pane's visibility is one answer for
+	// the frame; a portal's sub-camera is derived from whichever camera the
+	// recursion is at, and the same rectangle is on screen at one level and
+	// behind the camera at the next.
+	const Vector3 first{2.0f, 0.0f, 0.0f};
+	const Vector3 second{0.0f, 2.0f, 0.0f};
+
+	const glm::mat4 eye = LookingMatrix();
+
+	// Ten metres down -Z, square in the middle of the view.
+	CHECK(engine::graph::VisiblePane(eye, Vector3{0.0f, 0.0f, -10.0f}, first, second));
+
+	// The same rectangle behind the camera, which is where a sub-camera that
+	// stepped through it stands.
+	CHECK_FALSE(engine::graph::VisiblePane(eye, Vector3{0.0f, 0.0f, 10.0f}, first, second));
+
+	// Far off to the side, outside the field of view at that depth.
+	CHECK_FALSE(engine::graph::VisiblePane(eye, Vector3{200.0f, 0.0f, -10.0f}, first, second));
+}
+
+TEST_CASE("a pane edge-on to the camera is still culled by what it reaches", "[graph][cull]") {
+	// A rectangle in the plane of the view direction has no thickness on one
+	// axis, and the box built from it is degenerate there. That is exact rather
+	// than a case to guard: what matters is that the other two axes still bound
+	// it, so a pane whose corners reach into the frustum is kept and one whose
+	// corners do not is dropped.
+	const glm::mat4 eye = LookingMatrix();
+
+	// Lying in the XZ plane, stretching down the view axis. Zero thickness on Y.
+	CHECK(
+		engine::graph::VisiblePane(
+			eye, Vector3{0.0f, 0.0f, -10.0f}, Vector3{2.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, 5.0f}
+		)
+	);
+
+	// The same flat rectangle, moved a long way above the frustum.
+	CHECK_FALSE(
+		engine::graph::VisiblePane(
+			eye, Vector3{0.0f, 400.0f, -10.0f}, Vector3{2.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, 5.0f}
+		)
+	);
+}
+
+TEST_CASE("the oblique clip drops what is behind its plane at any angle", "[graph][cull]") {
+	// **`scene::ObliqueProjection` against the screen's own frustum**, which is
+	// what the recursive portal pass skews and what `SurfaceProjection` no
+	// longer holds a second copy of. The property that matters is the one
+	// Lengyel's method is for: the near plane *becomes* the given plane, so a
+	// point behind it leaves the clip volume however far off-axis it is.
+	Camera lens;
+	lens.NearPlane = 0.1f;
+	lens.FarPlane = 100.0f;
+
+	const CFrame at{Vector3::Zero};
+	const glm::mat4 plain = engine::scene::ResolveCamera(at, lens, 16.0f / 9.0f).Projection;
+
+	// A plane five metres down -Z, its normal pointing away from the camera.
+	const Vector3 normal{0.0f, 0.0f, -1.0f};
+	const float distance = normal.Dot(Vector3{0.0f, 0.0f, -5.0f});
+	const glm::mat4 skewed = engine::scene::ObliqueProjection(plain, at, normal, distance);
+
+	const auto depthOf = [](const glm::mat4 &projection, const Vector3 &point) {
+		const glm::vec4 clip = projection * glm::vec4(point.X, point.Y, point.Z, 1.0f);
+		return clip.z / clip.w;
+	};
+
+	// In front of the plane and inside the volume; behind it and outside, which
+	// under `GLM_FORCE_DEPTH_ZERO_TO_ONE` means a negative depth.
+	CHECK(depthOf(skewed, Vector3{0.0f, 0.0f, -6.0f}) > 0.0f);
+	CHECK(depthOf(skewed, Vector3{0.0f, 0.0f, -4.0f}) < 0.0f);
+
+	// Off to the side, where a near plane merely pushed out parallel to the
+	// face would still have kept it. Two metres across at four metres deep is
+	// well inside a sixteen-by-nine frustum.
+	CHECK(depthOf(skewed, Vector3{2.0f, 1.0f, -4.0f}) < 0.0f);
+	CHECK(depthOf(skewed, Vector3{2.0f, 1.0f, -6.0f}) > 0.0f);
+
+	// A camera standing on the plane has no half to keep, so it gets its
+	// frustum back rather than a matrix with no volume in it.
+	const CFrame onIt{Vector3{0.0f, 0.0f, -5.0f}};
+	CHECK(engine::scene::ObliqueProjection(plain, onIt, normal, distance) == plain);
+}

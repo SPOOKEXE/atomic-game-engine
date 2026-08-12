@@ -20,7 +20,10 @@ layout(set = 3, binding = 0) uniform Lighting {
 
 	// x: 1 when a shadow map was rendered this frame, 0 otherwise.
 	// y: one texel of the shadow map, for the sample offsets.
-	// z: 1 when this draw samples the surface texture rather than its own tint.
+	// z: how this draw reads `surfaceMap`. 0 draws its own tint; 1 projects
+	//    through `SurfaceViewProjection` and is a **mirror**; 2 reads by screen
+	//    position and is a **portal**. See `SurfacePane` below for why those are
+	//    two lookups rather than one.
 	// w: how opaque the projected image is, 0 to 1. See the composite below.
 	vec4 Flags;
 
@@ -347,6 +350,32 @@ void main() {
 	// shadow dark rather than black.
 	float shadow = ShadowFactor(normal, toLight);
 	vec3 lit = albedo * (lighting.Ambient.rgb + vec3(lambert * shadow + bounce) + LocalLight(normal));
+
+	// **A portal pane reads the sub-render by screen position**, which is the
+	// whole of CodeParade's `portal.frag` and the reason the recursive pass can
+	// be pixel-exact where the surface path cannot. The sub-view is rendered
+	// with the screen's own projection into a target the size of this
+	// attachment, so this fragment's own position in the target *is* the texel
+	// it wants — one texel per pixel at every distance, with nothing fitted and
+	// nothing to go coarse when you walk into the hole.
+	//
+	// `gl_FragCoord.xy` is already in the target's pixels and already points the
+	// way `v` does, so there is no flip here and no `w` divide: the demo's
+	// `gl_Position.xy / w` is the same quantity arrived at through a varying,
+	// which this pipeline does not need because the rasteriser hands it over.
+	//
+	// **Never rejected for being outside 0..1**, unlike the mirror below. It
+	// cannot be — the target covers the same rectangle as the frame this
+	// fragment is in — and a bounds test would only be a way to fail on a
+	// rounding error at the very edge of the pane.
+	if (lighting.Flags.z > 1.5) {
+		vec2 portalUv = gl_FragCoord.xy / vec2(textureSize(surfaceMap, 0));
+		vec3 image = texture(surfaceMap, portalUv).rgb * inColour.rgb;
+
+		float imageAlpha = lighting.Flags.w;
+		outColour = vec4(mix(lit, image, imageAlpha), max(alpha, imageAlpha));
+		return;
+	}
 
 	// **The surface texture, projected from the camera that rendered it.** A
 	// planar projection is exactly right for a flat mirror and exactly wrong

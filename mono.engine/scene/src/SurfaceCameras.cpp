@@ -712,6 +712,7 @@ namespace engine::scene {
 				seam.Pane = store.ParentOf(entity);
 				seam.Far = portal.Destination;
 				seam.Surface = camera.Surface;
+				seam.TagFilter = camera.TagFilter;
 				seam.Crosses = portal.DestinationWorld.IsValid();
 
 				seams.push_back(seam);

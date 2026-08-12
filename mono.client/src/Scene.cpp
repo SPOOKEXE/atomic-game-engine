@@ -472,6 +472,7 @@ namespace client {
 	size_t AttachForeignSurfaces(
 		engine::world::Universe &universe,
 		engine::world::WorldId world,
+		std::vector<engine::scene::DrawInstance> &drawn,
 		std::vector<engine::scene::DrawInstance> &foreign,
 		std::vector<engine::render::SurfaceView> &views
 	) {
@@ -479,11 +480,19 @@ namespace client {
 		// vector is kept between frames so a steady scene stops allocating, and
 		// a host that stopped looking through a portal would otherwise keep
 		// uploading last frame's copy of another world for ever.
+		//
+		// **`drawn` is not**, because it arrives holding this world's own rows.
+		// This pass adds to it rather than owning it.
 		foreign.clear();
 
 		if (views.empty() || !world.IsValid()) {
 			return 0;
 		}
+
+		// This world's name, which is how the far end recognises a pane that
+		// leads back here. Resolved once: `NameOf` is a registry lookup and the
+		// answer cannot change while the frame is being assembled.
+		const engine::core::Name here = universe.NameOf(world);
 
 		// Which surface index wants which world, gathered while inside the
 		// source store and used entirely outside it — `Universe::Enter` is not
@@ -516,6 +525,18 @@ namespace client {
 
 		size_t attached = 0;
 
+		// Which far worlds have already had their own straddlers brought back
+		// here. Two panes onto one world is an ordinary arrangement — a room
+		// with a window at each end — and the far world's bodies belong in this
+		// world's list once, not once per pane.
+		std::vector<engine::world::WorldId> paired;
+
+		// The far world's panes that lead back here, by surface slot. Gathered
+		// before anything is cloned because `AppendPortalClones` walks the store
+		// itself, and a walk started inside another walk is a nesting the ECS
+		// does not owe anybody.
+		std::vector<int8_t> returning;
+
 		for (const Wanted &entry : wanted) {
 			// **The name resolved against the universe, every frame.** A world
 			// created or destroyed between two frames is ordinary in an editor,
@@ -535,10 +556,68 @@ namespace client {
 				continue;
 			}
 
+			// **Whether the far end still owes this one its own straddlers.** A
+			// hole has two mouths and a body may be standing in either, so the
+			// visit below does both halves of one pair in one entry — see the
+			// `paired` note under it.
+			const bool returns =
+				here.IsValid() && std::find(paired.begin(), paired.end(), found) == paired.end();
+			if (returns) {
+				paired.push_back(found);
+			}
+
 			const auto first = static_cast<uint32_t>(foreign.size());
-			universe.Enter(found, [&foreign](Store &store) {
+			universe.Enter(found, [&foreign, &drawn, &returning, here, returns](Store &store) {
 				if (const auto *list = store.Resource<DrawList>()) {
 					foreign.insert(foreign.end(), list->Instances.begin(), list->Instances.end());
+				}
+
+				// **And whoever is standing in the far world's own pane, on
+				// this side of it — which is the half that was missing and is
+				// why a cross-world hole only worked one way round.** The two
+				// mouths of a pair are not one job done twice: the clone below
+				// this block carries *our* bodies into the picture the pane
+				// shows, and this one carries *theirs* into the room the pane is
+				// set in. Without it a body walking into the far mouth was whole
+				// in the world it was leaving and absent from this one, so the
+				// hole drew a body from A into B and nothing from B into A.
+				//
+				// **Into this world's own list rather than into `foreign`**,
+				// because that is where the far body's near half actually is: it
+				// stands in this room, in front of this world's pane, and is
+				// culled, sorted and lit with everything else here. `foreign` is
+				// the picture *inside* the glass, and the far body is already in
+				// it — the far world drew itself.
+				//
+				// **Selected by name and never by `entry.Surface`.** A surface
+				// slot numbers a camera within one store, so the near pane's
+				// index says nothing about which of the far world's cameras
+				// leads back — pointing it at that index picks whichever of the
+				// far world's panes happens to share the number, which is any of
+				// them or none.
+				if (!returns) {
+					return;
+				}
+
+				returning.clear();
+				store.Each<const engine::scene::Portal, const engine::scene::SurfaceCamera>(
+					[&returning, here](
+						engine::ecs::Entity,
+						const engine::scene::Portal &portal,
+						const engine::scene::SurfaceCamera &camera
+					) {
+						if (portal.DestinationWorld != here) {
+							return;
+						}
+						if (std::find(returning.begin(), returning.end(), camera.Surface) ==
+							returning.end()) {
+							returning.push_back(camera.Surface);
+						}
+					}
+				);
+
+				for (const int8_t slot : returning) {
+					(void)engine::scene::AppendPortalClones(store, slot, drawn);
 				}
 			});
 
@@ -580,17 +659,94 @@ namespace client {
 		return attached;
 	}
 
-	size_t CollectSurfaceViews(Store &store, std::vector<engine::render::SurfaceView> &views) {
+	size_t CollectPortalViews(Store &store, std::vector<engine::render::PortalView> &portals) {
+		portals.clear();
+
+		// **`GatherPortalSeams`, and never a second measurement of the same
+		// hole.** The rectangle and the map are what `CrossPortals` moves a body
+		// through; a picture that derived them its own way would be a picture
+		// that disagrees with where somebody comes out, which is the exact class
+		// of bug that made the camera and the body pick different panes.
+		static thread_local std::vector<engine::scene::PortalSeam> seams;
+		if (engine::scene::GatherPortalSeams(store, seams) == 0) {
+			return 0;
+		}
+
+		for (const engine::scene::PortalSeam &seam : seams) {
+			// **A cross-world pane stays on the surface path**, because a warp
+			// into another world's coordinate space is a stated frame rather than
+			// a derived one — `Portal::DestinationWorld` and
+			// `AttachForeignSurfaces` are the whole of that arrangement, and it
+			// does not recurse.
+			if (seam.Crosses || seam.Surface < 0) {
+				continue;
+			}
+
+			engine::render::PortalView portal;
+			portal.Index = seam.Surface;
+			portal.Centre = seam.Centre;
+			portal.Normal = seam.Normal;
+			portal.First = seam.First;
+			portal.Second = seam.Second;
+
+			// **Both sides, because which one applies is a question about the
+			// camera and the camera moves with the recursion.** `SeamMapping`
+			// takes the side exactly as `CrossPortals` hands it the side a body
+			// is on.
+			portal.Front = engine::scene::SeamMapping(seam, 1.0f);
+			portal.Back = engine::scene::SeamMapping(seam, -1.0f);
+			portal.TagFilter = seam.TagFilter;
+
+			// The hole at the far end, so the level this one opens can skip it.
+			// A pair is two seams whose `Far` and `Pane` cross over, which is the
+			// only place that pairing is written down.
+			for (const engine::scene::PortalSeam &other : seams) {
+				if (other.Pane == seam.Far && !other.Crosses) {
+					portal.Partner = other.Surface;
+					break;
+				}
+			}
+
+			portals.push_back(portal);
+		}
+
+		return portals.size();
+	}
+
+	size_t CollectSurfaceViews(
+		Store &store,
+		std::vector<engine::render::SurfaceView> &views,
+		std::span<const engine::render::PortalView> portals
+	) {
 		views.clear();
 		Ordered().clear();
 
 		store.Each<const engine::scene::SurfaceCamera, const engine::scene::Camera, const Transform>(
-			[&views, &store](
+			[&views, &store, portals](
 				Entity entity,
 				const engine::scene::SurfaceCamera &target,
 				const engine::scene::Camera &lens,
 				const Transform &placement
 			) {
+				// **A slot the recursive pass owns gets no surface camera.** Both
+				// would draw the same pane — one from a camera derived from this
+				// level and one from a camera placed off the eye — and the second
+				// is the viewpoint error the pass exists to remove. Skipped here
+				// rather than refused in the renderer so the cost of aiming it is
+				// the only thing wasted.
+				const auto claimed = [&](int8_t slot) {
+					for (const engine::render::PortalView &portal : portals) {
+						if (portal.Index == slot) {
+							return true;
+						}
+					}
+					return false;
+				};
+
+				if (claimed(target.Surface)) {
+					return;
+				}
+
 				engine::render::SurfaceView view;
 				view.Index = target.Surface;
 				view.Frame = placement.Frame;

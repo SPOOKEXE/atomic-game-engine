@@ -28,6 +28,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace client {
@@ -90,7 +91,40 @@ namespace client {
 	//              allocating after the first frame.
 	// @return How many views were written. Zero is the ordinary case in a scene
 	//         with no mirror in it, and is not a failure.
-	size_t CollectSurfaceViews(engine::ecs::Store &store, std::vector<engine::render::SurfaceView> &views);
+	// @param portals Optional. Any same-world portal in it is skipped, because
+	//                the recursive pass draws that pane and a surface camera
+	//                aimed at the same slot would render a texture nothing
+	//                samples. Pass what `CollectPortalViews` filled.
+	size_t CollectSurfaceViews(
+		engine::ecs::Store &store,
+		std::vector<engine::render::SurfaceView> &views,
+		std::span<const engine::render::PortalView> portals = {}
+	);
+
+	// Every same-world hole in the world, as the recursive pass takes them.
+	//
+	// **The other half of the split `render::PortalView` states**: a portal with
+	// a `DestinationWorld` is a window onto a second simulation and keeps its
+	// surface camera, and one without is a hole in this space and is drawn by
+	// recursion instead. `scene::PortalSeam::Crosses` is the test, so the two
+	// halves cannot disagree about which a pane is — it is the same field
+	// `AppendPortalClones` and `CrossPortals` already branch on.
+	//
+	// **Built from `GatherPortalSeams` and `SeamMapping`, not from a second
+	// derivation of them.** The rectangle a hole is, and the map through it, are
+	// what traversal already computes every tick; a picture that measured them
+	// its own way would be a picture that disagrees with where a body comes out.
+	//
+	// **Both maps, front and back.** Which one applies is a question about the
+	// camera, and the camera moves with the recursion — see
+	// `render::PortalView::Front`.
+	//
+	// @param store   The world to search.
+	// @param portals Cleared and filled, keeping capacity.
+	// @return How many holes were written. Zero for a world with no portal in it
+	//         and for one whose portals all name other worlds.
+	// @since v0.15
+	size_t CollectPortalViews(engine::ecs::Store &store, std::vector<engine::render::PortalView> &portals);
 
 	// Points a cross-world portal's surface at the world it names.
 	//
@@ -123,18 +157,55 @@ namespace client {
 	// world. That is the same fallback an unlinked portal already has, and fails
 	// the same visible way rather than as a blank pane.
 	//
+	// ## A hole has two mouths, and both of them are this pass's
+	//
+	// A body standing in a cross-world pane is in two rooms, exactly as it is
+	// for a same-world one — and neither store can say so, because each holds
+	// one of the two. So both halves are assembled here, and they go to
+	// different places:
+	//
+	// - a body in **this** world, standing in this world's pane, is cloned onto
+	//   the end of `foreign` — into the picture the glass shows;
+	// - a body in the **far** world, standing in the far world's pane back to
+	//   here, is cloned onto the end of `drawn` — into this room, in front of
+	//   this world's pane, where its near half actually stands.
+	//
+	// **Only the first of those existed until v0.15, and one direction is what
+	// that looks like.** Walk into the hole from world A and your far half
+	// appears in B's picture; stand in B while somebody walks in from A and
+	// nothing comes out of the block. The second half is not the first one
+	// repeated from the other side — nobody draws world B's frame while world A
+	// is on screen — so it has to be gathered while the far store is open and
+	// appended here.
+	//
+	// **The far pane is found by name, not by surface slot.** A slot numbers a
+	// camera within one store; the near pane's index says nothing about which of
+	// the far world's cameras leads back, so the pane that leads home is the one
+	// whose `Portal::DestinationWorld` names this world.
+	//
+	// **Driven by this world's panes**, so a pair with a mouth at only one end
+	// brings nothing back. That is the same rule the picture already follows:
+	// this pass knows which worlds *this* one looks into and does not search the
+	// universe for worlds looking at it.
+	//
 	// @param universe The worlds, entered one at a time and never nested.
 	// @param world    The world being drawn.
+	// @param drawn    This world's own rows, appended to — never cleared. The
+	//                 far side of anybody standing in a far pane that leads
+	//                 here ends up on the end of it.
 	// @param foreign  Cleared, then filled with every other world's rows this
 	//                 frame needs. Hand it to `render::Renderer::Render` as its
 	//                 `foreign` argument, beside — never joined to — this
 	//                 world's own draw list.
 	// @param views    The views `CollectSurfaceViews` filled, updated in place.
-	// @return How many surfaces were pointed at another world.
+	// @return How many surfaces were pointed at another world. The clones
+	//         appended to `drawn` are not counted: the question is how many
+	//         panes were given a picture.
 	// @since v0.14
 	size_t AttachForeignSurfaces(
 		engine::world::Universe &universe,
 		engine::world::WorldId world,
+		std::vector<engine::scene::DrawInstance> &drawn,
 		std::vector<engine::scene::DrawInstance> &foreign,
 		std::vector<engine::render::SurfaceView> &views
 	);

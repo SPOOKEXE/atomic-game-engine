@@ -16,6 +16,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -665,9 +666,7 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 		const Entity stand = store.CreateInstance(engine::scene::PartClass(), "StandIn");
 		store.SetParent(stand, engine::scene::InstallServices(store));
 
-		const Entity camera = store.CreateInstance(
-			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole"
-		);
+		const Entity camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
 		engine::scene::SurfaceCamera target;
 		target.Surface = 3;
 		store.Set(camera, target);
@@ -703,12 +702,17 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 	}
 
 	std::vector<engine::scene::DrawInstance> foreign;
-	CHECK(client::AttachForeignSurfaces(universe, here, foreign, views) == 1);
+	CHECK(client::AttachForeignSurfaces(universe, here, instances, foreign, views) == 1);
 
-	// **This world's list is not touched**, which is the property the fix
-	// turned on: joined to the far world's, every one of them would be culled
-	// against this camera, sorted into this scene's plan and submitted by the
-	// screen pass — the two rooms drawn on top of each other.
+	// **The far world's rows do not join this world's**, which is the property
+	// the fix turned on: joined, every one of them would be culled against this
+	// camera, sorted into this scene's plan and submitted by the screen pass —
+	// the two rooms drawn on top of each other.
+	//
+	// Nothing is appended here either, and that is a statement about this
+	// fixture rather than about the pass: the far world has no pane leading
+	// back, so nobody over there is standing in a hole into this room. The case
+	// where somebody is, is the two-mouthed test below.
 	CHECK(instances.size() == own);
 	CHECK(foreign.size() == published);
 
@@ -741,9 +745,7 @@ TEST_CASE("a portal naming a world that is not there keeps showing its own", "[c
 		const Entity pane = store.CreateInstance(engine::scene::PartClass(), "Pane");
 		store.SetParent(pane, engine::scene::InstallServices(store));
 
-		const Entity camera = store.CreateInstance(
-			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole"
-		);
+		const Entity camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
 		store.Set(camera, engine::scene::SurfaceCamera{});
 
 		engine::scene::Portal portal;
@@ -768,10 +770,351 @@ TEST_CASE("a portal naming a world that is not there keeps showing its own", "[c
 	const size_t own = instances.size();
 
 	std::vector<engine::scene::DrawInstance> foreign;
-	CHECK(client::AttachForeignSurfaces(universe, here, foreign, views) == 0);
+	CHECK(client::AttachForeignSurfaces(universe, here, instances, foreign, views) == 0);
 	CHECK(instances.size() == own);
 	CHECK(foreign.empty());
 	for (const engine::render::SurfaceView &view : views) {
 		CHECK(view.InstanceCount == 0);
+	}
+}
+
+namespace {
+	// A pair of panes facing each other across a hundred units, each a portal
+	// into the other. The arrangement every portal example builds.
+	//
+	// @param store  The world.
+	// @param apart  How far the second pane is down +X from the first.
+	// @param second Whether to make the far pane a portal back, which is what
+	//               gives the first one a partner.
+	void MakePortalPair(Store &store, float apart, bool second) {
+		const Entity services = engine::scene::InstallServices(store);
+
+		const auto pane = [&](std::string_view name, const Vector3 &at) {
+			const Entity part = store.CreateInstance(engine::scene::PartClass(), name);
+			store.SetParent(part, services);
+			store.Set(part, engine::scene::Transform{engine::core::CFrame{at}});
+			store.Set(part, engine::scene::Bounds{Vector3{2.0f, 3.0f, 0.25f}});
+			return part;
+		};
+
+		const Entity near = pane("Near", Vector3::Zero);
+		const Entity far = pane("Far", Vector3{apart, 0.0f, 0.0f});
+
+		const auto hole = [&](std::string_view name, Entity on, Entity to, int8_t slot) {
+			const Entity camera =
+				store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), name);
+			engine::scene::SurfaceCamera target;
+			target.Surface = slot;
+			store.Set(camera, target);
+
+			engine::scene::Portal portal;
+			portal.Destination = to;
+			store.Set(camera, portal);
+
+			store.SetParent(camera, on);
+		};
+
+		hole("NearHole", near, far, 0);
+		if (second) {
+			hole("FarHole", far, near, 1);
+		}
+	}
+}
+
+TEST_CASE("a same-world hole leaves the surface path for the recursive one", "[client][presentation]") {
+	// **The pivot, stated as a test.** A `SurfaceCamera` is placed from the eye,
+	// so when one surface pass draws another pane it projects that pane's image
+	// with a matrix taken from the eye rather than from the camera the pass is
+	// rendering from — the wrong viewpoint, not a stale one. A same-world portal
+	// is therefore drawn by `render::PortalView` and must *not* also arrive as a
+	// `SurfaceView`, or the pane is drawn twice and the second answer is wrong.
+	Universe universe;
+	const WorldId here = AddWorld(universe, "here");
+
+	universe.Enter(here, [](Store &store) { MakePortalPair(store, 100.0f, true); });
+
+	universe.Tick(1.0f / 60.0f);
+	universe.Present(here, 1.0f / 60.0f, 0.0f);
+
+	std::vector<engine::render::PortalView> portals;
+	std::vector<engine::render::SurfaceView> views;
+
+	universe.Enter(here, [&portals, &views](Store &store) {
+		CHECK(client::CollectPortalViews(store, portals) == 2);
+		(void)client::CollectSurfaceViews(store, views, portals);
+	});
+
+	REQUIRE(portals.size() == 2);
+	CHECK(views.empty());
+
+	// Each hole names the other, so the level one opens can skip the pane it is
+	// standing at — CodeParade's `skipPortal`.
+	CHECK(portals[0].Partner == portals[1].Index);
+	CHECK(portals[1].Partner == portals[0].Index);
+
+	// **The rectangle is the seam's, so it is the pane's *face* and not its
+	// box.** A quarter of a unit off the part's centre is the half-extent along
+	// the face normal, which is what `FaceOf` measures and what the sub-camera's
+	// clip plane is put on.
+	const engine::render::PortalView &first = portals[0];
+	const engine::render::PortalView &second = portals[1];
+	CHECK(first.Centre.X == Catch::Approx(0.0f).margin(0.01f));
+	CHECK(std::abs(first.Centre.Z) == Catch::Approx(0.25f));
+	CHECK(std::abs(first.Normal.Z) == Catch::Approx(1.0f));
+
+	// **The defining property of the map**: the source pane's centre lands on
+	// the destination's. Everything the pass does — where the sub-camera stands,
+	// where its near plane is skewed to — follows from it.
+	const Vector3 landed = first.Front.Point(first.Centre);
+	CHECK(landed.X == Catch::Approx(second.Centre.X).margin(0.01f));
+	CHECK(landed.Y == Catch::Approx(second.Centre.Y).margin(0.01f));
+	CHECK(landed.Z == Catch::Approx(second.Centre.Z).margin(0.01f));
+
+	// Two panes of one size, so the hole tells no lie about it.
+	CHECK(first.Front.Scale == Catch::Approx(1.0f));
+
+	// **A lap through and back returns you**, which is what makes it a hole
+	// rather than a one-way door — and it exercises exactly the side test the
+	// renderer makes at every level. `Front` and `Back` are the two sides of *one*
+	// seam and are not each other's inverse; the inverse is the partner's.
+	const auto step = [](const engine::render::PortalView &hole, const Vector3 &at) {
+		const float side = (at - hole.Centre).Dot(hole.Normal);
+		return side >= 0.0f ? hole.Front.Point(at) : hole.Back.Point(at);
+	};
+
+	const Vector3 eye{0.0f, 1.0f, 5.0f};
+	const Vector3 there = step(first, eye);
+
+	// A hundred units away, because that is where the far room is.
+	CHECK((there - eye).Magnitude() == Catch::Approx(100.0f).margin(0.5f));
+
+	const Vector3 home = step(second, there);
+	CHECK(home.X == Catch::Approx(eye.X).margin(0.01f));
+	CHECK(home.Y == Catch::Approx(eye.Y).margin(0.01f));
+	CHECK(home.Z == Catch::Approx(eye.Z).margin(0.01f));
+}
+
+TEST_CASE("a hole with no partner still recurses, and a lone pane has none", "[client][presentation]") {
+	// A one-way hole is a real arrangement — a pane leading into a room with no
+	// pane back — and it must still be drawn recursively. What it has no answer
+	// for is which slot the level below should skip, and -1 is that answer
+	// rather than a slot number that happens to be zero.
+	Universe universe;
+	const WorldId here = AddWorld(universe, "here");
+
+	universe.Enter(here, [](Store &store) { MakePortalPair(store, 60.0f, false); });
+
+	universe.Tick(1.0f / 60.0f);
+	universe.Present(here, 1.0f / 60.0f, 0.0f);
+
+	std::vector<engine::render::PortalView> portals;
+	universe.Enter(here, [&portals](Store &store) {
+		CHECK(client::CollectPortalViews(store, portals) == 1);
+	});
+
+	REQUIRE(portals.size() == 1);
+	CHECK(portals[0].Partner == -1);
+}
+
+TEST_CASE("a cross-world pane keeps its surface camera", "[client][presentation]") {
+	// **The split the pivot deliberately did not close.** A `DestinationWorld` is
+	// a window onto a second simulation rather than a hole in one space: the warp
+	// into another world's coordinates is a stated frame and not a derived one,
+	// so it does not recurse and `AttachForeignSurfaces` goes on pointing it at
+	// the far world's rows.
+	Universe universe;
+	const WorldId here = AddWorld(universe, "here");
+	(void)AddWorld(universe, "there");
+
+	universe.Enter(here, [](Store &store) {
+		const Entity services = engine::scene::InstallServices(store);
+
+		const Entity pane = store.CreateInstance(engine::scene::PartClass(), "Pane");
+		store.SetParent(pane, services);
+
+		const Entity stand = store.CreateInstance(engine::scene::PartClass(), "StandIn");
+		store.SetParent(stand, services);
+
+		const Entity camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+		store.Set(camera, engine::scene::SurfaceCamera{});
+
+		engine::scene::Portal portal;
+		portal.Destination = stand;
+		portal.DestinationWorld = Name("there");
+		store.Set(camera, portal);
+
+		store.SetParent(camera, pane);
+	});
+
+	universe.Tick(1.0f / 60.0f);
+	universe.Present(here, 1.0f / 60.0f, 0.0f);
+
+	std::vector<engine::render::PortalView> portals;
+	std::vector<engine::render::SurfaceView> views;
+	universe.Enter(here, [&portals, &views](Store &store) {
+		CHECK(client::CollectPortalViews(store, portals) == 0);
+		(void)client::CollectSurfaceViews(store, views, portals);
+	});
+
+	CHECK(portals.empty());
+	CHECK_FALSE(views.empty());
+}
+
+TEST_CASE("a cross-world portal carries a body through both of its mouths", "[client][presentation]") {
+	// **A hole has two mouths and the host used to assemble one of them.** The
+	// clone that puts a body's far half into the picture the glass shows was
+	// there; the one that puts the far world's body into *this* room, in front
+	// of this world's pane, was not. So walking into the hole from one world
+	// worked and standing in the other world watching somebody walk in showed
+	// an empty block — a portal that draws from A into B and never back.
+	//
+	// The two panes deliberately name different surface slots. A slot numbers a
+	// camera within one store, so asking the far world for "the pane on slot 2"
+	// because that is what this world's pane sits on picks whichever of its
+	// cameras happens to share the number. The pane that leads home is the one
+	// whose `Portal::DestinationWorld` names this world, and nothing else.
+	Universe universe;
+
+	const WorldId here = AddWorld(universe, "two.mouths.here");
+	const WorldId there = AddWorld(universe, "two.mouths.there");
+
+	// One pane at the origin with its `Front` face at z = -0.2, a stand-in the
+	// same size so the hole does not change scale, and a body standing in the
+	// pane. The stand-ins are a hundred units apart in opposite directions, so
+	// a clone's position says on its own which mouth produced it.
+	const auto build = [&universe](WorldId world, std::string_view other, int8_t slot, float standAtX) {
+		universe.Enter(world, [other, slot, standAtX](Store &store) {
+			const Entity services = engine::scene::InstallServices(store);
+
+			const Vector3 paneSize{10.0f, 8.0f, 0.4f};
+
+			const Entity pane = store.CreateInstance(engine::scene::PartClass(), "Pane");
+			store.SetProperty(pane, Name("Size"), &paneSize, sizeof(paneSize));
+			store.SetParent(pane, services);
+
+			const Entity stand = store.CreateInstance(engine::scene::PartClass(), "StandIn");
+			const Vector3 standAt{standAtX, 0.0f, 0.0f};
+			store.SetProperty(stand, Name("Size"), &paneSize, sizeof(paneSize));
+			store.SetProperty(stand, Name("Position"), &standAt, sizeof(standAt));
+			store.SetParent(stand, services);
+
+			const Entity camera =
+				store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+			engine::scene::SurfaceCamera target;
+			target.Surface = slot;
+			store.Set(camera, target);
+
+			engine::scene::Portal portal;
+			portal.Destination = stand;
+			portal.DestinationWorld = Name(other);
+			store.Set(camera, portal);
+			store.SetParent(camera, pane);
+
+			// **Standing in the pane, which is not a crossing.** The body has
+			// not moved at all — `PreviousTransform` is where it is — so the
+			// interpolation cannot move the clone whatever the frame's alpha.
+			const Entity body = store.CreateInstance(engine::scene::PartClass(), "Body");
+			const Vector3 bodySize{1.0f, 2.0f, 1.0f};
+			const Vector3 bodyAt{0.0f, 0.0f, -0.1f};
+			store.SetProperty(body, Name("Size"), &bodySize, sizeof(bodySize));
+			store.SetProperty(body, Name("Position"), &bodyAt, sizeof(bodyAt));
+			store.SetParent(body, services);
+			store.Set(body, engine::scene::Motion{});
+			store.Set(body, engine::scene::PreviousTransform{engine::core::CFrame(bodyAt)});
+		});
+	};
+
+	build(here, "two.mouths.there", 2, 100.0f);
+	build(there, "two.mouths.here", 5, -100.0f);
+
+	universe.Tick(1.0f / 60.0f);
+	universe.Present(here, 1.0f / 60.0f, 0.0f);
+	universe.Present(there, 1.0f / 60.0f, 0.0f);
+
+	// What each world published for itself, which is what the two lists below
+	// are measured against.
+	const auto publishedBy = [&universe](WorldId world) {
+		size_t count = 0;
+		universe.Enter(world, [&count](Store &store) {
+			if (const auto *list = store.Resource<client::DrawList>()) {
+				count = list->Instances.size();
+			}
+		});
+		return count;
+	};
+
+	const size_t ownHere = publishedBy(here);
+	const size_t ownThere = publishedBy(there);
+	REQUIRE(ownHere > 0);
+	REQUIRE(ownThere > 0);
+
+	// The far half of a clone, found by the one thing that identifies it: it is
+	// the only row a hundred units out along X.
+	const auto cloneAt = [](const std::vector<engine::scene::DrawInstance> &rows, float x) {
+		size_t found = 0;
+		for (const engine::scene::DrawInstance &row : rows) {
+			if (std::abs(row.Frame.Position.X - x) > 0.001f) {
+				continue;
+			}
+			found++;
+
+			// **The same depth into the far pane as into the near one**, which
+			// is what makes the two halves meet at the plane rather than
+			// overlap or leave a gap.
+			CHECK(row.Frame.Position.Z == Catch::Approx(-0.1f).margin(0.001f));
+
+			// **Never a surface itself**, or the copy would claim the slot its
+			// original writes and the two would fight over one texture.
+			CHECK(row.Surface == -1);
+		}
+		return found;
+	};
+
+	SECTION("drawn from here") {
+		std::vector<engine::scene::DrawInstance> drawn;
+		std::vector<engine::render::SurfaceView> views;
+		universe.Enter(here, [&drawn, &views](Store &store) {
+			if (const auto *list = store.Resource<client::DrawList>()) {
+				drawn = list->Instances;
+			}
+			(void)client::CollectSurfaceViews(store, views);
+		});
+
+		std::vector<engine::scene::DrawInstance> foreign;
+		CHECK(client::AttachForeignSurfaces(universe, here, drawn, foreign, views) == 1);
+
+		// The mouth that already worked: this world's body, in the picture the
+		// glass shows, beyond the far world's own rows.
+		CHECK(foreign.size() == ownThere + 1);
+		CHECK(cloneAt(foreign, 100.0f) == 1);
+
+		// **The mouth that did not.** The far world's body is standing in the
+		// far world's pane, and the half of it that is in this room belongs on
+		// the end of this room's list — where it is culled, lit and sorted with
+		// everything else here rather than inside the glass.
+		CHECK(drawn.size() == ownHere + 1);
+		CHECK(cloneAt(drawn, -100.0f) == 1);
+	}
+
+	SECTION("drawn from there") {
+		// The same claim from the other side, because "it works one way round"
+		// is exactly the bug and a test that only looks one way cannot see it.
+		std::vector<engine::scene::DrawInstance> drawn;
+		std::vector<engine::render::SurfaceView> views;
+		universe.Enter(there, [&drawn, &views](Store &store) {
+			if (const auto *list = store.Resource<client::DrawList>()) {
+				drawn = list->Instances;
+			}
+			(void)client::CollectSurfaceViews(store, views);
+		});
+
+		std::vector<engine::scene::DrawInstance> foreign;
+		CHECK(client::AttachForeignSurfaces(universe, there, drawn, foreign, views) == 1);
+
+		CHECK(foreign.size() == ownHere + 1);
+		CHECK(cloneAt(foreign, -100.0f) == 1);
+
+		CHECK(drawn.size() == ownThere + 1);
+		CHECK(cloneAt(drawn, 100.0f) == 1);
 	}
 }

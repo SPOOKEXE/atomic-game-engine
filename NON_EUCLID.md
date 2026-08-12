@@ -717,4 +717,60 @@ derived one. Two ways:
   the far world's draw list available at each level rather than as one appended
   range.
 
-The first is what I would do first.
+**Settled: the first.** A cross-world pane keeps its `SurfaceCamera` and does
+not recurse, and going *through* one is a teleport into the other world rather
+than a step across a seam. That is not a compromise dressed up — a world change
+is a load, and a load wants somewhere to put a screen. A hole you walk through
+without a frame of interruption is a same-world hole by definition; a hole into
+another simulation is a window you step into and arrive on the other side of.
+
+So the split is by what the pane leads to, and both halves keep the mechanism
+that suits them:
+
+| | Same world | Another world |
+|---|---|---|
+| Drawn by | The recursive portal pass | A `SurfaceCamera`, projected as today |
+| Recurses | Yes | No |
+| Crossing | `CrossPortals`, continuous | A teleport, with a load screen if wanted |
+| Resolution | Viewport, sampled by screen position | The pane's own surface target |
+
+---
+
+## The shutdown hang is not the portal pass
+
+The recursive pass landed with a caveat attached: the client hangs at shutdown,
+far more often with the pass on, main thread in a futex inside
+`SDL_WaitForGPUIdle`. The diagnosis offered was a write-after-read hazard at
+depth two — a level-zero target written, sampled, written and sampled again
+inside one command buffer — and the mitigation was to default the depth to one.
+
+**Measured again after merging, that diagnosis does not cover what happens.**
+
+| Scene | Portals in it | Hangs |
+|---|---|---|
+| `Portals-1-world` | three | 7/8 |
+| `Rings` | **none** | 2/6 |
+| `Rings`, offscreen capture path | none | 3/6 |
+
+`Rings` builds no `PortalView`s, so the pass never runs, the target pool is
+never allocated and the release loop walks an empty list. The portal code is
+inert and it still hangs two times in six. The offscreen path hangs too, so it
+is not the swapchain.
+
+So there is a **pre-existing shutdown race in the GPU teardown**, which more
+work per frame makes more likely, and the portal pass is one way of adding more
+work. Depth two may well have the additional hazard described — that measurement
+was 20/20 against 0/13 and is far too clean to be the same thing — but capping
+the depth does not make the client reliable, because at depth one the portals
+demo still hangs seven times in eight.
+
+**What this means for the default.** Depth one is worth keeping for now, because
+the depth-two evidence is strong and separate. But it should not be recorded as
+"the safe configuration": there is no safe configuration until the teardown race
+is closed, and a comment implying otherwise would send the next person looking in
+the wrong file.
+
+Not fixed here, and not attributed further than the evidence goes. The next step
+is the shutdown path rather than the pass: whether `AbandonFrame` can leave an
+acquisition outstanding, and whether anything still holds a command buffer when
+`Renderer::Shutdown` takes the device.

@@ -1148,9 +1148,7 @@ namespace studio {
 				Universe->Present(
 					candidate,
 					frameSeconds,
-					PresentationAlpha(
-						Advancing, Universe->StateOf(candidate), Universe->AlphaOf(candidate)
-					)
+					PresentationAlpha(Advancing, Universe->StateOf(candidate), Universe->AlphaOf(candidate))
 				);
 				break;
 			}
@@ -1451,7 +1449,12 @@ namespace studio {
 				// makes; a second way of finding a scene's surface cameras would
 				// be a second thing to keep in step with what `SurfaceSize` and
 				// `Surface` mean.
-				(void)client::CollectSurfaceViews(store, Surfaces);
+				// **The holes first, because they claim slots the surfaces then
+				// leave alone.** Same-world portals are drawn by the recursive
+				// pass; only cross-world ones stay surfaces. See
+				// `render::PortalView`.
+				(void)client::CollectPortalViews(store, Portals);
+				(void)client::CollectSurfaceViews(store, Surfaces, Portals);
 
 				// TODO(render-pipeline): the world's pipelines were installed here
 				// on first sight of the world, and the chosen key went into the
@@ -1494,7 +1497,15 @@ namespace studio {
 			// `foreign` with the far world's instances and points the surface at
 			// a range of it; a frame with no cross-world portal in it clears
 			// `foreign` and touches nothing else.
-			(void)client::AttachForeignSurfaces(*Universe, shown, foreign, Surfaces);
+			//
+			// **`drawn` goes in beside it, because a hole has two mouths.** The
+			// far side of anybody standing in *this* world's pane belongs in the
+			// picture the pane shows; the near side of anybody standing in the
+			// *far* world's pane back to here belongs in this room, in front of
+			// the pane, and so on the end of this world's own rows. The second
+			// of those is what a cross-world portal was missing, and missing it
+			// is what made one draw only from A into B and never back.
+			(void)client::AttachForeignSurfaces(*Universe, shown, drawn, foreign, Surfaces);
 
 			instances = &drawn;
 		}
@@ -1535,7 +1546,8 @@ namespace studio {
 			{},
 			{},
 			{},
-			foreign
+			foreign,
+			Portals
 		);
 
 		// **Presented, or simply drawn when there is nowhere to present.**

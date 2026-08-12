@@ -108,20 +108,20 @@ namespace engine::scene {
 	// @return The resolved view, projection and their product.
 	CameraMatrices ResolveCamera(const core::CFrame &frame, const Camera &camera, float aspectRatio);
 
-	// The projection a surface camera renders through.
+	// Any projection, with its near plane skewed onto a world-space plane.
 	//
-	// **Off-axis, so it is a window rather than a cone.** The four extents are
-	// independent, so a frustum fitted to a pane from off to one side leans
-	// instead of widening symmetrically about the view axis — which is the same
-	// coverage at twice the texel density, and what `SurfaceCameras.hpp` named
-	// as the change it was waiting for.
+	// **Lengyel's oblique frustum, applied to a projection somebody else
+	// built.** Everything in front of the plane survives clipping and everything
+	// behind it does not, at any angle — which is what a mirror wants for its own
+	// pane, so the frame and the back of the glass cannot occlude the reflection,
+	// and what a portal cannot work without: its destination is set into a wall,
+	// and the wall would otherwise draw across the hole it leads through.
 	//
-	// **Then skewed, if the lens carries a clip plane.** Lengyel's oblique
-	// frustum: the near plane is moved onto `SurfaceLens::ClipNormal` so nothing
-	// behind it survives clipping. A mirror wants that for its own pane, so the
-	// frame and the back of the glass cannot occlude the reflection; a portal
-	// *needs* it, because its destination is set into a wall and the wall would
-	// otherwise draw across the hole it leads through.
+	// **Separate from `SurfaceProjection` because the two callers start from
+	// different frustums.** A surface camera skews a frustum fitted to its pane;
+	// the recursive portal pass skews the **screen's own** projection, unchanged,
+	// which is what makes a pane's clip-space position in the parent view the
+	// same coordinate as its position in the sub-render. One skew, stated once.
 	//
 	// **Written for `0..1` depth, and the difference is not cosmetic.**
 	// Lengyel's published derivation maps the near plane to `-1`, so it
@@ -132,10 +132,32 @@ namespace engine::scene {
 	// z-fighting rather than as a matrix mistake, which is the trap
 	// `CameraMatrices` above already warns about.
 	//
-	// The camera must be on the near side of the clip plane, which is the
-	// arrangement `AimSurfaceCameras` builds: the normal points away from the
-	// camera, into the space being looked at. A camera level with its own clip
-	// plane gets the plain frustum, because there is no half to keep.
+	// The camera must be on the near side of the plane: the normal points away
+	// from it, into the space being looked at. A camera level with the plane gets
+	// the projection back unchanged, because there is no half to keep.
+	//
+	// @param projection The frustum to skew.
+	// @param frame      The camera's world-space placement, which is what takes
+	//                   the plane into view space.
+	// @param normal     The plane's normal in world space. A zero-length one
+	//                   means no plane and no skew.
+	// @param distance   `normal · point` for any point on the plane.
+	// @return The skewed projection, or `projection` when there is nothing to
+	//         skew against.
+	// @since v0.15
+	glm::mat4 ObliqueProjection(
+		const glm::mat4 &projection, const core::CFrame &frame, const core::Vector3 &normal, float distance
+	);
+
+	// The projection a surface camera renders through.
+	//
+	// **Off-axis, so it is a window rather than a cone.** The four extents are
+	// independent, so a frustum fitted to a pane from off to one side leans
+	// instead of widening symmetrically about the view axis — which is the same
+	// coverage at twice the texel density, and what `SurfaceCameras.hpp` named
+	// as the change it was waiting for.
+	//
+	// **Then skewed by `ObliqueProjection`, if the lens carries a clip plane.**
 	//
 	// @param lens  The fitted extents and the plane, in world space.
 	// @param frame The camera's world-space placement, which is what takes the

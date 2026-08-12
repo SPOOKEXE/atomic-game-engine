@@ -128,4 +128,38 @@ namespace engine::graph {
 		std::span<bool> visible,
 		std::span<float> coverage = {}
 	);
+
+	// Whether one rectangle is in front of one camera at all.
+	//
+	// **The recursive portal pass' cull, and it is per portal *per level*.** A
+	// surface's visibility is decided once against the eye because a surface
+	// camera is placed from the eye; a portal's sub-camera is derived from
+	// whichever camera the recursion is currently at, so "can this pane be seen"
+	// has to be asked again at every level — and answering it is what stops the
+	// cost being `portals ^ depth` scene renders in a scene where most holes are
+	// behind you. CodeParade's demo spends a GPU occlusion query per portal per
+	// level on exactly this; this is the same question asked on the CPU.
+	//
+	// **A rectangle rather than a draw instance**, because at depth the pane is
+	// not where the draw list says it is: the sub-camera lives in the warped
+	// space, and what has to be tested there is the *mapped* rectangle. The
+	// caller maps it and hands over four corners' worth of description.
+	//
+	// **A box around the rectangle, not the rectangle itself.** The box is at
+	// least the quad, so the error is always towards drawing — which is the
+	// direction culling has to err in, since a pane wrongly dropped is a hole
+	// that goes black for a frame.
+	//
+	// @param camera The camera's world-to-clip matrix.
+	// @param centre The rectangle's middle, in world space.
+	// @param first  One half-axis, so `centre ± first ± second` is the corners.
+	// @param second The other.
+	// @return Whether any of it may be on screen.
+	// @since v0.15
+	bool VisiblePane(
+		const glm::mat4 &camera,
+		const core::Vector3 &centre,
+		const core::Vector3 &first,
+		const core::Vector3 &second
+	);
 }

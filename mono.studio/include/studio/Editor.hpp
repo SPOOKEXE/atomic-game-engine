@@ -1021,7 +1021,6 @@ namespace studio {
 		bool Claimed(WorldId world, Entity player) const;
 
 	  private:
-
 		// The camera rules, over whichever viewport the pointer is in.
 		//
 		// **One driver rather than one per panel.** Right-drag to look,
@@ -1198,7 +1197,6 @@ namespace studio {
 		void UpdateWorldLifecycle();
 
 	  private:
-
 		// Records that a world had a reason to be running, now.
 		//
 		// @param world The world to keep open.
@@ -2796,6 +2794,12 @@ namespace studio {
 		// `client::CollectSurfaceViews`; a list assembled from what is in the
 		// world is also what makes a deleted mirror stop being drawn.
 		std::vector<engine::render::SurfaceView> Surfaces;
+
+		// The same-world holes, which are drawn by the recursive portal pass
+		// rather than by a surface camera. Gathered before `Surfaces`, because a
+		// slot a portal owns is one no surface camera may claim. See
+		// `client::CollectPortalViews`.
+		std::vector<engine::render::PortalView> Portals;
 
 		// TODO(render-pipeline): `PipelineSelected` mapped world index to the
 		// pipeline key installed for it — a map rather than one name, because two

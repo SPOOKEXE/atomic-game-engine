@@ -1523,7 +1523,25 @@ namespace client {
 						// view per surface index since v0.8, so a room of
 						// mirrored walls gets a working mirror per wall rather
 						// than one wall's image projected across all four.
-						(void)CollectSurfaceViews(store, Surfaces);
+						// **The holes first, because they claim slots the
+						// surfaces then leave alone.** A same-world portal is
+						// drawn by the recursive pass from a camera derived from
+						// this one; a surface camera aimed at the same pane
+						// would be a second answer taken from the eye.
+						(void)CollectPortalViews(store, Portals);
+						(void)CollectSurfaceViews(store, Surfaces, Portals);
+
+						// **Whether any pane here names another world**, asked
+						// while the world is open because that is the only place
+						// it is cheap. What it gates is a whole copy of the draw
+						// list, and a scene with no window in it must not pay
+						// for one.
+						Windowed = false;
+						store.Each<const engine::scene::Portal>(
+							[this](engine::ecs::Entity, const engine::scene::Portal &portal) {
+								Windowed = Windowed || portal.DestinationWorld.IsValid();
+							}
+						);
 
 						// TODO(render-pipeline): the world's own pipeline was
 						// installed here, on a world change rather than per
@@ -1859,6 +1877,34 @@ namespace client {
 		// `Renderer::SetAnimationTime` carries the rule.
 		Renderer.SetAnimationTime(AnimationSeconds);
 
+		// **The worlds a pane looks into, and the bodies standing in both mouths
+		// of it.** This is the step the standalone client never had: the studio
+		// has called `AttachForeignSurfaces` since cross-world panes existed and
+		// this loop handed the renderer an empty foreign span, so a
+		// `DestinationWorld` pane fell back to showing its own world — a mirror
+		// where a window was authored.
+		//
+		// **Outside every `Enter`, because it enters other worlds** and
+		// `Universe::Enter` is not re-entrant. The studio's own call carries the
+		// same note for the same reason.
+		//
+		// **And no `PresentPortalDestinations` beside it, unlike the studio.**
+		// That step exists there because a panel presents only the world it
+		// shows, so a far world's draw list was whatever it held last time
+		// somebody looked at it. This loop presents *every* simulated world
+		// already — a world the player is not looking at still ticks — so the
+		// far list is this frame's by the time we get here.
+		Foreign.clear();
+		std::span<const engine::scene::DrawInstance> drawn = Views.Instances();
+
+		if (Windowed) {
+			// The copy `Drawn`'s comment argues for: the published list is
+			// `const` and the return leg has to go somewhere.
+			Drawn.assign(drawn.begin(), drawn.end());
+			(void)AttachForeignSurfaces(*Universe_, Rendered, Drawn, Foreign, Surfaces);
+			drawn = Drawn;
+		}
+
 		// TODO(render-pipeline): this call took a `render::View` per camera.
 		//
 		// The old system's `Render` takes one camera's worth of arguments
@@ -1876,7 +1922,7 @@ namespace client {
 		LastFrame = Renderer.Render(
 			Views.CameraFrame(),
 			Views.Camera(),
-			Views.Instances(),
+			drawn,
 			Overlay,
 			Surfaces,
 			hook,
@@ -1885,7 +1931,9 @@ namespace client {
 			Particles,
 			RibbonVertices,
 			RibbonRuns,
-			Lights
+			Lights,
+			Foreign,
+			Portals
 		);
 
 		// **After the frame rather than before it**, so the capture is of a
@@ -1956,13 +2004,14 @@ namespace client {
 				// are being submitted at all.
 				ENGINE_INFO(
 					"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced, "
-					"{} surface pass(es)",
+					"{} surface pass(es), {} portal pass(es)",
 					Clock.Now(),
 					FramesDrawn,
 					LastFrame.DrawCalls,
 					LastFrame.Culled,
 					LastFrame.SurfaceInstances,
-					LastFrame.SurfacePasses
+					LastFrame.SurfacePasses,
+					LastFrame.PortalPasses
 				);
 				break;
 			}

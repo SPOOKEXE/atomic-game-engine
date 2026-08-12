@@ -59,7 +59,7 @@
 // its orientation decides which texels the pane lands on and never which part of
 // the world it shows. The position is what makes it a reflection.
 //
-// ## A portal is step 1 with a different map
+// ## A *cross-world* portal is step 1 with a different map
 //
 // Everything above generalises, and `Portal` is what uses it. Replace "mirror
 // the eye through the pane's plane" with "map it through `destination · source⁻¹`,
@@ -67,6 +67,34 @@
 // steps are unchanged: the same aim along the mapped normal, the same oblique
 // clip at the mapped plane, the same off-axis fit to the mapped corners, the
 // same slot handed to the same pane.
+//
+// **A same-world portal stopped being one of these at v0.15, and the reason is
+// worth stating here because this file argued the opposite at length.** Every
+// camera placed by this pass is a function of *the eye*. That is exactly right
+// for a reflection and it is what a hole cannot survive: when one surface pass
+// draws another surface's pane it projects that pane's image with the second
+// camera's own matrix, which was placed from the eye rather than from the camera
+// the pass is rendering from. A portal seen through a portal is therefore drawn
+// from the wrong **viewpoint**, not merely from a frame-old texture, and no
+// number of bounces touches it.
+//
+// So a hole in *this* space is `render::PortalView` and a recursive render pass,
+// whose sub-camera is derived from whichever camera the recursion is currently
+// at — the warp applied to that camera's own frame, that camera's own projection
+// skewed onto the mapped pane. Warps then compose down the recursion by
+// construction. `NON_EUCLID.md`'s final section is the whole argument and
+// `temp/NonEuclidean`'s `Portal.cpp` is the model.
+//
+// **What is left on this path is the cross-world pane**, and deliberately: a
+// `Portal::DestinationWorld` is a *window onto a second simulation* rather than a
+// hole in one space, so a warp into it is a stated frame and not a derived one.
+// It keeps its camera, its fit and its slot, and it does not recurse.
+//
+// This pass still places a camera for a same-world portal and still hands it a
+// slot, because the slot is how a pane is named and `client::CollectPortalViews`
+// reads `PortalSeam::Surface` to find the pane's draw run. What it no longer does
+// is reach a screen: `client::CollectSurfaceViews` drops any camera whose slot a
+// portal claimed.
 //
 // **The rectangle that is fitted and clipped against is the mapped *source*
 // pane, never the destination part.** `opaque.frag` shades a fragment of the
@@ -93,8 +121,9 @@
 // matrix, a crossing body, a clone, a ghost, the camera arm and a
 // portal-crossing ray all go through it.
 //
-// `D00112` is what remains, and it is now only in-frame recursion — which is
-// what would remove the one-frame seam on the frame somebody crosses.
+// `D00112` closed at v0.15 on the bounce loop, and the seam it left behind — a
+// hole seen through a hole, drawn from the eye rather than from the camera the
+// pass is rendering from — is the recursive portal pass'. See the section above.
 //
 // **Step 5 is what makes this an instance rather than a configuration.** Setting
 // `Visual::Surface` by hand as well as parenting the camera is one fact recorded
@@ -130,12 +159,14 @@
 // which is what used to make the fit a step function and read as the mirror
 // flashing.
 //
-// **A portal can be walked through, and the frame it happens on is still a
-// frame behind.** Traversal is `CrossPortals`, the body's half, with the eye
-// carried by `PortalCrossing` and the yaw by `PortalTransit`. What is left is
-// that a surface's texture is a frame old, so the portal chain resolves over
-// frames rather than within one — invisible on a mirror, a seam on the frame
-// somebody crosses. `D00112` is now only that.
+// **A portal can be walked through.** Traversal is `CrossPortals`, the body's
+// half, with the eye carried by `PortalCrossing` and the yaw by `PortalTransit`
+// — and none of it knows what a `SurfaceCamera` is, which is why none of it
+// changed when the picture moved to a pass of its own.
+//
+// **A cross-world pane is still a frame behind, and now it is the only thing
+// that is.** Its texture is written by the surface pass and read on the next
+// one; a same-world hole resolves inside the frame, deepest first.
 //
 // **A camera with no `BasePart` parent is left exactly where it was put.** That
 // is the script-authored arrangement `Mirrors-1-world.luau` used and it still
@@ -272,6 +303,19 @@ namespace engine::scene {
 		//
 		// @since v0.15
 		float Scale = 1.0f;
+
+		// Which tags an instance must carry to be drawn through this hole, or
+		// zero for all of them, from `SurfaceCamera::TagFilter`.
+		//
+		// **Carried on the seam because the recursive portal pass has no camera
+		// to read it off.** A same-world hole is drawn by `render::PortalView`
+		// rather than by a surface camera, and the seam is the only description
+		// of it that reaches the host — so a filter authored on the pane would
+		// otherwise be silently dropped for exactly the portals that stopped
+		// being surfaces.
+		//
+		// @since v0.15
+		uint32_t TagFilter = 0;
 
 		// Which surface slot the pane samples, from `SurfaceCamera::Surface`.
 		// What lets a host name one portal out of several.
