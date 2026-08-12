@@ -745,6 +745,22 @@ works, and a destination with **no runtime at all** — driven through the
 scheduler, so the wiring is pinned as well as the arithmetic — takes somebody in
 and gives them a body.
 
+**And the first version of that fix duplicated everybody**, which is worth
+recording because the cause is a property of the scheduler rather than of
+portals. `ecs::Scheduler` does not dedupe by name, and the studio registered the
+admitter twice: once through `client::InstallPresentation`, which it shares with
+the standalone client, and once beside its own physics and gravity systems. Both
+copies ran, the delivery was read and not consumed, and every crossing produced
+**two** players and two characters — one adopted by the play link and one orphan
+nobody drives, standing in the world for ever, one more of them per teleport. The
+picture of it is a character left behind in the world you just walked out of.
+
+Two changes, and the first is the one that matters: **the admitter takes what it
+admits out of the inbox**, so a second registration costs a walk over an empty
+list rather than a second person. The duplicate registration is gone as well, with
+a comment where it was. The case that pins it registers the system **twice on
+purpose** and asserts one player and one body.
+
 ---
 
 # Part IV — the full port, v0.15

@@ -1704,14 +1704,21 @@ namespace studio {
 		// otherwise be owned by a dead entity for the rest of the session.
 		engine::scene::RegisterOwnershipSystem(systems);
 
-		// **Who a teleport brings in, and it must not depend on scripts.** A
-		// destination is chosen by a script in *another* world, so a world can be
-		// somebody's destination without containing a line of code — and
-		// admitting used to happen inside the Luau runtime's own delivery pump.
-		// A world with no runtime took the payload into its inbox and left it
-		// there: destroyed in the world you left, never built in the world you
-		// went to. `script::RegisterTeleportAdmission` carries the argument.
-		engine::script::RegisterTeleportAdmission(systems);
+		// **The teleport admitter is not registered here, and that is the
+		// correction.** It belongs to every world whether or not scripts run —
+		// `script::RegisterTeleportAdmission` carries the whole argument — and
+		// `client::InstallPresentation` above already installs it, because the
+		// studio and the standalone client share that call. Adding it a second
+		// time here is what made every arrival admit twice: `ecs::Scheduler`
+		// does not dedupe by name, so two copies of the system both ran, and a
+		// cross-world portal produced two players and two characters per
+		// crossing — one adopted by the play link and one orphan nobody drives,
+		// one more of them on every teleport.
+		//
+		// The admitter itself now takes what it admits out of the inbox, so a
+		// third registration would cost a walk over an empty list rather than a
+		// third person. This comment is here so the next person does not add one
+		// back for the same good reason.
 
 		// **And the characters, for the same reason the ownership reclaim is
 		// here: the studio is an authority.** A world played in this process is

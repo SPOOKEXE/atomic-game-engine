@@ -979,6 +979,16 @@ TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
 		// cannot reach each other, so only this one can stop the player being
 		// in both — and the router already holds a copy of the bytes.
 		CHECK_FALSE(store.Alive(traveller));
+
+		// **And their body with them, which is the half a screenshot notices.**
+		// A `Player` is a row in a service and a character is a model in the
+		// workspace; destroying the first and leaving the second is a body
+		// standing in a world nobody is in, walking nowhere, for ever. It is
+		// also what makes a round trip look like it duplicates people: one in
+		// the world you left and one in the world you arrived in.
+		CHECK(
+			store.FindFirstChild(engine::scene::WorkspaceOf(store), "Wanderer") == engine::ecs::NULL_ENTITY
+		);
 	});
 
 	// The barrier that carries it across.
@@ -1089,8 +1099,18 @@ TEST_CASE("a world with no scripts still takes somebody in", "[script][teleport]
 	// **The destination has services and a scheduler and no runtime at all.**
 	// That is the whole point of the case: nothing here can run a line of Luau,
 	// and somebody still has to be able to arrive.
+	//
+	// **Registered twice, deliberately.** `ecs::Scheduler` does not dedupe by
+	// name, and a host that installs this once through a shared per-world call
+	// and once beside its own systems is not hypothetical — the studio did
+	// exactly that, and every arrival was admitted twice: two `Player` rows and
+	// two characters per crossing, one adopted by the play link and one orphan
+	// nobody drives, one more of them on every teleport. What stops it is that
+	// the admitter *takes* what it admits out of the inbox, so the second copy
+	// finds an empty list. This is the case that says so.
 	universe.Enter(to, [&](Store &store, engine::ecs::Scheduler &systems) {
 		engine::scene::InstallServices(store);
+		engine::script::RegisterTeleportAdmission(systems);
 		engine::script::RegisterTeleportAdmission(systems);
 	});
 
@@ -1122,6 +1142,20 @@ TEST_CASE("a world with no scripts still takes somebody in", "[script][teleport]
 		// guarantee a scripted destination gives, from a world that cannot run
 		// a script to give it.
 		CHECK(engine::scene::CharacterOf(store, arrived) != engine::ecs::NULL_ENTITY);
+
+		// **Exactly one of them**, which is the half two registrations exist to
+		// test. A second `Player` of the same name is one nothing claims and
+		// nobody drives, and the character under it stands in the world for
+		// ever.
+		size_t people = 0;
+		store.EachChild(engine::scene::PlayersOf(store), [&people](Entity) { people++; });
+		CHECK(people == 1);
+
+		size_t bodies = 0;
+		store.EachChild(engine::scene::WorkspaceOf(store), [&](Entity child) {
+			bodies += store.InstanceNameOf(child) == engine::core::Name("Wanderer") ? 1u : 0u;
+		});
+		CHECK(bodies == 1);
 	});
 
 	scripts.reset();
