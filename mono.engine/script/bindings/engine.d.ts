@@ -780,6 +780,7 @@ declare interface Camera extends PVInstance {
 
 declare interface SurfaceCamera extends Camera {
 	Effect: Enum.SurfaceEffect;
+	FPS: number;
 	Face: Enum.NormalId;
 	ImageTransparency: number;
 	TagFilter: string;

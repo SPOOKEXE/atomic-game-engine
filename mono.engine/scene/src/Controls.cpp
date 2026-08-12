@@ -196,6 +196,19 @@ namespace engine::scene {
 			forward = carried.Rotate(forward);
 		}
 
+		// **And never left standing in the glass.** The crossing above answers
+		// which room the eye is in; it does not stop the eye landing *inside*
+		// the pane, which an arm swung into a doorway or a first-person walk up
+		// to one both do. A surface camera constructed from a viewpoint in its
+		// own plane has no half-space to clip and no bounded fit, and the pane
+		// fills the screen with a smear. `ClearOfPanes` is the same rule a body
+		// already gets from its landing clearance, applied to the eye.
+		//
+		// **After the crossing rather than before it**, because it is the eye's
+		// final resting place that has to be out of the seam — pushing it clear
+		// first and then mapping it through a hole would put it back in.
+		(void)engine::scene::ClearOfPanes(store, eye);
+
 		// **`LookAt` towards a point along the forward rather than at the head**,
 		// which matters in first person and in shift-lock: aiming at the head from
 		// the head is a zero-length direction, and aiming at the head from over a

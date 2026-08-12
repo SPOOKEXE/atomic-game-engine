@@ -13,11 +13,13 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
@@ -239,13 +241,25 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 	// units and covered a third of it at two.
 	//
 	// So what is asserted is the thing that actually matters, rather than an
-	// angle: every corner of the pane projects inside the image the camera
-	// renders.
+	// angle: every part of the pane **that the viewer can see** projects inside
+	// the image the camera renders.
+	//
+	// **"That the viewer can see" is the correction, and it is the whole of the
+	// close-up sharpness.** The invariant used to be every *corner* of the pane,
+	// which is stronger than the shader needs and ruinously expensive up close:
+	// a pane subtends nearly half a turn from a point on its own surface while a
+	// screen subtends seventy degrees, so covering the corners means spending
+	// almost every texel outside the frame and the image goes blocky exactly
+	// when it is largest. The fit is intersected with the viewer's own frustum
+	// now, and what has to hold is that nothing on screen falls outside the
+	// texture — which is precisely the condition `opaque.frag` falls back on.
 	Mirror mirror;
 
-	// Half extents 8 by 4.5 on a pane facing -Z, so the face is at z = -0.2 and
-	// its corners are the four combinations of those.
-	const auto cornersAreCovered = [&]() {
+	// Half extents 8 by 4.5 on a pane facing -Z, so the face is at z = -0.2.
+	// Sampled over a grid rather than at the corners, because the corners are no
+	// longer the extreme case: with the fit clamped to the screen, the point
+	// that fails first is wherever the two boundaries cross.
+	const auto paneIsCovered = [&]() {
 		const Transform *placed = mirror.World.Get<Transform>(mirror.Reflection);
 		const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
 		REQUIRE(placed != nullptr);
@@ -260,14 +274,40 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 			)
 				.ViewProjection;
 
+		// What the screen itself makes of the pane, which is what decides which
+		// points have to be covered at all.
+		const Transform *eyePlaced = mirror.World.Get<Transform>(mirror.Eye);
+		const Camera *eyeLens = mirror.World.Get<Camera>(mirror.Eye);
+		REQUIRE(eyePlaced != nullptr);
+		REQUIRE(eyeLens != nullptr);
+
+		const glm::mat4 screen =
+			engine::scene::ResolveCamera(eyePlaced->Frame, *eyeLens, 16.0f / 9.0f).ViewProjection;
+
 		bool covered = true;
-		for (const float x : {-8.0f, 8.0f}) {
-			for (const float y : {-4.5f, 4.5f}) {
-				const glm::vec4 clip = viewProjection * glm::vec4(x, y, -0.2f, 1.0f);
-				INFO("corner " << x << ", " << y << " has w " << clip.w);
+		constexpr int STEPS = 16;
+
+		for (int ix = 0; ix <= STEPS; ix++) {
+			for (int iy = 0; iy <= STEPS; iy++) {
+				const float x = -8.0f + 16.0f * static_cast<float>(ix) / STEPS;
+				const float y = -4.5f + 9.0f * static_cast<float>(iy) / STEPS;
+				const glm::vec4 point(x, y, -0.2f, 1.0f);
+
+				// Off screen is not this camera's problem. A fit that covered
+				// the whole pane would pass this too — it is a weaker condition,
+				// and deliberately: what the shader needs is nothing on screen
+				// falling outside the image.
+				const glm::vec4 onScreen = screen * point;
+				if (!(onScreen.w > 0.0f) || std::abs(onScreen.x / onScreen.w) > 1.0f ||
+					std::abs(onScreen.y / onScreen.w) > 1.0f) {
+					continue;
+				}
+
+				const glm::vec4 clip = viewProjection * point;
+				INFO("pane point " << x << ", " << y << " has w " << clip.w);
 
 				// Behind the camera is not covered, and saying so beats a divide
-				// that flips the sign and reports the corner as central.
+				// that flips the sign and reports the point as central.
 				if (!(clip.w > 0.0f)) {
 					covered = false;
 					continue;
@@ -279,8 +319,42 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 		return covered;
 	};
 
+	// The strict form, which still has to hold whenever the pane fits on the
+	// screen. **This is the guard that the clamp does not bite when it should
+	// not**: at any ordinary distance the fit is already far tighter than the
+	// viewer's own frustum, so intersecting with it must change nothing at all
+	// — and a clamp that quietly cropped a mirror seen from across a room would
+	// look exactly like the bug it was written to fix.
+	const auto cornersAreCovered = [&]() {
+		const Transform *placed = mirror.World.Get<Transform>(mirror.Reflection);
+		const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+		REQUIRE(placed != nullptr);
+		REQUIRE(fitted != nullptr);
+
+		const glm::mat4 viewProjection =
+			engine::scene::ResolveSurfaceCamera(
+				placed->Frame, engine::scene::SurfaceProjection(*fitted, placed->Frame)
+			)
+				.ViewProjection;
+
+		bool covered = true;
+		for (const float x : {-8.0f, 8.0f}) {
+			for (const float y : {-4.5f, 4.5f}) {
+				const glm::vec4 clip = viewProjection * glm::vec4(x, y, -0.2f, 1.0f);
+				INFO("corner " << x << ", " << y << " has w " << clip.w);
+				if (!(clip.w > 0.0f)) {
+					covered = false;
+					continue;
+				}
+				covered = covered && std::abs(clip.x / clip.w) <= 1.0f && std::abs(clip.y / clip.w) <= 1.0f;
+			}
+		}
+		return covered;
+	};
+
 	// Twenty units back, which the old constant did cover.
 	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(paneIsCovered());
 	CHECK(cornersAreCovered());
 
 	// **Two units, which it did not.** The pane needs about 150 degrees from
@@ -288,13 +362,13 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 	// its own grey around a rectangle of reflection.
 	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, 2.0f});
 	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
-	CHECK(cornersAreCovered());
+	CHECK(paneIsCovered());
 
 	// And off to one side as well as close, which is the case a symmetric
 	// frustum has to widen for rather than shift.
 	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{6.0f, 3.0f, 3.0f});
 	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
-	CHECK(cornersAreCovered());
+	CHECK(paneIsCovered());
 
 	// **Far enough away that the fit narrows rather than widens**, which is the
 	// half a "make it wider" fix would pass without doing: a distant pane gets a
@@ -302,6 +376,7 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 	// room around it.
 	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, 200.0f});
 	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(paneIsCovered());
 	CHECK(cornersAreCovered());
 
 	// The frustum narrows rather than staying wide. Measured as a span at the
@@ -1441,4 +1516,332 @@ TEST_CASE("going back through a scaled hole undoes the scaling", "[scene][surfac
 		mirror.World.Get<engine::scene::Motion>(walker)->Linear.Magnitude(),
 		Catch::Matchers::WithinAbs(16.0f, 1e-3f)
 	);
+}
+
+TEST_CASE("a body goes through the nearest hole, not the first one gathered", "[scene][surfacecameras]") {
+	// **The bug that reads as the camera flipping on some crossings and not
+	// others.** `PlaceCamera` puts the third-person arm through the *nearest*
+	// pane its segment meets, and `CrossPortals` used to move the body through
+	// the *first one gathered* — which is archetype order, and archetype order
+	// moves whenever anything in the world changes a component set. On the
+	// frames the two chose differently the body went through one hole and the
+	// eye through another, and nothing about the crossing distinguished those
+	// frames from the ones that worked.
+	//
+	// The fixture's pane is at `z = -0.2` and leads to `x = 100`. A second one
+	// stands *in front* of it at `z = 0.3` and leads to `x = 200`, and is
+	// created second so that a first-match rule picks the fixture's.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	const Entity nearPane =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "NearPane");
+	mirror.World.Set<Transform>(nearPane, Transform{CFrame(Vector3{0.0f, 0.0f, 0.5f})});
+	mirror.World.Set<Bounds>(nearPane, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+
+	const Entity nearFar =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "NearFar");
+	mirror.World.Set<Transform>(nearFar, Transform{CFrame(Vector3{200.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(nearFar, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+
+	const Entity nearCamera = mirror.World.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), "NearReflection"
+	);
+	SurfaceCamera target;
+	target.Face = NormalId::Front;
+	mirror.World.Set<SurfaceCamera>(nearCamera, target);
+	mirror.World.Set<Transform>(nearCamera, Transform{CFrame()});
+	mirror.World.SetParent(nearCamera, nearPane);
+	mirror.World.Set<engine::scene::Portal>(nearCamera, engine::scene::Portal{nearFar});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 2);
+
+	// **What makes this a regression guard rather than a coincidence.** The
+	// *farther* pane is gathered first, so a rule that took the first match
+	// would send the body to `x = 100` and this case would be green against the
+	// bug it is written for. If a change to the store's walk order ever flips
+	// this, the case below stops testing anything and this line is what says so.
+	REQUIRE(seams[0].Pane == mirror.Pane);
+
+	// A step that passes through both planes inside both rectangles.
+	const Entity walker =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+	mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, -2.0f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 2.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(
+		walker, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, Vector3::Zero}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	// The one it reached first, which is the one in front.
+	CHECK_THAT(
+		mirror.World.Get<Transform>(walker)->Frame.Position.X, Catch::Matchers::WithinAbs(200.0f, TOLERANCE)
+	);
+
+	// **And the eye agrees, which is the whole point.** The same segment through
+	// the same rule has to name the same hole, or the body and the camera end up
+	// in two rooms.
+	engine::scene::SeamTransform carried;
+	REQUIRE(
+		engine::scene::PortalCrossing(
+			mirror.World, Vector3{0.0f, 0.0f, 2.0f}, Vector3{0.0f, 0.0f, -2.0f}, carried
+		)
+	);
+	CHECK_THAT(carried.Point(Vector3{0.0f, 0.0f, -2.0f}).X, Catch::Matchers::WithinAbs(200.0f, 1e-2f));
+}
+
+TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecameras]") {
+	// **A floor is not standing in a doorway, and the straddle test used to
+	// think it was.** Every check in that test widens by the body's own reach,
+	// which is right for a character and absurd for a slab: a floor fifty studs
+	// across has a reach of seventy, so its centre is within reach of every
+	// plane in the building and inside every rectangle in it. What got drawn was
+	// a copy of the far room's floor laid across the near room, meeting it along
+	// a hard straight line through the middle of the scene.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// **And a person is very nearly as big as the doorway they walk through**,
+	// which is the half a size rule gets wrong if it is stated against the
+	// pane's shorter half-axis. It was, briefly, and it refused every character
+	// in every hole — no clone in the far room, no half a body in the picture,
+	// which is the artefact this whole mechanism exists to remove.
+	//
+	// So the rule lives only where it is needed — the pass that reads a draw
+	// list and cannot ask whether a thing is able to move — and it is stated
+	// loosely, against the pane's diagonal. `SeamStraddled` has no size rule at
+	// all, because its callers filter by query.
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+
+	// A character-shaped body in the seam, which must straddle.
+	CHECK(engine::scene::SeamStraddled(seams[0], Vector3{0.0f, 0.0f, -0.2f}, 2.9f));
+
+	// A doorway-sized pane and the same character: still yes. The pane's shorter
+	// half-axis is two and the character's reach is nearly three, which is the
+	// arithmetic the broken rule refused.
+	engine::scene::PortalSeam doorway = seams[0];
+	doorway.First = Vector3{2.0f, 0.0f, 0.0f};
+	doorway.Second = Vector3{0.0f, 2.5f, 0.0f};
+	CHECK(engine::scene::SeamStraddled(doorway, Vector3{0.0f, 0.0f, -0.2f}, 2.9f));
+
+	// The pass that draws the far half keeps its own guard, because it is the
+	// one that cannot tell a floor from a person.
+	std::vector<engine::scene::DrawInstance> drawn;
+
+	engine::scene::DrawInstance slab;
+	slab.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
+	slab.HalfExtent = Vector3{50.0f, 0.5f, 50.0f};
+	drawn.push_back(slab);
+
+	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 0);
+
+	engine::scene::DrawInstance body;
+	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
+	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
+	drawn.push_back(body);
+
+	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 1);
+}
+
+TEST_CASE("a viewpoint is never left standing in a pane", "[scene][surfacecameras]") {
+	// **The band a camera cannot render from.** A surface camera built from an
+	// eye in its own pane's plane has no half-space for the oblique clip to keep
+	// and no bounded fit, and the pane comes out as a vertical smear of
+	// stretched texels — which reads as a corrupt texture rather than as an eye
+	// standing somewhere it should not. A body already has this rule: it is put
+	// down clear of whatever plane it crossed.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// The pane's face is at `z = -0.2` and its normal is `-Z`, so the side the
+	// normal points to — the side `SeamOffset` calls positive — is the smaller
+	// `z`. A point a little that way is a point that belongs that way.
+	Vector3 ahead{0.0f, 0.0f, -0.25f};
+	CHECK(engine::scene::ClearOfPanes(mirror.World, ahead));
+	CHECK(std::abs(ahead.Z + 0.2f) > 0.2f);
+
+	// **Out of the side it was nearer**, which is the same tie-break a crossing
+	// body gets from `SeamMapping`: barely in from one side and it belongs on
+	// that side.
+	CHECK(ahead.Z < -0.2f);
+
+	// And a point on the other side of the middle comes out the other way.
+	Vector3 behind{0.0f, 0.0f, -0.15f};
+	CHECK(engine::scene::ClearOfPanes(mirror.World, behind));
+	CHECK(behind.Z > -0.2f);
+
+	// **Well clear is left exactly alone**, which is every frame in every scene
+	// that has a portal in it and nobody standing in one.
+	Vector3 outside{0.0f, 0.0f, 5.0f};
+	CHECK_FALSE(engine::scene::ClearOfPanes(mirror.World, outside));
+	CHECK_THAT(outside.Z, Catch::Matchers::WithinAbs(5.0f, TOLERANCE));
+
+	// And so is a point level with the pane but well past the end of it: a plane
+	// is infinite and a pane is not, so an eye beside a doorway is in a wall
+	// rather than in a hole.
+	Vector3 beside{40.0f, 0.0f, -0.2f};
+	CHECK_FALSE(engine::scene::ClearOfPanes(mirror.World, beside));
+	CHECK_THAT(beside.X, Catch::Matchers::WithinAbs(40.0f, TOLERANCE));
+}
+
+TEST_CASE("a far-side copy that lands on its original is not drawn", "[scene][surfacecameras]") {
+	// **Two coplanar surfaces at one depth is a stripe of flickering colour.** A
+	// pair of panes can be arranged so the map is near enough the identity for
+	// whatever stands beside them — two rooms laid out adjacent with the hole
+	// between them agreeing with the geometry — and every copy then arrives on
+	// top of the thing it was copied from. A copy that overlaps its original is
+	// not a far half; it is a duplicate, and it can only fight.
+	//
+	// The degenerate pairing is a pane whose destination is itself: the map
+	// composes to something that leaves the pane's own neighbourhood where it
+	// is.
+	Mirror mirror;
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{mirror.Pane});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+
+	std::vector<engine::scene::DrawInstance> drawn;
+
+	engine::scene::DrawInstance body;
+	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
+	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
+	drawn.push_back(body);
+
+	// The map takes this body onto itself, so there is nothing to add.
+	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 0);
+	CHECK(drawn.size() == 1);
+}
+
+TEST_CASE("a character standing in a hole is drawn on both sides of it", "[scene][surfacecameras]") {
+	// **The artefact this whole mechanism exists to remove, asserted against a
+	// real rig rather than a box.** A pane is a hole and a body may straddle it;
+	// the body is one set of parts in one place, so without a copy the far room
+	// draws nothing and the near room draws all of it. Standing in the seam you
+	// are whole on the side you came from and absent on the side you are walking
+	// into.
+	//
+	// **A whole character, because that is where it broke.** A character is six
+	// anchored limbs posed off an invisible root, so it is found by the limb
+	// walk and not the moving-body one — and a size rule stated against the
+	// pane's shorter half-axis refused every one of them, because a person is
+	// very nearly as big as the doorway they walk through.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	engine::scene::InstallServices(mirror.World);
+
+	// Feet on the bottom edge of the pane's rectangle, standing in its plane.
+	engine::scene::CharacterDesc desc;
+	desc.Frame = CFrame(Vector3{0.0f, -4.5f, -0.2f});
+	const Entity model = engine::scene::MakeCharacter(mirror.World, desc);
+	REQUIRE(model != engine::ecs::NULL_ENTITY);
+
+	// What decides whether a part draws at all, and therefore whether the clone
+	// walk can see it.
+	(void)engine::scene::SyncRendered(mirror.World);
+	(void)engine::scene::PoseCharacters(mirror.World);
+
+	std::vector<engine::scene::DrawInstance> drawn;
+	const size_t clones = engine::scene::AppendPortalClones(mirror.World, drawn);
+
+	// **More than one, because a character is not one box.** The exact count is
+	// how many limbs happen to reach the plane and is the rig's business; that
+	// it is none is the bug.
+	CHECK(clones > 0);
+	REQUIRE(drawn.size() == clones);
+
+	// **And on the far side**, which is the half that says the copy is a copy
+	// through the hole rather than a second one beside the original.
+	// Within a rig's own width of the far pane rather than on it: an arm sits a
+	// stud and a half off the middle, and it is still in the far room.
+	for (const engine::scene::DrawInstance &copy : drawn) {
+		CHECK_THAT(copy.Frame.Position.X, Catch::Matchers::WithinAbs(100.0f, 3.0f));
+
+		// Never a surface of its own, or a cloned mirror would fight the
+		// original for the slot.
+		CHECK(copy.Surface == -1);
+	}
+}
+
+TEST_CASE("the far half of a body reaches the picture in the pane", "[scene][surfacecameras]") {
+	// **Being drawn on both sides is half the ask; the *hole* showing it is the
+	// other half.** A copy appended to the draw list is drawn by the screen
+	// pass, which puts the far half in the far room — but somebody looking *at*
+	// the pane sees the surface texture, and if the copy never reached the
+	// surface pass the picture in the hole would show a room with nobody in it
+	// while the body is visibly standing in the doorway.
+	//
+	// What decides that is where `OrderScene` puts it. The surface pass draws
+	// the `Reflected` run — the opaque part of the scene range that is not
+	// itself a mirror — so a copy is shown by the hole exactly when it lands
+	// there. It does, because a copy carries `Surface = -1` and the original's
+	// transparency, and the ordering has no other opinion.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// The pane itself, which is what makes the run boundaries meaningful: it
+	// shows a surface, so it belongs *after* the reflected run and must not be
+	// mistaken for content.
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+	std::vector<engine::scene::DrawInstance> drawn;
+
+	engine::scene::DrawInstance pane;
+	pane.Frame = CFrame(Vector3::Zero);
+	pane.HalfExtent = Vector3{8.0f, 4.5f, 0.2f};
+	pane.Surface = mirror.World.Get<Visual>(mirror.Pane)->Surface;
+	drawn.push_back(pane);
+
+	engine::scene::DrawInstance body;
+	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
+	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
+	drawn.push_back(body);
+
+	const size_t clones = engine::scene::AppendPortalClones(mirror.World, drawn);
+	// Nothing in this world carries a `Motion` or a limb, so the clone comes
+	// from the ghost pass rather than the entity walk — which is the path a
+	// replica takes and the one that has to agree.
+	CHECK(clones == 0);
+	REQUIRE(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 1);
+
+	std::vector<uint32_t> order;
+	const engine::scene::ScenePlan plan = engine::scene::OrderScene(drawn, Vector3{0.0f, 0.0f, 20.0f}, order);
+
+	// The copy is the last row, and it has to land inside the run the surface
+	// pass submits — not in the mirror run after it, and not in the blended
+	// tail.
+	const auto copy = static_cast<uint32_t>(drawn.size() - 1);
+	bool inReflected = false;
+	for (uint32_t at = 0; at < plan.Reflected; at++) {
+		inReflected = inReflected || order[at] == copy;
+	}
+
+	CHECK(inReflected);
+	CHECK(plan.Reflected < plan.Opaque);
 }

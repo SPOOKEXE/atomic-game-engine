@@ -865,6 +865,7 @@ end
 
 declare extern type SurfaceCamera extends Camera with
 	Effect: Enum_SurfaceEffect
+	FPS: number
 	Face: Enum_NormalId
 	ImageTransparency: number
 	TagFilter: string

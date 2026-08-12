@@ -372,16 +372,26 @@ namespace client {
 			// a debugging aid lying on a pane, which means it straddles that
 			// pane by construction — and a bar cloned onto the far side would
 			// mark a face nothing projects off.
+			//
+			// **One far-side copy and not two, which is what this used to
+			// draw.** `AppendPortalClones` and `AppendPortalGhosts` are the same
+			// answer reached two ways — one walks the world for things that can
+			// move, the other walks the draw list — and calling both put two
+			// copies of every straddling body on the far side, z-fighting each
+			// other. Worse, the ghost pass reads the list it is appending to, so
+			// it also ghosted the clones the line above had just added: a clone
+			// sits across the *far* pane by construction, so it was mapped back
+			// again and a third copy landed on top of the original. What that
+			// looks like is a spare character standing near the hole.
+			//
+			// **The clone pass is the one kept here**, because it walks entities
+			// and can therefore ask what a draw instance cannot: whether a thing
+			// is able to move at all. It visits `Motion` rows and character
+			// limbs, so the doorway's own wall is never cloned through the
+			// doorway. `client::CollectReplicatedInstances` keeps the ghost pass
+			// instead, and has to — a replica has a draw list and no simulation
+			// behind it.
 			(void)engine::scene::AppendPortalClones(store, drawList->Instances);
-
-			// **The far half of anybody standing in a hole, before the markers
-			// and after the world.** A ghost is content — it is the other side
-			// of a body that is really there — so it belongs with the instances
-			// rather than with the debugging bar, and it has to be appended
-			// after the metric above for the same reason the bar is: a count
-			// that moved when somebody stepped into a portal would stop being
-			// comparable between runs.
-			(void)engine::scene::AppendPortalGhosts(store, drawList->Instances);
 
 			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 		}
@@ -637,6 +647,13 @@ namespace client {
 				// Copied straight across: the renderer applies it and nothing
 				// between here and there has an opinion about it.
 				view.Effect = target.Effect;
+
+				// **And how often it may redraw**, which is the same kind of
+				// pass-through. A surface is a whole scene render and there is
+				// no reason it should keep the screen's rate — see
+				// `scene::SurfaceCamera::FPS` for why the default is a rate
+				// rather than "every frame".
+				view.FPS = target.FPS;
 
 				// **Copied rather than resolved.** The filter is already a mask
 				// on the component, because a name would be a lookup per

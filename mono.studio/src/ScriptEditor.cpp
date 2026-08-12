@@ -194,17 +194,28 @@ namespace studio {
 						// than a guess. `mono.studio/AGENTS.md` listed the
 						// absence of one as a deferred gap with the reason being
 						// a font this repository did not have; it has four now.
-						const engine::ui::ScopedFont code(engine::ui::Typeface::Monospace);
-
-						// **Zoom, and it scales the font rather than the
-						// interface.** `Options::Scale` rebuilds every metric
-						// in the editor and needs a restart to rasterise the
-						// faces at the new size; this is one panel's text, and
-						// wanting bigger code is not wanting a bigger
-						// properties panel. `SetWindowFontScale` stretches the
-						// glyphs the atlas already has, which is why it costs
-						// nothing and why it goes soft a long way from 1.
-						ImGui::SetWindowFontScale(ScriptZoom);
+						//
+						// **Zoom is the size this is pushed at, rather than a
+						// window scale laid over it.** `Options::Scale` rebuilds
+						// every metric in the editor and needs a restart to
+						// rasterise the faces at the new size; this is one
+						// panel's text, and wanting bigger code is not wanting a
+						// bigger properties panel.
+						//
+						// It has to be the pushed size specifically:
+						// `SetWindowFontScale` scales the window it is called
+						// on, and both the code and the gutter draw into child
+						// windows — which imgui begins at scale 1 whatever their
+						// parent was set to. That zoomed the frame and the row
+						// spacing measured out here, and left every glyph inside
+						// them exactly the size it started at.
+						//
+						// Everything below draws inside this scope, so the
+						// gutter's row height and the field's line height come
+						// from one number and stay in step.
+						const engine::ui::ScopedFont code(
+							engine::ui::Typeface::Monospace, engine::ui::TextSize::Body, ScriptZoom
+						);
 
 						// **The gutter, and it is a sibling of the code rather
 						// than part of it.** `CodeField` is an
@@ -258,12 +269,6 @@ namespace studio {
 						if (ScriptPopupOpen) {
 							DrawScriptCompletion(tab, fieldMin, popupId);
 						}
-
-						// **Restored before the panel ends.** The scale is a
-						// property of the window rather than of the widget, so
-						// leaving it set would zoom this tab's title and every
-						// other thing drawn in the panel after it.
-						ImGui::SetWindowFontScale(1.0f);
 
 						// Ctrl+wheel over the text, which is what every editor
 						// binds it to.

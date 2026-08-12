@@ -1955,10 +1955,10 @@ namespace studio {
 		// first time either is tuned.
 		//
 		// The floor is where the vendored faces stop being readable and the
-		// ceiling is where stretching the atlas's glyphs starts to look like a
-		// mistake rather than a setting — `SetWindowFontScale` resizes what has
-		// already been rasterised, so a long way from 1 goes soft in both
-		// directions.
+		// ceiling is where one line of code is wide enough that reading it
+		// becomes scrolling. Both ends stay sharp: a zoom is a font pushed at a
+		// size, which imgui rasterises at that size, rather than a stretch of
+		// glyphs baked at another one.
 		constexpr float ZOOM_MINIMUM = 0.6f;
 		constexpr float ZOOM_MAXIMUM = 3.0f;
 		constexpr float ZOOM_STEP = 0.1f;
@@ -2160,14 +2160,16 @@ namespace studio {
 			// **Monospace, because this is a log.** A stack trace, a table of
 			// numbers and a printed table all line up in one and none of them do
 			// in a proportional face.
-			const engine::ui::ScopedFont code(engine::ui::Typeface::Monospace, engine::ui::TextSize::Small);
-
-			// **Scales the font rather than the interface.** `Options::Scale`
-			// rebuilds every metric in the editor and needs a restart to
-			// rasterise the faces at the new size; this is one panel's text,
-			// and wanting a bigger stack trace is not wanting a bigger
-			// properties panel.
-			ImGui::SetWindowFontScale(OutputZoom);
+			//
+			// **The zoom is the size it is pushed at, and it scales the font
+			// rather than the interface.** `Options::Scale` rebuilds every
+			// metric in the editor and needs a restart to rasterise the faces at
+			// the new size; this is one panel's text, and wanting a bigger stack
+			// trace is not wanting a bigger properties panel. The same call the
+			// script editor makes, for the reason given on `ScopedFont`.
+			const engine::ui::ScopedFont code(
+				engine::ui::Typeface::Monospace, engine::ui::TextSize::Small, OutputZoom
+			);
 
 			size_t shown = 0;
 
@@ -2240,11 +2242,6 @@ namespace studio {
 					Output.size() - shown
 				);
 			}
-
-			// **Restored before the child ends.** The scale is a property of
-			// the window rather than of the widget, so leaving it set would
-			// zoom whatever the panel draws next as well.
-			ImGui::SetWindowFontScale(1.0f);
 
 			// Pinned to the bottom while the view is already there, and left
 			// alone when it is not. Scrolling up to read an error and being

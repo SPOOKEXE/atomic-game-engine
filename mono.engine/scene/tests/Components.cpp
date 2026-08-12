@@ -99,8 +99,8 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// spare bytes rather than out of a fourth word. One is left, and the day it
 	// runs out this case fails rather than a hole appearing in a snapshot.
 	CHECK(
-		sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + sizeof(float) + sizeof(uint32_t) + sizeof(int8_t) +
-									 sizeof(NormalId) + sizeof(SurfaceEffect) + 1
+		sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + 2 * sizeof(float) + sizeof(uint32_t) +
+									 sizeof(int8_t) + sizeof(NormalId) + sizeof(SurfaceEffect) + 1
 	);
 	CHECK(offsetof(SurfaceCamera, Reserved) + sizeof(SurfaceCamera::Reserved) == sizeof(SurfaceCamera));
 

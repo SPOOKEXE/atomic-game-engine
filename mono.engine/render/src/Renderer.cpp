@@ -210,6 +210,30 @@ namespace engine::render {
 			return scene::MixSignature(hash, bits);
 		}
 
+		// Whether a surface's rate cap has elapsed.
+		//
+		// **Three ways to be uncapped, and all three are "yes" rather than
+		// "no".** A rate of zero is the documented way to ask for every frame; a
+		// negative one is a script that computed something silly, and answering
+		// "never draw again" to that would be a surface that goes black for a
+		// mistake nothing reports; and a clock that has not advanced — a host
+		// that never calls `SetAnimationTime`, or a paused one — would otherwise
+		// freeze every capped surface in the world after its first frame.
+		//
+		// The bias is the same one culling takes: when the answer is not
+		// certain, do the work. A surface drawn too often costs a pass, and one
+		// skipped wrongly is a frozen picture nobody can explain.
+		//
+		// @param drawn When the slot last drew, or negative for never.
+		// @param fps   The cap, or zero for none.
+		// @param now   The frame clock.
+		bool DueToDraw(double drawn, float fps, double now) {
+			if (!(fps > 0.0f) || drawn < 0.0 || !(now > drawn)) {
+				return true;
+			}
+			return now - drawn >= 1.0 / static_cast<double>(fps);
+		}
+
 		uint64_t MixMatrix(uint64_t hash, const glm::mat4 &matrix) {
 			for (int column = 0; column < 4; column++) {
 				for (int row = 0; row < 4; row++) {
@@ -355,6 +379,22 @@ namespace engine::render {
 		// same reason: a module with a notion of "now" of its own has one to
 		// drift, and a recorded run could not replay.
 		double AnimationSeconds = 0.0;
+
+		// How many times the surface pass runs per frame.
+		//
+		// **One bounce is what this pipeline always did**, and it is why a
+		// portal seen through a portal resolved over frames: each surface
+		// sampled the others from the textures they held *last* frame. Two is
+		// the first value that closes `D00112` for the case anybody sees — the
+		// hole you are walking through, showing a hole — and every further
+		// bounce buys one more level of depth for one more scene pass per
+		// visible surface.
+		//
+		// **Two by default rather than CodeParade's four**, because that demo's
+		// portals are the whole scene and ours share a budget with mirrors,
+		// shadows and a world. The cost is linear and the knob is public, so a
+		// scene built around a corridor of holes can ask for more.
+		uint32_t SurfaceBounces = 2;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
@@ -777,6 +817,17 @@ namespace engine::render {
 			// The first frame has nothing to show, so a mirror draws as its own
 			// tint rather than sampling whatever the driver handed back.
 			bool Ready = false;
+
+			// The frame clock when this slot last drew, for
+			// `SurfaceView::FPS`.
+			//
+			// **Per slot rather than one stamp for the pass**, because the
+			// surfaces do not refresh together and never have: one that has
+			// never rendered has nothing to compare against, and one whose
+			// content has not moved is skipped for a different reason entirely.
+			// A shared stamp would let a mirror that redrew for its own reasons
+			// reset the interval of every other mirror in the room.
+			double Drawn = -1.0;
 
 			// World to this surface camera's clip space, for the frame just
 			// written. What the surface pass renders with.
@@ -2296,6 +2347,12 @@ namespace engine::render {
 		// visible artefact on exactly the frame a window was dragged.
 		state.Ready = false;
 
+		// And it owes a draw immediately rather than at the end of its next
+		// interval, which is what a resized slot with a live stamp would do:
+		// hold an empty texture for up to a frame's worth of cap while the pane
+		// showed its own tint.
+		state.Drawn = -1.0;
+
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
 		colour.format = ColourFormat();
@@ -2754,6 +2811,20 @@ namespace engine::render {
 		if (State != nullptr) {
 			State->AnimationSeconds = seconds;
 		}
+	}
+
+	void Renderer::SetSurfaceBounces(uint32_t bounces) {
+		if (State != nullptr) {
+			// Floored at one, because zero would mean no surface pass at all —
+			// which is a way of saying "no mirrors" that has a much clearer
+			// spelling elsewhere, and is not what somebody dialling this down
+			// means.
+			State->SurfaceBounces = std::max<uint32_t>(bounces, 1u);
+		}
+	}
+
+	uint32_t Renderer::SurfaceBounces() const {
+		return State == nullptr ? 0u : State->SurfaceBounces;
 	}
 
 	FlipbookCell Renderer::TextureCell(const core::Name &name, double seconds) const {
@@ -3425,6 +3496,13 @@ namespace engine::render {
 		// refresh together: one that has never rendered has nothing to compare
 		// against, and one that appeared this frame has to draw once before it
 		// can be skipped.
+		// The frame clock, which is what a rate cap is measured against.
+		//
+		// **`SetAnimationTime`'s, because the renderer already has exactly one
+		// idea of what time it is** and a second clock read here would let a
+		// surface's interval drift against the flipbooks in it.
+		const double frameSeconds = State->AnimationSeconds;
+
 		// **Whether anything can see each pane, which is the other half of the
 		// refresh decision and the half this pass did not have.** The signature
 		// answers "did the image change"; nothing answered "is the image
@@ -3501,13 +3579,27 @@ namespace engine::render {
 				state.ImageOpacity = accepted[index].ImageOpacity;
 				state.Effect = accepted[index].Effect;
 
-				// **Visibility first, and it overrides the never-rendered
-				// case.** A slot that has never drawn has nothing to compare a
-				// signature against, but it also has nothing looking at it —
-				// and `Ready` staying false is exactly right for that: the pane
-				// draws as its own tint until the frame something can see it.
-				accepted[index].Refresh = surfaceVisible[accepted[index].Index] &&
-										  (!state.Ready || state.Signature != surfaceSignature);
+				// **Three independent reasons to skip, and they are not
+				// interchangeable.** The signature says the image has not
+				// changed; visibility says nothing is looking at it; the rate
+				// says it drew recently enough. A surface has to clear all
+				// three, and each of them alone leaves the slot holding the
+				// frame it has along with the matrices that drew it.
+				//
+				// **Visibility overrides the never-rendered case.** A slot that
+				// has never drawn has nothing to compare a signature against,
+				// but it also has nothing looking at it — and `Ready` staying
+				// false is exactly right for that: the pane draws as its own
+				// tint until the frame something can see it.
+				//
+				// **The rate does not**, and that asymmetry is deliberate: a
+				// surface must draw *once* as soon as something can see it, or
+				// a pane walked up to shows its own tint for up to an interval
+				// before the picture appears.
+				const bool changed = !state.Ready || state.Signature != surfaceSignature;
+				const bool due = DueToDraw(state.Drawn, accepted[index].View->FPS, frameSeconds);
+
+				accepted[index].Refresh = surfaceVisible[accepted[index].Index] && changed && due;
 				refreshCount += accepted[index].Refresh ? 1u : 0u;
 			}
 		}
@@ -3932,265 +4024,213 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Surface);
 
-			// **Flipped for every refreshing surface before the first pass runs,
-			// not inside the loop.** A surface pass samples the other surfaces'
-			// read slots, so every slot has to have finished flipping before any
-			// of them is read — flipping inside the loop would have the second
-			// pass sample the first surface's *new* texture, which is this
-			// frame's half-drawn image and the exact self-reference the pair
-			// exists to make impossible.
+			// **The whole pass, run once per bounce, and that is in-frame
+			// recursion.** `D00112`'s remaining half was that a surface samples
+			// the *other* surfaces from the textures they had last frame — so a
+			// portal seen through a portal resolved over frames rather than
+			// within one, and the frame somebody crossed showed a seam.
 			//
-			// **A skipped surface does not flip, and its matrices do not move.**
-			// Both halves of that are one fact: the slot still holds the frame it
-			// held, so `ViewProjection` must still be the camera that drew it and
-			// `PreviousViewProjection` the one before. Advancing either for a
-			// surface that did not render would project a texture with a camera
-			// that never took it — a reflection sliding across a pane that
-			// nothing in the scene is moving, which is the hardest possible
-			// version of this bug to attribute.
-			for (size_t index = 0; index < acceptedCount; index++) {
-				if (!accepted[index].Refresh) {
-					continue;
+			// The fix does not need a recursive pass, a second renderer, or a
+			// camera per level: it needs this loop to run again. Bounce zero
+			// draws every surface sampling last frame's neighbours; the flip at
+			// the top of bounce one makes bounce zero's output the read side, so
+			// bounce one draws every surface sampling *this frame's*
+			// neighbours. After `n` bounces a chain `n` deep is resolved inside
+			// the frame, deepest first, because that is what iterating to a
+			// fixed point does from the outside in.
+			//
+			// **The ping-pong is what makes it safe**, and it is already here.
+			// Each bounce writes `Slot` and reads `Slot ^ 1`, and the flip
+			// between bounces swaps which is which — so no pass ever samples a
+			// texture another pass is writing in the same bounce, which is the
+			// exact self-reference the pair was built to make impossible.
+			//
+			// **A surface skipped on bounce zero stays skipped**, because
+			// `Refresh` is decided once above. A slot that is not refreshing is
+			// not flipped either, so its parity never moves and its neighbours
+			// go on reading the frame it actually holds.
+			//
+			// Costs a full scene pass per visible surface per bounce, which is
+			// what buys the depth — and is why the visibility gate and
+			// `SurfaceCamera::FPS` landed first. One surface gains nothing from
+			// a second bounce, because nothing samples itself.
+			const uint32_t bounces = acceptedCount > 1 ? std::max<uint32_t>(State->SurfaceBounces, 1u) : 1u;
+
+			for (uint32_t bounce = 0; bounce < bounces; bounce++) {
+
+				// **Flipped for every refreshing surface before the first pass runs,
+				// not inside the loop.** A surface pass samples the other surfaces'
+				// read slots, so every slot has to have finished flipping before any
+				// of them is read — flipping inside the loop would have the second
+				// pass sample the first surface's *new* texture, which is this
+				// frame's half-drawn image and the exact self-reference the pair
+				// exists to make impossible.
+				//
+				// **A skipped surface does not flip, and its matrices do not move.**
+				// Both halves of that are one fact: the slot still holds the frame it
+				// held, so `ViewProjection` must still be the camera that drew it and
+				// `PreviousViewProjection` the one before. Advancing either for a
+				// surface that did not render would project a texture with a camera
+				// that never took it — a reflection sliding across a pane that
+				// nothing in the scene is moving, which is the hardest possible
+				// version of this bug to attribute.
+				for (size_t index = 0; index < acceptedCount; index++) {
+					if (!accepted[index].Refresh) {
+						continue;
+					}
+
+					Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
+					state.PreviousViewProjection = state.ViewProjection;
+					state.PreviousSampling = state.Sampling;
+					state.ViewProjection = accepted[index].ViewProjection;
+					state.Sampling = accepted[index].Sampling;
+					state.Slot ^= 1u;
 				}
 
-				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
-				state.PreviousViewProjection = state.ViewProjection;
-				state.PreviousSampling = state.Sampling;
-				state.ViewProjection = accepted[index].ViewProjection;
-				state.Sampling = accepted[index].Sampling;
-				state.Slot ^= 1u;
-			}
+				for (size_t index = 0; index < acceptedCount; index++) {
+					if (!accepted[index].Refresh) {
+						continue;
+					}
 
-			for (size_t index = 0; index < acceptedCount; index++) {
-				if (!accepted[index].Refresh) {
-					continue;
-				}
+					const uint8_t self = accepted[index].Index;
 
-				const uint8_t self = accepted[index].Index;
+					// **Taken here rather than at each draw**, because `drawMirrors`
+					// below shadows `index` with its own loop over surfaces — so
+					// `accepted[index]` inside it would name a different view
+					// entirely, and the filter would silently be another surface's.
+					const uint32_t surfaceFilter = accepted[index].View->TagFilter;
+					Impl::SurfaceSlotState &state = bank.Surfaces[self];
 
-				// **Taken here rather than at each draw**, because `drawMirrors`
-				// below shadows `index` with its own loop over surfaces — so
-				// `accepted[index]` inside it would name a different view
-				// entirely, and the filter would silently be another surface's.
-				const uint32_t surfaceFilter = accepted[index].View->TagFilter;
-				Impl::SurfaceSlotState &state = bank.Surfaces[self];
+					SDL_GPUColorTargetInfo surfaceColour{};
+					surfaceColour.texture = state.Texture[state.Slot];
+					surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+					surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
+					surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
+					surfaceColour.cycle = true;
 
-				SDL_GPUColorTargetInfo surfaceColour{};
-				surfaceColour.texture = state.Texture[state.Slot];
-				surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
-				surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
-				surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
-				surfaceColour.cycle = true;
+					SDL_GPUDepthStencilTargetInfo surfaceDepth{};
+					surfaceDepth.texture = state.Depth;
+					surfaceDepth.clear_depth = 1.0f;
+					surfaceDepth.load_op = SDL_GPU_LOADOP_CLEAR;
+					surfaceDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+					surfaceDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+					surfaceDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+					surfaceDepth.cycle = true;
 
-				SDL_GPUDepthStencilTargetInfo surfaceDepth{};
-				surfaceDepth.texture = state.Depth;
-				surfaceDepth.clear_depth = 1.0f;
-				surfaceDepth.load_op = SDL_GPU_LOADOP_CLEAR;
-				surfaceDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
-				surfaceDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-				surfaceDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-				surfaceDepth.cycle = true;
+					SDL_GPURenderPass *pass =
+						SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
+					// **The light set, pushed once for the whole pass.** Uniform state
+					// on a command buffer persists until it is replaced, so one push
+					// before the draws serves every one of them — which is the whole
+					// reason this is a second buffer rather than fields on the
+					// per-draw `LightingUniforms`.
+					SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
-				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
-				// **The light set, pushed once for the whole pass.** Uniform state
-				// on a command buffer persists until it is replaced, so one push
-				// before the draws serves every one of them — which is the whole
-				// reason this is a second buffer rather than fields on the
-				// per-draw `LightingUniforms`.
-				SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
-				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+					const SDL_GPUBufferBinding vertexBindings[] = {
+						{State->Meshes.Vertices(), 0},
+						{State->InstanceBuffer, 0},
+					};
+					SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
 
-				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->Meshes.Vertices(), 0},
-					{State->InstanceBuffer, 0},
-				};
-				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					// **Shadowed, and pointedly not surfaced.** The mirror's own view
+					// gets the shadow map, so what it reflects is lit the way the
+					// screen lights it.
+					//
+					// **`Flags.z` is zero for the world, and it has to be.** It means
+					// "this draw samples a surface texture instead of its own tint",
+					// and it is set below for exactly the mirror runs. Setting it for
+					// the whole pass is what made the floor sample the previous
+					// frame's reflection and come out as the clear colour wherever
+					// that projection landed on untouched texels — a black wedge in
+					// the mirror that survived deleting every caster, the frame and
+					// the near-plane hack, and moved when the camera was re-aimed but
+					// not when the floor was.
+					const LightingUniforms surfaceLighting{
+						glm::vec4{SUN_DIRECTION, 0.0f},
+						SUN_AMBIENT,
+						glm::vec4{
+							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
+						},
+					};
 
-				// **Shadowed, and pointedly not surfaced.** The mirror's own view
-				// gets the shadow map, so what it reflects is lit the way the
-				// screen lights it.
-				//
-				// **`Flags.z` is zero for the world, and it has to be.** It means
-				// "this draw samples a surface texture instead of its own tint",
-				// and it is set below for exactly the mirror runs. Setting it for
-				// the whole pass is what made the floor sample the previous
-				// frame's reflection and come out as the clear colour wherever
-				// that projection landed on untouched texels — a black wedge in
-				// the mirror that survived deleting every caster, the frame and
-				// the near-plane hack, and moved when the camera was re-aimed but
-				// not when the floor was.
-				const LightingUniforms surfaceLighting{
-					glm::vec4{SUN_DIRECTION, 0.0f},
-					SUN_AMBIENT,
-					glm::vec4{
-						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
-					},
-				};
+					SDL_GPUTexture *const fallback =
+						State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
+					SDL_GPUSampler *const shadowSampler =
+						State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
 
-				SDL_GPUTexture *const fallback =
-					State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
-				SDL_GPUSampler *const shadowSampler =
-					State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
+					// **The samplers are bound per draw now rather than per run**,
+					// because the third one — the colour map — changes with the
+					// mesh being drawn and the other two do not. `DrawSlots` binds
+					// all three together; what is left here is remembering which
+					// surface texture the next draws should sample.
+					SDL_GPUTexture *surfaceTexture = nullptr;
+					const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
 
-				// **The samplers are bound per draw now rather than per run**,
-				// because the third one — the colour map — changes with the
-				// mesh being drawn and the other two do not. `DrawSlots` binds
-				// all three together; what is left here is remembering which
-				// surface texture the next draws should sample.
-				SDL_GPUTexture *surfaceTexture = nullptr;
-				const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
+					const FrameUniforms worldFrame{
+						state.ViewProjection,
+						lightViewProjection,
+						glm::mat4{1.0f},
+					};
 
-				const FrameUniforms worldFrame{
-					state.ViewProjection,
-					lightViewProjection,
-					glm::mat4{1.0f},
-				};
+					const auto plainly = [&]() {
+						SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
+						bindSurface(nullptr);
+					};
 
-				const auto plainly = [&]() {
-					SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
-					bindSurface(nullptr);
-				};
+					plainly();
 
-				plainly();
-
-				// **Another world's instances, when the host handed some over.**
-				// `SurfaceView::InstanceCount` says why this bypasses the plan:
-				// the plan partitions *this* world's draw list and knows nothing
-				// about the tail behind it, so a foreign surface is one plain run
-				// and no mirror runs at all. That is what lets a portal in one
-				// world show a live second world.
-				//
-				// **`ownCount` is what turns the host's index into a slot.** The
-				// host counts from zero within its own `foreign` list, because
-				// nothing outside this call knows where this world's rows end or
-				// that the plan reordered them.
-				//
-				// **`continue`, so the plan-driven draws below are skipped
-				// entirely.** Drawing both would put this world's floor into the
-				// far world's picture, which reads as the two rooms bleeding
-				// into each other.
-				if (accepted[index].View->InstanceCount > 0) {
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						ownCount + accepted[index].View->InstanceFirst,
-						accepted[index].View->InstanceCount,
-						&surfaceLighting,
-						fallback,
-						shadowSampler,
-						surfaceTexture,
-						State->SurfaceSampler,
-						surfaceFilter,
-						result.Triangles
-					);
-
-					// **Ended and left for the sweep below to mark ready**, which
-					// is the invariant this must not shortcut: a surface written
-					// this frame may not be sampled as another surface's
-					// "previous" within the same frame.
-					SDL_EndGPURenderPass(pass);
-					continue;
-				}
-
-				// The world, minus every mirror. `plan.Reflected` is the
-				// non-mirror opaque run.
-				if (sceneReflected > 0) {
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						0,
-						sceneReflected,
-						&surfaceLighting,
-						fallback,
-						shadowSampler,
-						surfaceTexture,
-						State->SurfaceSampler,
-						surfaceFilter,
-						result.Triangles
-					);
-				}
-
-				// **Every mirror except this one, one draw each.** `self` is
-				// skipped because nothing sees itself in its own reflection —
-				// drawing it would fill this texture with the pane it belongs
-				// to, and the mirror would show itself rather than the room.
-				//
-				// A surface that has no frame yet, or that no camera is
-				// rendering this frame, is drawn **plainly** rather than skipped.
-				// A pane that vanishes until its mirror warms up is worse than
-				// one that is briefly its own colour, and a pane naming an index
-				// nothing renders is a scene mistake that should be visible as a
-				// flat pane rather than as a hole in the geometry.
-				//
-				// Sampled draws project with the matrix that *rendered* the
-				// texture being read — `PreviousViewProjection`, not the one
-				// just resolved — because the image is a frame old and
-				// projecting it with a fresh camera slides it across the pane.
-				const auto drawMirrors = [&](bool blended) {
-					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
-						if (index == self) {
-							continue;
-						}
-
-						const scene::SurfaceRun &run = plan.Runs[index];
-						const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
-						const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
-						if (count == 0) {
-							continue;
-						}
-
-						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
-						if (!shown.Ready || !claimed[index]) {
-							plainly();
-							result.DrawCalls += State->DrawSlots(
-								command,
-								pass,
-								first,
-								count,
-								&surfaceLighting,
-								fallback,
-								shadowSampler,
-								surfaceTexture,
-								State->SurfaceSampler,
-								surfaceFilter,
-								result.Triangles
-							);
-							continue;
-						}
-
-						const FrameUniforms mirrorFrame{
-							state.ViewProjection,
-							lightViewProjection,
-							shown.PreviousSampling,
-						};
-						LightingUniforms mirrorLighting{
-							glm::vec4{SUN_DIRECTION, 0.0f},
-							SUN_AMBIENT,
-							glm::vec4{
-								haveShadow ? 1.0f : 0.0f,
-								1.0f / static_cast<float>(SHADOW_RESOLUTION),
-								1.0f,
-								shown.ImageOpacity
-							},
-						};
-
-						// Which grade this surface's image goes through. On the
-						// composite rather than on the render, so switching one
-						// costs no redraw of the texture.
-						mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
-
-						SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
-						bindSurface(shown.Texture[shown.Slot ^ 1u]);
-
+					// **Another world's instances, when the host handed some over.**
+					// `SurfaceView::InstanceCount` says why this bypasses the plan:
+					// the plan partitions *this* world's draw list and knows nothing
+					// about the tail behind it, so a foreign surface is one plain run
+					// and no mirror runs at all. That is what lets a portal in one
+					// world show a live second world.
+					//
+					// **`ownCount` is what turns the host's index into a slot.** The
+					// host counts from zero within its own `foreign` list, because
+					// nothing outside this call knows where this world's rows end or
+					// that the plan reordered them.
+					//
+					// **`continue`, so the plan-driven draws below are skipped
+					// entirely.** Drawing both would put this world's floor into the
+					// far world's picture, which reads as the two rooms bleeding
+					// into each other.
+					if (accepted[index].View->InstanceCount > 0) {
 						result.DrawCalls += State->DrawSlots(
 							command,
 							pass,
-							first,
-							count,
-							&mirrorLighting,
+							ownCount + accepted[index].View->InstanceFirst,
+							accepted[index].View->InstanceCount,
+							&surfaceLighting,
+							fallback,
+							shadowSampler,
+							surfaceTexture,
+							State->SurfaceSampler,
+							surfaceFilter,
+							result.Triangles
+						);
+
+						// **Ended and left for the sweep below to mark ready**, which
+						// is the invariant this must not shortcut: a surface written
+						// this frame may not be sampled as another surface's
+						// "previous" within the same frame.
+						SDL_EndGPURenderPass(pass);
+						continue;
+					}
+
+					// The world, minus every mirror. `plan.Reflected` is the
+					// non-mirror opaque run.
+					if (sceneReflected > 0) {
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							0,
+							sceneReflected,
+							&surfaceLighting,
 							fallback,
 							shadowSampler,
 							surfaceTexture,
@@ -4199,46 +4239,134 @@ namespace engine::render {
 							result.Triangles
 						);
 					}
-				};
 
-				drawMirrors(false);
+					// **Every mirror except this one, one draw each.** `self` is
+					// skipped because nothing sees itself in its own reflection —
+					// drawing it would fill this texture with the pane it belongs
+					// to, and the mirror would show itself rather than the room.
+					//
+					// A surface that has no frame yet, or that no camera is
+					// rendering this frame, is drawn **plainly** rather than skipped.
+					// A pane that vanishes until its mirror warms up is worse than
+					// one that is briefly its own colour, and a pane naming an index
+					// nothing renders is a scene mistake that should be visible as a
+					// flat pane rather than as a hole in the geometry.
+					//
+					// Sampled draws project with the matrix that *rendered* the
+					// texture being read — `PreviousViewProjection`, not the one
+					// just resolved — because the image is a frame old and
+					// projecting it with a fresh camera slides it across the pane.
+					const auto drawMirrors = [&](bool blended) {
+						for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+							if (index == self) {
+								continue;
+							}
 
-				// **The blended tail *minus* the mirrors in it.** The opaque head
-				// already excludes them for the reason above; a pane that went
-				// transparent moved from the head to the tail and stopped being
-				// excluded, so a faded mirror reflected itself.
-				const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
-				if (blendedPlain > 0 || plan.TransparentSurfaces > 0) {
-					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+							const scene::SurfaceRun &run = plan.Runs[index];
+							const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
+							const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
+							if (count == 0) {
+								continue;
+							}
+
+							const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
+							if (!shown.Ready || !claimed[index]) {
+								plainly();
+								result.DrawCalls += State->DrawSlots(
+									command,
+									pass,
+									first,
+									count,
+									&surfaceLighting,
+									fallback,
+									shadowSampler,
+									surfaceTexture,
+									State->SurfaceSampler,
+									surfaceFilter,
+									result.Triangles
+								);
+								continue;
+							}
+
+							const FrameUniforms mirrorFrame{
+								state.ViewProjection,
+								lightViewProjection,
+								shown.PreviousSampling,
+							};
+							LightingUniforms mirrorLighting{
+								glm::vec4{SUN_DIRECTION, 0.0f},
+								SUN_AMBIENT,
+								glm::vec4{
+									haveShadow ? 1.0f : 0.0f,
+									1.0f / static_cast<float>(SHADOW_RESOLUTION),
+									1.0f,
+									shown.ImageOpacity
+								},
+							};
+
+							// Which grade this surface's image goes through. On the
+							// composite rather than on the render, so switching one
+							// costs no redraw of the texture.
+							mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
+
+							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
+							bindSurface(shown.Texture[shown.Slot ^ 1u]);
+
+							result.DrawCalls += State->DrawSlots(
+								command,
+								pass,
+								first,
+								count,
+								&mirrorLighting,
+								fallback,
+								shadowSampler,
+								surfaceTexture,
+								State->SurfaceSampler,
+								surfaceFilter,
+								result.Triangles
+							);
+						}
+					};
+
+					drawMirrors(false);
+
+					// **The blended tail *minus* the mirrors in it.** The opaque head
+					// already excludes them for the reason above; a pane that went
+					// transparent moved from the head to the tail and stopped being
+					// excluded, so a faded mirror reflected itself.
+					const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
+					if (blendedPlain > 0 || plan.TransparentSurfaces > 0) {
+						SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+					}
+
+					if (blendedPlain > 0) {
+						plainly();
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							static_cast<uint32_t>(sceneOpaque),
+							blendedPlain,
+							&surfaceLighting,
+							fallback,
+							shadowSampler,
+							surfaceTexture,
+							State->SurfaceSampler,
+							surfaceFilter,
+							result.Triangles
+						);
+					}
+
+					// And the blended mirrors that are not this one, last of
+					// everything drawn into this texture.
+					if (plan.TransparentSurfaces > 0) {
+						drawMirrors(true);
+					}
+
+					SDL_EndGPURenderPass(pass);
 				}
-
-				if (blendedPlain > 0) {
-					plainly();
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						static_cast<uint32_t>(sceneOpaque),
-						blendedPlain,
-						&surfaceLighting,
-						fallback,
-						shadowSampler,
-						surfaceTexture,
-						State->SurfaceSampler,
-						surfaceFilter,
-						result.Triangles
-					);
-				}
-
-				// And the blended mirrors that are not this one, last of
-				// everything drawn into this texture.
-				if (plan.TransparentSurfaces > 0) {
-					drawMirrors(true);
-				}
-
-				SDL_EndGPURenderPass(pass);
 			}
 
-			// **Marked ready only after every pass has run**, so a surface that
+			// **Marked ready only after every bounce has run**, so a surface that
 			// was written this frame cannot be sampled as another surface's
 			// "previous" within the same frame. From here the screen pass may
 			// sample what was just written and the next frame's surface passes
@@ -4258,6 +4386,13 @@ namespace engine::render {
 				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
 				state.Ready = true;
 				state.Signature = surfaceSignature;
+
+				// **Stamped here for the same reason the signature is.** A slot
+				// only claims to have drawn at a time once a pass has actually
+				// drawn it; stamping up front would start the interval for a
+				// surface that was then skipped or abandoned, and the picture
+				// would end up an interval staler than the cap promises.
+				state.Drawn = frameSeconds;
 				result.SurfacePasses++;
 			}
 		}

@@ -167,6 +167,24 @@ namespace engine::render {
 		// screen pass would then draw the group instead of the world.
 		uint32_t TagFilter = 0;
 
+		// How many times a second this surface may redraw, or zero for every
+		// frame.
+		//
+		// From `scene::SurfaceCamera::FPS`, and honoured beside the content
+		// signature rather than instead of it: a surface redraws when its image
+		// has changed **and** it is visible **and** its interval has elapsed.
+		// The three are independent reasons to skip, and a surface that fails
+		// any of them keeps the texture it has along with the matrices that
+		// drew it.
+		//
+		// **Needs `Renderer::SetAnimationTime`**, which is the frame clock this
+		// class already has. A host that never sets one leaves it at zero, and
+		// a surface capped against a clock that never advances would render once
+		// and freeze — so a non-advancing clock is treated as uncapped.
+		//
+		// @since v0.15
+		float FPS = 0.0f;
+
 		// Which instances this surface draws, when they are not this world's.
 		//
 		// **What makes a portal able to show another world**, and it is a range
@@ -670,6 +688,37 @@ namespace engine::render {
 		// @param seconds Seconds since the session began.
 		// @since v0.10
 		void SetAnimationTime(double seconds);
+
+		// How many times the surface pass runs per frame.
+		//
+		// **In-frame recursion, and it is a loop rather than a second
+		// renderer.** A surface pass samples the *other* surfaces, and with one
+		// bounce it samples the textures they held last frame — so a portal seen
+		// through a portal resolves one level per frame, and the frame somebody
+		// walks through a hole shows a seam. That is the whole of `D00112`.
+		//
+		// Running the pass again makes the previous bounce's output the read
+		// side, so after `n` bounces a chain `n` deep is resolved inside the
+		// frame, deepest first. The ping-pong pair each slot already carries is
+		// what makes it safe: a bounce writes one texture and reads the other,
+		// and the flip between bounces swaps them.
+		//
+		// **Linear in visible surfaces**, because each bounce is a scene pass
+		// per surface that is refreshing. Two is the default and is what closes
+		// the case anybody sees; a corridor built out of holes can ask for more,
+		// and a scene that wants the old cheapness can ask for one.
+		//
+		// Floored at one — zero would mean no surface pass at all, which has a
+		// clearer spelling.
+		//
+		// @param bounces How many times to run it.
+		// @since v0.15
+		void SetSurfaceBounces(uint32_t bounces);
+
+		// What it is set to, or zero before the renderer has a device.
+		//
+		// @since v0.15
+		uint32_t SurfaceBounces() const;
 
 		// The backend handle for a registered texture, for an interface pass to
 		// sample.

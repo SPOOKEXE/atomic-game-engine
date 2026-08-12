@@ -83,13 +83,18 @@ The milestone headings below are development labels. Not in line with project ve
   renders the character, however, the character parts do not project through (neither does collisions).
   atomic-game-engine/temp/NonEuclidean will show how its done. Ensure both visually and physics-wise it
   propogates through - so even if you sit between the seam, the fact your body has collisions on either side
-  will make it so you do not fall between the world (and in the seam you can do a binary threshold for which 
+  will make it so you do not fall between the world (and in the seam you can do a binary threshold for which
   side to handle collisions on where >0.5 = B else A).
-
+- [_] svg rendering support
+- [_] gif rendering support (and ensure cdn supports it too)
 
 ### v0.15
 
 - [x] **read CodeParade's demo back against our own portals, and took the four things it does better** — `NON_EUCLID.md`. The two engines agree on the maths almost exactly and disagree on the schedule: the demo resolves the portal chain *inside* one frame, depth-first, and we resolve it across frames, one bounce per frame. Nearly every other difference follows from that, and three of the four fixes were never blocked on it. **A visibility gate on the surface pass** — `graph::VisibleSurfaces`, which is the demo's per-portal occlusion query asked on the CPU against boxes the culler already derives; a signature says whether an image *changed* and nothing said whether it is *looked at*, so a room of eight mirrors redrew all eight whenever anything moved. It unions in the panes visible only *inside* another surface, because gating on the main camera alone freezes a mirror seen in a mirror. **`EDGE_ON_MARGIN` is a mirror's fix and was being applied to holes** — a portal drew nothing within 0.3 studs of its own plane, which is exactly where somebody walking through spends the crossing; a linked portal has no discontinuity to blank, because the frame the viewer's side flips is the frame the viewer is carried through the pane. **A landing clearance**, so nothing comes to rest on a plane it just crossed and gets sent back by a tick of jitter — and pointedly *only* the landing: the demo also offsets the plane the test is made against, which is hysteresis at 500 Hz and, at a quarter of a stud per tick, a band a body walks through without ever crossing. **And scale-carrying portals**, which is the one this document had been overselling: `SeamMapping` returned a `CFrame`, so a mismatched pair rendered a source-sized window onto a full-sized room and a body walked out the size it went in. It is a `scene::SeamTransform` now — the rigid map, the source pane's centre and the ratio of the two panes — with four *named* applications rather than one multiply, because a position, a velocity, a unit direction and a placement go through a hole differently and mixing two of them up is a portal that works and leads somewhere slightly wrong. A crossing resizes the crate's box and collider, the humanoid's height, radius, walk speed, jump speed and ground tolerance, and every limb's box and rest offset; mass follows from the box. Gravity does not scale, deliberately: there is one world and a small thing in it should fall the way a small thing falls. `scene/SurfaceCameras.hpp`, `graph/Cull.hpp`, `scene::SurfaceMapping`
+- [x] **the portals, made usable** — a second pass over them after running the demo, and the reports were all one file deep. **Shadows cross a hole**: a ghost forced `CastShadow` off on the grounds that a second shadow would follow a body that is not there, which is true of a copy beside its original and false of one the map has taken to another room — a character in a doorway had half a shadow. **A crossing no longer snaps**: `CapturePreviousTransforms` runs at the top of a tick and `CrossPortals` in `PostSimulation`, so a teleported body was *interpolated across its own teleport* and drawn once or twice in the hundred studs between the panes; `PreviousTransform` goes through the same map now. **A body goes through the nearest hole rather than the first gathered** — the camera arm already took the nearest, and archetype order decided which one the body took, so on the frames they disagreed the eye and the body ended up in two rooms; one `NearestCrossing` serves both. **A viewpoint is never left standing in a pane**, which had no half-space to clip and no bounded fit and came out as a vertical smear. **Nothing larger than a hole is drawn through it**: every straddle check widens by the body's reach, so a floor fifty studs across was "inside" every rectangle in the building and the far room's floor was laid over the near one. **And one far-side copy instead of two** — `AppendPortalClones` and `AppendPortalGhosts` both ran on the client path, and the ghost pass then ghosted the clones. `scene::ClearOfPanes`, `scene::SeamStraddled`
+- [x] **`SurfaceCamera.FPS`, and the surface pass stopped redrawing what nobody looks at** — a surface is a whole scene render and there was no reason it should keep the screen's rate. Three independent reasons to skip and a pass has to clear all three: the content signature says the image has not changed, `graph::VisibleSurfaces` says nothing can see the pane, and the rate says it drew recently enough. The visibility half unions in the panes visible only *inside* another surface, because gating on the main camera alone freezes a mirror seen in a mirror. `FPS` is 120 by default and zero is uncapped; the never-drawn case ignores the cap, or a pane walked up to shows its own tint before the picture arrives
+- [x] **a portal is sharp up close** — it was not the texture being too small. The fit covers the whole pane, and against the glass almost all of the pane is off screen: a pane subtends nearly half a turn from a point on its own surface and a screen subtends seventy degrees, so nearly every texel went outside the frame. The fit is intersected with the viewer's own frustum carried through the same map, which is exact rather than a heuristic because the eye and the pane were mapped together. The clamp has to degrade *continuously* — a guard that switched it off when a frustum corner swung behind the camera moved the fit half a radian between two frames — and the coverage invariant had to change from "every corner of the pane is in the image" to "every part of the pane the viewer can see is in the image", which is what `opaque.frag` actually needs
+- [x] **`D00112` closed: the portal chain resolves inside the frame** — the last row of `NON-EUCLIDEAN.md`, estimated large on the assumption that it meant a recursive pass with its own budget. It is a loop around the pass that already exists: bounce zero draws every surface sampling last frame's neighbours, the flip at the top of bounce one makes bounce zero's output the read side, and after `n` bounces a chain `n` deep is resolved deepest-first. The ping-pong pair each slot already carried is what makes it safe — a bounce writes one texture and reads the other. `Renderer::SetSurfaceBounces`, two by default rather than CodeParade's four because their portals are the whole scene and ours share a budget; one surface takes one bounce whatever the setting says, because nothing samples itself
 - [_] also extra prototype project for rendering pipeline.
 - [_] thoroughly implement all user interface elements + surfacegui + billboardgui
 - [_] thoroughly implement user input system
@@ -101,6 +106,11 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [_] animation handler
 - [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
+
+#### v0.17
+
+- [_] add engine-level and cdn-level fast-flags for enable/disable types of content (mp4, gif, svg)
+- [_] add more engine-level, cdn-level, client and server level configs.
 
 ### v0.?? (needs prototype project first)
 
@@ -114,3 +124,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] rendering pipeline additions; ambient occulusion, emissive, pbr, default node setup with all these
 - [_] https://www.youtube.com/watch?v=SnNm7rSSvlg (Threat Interactive Tutorial: How To Optimize Almost Every Step In Modern Game Rendering)
 - [_] https://github.com/fini03/vkDuck
+
+---
+
+- [_] add modulescript boundaries between luau and javascript VMs. moving values between vms.
+- [_] consider adding C# as another scripting langauge?
+- [_] constraints system

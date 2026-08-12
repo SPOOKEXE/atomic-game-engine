@@ -122,11 +122,27 @@ namespace engine::ui {
 		return Loaded[IndexOf(Typeface::Interface, size)];
 	}
 
-	ScopedFont::ScopedFont(Typeface face, TextSize size) {
-		if (ImFont *font = Font(face, size); font != nullptr) {
-			ImGui::PushFont(font, font->LegacySize);
-			Pushed = true;
+	ScopedFont::ScopedFont(Typeface face, TextSize size, float scale) {
+		const float factor = scale > 0.0f ? scale : 1.0f;
+
+		ImFont *font = Font(face, size);
+		if (font == nullptr && factor == 1.0f) {
+			// Nothing loaded and nothing to scale. Leaving imgui's default
+			// alone is cheaper than pushing it back over itself.
+			return;
 		}
+
+		// `LegacySize` is what the face was rasterised at, which already
+		// carries `InterfaceSettings::Scale` — so a zoom multiplies the size
+		// somebody chose rather than replacing it.
+		//
+		// A null face means the family would not load; `PushFont` reads that as
+		// "keep the current one", which is what a zoom wants when the shapes it
+		// asked for are missing.
+		const float base = font != nullptr ? font->LegacySize : ImGui::GetStyle().FontSizeBase;
+
+		ImGui::PushFont(font, base * factor);
+		Pushed = true;
 	}
 
 	ScopedFont::~ScopedFont() {

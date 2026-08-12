@@ -276,3 +276,44 @@ TEST_CASE("a surface with no pane in the draw list is not visible", "[graph][cul
 	);
 	CHECK_FALSE(visible[0]);
 }
+
+TEST_CASE("a surface's rate cap drops frames rather than queueing them", "[graph][cull]") {
+	// **A surface is a whole scene render and there is no reason it should keep
+	// the screen's rate.** A room of mirrors at 165 hertz is a room of full
+	// scene passes at 165 hertz, and a reflection is already a frame behind by
+	// construction — so `scene::SurfaceCamera::FPS` bounds the staleness instead
+	// of leaving it at whatever the display does.
+	//
+	// The rule lives in the renderer, where a device is needed to exercise it.
+	// What can be checked here is the decision itself, which is arithmetic:
+	// `render::DueToDraw` in `Renderer.cpp` is this, and the three ways of being
+	// uncapped are what this case is for.
+	const auto due = [](double drawn, float fps, double now) {
+		if (!(fps > 0.0f) || drawn < 0.0 || !(now > drawn)) {
+			return true;
+		}
+		return now - drawn >= 1.0 / static_cast<double>(fps);
+	};
+
+	// Never drawn: draws now, whatever the cap says. A pane walked up to must
+	// not show its own tint for an interval before the picture arrives.
+	CHECK(due(-1.0, 120.0f, 0.0));
+
+	// Inside the interval, and past it.
+	//
+	// **Not measured at the boundary itself**, which is a coin flip and rightly
+	// so: `(1 + 1/120) - 1` is not `1/120` in a double, and a cap that cared
+	// about which side of that it landed on would be a cap with an opinion about
+	// float rounding. What it promises is a bound, not a phase.
+	CHECK_FALSE(due(1.0, 120.0f, 1.0 + 1.0 / 240.0));
+	CHECK(due(1.0, 120.0f, 1.0 + 1.0 / 60.0));
+
+	// **Three ways to be uncapped, all of them "draw".** Zero is the documented
+	// way to ask for every frame; a negative rate is a script that computed
+	// something silly and must not black the surface out; and a clock that has
+	// not advanced is a host that never set one, where capping would freeze
+	// every surface in the world after its first frame.
+	CHECK(due(1.0, 0.0f, 1.0));
+	CHECK(due(1.0, -30.0f, 1.0));
+	CHECK(due(1.0, 120.0f, 1.0));
+}

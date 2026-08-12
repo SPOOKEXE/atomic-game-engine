@@ -129,6 +129,14 @@ interpenetration needs more.
 
 ## The two limits worth knowing before starting
 
+**One frame of lag per recursion level — until v0.15, which removed it.** The
+surface pass runs `Renderer::SetSurfaceBounces` times per frame now, each bounce
+making the last one's output the read side, so a chain resolves inside the frame
+rather than across frames. The estimate below was the one thing this document got
+wrong: it assumed removing the lag meant a recursive pass with its own budget,
+and it turned out to be a loop around the pass that already existed. Two bounces
+by default; the paragraph that follows is what the cost used to be.
+
 **One frame of lag per recursion level.** A portal's texture is last frame's, so
 walking towards a portal shows a view that is one frame stale, and a portal seen
 through a portal two. For a mirror this is invisible. For a hole somebody is
@@ -157,7 +165,7 @@ one the table said it was.
 | Oblique near plane at the destination | small | **done** |
 | `Portal` component pairing two parts, placed like a surface camera | small | **done** |
 | Traversal — cross the plane, move the body, remap velocity | medium | **done**, at v0.14 — the controller arrived early |
-| In-frame recursion, deepest first | large | open, and a rendering decision |
+| In-frame recursion, deepest first | large | **done** at v0.15, and it was small — see below |
 
 Four more landed at v0.15, out of a second reading of the demo once there was
 something to compare against. `NON_EUCLID.md` at the repository root is that

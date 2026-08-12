@@ -298,9 +298,249 @@ fall the way a small thing falls — walk into the large end and the room become
 vast and your jumps become small, which is the whole point of having gone
 through.
 
-### What did not change
+### What did not change, at the time
 
-**In-frame recursion.** Still `D00112`, still the render-graph work behind a
-prototype project. Everything above was reachable without it, which is most of
-why this document exists: the seam had become an excuse for leaving cheaper
-things undone.
+**In-frame recursion** was left open here and is closed further down. Everything
+above was reachable without it, which is most of why this document exists: the
+seam had become an excuse for leaving cheaper things undone.
+
+---
+
+## Two bugs found by running it
+
+Both were reported from a screenshot and a description rather than a test, and
+both turned out to be older than any of the work above.
+
+### A spare character standing near the hole
+
+`client::CollectInstances` called **both** `AppendPortalClones` and
+`AppendPortalGhosts` over the same world. They are the same answer reached two
+ways — one walks the world for things that can move, the other walks the draw
+list — so every straddling body got two far-side copies z-fighting each other.
+Worse, the ghost pass reads the list it appends to, and the clones had just been
+appended to it: a clone sits across the *far* pane by construction, so it was
+mapped back again and a third copy landed on top of the original.
+
+The clone pass is the one kept on that path, because it walks entities and can
+therefore ask what a draw instance cannot — whether a thing is able to move at
+all. `client::CollectReplicatedInstances` keeps the ghost pass and has to: a
+replica has a draw list and no simulation behind it.
+
+### The far room's floor drawn across the near room
+
+The straddle test widens every check by the body's own reach, which is right for
+a character and absurd for a slab. A floor fifty studs across has a reach of
+seventy, so its centre is within reach of every plane in the building and inside
+every rectangle in it — and what gets drawn is a copy of the far room's floor
+laid over the near one, meeting it along a hard straight line through the middle
+of the scene.
+
+`SeamStraddled` now refuses anything whose reach exceeds the pane's shorter
+half-axis. The rule is physical rather than tuned: a thing wider than the hole is
+not standing in the hole, whatever its centre is doing. `AppendPortalGhosts` had
+a *third* hand-rolled copy of the straddle test — the reason the rule reached
+only half the passes — and now calls the public one.
+
+### The camera flipping on some crossings and not others
+
+`PlaceCamera` put the third-person arm through the **nearest** pane its segment
+met. `CrossPortals` moved the body through the **first pane gathered**, which is
+archetype order — and archetype order moves whenever anything in the world
+changes a component set. On the frames the two chose differently, the body went
+through one hole and the eye through another, and nothing about those frames
+distinguished them from the ones that worked. It shows up in first person too,
+because the yaw written into `PortalTransit` is measured off whichever map the
+body used.
+
+They are one function now — `NearestCrossing` — used by the body's crossing and
+the camera's alike, so the two cannot disagree again. The regression test asserts
+that the *farther* pane is gathered first, which is what makes it a guard rather
+than a coincidence: a first-match rule passes the old geometry and fails this.
+
+---
+
+## Four more, from looking at it
+
+### A body in a hole cast no shadow on the far side
+
+`AppendPortalGhosts` forced `CastShadow` off, and the note explaining why said a
+second shadow would follow a body that is not there. That is true of a copy
+standing beside its original and false of this one: the map takes it to the far
+pane, which is a different room. A character standing in a doorway has half its
+shadow in each, and only the near half was ever drawn. The ghost keeps the
+instance's own `CastShadow` now, so a part authored not to cast still does not.
+
+### The character snapped for a frame or two after crossing
+
+`CapturePreviousTransforms` records where a body was when the tick began, and
+the renderer blends that against `Transform` by the tick's alpha.
+`CrossPortals` runs in `PostSimulation` — *after* that capture — so a body it
+teleports is interpolated **across the teleport**, and at three frames to a tick
+it is drawn once or twice somewhere in the hundred units between the two panes.
+
+`PreviousTransform` now goes through the same map as the placement and the
+velocity. Mapped rather than collapsed onto the new position: CodeParade's demo
+assigns `prev_pos = pos`, which removes the streak by removing the motion, and
+mapping keeps the whole tick expressed in the room the body is now in.
+
+### `SurfaceCamera::FPS`
+
+A surface is a whole scene render and there was no reason it should keep the
+screen's rate. 120 by default, zero for uncapped, honoured beside the content
+signature and the visibility gate rather than instead of them — three
+independent reasons to skip, and a surface has to clear all three.
+
+Three ways to be uncapped and all of them mean "draw": a rate of zero, a
+negative rate (a script computed something silly, and blacking the surface out
+for that would be a bug nothing reports), and a frame clock that has not
+advanced (a host that never calls `SetAnimationTime`, where capping would freeze
+every surface after its first frame). The bias is culling's: when the answer is
+not certain, do the work.
+
+**The never-drawn case ignores the cap**, deliberately, or a pane walked up to
+shows its own tint for up to an interval before the picture appears.
+
+### The portal went blocky up close
+
+Not the texture being too small. The fit covers the whole pane, and up against
+the glass almost all of the pane is off screen — a pane subtends nearly half a
+turn from a point on its own surface and a screen subtends seventy degrees. So
+almost every texel was spent outside the frame, and the image went coarse exactly
+when it was largest.
+
+The fit is now intersected with the viewer's own frustum, carried through the
+same map as everything else — exact rather than a heuristic, because the eye and
+the pane were mapped together, so the mapped frustum stands in the same relation
+to the mapped rectangle as the real one does to the real pane.
+
+**Two things that had to be got right, and the suite caught both.** The clamp
+must degrade *continuously*: a guard that switched it off when an eye-frustum
+corner swung behind the camera moved the fit by nearly half a radian between two
+frames, which the smoothness case measures and which is what a flash is. Flooring
+the depth the way the pane's own corners are floored makes the clamp stop binding
+smoothly instead. And the invariant the coverage case asserts had to change from
+"every corner of the pane is inside the image" — which is stronger than the
+shader needs and is what made this expensive — to "every part of the pane *the
+viewer can see* is inside the image", which is precisely the condition
+`opaque.frag` falls back on. The strict corner form is still asserted at ordinary
+distances, as the guard that the clamp does not bite when it should not.
+
+---
+
+## Two more from the same session
+
+### The camera could stand inside a pane
+
+A third-person arm swung into a doorway, or a first-person eye walked up to one,
+could come to rest *within* the pane's own plane. A surface camera built from a
+viewpoint there has no half-space for its oblique clip to keep and no bounded
+fit, and the pane fills the screen with a vertical smear of stretched texels —
+which reads as a corrupt texture rather than as an eye standing somewhere it
+should not.
+
+A body already had this rule from its landing clearance. `ClearOfPanes` is the
+same rule for a viewpoint: inside the band and inside the rectangle, it is pushed
+to the side it was nearer, using the same tie-break `SeamMapping` uses so that an
+eye and a body never disagree about which room they are in. Called after the
+crossing rather than before, because it is the eye's final resting place that has
+to be out of the seam.
+
+### A copy landing on its own original
+
+A pair of panes can be arranged so the map is near enough the identity for
+whatever stands beside them — two rooms laid out adjacent, with the hole between
+them agreeing with the geometry. Every clone then arrives on top of the thing it
+was copied from, and two coplanar surfaces at one depth is a stripe of flickering
+colour along the seam.
+
+Both far-side passes now refuse a copy that lands within the body's own reach of
+its original. A copy that overlaps its original is not a far half; it is a
+duplicate, and it can only fight.
+
+---
+
+## In-frame recursion, which was the last row
+
+**It is a loop, not a second renderer.** The surface pass samples the *other*
+surfaces, and with one pass per frame it samples the textures they held last
+frame — so a portal seen through a portal resolved one level per frame, and the
+frame somebody crossed showed a seam. That was the whole of what remained in
+`D00112`, and `docs/NON-EUCLIDEAN.md` estimated it "large" on the assumption that
+it meant a recursive pass with its own budget.
+
+It did not. Running the existing pass again is enough:
+
+- bounce zero draws every surface sampling last frame's neighbours;
+- the flip at the top of bounce one makes bounce zero's output the read side;
+- bounce one draws every surface sampling **this frame's** neighbours.
+
+After `n` bounces a chain `n` deep is resolved inside the frame, deepest first,
+because that is what iterating to a fixed point does from the outside in.
+
+**The ping-pong pair is what makes it safe and it was already there.** Each
+bounce writes `Slot` and reads `Slot ^ 1`, and the flip between bounces swaps
+which is which — so no pass ever samples a texture another pass is writing in the
+same bounce, which is the exact self-reference the pair was built to prevent.
+Nothing about the pass body changed; the loop wraps it.
+
+**Two by default rather than CodeParade's four**, because their portals are the
+whole scene and ours share a budget with mirrors, shadows and a world. The cost
+is one scene pass per refreshing surface per bounce, which is linear and is
+exactly why the visibility gate and `SurfaceCamera::FPS` were worth landing
+first: a bounce only costs for panes something can actually see, and only when
+they are due. `Renderer::SetSurfaceBounces` is the knob, floored at one.
+
+**One surface takes one bounce whatever the setting says**, because nothing
+samples itself — a lone mirror gains nothing from a second pass and should not
+pay for one.
+
+---
+
+## The regression that made "render on both sides" look unfixed
+
+The size rule added to `SeamStraddled` — *nothing bigger than the hole is
+standing in the hole*, stated against the pane's shorter half-axis — was wrong,
+and it was wrong in the direction that removes the feature.
+
+**A person is very nearly as big as the doorway they walk through.** A five-stud
+character has a reach of about three; a four-by-five doorway has a shorter
+half-axis of two. So every character in every hole was refused: no clone in the
+far room, no half a body in the picture, and the artefact the whole mechanism
+exists to remove was back — while the tests, which measured a floor slab against
+a sixteen-by-nine pane, stayed green.
+
+What that rule was standing in for is *is this the room, or a thing in it*, and
+the answer to that is which query found it. `CloneThroughSeams` walks bodies that
+can move and character limbs, so a floor is never a candidate there and no size
+rule is needed at all. `AppendPortalGhosts` reads a draw list, where an instance
+is a frame and a box and nothing else — so the guard belongs there, and only
+there. It is stated against the pane's **diagonal, doubled**, because what has to
+be caught is a room, and a room is bigger than its own doorway by an order of
+magnitude rather than by a factor of two.
+
+The test that would have caught it is the one that now exists: a whole
+`MakeCharacter` rig stood in a seam, asserting that its limbs are cloned and land
+in the far room. A box was not enough, because the failing case was a body about
+the size of the hole.
+
+**And the coincident-copy rule was tightened for the same class of reason.** It
+refused a copy landing within the body's own *reach* of its original, which reads
+as "the copy overlaps the original" and is far too strong: two rooms laid out
+near each other move a body a few studs, which is a real crossing into a real
+other room. What has to be caught is a map that moves nothing, so it is a hair —
+five hundredths of a stud — and nothing else.
+
+### The other half: the hole has to show it
+
+A copy in the draw list is drawn by the screen pass, which puts the far half in
+the far room. Somebody looking *at* the pane sees the surface texture instead, so
+the copy has to reach the surface pass too — or the picture in the hole shows a
+room with nobody in it while the body is visibly standing in the doorway.
+
+It does, and it is now asserted rather than assumed: `OrderScene` puts a copy in
+the `Reflected` run — the opaque part of the scene range that is not itself a
+mirror — which is exactly the range the surface pass submits. A copy lands there
+because it carries `Surface = -1` and the original's transparency, and the
+ordering has no other opinion. The surface camera's oblique clip then takes the
+copy's near half, and the pane's own image covers the original's overhang, so the
+two meet at the plane.

@@ -179,6 +179,7 @@
 			"properties": [
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Effect", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SurfaceEffect", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "FPS", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "FarPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "FieldOfView", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
@@ -203,6 +204,7 @@
 				{"name": "Destination", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Portal"], "writes": ["scene.Portal"]},
 				{"name": "DestinationWorld", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Portal"], "writes": ["scene.Portal"]},
 				{"name": "Effect", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SurfaceEffect", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "FPS", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "FarPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "FieldOfView", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},

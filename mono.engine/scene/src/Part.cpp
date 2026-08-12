@@ -1647,11 +1647,20 @@ namespace engine::scene {
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
 			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
 
-			// The surface camera's three. `SurfaceSize` above is inherited, so a
+			// The surface camera's four. `SurfaceSize` above is inherited, so a
 			// `SurfaceCamera` can still be resized like any other.
 			ecs::Classes::ClampedProperty<&SurfaceCamera::ImageTransparency, 0.0f, 1.0f>(
 				surfaceCameraClass, "ImageTransparency"
 			);
+
+			// **How often the surface may redraw, and zero is uncapped.** A
+			// plain property rather than a clamped one: a ceiling here would be
+			// a second opinion about what a display can do, and the floor is
+			// already meaningful — see `SurfaceCamera::FPS`. A negative value
+			// is refused where it is read rather than where it is written, so
+			// a script that computes one gets the uncapped behaviour instead of
+			// a surface that never draws again.
+			ecs::Classes::Property<&SurfaceCamera::FPS>(surfaceCameraClass, "FPS");
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
 			ecs::Classes::Computed(surfaceCameraClass, SurfaceEffectProperty());
 			ecs::Classes::Computed(surfaceCameraClass, TagFilterProperty());

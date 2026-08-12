@@ -527,6 +527,39 @@ namespace engine::scene {
 	bool
 	PortalCrossing(ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, PortalHop &hop);
 
+	// Pushes a point out of any portal pane it is standing in the plane of.
+	//
+	// **A viewpoint may be on either side of a hole and never in it**, which is
+	// the rule a body already follows and an eye did not. `CrossPortals` puts a
+	// crosser down a stated distance clear of the plane it crossed — see the
+	// landing clearance in the source — so nothing can come to rest in the seam.
+	// A camera had no such rule: a third-person arm swung into a pane, or a
+	// first-person eye walked into one, could land *within* the pane's own
+	// thickness.
+	//
+	// What that looks like is worth naming because it does not read as a camera
+	// bug. The surface camera's oblique clip has no half-space left to keep, the
+	// fit's extents run away, and the pane fills the screen with a vertical
+	// smear of stretched texels — which looks like a corrupt texture or a broken
+	// projection rather than like an eye standing somewhere it should not.
+	//
+	// **Pushed to the nearer side rather than always outward.** Which side a
+	// viewpoint belongs on is the same question `SeamMapping` asks of a crosser
+	// and `AimSurfaceCameras` asks of a viewer: barely inside from the front, it
+	// belongs in front; past the middle, it has effectively arrived and belongs
+	// behind. Either answer is a place a camera can render from, and the band
+	// between them is the only place it cannot.
+	//
+	// **One pane, for `CrossPortals`' reason.** A point inside two panes at once
+	// is at the line where two holes meet, and pushing it out of both would be
+	// two answers to one question.
+	//
+	// @param store The world.
+	// @param at    The point, moved only when it is inside a pane.
+	// @return Whether it was moved.
+	// @since v0.15
+	bool ClearOfPanes(ecs::Store &store, core::Vector3 &at);
+
 	// Stops a portal's pane from solving contacts, so a body can be inside it.
 	//
 	// **A hole you cannot stand in is a picture of a hole.** The pane is an

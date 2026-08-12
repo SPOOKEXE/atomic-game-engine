@@ -184,6 +184,41 @@ namespace engine::scene {
 		// through — see `SeamStraddled`, whose reach is a whole body's radius.
 		constexpr float LANDING_CLEARANCE = 0.01f;
 
+		// How far a viewpoint is kept from a pane's plane, in studs.
+		//
+		// **Much wider than a body's landing clearance, and for a different
+		// reason.** A body one hundredth of a stud past a plane is simply on
+		// that side, and nothing about it renders badly. A *camera* that close
+		// is degenerate: the oblique clip has no half-space left to keep, the
+		// fitted extents run away, and the pane comes out as a vertical smear of
+		// stretched texels — which reads as a corrupt texture rather than as an
+		// eye standing somewhere it should not.
+		//
+		// The same 0.3 as `EDGE_ON_MARGIN`, and deliberately the same number:
+		// that constant is the width inside which every part of a surface
+		// camera's construction is already degenerate, and this is the rule that
+		// stops a viewpoint being there at all. A mirror stops drawing across
+		// it; a portal is walked through, so the eye is moved instead.
+		constexpr float VIEWPOINT_CLEARANCE = EDGE_ON_MARGIN;
+
+		// How close a far-side copy may land to its own original before it is
+		// not worth drawing, in studs.
+		//
+		// **A copy on top of its original is a duplicate rather than a far
+		// half**, and two coplanar surfaces at one depth is a stripe of
+		// flickering colour. That happens when the map is the identity for the
+		// thing being copied — a pane paired with itself, or a pair arranged so
+		// the map fixes whatever stands beside them.
+		//
+		// **Tiny rather than the body's own reach, which is what this was
+		// first.** Measuring against the reach reads as "the copy overlaps the
+		// original" and is far too strong: two rooms laid out next to each other
+		// with a hole between them move a body a few studs, which is a real
+		// crossing into a real other room, and refusing that clone puts the
+		// artefact back. What has to be caught is the degenerate map, and a
+		// degenerate map moves nothing at all.
+		constexpr float COINCIDENT_COPY = 0.05f;
+
 		// An up vector a `LookAt` can actually use for this direction.
 		//
 		// **A different up for a floor or a ceiling.** `LookAt` builds its
@@ -306,6 +341,29 @@ namespace engine::scene {
 			// Identity for a mirror. See the component's comment for why that is
 			// the reflection's equal on the only points that are shaded with it.
 			SeamTransform Map;
+
+			// The viewer's own frustum corners, as directions, put through the
+			// same map as everything else here.
+			//
+			// **What stops a close pane being drawn at a hundredth of the
+			// resolution it is shown at.** The fit covers the whole pane, and up
+			// against the glass almost all of the pane is off screen — a pane
+			// subtends nearly half a turn from a point on its own surface, and
+			// the viewer sees perhaps a tenth of that. Every texel spent on the
+			// other nine tenths is a texel not spent on the part in front of
+			// them, so the image goes blocky exactly when it is largest.
+			//
+			// Intersecting the fit with these four directions keeps the texels
+			// where the viewer is looking. It is exact rather than a heuristic:
+			// the map takes the eye and the pane together, so the eye's frustum
+			// stands in the same relation to the *mapped* pane as it does to the
+			// real one, and what it cannot see through the pane is what does not
+			// need drawing.
+			//
+			// Empty — a zero count — when there is no eye frustum to be had, in
+			// which case the fit is used unclamped.
+			Vector3 EyeCorners[4];
+			size_t EyeCornerCount = 0;
 		};
 
 		// The frustum extents that just cover a rectangle, at the near plane.
@@ -397,6 +455,63 @@ namespace engine::scene {
 			lens.Right = middleX + (lens.Right - middleX) * FIT_MARGIN;
 			lens.Bottom = middleY + (lens.Bottom - middleY) * FIT_MARGIN;
 			lens.Top = middleY + (lens.Top - middleY) * FIT_MARGIN;
+
+			// **Then cut down to what the viewer can actually see through the
+			// pane, which is the whole of the close-up sharpness.** See
+			// `Placement::EyeCorners`. An intersection rather than a
+			// replacement: far from the pane the fit is already much tighter
+			// than the eye's frustum and nothing here changes it, which is the
+			// case that must not regress.
+			if (placement.EyeCornerCount == 4) {
+				float eyeLeft = 0.0f;
+				float eyeRight = 0.0f;
+				float eyeBottom = 0.0f;
+				float eyeTop = 0.0f;
+
+				for (size_t corner = 0; corner < 4; corner++) {
+					const Vector3 &direction = placement.EyeCorners[corner];
+
+					// **The same floor the pane's corners get, and for the same
+					// reason.** A guard that switched the clamp off when a corner
+					// went behind the camera was tried and is what a flash is:
+					// the fit jumps from "the screen" to "the whole pane" between
+					// two frames, which the smoothness suite measured at nearly
+					// half a radian. Flooring the depth instead sends the extent
+					// off towards infinity as the corner swings past, so the
+					// clamp stops binding *continuously* and there is no step to
+					// see.
+					const float depth = std::max(direction.Dot(placement.Forward), MINIMUM_DEPTH);
+					const float scale = near / depth;
+
+					const float x = direction.Dot(right) * scale;
+					const float y = direction.Dot(above) * scale;
+
+					if (corner == 0) {
+						eyeLeft = x;
+						eyeRight = x;
+						eyeBottom = y;
+						eyeTop = y;
+						continue;
+					}
+
+					eyeLeft = std::min(eyeLeft, x);
+					eyeRight = std::max(eyeRight, x);
+					eyeBottom = std::min(eyeBottom, y);
+					eyeTop = std::max(eyeTop, y);
+				}
+
+				// **Clamped without letting the box invert, rather than skipped
+				// when the two do not overlap.** A pane entirely outside the
+				// viewer's frustum collapses to a sliver here and the degenerate
+				// guard below widens it to something finite — which is right,
+				// because that pane is about to be skipped for being invisible
+				// anyway. An `if` around the whole clamp would be one more
+				// switch to step across.
+				lens.Left = std::min(std::max(lens.Left, eyeLeft), lens.Right);
+				lens.Right = std::max(std::min(lens.Right, eyeRight), lens.Left);
+				lens.Bottom = std::min(std::max(lens.Bottom, eyeBottom), lens.Top);
+				lens.Top = std::max(std::min(lens.Top, eyeTop), lens.Bottom);
+			}
 
 			// A rectangle with no area cannot be a frustum. Widening to something
 			// tiny keeps the matrix finite, which is what lets the surface render
@@ -656,6 +771,66 @@ namespace engine::scene {
 			through = SeamMapping(hole, from);
 			return true;
 		}
+
+		// Which hole a segment goes through, out of all of them.
+		//
+		// **The nearest, and not the first one gathered.** A segment that meets
+		// two panes has to go through the one it reaches first, and the gather
+		// order is archetype order — which moves the moment anything in the
+		// world changes a component set. So "the first that matches" is not a
+		// rule at all: it is whichever pane the store happened to list first
+		// this frame, and it can differ between two frames in which nothing
+		// moved.
+		//
+		// **One function because two disagreeing is what a flipped camera is.**
+		// The body's crossing and the third-person camera arm's are the same
+		// question asked about two ends of the same rig, and they used to be two
+		// loops — this one picking the nearest and `CrossPortals` picking the
+		// first. On any frame the two chose differently, the body went through
+		// one hole and the eye through another: the view snapped somewhere the
+		// character was not, on some crossings and not others, with nothing
+		// about the crossing to distinguish them. Intermittent by construction,
+		// because the thing that decided it was archetype order.
+		//
+		// @param holes The gathered seams.
+		// @param from  Where the segment starts.
+		// @param to    Where it ends.
+		// @param hop   Filled when one is found, untouched otherwise.
+		// @return The seam that was crossed, or null. Returned rather than
+		//         looked up again from `PortalHop::Pane`, because a caller that
+		//         needs the rectangle — a body does, to be put down clear of it
+		//         — would otherwise search for the answer this already had.
+		const PortalSeam *NearestCrossing(
+			const std::vector<PortalSeam> &holes, const Vector3 &from, const Vector3 &to, PortalHop &hop
+		) {
+			const PortalSeam *found = nullptr;
+			float nearest = 1.0f;
+
+			for (const PortalSeam &seam : holes) {
+				// **A cross-world pane is nobody's to move anybody through
+				// here.** Its `Destination` is a stand-in that tells the camera
+				// where to look, so a segment through one has no far end in this
+				// store to be continued onto — and moving a body to the stand-in
+				// would put them a metre behind the pane they were walking into.
+				if (seam.Crosses) {
+					continue;
+				}
+
+				SeamTransform candidate;
+				float at = 1.0f;
+				if (!CrossingOf(seam, from, to, candidate, at)) {
+					continue;
+				}
+
+				if (found == nullptr || at < nearest) {
+					nearest = at;
+					found = &seam;
+					hop = PortalHop{candidate, at, seam.Pane};
+				}
+			}
+
+			return found;
+		}
 	}
 
 	SeamTransform SeamMapping(const PortalSeam &seam, float side) {
@@ -682,6 +857,27 @@ namespace engine::scene {
 	}
 
 	bool SeamStraddled(const PortalSeam &seam, const Vector3 &at, float reach) {
+		const float firstLength = std::sqrt(seam.First.Dot(seam.First));
+		const float secondLength = std::sqrt(seam.Second.Dot(seam.Second));
+		if (firstLength <= 0.0f || secondLength <= 0.0f) {
+			return false;
+		}
+
+		// **No size rule here, and the one that was here was a bug.** It refused
+		// anything whose reach exceeded the pane's shorter half-axis, which
+		// sounds like "bigger than the hole" and is not: a person is very nearly
+		// as big as the doorway they walk through. A five-stud character has a
+		// reach of about three and a four-by-five doorway a shorter half-axis of
+		// two, so every character in every hole was refused — no clone in the
+		// far room, no half-body in the picture, which is exactly the artefact
+		// the pass exists to remove.
+		//
+		// What that rule was standing in for is "is this the room rather than a
+		// thing in it", and the answer to that is which query found it:
+		// `CloneThroughSeams` walks bodies that can move and character limbs, so
+		// a floor is never a candidate. `AppendPortalGhosts` reads a draw list
+		// and cannot ask, so it keeps a size guard of its own — a much looser
+		// one, stated against the pane's diagonal.
 		if (std::abs(SeamOffset(seam, at)) >= reach) {
 			return false;
 		}
@@ -693,12 +889,6 @@ namespace engine::scene {
 		// (it is behind the pane) and one that appears a moment late is a body
 		// visibly cut in half, which is the artefact this exists to remove.
 		const Vector3 offset = at - seam.Centre;
-
-		const float firstLength = std::sqrt(seam.First.Dot(seam.First));
-		const float secondLength = std::sqrt(seam.Second.Dot(seam.Second));
-		if (firstLength <= 0.0f || secondLength <= 0.0f) {
-			return false;
-		}
 
 		const float alongFirst = std::abs(offset.Dot(seam.First) / firstLength);
 		const float alongSecond = std::abs(offset.Dot(seam.Second) / secondLength);
@@ -730,6 +920,47 @@ namespace engine::scene {
 			return 0;
 		}
 		const Vector3 eye = eyeTransform->Frame.Position;
+
+		// **The viewer's own frustum, as four directions.** What a surface has
+		// to cover is not the pane, it is the part of the pane the viewer can
+		// see — and up against the glass those are wildly different: a pane
+		// subtends nearly half a turn from a point on its own surface and a
+		// screen subtends seventy degrees. Fitting the whole pane there spends
+		// almost every texel outside the frame, which is exactly why a portal
+		// went blocky as you walked into it. `FitExtents` intersects with these.
+		//
+		// **Taken once, outside the walk**, because they are the eye's and not
+		// each pane's, and rebuilding them per surface would be four rotations
+		// per mirror per frame for one answer.
+		//
+		// A world whose active camera carries no `Camera` — which a bare
+		// `Transform` used as an eye is — leaves the count at zero and every fit
+		// unclamped, which is what this did before.
+		Vector3 eyeCorners[4];
+		size_t eyeCornerCount = 0;
+
+		if (const Camera *eyeLens = store.Get<Camera>(active->Entity)) {
+			const float aspect = active->AspectRatio > 0.0f ? active->AspectRatio : 1.0f;
+			const float up = std::tan(eyeLens->FieldOfViewRadians * 0.5f);
+			const float across = up * aspect;
+
+			// **A little wider than the screen exactly needs**, for
+			// `FIT_MARGIN`'s reason one level up: the edge of a frustum is not a
+			// safe place to sample, and a clamp landing exactly on the screen
+			// edge puts the pane's visible boundary on the texture's boundary.
+			const float slack = FIT_MARGIN;
+
+			int corner = 0;
+			for (int x = -1; x <= 1; x += 2) {
+				for (int y = -1; y <= 1; y += 2) {
+					const Vector3 local{
+						static_cast<float>(x) * across * slack, static_cast<float>(y) * up * slack, -1.0f
+					};
+					eyeCorners[corner++] = eyeTransform->Frame.VectorToWorldSpace(local);
+				}
+			}
+			eyeCornerCount = 4;
+		}
 
 		store.Each<const SurfaceCamera, const Camera, const Transform>(
 			[&](Entity entity, const SurfaceCamera &target, const Camera &lens, const Transform &) {
@@ -900,6 +1131,17 @@ namespace engine::scene {
 					// And the pane is mapped by the same matrix when it reads
 					// the image back, which is what makes the two line up.
 					placement.Map = through;
+
+					// **The viewer's frustum goes through the same map**, which
+					// is what makes clamping the fit against it exact rather
+					// than a guess: the eye and the pane were moved together, so
+					// the mapped frustum stands in the same relation to the
+					// mapped rectangle as the real one does to the real pane.
+					// `Rotate` and not `Carry`, because these are directions.
+					for (size_t corner = 0; corner < eyeCornerCount; corner++) {
+						placement.EyeCorners[corner] = through.Rotate(eyeCorners[corner]);
+					}
+					placement.EyeCornerCount = eyeCornerCount;
 				} else {
 					// **Mirrored through the plane.** The same distance behind the
 					// face as the eye is in front, on the other side — which is the
@@ -916,6 +1158,19 @@ namespace engine::scene {
 					placement.Forward = unit * facing;
 					placement.First = first;
 					placement.Second = second;
+
+					// **The same map applied to the viewer's frustum, and for a
+					// mirror the map is the reflection rather than the
+					// identity.** `Map` is left identity here on purpose — it is
+					// the reflection's equal on the pane's own plane, which is
+					// where the pane is shaded — but a *direction* is not on that
+					// plane, so it has to be reflected properly or the clamp
+					// would cut the wrong side of the image.
+					for (size_t corner = 0; corner < eyeCornerCount; corner++) {
+						const Vector3 &direction = eyeCorners[corner];
+						placement.EyeCorners[corner] = direction - unit * (2.0f * direction.Dot(unit));
+					}
+					placement.EyeCornerCount = eyeCornerCount;
 				}
 
 				// **Aimed, not merely placed.** An identity rotation looks down
@@ -1239,9 +1494,27 @@ namespace engine::scene {
 				// hole that changes size has to be the size of the room it is
 				// showing up in, or the two halves meet at the pane as a step.
 				const SeamTransform through = SeamMapping(seam, SeamOffset(seam, frame.Position));
+				const CFrame carried = through.Place(frame);
+
+				// **A copy that lands on its own original is not a far half, it
+				// is a duplicate.** A pair of panes can be arranged so that the
+				// map is near enough the identity for the things beside them —
+				// two rooms laid out adjacent, with the hole between them
+				// agreeing with the geometry — and every clone then arrives on
+				// top of the thing it was copied from. Two coplanar surfaces at
+				// the same depth is z-fighting, which is what a stripe of
+				// flickering colour along a seam is.
+				//
+				// Measured against a hair rather than the body's own size: see
+				// `COINCIDENT_COPY`. What has to be caught is a map that moves
+				// nothing, not a hole between two rooms that happen to be near
+				// each other.
+				if ((carried.Position - frame.Position).Magnitude() < COINCIDENT_COPY) {
+					continue;
+				}
 
 				DrawInstance ghost{
-					through.Place(frame),
+					carried,
 					bounds.HalfExtent * through.Scale,
 					visual.Tint,
 					visual.Mesh,
@@ -1339,6 +1612,39 @@ namespace engine::scene {
 		return CloneThroughSeams(store, static_cast<int>(surface), out);
 	}
 
+	bool ClearOfPanes(ecs::Store &store, Vector3 &at) {
+		std::vector<PortalSeam> &seams = Seams();
+		GatherSeams(store, seams);
+
+		for (const PortalSeam &seam : seams) {
+			const float offset = SeamOffset(seam, at);
+			if (std::abs(offset) >= VIEWPOINT_CLEARANCE) {
+				continue;
+			}
+
+			// **Inside the rectangle and not merely the plane**, which is
+			// `CrossingOf`'s distinction: a plane is infinite and a pane is not,
+			// and an eye level with a doorway but well to the side of it is
+			// standing in a wall rather than in a hole.
+			const Vector3 along = at - seam.Centre;
+			const float first = along.Dot(seam.First) / seam.First.Dot(seam.First);
+			const float second = along.Dot(seam.Second) / seam.Second.Dot(seam.Second);
+			if (std::abs(first) > 1.0f || std::abs(second) > 1.0f) {
+				continue;
+			}
+
+			// **The side it is nearer, and zero counts as behind** — the same
+			// tie-break `SeamMapping` makes, so a viewpoint pushed out of a pane
+			// and a body carried through one never disagree about which room
+			// they are in.
+			const float side = offset > 0.0f ? 1.0f : -1.0f;
+			at = at + seam.Normal * (side * VIEWPOINT_CLEARANCE - offset);
+			return true;
+		}
+
+		return false;
+	}
+
 	size_t OpenPortals(ecs::Store &store) {
 		// **Gathered before anything is written**, for the reason every other
 		// pass in this file gives: `Store::Set` on a component the row already
@@ -1396,37 +1702,7 @@ namespace engine::scene {
 	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, PortalHop &hop) {
 		std::vector<PortalSeam> &seams = Seams();
 		GatherSeams(store, seams);
-
-		// **The nearest crossing, not the first one gathered.** A segment that
-		// meets two panes has to go through the one it reaches first, and the
-		// gather order is archetype order — which moves whenever anything in the
-		// world changes a component set. A ray that picked the far pane would
-		// come out of a hole it never reached.
-		bool found = false;
-		float nearest = 1.0f;
-
-		for (const PortalSeam &seam : seams) {
-			// A cross-world pane leads somewhere this store cannot describe, so
-			// a segment through one has no far end here to be continued onto.
-			// `CrossPortals` skips them for the matching reason.
-			if (seam.Crosses) {
-				continue;
-			}
-
-			SeamTransform candidate;
-			float at = 1.0f;
-			if (!CrossingOf(seam, from, to, candidate, at)) {
-				continue;
-			}
-
-			if (!found || at < nearest) {
-				nearest = at;
-				found = true;
-				hop = PortalHop{candidate, at, seam.Pane};
-			}
-		}
-
-		return found;
+		return NearestCrossing(seams, from, to, hop) != nullptr;
 	}
 
 	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, SeamTransform &through) {
@@ -1486,23 +1762,38 @@ namespace engine::scene {
 					continue;
 				}
 
+				// **The room is not a thing standing in the hole, and this pass
+				// cannot ask which it is.** `CloneThroughSeams` walks bodies
+				// that can move and character limbs, so a floor is never a
+				// candidate there. This one reads a draw list, where an
+				// instance is a frame and a box and nothing else — so without a
+				// guard a floor slab fifty studs across, whose reach is seventy,
+				// is "within reach" of every plane in the building and "inside"
+				// every rectangle in it, and the far room's floor gets laid over
+				// the near one along a hard straight line through the scene.
+				//
+				// **Against the pane's diagonal and doubled**, which is loose on
+				// purpose. A person is very nearly as big as the doorway they
+				// walk through — the rule this replaces compared against the
+				// *shorter half-axis* and refused every character in every hole,
+				// which is the artefact this pass exists to remove wearing the
+				// costume of a fix for a different one. What has to be caught is
+				// the room, and a room is bigger than its own doorway by an
+				// order of magnitude rather than by a factor of two.
+				const float diagonal = std::sqrt(seam.First.Dot(seam.First) + seam.Second.Dot(seam.Second));
+				if (radius > diagonal * 2.0f) {
+					continue;
+				}
+
+				// **`SeamStraddled` and not a third copy of the straddle test.**
+				// This file had three: the segment one in `CrossingOf`, the
+				// public state one, and a hand-rolled version here that agreed
+				// with neither about its slack.
+				if (!SeamStraddled(seam, body.Frame.Position, radius)) {
+					continue;
+				}
+
 				const Vector3 offset = body.Frame.Position - seam.Centre;
-
-				// Straddling the plane, and within the rectangle it is a hole
-				// in. Both, for `CrossingOf`'s reason: a plane is infinite and a
-				// pane is not, and a body passing the end of one must not
-				// sprout a second copy of itself somewhere else.
-				if (std::abs(offset.Dot(seam.Normal)) > radius) {
-					continue;
-				}
-
-				const float alongFirst = offset.Dot(seam.First) / seam.First.Dot(seam.First);
-				const float alongSecond = offset.Dot(seam.Second) / seam.Second.Dot(seam.Second);
-				const float slackFirst = radius / seam.First.Magnitude();
-				const float slackSecond = radius / seam.Second.Magnitude();
-				if (std::abs(alongFirst) > 1.0f + slackFirst || std::abs(alongSecond) > 1.0f + slackSecond) {
-					continue;
-				}
 
 				// **Which side the body's middle is on decides the map**, the
 				// same question `CrossingOf` asks of a segment and
@@ -1518,17 +1809,39 @@ namespace engine::scene {
 				// plane.
 				const SeamTransform through = SeamMapping(seam, offset.Dot(seam.Normal));
 
+				const CFrame carried = through.Place(body.Frame);
+
+				// **A copy that lands on its own original is a duplicate rather
+				// than a far half**, and two coplanar surfaces at one depth is
+				// the stripe of flickering colour that appears along a seam. See
+				// `CloneThroughSeams`, which refuses it for the same reason: a
+				// pair of panes can be arranged so the map is near enough the
+				// identity for whatever stands beside them.
+				if ((carried.Position - body.Frame.Position).Magnitude() < COINCIDENT_COPY) {
+					continue;
+				}
+
 				DrawInstance ghost = body;
-				ghost.Frame = through.Place(body.Frame);
+				ghost.Frame = carried;
 				ghost.HalfExtent = body.HalfExtent * through.Scale;
 
-				// **Never a surface and never a caster.** A ghost is the far
-				// half of something that is already in the world: a second
-				// shadow would follow a body that is not there, and a ghost that
-				// sampled a surface slot would put the far room's picture on a
-				// copy of a character.
+				// **Never a surface**, because a ghost that sampled a surface
+				// slot would put the far room's picture on a copy of a
+				// character.
 				ghost.Surface = -1;
-				ghost.CastShadow = false;
+
+				// **But it does cast, and refusing to was wrong.** The note
+				// here used to say a second shadow would follow a body that is
+				// not there — which is true of a copy standing beside its
+				// original and false of this one: the map takes it to the far
+				// pane, which is a different room. A body half through a hole
+				// has half its shadow in each, and the near half is the only one
+				// anything was drawing. What that looks like is a character
+				// standing in a doorway whose shadow stops dead at the seam.
+				//
+				// The instance's own `CastShadow` is kept rather than forced on,
+				// so a part authored not to cast still does not.
+				ghost.CastShadow = body.CastShadow;
 
 				out.push_back(ghost);
 				appended++;
@@ -1676,29 +1989,34 @@ namespace engine::scene {
 		// footnote, and the arithmetic does not care which it is. Anchored
 		// scenery carries no `Motion` and is therefore never a candidate, which
 		// is the archetype doing the filtering rather than a branch.
-		store.Each<Transform, Motion, const PreviousTransform>(
-			[&](ecs::Entity entity, Transform &placement, Motion &motion, const PreviousTransform &before) {
+		store.Each<Transform, Motion, PreviousTransform>(
+			[&](ecs::Entity entity, Transform &placement, Motion &motion, PreviousTransform &before) {
 				const Vector3 was = before.Frame.Position;
 				const Vector3 now = placement.Frame.Position;
 
-				for (const PortalSeam &hole : holes) {
-					// **A cross-world pane is not this pass's to move anybody
-					// through.** Its `Destination` is a stand-in that tells the
-					// camera where to look, so walking through one used to be
-					// answered twice — once by this pass, which put the body a
-					// metre behind the pane it was entering, and once by whoever
-					// owns the world change. Two authorities over one crossing
-					// is what a body flipping about in the seam looks like.
-					if (hole.Crosses) {
-						continue;
-					}
+				// **The nearest hole this step met, by the same rule and the
+				// same code as the camera's.** This used to take the first seam
+				// the gather happened to list, which is archetype order and
+				// therefore not a rule — and `PlaceCamera` already took the
+				// nearest for its arm. On any frame the two chose differently
+				// the body went through one hole and the eye through another,
+				// and what that looks like is the view flipping on some
+				// crossings and not others with nothing to tell them apart.
+				//
+				// **One hole per body per tick**, which the single answer now
+				// says rather than a `break` at the bottom of a loop: a body
+				// bounced through three holes on one step is neither what the
+				// author drew nor reproducible.
+				PortalHop hop;
+				const PortalSeam *met = NearestCrossing(holes, was, now, hop);
+				if (met == nullptr) {
+					return;
+				}
 
-					SeamTransform through;
-					float share = 1.0f;
-					if (!CrossingOf(hole, was, now, through, share)) {
-						continue;
-					}
+				const PortalSeam &hole = *met;
+				const SeamTransform &through = hop.Through;
 
+				{
 					// **Put down clear of the plane it is about to be on the far
 					// side of.** Pushed before the map rather than after, so the
 					// only normal involved is the source pane's — which this pass
@@ -1724,6 +2042,25 @@ namespace engine::scene {
 					placement.Frame =
 						through.Place(CFrame{placement.Frame.Position + clear, placement.Frame.Rotation()});
 					motion.Linear = through.Carry(motion.Linear);
+
+					// **And where it started the tick, or the frames between now
+					// and the next tick draw it halfway between two rooms.**
+					// `CapturePreviousTransforms` records where a body was when
+					// the tick began and the renderer blends the two by the
+					// tick's alpha — so a body teleported after that capture is
+					// interpolated *across the teleport*, and at three frames to
+					// a tick it is drawn once or twice somewhere in the hundred
+					// units between the two panes. What that looks like is the
+					// character snapping, with a streak where it went.
+					//
+					// **Mapped rather than collapsed onto the new placement.**
+					// CodeParade's demo assigns `prev_pos = pos`, which removes
+					// the streak by removing the motion — the body stands still
+					// for the rest of the tick and then jumps. Putting the old
+					// position through the same map keeps the whole tick, just
+					// expressed in the room the body is now in, so it walks out
+					// of the far pane at the speed it walked into the near one.
+					before.Frame = through.Place(before.Frame);
 
 					// **And the body itself, when the two ends are not the same
 					// size.** Gathered rather than applied here for the reason
@@ -1778,9 +2115,6 @@ namespace engine::scene {
 					}
 
 					crossed++;
-
-					// One hole per body per tick. See the gathering pass above.
-					break;
 				}
 			}
 		);

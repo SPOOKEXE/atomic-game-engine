@@ -850,6 +850,36 @@ namespace engine::scene {
 		// other, once, wherever the camera is authored.
 		uint32_t TagFilter = 0;
 
+		// How many times a second this surface may redraw.
+		//
+		// **A surface is a whole scene render and there is no reason it should
+		// keep the screen's rate.** A room of mirrors at 165 hertz is a room of
+		// full scene passes at 165 hertz, and nothing a viewer can see in a
+		// pane at arm's length needs them: a reflection is already a frame
+		// behind by construction, and the eye cannot tell a reflection updated
+		// at 120 from one updated at 165 while it can very much tell the
+		// difference in frame time.
+		//
+		// **120 by default rather than uncapped**, because that is the rate
+		// above which nobody has reported seeing the difference and below which
+		// several people have reported the cost. A display slower than this
+		// never reaches the cap and pays nothing for it; a fast one draws the
+		// world at its own rate and the mirrors at this one.
+		//
+		// **Zero is uncapped**, which is what a surface wants when it is the
+		// subject rather than the scenery — a camera feed somebody is looking
+		// straight at, or a test that needs one render per frame.
+		//
+		// **Frames are dropped, never queued.** A surface past its interval
+		// draws on the next frame that asks; one inside it keeps the texture it
+		// has, and its matrices keep describing the camera that drew it, which
+		// is the same contract the content signature already gives. So a capped
+		// surface is not a delayed surface, it is one whose staleness has a
+		// stated bound.
+		//
+		// @since v0.15
+		float FPS = 120.0f;
+
 		// What the image is put through before a pane shows it.
 		//
 		// **A grade on the way out, not a second render.** The surface pass is

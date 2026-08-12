@@ -153,7 +153,7 @@ become one, by one of:
 its own registry and its own canvas would make this three, and the first
 divergence would be in the part nobody tests: the cycle guard or the hash.
 
-### [_] D00112
+### [x] D00112
 
 **Portals can be walked through; the frame you cross on still shows the wrong
 side.** `docs/NON-EUCLIDEAN.md` filed six rows of work at v0.14 and this entry
@@ -186,6 +186,15 @@ it is a visible seam. Removing it means rendering the portal chain inside the
 frame, deepest first — the one property the surface pass trades away for being
 cheap, and a change that belongs with the render-graph work `ROADMAP.md` files
 behind a prototype project.
+
+**Closed at v0.15, and the last row was much smaller than this entry says.**
+The seam was that a surface samples the *other* surfaces from the textures they
+held last frame. Removing it does not need a recursive pass with its own budget —
+it needs the existing pass to run again: each bounce makes the previous one's
+output the read side, and after `n` bounces a chain `n` deep is resolved inside
+the frame, deepest first. The ping-pong pair each slot already carried is what
+makes it safe. `Renderer::SetSurfaceBounces`, two by default, and `NON_EUCLID.md`
+is the reading of CodeParade's demo that the work came out of.
 
 **Part of what looked like the seam was not the seam, and is gone.** v0.15 found
 that `EDGE_ON_MARGIN` — a mirror's fix for a camera that flips 180 degrees as a
