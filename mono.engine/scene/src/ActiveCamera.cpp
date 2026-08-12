@@ -98,6 +98,32 @@ namespace engine::scene {
 		return projection;
 	}
 
+	glm::mat4 SurfaceMapping(const SurfaceLens &lens) {
+		const glm::mat4 rigid = lens.Mapping.ToMatrix();
+
+		// **A scale of one is the identity and is worth taking early**, because
+		// it is every mirror and every matched pair of panes — which is nearly
+		// every surface in nearly every world. Three matrix multiplies avoided
+		// per surface per frame, and no float error introduced where there was
+		// none.
+		if (lens.MappingScale == 1.0f) {
+			return rigid;
+		}
+
+		// **Taken about the source pane's centre**, which is the point the rigid
+		// half already sends to the destination's centre — so scaling here and
+		// scaling at the far end are the same map, and only the centre this lens
+		// carries is needed to say it.
+		const glm::vec3 origin{lens.MappingOrigin.X, lens.MappingOrigin.Y, lens.MappingOrigin.Z};
+
+		glm::mat4 about(1.0f);
+		about = glm::translate(about, origin);
+		about = glm::scale(about, glm::vec3(lens.MappingScale));
+		about = glm::translate(about, -origin);
+
+		return rigid * about;
+	}
+
 	CameraMatrices ResolveSurfaceCamera(const core::CFrame &frame, const glm::mat4 &projection) {
 		CameraMatrices matrices;
 		matrices.View = glm::inverse(frame.ToMatrix());

@@ -1060,7 +1060,34 @@ namespace engine::scene {
 		// it reflects through, so on the pane's own face they are the same map.
 		// They differ off it — the sides and back of the pane's box — and
 		// identity is what a mirror has always sampled with there.
+		//
+		// **The rigid half only.** A hole between two panes of different sizes
+		// maps by a similarity, and the scale it carries lives in the two fields
+		// below because a `CFrame` is a position and a rotation and nothing else.
+		// `scene::SeamTransform` is the whole map and is what both halves are
+		// taken from.
 		core::CFrame Mapping;
+
+		// The point `MappingScale` is taken about, which is the source pane's
+		// centre in world space.
+		//
+		// **Carried rather than derived from the pane**, because the pane a
+		// consumer has is a box and the centre this needs is the centre of one
+		// *face* of it — which is `ReachOf` and a face id away, and is exactly
+		// the sort of second derivation that ends up disagreeing by a
+		// half-extent.
+		//
+		// @since v0.15
+		core::Vector3 MappingOrigin;
+
+		// How much bigger the far pane is, from `scene::PortalSeam::Scale`.
+		//
+		// One for a mirror, one for a matched pair, and one for anything a host
+		// fills in by hand — so a consumer that has never heard of a scaled
+		// portal composes the same matrix it always did.
+		//
+		// @since v0.15
+		float MappingScale = 1.0f;
 	};
 
 	// A point on a part, carried with it.

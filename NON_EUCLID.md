@@ -196,153 +196,111 @@ exists.
 
 ---
 
-## The work, in order
+## The work, as built
 
-### 1. A visibility gate on the surface pass
+All four landed. What follows is what each turned out to be, and — where it
+differs from the plan above — why.
 
-**What.** A surface does not re-render when its pane is not visible from the
-main camera and not visible from any other refreshing surface camera.
+| | Landed as | Test |
+|---|---|---|
+| Visibility gate | `graph::VisibleSurfaces` | `graph/tests/Frustum.cpp`, three cases |
+| Portals exempt from `EDGE_ON_MARGIN` | one `!linked &&` | `scene/tests/SurfaceCameras.cpp`, two cases |
+| Traversal bump | `LANDING_CLEARANCE`, landing only | `scene/tests/SurfaceCameras.cpp`, one case |
+| Scale-carrying portals | `SeamTransform`, `PortalSeam::Scale` | `scene/tests/SurfaceCameras.cpp`, three cases |
 
-**Why.** It is the one thing the demo does that we have no equivalent of, and
-the cost we pay for its absence grows with the number of panes — which is the
-direction every one of these scenes goes. Eight mirrors in a room means eight
-full scene renders a frame for as long as anything in the world is moving,
-including the ones behind the viewer.
+### 1. The visibility gate moved out of the renderer
 
-**Where.** `mono.engine/render/src/Renderer.cpp`. The cull at 3262 already
-produces `State->Visible` against the main camera's frustum; the refresh
-decision is at 3461. `AcceptedView` gains a `Visible` flag; `Refresh` becomes
-`Visible && (!state.Ready || state.Signature != surfaceSignature)`.
+Written in `Renderer::Render` first, exactly where the plan put it, and then
+moved to `graph::VisibleSurfaces` — because `Renderer::Render` needs a GPU and
+the decision does not. It is boxes against frusta over a draw list, which is
+what `graph` already is, so the render pass is now nine lines that fill a
+`SurfaceEye` array and call it. Three cases cover the pane off screen, the pane
+visible only inside another surface, and the slot with no pane in the list at
+all; none of them need a device.
 
-**How.**
-- Each pane is a `DrawInstance` whose `Surface` names its slot, so main-camera
-  visibility is a sweep over `State->VisibleInstances` marking a bitmask of
-  slots — no new geometry and no new bound.
-- Then one pass over `accepted[]`: for each surface `i` not yet marked, test
-  pane `i`'s world box against every *marked* surface's frustum
-  (`graph::Frustum::FromViewProjection(accepted[j].ViewProjection)`), and mark
-  it if any accepts.
-- A slot that has never rendered (`!state.Ready`) refreshes regardless, so the
-  first frame is unchanged.
+The union sweep is the part that would have been wrong without writing it down.
+Gating on the main camera alone freezes a mirror seen only inside another
+mirror, which is a much louder artefact than the redraw it saves.
 
-**Test.** `mono.engine/render` — a world with two panes, one behind the camera:
-`FrameResult` reports one surface pass rather than two, and the off-screen
-pane's slot keeps its `ViewProjection`. Then the mirror-in-mirror case: pane B
-faces away from the camera but is visible in pane A, and B still refreshes.
+### 2. The band is a mirror's, and the header said so before the code did
 
-**Risk.** Low. The failure mode is a stale reflection, which is the same failure
-the signature check already risks and the same one-frame budget.
+Three lines: resolve `Portal` before the edge-on test and guard it with
+`!linked`. Nothing replaced it — the three floors that keep the matrix finite at
+the plane (`MINIMUM_DEPTH`, `FIT_MINIMUM_SPAN`, and `SurfaceProjection` refusing
+to skew against a plane the camera is on) were all already there for the mirror
+case just outside the band.
 
-### 2. `EDGE_ON_MARGIN` applies to mirrors, not to holes
+The test that matters is not the one that checks a portal renders in the band.
+It is the sweep: the eye walks the last sixty centimetres at the pane in
+one-centimetre steps and the camera is required to move less than five
+centimetres per step. A flip would move it by twice its distance from the pane.
 
-**What.** In `AimSurfaceCameras`, move the edge-on blank inside the mirror
-branch.
+### 3. Only half the demo's bump was taken, and the other half would have been a bug
 
-**Why.** The flip it prevents cancels itself for a linked portal, and the band
-sits exactly where somebody walking through a hole spends the crossing. It is a
-plausible part of `D00112`'s seam and it is three lines.
+CodeParade bumps twice: the landing *and* the plane the crossing test is made
+against. The second half is hysteresis at 500 Hz and a trap at 60. Offsetting
+the test plane means a body that begins a tick inside the offset never sees a
+sign change — at 2 mm and 6 mm per tick nothing can start there, but at a
+quarter of a stud per tick a body can begin a tick anywhere, and the offset
+becomes a band you walk through without ever crossing.
 
-**Where.** `mono.engine/scene/src/SurfaceCameras.cpp:667-674`. The check
-currently runs before `const Portal *portal = store.Get<Portal>(entity)` at 691,
-so the resolution of `linked` moves above it.
+The landing clearance alone gives the same guarantee: nothing can come to rest
+within a hundredth of a stud of a plane *because it crossed one*, so no jitter
+smaller than that can send it back. One mechanism, in one place.
 
-**How.** Resolve `portal` and `linked` first; blank only when `!linked`. The
-`Aim` still travels through the rest of the pass with `Renders = false` for a
-mirror, exactly as now. Nothing about slot numbering changes — the comment at
-863 about a blanked pane holding its place stays true and stays load-bearing.
+**What the test found, which is worth knowing and is not fixed.** A body whose
+step ends *exactly* on the plane, arriving from the negative side of the
+normal, never crosses — `from == 0` counts as behind, so both ends test the same
+side. It is measure-zero in floats, it cannot arise from a crossing now that
+landings are clear, and `OpenPortals` stops the solver parking anything there.
+Named here rather than guarded, because the guard would be a second sign
+convention.
 
-**Test.** `mono.engine/scene/tests/SurfaceCameras.cpp` — a linked portal with
-the eye on its plane still produces a lens with a finite, non-degenerate
-frustum and a `Surface >= 0`; the same geometry with `Portal` removed still
-blanks. And an eye walked *through* a portal in small steps produces a camera
-frame that moves continuously across the crossing, which is the property the
-band was standing in for.
+### 4. Scale is a similarity, and the four applications had to be named
 
-**Risk.** Medium, and it is the one item here whose result has to be looked at
-rather than asserted. The claim is that the cancellation holds; the test above
-is what turns that from an argument into a fact. If a flip does survive, the
-fallback is to keep a much narrower band for portals — the geometry degenerates
-long before 0.3 studs.
+`SeamMapping` returns a `SeamTransform` — the rigid map, the source pane's
+centre, and a scale — instead of a `CFrame`. The scale is the square root of the
+two panes' area ratio, which is the ratio of their sides for any pair of the
+same shape and the only definition that does not depend on which axis `FaceAxes`
+called first.
 
-### 3. A traversal bump
+The struct exposes four applications rather than one multiply, and that is the
+part that stops this being a source of quiet bugs:
 
-**What.** Offset the crossing test plane toward the crosser's side, and land the
-crosser clear of the far plane.
+- `Point` — a position: moves and scales.
+- `Carry` — a velocity, an offset, a half-extent: rotates and scales.
+- `Rotate` — a unit direction, a clip normal, a ray's aim: rotates only.
+- `Place` — a placement: `Point` for the position, the rotation for the rest.
 
-**Why.** `CrossingOf` treats a body exactly on the plane as behind it, so a body
-the solver parks there can change sides on alternate ticks. The demo's margin is
-two lines and removes the case.
+Every consumer now says which it wants. Getting `Rotate` and `Carry` the wrong
+way round in `Query.cpp` would make a portal-crossing ground ray report a floor
+at the wrong range, which is a character falling through a floor it is standing
+on — the exact class of bug the naming exists to make visible in review.
 
-**Where.** `mono.engine/scene/src/SurfaceCameras.cpp` — `CrossingOf` for the
-test, `CrossPortals` for the landing. `PortalCrossing`'s callers (the camera arm
-in `Controls.cpp`, `RaycastThroughPortals` in `physics`) test but do not move,
-so they take the offset and not the landing.
+`SurfaceLens` grew two fields, because a `CFrame` cannot hold a scale and the
+pane has to be read back through *exactly* the map the camera was fitted with.
+`scene::SurfaceMapping` composes the three into the matrix the shader wants, in
+one place, because `T(pos) · R · T(origin) · S · T(-origin)` has an order that
+can be got wrong.
 
-**How.** A named constant beside `EDGE_ON_MARGIN` — the demo uses
-`2 · GH_NEAR_MIN`, which is millimetres; ours should be derived from nothing
-finer than the solver's own contact slop, and stated as such. The landing is
-`placement.Frame.Position` pushed along the destination's outward normal by the
-same amount, after the map.
+**What crossing resizes**, and the list is longer than the multiply suggests: a
+crate is its `Bounds` and its `Collider`; a character is those on a root nobody
+can see, a `Humanoid` on a third entity holding every figure that decides how it
+moves, and five limbs that are their own rows with their own boxes and their own
+rest offsets. Mass follows from the box through `PhysicsProperties` and is not
+touched.
 
-**Test.** `mono.engine/scene/tests/SurfaceCameras.cpp` — a body placed exactly
-on a pane's plane crosses at most once over ten ticks of no motion, and a body
-walked through at a tick step larger than the pane is thick still crosses
-exactly once.
+**Gravity is not scaled, and that is the one place this deliberately parts from
+the demo.** CodeParade multiplies it by the crosser's accumulated scale so that
+shrinking is imperceptible, which is right for a gag about a tunnel. Here there
+is one world, `scene::Gravity` is its property, and a small thing in it should
+fall the way a small thing falls — walk into the large end and the room becomes
+vast and your jumps become small, which is the whole point of having gone
+through.
 
-**Risk.** Low, with one thing to watch: the bump must be smaller than the
-`SeamStraddled` reach used by the clone and ghost passes, or a body can land
-outside the seam it just came out of and lose its far-side copy on the crossing
-frame — which is the artefact those passes exist to remove.
+### What did not change
 
-### 4. Scale-carrying portals
-
-**What.** A portal pair whose panes are different sizes rescales what goes
-through it.
-
-**Why.** It is what turns "a room bigger on the inside" from a rendering trick
-into something the simulation agrees with, and it is the mechanism behind the
-demo's best two levels. It is also the item that makes
-`docs/NON-EUCLIDEAN.md:60` true.
-
-**Where.** `SeamMapping` gains a scale alongside its `CFrame`; `CrossPortals`,
-`AppendPortalClones`, `AppendPortalGhosts`, `PlaceCamera` and
-`RaycastThroughPortals` all consume the pair rather than the frame alone. The
-physics side needs a body scale that gravity, walk speed and the character rig
-read — which is new, and is the actual size of this item.
-
-**How — not yet decided, and this is the part to design before writing.** Two
-shapes, and the choice is the work:
-
-- **A scale on the body.** Closest to the demo: one float per physical thing,
-  multiplied into every length and speed it has. Honest and invasive — every
-  place that reads a distance has to know.
-- **A scale on the world region.** The portal does not rescale the crosser; it
-  moves them into a region whose units are different. Cleaner in principle,
-  and it needs a concept this engine does not have.
-
-**Test.** Nothing to specify until the shape is chosen. What must be true either
-way: a body that goes through a pair and comes back is the size it started, to
-within float error, after any number of round trips.
-
-**Risk.** High, and it is the reason this is fourth rather than first. It should
-not be started as a side effect of the other three, and it should not be started
-without the design question above being answered on its own.
-
----
-
-## What is deliberately not being taken
-
-**In-frame recursion.** Still the right answer and still `D00112`, and still
-gated on the render-graph work `ROADMAP.md` files behind a prototype project.
-The three items above are all things that were never blocked on it, which is
-most of why this document exists — the seam had become an excuse for leaving
-cheaper things undone.
-
-**Pink at the bottom of the chain.** Our terminus is last frame's texture, which
-is a plausible image rather than a marker. That is better for a shipped world
-and worse for a developer, and if it ever needs to be visible it belongs behind
-a debug flag beside `AppendSurfaceFaceMarkers` rather than in the pass.
-
-**Yaw-only panes.** Their `assert(euler.x == 0)` is a constraint we do not have
-and do not want. `UpFor` costs one dot product and a branch, and a portal in a
-floor is a thing people will build the first day they find the feature.
+**In-frame recursion.** Still `D00112`, still the render-graph work behind a
+prototype project. Everything above was reachable without it, which is most of
+why this document exists: the seam had become an excuse for leaving cheaper
+things undone.

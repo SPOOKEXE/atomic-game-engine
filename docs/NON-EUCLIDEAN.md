@@ -61,6 +61,14 @@ placed anywhere gives a room bigger on the inside or a corridor that turns more
 than four right angles — with no separate feature and no maths beyond a matrix
 multiply. That is the whole insight of the demo.
 
+**"Scaled" was the one word this document oversold for a version.** The map was
+a `CFrame` — a position and a quaternion — so a mismatched pair rendered a
+source-sized window onto a full-sized room and a body walked out of it the size
+it went in. It is a `scene::SeamTransform` since v0.15: the same rigid product,
+plus the ratio of the two panes, taken about the source pane's centre. The
+camera, the pane's sampling matrix, a crossing body, a clone, a ghost, the
+camera arm and a portal-crossing ray all go through it.
+
 ### 2. A real oblique near-plane clip. The pinch point.
 
 Today's approximation moves the near plane parallel to the face. On a mirror that
@@ -148,8 +156,19 @@ one the table said it was.
 | Off-axis frustum fitted to the pane's rectangle | small | **done** |
 | Oblique near plane at the destination | small | **done** |
 | `Portal` component pairing two parts, placed like a surface camera | small | **done** |
-| Traversal — cross the plane, move the body, remap velocity | medium | blocked on v0.15's character controller |
+| Traversal — cross the plane, move the body, remap velocity | medium | **done**, at v0.14 — the controller arrived early |
 | In-frame recursion, deepest first | large | open, and a rendering decision |
+
+Four more landed at v0.15, out of a second reading of the demo once there was
+something to compare against. `NON_EUCLID.md` at the repository root is that
+comparison and what each of them cost; in short:
+
+| Step | Size | Status |
+|---|---|---|
+| A visibility gate on the surface pass — the demo's occlusion query, on the CPU | small | **done** |
+| The edge-on band applies to mirrors and not to holes | small | **done** |
+| A landing clearance, so nothing rests on a plane it just crossed | small | **done** |
+| Scale-carrying portals — a hole that changes what goes through it | medium | **done** |
 
 ### What building it actually taught
 

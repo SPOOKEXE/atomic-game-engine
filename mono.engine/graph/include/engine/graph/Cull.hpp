@@ -56,4 +56,58 @@ namespace engine::graph {
 	size_t Cull(
 		std::span<const scene::DrawInstance> instances, const Frustum &frustum, std::vector<uint32_t> &visible
 	);
+
+	// One surface camera, as much of it as deciding visibility needs.
+	//
+	// @since v0.15
+	struct SurfaceEye {
+		// World to that camera's clip space, which is what a frustum comes out
+		// of.
+		glm::mat4 ViewProjection{1.0f};
+
+		// The slot it renders into, matching `scene::DrawInstance::Surface` on
+		// whatever samples it.
+		int8_t Index = 0;
+	};
+
+	// Which surface slots have a pane something can currently see.
+	//
+	// **The other half of "should this surface redraw", and the half the render
+	// pass did not have.** A signature answers whether the image *changed*;
+	// nothing answered whether it is *looked at*, so a room of mirrors redrew
+	// every one of them on every frame anything moved — including the ones
+	// behind the viewer and the ones a wall stands in front of. CodeParade's
+	// non-Euclidean demo spends a GPU occlusion query per portal per recursion
+	// level on exactly this question, which is how it affords four levels of
+	// them; this is the same question asked on the CPU against boxes the culler
+	// has already been deriving.
+	//
+	// **A pane and not a camera.** A `SurfaceEye` says where the camera is, and
+	// for a portal that is the far room — what has to be on screen is the pane,
+	// and the only description of a pane here is the instance that samples the
+	// slot. A slot with no instance naming it is a surface nothing samples, and
+	// comes back invisible.
+	//
+	// **Two sweeps, and deliberately not a fixed point.** A pane visible only
+	// *inside another mirror* is a real case — two facing panes, a portal seen
+	// through a portal — so the camera frustum alone would freeze it. The second
+	// sweep unions in the panes that are visible from a surface which is itself
+	// on screen. Iterating that to closure would spend the saving this exists
+	// for; one pass means a pane buried two bounces deep lights up a frame
+	// later, which is the same one-frame budget the surface pass already runs
+	// on.
+	//
+	// @param instances The whole draw list, culled or not.
+	// @param camera    The viewer's frustum.
+	// @param surfaces  The surface cameras this frame accepted.
+	// @param visible   Indexed by slot, cleared then filled. Must be at least as
+	//                  long as the highest index in `surfaces`, plus one.
+	// @return How many slots came back visible.
+	// @since v0.15
+	size_t VisibleSurfaces(
+		std::span<const scene::DrawInstance> instances,
+		const Frustum &camera,
+		std::span<const SurfaceEye> surfaces,
+		std::span<bool> visible
+	);
 }

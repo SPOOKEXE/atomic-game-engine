@@ -112,16 +112,18 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// over and are named rather than left to the compiler.
 	CHECK(offsetof(Portal, Reserved) + sizeof(Portal::Reserved) == sizeof(Portal));
 
-	// **Ten floats and a `CFrame`, and not one byte more.** A fitted frustum is
-	// four extents, two distances and a plane, and the placement the pane was
-	// mapped by rides with it — a portal's frustum is fitted to the *mapped*
-	// source pane, so the transform that mapped it is part of the answer rather
-	// than something to look up again. A `CFrame` is a `Vector3` and a
-	// quaternion, both four-byte aligned, so it opens no hole beside the floats.
-	// A member of another width added here would, and a hole in a component is
-	// uninitialised bytes in a snapshot.
-	CHECK(sizeof(SurfaceLens) == 10 * sizeof(float) + sizeof(engine::core::CFrame));
-	CHECK(offsetof(SurfaceLens, Mapping) + sizeof(engine::core::CFrame) == sizeof(SurfaceLens));
+	// **Fourteen floats and a `CFrame`, and not one byte more.** A fitted
+	// frustum is four extents, two distances and a plane, and the map the pane
+	// was taken through rides with it — a portal's frustum is fitted to the
+	// *mapped* source pane, so the transform that mapped it is part of the
+	// answer rather than something to look up again. That map is a similarity
+	// rather than a rigid motion, so it is a `CFrame`, the centre its scale is
+	// taken about, and the scale: four floats past the ten the frustum needs.
+	// All of them are four-byte aligned and so is a `CFrame`, so nothing here
+	// opens a hole. A member of another width added here would, and a hole in a
+	// component is uninitialised bytes in a snapshot.
+	CHECK(sizeof(SurfaceLens) == 14 * sizeof(float) + sizeof(engine::core::CFrame));
+	CHECK(offsetof(SurfaceLens, MappingScale) + sizeof(float) == sizeof(SurfaceLens));
 
 	// A face is one byte, so a component can hold one without the row noticing.
 	CHECK(sizeof(NormalId) == sizeof(uint8_t));

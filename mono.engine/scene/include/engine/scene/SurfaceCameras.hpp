@@ -83,9 +83,18 @@
 // loophole, it is the feature: a destination turned, moved or scaled anywhere
 // gives a room bigger on the inside or a corridor that turns through more than
 // four right angles, with no second mechanism and no maths past a matrix
-// multiply. `docs/NON-EUCLIDEAN.md` is the investigation, `D00112` is what
-// remains — traversal, which needs a body to move, and in-frame recursion, which
-// is what would remove the one-frame seam on the frame somebody crosses.
+// multiply. `docs/NON-EUCLIDEAN.md` is the investigation.
+//
+// **"Scaled" is `SeamTransform`, and it was the one word that document oversold
+// for a version.** The map used to be a `CFrame` — a position and a rotation —
+// so a pair of panes of different sizes drew a source-sized window onto a
+// full-sized room and a body walked out of it the size it went in. The map
+// carries the ratio of the two panes now, and the camera, the pane's sampling
+// matrix, a crossing body, a clone, a ghost, the camera arm and a
+// portal-crossing ray all go through it.
+//
+// `D00112` is what remains, and it is now only in-frame recursion — which is
+// what would remove the one-frame seam on the frame somebody crosses.
 //
 // **Step 5 is what makes this an instance rather than a configuration.** Setting
 // `Visual::Surface` by hand as well as parenting the camera is one fact recorded
@@ -111,17 +120,22 @@
 //
 // **What no frustum escapes** is the geometry rather than the parameterisation.
 // A pane subtends half a turn from a point on its own surface, so walking into
-// the glass asks for something no projection covers. `EDGE_ON_MARGIN` is what
-// turns that into a surface that stops drawing rather than a matrix full of
-// infinities, and an off-axis frustum has exactly the same limit — it simply no
-// longer has to clamp on the way there, which is what used to make the fit a
-// step function and read as the mirror flashing.
+// the glass asks for something no projection covers. For a mirror
+// `EDGE_ON_MARGIN` is what turns that into a surface that stops drawing rather
+// than a matrix full of infinities; for a portal, which is walked through on
+// purpose, the three floors that keep the matrix finite — `MINIMUM_DEPTH`,
+// `FIT_MINIMUM_SPAN` and `SurfaceProjection`'s refusal to skew against a plane
+// the camera is on — are what carry it across. An off-axis frustum has exactly
+// the same limit either way; it simply no longer has to clamp on the way there,
+// which is what used to make the fit a step function and read as the mirror
+// flashing.
 //
-// **A portal cannot be walked through.** Seeing through a hole is half the
-// feature and moving a body through it is the other; there is no body until the
-// character controller lands. And a surface's texture is a frame old, so the
-// portal chain resolves over frames rather than within one — invisible on a
-// mirror, a seam on the frame somebody crosses. `D00112` carries both.
+// **A portal can be walked through, and the frame it happens on is still a
+// frame behind.** Traversal is `CrossPortals`, the body's half, with the eye
+// carried by `PortalCrossing` and the yaw by `PortalTransit`. What is left is
+// that a surface's texture is a frame old, so the portal chain resolves over
+// frames rather than within one — invisible on a mirror, a seam on the frame
+// somebody crosses. `D00112` is now only that.
 //
 // **A camera with no `BasePart` parent is left exactly where it was put.** That
 // is the script-authored arrangement `Mirrors-1-world.luau` used and it still
@@ -167,7 +181,7 @@ namespace engine::scene {
 	// immediately before each. Nothing here can enforce that: this pass has no
 	// idea how many places its answer is about to be drawn from.
 	//
-	// **A pane the viewer is level with draws nothing at all**, which is a
+	// **A *mirror* the viewer is level with draws nothing at all**, which is a
 	// statement about what a surface view means rather than about arithmetic.
 	// Which way along its normal a reflected camera looks depends on which side
 	// of the plane the viewer is, both answers are right, and no continuous path
@@ -176,6 +190,12 @@ namespace engine::scene {
 	// edge-on covers no pixels, so the honest answer is that there is nothing to
 	// show; its camera is left where it was and its pane is taken off its slot.
 	// `EDGE_ON_MARGIN` in the source carries the width and its limits.
+	//
+	// **A linked portal is exempt, and the exemption is not a tolerance.** The
+	// flip cancels for a hole: the frame the viewer's side changes is the frame
+	// the viewer is carried through the pane, so `through · eye` is continuous
+	// and there is no discontinuity to blank. Blanking it anyway put a dark
+	// frame exactly in the doorway, on the one move a portal is for.
 	//
 	// @param store The world.
 	// @return How many surface cameras produced a reflection. Zero is the
@@ -225,6 +245,34 @@ namespace engine::scene {
 		ecs::Entity Pane = ecs::NULL_ENTITY;
 		ecs::Entity Far = ecs::NULL_ENTITY;
 
+		// How much bigger the far pane is than this one.
+		//
+		// **A hole between two panes of different sizes is a change of scale,
+		// and treating it as a rigid map is what makes a room bigger on the
+		// inside a painting.** The map that puts the camera at the far end also
+		// says how large the far end is; if it carries only a rotation and a
+		// translation then a doorway twice the size shows the same room at the
+		// same size through a bigger frame, and a body that walks through comes
+		// out the size it went in. That is a picture of an impossible space
+		// rather than one, and it is the difference `docs/NON-EUCLIDEAN.md`
+		// claimed and the implementation did not have.
+		//
+		// **The square root of the area ratio, which is the one definition that
+		// does not have to pick an axis.** Two rectangles of the same shape give
+		// exactly the ratio of their sides, which is what anybody would expect.
+		// Two of *different* shapes are an ill-posed pair — there is no single
+		// number that maps a tall rectangle onto a wide one — and this answers
+		// with the one that is symmetric in the two axes rather than with
+		// whichever the face's first axis happened to be. A pair like that
+		// renders and traverses; it simply does not line up at the edges, and no
+		// scalar could make it.
+		//
+		// One, exactly, for the ordinary pair of matching panes and for every
+		// mirror. `SeamTransform` is where it is applied.
+		//
+		// @since v0.15
+		float Scale = 1.0f;
+
 		// Which surface slot the pane samples, from `SurfaceCamera::Surface`.
 		// What lets a host name one portal out of several.
 		int8_t Surface = 0;
@@ -241,16 +289,75 @@ namespace engine::scene {
 
 	// The map from one side of a seam to the far side.
 	//
-	// `destination · half-turn · source⁻¹`, which is the same product
-	// `AimSurfaceCameras` puts the camera through. The half-turn is what makes
-	// it a hole rather than a window onto a copy.
+	// **A similarity and not a rigid motion, which is the one thing that had to
+	// change for a hole to be able to lie about size.** The rotation and the
+	// translation are `destination · half-turn · source⁻¹`, exactly as before;
+	// the scale is `PortalSeam::Scale` and it is taken about the *source* pane's
+	// centre, which is the point the rigid map already sends to the destination's
+	// centre. Scaling there rather than at the far end means the two halves
+	// compose in either order and neither needs the other's centre.
+	//
+	// **Four ways to apply it, because four things go through a hole and they
+	// are not the same kind of thing.** A position moves and scales; a velocity
+	// or an offset rotates and scales; a unit direction only rotates, and
+	// scaling it would quietly stop it being unit; a placement is a position and
+	// a rotation. Every caller that got one of these wrong produced the same
+	// symptom — a portal that works and leads somewhere slightly wrong — so they
+	// are named rather than left to a multiply.
+	//
+	// @since v0.15
+	struct SeamTransform {
+		// The rigid half: `destination · half-turn · source⁻¹`. The half-turn is
+		// what makes it a hole rather than a window onto a copy.
+		core::CFrame Frame;
+
+		// The point the scale is about, which is the source pane's centre.
+		core::Vector3 Origin;
+
+		// `PortalSeam::Scale`, or 1 for a mirror and for any matched pair.
+		float Scale = 1.0f;
+
+		// Where a point in this space lands in the far one.
+		core::Vector3 Point(const core::Vector3 &at) const {
+			return Frame.PointToWorldSpace(Origin + (at - Origin) * Scale);
+		}
+
+		// Where a direction points in the far space, keeping its length.
+		//
+		// **For anything that must stay unit** — a ray's direction, a normal.
+		core::Vector3 Rotate(const core::Vector3 &of) const {
+			return Frame.VectorToWorldSpace(of);
+		}
+
+		// The same, taking the scale with it.
+		//
+		// **For anything that is a length** — a velocity, an offset, a
+		// half-extent. A body that comes out of a hole half the size it went in
+		// and keeps its old speed is a body that crosses the far room in half
+		// the time, which reads as the portal firing you out of it.
+		core::Vector3 Carry(const core::Vector3 &of) const {
+			return Frame.VectorToWorldSpace(of * Scale);
+		}
+
+		// Where a placement ends up: its position mapped, its rotation turned.
+		core::CFrame Place(const core::CFrame &frame) const {
+			return core::CFrame{Point(frame.Position), Frame.Rotation() * frame.Rotation()};
+		}
+
+		// How long a distance measured in this space is in the far one.
+		float Length(float of) const {
+			return of * Scale;
+		}
+	};
+
+	// Builds it for one side of one seam.
 	//
 	// @param seam The portal.
 	// @param side Which side the thing being mapped is on: positive in front of
 	//             `Normal`, negative behind it. Zero counts as behind.
-	// @return The frame to pre-multiply a placement, a velocity or a direction by.
+	// @return The map to put a placement, a velocity or a direction through.
 	// @since v0.15
-	core::CFrame SeamMapping(const PortalSeam &seam, float side);
+	SeamTransform SeamMapping(const PortalSeam &seam, float side);
 
 	// How far the seam's plane is from a point, signed along `Normal`.
 	//
@@ -313,6 +420,25 @@ namespace engine::scene {
 	// of the destination sideways, or backwards through the hole it just came
 	// out of, which reads as the portal spitting people back.
 	//
+	// **And the body is resized when the two panes are not the same size**,
+	// which is what makes a room bigger on the inside something the simulation
+	// agrees with rather than something the pane draws. A crosser's `Bounds`,
+	// its speed, and — for a character — its humanoid's height, radius, walk and
+	// jump speeds, ground tolerance and every limb's box and rest offset are all
+	// multiplied by `PortalSeam::Scale`. Go through the small end and you are
+	// small; come back the other way and the reciprocal puts you back, exactly,
+	// because the scale of a pair is the ratio of two measurements that have not
+	// changed.
+	//
+	// **Gravity is not scaled, and that is a decision rather than an
+	// oversight.** CodeParade's demo multiplies it by the crosser's accumulated
+	// scale so that shrinking is imperceptible, which is right for a gag about a
+	// tunnel and wrong here: there is one world, `scene::Gravity` is its
+	// property, and a small thing in it should fall the way a small thing falls.
+	// What that looks like is the correct thing — walk into the large end and
+	// the room becomes vast and your jumps become small, which is the whole
+	// point of having gone through.
+	//
 	// **So is the camera's yaw, when the body crossing is the one it follows**,
 	// and that is the same bug a third time. A player's view direction is
 	// `CameraController::Angles` rather than any transform this pass moves, so
@@ -357,10 +483,15 @@ namespace engine::scene {
 	// @param to      Where it would end without a portal in the way.
 	// @param through The map from this side to the far side, written only when
 	//                the answer is true. Apply it to *both* the far end and the
-	//                direction, exactly as a body's placement and velocity are.
+	//                direction, exactly as a body's placement and velocity are —
+	//                and mind which of `SeamTransform`'s four applications each
+	//                of those is, because a hole may change size as well as
+	//                place.
 	// @return Whether the segment went through a hole rather than past one.
 	// @since v0.15
-	bool PortalCrossing(ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, core::CFrame &through);
+	bool PortalCrossing(
+		ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, SeamTransform &through
+	);
 
 	// One segment's meeting with one pane, in full.
 	//
@@ -372,7 +503,7 @@ namespace engine::scene {
 	// @since v0.15
 	struct PortalHop {
 		// The map from this side to the far side. `CrossPortals`' `through`.
-		core::CFrame Through;
+		SeamTransform Through;
 
 		// Where along `from`→`to` the plane was met, as a fraction.
 		float Share = 1.0f;
@@ -393,9 +524,8 @@ namespace engine::scene {
 	//
 	// @param hop Filled when the answer is true, untouched otherwise.
 	// @since v0.15
-	bool PortalCrossing(
-		ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, PortalHop &hop
-	);
+	bool
+	PortalCrossing(ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, PortalHop &hop);
 
 	// Stops a portal's pane from solving contacts, so a body can be inside it.
 	//

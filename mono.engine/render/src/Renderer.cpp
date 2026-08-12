@@ -3252,14 +3252,20 @@ namespace engine::render {
 		// six comparisons on a box that already exists. See its comment for why
 		// this is not a cache.
 		core::AABB sceneBounds;
+
+		// **Kept past the cull, because the refresh decision below needs it
+		// too.** Whether a pane is on screen is the same question the culler
+		// already answers for every instance, and building a second frustum
+		// from the same camera would be a second answer to it.
+		graph::Frustum cameraFrustum{};
 		{
 			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
 
 			const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-			const graph::Frustum frustum = graph::Frustum::FromViewProjection(
+			cameraFrustum = graph::Frustum::FromViewProjection(
 				scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection
 			);
-			visibleCount = graph::CullAndBound(instances, frustum, State->Visible, sceneBounds);
+			visibleCount = graph::CullAndBound(instances, cameraFrustum, State->Visible, sceneBounds);
 		}
 
 		// **Fitted to the whole draw list, not to what survived culling.** A
@@ -3419,6 +3425,43 @@ namespace engine::render {
 		// refresh together: one that has never rendered has nothing to compare
 		// against, and one that appeared this frame has to draw once before it
 		// can be skipped.
+		// **Whether anything can see each pane, which is the other half of the
+		// refresh decision and the half this pass did not have.** The signature
+		// answers "did the image change"; nothing answered "is the image
+		// looked at", so a room of mirrors redrew every one of them on every
+		// frame anything moved — including the ones behind the viewer and the
+		// ones a wall stands in front of. That cost is per pane and the scenes
+		// this exists for are the ones with several.
+		//
+		// **Two sweeps and deliberately not a fixed point.** A pane visible only
+		// *inside another mirror* is a real case — two facing panes, or a portal
+		// seen through a portal — so main-camera visibility alone would freeze
+		// it. The union with the other surfaces' own frusta covers it in one
+		// pass: a pane seen inside a surface that is itself on screen refreshes
+		// now, and one buried two bounces deep refreshes a frame later. That is
+		// the same one-frame budget the whole surface pass already runs on, and
+		// iterating to closure here would spend the saving this exists for.
+		bool surfaceVisible[scene::MAX_SURFACES] = {};
+		if (wantSurface) {
+			graph::SurfaceEye eyes[scene::MAX_SURFACES];
+			for (size_t index = 0; index < acceptedCount; index++) {
+				eyes[index].ViewProjection = accepted[index].ViewProjection;
+				eyes[index].Index = static_cast<int8_t>(accepted[index].Index);
+			}
+
+			// **In `graph` rather than here, and that is the seam rather than
+			// tidiness.** The decision is boxes against frusta over a draw list,
+			// which is what that module is, and a rule this pass held privately
+			// would be a rule no suite could reach — `Renderer::Render` needs a
+			// device and the answer does not.
+			(void)graph::VisibleSurfaces(
+				instances,
+				cameraFrustum,
+				std::span<const graph::SurfaceEye>(eyes, acceptedCount),
+				std::span<bool>(surfaceVisible, scene::MAX_SURFACES)
+			);
+		}
+
 		uint64_t surfaceSignature = 0;
 		size_t refreshCount = 0;
 		if (wantSurface) {
@@ -3458,7 +3501,13 @@ namespace engine::render {
 				state.ImageOpacity = accepted[index].ImageOpacity;
 				state.Effect = accepted[index].Effect;
 
-				accepted[index].Refresh = !state.Ready || state.Signature != surfaceSignature;
+				// **Visibility first, and it overrides the never-rendered
+				// case.** A slot that has never drawn has nothing to compare a
+				// signature against, but it also has nothing looking at it —
+				// and `Ready` staying false is exactly right for that: the pane
+				// draws as its own tint until the frame something can see it.
+				accepted[index].Refresh = surfaceVisible[accepted[index].Index] &&
+										  (!state.Ready || state.Signature != surfaceSignature);
 				refreshCount += accepted[index].Refresh ? 1u : 0u;
 			}
 		}

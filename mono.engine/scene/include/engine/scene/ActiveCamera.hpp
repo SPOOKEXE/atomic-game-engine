@@ -144,6 +144,25 @@ namespace engine::scene {
 	// @since v0.14
 	glm::mat4 SurfaceProjection(const SurfaceLens &lens, const core::CFrame &frame);
 
+	// What moved the pane into the space that projection was fitted to.
+	//
+	// **`SurfaceLens` holds the map in three pieces and a shader wants one
+	// matrix**, and composing them is arithmetic with an order that can be got
+	// wrong: the scale is taken about `MappingOrigin` and *then* the rigid part
+	// is applied, so the product is `T(pos) · R · T(origin) · S · T(-origin)`.
+	// Written once here rather than at each consumer, for the reason
+	// `SurfaceProjection` is: a second composition is a second chance to swap
+	// two of the four.
+	//
+	// The identity for a mirror, and for any pair of panes the same size, so a
+	// caller that has never heard of a scaled portal gets what it always got.
+	//
+	// @param lens The lens `AimSurfaceCameras` fitted.
+	// @return The matrix to pre-multiply a pane's world position by, which is
+	//         what `render::SurfaceView::Mapping` carries.
+	// @since v0.15
+	glm::mat4 SurfaceMapping(const SurfaceLens &lens);
+
 	// Builds the matrices for a camera whose projection is already decided.
 	//
 	// **The surface path's `ResolveCamera`.** A surface camera's frustum is not

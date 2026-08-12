@@ -259,23 +259,35 @@ namespace engine::physics {
 		// far side aimed the way it entered the near one rather than the way the
 		// far pane faces — see `CrossPortals`, which is the same two lines about
 		// a body's placement and its velocity.
+		//
+		// **`Rotate` and not `Carry` for the direction**, because `core::Ray`
+		// keeps a unit one and every distance it reports is measured along it. A
+		// scaled direction would make the far side's hits come back at the wrong
+		// range, which is a ground query that says a floor is twice as far away
+		// as it is.
 		const core::Vector3 at = ray.PointAt(reached);
-		const core::Ray beyond(
-			hop.Through.PointToWorldSpace(at), hop.Through.VectorToWorldSpace(ray.Direction)
-		);
+		const core::Ray beyond(hop.Through.Point(at), hop.Through.Rotate(ray.Direction));
+
+		// **And the reach it has left is a length, so it scales.** A ray with a
+		// metre to run that enters the large end of a hole has that metre
+		// stretched with everything else about it — anything else would give a
+		// character walking into the big room a ground query that stops short of
+		// a floor it is standing on.
+		const float beyondDistance = hop.Through.Length(remaining);
 
 		// **Nothing is ignored on the far side.** `ignore` is the caster, and
 		// the caster is on this side of the glass by construction — carrying it
 		// across would name whatever entity happens to share that index over
 		// there, which is nothing in particular.
-		std::optional<ColliderHit> far = Raycast(store, beyond, remaining, mask, ecs::Entity{});
+		std::optional<ColliderHit> far = Raycast(store, beyond, beyondDistance, mask, ecs::Entity{});
 		if (!far) {
 			return blocking;
 		}
 
 		// Measured from the original origin, so a caller comparing against its
-		// own reach never has to know a hole was involved.
-		far->Distance += reached;
+		// own reach never has to know a hole was involved — which means the far
+		// side's distance comes back through the scale it went out by.
+		far->Distance = reached + far->Distance / hop.Through.Scale;
 		return far;
 	}
 

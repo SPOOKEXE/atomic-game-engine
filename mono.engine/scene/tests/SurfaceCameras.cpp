@@ -828,9 +828,19 @@ TEST_CASE("a body that walks into a portal comes out of the far one", "[scene][s
 	// `-Z`, so what A shows is the room in front of B's *front* face — and a
 	// body that walks into A has to arrive in the room it was looking at. One
 	// metre of clearance in front of A becomes one metre in front of B.
+	//
+	// **Plus the landing clearance, which is why this is not exactly `-1`.** A
+	// crosser is put down a hundredth of a metre further out than its own step
+	// ended, so that nothing can come to rest on a plane it has just crossed and
+	// be sent back through by a tick of jitter. See `LANDING_CLEARANCE`.
 	const Vector3 landed = mirror.World.Get<Transform>(walker)->Frame.Position;
 	CHECK_THAT(landed.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
-	CHECK_THAT(landed.Z, Catch::Matchers::WithinAbs(-1.0f, TOLERANCE));
+	CHECK_THAT(landed.Z, Catch::Matchers::WithinAbs(-1.01f, TOLERANCE));
+
+	// **And clear of the plane rather than merely past it**, which is the
+	// property the number is for: the pane's front face is at `z = -0.2`, the
+	// body is beyond it, and the gap is the clearance and not a rounding error.
+	CHECK(landed.Z < -0.2f - 0.005f);
 
 	// **And still walking away from the pane it came out of**, at the speed it
 	// had. Forgetting to map the velocity is the bug that reads as the portal
@@ -1158,7 +1168,277 @@ TEST_CASE("a third-person camera goes through the hole its subject went through"
 
 	REQUIRE(engine::scene::PlaceCamera(mirror.World));
 	CHECK_THAT(
-		mirror.World.Get<Transform>(mirror.Eye)->Frame.Position.X,
-		Catch::Matchers::WithinAbs(0.0f, TOLERANCE)
+		mirror.World.Get<Transform>(mirror.Eye)->Frame.Position.X, Catch::Matchers::WithinAbs(0.0f, TOLERANCE)
+	);
+}
+
+TEST_CASE("a portal in the plane of the viewer keeps drawing", "[scene][surfacecameras]") {
+	// **The band is a mirror's fix and it was being applied to holes.** Which
+	// way a *reflected* camera looks depends on which side of the plane the
+	// viewer is, both answers are right, and nothing joins them — so a mirror
+	// blanks across `EDGE_ON_MARGIN` rather than flashing. A linked portal has
+	// no such discontinuity: the frame the viewer's side flips is the frame the
+	// viewer is carried through the pane, and the two cancel.
+	//
+	// What the band cost there is the whole of the feature. It is 0.3 metres
+	// either side of the plane, which is exactly where somebody walking through
+	// a hole spends the crossing — so the picture went dark on the one frame it
+	// mattered.
+	Mirror portal;
+	const Entity far =
+		portal.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	portal.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	portal.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	portal.World.Set<engine::scene::Portal>(portal.Reflection, engine::scene::Portal{far});
+
+	// In the plane of the pane's front face, which is `z = -0.2`.
+	portal.World.GetMutable<Transform>(portal.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
+
+	REQUIRE(AimSurfaceCameras(portal.World) == 1);
+
+	// **And it is a real frustum, not a bounded one.** The floors that keep the
+	// matrix finite at the plane — `MINIMUM_DEPTH` and `FIT_MINIMUM_SPAN` —
+	// were already there for the mirror case just outside the band, and they
+	// are what carries a portal across it.
+	const SurfaceLens *lens = portal.World.Get<SurfaceLens>(portal.Reflection);
+	REQUIRE(lens != nullptr);
+	CHECK(std::isfinite(lens->Left));
+	CHECK(std::isfinite(lens->Right));
+	CHECK(lens->Right > lens->Left);
+	CHECK(lens->Top > lens->Bottom);
+
+	// The pane keeps its slot, which is the half a viewer actually sees: a
+	// camera placed perfectly into a texture nothing samples looks exactly like
+	// a portal that does not work.
+	const Visual *pane = portal.World.Get<Visual>(portal.Pane);
+	REQUIRE(pane != nullptr);
+	CHECK(pane->Surface >= 0);
+
+	// **And the same geometry without the link still blanks**, so this is an
+	// exemption for holes rather than the band being deleted.
+	portal.World.Remove<engine::scene::Portal>(portal.Reflection);
+	CHECK(AimSurfaceCameras(portal.World) == 0);
+}
+
+TEST_CASE("a portal's camera moves smoothly up to its own plane", "[scene][surfacecameras]") {
+	// **What the band was standing in for, asserted instead of assumed.** A
+	// flash is a discontinuity, so the thing to check is not that the camera is
+	// in some particular place but that it never *jumps* — and the interesting
+	// stretch is the last third of a metre, which used to draw nothing at all.
+	Mirror portal;
+	const Entity far =
+		portal.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	portal.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	portal.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	portal.World.Set<engine::scene::Portal>(portal.Reflection, engine::scene::Portal{far});
+
+	// Walking at the pane along -Z in centimetre steps, from well outside the
+	// old band to within a millimetre of the glass.
+	Vector3 previous;
+	bool first = true;
+
+	for (int step = 60; step >= 1; step--) {
+		const float z = -0.2f + static_cast<float>(step) * 0.01f;
+		portal.World.GetMutable<Transform>(portal.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, z});
+
+		REQUIRE(AimSurfaceCameras(portal.World) == 1);
+
+		const Vector3 placed = portal.Placed();
+		if (!first) {
+			// **A centimetre of eye is a centimetre of camera**, because the map
+			// is a rigid one for a matched pair. A flip would move it by twice
+			// its distance from the pane, which at this range is metres.
+			CHECK((placed - previous).Magnitude() < 0.05f);
+		}
+
+		previous = placed;
+		first = false;
+	}
+}
+
+TEST_CASE("a crosser is put down clear of the plane it crossed", "[scene][surfacecameras]") {
+	// **A body that lands on a plane is a body that can cross it again**, and
+	// one tick of jitter is all it takes — which reads as the portal throwing
+	// somebody back and forth rather than as a rounding error. The clearance is
+	// the hysteresis and it is the only one: offsetting the *test* plane as
+	// CodeParade's demo also does would, at this engine's tick rate, be a band a
+	// body can step over without ever changing sign.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// A step that ends barely past the plane, which is the case with almost no
+	// depth of its own to be put down at — a character brought to a halt in a
+	// doorway by the thing it walked into.
+	const Entity walker =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+	mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, -0.2f - 1e-5f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(
+		walker, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, Vector3::Zero}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	// **Out of the far pane and clear of it, rather than resting in its plane.**
+	// Without the clearance this lands a hundredth of a millimetre past B and
+	// every one of the checks below fails.
+	const Vector3 landed = mirror.World.Get<Transform>(walker)->Frame.Position;
+	CHECK_THAT(landed.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK(landed.Z < -0.2f);
+	CHECK(std::abs(landed.Z + 0.2f) > 0.005f);
+
+	// **And it stays there, even when something nudges it back.** The next tick
+	// starts where this one ended, and a body standing clear of a plane cannot
+	// change sign through it on a step smaller than the clearance — which is
+	// exactly the jitter that used to send a crosser back through the hole it
+	// had just come out of, once per tick.
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		walker, engine::scene::PreviousTransform{CFrame(landed)}
+	);
+	mirror.World.Set<Transform>(walker, Transform{CFrame(landed + Vector3{0.0f, 0.0f, 0.005f})});
+	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+
+	// **And it is hysteresis rather than a wall.** There is only one pane in
+	// this world and the body is now beside the far end of it, so walking back
+	// through is the round-trip case rather than this one — see "going back
+	// through a scaled hole", which does it with both halves of a pair.
+}
+
+TEST_CASE("a hole between panes of different sizes changes what goes through it", "[scene][surfacecameras]") {
+	// **The difference between a room bigger on the inside and a picture of
+	// one.** A rigid map puts the camera at the far end and leaves everything
+	// the size it was, so a doorway twice as big shows the same room through a
+	// bigger frame and a body walks out of it unchanged. Carrying the scale is
+	// what makes the simulation agree with the claim.
+	//
+	// Pane A is 16 by 9 across its face — the fixture's half-extents are 8 and
+	// 4.5 — and B is twice that on both axes, so the ratio of the areas is four
+	// and the scale is its square root.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{16.0f, 9.0f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+	CHECK_THAT(seams[0].Scale, Catch::Matchers::WithinAbs(2.0f, TOLERANCE));
+
+	// **And the picture is told**, or the hole draws the far room at the near
+	// room's size and the image slides across the glass as the viewer moves.
+	// `SurfaceLens` carries the map in three pieces because a `CFrame` cannot
+	// hold a scale, and this is the piece that would be silently dropped.
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	const SurfaceLens *lens = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+	REQUIRE(lens != nullptr);
+	CHECK_THAT(lens->MappingScale, Catch::Matchers::WithinAbs(2.0f, TOLERANCE));
+
+	// A body walking into the small end comes out of the large one, twice the
+	// size and twice as fast — a speed is a length, and a crosser that kept its
+	// old one would cross the far room in half the time.
+	const Entity walker =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+	mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f})});
+	mirror.World.Set<Bounds>(walker, Bounds{Vector3{0.5f, 1.0f, 0.5f}});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(
+		walker, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, Vector3::Zero}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	CHECK_THAT(mirror.World.Get<Bounds>(walker)->HalfExtent.Y, Catch::Matchers::WithinAbs(2.0f, TOLERANCE));
+	CHECK_THAT(
+		mirror.World.Get<engine::scene::Motion>(walker)->Linear.Magnitude(),
+		Catch::Matchers::WithinAbs(32.0f, 1e-3f)
+	);
+}
+
+TEST_CASE("a matched pair of panes changes nothing about what crosses", "[scene][surfacecameras]") {
+	// **The regression guard for every world already built.** The scale is
+	// derived from two measurements rather than authored, so the ordinary pair
+	// has to come out at exactly one — not nearly one — or every portal in the
+	// repository quietly starts resizing whatever walks through it.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+	CHECK(seams[0].Scale == 1.0f);
+
+	// And a mirror, which has no destination to be measured against at all.
+	Mirror plain;
+	REQUIRE(AimSurfaceCameras(plain.World) == 1);
+	CHECK(plain.World.Get<SurfaceLens>(plain.Reflection)->MappingScale == 1.0f);
+}
+
+TEST_CASE("going back through a scaled hole undoes the scaling", "[scene][surfacecameras]") {
+	// **A corridor of mismatched holes has to be somewhere you can walk about
+	// in, not a ratchet.** The scale of a seam is the ratio of two measurements
+	// that a crossing does not change, so the reverse pair is the reciprocal by
+	// construction — but "by construction" is exactly the sort of claim that
+	// stops being true when somebody normalises one of the two.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{16.0f, 9.0f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// The other half of the pair: a surface camera on the far pane, leading
+	// back. Its `Front` face is the one the fixture's portal already measures
+	// against, so the two seams are the same two rectangles the other way up.
+	const Entity back =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), "Back");
+	SurfaceCamera target;
+	target.Face = NormalId::Front;
+	mirror.World.Set<SurfaceCamera>(back, target);
+	mirror.World.Set<Transform>(back, Transform{CFrame()});
+	mirror.World.SetParent(back, far);
+	mirror.World.Set<engine::scene::Portal>(back, engine::scene::Portal{mirror.Pane});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 2);
+	CHECK_THAT(seams[0].Scale * seams[1].Scale, Catch::Matchers::WithinAbs(1.0f, TOLERANCE));
+
+	const Entity walker =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+	mirror.World.Set<Bounds>(walker, Bounds{Vector3{0.5f, 1.0f, 0.5f}});
+	mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(
+		walker, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, Vector3::Zero}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	// Straight back the way it came, which for the far pane is a step from
+	// behind its face to in front of it.
+	const CFrame arrived = mirror.World.Get<Transform>(walker)->Frame;
+	mirror.World.Set<engine::scene::PreviousTransform>(walker, engine::scene::PreviousTransform{arrived});
+	mirror.World.Set<Transform>(walker, Transform{CFrame(arrived.Position + Vector3{0.0f, 0.0f, 4.0f})});
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	CHECK_THAT(mirror.World.Get<Bounds>(walker)->HalfExtent.X, Catch::Matchers::WithinAbs(0.5f, TOLERANCE));
+	CHECK_THAT(mirror.World.Get<Bounds>(walker)->HalfExtent.Y, Catch::Matchers::WithinAbs(1.0f, TOLERANCE));
+	CHECK_THAT(
+		mirror.World.Get<engine::scene::Motion>(walker)->Linear.Magnitude(),
+		Catch::Matchers::WithinAbs(16.0f, 1e-3f)
 	);
 }

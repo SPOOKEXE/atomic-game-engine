@@ -609,7 +609,12 @@ namespace client {
 					// a camera fitted three hundred units away needs the pane
 					// carried there too — see `scene::SurfaceLens::Mapping`. A
 					// mirror's is the identity and this line is free.
-					view.Mapping = fitted->Mapping.ToMatrix();
+					//
+					// **Composed by `SurfaceMapping` rather than here**, because
+					// the lens holds a rotation, a centre and a scale and the
+					// order those go in is the sort of thing that is wrong once
+					// and then wrong everywhere.
+					view.Mapping = engine::scene::SurfaceMapping(*fitted);
 				} else {
 					const float aspect = static_cast<float>(target.Width) /
 										 static_cast<float>(std::max<uint16_t>(target.Height, 1));

@@ -81,8 +81,14 @@ namespace engine::scene {
 			bool Renders = true;
 		};
 
-		// How close to a pane's own plane the viewer may be before its surface
+		// How close to a mirror's own plane the viewer may be before its surface
 		// stops drawing.
+		//
+		// **A mirror's, and not a portal's.** The discontinuity below is
+		// `facing` changing sign with nothing else changing, which is true of a
+		// reflection and false of a hole: a portal's eye is carried through the
+		// pane on the same frame, so the two flips cancel. `AimSurfaceCameras`
+		// is where the exemption is applied and argued.
 		//
 		// **A pane seen edge-on subtends no pixels, and its reflection is
 		// degenerate before it gets there.** This is the fix for D00027 and it is
@@ -151,6 +157,33 @@ namespace engine::scene {
 		// Half a turn, for the rotation that makes a portal a hole.
 		constexpr float PI = 3.14159265358979323846f;
 
+		// How far past the destination's plane a crosser is put down, in studs.
+		//
+		// **A body that lands on a plane is a body that can cross it again.** The
+		// map takes the source pane onto the destination exactly, so a crosser
+		// arrives at whatever depth past the far plane its own step happened to
+		// end at — which can be a float's worth of nothing. One tick of jitter
+		// then changes its side back and it is returned through the hole it came
+		// out of, once per tick, which reads as the portal spitting people back
+		// and forth rather than as a rounding error.
+		//
+		// **This is the hysteresis, and it is the only one.** CodeParade's demo
+		// bumps twice — the landing *and* the plane the test is made against —
+		// and the second half is not taken here on purpose. Offsetting the test
+		// plane means a body that begins a tick inside the offset never sees a
+		// sign change at all, and at 500 Hz with a 2 mm offset nothing can start
+		// there; at 60 Hz, where a character covers a quarter of a stud a tick, a
+		// body can begin a tick anywhere and the offset becomes a band you walk
+		// through without crossing. A landing that is always clear gives the same
+		// guarantee — nothing can come to rest within the bump of a plane because
+		// it crossed one — with no band to fall into.
+		//
+		// Twenty times the solver's own penetration slop, and a small fraction of
+		// any tick's travel or any body's reach, so it can neither be lost to
+		// float error nor take a crosser outside the seam its clone is drawn
+		// through — see `SeamStraddled`, whose reach is a whole body's radius.
+		constexpr float LANDING_CLEARANCE = 0.01f;
+
 		// An up vector a `LookAt` can actually use for this direction.
 		//
 		// **A different up for a floor or a ceiling.** `LookAt` builds its
@@ -165,6 +198,38 @@ namespace engine::scene {
 		// forgotten.
 		Vector3 UpFor(const Vector3 &forward) {
 			return std::abs(forward.Dot(Vector3::YAxis)) > 0.99f ? Vector3::ZAxis : Vector3::YAxis;
+		}
+
+		// How much bigger one pane is than another, as a single number.
+		//
+		// **The square root of the area ratio.** For two rectangles of the same
+		// shape that is exactly the ratio of their sides, which is the answer
+		// anybody expects and the only case a sane author builds. For two of
+		// different shapes there is no such number at all, and this returns the
+		// one that treats the two axes alike rather than the one that depends on
+		// which axis `FaceAxes` happened to call first — a choice that would
+		// make the same pair scale differently on a face turned ninety degrees.
+		//
+		// **One for a degenerate pane rather than an infinity or a zero.** A
+		// part flattened to nothing on one of a face's two axes is a pane with no
+		// area, and every consumer of this multiplies a length by it — so the
+		// answer that leaves the world alone is the only safe one, and it is the
+		// same answer this gives for a matched pair.
+		//
+		// @param first  The source pane's half-axes.
+		// @param second The source pane's other half-axis.
+		// @param farFirst  The destination pane's, measured off the same face.
+		// @param farSecond The destination pane's other one.
+		// @return The scale, which is 1 whenever the two are the same size.
+		float ScaleBetween(
+			const Vector3 &first, const Vector3 &second, const Vector3 &farFirst, const Vector3 &farSecond
+		) {
+			const float here = first.Magnitude() * second.Magnitude();
+			const float there = farFirst.Magnitude() * farSecond.Magnitude();
+			if (!(here > 0.0f) || !(there > 0.0f)) {
+				return 1.0f;
+			}
+			return std::sqrt(there / here);
 		}
 
 		// The two half-axes of a face, in the world.
@@ -240,7 +305,7 @@ namespace engine::scene {
 			//
 			// Identity for a mirror. See the component's comment for why that is
 			// the reflection's equal on the only points that are shaded with it.
-			CFrame Map;
+			SeamTransform Map;
 		};
 
 		// The frustum extents that just cover a rectangle, at the near plane.
@@ -475,58 +540,67 @@ namespace engine::scene {
 		void GatherSeams(Store &store, std::vector<PortalSeam> &seams) {
 			seams.clear();
 
-			store.Each<const Portal, const SurfaceCamera>(
-				[&](Entity entity, const Portal &portal, const SurfaceCamera &camera) {
-					if (portal.Destination == NULL_ENTITY || !store.Alive(portal.Destination)) {
-						// An unlinked portal falls back to a mirror, and a mirror
-						// is a wall. Walking into one is walking into a wall.
-						return;
-					}
-
-					// **The pane is the camera's parent, not the camera.** A
-					// `SurfaceCamera` is a `PVInstance` — it has a placement and
-					// no size at all — so a pass that read the camera's own
-					// `Bounds` found none and every portal in the world quietly
-					// had no hole in it. `FaceOf` is what `AimSurfaceCameras`
-					// uses and is the one answer to "which rectangle is this
-					// camera projecting off".
-					Face face;
-					if (!FaceOf(store, entity, camera.Face, face)) {
-						return;
-					}
-
-					const Transform *far = store.Get<Transform>(portal.Destination);
-					const Bounds *farBounds = store.Get<Bounds>(portal.Destination);
-					if (far == nullptr || farBounds == nullptr) {
-						return;
-					}
-
-					// The far pane's own face, chosen the way the source's was:
-					// `SurfaceCamera::Face` names one side of a part, and the far
-					// end of a hole is the matching side of the part it leads to.
-					const Vector3 local = NormalOf(camera.Face);
-					const Vector3 farNormal = far->Frame.VectorToWorldSpace(local).Unit();
-					const Vector3 farCentre =
-						far->Frame.Position + farNormal * ReachOf(*farBounds, camera.Face);
-
-					PortalSeam seam;
-					seam.Centre = face.Centre;
-					seam.Normal = face.Normal;
-					FaceAxes(face.Placement, local, face.HalfExtent, seam.First, seam.Second);
-					seam.Destination = CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
-
-					// **The pane, which is the camera's parent and not the
-					// camera.** Everything that reads a seam back has to be able
-					// to leave the surface itself alone, and only the walk that
-					// found it knows which entity that was.
-					seam.Pane = store.ParentOf(entity);
-					seam.Far = portal.Destination;
-					seam.Surface = camera.Surface;
-					seam.Crosses = portal.DestinationWorld.IsValid();
-
-					seams.push_back(seam);
+			store.Each<const Portal, const SurfaceCamera>([&](Entity entity,
+															  const Portal &portal,
+															  const SurfaceCamera &camera) {
+				if (portal.Destination == NULL_ENTITY || !store.Alive(portal.Destination)) {
+					// An unlinked portal falls back to a mirror, and a mirror
+					// is a wall. Walking into one is walking into a wall.
+					return;
 				}
-			);
+
+				// **The pane is the camera's parent, not the camera.** A
+				// `SurfaceCamera` is a `PVInstance` — it has a placement and
+				// no size at all — so a pass that read the camera's own
+				// `Bounds` found none and every portal in the world quietly
+				// had no hole in it. `FaceOf` is what `AimSurfaceCameras`
+				// uses and is the one answer to "which rectangle is this
+				// camera projecting off".
+				Face face;
+				if (!FaceOf(store, entity, camera.Face, face)) {
+					return;
+				}
+
+				const Transform *far = store.Get<Transform>(portal.Destination);
+				const Bounds *farBounds = store.Get<Bounds>(portal.Destination);
+				if (far == nullptr || farBounds == nullptr) {
+					return;
+				}
+
+				// The far pane's own face, chosen the way the source's was:
+				// `SurfaceCamera::Face` names one side of a part, and the far
+				// end of a hole is the matching side of the part it leads to.
+				const Vector3 local = NormalOf(camera.Face);
+				const Vector3 farNormal = far->Frame.VectorToWorldSpace(local).Unit();
+				const Vector3 farCentre = far->Frame.Position + farNormal * ReachOf(*farBounds, camera.Face);
+
+				PortalSeam seam;
+				seam.Centre = face.Centre;
+				seam.Normal = face.Normal;
+				FaceAxes(face.Placement, local, face.HalfExtent, seam.First, seam.Second);
+				seam.Destination = CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
+
+				// **How much bigger the far end is, from the two rectangles
+				// themselves.** The destination's face is measured exactly
+				// the way the source's was — same face id, same `FaceAxes` —
+				// so a pair that is the same size cannot come out as
+				// anything but one, and nothing has to be authored.
+				Vector3 farFirst;
+				Vector3 farSecond;
+				FaceAxes(far->Frame, local, farBounds->HalfExtent, farFirst, farSecond);
+				seam.Scale = ScaleBetween(seam.First, seam.Second, farFirst, farSecond);
+
+				// **The pane, which is the camera's parent and not the
+				// camera.** Everything that reads a seam back has to be able
+				// to leave the surface itself alone, and only the walk that
+				// found it knows which entity that was.
+				seam.Pane = store.ParentOf(entity);
+				seam.Far = portal.Destination;
+				seam.Surface = camera.Surface;
+				seam.Crosses = portal.DestinationWorld.IsValid();
+
+				seams.push_back(seam);
+			});
 		}
 
 		// Whether a segment goes through one hole, and what carries it there.
@@ -537,7 +611,11 @@ namespace engine::scene {
 		// @param through The map from this side to the far side, written only
 		//                when the answer is true.
 		bool CrossingOf(
-			const PortalSeam &hole, const Vector3 &was, const Vector3 &now, CFrame &through, float &share
+			const PortalSeam &hole,
+			const Vector3 &was,
+			const Vector3 &now,
+			SeamTransform &through,
+			float &share
 		) {
 			// Signed distance either side of the pane's plane. **A crossing is a
 			// change of side and not a place**, which is what makes the test
@@ -580,14 +658,23 @@ namespace engine::scene {
 		}
 	}
 
-	CFrame SeamMapping(const PortalSeam &seam, float side) {
+	SeamTransform SeamMapping(const PortalSeam &seam, float side) {
 		const Vector3 outward = seam.Normal * (side > 0.0f ? 1.0f : -1.0f);
 		const CFrame source = CFrame::LookAt(seam.Centre, seam.Centre + outward, UpFor(outward));
 
 		// `destination · half-turn · source⁻¹`, the same product the camera goes
 		// through — see `AimSurfaceCameras`' `linked` branch for why the
 		// half-turn is what makes it a hole rather than a window onto a copy.
-		return seam.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+		//
+		// **The scale is about the source pane's centre**, which this rigid
+		// product already sends to the destination's centre — so scaling before
+		// the map and scaling after it are the same operation, and only the
+		// centre this pass already has is needed to state it.
+		SeamTransform through;
+		through.Frame = seam.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+		through.Origin = seam.Centre;
+		through.Scale = seam.Scale;
+		return through;
 	}
 
 	float SeamOffset(const PortalSeam &seam, const Vector3 &at) {
@@ -659,12 +746,49 @@ namespace engine::scene {
 				// uses its sign to decide which way out of the far side to look.
 				const float distance = (eye - centre).Dot(unit);
 
-				// **Edge-on renders nothing.** See `EDGE_ON_MARGIN`: this is the
-				// one band where there is no continuous orientation to aim for,
-				// and a pane the viewer is level with covers no pixels anyway.
-				// Carried through as a non-rendering aim rather than returned
-				// from, so the pane is told to stop sampling its slot.
-				if (std::abs(distance) < EDGE_ON_MARGIN) {
+				// **The one branch that makes a portal a portal.** Everything after
+				// it is shared, because both cases have produced the same five
+				// facts: where the camera stands, which way it looks, and the
+				// rectangle it has to cover.
+				//
+				// **Resolved before the edge-on band because the band is not the
+				// same question for the two.** See below.
+				const Portal *portal = store.Get<Portal>(entity);
+				const bool linked = portal != nullptr && portal->Destination != NULL_ENTITY &&
+									store.Alive(portal->Destination) &&
+									store.Get<Transform>(portal->Destination) != nullptr &&
+									store.Get<Bounds>(portal->Destination) != nullptr;
+
+				// **Edge-on renders nothing, and only a mirror is edge-on.** See
+				// `EDGE_ON_MARGIN`: for a *mirror* this is the one band where
+				// there is no continuous orientation to aim for, and a pane the
+				// viewer is level with covers no pixels anyway. Carried through
+				// as a non-rendering aim rather than returned from, so the pane
+				// is told to stop sampling its slot.
+				//
+				// **A linked portal is exempt, and that is the whole of it.** The
+				// discontinuity the band exists for is `facing` changing sign
+				// with nothing else changing — true of a mirror, whose map is
+				// the reflection through its own plane, and false of a hole. A
+				// portal's camera is `through · eye`, and the frame `facing`
+				// flips is the same frame `CrossPortals` — or `PortalCrossing`,
+				// for the arm a third-person eye rides on — carries the eye
+				// through the pane. The two flips cancel and the placement is
+				// continuous across the crossing.
+				//
+				// Which matters because the band sits exactly where somebody
+				// walking through a hole spends the crossing: 0.3 studs either
+				// side of the plane, blanked, on the one frame they are in the
+				// doorway. That is a picture going dark in the middle of the one
+				// move a portal exists for, and it was a mirror's fix wearing a
+				// hole's clothes.
+				//
+				// Nothing replaces it here. `FitExtents` already floors the
+				// corner depth and the frustum span, and `SurfaceProjection`
+				// already declines to skew when the camera is on its own clip
+				// plane — the three guards a fit needs at the plane are the ones
+				// that were already written.
+				if (!linked && std::abs(distance) < EDGE_ON_MARGIN) {
 					Aim blank;
 					blank.Camera = entity;
 					blank.Part = face.Part;
@@ -683,16 +807,6 @@ namespace engine::scene {
 				FaceAxes(face.Placement, NormalOf(target.Face), face.HalfExtent, first, second);
 
 				Placement placement;
-
-				// **The one branch that makes a portal a portal.** Everything after
-				// it is shared, because both cases have produced the same five
-				// facts: where the camera stands, which way it looks, and the
-				// rectangle it has to cover.
-				const Portal *portal = store.Get<Portal>(entity);
-				const bool linked = portal != nullptr && portal->Destination != NULL_ENTITY &&
-									store.Alive(portal->Destination) &&
-									store.Get<Transform>(portal->Destination) != nullptr &&
-									store.Get<Bounds>(portal->Destination) != nullptr;
 
 				if (linked) {
 					// The two face frames, each looking *out* of its own pane. A
@@ -716,6 +830,14 @@ namespace engine::scene {
 					const CFrame destination =
 						CFrame::LookAt(farCentre, farCentre + farNormal, UpFor(farNormal));
 
+					// Its rectangle, measured exactly as the source's was, which
+					// is the only reason a matched pair scales by one.
+					Vector3 farFirst;
+					Vector3 farSecond;
+					FaceAxes(
+						farPlacement->Frame, NormalOf(target.Face), farBounds->HalfExtent, farFirst, farSecond
+					);
+
 					// **`destination · half-turn · source⁻¹`, and the half-turn is
 					// what makes it a hole rather than a window onto a copy.**
 					// Without it the camera arrives at the far pane facing back the
@@ -724,23 +846,43 @@ namespace engine::scene {
 					//
 					// **Nothing here constrains the two frames to describe one
 					// space, and that is the entire non-Euclidean feature.** A
-					// destination turned, moved or placed anywhere gives a room
-					// bigger on the inside or a corridor that turns through more
-					// than four right angles — with no second mechanism and no
+					// destination turned, moved, resized or placed anywhere gives a
+					// room bigger on the inside or a corridor that turns through
+					// more than four right angles — with no second mechanism and no
 					// maths past this multiply. `docs/NON-EUCLIDEAN.md` is the
 					// investigation that settled it.
-					const CFrame through = destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+					//
+					// **Built the same way a crossing body's is**, rather than
+					// composed here: `SeamMapping` is the one statement of what a
+					// hole does to what goes through it, and a second derivation of
+					// it in the pass that draws the picture is a second chance for
+					// the picture and the simulation to disagree about a sign or a
+					// size. The scale is why that stopped being cosmetic — a hole
+					// between panes of different sizes moves the camera *and*
+					// resizes the rectangle it is fitted to.
+					SeamTransform through;
+					through.Frame = destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+					through.Origin = centre;
+					through.Scale = ScaleBetween(first, second, farFirst, farSecond);
 
-					placement.Eye = through.PointToWorldSpace(eye);
-					placement.Centre = through.PointToWorldSpace(centre);
-					placement.First = through.VectorToWorldSpace(first);
-					placement.Second = through.VectorToWorldSpace(second);
+					placement.Eye = through.Point(eye);
+					placement.Centre = through.Point(centre);
+
+					// **`Carry`, so the fitted rectangle is the destination pane's
+					// size and not the source's.** This is where the scale earns
+					// its place: the fit and the oblique clip are made against
+					// these vectors, and `opaque.frag` projects the source pane
+					// through the same map — so the three agree by construction
+					// however different the two panes are.
+					placement.First = through.Carry(first);
+					placement.Second = through.Carry(second);
 
 					// **Negated, and this is the one sign in the file worth
-					// deriving rather than trying.** `through` is rigid, so it
-					// preserves which side of the pane a point is on: the eye
-					// stands at `+outward` from the source, so the camera lands
-					// at `+outward` from the *mapped* pane. A mirror's camera is
+					// deriving rather than trying.** `through` is a similarity
+					// with a positive scale, so it preserves which side of the
+					// pane a point is on: the eye stands at `+outward` from the
+					// source, so the camera lands at `+outward` from the *mapped*
+					// pane, further out by the scale. A mirror's camera is
 					// on the far side and looks along the outward normal; a
 					// portal's is on the near side and has to look back through
 					// the rectangle, which is the other way.
@@ -749,7 +891,11 @@ namespace engine::scene {
 					// the portal shows whatever happens to be behind the
 					// destination — which looks like a portal that works and
 					// leads somewhere wrong.
-					placement.Forward = through.VectorToWorldSpace(outward) * -1.0f;
+					// **`Rotate` and not `Carry`**, because this is a direction
+					// and has to stay unit: it is handed straight to `LookAt` and
+					// used as the oblique clip's normal, and a clip plane whose
+					// normal is twice as long is a plane twice as far away.
+					placement.Forward = through.Rotate(outward) * -1.0f;
 
 					// And the pane is mapped by the same matrix when it reads
 					// the image back, which is what makes the two line up.
@@ -824,7 +970,16 @@ namespace engine::scene {
 
 				// The map the pane is read back through. Identity for a mirror,
 				// which is what the default already is.
-				aim.Lens.Mapping = placement.Map;
+				//
+				// **Three fields rather than one, because the map is a similarity
+				// and a `CFrame` is not.** A hole between panes of different
+				// sizes scales what goes through it, and the pane has to be read
+				// back through *exactly* the transform the camera was fitted with
+				// or the image slides across the glass. `client::CollectSurfaceViews`
+				// composes the three into the matrix the shader wants.
+				aim.Lens.Mapping = placement.Map.Frame;
+				aim.Lens.MappingOrigin = placement.Map.Origin;
+				aim.Lens.MappingScale = placement.Map.Scale;
 
 				pending.push_back(aim);
 			}
@@ -1080,9 +1235,14 @@ namespace engine::scene {
 					continue;
 				}
 
+				// **The box goes through too.** A clone of a body standing in a
+				// hole that changes size has to be the size of the room it is
+				// showing up in, or the two halves meet at the pane as a step.
+				const SeamTransform through = SeamMapping(seam, SeamOffset(seam, frame.Position));
+
 				DrawInstance ghost{
-					SeamMapping(seam, SeamOffset(seam, frame.Position)) * frame,
-					bounds.HalfExtent,
+					through.Place(frame),
+					bounds.HalfExtent * through.Scale,
 					visual.Tint,
 					visual.Mesh,
 					appearance.ColourMap,
@@ -1125,19 +1285,17 @@ namespace engine::scene {
 			const Visual,
 			const SurfaceAppearance,
 			const Tags,
-			const Rendered>(
-			[&](Entity entity,
-				const Motion &,
-				const Transform &placement,
-				const PreviousTransform &previous,
-				const Bounds &bounds,
-				const Visual &visual,
-				const SurfaceAppearance &appearance,
-				const Tags &tags,
-				const Rendered &) {
-				clone(entity, placement, previous, bounds, visual, appearance, tags);
-			}
-		);
+			const Rendered>([&](Entity entity,
+								const Motion &,
+								const Transform &placement,
+								const PreviousTransform &previous,
+								const Bounds &bounds,
+								const Visual &visual,
+								const SurfaceAppearance &appearance,
+								const Tags &tags,
+								const Rendered &) {
+			clone(entity, placement, previous, bounds, visual, appearance, tags);
+		});
 
 		// **Anchored, which is why they need their own walk.** `MakeCharacter`
 		// anchors every visible limb and poses it off the root each tick, so the
@@ -1152,25 +1310,23 @@ namespace engine::scene {
 			const Visual,
 			const SurfaceAppearance,
 			const Tags,
-			const Rendered>(
-			[&](Entity entity,
-				const CharacterLimb &,
-				const Transform &placement,
-				const PreviousTransform &previous,
-				const Bounds &bounds,
-				const Visual &visual,
-				const SurfaceAppearance &appearance,
-				const Tags &tags,
-				const Rendered &) {
-				// Whatever the first walk already took. Nothing in this engine
-				// carries both today; a rig that did would otherwise be drawn
-				// twice on the far side, exactly on top of itself.
-				if (store.Has<Motion>(entity)) {
-					return;
-				}
-				clone(entity, placement, previous, bounds, visual, appearance, tags);
+			const Rendered>([&](Entity entity,
+								const CharacterLimb &,
+								const Transform &placement,
+								const PreviousTransform &previous,
+								const Bounds &bounds,
+								const Visual &visual,
+								const SurfaceAppearance &appearance,
+								const Tags &tags,
+								const Rendered &) {
+			// Whatever the first walk already took. Nothing in this engine
+			// carries both today; a rig that did would otherwise be drawn
+			// twice on the far side, exactly on top of itself.
+			if (store.Has<Motion>(entity)) {
+				return;
 			}
-		);
+			clone(entity, placement, previous, bounds, visual, appearance, tags);
+		});
 
 		return appended;
 	}
@@ -1257,7 +1413,7 @@ namespace engine::scene {
 				continue;
 			}
 
-			CFrame candidate;
+			SeamTransform candidate;
 			float at = 1.0f;
 			if (!CrossingOf(seam, from, to, candidate, at)) {
 				continue;
@@ -1273,7 +1429,7 @@ namespace engine::scene {
 		return found;
 	}
 
-	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, CFrame &through) {
+	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, SeamTransform &through) {
 		PortalHop hop;
 		if (!PortalCrossing(store, from, to, hop)) {
 			return false;
@@ -1352,14 +1508,19 @@ namespace engine::scene {
 				// same question `CrossingOf` asks of a segment and
 				// `AimSurfaceCameras` asks of a viewer. The half that has
 				// crossed belongs in the space the other half is looking into.
-				const float side = offset.Dot(seam.Normal) > 0.0f ? 1.0f : -1.0f;
-				const Vector3 outward = seam.Normal * side;
-				const CFrame source = CFrame::LookAt(seam.Centre, seam.Centre + outward, UpFor(outward));
-				const CFrame through =
-					seam.Destination * CFrame::Angles(0.0f, PI, 0.0f) * source.Inverse();
+				//
+				// **`SeamMapping` and not a fourth copy of the product.** This
+				// used to compose `destination · half-turn · source⁻¹` by hand,
+				// which was the same three lines as the function beside it and
+				// went out of date the moment the map gained a scale — a ghost
+				// mapped rigidly through a hole that resizes is a body whose far
+				// half is the wrong size, meeting its near half at a step in the
+				// plane.
+				const SeamTransform through = SeamMapping(seam, offset.Dot(seam.Normal));
 
 				DrawInstance ghost = body;
-				ghost.Frame = through * body.Frame;
+				ghost.Frame = through.Place(body.Frame);
+				ghost.HalfExtent = body.HalfExtent * through.Scale;
 
 				// **Never a surface and never a caster.** A ghost is the far
 				// half of something that is already in the world: a second
@@ -1382,6 +1543,110 @@ namespace engine::scene {
 		return appended;
 	}
 
+	// Grows or shrinks everything about one body that is a length.
+	//
+	// **What a hole between panes of different sizes does to what goes through
+	// it, and it is a list rather than a multiply because a body is not one
+	// row.** A crate is its `Bounds` and its `Collider`. A character is those on
+	// a root nobody can see, a `Humanoid` on a *third* entity holding every
+	// figure that decides how it moves, and five limbs that are their own rows
+	// with their own boxes and their own rest offsets. Missing any one of them
+	// is visible immediately: a character whose limbs did not scale is a body
+	// standing inside a rig the size it used to be.
+	//
+	// **Multiplied rather than assigned, so the pair is its own inverse.** The
+	// scale of a seam is the ratio of two measurements that a crossing does not
+	// change, so going back through the other way multiplies by the reciprocal
+	// and lands on the number it started with — which is what makes a corridor
+	// of mismatched holes a place you can walk around in rather than a ratchet.
+	//
+	// **Not the mass, and not because it is forgotten.** `PhysicsProperties`
+	// derives mass from the volume and the density, so a body whose box has
+	// changed already weighs what a body that size weighs.
+	//
+	// @param store The world.
+	// @param body  The row the solver moves, which for a character is its root.
+	// @param scale What to multiply by.
+	static void ResizeCrosser(Store &store, Entity body, float scale) {
+		if (const Bounds *bounds = store.Get<Bounds>(body)) {
+			store.Set(body, Bounds{bounds->HalfExtent * scale});
+		}
+
+		// **Its own extent and not the bounds'.** A collider may be a different
+		// shape and a different size from the box a part draws as, which is
+		// exactly what `Collider::Extent` is for — scaling one and not the other
+		// is a body that looks right and collides at its old size.
+		if (const Collider *collider = store.Get<Collider>(body)) {
+			Collider resized = *collider;
+			resized.Extent = resized.Extent * scale;
+			store.Set(body, resized);
+		}
+
+		// The humanoid steering it, which is on the model rather than on the
+		// part — `Character` exists to spare everything this a walk by name.
+		// A scripted character carries both on one row and is found by the
+		// fallback below.
+		Entity steering = NULL_ENTITY;
+		store.Each<const Character>([&](Entity, const Character &character) {
+			if (character.Root == body) {
+				steering = character.Humanoid;
+			}
+		});
+		if (steering == NULL_ENTITY && store.Has<Humanoid>(body)) {
+			steering = body;
+		}
+
+		if (const Humanoid *humanoid = steering == NULL_ENTITY ? nullptr : store.Get<Humanoid>(steering)) {
+			Humanoid resized = *humanoid;
+
+			// **Every figure here is a length or a length per second**, and the
+			// two that are easy to leave out are the ones that show. A ground
+			// tolerance that did not shrink is a character hovering a tenth of
+			// its own height off the floor; a walk speed that did not is a body
+			// a tenth the size crossing the room at the same rate, which reads
+			// as the portal having made it fast rather than small.
+			resized.Height *= scale;
+			resized.Radius *= scale;
+			resized.WalkSpeed *= scale;
+			resized.JumpSpeed *= scale;
+			resized.GroundTolerance *= scale;
+			store.Set(steering, resized);
+		}
+
+		// **Gathered before writing**, because adding nothing and changing a
+		// component are different costs and a walk that wrote inside itself
+		// would queue a heap copy per limb. The same two phases every other pass
+		// in this file uses, for the same reason.
+		std::vector<Entity> limbs;
+		store.Each<const CharacterLimb>([&](Entity limb, const CharacterLimb &carried) {
+			if (carried.Root == body) {
+				limbs.push_back(limb);
+			}
+		});
+
+		for (const Entity limb : limbs) {
+			// **The rest offset as well as the box.** `PoseCharacterLimbs` puts
+			// a limb at `root · Offset` every tick, so a rig whose offsets kept
+			// their old lengths is a character shrunk in the middle of a skeleton
+			// that did not — arms at the old distance, boxes at the new size.
+			if (const CharacterLimb *carried = store.Get<CharacterLimb>(limb)) {
+				CharacterLimb moved = *carried;
+				moved.Offset = CFrame{moved.Offset.Position * scale, moved.Offset.Rotation()};
+				store.Set(limb, moved);
+			}
+
+			if (const Bounds *bounds = store.Get<Bounds>(limb)) {
+				store.Set(limb, Bounds{bounds->HalfExtent * scale});
+			}
+
+			if (const Collider *collider = store.Get<Collider>(limb)) {
+				Collider resized = *collider;
+				resized.Extent = resized.Extent * scale;
+				store.Set(limb, resized);
+			}
+		}
+	}
+
 	size_t CrossPortals(ecs::Store &store) {
 		// **The portals are gathered before anything is moved.** A body pushed
 		// through one lands somewhere another might also claim, and a single
@@ -1396,6 +1661,15 @@ namespace engine::scene {
 		}
 
 		size_t crossed = 0;
+
+		// What went through a hole that changes size, and by how much. Empty in
+		// every world whose panes match, which is every world with a mirror in
+		// it and most with a portal.
+		struct Resize {
+			ecs::Entity Body;
+			float Scale;
+		};
+		std::vector<Resize> resized;
 
 		// **Anything with a velocity, not only a character.** A portal that
 		// swallowed people and refused a thrown crate would be a portal with a
@@ -1419,18 +1693,47 @@ namespace engine::scene {
 						continue;
 					}
 
-					CFrame through;
+					SeamTransform through;
 					float share = 1.0f;
 					if (!CrossingOf(hole, was, now, through, share)) {
 						continue;
 					}
 
+					// **Put down clear of the plane it is about to be on the far
+					// side of.** Pushed before the map rather than after, so the
+					// only normal involved is the source pane's — which this pass
+					// already has — and the rigid map carries the clearance to the
+					// destination as the same distance out of the far pane. See
+					// `LANDING_CLEARANCE`.
+					//
+					// Away from the side it came in on, which is the direction it
+					// was already travelling.
+					const Vector3 clear =
+						hole.Normal * (SeamOffset(hole, was) > 0.0f ? -LANDING_CLEARANCE : LANDING_CLEARANCE);
+
 					// **The placement and the velocity, by the same transform.**
 					// Forgetting the second is the bug that looks like physics:
 					// the body arrives aimed the way it was aimed in the frame it
 					// left, so it walks out of the destination sideways.
-					placement.Frame = through * placement.Frame;
-					motion.Linear = through.VectorToWorldSpace(motion.Linear);
+					//
+					// **`Carry` for the velocity, because a speed is a length.**
+					// A body that comes out of the small end of a hole at the
+					// speed it went into the large end crosses the far room in a
+					// fraction of the time, which reads as the portal firing you
+					// out rather than as a change of scale.
+					placement.Frame =
+						through.Place(CFrame{placement.Frame.Position + clear, placement.Frame.Rotation()});
+					motion.Linear = through.Carry(motion.Linear);
+
+					// **And the body itself, when the two ends are not the same
+					// size.** Gathered rather than applied here for the reason
+					// every pass in this file gives about its own two phases: this
+					// touches other entities — a character's limbs are their own
+					// rows — and an archetype the walk is not standing on is still
+					// a deferred command with a heap copy behind it.
+					if (through.Scale != 1.0f) {
+						resized.push_back(Resize{entity, through.Scale});
+					}
 
 					// **And the turn is written down, because the eye that has
 					// to follow it is on another machine.** This is the same
@@ -1455,8 +1758,13 @@ namespace engine::scene {
 					// hole this tick and does not depend on which way any of
 					// them happened to be facing. North is the reference for no
 					// reason but that a yaw of zero is north.
+					// **`Rotate`, so a scaled hole still reports the angle it
+					// turns through.** A yaw is not a length, and `Carry` here
+					// would leave `atan2` measuring a vector scaled on both
+					// components — the same angle, arrived at by luck — or a zero
+					// vector for a hole that shrinks to nothing.
 					const Vector3 north{0.0f, 0.0f, -1.0f};
-					const Vector3 turned = through.VectorToWorldSpace(north);
+					const Vector3 turned = through.Rotate(north);
 
 					if (std::abs(turned.X) > 1e-6f || std::abs(turned.Z) > 1e-6f) {
 						PortalTransit went;
@@ -1476,6 +1784,15 @@ namespace engine::scene {
 				}
 			}
 		);
+
+		// **After the walk, where the defer depth is back to zero.** A resize
+		// touches a character's limbs, which are rows the walk above never
+		// visits, and `ResizeCrosser` walks the world twice to find them — an
+		// `Each` opened inside another one is a great deal of machinery to run
+		// per crossing when a crossing is already over.
+		for (const Resize &change : resized) {
+			ResizeCrosser(store, change.Body, change.Scale);
+		}
 
 		return crossed;
 	}

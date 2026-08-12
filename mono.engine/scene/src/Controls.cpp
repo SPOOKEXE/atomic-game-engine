@@ -184,10 +184,16 @@ namespace engine::scene {
 		// the character, on the far side, looking back through the hole. First
 		// person has no arm and therefore no crossing, which is why this is
 		// after the branch above rather than inside it.
-		CFrame carried;
+		// **`Point` for the eye and `Rotate` for the aim**, because a hole may
+		// change size as well as place: the arm's far end is a position and
+		// scales with the room it lands in, and the look direction is a unit
+		// vector that must stay one. Scaling the aim would give `LookAt` a
+		// longer forward, which is not wrong so much as it is one edit away from
+		// being wrong.
+		SeamTransform carried;
 		if (engine::scene::PortalCrossing(store, head, eye, carried)) {
-			eye = carried.PointToWorldSpace(eye);
-			forward = carried.VectorToWorldSpace(forward);
+			eye = carried.Point(eye);
+			forward = carried.Rotate(forward);
 		}
 
 		// **`LookAt` towards a point along the forward rather than at the head**,

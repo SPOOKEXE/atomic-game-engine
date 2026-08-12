@@ -187,6 +187,16 @@ frame, deepest first — the one property the surface pass trades away for being
 cheap, and a change that belongs with the render-graph work `ROADMAP.md` files
 behind a prototype project.
 
+**Part of what looked like the seam was not the seam, and is gone.** v0.15 found
+that `EDGE_ON_MARGIN` — a mirror's fix for a camera that flips 180 degrees as a
+viewer crosses its plane — was being applied to holes as well, so a portal drew
+*nothing at all* within 0.3 studs of its own plane. That band is exactly where
+somebody walking through spends the crossing. A linked portal has no
+discontinuity to blank: the frame the viewer's side flips is the frame the
+viewer is carried through the pane, and the two cancel. What is left of this
+entry is the one-frame staleness above and nothing else. `NON_EUCLID.md` is the
+reading of CodeParade's demo that turned it up.
+
 **Two smaller things worth knowing before building on this.** Sixteen surfaces
 per world, shared with mirrors, which is a reasonable limit for this kind of
 level and not for a world dotted with holes. And physics has no per-region

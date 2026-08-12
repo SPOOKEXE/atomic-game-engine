@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <span>
 #include <vector>
 
 TEST_SUITE_ID("engine.graph.frustum")
@@ -175,4 +176,103 @@ TEST_CASE("culling an empty list is empty", "[graph][frustum]") {
 	std::vector<uint32_t> visible;
 	CHECK(Cull({}, Looking(), visible) == 0);
 	CHECK(visible.empty());
+}
+
+TEST_CASE("a surface whose pane nothing can see is not visible", "[graph][cull]") {
+	// **The half of "should this mirror redraw" that used not to be asked.** A
+	// content signature says whether the image changed; it cannot say whether
+	// anybody is looking, so a room of eight mirrors redrew all eight on every
+	// frame anything in the world moved — including the ones behind the viewer.
+	//
+	// Two panes, one in front of a camera at the origin and one well behind it.
+	DrawInstance ahead = At(Vector3{0.0f, 0.0f, -10.0f}, 2.0f);
+	ahead.Surface = 0;
+
+	DrawInstance behind = At(Vector3{0.0f, 0.0f, 40.0f}, 2.0f);
+	behind.Surface = 1;
+
+	const std::vector<DrawInstance> instances{ahead, behind};
+
+	// Each pane's own camera. Neither matters for this case — what decides it
+	// is where the *pane* is — and giving them matrices that see nothing is
+	// what makes that claim rather than assumes it.
+	engine::graph::SurfaceEye eyes[2];
+	eyes[0].Index = 0;
+	eyes[1].Index = 1;
+
+	bool visible[2] = {true, true};
+	const size_t seen = engine::graph::VisibleSurfaces(
+		instances, Looking(), std::span<const engine::graph::SurfaceEye>(eyes, 2), std::span<bool>(visible, 2)
+	);
+
+	CHECK(seen == 1);
+	CHECK(visible[0]);
+	CHECK_FALSE(visible[1]);
+}
+
+TEST_CASE("a surface visible only inside another surface still counts", "[graph][cull]") {
+	// **Two facing mirrors, and a portal seen through a portal.** A pane off the
+	// screen but inside one that is on it has to keep refreshing, or the picture
+	// in the mirror freezes while the mirror itself moves — which is a much
+	// louder artefact than the redraw it saves.
+	//
+	// Pane A is in front of the viewer. Pane B is behind the viewer and so is
+	// not on screen, but A's camera looks the other way and has B in it.
+	DrawInstance ahead = At(Vector3{0.0f, 0.0f, -10.0f}, 2.0f);
+	ahead.Surface = 0;
+
+	DrawInstance behind = At(Vector3{0.0f, 0.0f, 40.0f}, 2.0f);
+	behind.Surface = 1;
+
+	const std::vector<DrawInstance> instances{ahead, behind};
+
+	Camera looking;
+	looking.NearPlane = 0.1f;
+	looking.FarPlane = 200.0f;
+
+	engine::graph::SurfaceEye eyes[2];
+	eyes[0].Index = 0;
+
+	// A's camera stands where A is and looks back down +Z, so pane B at z = 40
+	// is squarely in front of it.
+	eyes[0].ViewProjection =
+		engine::scene::ResolveCamera(
+			CFrame::LookAt(Vector3{0.0f, 0.0f, -10.0f}, Vector3{0.0f, 0.0f, 40.0f}), looking, 16.0f / 9.0f
+		)
+			.ViewProjection;
+	eyes[1].Index = 1;
+
+	bool visible[2] = {};
+	const size_t seen = engine::graph::VisibleSurfaces(
+		instances, Looking(), std::span<const engine::graph::SurfaceEye>(eyes, 2), std::span<bool>(visible, 2)
+	);
+
+	CHECK(seen == 2);
+	CHECK(visible[0]);
+	CHECK(visible[1]);
+}
+
+TEST_CASE("a surface with no pane in the draw list is not visible", "[graph][cull]") {
+	// A slot nothing samples is a texture nothing reads, and rendering into it
+	// is work with no consumer. `SurfaceSlotState::Ready` already knows how to
+	// show a pane that has never been drawn — it falls back to its own tint — so
+	// the honest answer costs nothing downstream.
+	DrawInstance plain = At(Vector3{0.0f, 0.0f, -10.0f}, 2.0f);
+	plain.Surface = -1;
+
+	const std::vector<DrawInstance> instances{plain};
+
+	engine::graph::SurfaceEye eyes[1];
+	eyes[0].Index = 0;
+
+	bool visible[1] = {true};
+	CHECK(
+		engine::graph::VisibleSurfaces(
+			instances,
+			Looking(),
+			std::span<const engine::graph::SurfaceEye>(eyes, 1),
+			std::span<bool>(visible, 1)
+		) == 0
+	);
+	CHECK_FALSE(visible[0]);
 }
