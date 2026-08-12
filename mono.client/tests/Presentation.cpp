@@ -1129,3 +1129,199 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 		CHECK(cloneAt(drawn, 100.0f) == 1);
 	}
 }
+
+TEST_CASE("a cross-world pane is handed every row of the world it names", "[client][presentation]") {
+	// **The half a screenshot cannot tell apart from a camera fault.** A pane
+	// onto another world shows either what that world published or nothing, and
+	// "the far room draws but its spawn pad does not" has two completely
+	// different causes: the rows never crossed, or they crossed and the camera
+	// did not cover them. This case answers the first, so that a report about
+	// the second is about the second.
+	//
+	// `AttachForeignSurfaces` is the whole of the crossing: it resolves the
+	// destination by *name*, copies that world's `DrawList` into a range of its
+	// own, and points the surface at it. Nothing here filters, sorts or culls —
+	// so if a part is in the far world's draw list it is in the range, and if it
+	// is missing from the picture the loss is downstream.
+	Universe universe;
+
+	const WorldId here = AddWorld(universe, "presentation.near");
+	const WorldId there = AddWorld(universe, "presentation.far");
+
+	// The far world's furniture, named the way the immersive scene names it:
+	// a floor everybody sees, a pad that was reported missing, and a marker.
+	AddPart(universe, there, "Floor");
+	AddPart(universe, there, "SpawnLocation");
+	AddPart(universe, there, "Brick");
+
+	// The near world's pane, and the stand-in its camera is aimed at. A
+	// cross-world portal has both: `Destination` is a part in *this* world and
+	// decides where the camera stands; `DestinationWorld` is a name and decides
+	// whose rows are drawn.
+	universe.Enter(here, [there, &universe](Store &store) {
+		const Entity workspace = engine::scene::InstallServices(store);
+
+		engine::scene::PartDesc pane;
+		pane.Size = Vector3{10.0f, 8.0f, 0.4f};
+		pane.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, 0.0f});
+		pane.Anchored = true;
+		const Entity block = engine::scene::MakePart(store, pane);
+		store.SetParent(block, workspace);
+
+		engine::scene::PartDesc stand;
+		stand.Size = pane.Size;
+		stand.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, -0.6f});
+		stand.Anchored = true;
+		const Entity beyond = engine::scene::MakePart(store, stand);
+		store.SetParent(beyond, workspace);
+
+		const Entity hole = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+		engine::scene::SurfaceCamera camera;
+		camera.Surface = 0;
+		store.Set(hole, camera);
+
+		engine::scene::Portal portal;
+		portal.Destination = beyond;
+		portal.DestinationWorld = universe.NameOf(there);
+		store.Set(hole, portal);
+		store.SetParent(hole, block);
+	});
+
+	// Both worlds publish, which is what `Editor::PresentPortalDestinations`
+	// exists to make true for a world nobody is looking at.
+	universe.Present(here, 1.0f / 60.0f, 0.0f);
+	universe.Present(there, 1.0f / 60.0f, 0.0f);
+
+	std::vector<engine::render::SurfaceView> views;
+	universe.Enter(here, [&views](Store &store) {
+		std::vector<engine::render::PortalView> portals;
+		(void)client::CollectPortalViews(store, portals);
+
+		// **Empty, and that is the assertion under the assertion.** A
+		// cross-world pane is not a `PortalView` — it does not recurse — so it
+		// must still be a `SurfaceView`, and a change that swept it onto the
+		// recursive path would show up here first.
+		CHECK(portals.empty());
+
+		(void)client::CollectSurfaceViews(store, views, portals);
+	});
+
+	REQUIRE(views.size() == 1);
+
+	std::vector<engine::scene::DrawInstance> drawn;
+	std::vector<engine::scene::DrawInstance> foreign;
+	REQUIRE(client::AttachForeignSurfaces(universe, here, drawn, foreign, views) == 1);
+
+	// The far world's whole list, and the range points at all of it.
+	const size_t published = Drawn(universe, there);
+	REQUIRE(published >= 3);
+	CHECK(foreign.size() >= published);
+	CHECK(views[0].InstanceCount == static_cast<uint32_t>(published));
+	CHECK(views[0].InstanceFirst == 0);
+}
+
+TEST_CASE("a pane is not drawn into the hole that leads back to it", "[client][presentation]") {
+	// **The rule a mirror has always had about itself, which a cross-world pair
+	// had nowhere to state — and it blanked the feature outright.**
+	//
+	// A pair is laid out the same way at both ends: that is what makes a hole
+	// read as an opening rather than as a painting, and it is what
+	// `ImmersivePortals.luau` does. So the far world's own slab stands exactly
+	// where this pane's camera is aimed, at about the distance the frustum is
+	// fitted to, and it is the same rectangle that frustum covers. It filled the
+	// image edge to edge in one flat colour and hid every room behind it.
+	//
+	// What that reads as is "the other world does not render its objects" — the
+	// floor shows wherever the slab does not quite reach, and nothing else ever
+	// does. It survived a correct camera, a correct sampling matrix and a
+	// correct foreign range, because all three of those were doing their jobs on
+	// a picture of a wall.
+	//
+	// **Selected by slot rather than by entity**, because a draw instance carries
+	// a surface index and no identity — and the slots wanted are exactly the ones
+	// `AttachForeignSurfaces` already gathers to bring the far world's straddlers
+	// back here.
+	Universe universe;
+
+	const WorldId here = AddWorld(universe, "presentation.pair.near");
+	const WorldId there = AddWorld(universe, "presentation.pair.far");
+
+	AddPart(universe, there, "Floor");
+	AddPart(universe, there, "SpawnLocation");
+
+	// Both worlds get a pane, and each names the other. Without the rule the far
+	// one is copied into this one's picture and stands in front of everything.
+	const auto pair = [&universe](WorldId world, WorldId other) {
+		universe.Enter(world, [&universe, other](Store &store) {
+			const Entity workspace = engine::scene::InstallServices(store);
+
+			engine::scene::PartDesc slab;
+			slab.Size = Vector3{10.0f, 8.0f, 0.4f};
+			slab.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, 0.0f});
+			slab.Anchored = true;
+			const Entity block = engine::scene::MakePart(store, slab);
+			store.SetInstanceName(block, "PortalBlock");
+			store.SetParent(block, workspace);
+
+			engine::scene::PartDesc stand;
+			stand.Size = slab.Size;
+			stand.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, -0.6f});
+			stand.Anchored = true;
+			const Entity beyond = engine::scene::MakePart(store, stand);
+			store.SetParent(beyond, workspace);
+
+			// **An eye, because a surface camera is placed from one.** Without an
+			// `ActiveCamera` the aim pass has no viewer to map and assigns no
+			// slot — and a pane with no slot is not a pane any filter can see.
+			const Entity eye = store.CreateInstance(engine::ecs::Classes::Find(Name("Camera")), "Eye");
+			store.Set(eye, engine::scene::Transform{engine::core::CFrame(Vector3{0.0f, 5.0f, 16.0f})});
+			store.SetResource(engine::scene::ActiveCamera{eye, 16.0f / 9.0f});
+
+			const Entity hole =
+				store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+			store.Set(hole, engine::scene::SurfaceCamera{});
+
+			engine::scene::Portal portal;
+			portal.Destination = beyond;
+			portal.DestinationWorld = universe.NameOf(other);
+			store.Set(hole, portal);
+			store.SetParent(hole, block);
+		});
+	};
+
+	pair(here, there);
+	pair(there, here);
+
+	// **Aimed before it is published**, because that is what writes
+	// `Visual::Surface` onto a pane — and a draw instance's surface index is the
+	// only thing the filter has to recognise a pane by. In a running host
+	// `client::InstallControls` registers this; the fixture installs
+	// presentation alone, so it is called here.
+	for (const WorldId world : {here, there}) {
+		universe.Enter(world, [](Store &store) { (void)engine::scene::AimSurfaceCameras(store); });
+		universe.Present(world, 1.0f / 60.0f, 0.0f);
+	}
+
+	std::vector<engine::render::SurfaceView> views;
+	universe.Enter(here, [&views](Store &store) {
+		std::vector<engine::render::PortalView> portals;
+		(void)client::CollectPortalViews(store, portals);
+		(void)client::CollectSurfaceViews(store, views, portals);
+	});
+	REQUIRE(!views.empty());
+
+	std::vector<engine::scene::DrawInstance> drawn;
+	std::vector<engine::scene::DrawInstance> foreign;
+	REQUIRE(client::AttachForeignSurfaces(universe, here, drawn, foreign, views) == 1);
+
+	// **Nothing in the picture samples a surface.** The far world's pane is the
+	// one row that does, and it is the row that used to fill the hole.
+	for (const engine::scene::DrawInstance &instance : foreign) {
+		CHECK(instance.Surface < 0);
+	}
+
+	// And the room is still there — a filter that dropped the far world rather
+	// than its pane would pass the line above and show nothing at all.
+	CHECK(foreign.size() + 1 == Drawn(universe, there));
+	CHECK(views[0].InstanceCount == static_cast<uint32_t>(foreign.size()));
+}

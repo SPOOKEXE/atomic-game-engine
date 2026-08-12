@@ -714,6 +714,72 @@ hole by definition.
 | Crossing | `CrossPortals`, continuous | A teleport, with a load screen if wanted |
 | Resolution | Viewport, sampled by screen position | The pane's own surface target |
 
+### The camera half, which stood on the wrong side of the far pane
+
+**`AimSurfaceCameras` composed its own map and `SeamMapping` is the map.** One
+pane, two derivations, and they agreed only for a viewer standing in *front* of
+the glass.
+
+The pass built its source frame from `unit * facing` — the pane's normal times
+which side the viewer is on — which is the pre-v0.15 shape, the one that makes
+two maps for one pane that are not each other's inverse. `SeamMapping` was fixed
+at v0.15 for exactly that reason; this pass was not, and nothing noticed because
+the recursive portal pass took the picture of every *same-world* hole away from
+it. A **cross-world** pane is the only thing still drawn from here.
+
+**And a cross-world scene spawns you behind its pane.** `ImmersivePortals.luau`
+puts its spawn pad on the pane's back side, so every frame of it was the side the
+two maps differ on: with an eye 20 studs behind the pane, the camera landed at
+`z = +20` where the seam's own map says `z = -20.4` — forty studs out, on the
+wrong side of the far pane, looking the wrong way. What it showed was the half of
+the far room a traveller walks *away* from: the floor, which is everywhere, and
+none of the furniture.
+
+The fix is one expression: build the source frame from the pane's own normal, as
+`SeamMapping` does. `outward` still carries the viewer's side, because *which
+half-space the clip keeps* genuinely depends on where you stand — the recursive
+pass makes the same split, and for the same reason.
+
+**Two cases pin it**, and the second is the one that matters: the camera stands
+where `SeamMapping` puts it from either side, and the half-space the clip keeps
+contains the point a body crossing from that side lands in. The old case here
+asserted the coordinate the bug produced and had its reasoning written out in
+full — which is why this is worth reading twice before changing a sign.
+
+### The pane that filled its own hole
+
+**A pair is laid out the same way at both ends, and that is what blanked the
+feature.** Two rooms built to the same plan is what makes a hole read as an
+opening rather than as a painting — `ImmersivePortals.luau` does it, and so does
+every scene anybody would author. It also puts the *far* world's slab exactly
+where this pane's camera is aimed, at about the distance the frustum is fitted
+to, and it is the same rectangle that frustum covers.
+
+So it filled the image edge to edge, in one flat colour, and hid every room
+behind it. What that reads as is **"the other world does not render its
+objects"**: the floor shows wherever the slab does not quite reach, and nothing
+else ever does.
+
+**It survived three correct things**, which is why it took so long to find. The
+camera was right once the map was fixed, the sampling matrix was right — a test
+projects the pane's corners through it and requires them inside `0..1` — and the
+foreign range was right, every published row of the far world at
+`InstanceFirst = 0`. All three were doing their jobs on a picture of a wall.
+
+The rule it was missing is the one a mirror has always had: **nothing sees itself
+in its own reflection.** `client::AttachForeignSurfaces` gathers the far world's
+panes that lead back here — it already did, to bring that world's straddlers
+across — and now gathers them *before* it copies, skipping any row whose surface
+slot is one of them. Selected by slot rather than by entity, because a draw
+instance carries a surface index and no identity.
+
+**Measured rather than argued.** `examples/CrossWorldSeam.luau` under
+`client --worlds 2 --view-spacing 0`: the pane's pixels go from a uniform
+`(141,145,167)` — its own material — to `(25,35,67)` far floor, `(61,144,229)`
+far spawn pad and `(11,13,21)` far sky. `client/tests/Presentation.cpp` pins it
+without a device: exactly one row is dropped, every row that crosses carries
+`Surface < 0`, and the far world's room is still all there.
+
 ### The crossing half of a cross-world pane, which drew and did not carry
 
 **A window that shows a live room and deletes whoever walks into it is worse

@@ -1202,8 +1202,26 @@ namespace engine::scene {
 					// when the two are parallel, which is a portal in the floor —
 					// the same case the mirror branch guards below, for the same
 					// reason and with the same answer.
+					//
+					// **Built from the pane's own normal and never from the
+					// viewer's side of it**, which is the whole of what
+					// `SeamMapping` settled at v0.15 and what this pass was still
+					// getting wrong. A source frame that flips with the side is
+					// two maps for one pane, and they are not each other's
+					// inverse: both send a viewer to the *same* side of the far
+					// pane. A same-world hole stopped noticing when the recursive
+					// pass took its picture over — but a **cross-world** pane
+					// still draws from here, and `ImmersivePortals.luau` spawns
+					// you *behind* its pane, which is exactly the side the two
+					// maps differ on.
+					//
+					// What that looked like: a window onto the other world whose
+					// camera stood forty studs from where a body crossing would
+					// land, on the wrong side, showing the half of the far room
+					// with nothing in it. The floor is everywhere so the floor
+					// arrived; the pad, the markers and the people did not.
 					const Vector3 outward = unit * facing;
-					const CFrame source = CFrame::LookAt(centre, centre + outward, UpFor(outward));
+					const CFrame source = CFrame::LookAt(centre, centre + unit, UpFor(unit));
 
 					const Transform *farPlacement = store.Get<Transform>(portal->Destination);
 					const Bounds *farBounds = store.Get<Bounds>(portal->Destination);

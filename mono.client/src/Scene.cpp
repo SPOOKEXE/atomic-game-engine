@@ -566,8 +566,54 @@ namespace client {
 
 			const auto first = static_cast<uint32_t>(foreign.size());
 			universe.Enter(found, [&foreign, &drawn, &returning, here, returns](Store &store) {
+				// **The far world's own panes back to here, gathered before its
+				// rows are copied**, because they decide which of those rows may
+				// be copied at all.
+				returning.clear();
+				store.Each<const engine::scene::Portal, const engine::scene::SurfaceCamera>(
+					[&returning, here](
+						engine::ecs::Entity,
+						const engine::scene::Portal &portal,
+						const engine::scene::SurfaceCamera &camera
+					) {
+						if (portal.DestinationWorld != here) {
+							return;
+						}
+						if (std::find(returning.begin(), returning.end(), camera.Surface) ==
+							returning.end()) {
+							returning.push_back(camera.Surface);
+						}
+					}
+				);
+
+				// **A pane is not drawn into the picture of the hole that leads
+				// back to it**, which is the rule a mirror has always had about
+				// itself and which a cross-world pair had nowhere to state.
+				//
+				// **It blanked the feature outright, and looked like the pass
+				// failing.** A pair is laid out the same way at both ends — that
+				// is what makes a hole read as an opening rather than as a
+				// painting — so the far world's own slab stands exactly where
+				// this pane's camera is aimed, at about the distance the frustum
+				// is fitted to, and it is the same rectangle that frustum covers.
+				// It therefore fills the image edge to edge, in one flat colour,
+				// and every room behind it is hidden. What that reads as is "the
+				// other world does not render its objects": the floor shows
+				// wherever the slab does not quite reach, and nothing else ever
+				// does.
+				//
+				// Selected by **slot** rather than by entity, because a draw
+				// instance carries a surface index and no identity — and the
+				// slots wanted are exactly the ones gathered above.
 				if (const auto *list = store.Resource<DrawList>()) {
-					foreign.insert(foreign.end(), list->Instances.begin(), list->Instances.end());
+					for (const DrawInstance &instance : list->Instances) {
+						if (instance.Surface >= 0 &&
+							std::find(returning.begin(), returning.end(), instance.Surface) !=
+								returning.end()) {
+							continue;
+						}
+						foreign.push_back(instance);
+					}
 				}
 
 				// **And whoever is standing in the far world's own pane, on
@@ -597,23 +643,7 @@ namespace client {
 					return;
 				}
 
-				returning.clear();
-				store.Each<const engine::scene::Portal, const engine::scene::SurfaceCamera>(
-					[&returning, here](
-						engine::ecs::Entity,
-						const engine::scene::Portal &portal,
-						const engine::scene::SurfaceCamera &camera
-					) {
-						if (portal.DestinationWorld != here) {
-							return;
-						}
-						if (std::find(returning.begin(), returning.end(), camera.Surface) ==
-							returning.end()) {
-							returning.push_back(camera.Surface);
-						}
-					}
-				);
-
+				// The same slots the copy above filtered by, gathered once.
 				for (const int8_t slot : returning) {
 					(void)engine::scene::AppendPortalClones(store, slot, drawn);
 				}

@@ -754,17 +754,33 @@ TEST_CASE("a portal stands at the far pane and looks out of it", "[scene][surfac
 	//
 	// Pane A is at the origin with a half extent of 0.2 along Z and its `Front`
 	// face, so that face is at `z = -0.2` with an outward normal of `-Z`. The eye
-	// is at `z = 20`, which is on the *other* side — so `facing` is -1 and the
-	// direction out of the pane towards the viewer is `+Z`. The source frame
-	// looks along that.
+	// is at `z = 20`, which is the pane's **back** side.
 	//
 	// Pane B is a hundred units along X, unrotated and the same size, so its
 	// `Front` face is at `(100, 0, -0.2)` with an outward normal of `-Z` too.
 	//
-	// `destination · half-turn · source⁻¹` takes the eye's 20.2 units of
-	// clearance and puts it on the far side of B: `(100, 0, -0.2)` plus 20.2
-	// along `+Z`, which is `(100, 0, 20)`. The camera then looks back through B
-	// along `-Z`, into the room B faces.
+	// **The numbers below moved once, and the old ones were the bug.** This case
+	// used to build its expectation from a source frame that *flipped with the
+	// viewer's side* — "`facing` is -1, so the source looks along `+Z`" — which
+	// is two maps for one pane and is exactly what `SeamMapping` stopped doing at
+	// v0.15, because two maps that are not each other's inverse send a body that
+	// walks in the back of a hole to where one that walked in the front goes.
+	// `AimSurfaceCameras` was left composing the old one, and a **cross-world**
+	// pane is the only thing still drawn from it — so the immersive scene, which
+	// spawns you behind its pane, got a camera forty studs from where a body
+	// crossing lands and showed the half of the far room with nothing in it.
+	//
+	// So: the map is `destination · half-turn · source⁻¹` with `source` built
+	// from **the pane's own normal**. It carries A's back hemisphere to B's
+	// front, so an eye 20.2 behind A's face lands 20.2 in front of B's — at
+	// `(100, 0, -20.4)` — and turns to look back through B along `+Z`.
+	//
+	// **Which is the half a traveller arrives in, and that is the check that
+	// matters.** Looking through A from behind it is looking into A's *front*
+	// hemisphere, and A's front is identified with B's *back*. A body that walks
+	// through ends in B's back. The picture and the crossing therefore agree,
+	// which is the whole property, and the assertion below states it against
+	// `SeamMapping` rather than against a hand-worked coordinate.
 	Mirror mirror;
 
 	const Entity far =
@@ -779,23 +795,40 @@ TEST_CASE("a portal stands at the far pane and looks out of it", "[scene][surfac
 	const Vector3 placed = mirror.Placed();
 	CHECK_THAT(placed.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
 	CHECK_THAT(placed.Y, Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
-	CHECK_THAT(placed.Z, Catch::Matchers::WithinAbs(20.0f, TOLERANCE));
+	CHECK_THAT(placed.Z, Catch::Matchers::WithinAbs(-20.4f, TOLERANCE));
+
+	// **Where the seam's own map says, and not a second derivation of it.** This
+	// is the assertion the old numbers could not make: one statement of what a
+	// hole does, checked against the pass that draws the picture.
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+
+	const Vector3 mapped =
+		engine::scene::SeamMapping(seams[0]).Point(mirror.World.Get<Transform>(mirror.Eye)->Frame.Position);
+	CHECK_THAT(placed.X, Catch::Matchers::WithinAbs(mapped.X, 1e-2f));
+	CHECK_THAT(placed.Z, Catch::Matchers::WithinAbs(mapped.Z, 1e-2f));
 
 	// **Looking back through the far pane, not away from it.** The camera lands
-	// on the same side of B as the eye was of A, because the map is rigid — so
-	// it has to turn round to see through the hole. Pointing it the other way
-	// gives a portal that works and leads somewhere wrong.
+	// on the far side of B from the room it has to show, so it has to turn round
+	// to see through the hole. Pointing it the other way gives a portal that
+	// works and leads somewhere wrong.
 	const CFrame &frame = mirror.World.Get<Transform>(mirror.Reflection)->Frame;
-	CHECK_THAT(frame.LookVector().Z, Catch::Matchers::WithinAbs(-1.0f, 1e-3f));
+	CHECK_THAT(frame.LookVector().Z, Catch::Matchers::WithinAbs(1.0f, 1e-3f));
 
-	// And the oblique clip is at the far pane's plane, keeping the room B faces
-	// and dropping the wall B is set into. Without this the hole shows the back
-	// of that wall, which is the failure the parallel-plane approximation never
-	// revealed on a mirror.
+	// And the oblique clip is at the far pane's plane, keeping the half a
+	// traveller arrives in and dropping the wall B is set into. Without this the
+	// hole shows the back of that wall, which is the failure the parallel-plane
+	// approximation never revealed on a mirror.
 	const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
 	REQUIRE(fitted != nullptr);
-	CHECK_THAT(fitted->ClipNormal.Z, Catch::Matchers::WithinAbs(-1.0f, 1e-3f));
-	CHECK_THAT(fitted->ClipDistance, Catch::Matchers::WithinAbs(0.2f, 1e-3f));
+	CHECK_THAT(fitted->ClipNormal.Z, Catch::Matchers::WithinAbs(1.0f, 1e-3f));
+
+	// **The kept half-space is the one a crossing body lands in**, which is the
+	// invariant rather than the coordinate: `examples/tests/Scene.cpp` states the
+	// same thing about a room's middle, and this states it about the one point
+	// the engine can derive for itself.
+	const Vector3 landed = engine::scene::SeamMapping(seams[0]).Point(Vector3{0.0f, 0.0f, -2.0f});
+	CHECK(landed.Dot(fitted->ClipNormal) >= fitted->ClipDistance);
 }
 
 TEST_CASE("a portal with no destination is a mirror", "[scene][surfacecameras]") {
@@ -856,7 +889,11 @@ TEST_CASE("a portal pair need not describe one space", "[scene][surfacecameras]"
 
 	// Square on, the clearance runs along Z. Yawed a quarter turn, it runs along
 	// X — the same portal, the same eye, a different space on the other side.
-	CHECK_THAT(straight.Placed().Z, Catch::Matchers::WithinAbs(20.0f, TOLERANCE));
+	//
+	// The straight number is `-20.4` and not `20` for the reason the case above
+	// records at length: the map is built from the pane's own normal now, so an
+	// eye behind A lands in front of B rather than behind it.
+	CHECK_THAT(straight.Placed().Z, Catch::Matchers::WithinAbs(-20.4f, TOLERANCE));
 	CHECK_THAT(turned.Placed().Z, Catch::Matchers::WithinAbs(0.0f, 1e-3f));
 	CHECK(std::abs(turned.Placed().X - 100.0f) > 15.0f);
 }
@@ -2165,4 +2202,150 @@ TEST_CASE("the far half of a body reaches the picture in the pane", "[scene][sur
 
 	CHECK(inReflected);
 	CHECK(plan.Reflected < plan.Opaque);
+}
+
+TEST_CASE("a hole's camera stands where its own map says", "[scene][surfacecameras]") {
+	// **Two derivations of one map, and they were allowed to disagree.**
+	// `scene::SeamMapping` is the single statement of what a hole does to what
+	// goes through it: one map per pane, carrying its front hemisphere to the far
+	// pane's back one and its back to the far pane's front, so a pair's two maps
+	// are each other's exact inverse. A crossing body goes through it, a ray goes
+	// through it, the recursive pass's sub-camera goes through it, and the far
+	// half of anything standing in the seam goes through it.
+	//
+	// `AimSurfaceCameras` composed its own instead — out of a *source frame built
+	// from which side the viewer is on*. That is the pre-v0.15 shape, and it is
+	// side-dependent by construction: the same pane yields one map for a viewer in
+	// front and a different one for a viewer behind.
+	//
+	// **A same-world hole hid it**, because the recursive portal pass took over
+	// the picture and this camera stopped reaching a screen. A **cross-world**
+	// pane is the one that still draws from here — and the immersive scene spawns
+	// you *behind* the pane, which is precisely the side the two maps differ on.
+	// What that looks like is a window onto the other world showing the wrong half
+	// of it: the floor, which is everywhere, and none of the furniture.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+	const engine::scene::SeamTransform through = engine::scene::SeamMapping(seams[0]);
+
+	// The eye's two sides of the pane, whose `Front` face is at `z = -0.2`.
+	const auto aimedFrom = [&](const Vector3 &at) {
+		mirror.World.Set<Transform>(mirror.Eye, Transform{CFrame(at)});
+		REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+		return mirror.Placed();
+	};
+
+	// **In front of the face**, which is the side a same-world hole is usually
+	// walked into from and the side this always agreed on.
+	const Vector3 ahead{0.0f, 0.0f, -20.0f};
+	const Vector3 aheadCamera = aimedFrom(ahead);
+	CHECK_THAT(aheadCamera.X, Catch::Matchers::WithinAbs(through.Point(ahead).X, 1e-2f));
+	CHECK_THAT(aheadCamera.Y, Catch::Matchers::WithinAbs(through.Point(ahead).Y, 1e-2f));
+	CHECK_THAT(aheadCamera.Z, Catch::Matchers::WithinAbs(through.Point(ahead).Z, 1e-2f));
+
+	// **And behind it**, which is where `ImmersivePortals.luau` puts you: its
+	// spawn pad is on the pane's back side, so every frame of that scene is this
+	// case. The camera has to be at the same place the body would land, or the
+	// picture is of a room nobody can walk to.
+	const Vector3 behind{0.0f, 0.0f, 20.0f};
+	const Vector3 behindCamera = aimedFrom(behind);
+	CHECK_THAT(behindCamera.X, Catch::Matchers::WithinAbs(through.Point(behind).X, 1e-2f));
+	CHECK_THAT(behindCamera.Y, Catch::Matchers::WithinAbs(through.Point(behind).Y, 1e-2f));
+	CHECK_THAT(behindCamera.Z, Catch::Matchers::WithinAbs(through.Point(behind).Z, 1e-2f));
+
+	// **And from either side the clip keeps the half a traveller lands in**,
+	// which is the invariant the coordinates are only evidence for. A camera in
+	// the right place looking the wrong way, or clipping the wrong half, shows
+	// an empty room just as convincingly as one in the wrong place.
+	const auto keepsWhereTheyLand = [&](const Vector3 &eye) {
+		mirror.World.Set<Transform>(mirror.Eye, Transform{CFrame(eye)});
+		REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+		const SurfaceLens *lens = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+		REQUIRE(lens != nullptr);
+
+		// A step through the pane from where the eye is, mapped the way a body
+		// would be: `CrossPortals` moves a crosser by exactly this.
+		const Vector3 crossed{0.0f, 0.0f, eye.Z > 0.0f ? -2.0f : 2.0f};
+		const Vector3 landed = through.Point(crossed);
+
+		return landed.Dot(lens->ClipNormal) >= lens->ClipDistance;
+	};
+
+	CHECK(keepsWhereTheyLand(ahead));
+	CHECK(keepsWhereTheyLand(behind));
+}
+
+TEST_CASE("a hole's pane samples the image its own camera drew", "[scene][surfacecameras]") {
+	// **The last thing between a correct camera and a correct picture.** A pane
+	// does not read its texture by UV: `opaque.frag` projects the fragment's
+	// world position through `SurfaceViewProjection · SurfaceMapping` and tests
+	// the result against the `0..1` rectangle, falling through to the plainly-lit
+	// pane outside it. So a camera standing in exactly the right place still
+	// shows nothing if that product does not land the *source* pane inside the
+	// image — and what that looks like is a pane drawing its own material, flat,
+	// which reads as "the other world does not render" rather than as a matrix.
+	//
+	// The three matrices come from one place and must therefore agree: the fit
+	// and the oblique clip are built against the *mapped* rectangle, and the
+	// mapping carries the source pane onto exactly that rectangle. This case is
+	// the assertion that they do, stated where a suite can reach it — the
+	// renderer needs a device and this arithmetic does not.
+	//
+	// The geometry is `examples/CrossWorldSeam.luau`'s, which is the scene the
+	// cross-world report was captured from: a ten by eight pane at the origin,
+	// its stand-in destination a little behind it, and the eye on the pane's
+	// **back** side where a player spawns.
+	Mirror mirror(NormalId::Front, CFrame(Vector3{0.0f, 4.0f, 0.0f}));
+	mirror.World.Set<Bounds>(mirror.Pane, Bounds{Vector3{5.0f, 4.0f, 0.2f}});
+	mirror.World.Set<Transform>(mirror.Eye, Transform{CFrame(Vector3{0.0f, 5.0f, 16.0f})});
+
+	const Entity beyond =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Beyond");
+	mirror.World.Set<Transform>(beyond, Transform{CFrame(Vector3{0.0f, 4.0f, -0.6f})});
+	mirror.World.Set<Bounds>(beyond, Bounds{Vector3{5.0f, 4.0f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{beyond});
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+	const CFrame &frame = mirror.World.Get<Transform>(mirror.Reflection)->Frame;
+	const SurfaceLens *lens = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+	REQUIRE(lens != nullptr);
+
+	// Exactly what `render::Renderer` composes for the pane: the camera's own
+	// matrices, then the map the pane reads the image back through.
+	const glm::mat4 sampling =
+		engine::scene::ResolveSurfaceCamera(frame, engine::scene::SurfaceProjection(*lens, frame))
+			.ViewProjection *
+		engine::scene::SurfaceMapping(*lens);
+
+	// The source pane's own face, which is what the fragment shader projects:
+	// `Front` puts it at `z = -0.2`, five wide and four tall about `y = 4`.
+	const auto lands = [&sampling](float x, float y) {
+		const glm::vec4 clip = sampling * glm::vec4{x, y, -0.2f, 1.0f};
+
+		// Behind the camera is the loudest way to miss: `w` turns negative and
+		// the divide flips the coordinate to the other side of the image.
+		if (!(clip.w > 0.0f)) {
+			return false;
+		}
+
+		const float u = (clip.x / clip.w) * 0.5f + 0.5f;
+		const float v = 0.5f - (clip.y / clip.w) * 0.5f;
+		return u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f;
+	};
+
+	CHECK(lands(-5.0f, 0.0f));
+	CHECK(lands(5.0f, 0.0f));
+	CHECK(lands(-5.0f, 8.0f));
+	CHECK(lands(5.0f, 8.0f));
+	CHECK(lands(0.0f, 4.0f));
 }
