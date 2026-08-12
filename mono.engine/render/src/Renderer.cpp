@@ -474,7 +474,7 @@ namespace engine::render {
 		// is a default and not a wall; what it needs to be raised safely is a
 		// command buffer per top-level hole, which is where each level-zero target
 		// would be written once and read once.
-		uint32_t PortalDepth = 1;
+		uint32_t PortalDepth = 2;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
