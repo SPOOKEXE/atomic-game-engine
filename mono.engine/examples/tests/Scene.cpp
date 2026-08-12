@@ -559,6 +559,139 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
 }
 
+TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples][scene]") {
+	// **The claim this scene makes is a pair of lengths, so the lengths are what
+	// is asserted.** Every other portal example can be checked by asking whether
+	// a hole renders; this one is only interesting if walking through a
+	// thirty-two stud building takes four studs and walking through a four stud
+	// one takes twenty-eight. Both are `CrossPortals` arithmetic against panes
+	// the script placed, which is exactly what a wrongly aimed pane breaks.
+	//
+	// It is also the one arrangement the other portal scenes do not have: panes
+	// part-way *down* a corridor rather than filling a doorway, two of them back
+	// to back a stud apart, and a middle that belongs to a different building
+	// from the shell around it.
+	const StagedAssets assets;
+
+	Store store("tunnels");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Tunnels.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	const auto zOf = [&store](const char *name) {
+		const Entity found = InScene(store, name);
+		REQUIRE(found != engine::ecs::NULL_ENTITY);
+		return store.Get<engine::scene::Transform>(found)->Frame.Position.Z;
+	};
+
+	// The two shells, end to end. These are what an eye on the plain measures.
+	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "LongFloor"))->HalfExtent.Z == Approx(16.0f));
+	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "ShortFloor"))->HalfExtent.Z == Approx(2.0f));
+
+	// And the panes, which are what a body measures. The west tunnel's walk is
+	// its two stubs; the east tunnel's is its two studs plus the west tunnel's
+	// whole middle.
+	const float westWalk = (16.0f - zOf("LongSkipNorth")) * 2.0f;
+	const float eastWalk = (2.0f - zOf("ShortNorth")) * 2.0f + zOf("MiddleNorth") * 2.0f;
+
+	INFO("west walk " << westWalk << ", east walk " << eastWalk);
+	CHECK(westWalk == Approx(4.0f));
+	CHECK(eastWalk == Approx(28.0f));
+
+	// Something moving in each, because a still portal is indistinguishable from
+	// a painted mural — and because the timing of a crossing is the half of the
+	// illusion a screenshot cannot carry.
+	CHECK(CountNamed(store, "LongDrifter") == 1);
+	CHECK(CountNamed(store, "ShortDrifter") == 1);
+
+	// **Three pairs, six holes, each naming the other back.** A pane whose
+	// partner did not name it is a mirror, and a mirror in either of these
+	// tunnels is a wall across the walk.
+	//
+	// Checked by component rather than by aiming, because aiming needs an eye
+	// and this scene deliberately has no camera in it.
+	const auto portalOn = [&store](const char *name) {
+		const Entity pane = InScene(store, name);
+		REQUIRE(pane != engine::ecs::NULL_ENTITY);
+
+		Entity found = engine::ecs::NULL_ENTITY;
+		store.EachChild(pane, [&](Entity child) {
+			if (found == engine::ecs::NULL_ENTITY && store.Get<engine::scene::Portal>(child) != nullptr) {
+				found = child;
+			}
+		});
+		REQUIRE(found != engine::ecs::NULL_ENTITY);
+		return store.Get<engine::scene::Portal>(found)->Destination;
+	};
+
+	const char *const pairs[][2] = {
+		{"LongSkipNorth", "LongSkipSouth"},
+		{"ShortNorth", "MiddleNorth"},
+		{"ShortSouth", "MiddleSouth"},
+	};
+
+	for (const auto &pair : pairs) {
+		INFO(pair[0] << " <-> " << pair[1]);
+		CHECK(portalOn(pair[0]) == InScene(store, pair[1]));
+		CHECK(portalOn(pair[1]) == InScene(store, pair[0]));
+	}
+
+	// A body walking one step, put down where the step ended.
+	//
+	// **The seam is the pane's *face*, not its middle** — `GatherSeams` pushes
+	// the centre out by the reach along the normal — so a pane a quarter thick
+	// standing at `z` has its plane an eighth beyond that. Each step below ends
+	// five eighths past its plane and therefore lands five eighths past the far
+	// one: `LANDING_CLEARANCE` is a floor rather than an offset, and a step that
+	// already cleared it gets nothing added.
+	//
+	// Every walk is on the tunnel's centre line, so the half-turn in the map has
+	// no transverse offset to flip and the landing is a pure translation.
+	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
+
+	const auto step = [&store, walker](float fromX, float fromZ, float toX, float toZ) {
+		store.Set<engine::scene::PreviousTransform>(
+			walker, engine::scene::PreviousTransform{engine::core::CFrame({fromX, 4.0f, fromZ})}
+		);
+		store.Set<engine::scene::Transform>(
+			walker, engine::scene::Transform{engine::core::CFrame({toX, 4.0f, toZ})}
+		);
+		store.Set<engine::scene::Motion>(
+			walker, engine::scene::Motion{{0.0f, 0.0f, toZ - fromZ}, engine::core::Vector3::Zero}
+		);
+
+		REQUIRE(engine::scene::CrossPortals(store) == 1);
+		return store.Get<engine::scene::Transform>(walker)->Frame.Position;
+	};
+
+	// **Long outside, short inside.** Two studs into a thirty-two stud building
+	// and the walk is already at the far end's last two studs.
+	const engine::core::Vector3 skipped = step(-20.0f, 14.5f, -20.0f, 13.5f);
+	CHECK(skipped.X == Approx(-20.0f).margin(1e-3f));
+	CHECK(skipped.Y == Approx(4.0f).margin(1e-3f));
+	CHECK(skipped.Z == Approx(-14.75f).margin(1e-3f));
+
+	// **Short outside, long inside, and it lands in the other building.** One
+	// stud into a four stud box, and the arrival is twenty-six studs of corridor
+	// inside the west tunnel's middle — the space the walk above stepped over.
+	const engine::core::Vector3 entered = step(20.0f, 1.5f, 20.0f, 0.5f);
+	CHECK(entered.X == Approx(-20.0f).margin(1e-3f));
+	CHECK(entered.Z == Approx(12.25f).margin(1e-3f));
+
+	// And out the far end of the box it never left.
+	const engine::core::Vector3 left = step(-20.0f, -12.5f, -20.0f, -13.5f);
+	CHECK(left.X == Approx(20.0f).margin(1e-3f));
+	CHECK(left.Z == Approx(-1.75f).margin(1e-3f));
+
+	// **Nothing is set as the world's camera**, which is what makes this one
+	// walkable where `Hallway.luau` is a capture: a `CurrentCamera` standing in
+	// a world somebody presses Play in overrides the character's own.
+	CHECK(InScene(store, "Viewer") == engine::ecs::NULL_ENTITY);
+}
+
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
 	const StagedAssets assets;
 

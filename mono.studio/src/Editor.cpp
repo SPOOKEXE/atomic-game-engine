@@ -72,6 +72,7 @@ namespace studio {
 		constexpr std::string_view MESHGRID_WORLD = "Meshes";
 		constexpr std::string_view SLIDE_WORLD = "Slide";
 		constexpr std::string_view PORTAL_WORLD = "Portals";
+		constexpr std::string_view TUNNELS_WORLD = "Tunnels";
 
 		// **The pair, and they are a pair on purpose.** A teleport needs
 		// somewhere to go, and until v0.14 there were five worlds a player could
@@ -1808,6 +1809,16 @@ namespace studio {
 		// the whole hole.
 		const WorldId portals = AddWorld(Name(PORTAL_WORLD));
 
+		// **A sixth, and it is the portal world's claim made walkable.** The
+		// three rooms above prove a hole *renders*; two tunnels whose insides
+		// are not the length their outsides promise prove it is a hole rather
+		// than a picture, which is the only claim a `Portal` makes that a
+		// `SurfaceCamera` does not. It is also the pane arrangement neither of
+		// the other portal worlds has: panes part-way *down* a corridor rather
+		// than filling a doorway, back to back a stud apart, with a walker
+		// crossing one while another shows the space they are crossing.
+		const WorldId tunnels = AddWorld(Name(TUNNELS_WORLD));
+
 		// The two a person actually stands in. See the constants above.
 		const WorldId playground = AddWorld(Name(PLAYGROUND_WORLD));
 		const WorldId arena = AddWorld(Name(ARENA_WORLD));
@@ -1877,6 +1888,13 @@ namespace studio {
 			InstallExampleScript(store, "Portals-1-world.luau", "PortalScene");
 		});
 
+		// Two shells and a black plain, all laid by the script — and a baseplate
+		// under them would be a second surface coplanar with the one the scene
+		// lays, which is the z-fighting the mirror world's comment describes.
+		Universe->Enter(tunnels, [this](Store &store) {
+			InstallExampleScript(store, "Tunnels.luau", "TunnelsScene");
+		});
+
 		// **Two scripts each, and the split is the point.** The world's geometry
 		// is one file and the pad naming the *other* world is another, because a
 		// scene that names a destination only works in a universe that has one —
@@ -1926,6 +1944,7 @@ namespace studio {
 		ExpandWorldTree(meshes);
 		ExpandWorldTree(slide);
 		ExpandWorldTree(portals);
+		ExpandWorldTree(tunnels);
 		ExpandWorldTree(playground);
 		ExpandWorldTree(arena);
 
@@ -1933,8 +1952,8 @@ namespace studio {
 		// `FocusWorlds`.
 		FocusWorlds = 4;
 
-		Say("new game: seven worlds — skygrid, mirrors, meshes, slide, portals, "
-			"playground and arena — ticking in parallel");
+		Say("new game: eight worlds — skygrid, mirrors, meshes, slide, portals, "
+			"tunnels, playground and arena — ticking in parallel");
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
