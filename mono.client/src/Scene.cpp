@@ -689,12 +689,10 @@ namespace client {
 			portal.First = seam.First;
 			portal.Second = seam.Second;
 
-			// **Both sides, because which one applies is a question about the
-			// camera and the camera moves with the recursion.** `SeamMapping`
-			// takes the side exactly as `CrossPortals` hands it the side a body
-			// is on.
-			portal.Front = engine::scene::SeamMapping(seam, 1.0f);
-			portal.Back = engine::scene::SeamMapping(seam, -1.0f);
+			// **The same one map a body is carried by.** `SeamMapping` states it
+			// once for the pane rather than once per side, so what the hole shows
+			// and where walking into it puts you are the same arithmetic.
+			portal.Warp = engine::scene::SeamMapping(seam);
 			portal.TagFilter = seam.TagFilter;
 
 			// The hole at the far end, so the level this one opens can skip it.

@@ -275,11 +275,15 @@ namespace engine::physics {
 		// a floor it is standing on.
 		const float beyondDistance = hop.Through.Length(remaining);
 
-		// **Nothing is ignored on the far side.** `ignore` is the caster, and
-		// the caster is on this side of the glass by construction — carrying it
-		// across would name whatever entity happens to share that index over
-		// there, which is nothing in particular.
-		std::optional<ColliderHit> far = Raycast(store, beyond, beyondDistance, mask, ecs::Entity{});
+		// **The far pane is ignored and the caster is not.** `ignore` is the
+		// caster, and the caster is on this side of the glass by construction —
+		// carrying it across would name whatever entity happens to share that
+		// index over there, which is nothing in particular. What does have to go
+		// is the pane the ray comes *out* of: the map takes the near pane's plane
+		// onto the far one's, so the continuation starts at zero distance from it
+		// and every portal ray would report the destination's own glass as the
+		// first thing beyond the hole.
+		std::optional<ColliderHit> far = Raycast(store, beyond, beyondDistance, mask, hop.Far);
 		if (!far) {
 			return blocking;
 		}

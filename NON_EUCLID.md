@@ -774,3 +774,103 @@ Not fixed here, and not attributed further than the evidence goes. The next step
 is the shutdown path rather than the pass: whether `AbandonFrame` can leave an
 acquisition outstanding, and whether anything still holds a command buffer when
 `Renderer::Shutdown` takes the device.
+
+---
+
+## The full port, v0.15
+
+Everything below was done in one pass, because the half-implementations were what
+kept producing new symptoms. The demo was read end to end — `Portal.cpp`,
+`Camera.cpp`, `Physical.cpp`, `Engine.cpp`, `Level1`–`Level6` — and the four
+places this engine still differed from it were closed together.
+
+### One map per pane, not one per side
+
+`scene::SeamMapping` took the crosser's side and flipped the *source* frame with
+it while leaving the destination fixed. That makes two maps which are **not each
+other's inverse**, and both of them land a crosser on the same side of the far
+pane. The consequences were exactly the reports that had been accumulating:
+
+* a body that entered a hole from behind came out where one that entered from the
+  front does, so walking back through returned it to the front — a round trip
+  that started from the back landed somewhere else, turned by whatever angle the
+  pair turns through;
+* the camera's map and the body's map agreed with each other but not with a
+  second crossing, so the view snapped to a heading nobody entered from.
+
+It is now one rigid `destination · half-turn · source⁻¹` per pane, which carries
+the pane's front hemisphere to the far pane's back one and its back to the far
+pane's front. The far pane's own map is its exact inverse, so a lap closes from
+either face. This is what `Portal::Connect` does in the demo, where `a.delta` and
+`b.delta` for the same pane are the same matrix and `front`/`back` exist only to
+name which hole to skip. `render::PortalView::Front`/`Back` collapsed to `Warp`.
+
+### The near plane follows the eye into the hole
+
+The demo's single most important line for seamlessness was missing here:
+
+```cpp
+const float n = GH_CLAMP(NearestPortalDist() * 0.5f, GH_NEAR_MIN, GH_NEAR_MAX);
+```
+
+Without it a pane is sliced open by the near plane for the last hand's width of an
+approach and you see through the wall beside the doorway. This engine hid that
+behind `ClearOfPanes`, which shoved the eye a third of a stud out of any pane it
+came near — a visible push at the one moment the illusion is judged.
+
+`scene::PortalNearPlane(authored, nearestSeam)` is that clamp, derived rather than
+written back so the authored value survives and returns the moment the eye is
+clear. `scene::RectangleDistance` is `Portal::DistTo`: the distance to the hole
+rather than to its plane, so an eye level with a doorway but beside it spends no
+precision. The renderer applies it once to a `drawCamera` used by the cull, the
+recursion and the opaque draw, and `ResolveActiveCamera` applies the same function
+to the matrices culling runs against. `ClearOfPanes` now keeps a hair — twice the
+smallest near plane — for a same-world hole, and the old margin only for a
+cross-world pane, which is still a picture fitted from a viewpoint.
+
+### The oblique clip is pulled back off the pane
+
+`extra_clip` in the demo. Clipping exactly at the mapped pane leaves the far
+room's own geometry — the floor that meets the doorway, the wall the pane is set
+into — fighting the pane for depth, which is the "parts poking through" report.
+`scene::PortalClipBias` takes a sliver off the far room instead, shrinking with
+the distance so a nose against the glass does not lose most of what the hole
+shows.
+
+### The turn is the crosser's, not the map's idea of north
+
+`CrossPortals` measured `PortalTransit::Turn` by mapping a fixed north and taking
+its yaw, which is right only while the composed rotation is a pure yaw. Tilt
+either pane and it is an angle nothing turned through. It now maps the body's own
+facing and reports the difference, wrapped — CodeParade's `TryPortal`, which sets
+`euler.y` from the mapped forward.
+
+### One thing the demo does that was deliberately not taken
+
+`Physical::TryPortal` bumps twice: the landing *and* the plane the test is made
+against. The second half is a band a body can begin a tick inside and walk
+straight through without ever changing sign. At the demo's 500 Hz with a 2 mm
+offset nothing can start there; at 60 Hz, where a character covers a quarter of a
+stud a tick, it can. The landing clearance alone gives the same guarantee with no
+band, and `LANDING_CLEARANCE`'s comment carries the argument.
+
+### A bug the port exposed
+
+A ray leaving a hole stands at exactly zero distance from the destination's glass,
+because the map takes the near pane's plane onto the far one's. `PortalHop` now
+carries `Far` and `RaycastThroughPortals` ignores it, or every portal ray reports
+the destination pane as the first thing beyond the hole.
+
+### `Hallway.luau`
+
+CodeParade's Level 1, which is the smallest scene that proves a portal is a hole.
+Two corridors on an empty plain, one thirty-two studs and one four, mouths paired
+across. Walk into the small one and come out thirty-two studs later; walk into the
+long one and come out after four. Both illusions are visible in one frame from the
+spawn. `_G.HALLWAY_VIEW` names a still for headless capture; unset, the scene is
+walkable.
+
+The authoring rule the file records, and the only thing to get right: **point each
+pane's face at the space a traveller comes from, and the destination's face at the
+space they should arrive in.** The long corridor's mouths therefore face out and
+the short one's face in.

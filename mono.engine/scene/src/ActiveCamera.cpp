@@ -1,5 +1,6 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -161,7 +162,23 @@ namespace engine::scene {
 			return;
 		}
 
-		const CameraMatrices resolved = ResolveCamera(transform->Frame, *camera, aspectRatio);
+		// **The near plane the renderer will actually draw with, not the one the
+		// scene authored.** A hole is walked up to and then through, and for the
+		// last hand's width of that approach an authored near plane slices the
+		// pane open — you see through the wall beside the doorway on the one
+		// frame the illusion is judged on. `PortalNearPlane` gives the drawing
+		// value back without touching the component, so the authored number
+		// survives and comes back the moment the eye is clear.
+		//
+		// **Here as well as in the renderer, and both from the same function.**
+		// These matrices are what culling runs against, so a near plane larger
+		// than the one the draw uses culls away exactly the geometry that the
+		// smaller one exists to keep.
+		Camera drawn = *camera;
+		drawn.NearPlane =
+			PortalNearPlane(camera->NearPlane, NearestSeamDistance(store, transform->Frame.Position));
+
+		const CameraMatrices resolved = ResolveCamera(transform->Frame, drawn, aspectRatio);
 		store.ResourceMutable<ActiveCamera>()->Matrices = resolved;
 	}
 }

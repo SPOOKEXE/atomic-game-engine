@@ -865,33 +865,43 @@ TEST_CASE("a same-world hole leaves the surface path for the recursive one", "[c
 	// **The defining property of the map**: the source pane's centre lands on
 	// the destination's. Everything the pass does — where the sub-camera stands,
 	// where its near plane is skewed to — follows from it.
-	const Vector3 landed = first.Front.Point(first.Centre);
+	const Vector3 landed = first.Warp.Point(first.Centre);
 	CHECK(landed.X == Catch::Approx(second.Centre.X).margin(0.01f));
 	CHECK(landed.Y == Catch::Approx(second.Centre.Y).margin(0.01f));
 	CHECK(landed.Z == Catch::Approx(second.Centre.Z).margin(0.01f));
 
 	// Two panes of one size, so the hole tells no lie about it.
-	CHECK(first.Front.Scale == Catch::Approx(1.0f));
+	CHECK(first.Warp.Scale == Catch::Approx(1.0f));
 
-	// **A lap through and back returns you**, which is what makes it a hole
-	// rather than a one-way door — and it exercises exactly the side test the
-	// renderer makes at every level. `Front` and `Back` are the two sides of *one*
-	// seam and are not each other's inverse; the inverse is the partner's.
-	const auto step = [](const engine::render::PortalView &hole, const Vector3 &at) {
-		const float side = (at - hole.Centre).Dot(hole.Normal);
-		return side >= 0.0f ? hole.Front.Point(at) : hole.Back.Point(at);
-	};
-
+	// **A lap through and back returns you, from either side**, which is what
+	// makes it a hole rather than a one-way door. One map per pane is what buys
+	// that: a pane's map and its partner's are exact inverses, so the lap closes
+	// no matter which face was entered. The pair of side-picked maps this used to
+	// carry both landed on the same side of the far pane and were therefore not
+	// inverses — a lap that started from behind came back displaced and turned by
+	// whatever angle the pair turns through.
 	const Vector3 eye{0.0f, 1.0f, 5.0f};
-	const Vector3 there = step(first, eye);
+	const Vector3 there = first.Warp.Point(eye);
 
-	// A hundred units away, because that is where the far room is.
-	CHECK((there - eye).Magnitude() == Catch::Approx(100.0f).margin(0.5f));
+	// A hundred units along X, because that is where the far room is. **Measured
+	// on the axis the pair is laid out on rather than as a distance**, so the
+	// case says "the other room" and not "and this far into it" — how far into it
+	// is the round trip's business, checked below.
+	CHECK(std::abs(there.X - eye.X) == Catch::Approx(100.0f).margin(0.5f));
 
-	const Vector3 home = step(second, there);
+	const Vector3 home = second.Warp.Point(there);
 	CHECK(home.X == Catch::Approx(eye.X).margin(0.01f));
 	CHECK(home.Y == Catch::Approx(eye.Y).margin(0.01f));
 	CHECK(home.Z == Catch::Approx(eye.Z).margin(0.01f));
+
+	// And the same lap from the pane's other face, which is the case the old
+	// arrangement got wrong.
+	const Vector3 behind{0.0f, 1.0f, -5.0f};
+	const Vector3 across = first.Warp.Point(behind);
+	const Vector3 back = second.Warp.Point(across);
+	CHECK(back.X == Catch::Approx(behind.X).margin(0.01f));
+	CHECK(back.Y == Catch::Approx(behind.Y).margin(0.01f));
+	CHECK(back.Z == Catch::Approx(behind.Z).margin(0.01f));
 }
 
 TEST_CASE("a hole with no partner still recurses, and a lone pane has none", "[client][presentation]") {
@@ -1060,8 +1070,9 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 
 			// **The same depth into the far pane as into the near one**, which
 			// is what makes the two halves meet at the plane rather than
-			// overlap or leave a gap.
-			CHECK(row.Frame.Position.Z == Catch::Approx(-0.1f).margin(0.001f));
+			// overlap or leave a gap — mirrored across it, because the map
+			// carries a pane's front hemisphere to the far pane's back one.
+			CHECK(row.Frame.Position.Z == Catch::Approx(-0.3f).margin(0.001f));
 
 			// **Never a surface itself**, or the copy would claim the slot its
 			// original writes and the two would fight over one texture.

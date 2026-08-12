@@ -285,18 +285,16 @@ namespace engine::render {
 		core::Vector3 Second;
 		//@}
 
-		// The map to the far side, for a viewer in front of the pane and for one
-		// behind it.
+		// The map to the far side.
 		//
-		// **Both, because which one applies is a question about the camera and
-		// the camera moves with the recursion.** `scene::SeamMapping` answers it
-		// per side; a single baked warp would be right at the top level and wrong
-		// at every level below, where the sub-camera has stepped through. The
-		// demo re-picks `front` or `back` at every level for the same reason.
-		//@{
-		scene::SeamTransform Front;
-		scene::SeamTransform Back;
-		//@}
+		// **One map and not one per side, which is the point.** It carries this
+		// pane's front hemisphere to the far pane's back one and its back to the
+		// far pane's front, so it is right at the top level and right at every
+		// level below where the sub-camera has stepped through — and it is the
+		// exact map `scene::CrossPortals` moves a body by, so what the hole shows
+		// and where walking into it puts you cannot come apart. CodeParade's
+		// `Portal::Warp::delta`, which is likewise one matrix for both sides.
+		scene::SeamTransform Warp;
 
 		// Which tags an instance must carry to be drawn through this hole, or
 		// zero for all of them. `SurfaceView::TagFilter`'s argument, unchanged.

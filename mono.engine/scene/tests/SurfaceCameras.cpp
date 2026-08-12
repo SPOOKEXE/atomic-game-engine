@@ -29,6 +29,7 @@
 #include <glm/vec4.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 TEST_SUITE_ID("engine.scene.surfacecameras")
@@ -898,11 +899,12 @@ TEST_CASE("a body that walks into a portal comes out of the far one", "[scene][s
 
 	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
 
-	// **Out of the far pane, into the space the hole was showing.** The camera
-	// case above puts A's camera at `(100, 0, 20)` looking back through B along
-	// `-Z`, so what A shows is the room in front of B's *front* face — and a
-	// body that walks into A has to arrive in the room it was looking at. One
-	// metre of clearance in front of A becomes one metre in front of B.
+	// **Out of the far pane, into the space the hole was showing.** The map
+	// carries a pane's front hemisphere to the far pane's *back* one, which is
+	// CodeParade's `Connect(a->front, b->back)` written as a matrix — so a body
+	// that ends its step eight tenths in front of A arrives eight tenths behind
+	// B, and the sub-camera the pass builds for the same eye is placed by the
+	// same product and looks at exactly that spot.
 	//
 	// **Exactly where the step ended, mapped — the clearance is a floor and not
 	// an offset.** A crosser whose step already finished well past the plane
@@ -911,19 +913,19 @@ TEST_CASE("a body that walks into a portal comes out of the far one", "[scene][s
 	// does need it.
 	const Vector3 landed = mirror.World.Get<Transform>(walker)->Frame.Position;
 	CHECK_THAT(landed.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
-	CHECK_THAT(landed.Z, Catch::Matchers::WithinAbs(-1.0f, TOLERANCE));
+	CHECK_THAT(landed.Z, Catch::Matchers::WithinAbs(0.6f, TOLERANCE));
 
 	// **And clear of the plane rather than merely past it**, which is the
-	// property the number is for: the pane's front face is at `z = -0.2`, the
-	// body is beyond it, and the gap is the clearance and not a rounding error.
-	CHECK(landed.Z < -0.2f - 0.005f);
+	// property the number is for: B's face is at `z = -0.2`, the body is beyond
+	// it, and the gap is the clearance and not a rounding error.
+	CHECK(landed.Z > -0.2f + 0.005f);
 
 	// **And still walking away from the pane it came out of**, at the speed it
 	// had. Forgetting to map the velocity is the bug that reads as the portal
 	// spitting people back: the body would arrive aimed the way it was aimed in
 	// the frame it left, which here is straight back into B.
 	const Vector3 speed = mirror.World.Get<engine::scene::Motion>(walker)->Linear;
-	CHECK_THAT(speed.Z, Catch::Matchers::WithinAbs(-16.0f, TOLERANCE));
+	CHECK_THAT(speed.Z, Catch::Matchers::WithinAbs(16.0f, TOLERANCE));
 	CHECK_THAT(speed.Magnitude(), Catch::Matchers::WithinAbs(16.0f, TOLERANCE));
 
 	// **Once, not once per tick.** The body is now behind B's plane and in front
@@ -1060,14 +1062,14 @@ TEST_CASE("a body standing in a portal is drawn on the far side too", "[scene][s
 	// goes through, applied to a body that has not crossed.
 	//
 	// **And the same depth into it, which is what makes the two halves meet.**
-	// The map carries the signed distance from the plane across, so a body whose
-	// centre is a tenth of a metre short of A's face has a copy a tenth of a
-	// metre short of B's — poking out of B by exactly as much as it has pushed
-	// through A. Landing it a tenth *past* B instead would be the same body
-	// drawn twice with a fifth of a metre of it missing, which is the join
-	// everybody looks at.
+	// The map is a rigid isometry taking A's plane onto B's, so whatever slice of
+	// the body crosses A's face is exactly the slice of the copy that crosses
+	// B's: the two halves join whichever side the map lands on. Which side it
+	// lands on is the map's own: a pane's front hemisphere goes to the far pane's
+	// back one, so a centre a tenth *short* of A's face copies to a tenth *past*
+	// B's, and the copy pokes out of B by exactly what has pushed through A.
 	CHECK_THAT(drawn[0].Frame.Position.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
-	CHECK_THAT(drawn[0].Frame.Position.Z, Catch::Matchers::WithinAbs(-0.1f, TOLERANCE));
+	CHECK_THAT(drawn[0].Frame.Position.Z, Catch::Matchers::WithinAbs(-0.3f, TOLERANCE));
 
 	// Its own size and appearance, because it is the same body seen from
 	// somewhere else rather than a marker standing in for one.
@@ -1366,7 +1368,7 @@ TEST_CASE("a crosser is put down clear of the plane it crossed", "[scene][surfac
 	// every one of the checks below fails.
 	const Vector3 landed = mirror.World.Get<Transform>(walker)->Frame.Position;
 	CHECK_THAT(landed.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
-	CHECK(landed.Z < -0.2f);
+	CHECK(landed.Z > -0.2f);
 	CHECK(std::abs(landed.Z + 0.2f) > 0.005f);
 
 	// **And it stays there, even when something nudges it back.** The next tick
@@ -1377,7 +1379,7 @@ TEST_CASE("a crosser is put down clear of the plane it crossed", "[scene][surfac
 	mirror.World.Set<engine::scene::PreviousTransform>(
 		walker, engine::scene::PreviousTransform{CFrame(landed)}
 	);
-	mirror.World.Set<Transform>(walker, Transform{CFrame(landed + Vector3{0.0f, 0.0f, 0.005f})});
+	mirror.World.Set<Transform>(walker, Transform{CFrame(landed - Vector3{0.0f, 0.0f, 0.005f})});
 	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 
 	// **And it is hysteresis rather than a wall.** There is only one pane in
@@ -1503,11 +1505,14 @@ TEST_CASE("going back through a scaled hole undoes the scaling", "[scene][surfac
 
 	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
 
-	// Straight back the way it came, which for the far pane is a step from
-	// behind its face to in front of it.
+	// Straight back the way it came, which is a step against the velocity the
+	// crossing gave it. **Taken from the motion rather than written down as an
+	// axis**, so the case still tests a round trip when the map changes which
+	// side of the far pane a crosser lands on.
 	const CFrame arrived = mirror.World.Get<Transform>(walker)->Frame;
+	const Vector3 away = mirror.World.Get<engine::scene::Motion>(walker)->Linear.Unit();
 	mirror.World.Set<engine::scene::PreviousTransform>(walker, engine::scene::PreviousTransform{arrived});
-	mirror.World.Set<Transform>(walker, Transform{CFrame(arrived.Position + Vector3{0.0f, 0.0f, 4.0f})});
+	mirror.World.Set<Transform>(walker, Transform{CFrame(arrived.Position - away * 4.0f)});
 
 	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
 
@@ -1661,6 +1666,130 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 1);
 }
 
+TEST_CASE("the near plane and the clip follow the eye into a hole", "[scene][surfacecameras]") {
+	// **What makes the last hand's width of an approach seamless.** A near plane
+	// is a floor on how close geometry may be drawn, so walking up to a pane with
+	// an authored one slices it open and the wall beside the doorway disappears —
+	// on the one frame the whole feature is judged. CodeParade's demo drives the
+	// near plane down from the nearest hole's distance and pulls the oblique clip
+	// back by the same measure; these are those two numbers.
+	constexpr float FAR_AWAY = std::numeric_limits<float>::infinity();
+
+	// **The rectangle and not its plane.** An eye level with a doorway but well
+	// to the side of it is standing in a wall, and a plane says zero for both —
+	// which would spend the depth range on nothing.
+	const Vector3 centre{0.0f, 0.0f, -0.2f};
+	const Vector3 first{8.0f, 0.0f, 0.0f};
+	const Vector3 second{0.0f, 4.5f, 0.0f};
+	CHECK_THAT(
+		engine::scene::RectangleDistance(centre, first, second, Vector3{0.0f, 0.0f, 4.8f}),
+		Catch::Matchers::WithinAbs(5.0f, TOLERANCE)
+	);
+	CHECK_THAT(
+		engine::scene::RectangleDistance(centre, first, second, Vector3{40.0f, 0.0f, -0.2f}),
+		Catch::Matchers::WithinAbs(32.0f, TOLERANCE)
+	);
+
+	// The same, asked of a world rather than of four vectors.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	CHECK_THAT(
+		engine::scene::NearestSeamDistance(mirror.World, Vector3{0.0f, 0.0f, 4.8f}),
+		Catch::Matchers::WithinAbs(5.0f, TOLERANCE)
+	);
+
+	// **The authored value survives, which is the reason this is a function and
+	// not a write-back.** A world with no holes in it, and an eye well away from
+	// the one hole there is, both draw with exactly what the scene asked for —
+	// so the depth range is only ever spent when something needs it.
+	CHECK_THAT(engine::scene::PortalNearPlane(0.1f, FAR_AWAY), Catch::Matchers::WithinAbs(0.1f, TOLERANCE));
+	CHECK_THAT(engine::scene::PortalNearPlane(0.1f, 5.0f), Catch::Matchers::WithinAbs(0.1f, TOLERANCE));
+
+	// Half the distance once half the distance is the smaller number, so the
+	// pane is never inside the near plane.
+	CHECK_THAT(engine::scene::PortalNearPlane(0.1f, 0.08f), Catch::Matchers::WithinAbs(0.04f, TOLERANCE));
+
+	// And a floor, because an eye pressed against the glass would otherwise ask
+	// for a near plane of zero and get a projection of infinities.
+	CHECK_THAT(
+		engine::scene::PortalNearPlane(0.1f, 1.0e-6f),
+		Catch::Matchers::WithinAbs(engine::scene::PORTAL_NEAR_MIN, TOLERANCE)
+	);
+
+	// The clip bias is the same halving, capped by the width inside which a
+	// pane's construction is degenerate anyway, and nothing at all when there is
+	// no hole to bias against.
+	CHECK_THAT(engine::scene::PortalClipBias(FAR_AWAY), Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+	CHECK_THAT(engine::scene::PortalClipBias(0.08f), Catch::Matchers::WithinAbs(0.04f, TOLERANCE));
+	CHECK_THAT(engine::scene::PortalClipBias(50.0f), Catch::Matchers::WithinAbs(0.3f, TOLERANCE));
+}
+
+TEST_CASE("a crossing reports the turn the body actually made", "[scene][surfacecameras]") {
+	// **The turn has to be the crosser's, not the map's idea of north.** Mapping
+	// a fixed reference and calling the result the turn is right only while the
+	// composed rotation is a pure yaw. Tip either pane and it is not: the yaw of
+	// a mapped north is then an angle nothing turned through, wrong by an amount
+	// that depends on the geometry rather than on anything the player did — which
+	// reads as the view snapping to a heading nobody entered from.
+	//
+	// So the pair here is deliberately tilted, and the property checked is the
+	// one that survives it: the body's own facing turned by exactly what was
+	// reported.
+	constexpr float QUARTER = 1.57079632679f;
+
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(
+		far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f}) * CFrame::Angles(0.4f, QUARTER, 0.0f)}
+	);
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// Walking along -Z through pane A, aimed a little off its normal so a turn
+	// measured off the body differs from one measured off the axis.
+	const CFrame started = CFrame(Vector3{0.0f, 0.0f, 1.0f}) * CFrame::Angles(0.0f, 0.6f, 0.0f);
+	const Entity walker =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+	mirror.World.Set<Transform>(
+		walker, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f}) * CFrame::Angles(0.0f, 0.6f, 0.0f)}
+	);
+	mirror.World.Set<engine::scene::PreviousTransform>(walker, engine::scene::PreviousTransform{started});
+	mirror.World.Set<engine::scene::Motion>(
+		walker, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, Vector3::Zero}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	const engine::scene::PortalTransit *went = mirror.World.Get<engine::scene::PortalTransit>(walker);
+	REQUIRE(went != nullptr);
+
+	const auto yawOf = [](const CFrame &frame) {
+		const Vector3 facing = frame.VectorToWorldSpace(Vector3{0.0f, 0.0f, -1.0f});
+		return std::atan2(-facing.X, -facing.Z);
+	};
+
+	const float before = yawOf(started);
+	const float after = yawOf(mirror.World.Get<Transform>(walker)->Frame);
+
+	// The reported turn takes the old heading to the new one. This is what the
+	// camera on the looking machine adds to its own yaw, so anything else is the
+	// view and the body disagreeing about which way the room went.
+	CHECK_THAT(
+		std::remainder(after - before - went->Turn, 2.0f * 3.14159265358979f),
+		Catch::Matchers::WithinAbs(0.0f, 1.0e-4f)
+	);
+
+	// And it is a turn rather than a heading: an unturned pair reports zero, not
+	// whichever way the pair happens to point.
+	CHECK(std::abs(went->Turn) > 1.0e-3f);
+}
+
 TEST_CASE("a viewpoint is never left standing in a pane", "[scene][surfacecameras]") {
 	// **The band a camera cannot render from.** A surface camera built from an
 	// eye in its own pane's plane has no half-space for the oblique clip to keep
@@ -1678,9 +1807,17 @@ TEST_CASE("a viewpoint is never left standing in a pane", "[scene][surfacecamera
 	// The pane's face is at `z = -0.2` and its normal is `-Z`, so the side the
 	// normal points to — the side `SeamOffset` calls positive — is the smaller
 	// `z`. A point a little that way is a point that belongs that way.
-	Vector3 ahead{0.0f, 0.0f, -0.25f};
+	//
+	// **A hair rather than a hand's width, and that is the whole seamlessness
+	// argument.** A same-world hole is drawn by the recursive pass, whose only
+	// construction is an oblique clip — it needs the eye off the plane and
+	// nothing else — and `PortalNearPlane` shrinks the near plane to meet
+	// whatever is left. So an eye may walk right up to one, and being shoved a
+	// third of a stud instead is a visible push at the one moment the illusion
+	// is judged.
+	Vector3 ahead{0.0f, 0.0f, -0.202f};
 	CHECK(engine::scene::ClearOfPanes(mirror.World, ahead));
-	CHECK(std::abs(ahead.Z + 0.2f) > 0.2f);
+	CHECK(std::abs(ahead.Z + 0.2f) > 0.002f);
 
 	// **Out of the side it was nearer**, which is the same tie-break a crossing
 	// body gets from `SeamMapping`: barely in from one side and it belongs on
@@ -1688,9 +1825,32 @@ TEST_CASE("a viewpoint is never left standing in a pane", "[scene][surfacecamera
 	CHECK(ahead.Z < -0.2f);
 
 	// And a point on the other side of the middle comes out the other way.
-	Vector3 behind{0.0f, 0.0f, -0.15f};
+	Vector3 behind{0.0f, 0.0f, -0.198f};
 	CHECK(engine::scene::ClearOfPanes(mirror.World, behind));
 	CHECK(behind.Z > -0.2f);
+
+	// **A tenth of a stud from a hole is simply standing near it**, which is
+	// where the old rule moved a camera and the new one leaves it. This is the
+	// assertion that fails if the wide margin ever comes back.
+	Vector3 close{0.0f, 0.0f, -0.3f};
+	CHECK_FALSE(engine::scene::ClearOfPanes(mirror.World, close));
+	CHECK_THAT(close.Z, Catch::Matchers::WithinAbs(-0.3f, TOLERANCE));
+
+	// **A cross-world pane keeps the old margin, because it is still a
+	// picture.** It goes through `AimSurfaceCameras`, which fits extents to the
+	// rectangle from the viewpoint and runs away as that viewpoint reaches the
+	// plane — there is nothing to walk through and no recursion to draw it.
+	{
+		engine::scene::Portal crossing{far};
+		crossing.DestinationWorld = engine::core::Name("somewhere else");
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, crossing);
+
+		Vector3 near{0.0f, 0.0f, -0.3f};
+		CHECK(engine::scene::ClearOfPanes(mirror.World, near));
+		CHECK(std::abs(near.Z + 0.2f) > 0.2f);
+
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+	}
 
 	// **Well clear is left exactly alone**, which is every frame in every scene
 	// that has a portal in it and nobody standing in one.

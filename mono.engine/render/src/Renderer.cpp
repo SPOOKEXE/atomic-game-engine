@@ -3342,6 +3342,36 @@ namespace engine::render {
 			return result;
 		}
 
+		// How close the nearest hole is, and the near plane that follows from it.
+		//
+		// **The near plane a portal needs is not the one a scene authors.** Walk
+		// up to a doorway with a hole in it and the last hand's width of the
+		// approach is the whole illusion: an authored near plane slices the pane
+		// open there and the wall beside it disappears. `scene::PortalNearPlane`
+		// trades depth precision for that, and only while a hole is close enough
+		// to need it — CodeParade's `GH_CLAMP(NearestPortalDist() * 0.5f, ...)`,
+		// which the demo applies to its one and only camera.
+		//
+		// **Measured off the panes this frame was handed rather than off the
+		// world**, because that is the same set the pass below draws through and
+		// the renderer has no store to ask. `scene::ResolveActiveCamera` answers
+		// the same question from the seams for culling, from the same functions.
+		float nearestPane = std::numeric_limits<float>::infinity();
+		for (const PortalView &portal : portals) {
+			nearestPane = std::min(
+				nearestPane,
+				scene::RectangleDistance(portal.Centre, portal.First, portal.Second, cameraFrame.Position)
+			);
+		}
+
+		// **One adapted copy used by every projection this frame builds**, so the
+		// cull, the portal recursion and the opaque draw cannot disagree about
+		// where the near plane is. A cull run against a larger near plane than
+		// the draw uses throws away exactly the geometry the smaller one exists
+		// to keep.
+		scene::Camera drawCamera = camera;
+		drawCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, nearestPane);
+
 		// **Claimed here only if the caller did not claim it first.** `WaitForFrame`
 		// is what a latency-sensitive loop calls before it reads its input; a
 		// caller that does not is no worse off than before, because this is the
@@ -3654,7 +3684,7 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
 
 			const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-			cameraMatrix = scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection;
+			cameraMatrix = scene::ResolveCamera(cameraFrame, drawCamera, aspect).ViewProjection;
 			cameraFrustum = graph::Frustum::FromViewProjection(cameraMatrix);
 			visibleCount = graph::CullAndBound(instances, cameraFrustum, State->Visible, sceneBounds);
 		}
@@ -4770,7 +4800,7 @@ namespace engine::render {
 			// lookup in `opaque.frag` exact.
 			const float portalAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 			const glm::mat4 screenProjection =
-				scene::ResolveCamera(cameraFrame, camera, portalAspect).Projection;
+				scene::ResolveCamera(cameraFrame, drawCamera, portalAspect).Projection;
 
 			// **Made before anything is captured, because a world of nothing but
 			// holes never reaches `EnsureSurface`.** The sampler used to be
@@ -4787,10 +4817,15 @@ namespace engine::render {
 			// Where a hole's sub-camera stands, and what it looks through.
 			//
 			// **Which warp is a question about this level's camera, asked again at
-			// every level.** A pane is a hole from either side and the two maps are
-			// inverses; the demo re-picks `front` or `back` inside `Portal::Draw`
-			// for the same reason, because by the second level the camera has
-			// stepped through and is on the other side of something.
+			// every level.** A pane is a hole from either side, and one map serves
+			// both: it carries the pane's front hemisphere to the far pane's back
+			// one and its back to the far pane's front, so a sub-camera that has
+			// stepped through and is now on the other side of something is carried
+			// by the same matrix, the other way, for free. CodeParade's
+			// `Portal::Connect` writes the same `delta` into both warps.
+			//
+			// Which *side* still has to be asked, because the clip plane's normal
+			// is the way this camera is looking and that does flip.
 			struct SubCamera {
 				core::CFrame Frame;
 				scene::CameraMatrices Matrices;
@@ -4798,21 +4833,41 @@ namespace engine::render {
 
 			const auto subCameraFor = [&](const PortalView &portal, const core::CFrame &from) {
 				const float side = (from.Position - portal.Centre).Dot(portal.Normal);
-				const scene::SeamTransform &warp = side >= 0.0f ? portal.Front : portal.Back;
+				const scene::SeamTransform &warp = portal.Warp;
 
 				const core::CFrame placed = warp.Place(from);
 
 				// **The clip normal points back through the hole**, which is the
-				// one sign here worth deriving rather than trying. The map has a
-				// positive scale, so it preserves which side of the pane a point is
-				// on: the eye stands at `+outward` from the source pane and the
-				// sub-camera therefore lands at `+outward` from the mapped one —
-				// facing back through it. What has to survive clipping is
-				// everything beyond the mapped pane, so the normal is the way the
-				// camera is looking and not the way the pane faces.
+				// one sign here worth deriving rather than trying. The map sends
+				// the eye's side of the source pane to the *opposite* side of the
+				// far one, so a sub-camera placed from an eye at `+outward` lands
+				// behind the mapped pane looking back along `outward`'s image.
+				// What has to survive clipping is everything beyond the mapped
+				// pane, so the normal is the way this camera is looking and not
+				// the way the pane faces.
 				const core::Vector3 outward = portal.Normal * (side >= 0.0f ? 1.0f : -1.0f);
 				const core::Vector3 clipNormal = warp.Rotate(outward) * -1.0f;
-				const core::Vector3 clipPoint = warp.Point(portal.Centre);
+
+				// **Moved back towards this camera by a sliver, so the plane
+				// keeps a little more rather than a little less.** The oblique
+				// substitution makes this plane the near plane, so everything
+				// between the sub-camera and it is thrown away — and the far
+				// room's own geometry meets the mapped pane exactly, which after
+				// two matrix products means some of it lands a float either side.
+				// The half that lands short is clipped, and what that looks like
+				// is a hairline of background around the inside of every hole,
+				// with parts poking through it.
+				//
+				// **The sign is the whole of it and it is worth deriving rather
+				// than trying.** `clipNormal` is the way this camera looks, so
+				// adding along it pushes the plane deeper into the far room and
+				// removes a slab of whatever is standing in the hole — a body
+				// straddling the seam loses its far half and reads as a character
+				// cut in two. CodeParade's `extra_clip` subtracts for this
+				// reason: `pos - normal*extra_clip` with `normal` pointing away
+				// from the camera is the pane moved *towards* it.
+				const core::Vector3 clipPoint =
+					warp.Point(portal.Centre) - clipNormal * scene::PortalClipBias(nearestPane);
 
 				return SubCamera{
 					placed,
@@ -5184,7 +5239,7 @@ namespace engine::render {
 				// give the plain geometry a projection it must never use, which
 				// is the shape of the black-wedge bug the surface pass records.
 				const glm::mat4 viewProjection =
-					scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection;
+					scene::ResolveCamera(cameraFrame, drawCamera, aspect).ViewProjection;
 
 				const FrameUniforms frameUniforms{
 					viewProjection,

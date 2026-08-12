@@ -394,14 +394,19 @@ namespace engine::scene {
 		}
 	};
 
-	// Builds it for one side of one seam.
+	// Builds the map through one seam.
+	//
+	// **One map for both sides, which is what makes it a hole.** It carries this
+	// pane's front hemisphere to the far pane's back one and its back to the far
+	// pane's front, and the far pane's own map is its exact inverse — so a round
+	// trip is the identity whichever side it started from. Picking the map by
+	// the crosser's side, which this used to do, gives two maps that both land
+	// on the same side of the far pane and are therefore not inverses.
 	//
 	// @param seam The portal.
-	// @param side Which side the thing being mapped is on: positive in front of
-	//             `Normal`, negative behind it. Zero counts as behind.
 	// @return The map to put a placement, a velocity or a direction through.
 	// @since v0.15
-	SeamTransform SeamMapping(const PortalSeam &seam, float side);
+	SeamTransform SeamMapping(const PortalSeam &seam);
 
 	// How far the seam's plane is from a point, signed along `Normal`.
 	//
@@ -410,6 +415,104 @@ namespace engine::scene {
 	// @return Positive in front of the pane, negative behind it.
 	// @since v0.15
 	float SeamOffset(const PortalSeam &seam, const core::Vector3 &at);
+
+	// How far a point is from a rectangle, as a solid rather than as a plane.
+	//
+	// **The rectangle and not its plane, which is the whole point.** A pane
+	// stretched across a doorway is a metre from somebody standing beside the
+	// doorway and a hair from somebody standing in it, and the plane cannot tell
+	// those apart — it says zero for both. Everything downstream of this number
+	// (`PortalNearPlane`, `PortalClipBias`) is trading precision away as the eye
+	// closes on a hole, so answering "zero" for an eye that is nowhere near one
+	// spends that precision on nothing.
+	//
+	// The closest point of the rectangle, found by clamping the projection onto
+	// each half-axis into `-1..1` and measuring to what is left. CodeParade's
+	// `Portal::DistTo`.
+	//
+	// @param centre The middle of the rectangle.
+	// @param first  One half-axis, as a vector, so `centre ± first` is an edge.
+	// @param second The other.
+	// @param at     The point.
+	// @return The distance, never negative.
+	// @since v0.15
+	float RectangleDistance(
+		const core::Vector3 &centre,
+		const core::Vector3 &first,
+		const core::Vector3 &second,
+		const core::Vector3 &at
+	);
+
+	// The same, for a gathered seam.
+	//
+	// @param seam The portal.
+	// @param at   The point.
+	// @return The distance from the hole itself, never negative.
+	// @since v0.15
+	float SeamDistance(const PortalSeam &seam, const core::Vector3 &at);
+
+	// How far the nearest hole in the world is from a point.
+	//
+	// @param store The world.
+	// @param at    The point, normally the eye.
+	// @return The distance, or infinity in a world with no portals in it.
+	// @since v0.15
+	float NearestSeamDistance(ecs::Store &store, const core::Vector3 &at);
+
+	// Smallest near plane a camera is allowed, in studs.
+	//
+	// **Depth precision has to be spent somewhere and this is where.** A near
+	// plane is a floor on how close geometry can be drawn, so the pane of a hole
+	// you are walking into is sliced open by it — you see through the wall for
+	// the last hand's width of the approach, which is the one moment the whole
+	// feature is judged on.
+	constexpr float PORTAL_NEAR_MIN = 0.003f;
+
+	// The near plane to actually draw with, given how close a hole is.
+	//
+	// **Half the distance, so the pane is never within the near plane and the
+	// depth range is never cut further than it has to be.** CodeParade's
+	// `GH_CLAMP(NearestPortalDist() * 0.5f, GH_NEAR_MIN, GH_NEAR_MAX)`, with the
+	// authored value standing in for `GH_NEAR_MAX` — a camera the scene wanted
+	// far-sighted keeps that until a hole is close enough to need otherwise, and
+	// gets it straight back on the way out.
+	//
+	// **Derived rather than stored, and that is deliberate.** Writing this back
+	// into `Camera::NearPlane` would destroy the authored value on the first
+	// frame near a portal and there would be nothing left to return to. Every
+	// caller passes the authored number in and gets the drawing number out, so
+	// the component keeps meaning what the scene said.
+	//
+	// @param authored    `Camera::NearPlane`, the value with no hole nearby.
+	// @param nearestSeam What `NearestSeamDistance` said, or infinity.
+	// @return The near plane to build the projection with.
+	// @since v0.15
+	float PortalNearPlane(float authored, float nearestSeam);
+
+	// How far a hole's oblique clip plane is moved back towards its camera.
+	//
+	// **Towards, so the plane keeps a little more and not a little less.** The
+	// oblique substitution makes that plane the near plane, and the far room's
+	// own geometry meets the mapped pane exactly — a floor that runs up to the
+	// doorway, the wall the pane is set into — so after two matrix products some
+	// of it lands a float on the wrong side and is thrown away. What that looks
+	// like is a hairline of background around the inside of every hole with
+	// parts poking through it. Keeping a sliver too much costs nothing anybody
+	// can see; keeping a sliver too little is the artefact.
+	//
+	// **Pushing the plane the other way is what cuts a body in half.** Anything
+	// standing in the seam is within a hair of the plane on both sides, so a
+	// slab taken off the far room takes the far half of whoever is walking
+	// through with it.
+	//
+	// Shrinks with the distance for the reason the near plane does: standing
+	// with your nose against the pane, a fixed slab would be most of what the
+	// hole shows. CodeParade's `extra_clip`.
+	//
+	// @param nearestSeam What `NearestSeamDistance` said, or infinity.
+	// @return The pull-back, in studs.
+	// @since v0.15
+	float PortalClipBias(float nearestSeam);
 
 	// Whether a box centred on `at` reaches across the seam inside its rectangle.
 	//
@@ -559,6 +662,15 @@ namespace engine::scene {
 		// contacts are still reported and `Raycast` still answers with it — so
 		// the nearest thing in front of every hole is the hole.
 		ecs::Entity Pane = ecs::NULL_ENTITY;
+
+		// The pane at the far end, which the same rule applies to.
+		//
+		// **A ray comes out of a hole standing on the far pane's glass**, at
+		// exactly zero distance from it, because the map takes the near pane's
+		// plane onto the far one's. Continuing without ignoring it reports the
+		// destination pane as the first thing beyond the hole, every time, which
+		// reads as a portal you cannot see or shoot through at all.
+		ecs::Entity Far = ecs::NULL_ENTITY;
 	};
 
 	// The same crossing, described rather than just mapped.

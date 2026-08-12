@@ -3,6 +3,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
@@ -11,7 +12,6 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
-#include <engine/ecs/Classes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Registration.hpp>
@@ -300,22 +300,31 @@ TEST_CASE("a raycast carries on out of the far side of a portal", "[physics][que
 	const Entity paneA = part("PaneA", Vector3::Zero, Vector3{8.0f, 4.5f, 0.2f});
 	const Entity paneB = part("PaneB", Vector3{100.0f, 0.0f, 0.0f}, Vector3{8.0f, 4.5f, 0.2f});
 
-	const Entity camera =
-		store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+	const Entity camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
 	store.Set<engine::scene::SurfaceCamera>(camera, engine::scene::SurfaceCamera{});
 	store.Set<engine::scene::Portal>(camera, engine::scene::Portal{paneB});
 	store.SetParent(camera, paneA);
 
-	// The far room's slab, one and a half metres behind B's face.
-	const Entity beyond = Place(
-		store,
-		Placed{.Position = Vector3{100.0f, 0.0f, -2.0f}, .Extent = Vector3{4.0f, 4.0f, 0.5f}}
-	);
+	// **The return pane, because a hole is a pair.** Without it B is ordinary
+	// scenery and the ray that comes out of it hits its own glass — which is
+	// what `OpenPortals` exists to stop, and is only ever true of a pane nobody
+	// linked back.
+	const Entity mouth = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Mouth");
+	store.Set<engine::scene::SurfaceCamera>(mouth, engine::scene::SurfaceCamera{});
+	store.Set<engine::scene::Portal>(mouth, engine::scene::Portal{paneA});
+	store.SetParent(mouth, paneB);
+
+	// The far room's slab, one and a third metres past B's face. **On the side
+	// the hole actually opens onto**: the map carries a pane's front hemisphere
+	// to the far pane's back one, so a ray that goes in the back of A comes out
+	// the front of B travelling away from it.
+	const Entity beyond =
+		Place(store, Placed{.Position = Vector3{100.0f, 0.0f, 1.6f}, .Extent = Vector3{4.0f, 4.0f, 0.5f}});
 	Index(store);
 
 	const Ray down{Vector3{0.0f, 0.0f, 1.0f}, Vector3{0.0f, 0.0f, -1.0f}};
 
-	REQUIRE(engine::scene::OpenPortals(store) == 1);
+	REQUIRE(engine::scene::OpenPortals(store) == 2);
 	Index(store);
 
 	// **The near room holds nothing but the pane**, so what an ordinary raycast
@@ -329,8 +338,7 @@ TEST_CASE("a raycast carries on out of the far side of a portal", "[physics][que
 	// A metre and a fifth to the glass, then one and three tenths on the far
 	// side. **Measured from the original origin**, so a caller comparing against
 	// its own reach never has to know a hole was involved.
-	const std::optional<ColliderHit> through =
-		engine::physics::RaycastThroughPortals(store, down, 5.0f);
+	const std::optional<ColliderHit> through = engine::physics::RaycastThroughPortals(store, down, 5.0f);
 	REQUIRE(through.has_value());
 	CHECK(through->Owner == beyond);
 	CHECK(through->Distance == Approx(2.5f).margin(1e-3f));
@@ -346,8 +354,7 @@ TEST_CASE("a raycast carries on out of the far side of a portal", "[physics][que
 	// never reaches the hole has no remainder to spend. Looking past the glass
 	// is something a *crossing* earns, which is what keeps the frame of a hole,
 	// and the wall it is cut in, solid.
-	const std::optional<ColliderHit> shortOf =
-		engine::physics::RaycastThroughPortals(store, down, 1.0f);
+	const std::optional<ColliderHit> shortOf = engine::physics::RaycastThroughPortals(store, down, 1.0f);
 	REQUIRE(shortOf.has_value());
 	CHECK(shortOf->Owner == paneA);
 
@@ -358,8 +365,7 @@ TEST_CASE("a raycast carries on out of the far side of a portal", "[physics][que
 		Place(store, Placed{.Position = Vector3{0.0f, 0.0f, 0.5f}, .Extent = Vector3{4.0f, 4.0f, 0.1f}});
 	Index(store);
 
-	const std::optional<ColliderHit> stopped =
-		engine::physics::RaycastThroughPortals(store, down, 5.0f);
+	const std::optional<ColliderHit> stopped = engine::physics::RaycastThroughPortals(store, down, 5.0f);
 	REQUIRE(stopped.has_value());
 	CHECK(stopped->Owner == wall);
 }

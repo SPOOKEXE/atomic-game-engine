@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 namespace engine::scene {
@@ -200,6 +201,17 @@ namespace engine::scene {
 		// stops a viewpoint being there at all. A mirror stops drawing across
 		// it; a portal is walked through, so the eye is moved instead.
 		constexpr float VIEWPOINT_CLEARANCE = EDGE_ON_MARGIN;
+
+		// How close a viewpoint may come to a pane it can be carried through, in
+		// studs.
+		//
+		// **Twice the smallest near plane, which is CodeParade's bump exactly.**
+		// The recursive portal pass builds nothing that runs away as the eye
+		// approaches — only an oblique clip, which needs the eye off the plane
+		// and nothing more — and `PortalNearPlane` shrinks the near plane to half
+		// whatever this leaves. So the rule is only "not *in* the glass", and the
+		// margin is the smallest one float arithmetic can still tell apart.
+		constexpr float SEAM_TOUCH = 2.0f * PORTAL_NEAR_MIN;
 
 		// How close a far-side copy may land to its own original before it is
 		// not worth drawing, in studs.
@@ -769,7 +781,7 @@ namespace engine::scene {
 			// `AimSurfaceCameras` — a pane walked into from behind maps through
 			// the frame that faces backwards, and whatever went in comes out of
 			// the destination the same way round.
-			through = SeamMapping(hole, from);
+			through = SeamMapping(hole);
 			return true;
 		}
 
@@ -826,7 +838,7 @@ namespace engine::scene {
 				if (found == nullptr || at < nearest) {
 					nearest = at;
 					found = &seam;
-					hop = PortalHop{candidate, at, seam.Pane};
+					hop = PortalHop{candidate, at, seam.Pane, seam.Far};
 				}
 			}
 
@@ -834,13 +846,29 @@ namespace engine::scene {
 		}
 	}
 
-	SeamTransform SeamMapping(const PortalSeam &seam, float side) {
-		const Vector3 outward = seam.Normal * (side > 0.0f ? 1.0f : -1.0f);
-		const CFrame source = CFrame::LookAt(seam.Centre, seam.Centre + outward, UpFor(outward));
+	SeamTransform SeamMapping(const PortalSeam &seam) {
+		const CFrame source = CFrame::LookAt(seam.Centre, seam.Centre + seam.Normal, UpFor(seam.Normal));
 
 		// `destination · half-turn · source⁻¹`, the same product the camera goes
 		// through — see `AimSurfaceCameras`' `linked` branch for why the
 		// half-turn is what makes it a hole rather than a window onto a copy.
+		//
+		// **One map, and picking it by which side the crosser is on was a bug.**
+		// The source frame used to flip with the side while the destination
+		// stayed put, which makes two maps that are not each other's inverse:
+		// both of them send a crosser to the *same* side of the far pane, so a
+		// body that walks in the back of a hole comes out where one that walked
+		// in the front does, and walking back through returns it to the front.
+		// A round trip that starts from behind therefore lands somewhere else,
+		// turned by whatever angle the pair turns through — which is the report
+		// about a character snapping to a heading it never entered from.
+		//
+		// With the source fixed, the product is one rigid map that carries this
+		// pane's front hemisphere to the far pane's back one and its back to the
+		// far pane's front, and the far pane's own map is exactly its inverse.
+		// CodeParade's `Portal::Connect` writes one `delta` per side and they
+		// are the same matrix, for this reason; `Portal::Draw` re-picks `front`
+		// or `back` only to know which hole to skip.
 		//
 		// **The scale is about the source pane's centre**, which this rigid
 		// product already sends to the destination's centre — so scaling before
@@ -855,6 +883,63 @@ namespace engine::scene {
 
 	float SeamOffset(const PortalSeam &seam, const Vector3 &at) {
 		return (at - seam.Centre).Dot(seam.Normal);
+	}
+
+	float
+	RectangleDistance(const Vector3 &centre, const Vector3 &first, const Vector3 &second, const Vector3 &at) {
+		const Vector3 offset = at - centre;
+
+		// How far along each half-axis, in units of that axis, clamped to the
+		// edge. **`a·b / b·b` rather than a normalise**, which is the projection
+		// without a square root and is what makes the clamp read as `-1..1`.
+		const float firstSquared = first.Dot(first);
+		const float secondSquared = second.Dot(second);
+		const float alongFirst =
+			firstSquared > 0.0f ? std::clamp(offset.Dot(first) / firstSquared, -1.0f, 1.0f) : 0.0f;
+		const float alongSecond =
+			secondSquared > 0.0f ? std::clamp(offset.Dot(second) / secondSquared, -1.0f, 1.0f) : 0.0f;
+
+		const Vector3 closest = first * alongFirst + second * alongSecond;
+		return (offset - closest).Magnitude();
+	}
+
+	float SeamDistance(const PortalSeam &seam, const Vector3 &at) {
+		return RectangleDistance(seam.Centre, seam.First, seam.Second, at);
+	}
+
+	float NearestSeamDistance(ecs::Store &store, const Vector3 &at) {
+		std::vector<PortalSeam> &seams = Seams();
+		GatherSeams(store, seams);
+
+		float nearest = std::numeric_limits<float>::infinity();
+		for (const PortalSeam &seam : seams) {
+			nearest = std::min(nearest, SeamDistance(seam, at));
+		}
+		return nearest;
+	}
+
+	float PortalNearPlane(float authored, float nearestSeam) {
+		if (!(authored > 0.0f)) {
+			// A camera with no usable near plane is not one this can rescue, and
+			// substituting one would hide the authoring mistake behind a portal.
+			return authored;
+		}
+		if (!(nearestSeam < std::numeric_limits<float>::infinity())) {
+			// No holes in this world, which is nearly every world.
+			return authored;
+		}
+
+		return std::clamp(nearestSeam * 0.5f, PORTAL_NEAR_MIN, authored);
+	}
+
+	float PortalClipBias(float nearestSeam) {
+		// The same halving as the near plane, and capped by the same margin that
+		// says how wide a band around a pane is degenerate. Beyond that the
+		// camera is far enough away that a fixed slab is invisible.
+		if (!(nearestSeam < std::numeric_limits<float>::infinity())) {
+			return 0.0f;
+		}
+		return std::min(nearestSeam * 0.5f, EDGE_ON_MARGIN);
 	}
 
 	bool SeamStraddled(const PortalSeam &seam, const Vector3 &at, float reach) {
@@ -1494,7 +1579,7 @@ namespace engine::scene {
 				// **The box goes through too.** A clone of a body standing in a
 				// hole that changes size has to be the size of the room it is
 				// showing up in, or the two halves meet at the pane as a step.
-				const SeamTransform through = SeamMapping(seam, SeamOffset(seam, frame.Position));
+				const SeamTransform through = SeamMapping(seam);
 				const CFrame carried = through.Place(frame);
 
 				// **A copy that lands on its own original is not a far half, it
@@ -1618,8 +1703,22 @@ namespace engine::scene {
 		GatherSeams(store, seams);
 
 		for (const PortalSeam &seam : seams) {
+			// **A hole you walk through gets a hair, a picture gets a hand's
+			// width.** A same-world pane is drawn by the recursive portal pass,
+			// whose only construction is an oblique clip — degenerate exactly on
+			// the plane and nowhere else — and the near plane now shrinks to meet
+			// it, so an eye may stand as close to one as physics allows and the
+			// pane still draws. Pushing it a third of a stud instead is a visible
+			// shove at the one moment the illusion is judged, and it is what
+			// stopped the approach from ever being seamless.
+			//
+			// A cross-world pane still goes through `AimSurfaceCameras`, which
+			// fits extents to the rectangle from the viewpoint and runs away as
+			// that viewpoint reaches the plane. That one keeps the old margin.
+			const float clearance = seam.Crosses ? VIEWPOINT_CLEARANCE : SEAM_TOUCH;
+
 			const float offset = SeamOffset(seam, at);
-			if (std::abs(offset) >= VIEWPOINT_CLEARANCE) {
+			if (std::abs(offset) >= clearance) {
 				continue;
 			}
 
@@ -1639,7 +1738,7 @@ namespace engine::scene {
 			// and a body carried through one never disagree about which room
 			// they are in.
 			const float side = offset > 0.0f ? 1.0f : -1.0f;
-			at = at + seam.Normal * (side * VIEWPOINT_CLEARANCE - offset);
+			at = at + seam.Normal * (side * clearance - offset);
 			return true;
 		}
 
@@ -1804,7 +1903,7 @@ namespace engine::scene {
 				// mapped rigidly through a hole that resizes is a body whose far
 				// half is the wrong size, meeting its near half at a step in the
 				// plane.
-				const SeamTransform through = SeamMapping(seam, offset.Dot(seam.Normal));
+				const SeamTransform through = SeamMapping(seam);
 
 				const CFrame carried = through.Place(body.Frame);
 
@@ -2033,6 +2132,11 @@ namespace engine::scene {
 					//
 					// Away from the side it came in on, which is the direction it
 					// was already travelling.
+					// **Read before anything is mapped**, because the turn below
+					// is the difference between this and its image and every
+					// line between here and there overwrites one of them.
+					const Vector3 facing = placement.Frame.VectorToWorldSpace({0.0f, 0.0f, -1.0f});
+
 					const float side = SeamOffset(hole, was) > 0.0f ? -1.0f : 1.0f;
 					const float depth = std::abs(SeamOffset(hole, now));
 					const Vector3 clear = hole.Normal * (side * std::max(LANDING_CLEARANCE - depth, 0.0f));
@@ -2098,27 +2202,45 @@ namespace engine::scene {
 					// `scene::PortalTransit` is the fact; `FollowPortalTransit`
 					// is the client end of it.
 					//
-					// **Measured off the map and not off the crosser**, so it
-					// is the same number for everything that goes through this
-					// hole this tick and does not depend on which way any of
-					// them happened to be facing. North is the reference for no
-					// reason but that a yaw of zero is north.
+					// **Measured off the crosser's own facing, which is what
+					// CodeParade's `TryPortal` does and is the half this got
+					// wrong.** Mapping a fixed reference — north — and calling
+					// the result the turn is only right when the map is a pure
+					// yaw. Give either pane any tilt at all, or a pair whose
+					// faces are not both level, and the composed rotation has
+					// pitch and roll in it: the yaw of the mapped north is then
+					// not the yaw anything actually turned through, and it is
+					// wrong by an amount that depends on the geometry rather
+					// than on anything the player did. What that reads as is the
+					// view snapping to an angle nobody entered from, on some
+					// pairs and not others.
+					//
+					// The body's own forward, mapped, minus where it started, is
+					// the angle that body turned. For a level pair it is the
+					// same number the old rule gave.
+					//
 					// **`Rotate`, so a scaled hole still reports the angle it
 					// turns through.** A yaw is not a length, and `Carry` here
 					// would leave `atan2` measuring a vector scaled on both
 					// components — the same angle, arrived at by luck — or a zero
 					// vector for a hole that shrinks to nothing.
-					const Vector3 north{0.0f, 0.0f, -1.0f};
-					const Vector3 turned = through.Rotate(north);
+					const Vector3 turned = through.Rotate(facing);
 
-					if (std::abs(turned.X) > 1e-6f || std::abs(turned.Z) > 1e-6f) {
+					if ((std::abs(turned.X) > 1e-6f || std::abs(turned.Z) > 1e-6f) &&
+						(std::abs(facing.X) > 1e-6f || std::abs(facing.Z) > 1e-6f)) {
 						PortalTransit went;
 						if (const PortalTransit *before_ = store.Get<PortalTransit>(entity)) {
 							went = *before_;
 						}
 
+						// Wrapped, so a quarter turn is reported as a quarter
+						// turn and never as seven quarters the other way — the
+						// camera it reaches adds it to an angle it already has.
+						float turn = std::atan2(-turned.X, -turned.Z) - std::atan2(-facing.X, -facing.Z);
+						turn = std::remainder(turn, 2.0f * PI);
+
 						went.Serial++;
-						went.Turn = std::atan2(-turned.X, -turned.Z);
+						went.Turn = turn;
 						store.Set(entity, went);
 					}
 
