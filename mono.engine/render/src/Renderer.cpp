@@ -1,3 +1,5 @@
+#include "SurfaceScale.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
@@ -298,61 +300,6 @@ namespace engine::render {
 				return true;
 			}
 			return now - drawn >= 1.0 / static_cast<double>(fps);
-		}
-
-		// How many times over the authored surface size a pane needs, given how
-		// much of the screen it covers.
-		//
-		// **A surface camera is fitted to its pane, so its texture maps one to
-		// one onto the pane's screen footprint.** A pane covering half the screen
-		// therefore wants half the screen's pixels, and handing it a fixed size
-		// whatever it covers is what makes a portal go coarse as you walk up to
-		// it — the texels are all there, they are just spread over a rectangle
-		// several times larger than the one they were authored for.
-		//
-		// **Powers of two, because the alternative is reallocating a render
-		// target every frame.** A continuous size would recreate two textures and
-		// a depth buffer on every step the viewer takes; doubling gives at most a
-		// handful of distinct sizes over the whole approach, and the step is
-		// where the hysteresis below can sit.
-		//
-		// **It only grows.** The authored size is the floor — a scene that asked
-		// for a large mirror keeps it — and the screen is the ceiling, because
-		// nothing is served by rendering more texels than the pane can occupy.
-		//
-		// @param authored The larger of the authored dimensions.
-		// @param coverage 0..1 of the viewport's larger axis.
-		// @param screen   The larger viewport dimension.
-		// @param current  The scale in force, so a step down needs a whole step.
-		uint32_t SurfaceScale(uint32_t authored, float coverage, uint32_t screen, uint32_t current) {
-			if (authored == 0 || screen == 0 || !(coverage > 0.0f)) {
-				return std::max(current, 1u);
-			}
-
-			const auto needed = static_cast<uint32_t>(std::ceil(coverage * static_cast<float>(screen)));
-
-			// **The stop is "already at least the screen", not "the next step
-			// would exceed it".** The second reads as safer and is why this did
-			// nothing at all on the first run: a surface authored at more than
-			// half the viewport could never take a step, which is every surface
-			// in a scene that sized its panes sensibly. Overshooting the screen
-			// by one doubling costs texels nobody samples; stopping short costs
-			// the sharpness this exists for.
-			uint32_t scale = 1;
-			while (authored * scale < needed && authored * scale < screen && scale < 16u) {
-				scale *= 2u;
-			}
-
-			// **A step down costs a whole step, which is what stops the size
-			// oscillating on the boundary.** Walking towards a pane crosses each
-			// threshold once; without this, standing exactly on one would
-			// recreate the target every other frame for as long as somebody stood
-			// still.
-			if (current > scale && authored * current <= needed * 2u) {
-				return current;
-			}
-
-			return scale;
 		}
 
 		uint64_t MixMatrix(uint64_t hash, const glm::mat4 &matrix) {
@@ -2701,28 +2648,17 @@ namespace engine::render {
 			return true;
 		}
 
-		for (SDL_GPUTexture *&texture : state.Texture) {
-			if (texture) {
-				SDL_ReleaseGPUTexture(Device, texture);
-				texture = nullptr;
-			}
-		}
-		if (state.Depth) {
-			SDL_ReleaseGPUTexture(Device, state.Depth);
-			state.Depth = nullptr;
+		if (!EnsureSurfaceSampler()) {
+			return false;
 		}
 
-		// Resized, so whatever it held is gone. A mirror that showed the last
-		// frame at the old resolution stretched across the new one would be a
-		// visible artefact on exactly the frame a window was dragged.
-		state.Ready = false;
-
-		// And it owes a draw immediately rather than at the end of its next
-		// interval, which is what a resized slot with a live stamp would do:
-		// hold an empty texture for up to a frame's worth of cap while the pane
-		// showed its own tint.
-		state.Drawn = -1.0;
-
+		// **Built beside what the slot already holds, and swapped in only once
+		// all four exist.** Releasing first is what turned a device that could
+		// not honour the new size into a pane with no texture at all: the slot
+		// kept its old `Width`, so every later frame asked for the same size,
+		// failed the same way, and the pane drew its own flat tint for the rest
+		// of the run. A resize that cannot be made is a resize that does not
+		// happen, and the picture the slot has is still a picture.
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
 		colour.format = ColourFormat();
@@ -2732,16 +2668,6 @@ namespace engine::render {
 		colour.layer_count_or_depth = 1;
 		colour.num_levels = 1;
 		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
-
-		for (SDL_GPUTexture *&texture : state.Texture) {
-			texture = SDL_CreateGPUTexture(Device, &colour);
-			if (!texture) {
-				ENGINE_ERROR(
-					"viewport {} surface {} texture {}x{}: {}", viewport, index, width, height, SDL_GetError()
-				);
-				return false;
-			}
-		}
 
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
@@ -2753,17 +2679,64 @@ namespace engine::render {
 		depth.num_levels = 1;
 		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		state.Depth = SDL_CreateGPUTexture(Device, &depth);
-		if (!state.Depth) {
+		SDL_GPUTexture *made[2] = {nullptr, nullptr};
+		SDL_GPUTexture *madeDepth = nullptr;
+
+		const auto abandon = [&]() {
+			for (SDL_GPUTexture *texture : made) {
+				if (texture != nullptr) {
+					SDL_ReleaseGPUTexture(Device, texture);
+				}
+			}
+			if (madeDepth != nullptr) {
+				SDL_ReleaseGPUTexture(Device, madeDepth);
+			}
+			// **True when the slot still has its old pair**, because the caller's
+			// question is "may this surface be rendered", not "was it resized".
+			return state.Texture[0] != nullptr;
+		};
+
+		for (SDL_GPUTexture *&texture : made) {
+			texture = SDL_CreateGPUTexture(Device, &colour);
+			if (texture == nullptr) {
+				ENGINE_ERROR(
+					"viewport {} surface {} texture {}x{}: {}", viewport, index, width, height, SDL_GetError()
+				);
+				return abandon();
+			}
+		}
+
+		madeDepth = SDL_CreateGPUTexture(Device, &depth);
+		if (madeDepth == nullptr) {
 			ENGINE_ERROR(
 				"viewport {} surface {} depth {}x{}: {}", viewport, index, width, height, SDL_GetError()
 			);
-			return false;
+			return abandon();
 		}
 
-		if (!EnsureSurfaceSampler()) {
-			return false;
+		for (SDL_GPUTexture *&texture : state.Texture) {
+			if (texture != nullptr) {
+				SDL_ReleaseGPUTexture(Device, texture);
+			}
 		}
+		if (state.Depth != nullptr) {
+			SDL_ReleaseGPUTexture(Device, state.Depth);
+		}
+
+		state.Texture[0] = made[0];
+		state.Texture[1] = made[1];
+		state.Depth = madeDepth;
+
+		// Resized, so whatever it held is gone. A mirror that showed the last
+		// frame at the old resolution stretched across the new one would be a
+		// visible artefact on exactly the frame a window was dragged.
+		state.Ready = false;
+
+		// And it owes a draw immediately rather than at the end of its next
+		// interval, which is what a resized slot with a live stamp would do:
+		// hold an empty texture for up to a frame's worth of cap while the pane
+		// showed its own tint.
+		state.Drawn = -1.0;
 
 		state.Width = width;
 		state.Height = height;

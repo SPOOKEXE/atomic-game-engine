@@ -780,6 +780,42 @@ far spawn pad and `(11,13,21)` far sky. `client/tests/Presentation.cpp` pins it
 without a device: exactly one row is dropped, every row that crosses carries
 `Surface < 0`, and the far world's room is still all there.
 
+### The gray flash, which was a hysteresis one texel wide
+
+**A pane's texture is sized to how much of the screen it covers**, because a
+surface camera is fitted to its pane and the texture maps one to one onto the
+pane's footprint — a fixed size is what made a portal go coarse as you walked
+into it. The size doubles rather than sliding, so that walking an approach costs
+a handful of reallocations rather than one per step, and `SurfaceScale` carries a
+step-down rule so the size does not oscillate on a threshold.
+
+**That rule did nothing.** A step *up* happens when the pane wants more texels
+than the held size provides. The step down was tested against half of that same
+number — and a step is a factor of two, so half of what is held is exactly what
+the step below provides. Both thresholds sat on one point. The band was one texel
+wide, which is none.
+
+What crosses a one-texel band is a viewer standing still: a character bobs, a
+camera arm settles, a hand moves a mouse. Measured, a coverage wobble of `0.0008`
+around the threshold gave **32 reallocations in 60 frames**. Each one released
+three render targets, created three more and cleared the slot's `Ready` — so the
+pane spent those frames re-rendering from nothing and drew its own flat tint on
+any frame that re-render did not finish. The report was *"a gray flash a bunch
+when i walk around"*, and the tint of the demo panes is `(141,145,167)`.
+
+Two changes, and the second is the one that matters when a device says no:
+
+* **The band is a whole doubling wide.** Step up when the pane wants more than it
+  holds; step down when it wants less than a *quarter* of it — which is half of
+  what the step below provides. `render/tests/SurfaceScale.cpp` runs 240 frames
+  of the wobble and requires at most one resize.
+* **A resize that cannot be made does not happen.** `EnsureSurface` used to
+  release the old pair before creating the new one, so a device that could not
+  honour the size left the slot with no texture *and* its old `Width` — every
+  later frame asked for the same size, failed the same way, and the pane drew
+  flat for the rest of the run. The new pair is built beside the old one and
+  swapped in only once all of it exists.
+
 ### The crossing half of a cross-world pane, which drew and did not carry
 
 **A window that shows a live room and deletes whoever walks into it is worse
