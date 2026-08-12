@@ -874,3 +874,67 @@ The authoring rule the file records, and the only thing to get right: **point ea
 pane's face at the space a traveller comes from, and the destination's face at the
 space they should arrive in.** The long corridor's mouths therefore face out and
 the short one's face in.
+
+---
+
+## Light through a hole — the diagnosis, and what the fix costs
+
+`examples/PortalShadow.luau` is the scene this was worked out on: two floors in
+two colours, a quarter-turn pair between them, an unanchored crate straddling the
+seam and a second crate well clear of it as a control. `_G.SHADOW_VIEW` names a
+still for a headless capture.
+
+### What is actually happening
+
+The renderer fits **one** shadow map, once, to the whole scene, from one
+direction:
+
+```cpp
+const glm::mat4 lightViewProjection =
+    graph::FitDirectionalLight(sceneBounds, SUN_DIRECTION);
+```
+
+`scene::CloneThroughSeams` puts a rigid image `M(body)` of a straddling body in
+the destination room and lets it cast, which is what stopped a shadow dying at
+the seam. But `M` has a rotation `R` and the light does not, so the far half is
+lit from a direction turned by `R` relative to the near half.
+
+The arithmetic says this is not a mistake so much as a *model*: it is exactly
+what "every room has its own sun, all pointing the same way in world space"
+looks like. A body straddling two rooms is lit by two suns, and because it is
+rotated between them the two shadows point different ways. Self-consistent, and
+not what anybody means by a portal.
+
+What is wanted instead is that **the near room's light passes through the hole
+and arrives in the far room turned by `R`** — so a body in the seam has one
+shadow, and a caster beside a hole darkens the floor on the other side of it.
+
+### Why there is no cheap version
+
+For a rigid `M` and a directional light, the image of a shadow is a shadow cast
+by the *mapped* light:
+
+> `M(proj_d(B) onto P)` = `proj_{R·d}(M(B))` onto `M(P)`
+
+So getting the far half right needs the clone lit by `R·L` while the far room's
+own geometry stays lit by `L`. That is two light directions in one region, and
+this pipeline has one shadow map, one `lightViewProjection` pushed per pass, and
+no per-instance shadow selection. Every trick that avoids a second map — rotating
+the clone, biasing the caster, mapping the light for the whole sub-render — is
+either wrong for asymmetric bodies or wrong for the far room.
+
+### What the fix is
+
+One extra shadow map per hole:
+
+* fit a second directional light to the destination room from `R · SUN_DIRECTION`,
+  and render into it the *near* room's casters mapped through `M` — which for a
+  straddler is the clone that already exists;
+* bind it alongside the world shadow map, with its own matrix in
+  `FrameUniforms`, and take the darker of the two in `opaque.frag`;
+* bound the count. The pool is already per level per slot, so the natural cap is
+  the same `MAX_PORTAL_DEPTH` the colour targets use, and the natural fit is the
+  destination pane's rectangle extruded along `R·L`.
+
+That is a shadow-pipeline change — an extra render target class, a uniform, and a
+shader — rather than an edit to the portal pass. It is not started here.
