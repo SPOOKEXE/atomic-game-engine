@@ -12,10 +12,12 @@ comes after them:
    compare it against, and the four things it does better.
 3. **The pivot and the port** (v0.15) — the discovery that a portal is not a
    surface camera, and the recursive pass that followed.
-4. **The wormhole contract** (this version) — what is still missing for a hole
-   that carries *everything* through it: bodies, contacts, light and shadow.
-   Parts I to IV are what was built and why; **Part V is the design of what is
-   not built**, stated as contracts rather than as intentions.
+4. **The wormhole contract** (this version) — a hole that carries *everything*
+   through it: bodies, contacts, light and shadow. Parts I to IV are what was
+   built and why; **Part V is the design of the rest**, stated as contracts
+   rather than as intentions, with what each one turned out to be recorded
+   against it. All nine items it ordered are built; four of them were cheaper
+   than the design said, and those four are the useful part of the document.
 
 The one-line summary of the maths, which has not changed across any of the four:
 **the eye, the body, the ray and the photon are all mapped by
@@ -64,12 +66,16 @@ separate passes with separate budgets:
 |---|---|---|---|
 | **T1 view** | the camera | `render::PortalView`, the recursive pass | built, v0.15 |
 | **T2 body** | placement, velocity, size, yaw | `scene::CrossPortals` | built, v0.14–v0.15 |
-| **T3 image** | the far half of anything standing in the seam | `AppendPortalClones` / `AppendPortalGhosts` | built, **uncut** — Part V.1 |
-| **T4 contact** | the far room's floor and walls, under a straddler | `physics::GhostPortalBodies` | **named in two headers and does not exist** — Part V.2 |
-| **T5 light** | direct light, local lamps, shadow | nothing | **not built** — Part V.3 |
+| **T3 image** | the far half of anything standing in the seam, and the sparks that have gone through | `scene::CutAndCloneSeams`, `scene::SeamCarries` | built, v0.15 — Part V.1 |
+| **T4 contact** | the far room's floor and walls, under a straddler | `physics::GhostPortalBodies`, and `RaycastThroughPortals` for a character's feet | built, v0.15 — Part V.2 |
+| **T5 light** | direct light, local lamps, shadow | `DrawInstance::SeamLight`, `client::CollectLights`, `graph::FitPortalLight` and the beam atlas | built, v0.15 — Part V.3 |
 
 A hole is *seamless* exactly when all five agree about where the seam is. Every
 artefact in this file is two of them disagreeing.
+
+**All five are built.** What is left is stated at the end of Part V rather than
+implied here: two kinds of effect that are their own buffers, a cross-world pane
+that is a window by decision, and two limits that are limits.
 
 ## What must not happen
 
@@ -708,6 +714,37 @@ hole by definition.
 | Crossing | `CrossPortals`, continuous | A teleport, with a load screen if wanted |
 | Resolution | Viewport, sampled by screen position | The pane's own surface target |
 
+### The crossing half of a cross-world pane, which drew and did not carry
+
+**A window that shows a live room and deletes whoever walks into it is worse
+than one that shows nothing**, and that is what a cross-world pane did.
+
+`TeleportService:Teleport` destroys the player in the world they left — it has
+to, because only that world can, and a player left behind is in two places at
+once. The destination then rebuilds them from its *own* class definitions, which
+is what keeps two worlds from having to agree on class versions. That half
+worked.
+
+**What did not was where the rebuilding happened: inside the Luau runtime's own
+delivery pump.** So a world had to be *running a script* to take somebody in —
+and the second world of a cross-world pair is routinely furnished, awake and
+drawn live through the pane while nobody is playing it. The studio's unplayed
+scene, a world whose scripts are JavaScript, a room built entirely by C++: each
+took the payload into its inbox and left it there. The traveller existed nowhere.
+The picture kept working the whole time, because **a picture is a draw list and
+needs no runtime** — which is exactly why this reads as a portal bug and is not
+one.
+
+`script::AdmitTeleports` is that admission with no `lua_State` in it, and
+`script::RegisterTeleportAdmission` puts it on every world the studio, the client
+and the server build. The pump no longer admits, so there is one admitter however
+many runtimes a world has.
+
+`script/tests/Runtime.cpp` pins it from both ends: the scripted destination still
+works, and a destination with **no runtime at all** — driven through the
+scheduler, so the wiring is pinned as well as the arithmetic — takes somebody in
+and gives them a body.
+
 ---
 
 # Part IV — the full port, v0.15
@@ -796,7 +833,7 @@ in.** The long corridor's mouths therefore face out and the short one's face in.
 
 ---
 
-# Part V — the wormhole contract: what is not built
+# Part V — the wormhole contract
 
 Parts I to IV built T1 (the view) and T2 (the body). This part is the design for
 the rest: **an object in the seam, a contact through the seam, light through the
@@ -809,9 +846,10 @@ than as an intention. Where a contract is expensive, the cost is stated and the
 
 ## What has since landed
 
-**Five of the nine items in V.6 are built, and the four requirements are met
-except for one half of R2.** Each section below keeps its design and gains a
-statement of what it turned out to be. In short:
+**All nine items in V.6 are built and the four requirements are met.** Each
+section below keeps its design and gains a statement of what it turned out to
+be — including the four places the design was wrong, which are the useful part.
+In short:
 
 | | Landed as | Verified by |
 |---|---|---|
@@ -820,6 +858,11 @@ statement of what it turned out to be. In short:
 | **C3b** local lamps through a hole | `client::CollectLights`, one hop, gated on `SeamDistance < Range` | The `far` still: a cyan lamp in the near room lands a pool of light on the far room's red floor, and the far room has no lamp of its own |
 | **The portal image was tinted by its own pane** | `opaque.frag` no longer multiplies the portal branch by the instance tint | Every portal scene is brighter through the hole and unchanged around it; a grey pane was eating forty-five per cent of the far room |
 | **C2's 80/20**, the ground cast through a hole | Already built — `physics::RaycastThroughPortals`, used by `GroundCharacters` | `physics/tests/Query.cpp`, a downward ray through a horizontal pane finding the far room's floor |
+| **C2 in full**, the contact transport | `scene::PortalProxy`, `physics::GhostPortalBodies`, `physics::RetirePortalProxies` — the far room's colliders mapped **into** the near one | `physics/tests/Portals.cpp`, three cases: the copy lands beside the body rather than at `x = 100`, nothing is proxied for a body clear of a hole, and a pane, a proxy and a moving body are each refused |
+| **Seam #10**, particles across a seam | `scene::SeamCarries`, `client::CollectParticleBatches` | `scene/tests/SurfaceCameras.cpp` for the point test; the `far` still counts 23,919 px of a plume whose emitter is in the *near* room |
+| **Seams #10 and #11**, the pane's rim and the terminus | `LightingUniforms::PaneNormal`, `Flags.z = 3` | A two-stud pane captured head-on: the rim draws its own material where it drew the far room |
+| **`scene::Sun`** | `scene/Sunlight.hpp`, `scene::SunOf`, `Renderer::SetSun` | Every scene unchanged, which is the point — a world that sets nothing draws with the numbers it always did |
+| **C3c**, the beam shadows | `graph::FitPortalLight`, a 2×2 depth atlas, `BeamUniforms`, `BeamFactor()` in `opaque.frag` | An A/B on the `far` still: 1,968 pixels of the far room's floor darken in a triangle beside the pane when the beams are on, and nothing else in the frame moves |
 
 **And one field went away.** `DrawInstance::Movable` existed because the pass
 that copies a straddler reads a draw list and could not ask whether a thing was
@@ -835,10 +878,32 @@ original is in. `AppendPortalClones` keeps the entity walk for the one caller
 that cannot use a list one — a cross-world copy goes into *another world's*
 list, where this world's row is not.
 
-**What remains is V.6 items 5 to 9**, and the largest is stated honestly in
-V.3's third layer: a caster on one side of a hole still does not darken the floor
-on the other, and a seam half casts its shadow along the world's sun rather than
-along the one it is now lit by.
+**Four places this document's design was wrong, and each was cheaper than it
+said:**
+
+* **The seam cut wanted a run in `ScenePlan`.** It needed nothing of the sort —
+  `DrawSlots` already breaks a run on the mesh, the texture and the tag mask, so
+  the plane is a fourth term in a test that was already there. Nothing in the
+  ordering moved.
+* **The contact transport wanted a kinematic twin of the body**, with every
+  contact mapped back through the seam as an impulse. Mapping the other way needs
+  none of it: copy the *far room's colliders* into the near room and the solver
+  pushes the body in its own space, through the path every other contact takes.
+* **The beam shadow wanted the near room's casters rendered transformed into the
+  far room**, which is a second instance buffer holding a mapped copy of the
+  world. Map the *fragment* back instead and the existing caster range renders
+  unchanged.
+* **The pane's own thickness wanted a warning.** It wanted a fix: the image goes
+  on the faces square to the pane's normal and the rim draws its own material.
+
+The three that survive are the same trick — **move the receiver into the sender's
+space rather than the sender into the receiver's** — and it is worth naming
+because it is the shape of every remaining problem a hole has.
+
+**What is not built, stated rather than implied:** ribbons and billboards still
+do not cross a seam (particles do, and the other two want the same three lines);
+a cross-world pane is still a window rather than a hole, by the decision in Part
+III; and the two limits in V.4, which are limits and not defects.
 
 ## V.0 The four requirements, restated as invariants
 
@@ -1160,11 +1225,35 @@ through a horizontal pane finding the far room's floor. So a character standing
 in a doorway is grounded by whichever floor is under its feet, on either side,
 today.
 
-**What is left is everything that is not a character's feet**: walls, ceilings,
-and any rigid body that is not a humanoid. A crate resting in a seam is held by
-the near room's floor and nothing else, so a far room whose floor is a stud
-higher lets it clip. That is the proxy, and it is worth building when a scene
-needs a far-side wall rather than before.
+**What was left is everything that is not a character's feet** — walls, ceilings,
+and any rigid body that is not a humanoid — and that is built now.
+
+### What the full version turned out to be, and it is not a twin of the body
+
+The design above places a kinematic copy of the body at `M(body)` and maps every
+contact back through `M⁻¹` as an impulse. **That is the expensive way round.**
+`physics::GhostPortalBodies` copies the *far room's colliders* into the near room
+through the inverse seam instead, where they are ordinary static geometry: the
+solver pushes the body with them in its own space, with its own mass, through the
+path every other contact takes. Nothing is mapped back because nothing crossed —
+no impulse map, no broadphase filter, no second solver path.
+
+**The inverse is not derived, it is the partner pane's own map.**
+`scene::SeamMapping` states one map per pane and a pair's two are each other's
+exact inverse, so `PartnerOf` finds it and there is no second arithmetic to get
+wrong.
+
+Three refusals, each of which would be wrong in its own way: a pane is never
+copied (it is a trigger and would solve nothing, and a copy of the far one lands
+on the near one); a proxy is never copied (a room copied into itself); and a
+*dynamic* body on the far side is never copied (it is already simulated there,
+and a copy here would be one body with two momenta pushing through the wall
+between them).
+
+**Created and destroyed inside one tick**, in `PreSimulation` and
+`PostSimulation`, because a proxy that outlived its tick is a piece of another
+room standing invisibly in this one — and the body may have walked out of the
+seam, or through it, in the tick that just ran.
 
 ### What would catch it
 
@@ -1402,13 +1491,31 @@ The one new cost the fragment side pays is that the lookup cannot ride
 `inLightPosition`, which the vertex shader computes from the world light: a beam
 lookup starts from `inWorldPosition` and does its own matrix products.
 
+**Built, exactly as the cheaper form describes.** `graph::FitPortalLight` fits
+the sides of the box to the pane's rectangle and its depth to the scene, so the
+frustum is the aperture and no rectangle test exists in the shader. Four beams
+share one `SHADOW_RESOLUTION` depth texture as a 2×2 atlas, chosen by which holes
+are nearest the eye and logged when a fifth is refused. The first beam clears the
+whole atlas and the rest load it, because a clear is not confined by a viewport —
+and a quadrant nobody wrote stays at the far plane, which the lookup already
+reads as lit.
+
+`shadow = min(ShadowFactor(...), BeamFactor())`, never a sum, for the reason this
+section opens with.
+
+**What it is measured by**: an A/B on `PortalSeam.luau`'s `far` still. With the
+beams off the far room's floor beside the pane is evenly lit; with them on, 1,968
+pixels of it darken in a triangle, and the bounding box of everything that
+changed is the patch of floor the hole's beam reaches. Nothing else in the frame
+moves.
+
 ### What each layer is worth
 
 | Layer | Fixes | Cost | State |
 |---|---|---|---|
 | C3a — shade the seam half by `M.Rotate(L)` | A body in a hole looks like one body | One field on the row, one branch in `DrawSlots` | **built** |
 | C3b — transport local lamps | A lamp near a hole lights the far room | ~40 lines in `client`, no new pass | **built** |
-| C3c — beam shadow maps | A caster darkens the floor on the other side; a seam half shadowed by what shadows its original | A shadow atlas, a fragment uniform block, a loop of four in `opaque.frag` | open |
+| C3c — beam shadow maps | A caster darkens the floor on the other side of a hole | A shadow atlas, a fragment uniform block, a loop of four in `opaque.frag` | **built** |
 
 ### What would catch it
 
@@ -1435,13 +1542,16 @@ where the plane is.
 | 6 | The image goes coarse against the glass | **closed** — the sub-render is the screen's own projection, sampled by `gl_FragCoord` |
 | 7 | The two halves of a straddler are two whole bodies | **closed** — `CutAndCloneSeams` cuts both at the plane, `opaque.frag` and `shadow.frag` discard past it |
 | 8 | The two halves are lit differently | **closed** — `SeamLight` carries `R · L`, and the portal image stopped being tinted by the pane's own colour, which was the larger half of it |
-| 9 | The far half stands on nothing | **closed for a character's feet** — `GroundCharacters` casts through the hole. Open for walls, ceilings and anything that is not a humanoid — V.2 |
-| 10 | **The pane's own thickness** | **open, small.** A `Part` is a box, and the portal image is applied to the *whole instance* — including its four edge faces. A one-stud-thick pane shows a one-stud band of the far room around its rim, at the wrong parallax. The contract is that a hole's pane is drawn as its **face** and not its box, or that thickness is authored below a stated fraction of the shorter half-axis and the engine warns above it. The cheaper half — the warn — is worth doing today |
-| 11 | **The recursion terminus** | **open, small.** At depth zero the pane draws its own material, which is a flat panel at the end of a corridor of holes. The demo's answer is a pink quad, deliberately wrong; a shipped world wants the far room's fog or a plain shade, behind the same flag the face markers are |
+| 9 | The far half stands on nothing | **closed** — `GroundCharacters` casts through the hole for a character's feet, and `physics::GhostPortalBodies` puts the far room's own colliders under everything else |
+| 10 | **The pane's own thickness** | **closed, and by the fix rather than the warn.** A `Part` is a box and the image was applied to the whole instance, so a thick pane showed a band of the far room round its rim at a parallax nothing else in the frame had. `LightingUniforms::PaneNormal` carries the pane's face normal and `opaque.frag` shows the image on the faces square to it — both of them, because a hole is a hole from either side — so the rim falls through to the pane's own material and reads as a frame |
+| 11 | **The recursion terminus** | **closed.** A hole at the deepest level has no sub-render to sample and drew its own lit material, which is a grey slab at the end of a corridor of holes. `Flags.z = 3` is the flat branch and it shades the ambient — the far room's own unlit tone, so the chain fades into it rather than stopping against something, and no second uniform was needed to say what that tone is |
 | 12 | **The far room's own geometry may reach into the near room's half-space** | **open, authoring.** The oblique clip keeps the half-space beyond the mapped pane, so anything of the *near* room that happens to lie in that half-space is drawn inside the picture. Placing regions apart is the standing answer; `TagFilter` is the mechanism when they cannot be. This is the "overlapping space" limit from Part I, unchanged |
 | 13 | **Blended geometry inside a hole is sorted for the wrong eye** | **open, known.** There is one scene range and its transparent tail is sorted once, from the first surface camera when there is one. A sort per sub-camera would be a sort per hole per level |
 
-Seams 10 and 11 are the two small ones left. Neither is blocked on anything.
+**Every seam in the table is closed except the last two, and both are stated
+limits rather than defects.** Item 12 is the overlapping-space limit from Part I:
+place regions apart, or tag them. Item 13 is one sorted transparent tail shared
+by every view, and a sort per sub-camera would be a sort per hole per level.
 
 ## V.5 The disappearance audit — R4
 
@@ -1461,15 +1571,16 @@ broken in a way nobody can grep for.
 | 7 | `scene::MAX_SURFACES` = 16, shared between mirrors, cross-world windows and holes | The seventeenth pane | Logged (`ENGINE_WARN` on a duplicate or out-of-range index). A hole that loses its slot draws flat |
 | 8 | `MAX_PORTAL_DEPTH` = 4, `PortalDepth` = 2 by default | The fifth level of a chain | Stated; the terminus is seam #11 |
 | 9 | `graph::VisiblePane` per hole per level | A hole not in the sub-camera's frustum | Correct, and it is the demo's occlusion query on the CPU. **The one thing it cannot see is a hole visible only in a mirror inside a hole**, which resolves a frame later |
-| 10 | **Particles, ribbons and billboards do not cross a seam** | Every effect, at the plane | **Open, and the most visible of these.** `CollectParticleBatches` has no seam pass, so a torch's flame vanishes as it is carried through a doorway while the torch does not. The fix is `CloneThroughSeams` for a `ParticleBatch`, which is the same map applied to a different row |
+| 10 | Particles across a seam | Nothing now | **Closed, and *moved* rather than copied.** A particle is a point: it is wholly on one side of a pane or the other, so drawing it in both places would be two sparks where one was authored. `scene::SeamCarries` is the point-through-the-hole test and `client::CollectParticleBatches` writes the moved copies into one buffer reserved to the pool's own size, because every batch's span has to survive until the renderer has drawn it. **Ribbons and billboards still do not cross** — they are their own buffers and want the same treatment |
 | 11 | ~~Anchored bodies are never copied~~ | Nothing now | **Closed.** The rule was `Motion` and `CharacterLimb`, which kept a floor out of the room next door and also refused an anchored crate resting in a seam. `Fits` does the first without the second |
 
-**Item 10 is the one left, and it is the one a player sees.** A torch carried
-through a doorway keeps its flame on one side of the plane and loses it on the
-other, because a `ParticleBatch` is a span of a system-owned buffer rather than a
-row in the draw list — so the map that copies a body has nothing to copy.
+**Every mechanism in the table is now impossible, stated or logged**, which is
+what R4 asked for. The one thing still absent is the tail of item 10: a
+`ParticleBatch` crosses and a ribbon or a billboard does not, because each is its
+own buffer and each wants the same three lines. Nothing else in the pipeline can
+drop a thing from the picture without saying so.
 
-## V.6 Order of work
+## V.6 Order of work, and what it cost
 
 Ranked by what a player notices per line of code, and by what unblocks what.
 
@@ -1479,16 +1590,33 @@ Ranked by what a player notices per line of code, and by what unblocks what.
 | 2 | **C3a — shade the far half by `M.Rotate(L)`** | R2's most visible half; a body in a hole looks like one body | **done**, and it needed the pane's tint off the portal image to show |
 | 3 | **C2's 80/20 — the ground cast through the hole** | R1's floor; a body in a doorway stands on whichever floor is under it | **was already done** |
 | 4 | **C3b — transported lamps** | R2; a light carried into a hole lights the far room | **done** |
-| 5 | **Seam #10 — particles across the seam** | R4's most visible drop | open. A `ParticleBatch` is a span of a system-owned buffer, so there is no row to copy — the map has to reach the emitter rather than the draw list |
-| 6 | **Seam #11 and #12 — the terminus and the thickness warn** | R3's two small ones | open, and neither is blocked |
-| 7 | **C2 in full — the kinematic proxy** | R1's walls and ceilings | open. Needs a broadphase filter and an impulse map |
-| 8 | **A `scene::Sun` a world can author** | Nothing on its own; unblocks 9 | a third done — the direction is `scene::SUN_DIRECTION` now; what is left is making it a resource and handing it to `Renderer::Render` |
-| 9 | **C3c — beam shadow maps** | The rest of R2: a caster darkens the floor on the other side of a hole | open, and cheaper than this document first thought — see V.3 |
+| 5 | **Seam #10 — particles across the seam** | R4's most visible drop | **done.** A particle is a point, so it is *moved* rather than copied and cut — `scene::SeamCarries` decides, `client::CollectParticleBatches` writes the moved copies into one reserved scratch buffer so no batch's span can be invalidated by a later batch's |
+| 6 | **Seam #11 and #12 — the terminus and the pane's rim** | R3's two small ones | **done**, and the second is a fix rather than the warn this table planned: `LightingUniforms::PaneNormal` keeps the image on the pane's *faces*, so the rim draws its own material and is a frame |
+| 7 | **C2 in full** | R1's walls and ceilings | **done, and not as a proxy of the body.** `physics::GhostPortalBodies` copies the *far room's colliders* into the near room through the inverse seam, so nothing is mapped back — no impulse map, no broadphase filter |
+| 8 | **A `scene::Sun` a world can author** | Nothing on its own; unblocks 9 | **done.** `scene::Sun` is a resource with `scene::SunOf` as its reader, and `Renderer::SetSun` is the knob a host pushes it through — a world that never sets one draws with the numbers this engine always drew with |
+| 9 | **C3c — beam shadow maps** | The rest of R2: a caster darkens the floor on the other side of a hole | **done**, and cheaper than this document first thought — the receiver is mapped back rather than the casters forward, so the existing caster range renders into a 2×2 atlas and no second instance buffer exists |
 
-**1 through 4 were taken in that order and it held.** Each was cheaper than the
-one after it, and two of them turned up bugs that would otherwise have been
-blamed on 9: the portal image was being multiplied by its pane's own grey, and
-`DrawInstance::Movable` had never been set on the path that mattered.
+**All nine were taken in this order and the order held.** Each was cheaper than
+the one after it, and the early ones turned up bugs that would otherwise have
+been blamed on the late ones: the portal image was being multiplied by its pane's
+own grey, `DrawInstance::Movable` had never been set on the path that mattered,
+and the ground cast through a hole turned out to have been built already.
+
+**Four of the nine were cheaper than this document said**, and all four for one
+reason — see the summary at the head of Part V. The design kept reaching for
+"move the sender into the receiver's space", which needs a second copy of
+something large (a run in the plan, a twin of the body, a mapped instance
+buffer); the answer each time was to move the *receiver* into the sender's space,
+which needs a matrix.
+
+### What is left, stated
+
+| | Why it is left |
+|---|---|
+| Ribbons and billboards across a seam | Each is its own buffer and each wants the same three lines `CollectParticleBatches` got. Particles were the visible one |
+| A cross-world pane that recurses | A decision rather than a gap — Part III. A hole you walk through without a frame of interruption is a same-world hole by definition |
+| Seams #12 and #13 | Limits, not defects: overlapping space is answered by placing regions apart or tagging them, and one sorted transparent tail is shared by every view |
+| The shutdown race | Appendix A. It predates the portal pass and more work per frame makes it likelier; the next step is the teardown path rather than any pass |
 
 ---
 
@@ -1557,7 +1685,20 @@ scene could ever set one. They read a `local VIEW` line now, and
 the client with `--frames` and `--capture`. That is the only mechanism that works
 from a shell, and it is now the one the files describe.
 
-`scripts/demos/portal-seam-report.py` turns a capture into two numbers: the
+`scripts/demos/portal-seam-report.py` turns a capture into three numbers: the
 straddler's coloured pixels against the control's, which halve when the cut is
-working, and how much of the near room's cyan lamp lands on the far room's red
-floor.
+working; how much of the near room's cyan lamp lands on the far room's red floor;
+and how many of the near room's sparks arrive in the far one.
+
+## What is checked, and where
+
+| Claim | Checked by |
+|---|---|
+| A straddler is cut, and the two planes are each other's image | `scene/tests/SurfaceCameras.cpp` — a crate, a whole `MakeCharacter` rig, a room-sized slab that is refused |
+| A point through a hole is on one side or the other | `scene/tests/SurfaceCameras.cpp` — `SeamCarries` against the plane *and* the rectangle, with no widening |
+| The row's size and signature | `scene/tests/DrawInstance.cpp` — the static assert, and one case per seam field |
+| The far room holds a body in a seam up | `physics/tests/Portals.cpp` — three cases |
+| A ground ray continues out of a hole | `physics/tests/Query.cpp` |
+| Somebody can arrive in a world that runs no scripts | `script/tests/Runtime.cpp` — driven through the scheduler |
+| The cut, the light and the sparks, in pixels | `scripts/demos/capture-portal-seam.sh` over `examples/PortalSeam.luau` |
+| The beams darken the right patch of the far floor | The same harness, run twice with `Beams.Count` forced to zero — 1,968 pixels change and the bounding box is the beam's |

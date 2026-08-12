@@ -41,6 +41,16 @@
 -- two places in one. You arrive in front of the other demo's block and the
 -- brick that greets you is the other colour.
 --
+-- **And arriving needs nothing of the destination**, which is what it looked
+-- like when it was wrong. Admitting an arrival used to happen inside the Luau
+-- runtime's own delivery pump, so a world had to be *running a script* to take
+-- somebody in — and the second demo is furnished, awake and drawn live through
+-- the pane while nobody is playing it. The payload landed in its inbox and
+-- stayed there: the player was destroyed in the world they left, built in
+-- neither, and the studio dropped the client as lost after a few frames. The
+-- picture worked the whole time, because a picture is a draw list and needs no
+-- runtime. `script::RegisterTeleportAdmission` is a system on every world now.
+--
 -- **The image** is the other world too, and getting there took a renderer
 -- change. `client::CollectSurfaceViews` takes one `Store` and the surface pass
 -- drew "the same scene range" as the main pass, so a surface camera could only

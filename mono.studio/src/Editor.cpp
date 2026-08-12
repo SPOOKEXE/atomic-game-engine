@@ -19,6 +19,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -1702,6 +1703,15 @@ namespace studio {
 		// replicated in. A body handed to a player who then leaves would
 		// otherwise be owned by a dead entity for the rest of the session.
 		engine::scene::RegisterOwnershipSystem(systems);
+
+		// **Who a teleport brings in, and it must not depend on scripts.** A
+		// destination is chosen by a script in *another* world, so a world can be
+		// somebody's destination without containing a line of code — and
+		// admitting used to happen inside the Luau runtime's own delivery pump.
+		// A world with no runtime took the payload into its inbox and left it
+		// there: destroyed in the world you left, never built in the world you
+		// went to. `script::RegisterTeleportAdmission` carries the argument.
+		engine::script::RegisterTeleportAdmission(systems);
 
 		// **And the characters, for the same reason the ownership reclaim is
 		// here: the studio is an authority.** A world played in this process is

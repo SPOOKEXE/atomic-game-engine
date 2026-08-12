@@ -990,11 +990,20 @@ TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
 		// says which half is wrong.
 		REQUIRE(engine::world::Postbox(store).Deliveries().size() == 1);
 
-		// The arrival is admitted by the engine rather than by a script — who
-		// is in a game is the host's business, and a teleport that only worked
-		// in games whose author had written a handler would be a feature with a
-		// footnote.
-		arenaScripts->Heartbeat(1.0f / 60.0f);
+		// **The arrival is admitted by the engine rather than by a script**, and
+		// no longer by a *runtime* either — who is in a game is the host's
+		// business, and a teleport that only worked in games whose author had
+		// written a handler would be a feature with a footnote.
+		//
+		// **It used to be the Luau pump, and that was the footnote.** A
+		// destination is chosen by a script in another world, so a world can be
+		// somebody's destination without running a line of code: the studio's
+		// unplayed second scene, a world whose scripts are JavaScript, a room
+		// furnished by C++. Every one of them took the payload into its inbox
+		// and left it there, and the traveller was destroyed in the world they
+		// left and never built in the one they went to. `AdmitTeleports` is a
+		// system on every world now, and this call is that system's body.
+		CHECK(engine::script::AdmitTeleports(store) == 1);
 
 		arrived = store.FindFirstChild(engine::scene::PlayersOf(store), "Wanderer");
 		REQUIRE(arrived != engine::ecs::NULL_ENTITY);
@@ -1027,4 +1036,93 @@ TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
 
 	lobbyScripts.reset();
 	arenaScripts.reset();
+}
+
+TEST_CASE("a world with no scripts still takes somebody in", "[script][teleport]") {
+	// **The case that made an immersive cross-world portal delete you.** A
+	// destination is chosen by a script in *another* world, so a world can be
+	// somebody's destination without containing a line of code: the studio's
+	// second scene, which is furnished but not being played; a world whose
+	// scripts are JavaScript; a room built entirely by C++.
+	//
+	// Admitting an arrival used to happen inside the Luau runtime's own delivery
+	// pump. So all three took the payload into their inbox and left it there —
+	// and the source world had already destroyed the player, because only the
+	// source world can. The traveller existed nowhere, the host that follows
+	// them searched every world and found nobody, and the client was dropped as
+	// lost. The portal drew the far room live the whole time, because a picture
+	// is a draw list and needs no runtime.
+	//
+	// **Driven through the scheduler rather than by calling the function**, so
+	// what is pinned is the wiring as well as the arithmetic:
+	// `RegisterTeleportAdmission` is what every host installs and this is the
+	// only test that proves it runs.
+	struct Pool {
+		Pool() {
+			engine::parallel::Jobs::Start(2);
+		}
+		~Pool() {
+			engine::parallel::Jobs::Stop();
+		}
+	} pool;
+
+	engine::world::Universe universe;
+
+	engine::world::WorldSettings fromSettings;
+	fromSettings.Name = engine::core::Name("test.scripted");
+	engine::world::WorldSettings toSettings;
+	toSettings.Name = engine::core::Name("test.quiet");
+
+	const engine::world::WorldId from = universe.Create(fromSettings);
+	const engine::world::WorldId to = universe.Create(toSettings);
+	REQUIRE(from.IsValid());
+	REQUIRE(to.IsValid());
+
+	std::unique_ptr<engine::script::Runtime> scripts;
+
+	universe.Enter(from, [&](Store &store) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+		scripts = MakeRuntime(store, Language::Luau);
+	});
+
+	// **The destination has services and a scheduler and no runtime at all.**
+	// That is the whole point of the case: nothing here can run a line of Luau,
+	// and somebody still has to be able to arrive.
+	universe.Enter(to, [&](Store &store, engine::ecs::Scheduler &systems) {
+		engine::scene::InstallServices(store);
+		engine::script::RegisterTeleportAdmission(systems);
+	});
+
+	universe.Enter(from, [&](Store &store) {
+		const Entity traveller = engine::scene::AddPlayer(store, "Wanderer");
+		REQUIRE(traveller != engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::scene::LoadCharacter(store, traveller) != engine::ecs::NULL_ENTITY);
+
+		REQUIRE(scripts->Run(R"(
+			local player = game:GetService('Players'):FindFirstChild('Wanderer')
+			TeleportService:Teleport('test.quiet', player, { Score = 7 })
+		)"));
+
+		CHECK_FALSE(store.Alive(traveller));
+	});
+
+	// One tick carries it across the barrier and the next runs the destination's
+	// systems over what arrived. **Two, because the delivery lands in the inbox
+	// at the barrier and `PreSimulation` has already run by then** — which is
+	// the same one-tick gap `studio::PlayLink::Missing` exists to wait out.
+	universe.Tick(1.0f / 60.0f);
+	universe.Tick(1.0f / 60.0f);
+
+	universe.Enter(to, [&](Store &store) {
+		const Entity arrived = store.FindFirstChild(engine::scene::PlayersOf(store), "Wanderer");
+		REQUIRE(arrived != engine::ecs::NULL_ENTITY);
+
+		// With a body, built from this world's own class table — the same
+		// guarantee a scripted destination gives, from a world that cannot run
+		// a script to give it.
+		CHECK(engine::scene::CharacterOf(store, arrived) != engine::ecs::NULL_ENTITY);
+	});
+
+	scripts.reset();
 }

@@ -35,6 +35,7 @@
 //
 // @tier L9 · shared
 
+#include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/script/Debugger.hpp>
@@ -473,4 +474,50 @@ namespace engine::script {
 	bool RunScriptFile(
 		ecs::Store &store, const std::string &path, std::string &error, const RuntimeLimits &limits = {}
 	);
+
+	// Takes in everybody a teleport has sent to this world.
+	//
+	// **A world that is not running scripts still has to accept people.** This
+	// used to happen inside the Luau runtime's own delivery pump, which meant a
+	// teleport was only ever admitted by a world with a *Luau* script actually
+	// executing — so a destination the studio was not playing, a world whose
+	// scripts are JavaScript, or a scene furnished entirely by C++ took the
+	// payload into its inbox and left it there. The player was destroyed in the
+	// world they left, never built in the world they went to, and the host that
+	// followed them searched every world and found nobody.
+	//
+	// That is what an immersive cross-world portal looks like when it goes
+	// wrong: the far room draws, live, through the pane — because a picture is a
+	// draw list and needs no runtime — and walking into it deletes you.
+	//
+	// **Here rather than in `world`, because admitting is a `scene` act.** What
+	// arrives is a name and a payload; what is built is a `Player`, a character
+	// and a `StringValue` of teleport data, all from *this* world's own class
+	// definitions. `world` may not name any of those, and that is the rule that
+	// keeps two worlds from having to agree on class versions.
+	//
+	// **Idempotent within a tick and safe to call beside a runtime.** It reads
+	// the same delivery list the pump reads and admits only `BusKind::Teleport`;
+	// the pump no longer touches those, so there is exactly one admitter however
+	// many runtimes a world has.
+	//
+	// @param store The destination world.
+	// @return How many players were admitted. Zero on nearly every tick.
+	// @since v0.15
+	size_t AdmitTeleports(ecs::Store &store);
+
+	// Installs `AdmitTeleports` as a system on a world.
+	//
+	// **`PreSimulation`, so somebody who arrived this tick is simulated this
+	// tick** rather than standing still for one — which at sixty ticks is
+	// invisible and at a low tick rate is a body that appears already falling.
+	//
+	// **Every world, whether or not it runs scripts.** A destination is chosen
+	// by a script in *another* world, so a world can be a destination without
+	// containing a single line of code — which is exactly the case that was
+	// broken.
+	//
+	// @param scheduler The world's scheduler.
+	// @since v0.15
+	void RegisterTeleportAdmission(ecs::Scheduler &scheduler);
 }

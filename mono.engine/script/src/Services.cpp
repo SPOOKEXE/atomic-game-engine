@@ -828,12 +828,17 @@ namespace engine::script {
 				continue;
 			}
 
-			// **An arrival, which nothing was reading.** Every non-messaging
-			// delivery used to fall through this test and be dropped — which is
-			// how a teleport could be sent, routed, delivered, and have no
-			// effect anywhere.
+			// **An arrival is not this pump's any more, and that is the fix
+			// rather than a tidy-up.** It used to be admitted here — which meant
+			// a teleport was only ever taken in by a world with a *Luau* script
+			// executing. A destination the studio was not playing, or one whose
+			// scripts are JavaScript, or a scene furnished by C++, took the
+			// payload into its inbox and left it there: destroyed in the world
+			// you left, never built in the world you went to.
+			//
+			// `script::AdmitTeleports` is a system on every world now, running
+			// whether or not anything is running scripts. See `Runtime.hpp`.
 			if (delivery.Bus == BusKind::Teleport) {
-				AdmitArrival(store, delivery);
 				continue;
 			}
 
@@ -877,5 +882,41 @@ namespace engine::script {
 			lua_pop(state, 2);
 		}
 		return firstError;
+	}
+
+	size_t AdmitTeleports(ecs::Store &store) {
+		const Postbox box(store);
+		const auto deliveries = box.Deliveries();
+		if (deliveries.empty()) {
+			return 0;
+		}
+
+		size_t admitted = 0;
+		for (const Delivery &delivery : deliveries) {
+			// **Only teleports, and every other delivery is left where it is.**
+			// The list is the driver's and is refilled per tick, so this reads
+			// it rather than draining it — a subscriber's message has to still
+			// be there when a runtime pumps, and a world with no runtime simply
+			// never asks for one.
+			if (delivery.Bus != BusKind::Teleport) {
+				continue;
+			}
+
+			const size_t before = admitted;
+			AdmitArrival(store, delivery);
+
+			// `AdmitArrival` is quiet about a world with no `Players` service —
+			// that is the placeholder scene and it takes nobody — so what is
+			// counted is what it built rather than what arrived.
+			admitted = before + (scene::PlayersOf(store) == ecs::NULL_ENTITY ? 0u : 1u);
+		}
+
+		return admitted;
+	}
+
+	void RegisterTeleportAdmission(ecs::Scheduler &scheduler) {
+		scheduler.Add("teleport.admit", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			(void)AdmitTeleports(store);
+		});
 	}
 }

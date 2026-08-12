@@ -9,6 +9,7 @@
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cmath>
@@ -177,6 +178,15 @@ namespace server {
 		// reads ownership yet, because the day something does is the day this
 		// being absent is a bug rather than a gap.
 		engine::scene::RegisterOwnershipSystem(scheduler);
+
+		// **Who a teleport brings in, and it must not depend on scripts.** A
+		// destination is chosen by a script in *another* world, so a world can be
+		// somebody's destination without containing a line of code — and
+		// admitting used to happen inside the Luau runtime's own delivery pump.
+		// A world with no runtime took the payload into its inbox and left it
+		// there: destroyed in the world you left, never built in the world you
+		// went to. `script::RegisterTeleportAdmission` carries the argument.
+		engine::script::RegisterTeleportAdmission(scheduler);
 
 		// **A server grounds, steps and poses its own characters.** Until this
 		// the three lived in `mono.client` alone, so a character on a dedicated

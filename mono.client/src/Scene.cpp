@@ -27,6 +27,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/script/Runtime.hpp>
 
 #include <algorithm>
 #include <client/Scene.hpp>
@@ -1446,6 +1447,15 @@ namespace client {
 		// two copies of a system that writes `PreviousTransform` can both be
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
+
+		// **Who a teleport brings in, and it must not depend on scripts.** A
+		// destination is chosen by a script in *another* world, so a world can be
+		// somebody's destination without containing a line of code — and
+		// admitting used to happen inside the Luau runtime's own delivery pump.
+		// A world with no runtime took the payload into its inbox and left it
+		// there: destroyed in the world you left, never built in the world you
+		// went to. `script::RegisterTeleportAdmission` carries the argument.
+		engine::script::RegisterTeleportAdmission(scheduler);
 
 		// **`PreRender`, ahead of everything that reads a `SurfaceAppearance`.**
 		// A `Material` instance names an asset and the part it hangs off is what
