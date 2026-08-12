@@ -7,6 +7,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 
@@ -942,6 +943,23 @@ namespace engine::scene {
 		return std::min(nearestSeam * 0.5f, EDGE_ON_MARGIN);
 	}
 
+	bool SeamCarries(const PortalSeam &seam, const Vector3 &at) {
+		if (SeamOffset(seam, at) >= 0.0f) {
+			return false;
+		}
+
+		const float firstLength = std::sqrt(seam.First.Dot(seam.First));
+		const float secondLength = std::sqrt(seam.Second.Dot(seam.Second));
+		if (firstLength <= 0.0f || secondLength <= 0.0f) {
+			return false;
+		}
+
+		const Vector3 offset = at - seam.Centre;
+
+		return std::abs(offset.Dot(seam.First) / firstLength) <= firstLength &&
+			   std::abs(offset.Dot(seam.Second) / secondLength) <= secondLength;
+	}
+
 	bool SeamStraddled(const PortalSeam &seam, const Vector3 &at, float reach) {
 		const float firstLength = std::sqrt(seam.First.Dot(seam.First));
 		const float secondLength = std::sqrt(seam.Second.Dot(seam.Second));
@@ -980,6 +998,59 @@ namespace engine::scene {
 		const float alongSecond = std::abs(offset.Dot(seam.Second) / secondLength);
 
 		return alongFirst < firstLength + reach && alongSecond < secondLength + reach;
+	}
+
+	SeamCut CutOfSeam(
+		const PortalSeam &seam, const SeamTransform &through, const CFrame &frame, const Vector3 &halfExtent
+	) {
+		SeamCut cut;
+
+		// **The original keeps the front of its own pane and the copy keeps the
+		// front of the far one**, and the second follows from the first rather
+		// than being chosen. `SeamMapping` carries a pane's front hemisphere to
+		// the far pane's *back* one, so the half of the body that has pushed
+		// through — everything behind this pane's face — lands in front of the
+		// far pane, which is the room it is walking into. Mapping the complement
+		// of the near half-space gives exactly that, and the two are therefore
+		// complementary by construction rather than by two sign choices that
+		// have to agree.
+		cut.NearNormal = seam.Normal;
+		cut.NearOffset = seam.Centre.Dot(seam.Normal);
+
+		// `Rotate` and not `Carry`: a plane's normal must stay unit through a
+		// hole that changes size, or the offset it is compared against means a
+		// different distance. `SeamTransform`'s four applications exist for
+		// exactly this.
+		cut.FarNormal = through.Rotate(seam.Normal) * -1.0f;
+		cut.FarOffset = through.Point(seam.Centre).Dot(cut.FarNormal);
+
+		// How far the body reaches across the hole, on the pane's own axes.
+		const float firstLength = std::sqrt(seam.First.Dot(seam.First));
+		const float secondLength = std::sqrt(seam.Second.Dot(seam.Second));
+		if (firstLength <= 0.0f || secondLength <= 0.0f) {
+			return cut;
+		}
+
+		const Vector3 first = seam.First / firstLength;
+		const Vector3 second = seam.Second / secondLength;
+
+		// The support of an oriented box along a unit direction: the three
+		// half-extents, each weighted by how much of that axis points along it.
+		const Vector3 right = frame.RightVector();
+		const Vector3 up = frame.UpVector();
+		const Vector3 back = frame.LookVector() * -1.0f;
+
+		const auto span = [&](const Vector3 &along) {
+			return std::abs(halfExtent.X * along.Dot(right)) + std::abs(halfExtent.Y * along.Dot(up)) +
+				   std::abs(halfExtent.Z * along.Dot(back));
+		};
+
+		const Vector3 offset = frame.Position - seam.Centre;
+
+		cut.Fits = std::abs(offset.Dot(first)) + span(first) <= firstLength &&
+				   std::abs(offset.Dot(second)) + span(second) <= secondLength;
+
+		return cut;
 	}
 
 	size_t GatherPortalSeams(Store &store, std::vector<PortalSeam> &seams) {
@@ -1513,7 +1584,15 @@ namespace engine::scene {
 	// one. The split is the boundary and not a preference: a cross-world pane's
 	// far side is a draw list only the host can reach, so the host is what asks
 	// for those by name.
-	static size_t CloneThroughSeams(Store &store, int surface, std::vector<DrawInstance> &out) {
+	// The far half of every movable body standing in one named pane, appended to
+	// a list this store does not own.
+	//
+	// **The entity walk, kept for the one caller that cannot use a list one.**
+	// `CutAndCloneSeams` reads the draw list, which is what lets it cut the
+	// original as well as copy it — and a cross-world copy goes into the *other*
+	// world's list, where the original is not. So this walks the store, appends,
+	// and cuts nothing. See the header.
+	static size_t CloneThroughSeams(Store &store, int8_t surface, std::vector<DrawInstance> &out) {
 		ENGINE_PROFILE("clone portal seams");
 
 		std::vector<PortalSeam> &seams = Seams();
@@ -1527,9 +1606,7 @@ namespace engine::scene {
 			std::remove_if(
 				seams.begin(),
 				seams.end(),
-				[surface](const PortalSeam &seam) {
-					return surface < 0 ? seam.Crosses : seam.Surface != surface;
-				}
+				[surface](const PortalSeam &seam) { return seam.Surface != surface; }
 			),
 			seams.end()
 		);
@@ -1690,12 +1767,8 @@ namespace engine::scene {
 		return appended;
 	}
 
-	size_t AppendPortalClones(Store &store, std::vector<DrawInstance> &out) {
-		return CloneThroughSeams(store, -1, out);
-	}
-
 	size_t AppendPortalClones(Store &store, int8_t surface, std::vector<DrawInstance> &out) {
-		return CloneThroughSeams(store, static_cast<int>(surface), out);
+		return CloneThroughSeams(store, surface, out);
 	}
 
 	bool ClearOfPanes(ecs::Store &store, Vector3 &at) {
@@ -1814,16 +1887,16 @@ namespace engine::scene {
 		return true;
 	}
 
-	size_t AppendPortalGhosts(ecs::Store &store, std::vector<DrawInstance> &out) {
-		ENGINE_PROFILE("portal ghosts");
+	size_t CutAndCloneSeams(ecs::Store &store, std::vector<DrawInstance> &out) {
+		ENGINE_PROFILE("cut and clone seams");
 
 		if (out.empty()) {
 			return 0;
 		}
 
-		// **The same seams the crossing uses**, so a body is ghosted through
+		// **The same seams the crossing uses**, so a body is copied through
 		// exactly the rectangle it will be moved through — two answers to "which
-		// pane is this" is the kind of disagreement that shows up as a ghost
+		// pane is this" is the kind of disagreement that shows up as a far half
 		// standing somewhere its body never goes.
 		std::vector<PortalSeam> seams;
 		GatherSeams(store, seams);
@@ -1833,45 +1906,30 @@ namespace engine::scene {
 
 		size_t appended = 0;
 
-		// **The list as it stands, not as it grows.** Every ghost is itself a
-		// draw instance in `out`, and a walk that saw its own output would ghost
-		// the ghosts — a body near two facing panes would fill the buffer.
+		// **The list as it stands, not as it grows.** Every far half is itself a
+		// draw instance in `out`, and a walk that saw its own output would copy
+		// the copies — a body near two facing panes would fill the buffer.
 		const size_t drawn = out.size();
 
 		for (size_t index = 0; index < drawn; index++) {
-			const DrawInstance &body = out[index];
-
-			// **A pane never ghosts itself.** It is a hole rather than a thing
-			// in the hole, and a copy of it mapped through its own pairing lands
-			// exactly on the far pane — z-fighting a wall with a picture on it.
-			if (body.Surface >= 0) {
-				continue;
-			}
-
-			// **The room is not a thing standing in the hole, and this pass
-			// stopped trying to work out which is which.** It reads a draw list,
-			// where an instance is a frame and a box and nothing else, so every
-			// rule it could infer from size was wrong somewhere: measured
-			// against the pane's shorter half-axis it refused every character,
-			// because a person is very nearly as big as the doorway they walk
-			// through; loose enough to admit one, it admitted the floor — and a
-			// floor copied through a doorway is the far room's ground laid over
-			// the near one, meeting it along a hard straight line through the
-			// middle of the scene.
-			//
-			// The collector knows and this does not, so the collector says. See
-			// `DrawInstance::Movable`, which `CloneThroughSeams` answers by
-			// walking `Motion` and `CharacterLimb` and a replica's collector
-			// answers by asking for the same two.
-			if (!body.Movable) {
+			// **By index and not by reference**, because `push_back` below may
+			// reallocate and because the original's row is written as well as
+			// read. A reference taken here would dangle on the first growth.
+			if (out[index].Surface >= 0) {
+				// **A pane is never copied through itself.** It is a hole rather
+				// than a thing in the hole, and a copy of it mapped through its
+				// own pairing lands exactly on the far pane — z-fighting a wall
+				// with a picture on it. It is also the one instance that always
+				// passes the fit test below, since it *is* the hole's own
+				// rectangle.
 				continue;
 			}
 
 			// A sphere around the instance rather than its oriented box, which
 			// is conservative in the only direction that costs nothing: a false
-			// positive is a ghost the oblique clip throws away, and a false
+			// positive is a copy the oblique clip throws away, and a false
 			// negative is the half a body that this whole pass exists to draw.
-			const float radius = body.HalfExtent.Magnitude();
+			const float radius = out[index].HalfExtent.Magnitude();
 
 			for (const PortalSeam &seam : seams) {
 				// A cross-world pane leads somewhere this store cannot draw. The
@@ -1885,64 +1943,94 @@ namespace engine::scene {
 				// This file had three: the segment one in `CrossingOf`, the
 				// public state one, and a hand-rolled version here that agreed
 				// with neither about its slack.
-				if (!SeamStraddled(seam, body.Frame.Position, radius)) {
+				if (!SeamStraddled(seam, out[index].Frame.Position, radius)) {
 					continue;
 				}
 
-				const Vector3 offset = body.Frame.Position - seam.Centre;
-
-				// **Which side the body's middle is on decides the map**, the
-				// same question `CrossingOf` asks of a segment and
-				// `AimSurfaceCameras` asks of a viewer. The half that has
-				// crossed belongs in the space the other half is looking into.
-				//
 				// **`SeamMapping` and not a fourth copy of the product.** This
 				// used to compose `destination · half-turn · source⁻¹` by hand,
 				// which was the same three lines as the function beside it and
-				// went out of date the moment the map gained a scale — a ghost
-				// mapped rigidly through a hole that resizes is a body whose far
-				// half is the wrong size, meeting its near half at a step in the
-				// plane.
+				// went out of date the moment the map gained a scale — a far
+				// half mapped rigidly through a hole that resizes is a body
+				// whose two halves meet at a step in the plane.
 				const SeamTransform through = SeamMapping(seam);
 
-				const CFrame carried = through.Place(body.Frame);
-
-				// **A copy that lands on its own original is a duplicate rather
-				// than a far half**, and two coplanar surfaces at one depth is
-				// the stripe of flickering colour that appears along a seam. See
-				// `CloneThroughSeams`, which refuses it for the same reason: a
-				// pair of panes can be arranged so the map is near enough the
-				// identity for whatever stands beside them.
-				if ((carried.Position - body.Frame.Position).Magnitude() < COINCIDENT_COPY) {
+				// **What may be copied is what fits through the hole**, which is
+				// the rule that replaced both a size heuristic and a test for
+				// whether a thing can move. A room is far wider than its own
+				// doorway and is refused; an anchored crate resting in a seam is
+				// not, and is as much a thing standing in the hole as anything
+				// that walked there.
+				//
+				// The same answer decides the cut, and it has to: a body that
+				// does not fit cannot be cut by a single plane without slicing
+				// the part of it that hangs past the rim, where the hole is not.
+				// Such a body is drawn whole on both sides, which is what this
+				// did before the cut existed.
+				const SeamCut cut = CutOfSeam(seam, through, out[index].Frame, out[index].HalfExtent);
+				if (!cut.Fits) {
 					continue;
 				}
 
-				DrawInstance ghost = body;
-				ghost.Frame = carried;
-				ghost.HalfExtent = body.HalfExtent * through.Scale;
+				const CFrame carried = through.Place(out[index].Frame);
 
-				// **Never a surface**, because a ghost that sampled a surface
+				// **A copy that lands on its own original is a duplicate rather
+				// than a far half**, and two coplanar surfaces at one depth is
+				// the stripe of flickering colour that appears along a seam. A
+				// pair of panes can be arranged so the map is near enough the
+				// identity for whatever stands beside them.
+				if ((carried.Position - out[index].Frame.Position).Magnitude() < COINCIDENT_COPY) {
+					continue;
+				}
+
+				DrawInstance ghost = out[index];
+				ghost.Frame = carried;
+				ghost.HalfExtent = out[index].HalfExtent * through.Scale;
+
+				// **Never a surface**, because a copy that sampled a surface
 				// slot would put the far room's picture on a copy of a
 				// character.
 				ghost.Surface = -1;
 
-				// **But it does cast, and refusing to was wrong.** The note
-				// here used to say a second shadow would follow a body that is
-				// not there — which is true of a copy standing beside its
-				// original and false of this one: the map takes it to the far
-				// pane, which is a different room. A body half through a hole
-				// has half its shadow in each, and the near half is the only one
-				// anything was drawing. What that looks like is a character
-				// standing in a doorway whose shadow stops dead at the seam.
+				// **But it does cast, and refusing to was wrong.** The note here
+				// used to say a second shadow would follow a body that is not
+				// there — which is true of a copy standing beside its original
+				// and false of this one: the map takes it to the far pane, which
+				// is a different room. A body half through a hole has half its
+				// shadow in each, and the near half is the only one anything was
+				// drawing.
 				//
 				// The instance's own `CastShadow` is kept rather than forced on,
 				// so a part authored not to cast still does not.
-				ghost.CastShadow = body.CastShadow;
+				ghost.CastShadow = out[index].CastShadow;
+
+				// **The two halves, and this is the whole of the cut.** Each
+				// keeps the front of its own pane; `CutOfSeam` derives the far
+				// plane by mapping the complement of the near one, so their
+				// union is the body and their intersection is empty.
+				ghost.SeamNormal = cut.FarNormal;
+				ghost.SeamOffset = cut.FarOffset;
+
+				// **And it is lit by the sun this side of the hole sees.** The
+				// copy's normals are the original's turned by the seam's
+				// rotation, so shading them with the world's own light gives one
+				// body lit by two suns a quarter apart — a bright face meeting
+				// an olive one down the middle of a crate. `R · L` makes
+				// `dot(R n, R L)` equal `dot(n, L)` for every normal, so the two
+				// halves shade identically and the join stops being visible.
+				//
+				// `Rotate` and not `Carry`: a light direction is a direction,
+				// and a hole that changes size must not change how bright
+				// anything is.
+				ghost.SeamLight = through.Rotate(SunOf(store).Direction);
+
+				out[index].SeamNormal = cut.NearNormal;
+				out[index].SeamOffset = cut.NearOffset;
 
 				out.push_back(ghost);
 				appended++;
 
-				// One ghost per body. A body in two holes at once is a body at
+				// One copy per body. A body in two holes at once is a body at
 				// the cone point where two panes meet, and the second copy would
 				// land on top of the first.
 				break;

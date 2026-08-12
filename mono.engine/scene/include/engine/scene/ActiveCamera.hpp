@@ -24,6 +24,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 
 #include <glm/mat4x4.hpp>
 
@@ -184,6 +185,23 @@ namespace engine::scene {
 	//         what `render::SurfaceView::Mapping` carries.
 	// @since v0.15
 	glm::mat4 SurfaceMapping(const SurfaceLens &lens);
+
+	// A seam's map as a matrix.
+	//
+	// **The same product `SeamTransform::Point` applies, written once as four
+	// multiplies rather than per point.** A shader cannot call a method, and the
+	// beam shadow a hole transports needs the map on the fragment side — see
+	// `NON-EUCLIDEAN.md` Part V.3, where a far-side fragment is carried back into
+	// the near room before it is looked up.
+	//
+	// `T(position) · R · T(origin) · S · T(-origin)`, and the order is the part
+	// that can be got wrong: the scale is about the *source* pane's centre, which
+	// is the point the rigid half already sends to the destination's centre.
+	//
+	// @param through The map.
+	// @return It, as a matrix a shader can multiply by.
+	// @since v0.15
+	glm::mat4 SeamMatrix(const SeamTransform &through);
 
 	// Builds the matrices for a camera whose projection is already decided.
 	//

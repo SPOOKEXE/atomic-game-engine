@@ -20,6 +20,7 @@
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -1904,6 +1905,21 @@ namespace client {
 			(void)AttachForeignSurfaces(*Universe_, Rendered, Drawn, Foreign, Surfaces);
 			drawn = Drawn;
 		}
+
+		// **The world's sun, pushed before the frame that shades with it.** It is
+		// a knob rather than an argument for `SetPortalDepth`'s reason, so this is
+		// where a world's `scene::Sun` reaches the renderer — every frame, because
+		// a resource a script may write is one a script may write at any time and
+		// two floats compared per frame is cheaper than anything that would notice
+		// when it changed.
+		//
+		// **`SunOf` rather than the resource**, so a world that has never set one
+		// draws with the numbers this engine has always drawn with rather than
+		// with black.
+		Universe_->Enter(Rendered, [this](engine::ecs::Store &lit, engine::ecs::Scheduler &) {
+			const engine::scene::Sun sun = engine::scene::SunOf(lit);
+			Renderer.SetSun(sun.Direction, sun.Ambient);
+		});
 
 		// TODO(render-pipeline): this call took a `render::View` per camera.
 		//

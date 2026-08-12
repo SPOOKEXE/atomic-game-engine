@@ -115,10 +115,19 @@ namespace engine::scene {
 			// the same image", and a texture swap, a tag change or an alpha mode
 			// change all produce a different one.
 			b = MixSignature(b, Pair(instance.Texture.Id(), static_cast<uint32_t>(instance.TagMask)));
-			// **And whether it may be copied through a hole**, which changes
-			// what the far side of a portal draws and is therefore a change to
-			// the image. See `DrawInstance::Movable`.
-			c = MixSignature(c, Pair(static_cast<uint32_t>(instance.Alpha), instance.Movable ? 1u : 0u));
+			c = MixSignature(c, Pair(static_cast<uint32_t>(instance.Alpha), 0u));
+
+			// **And where it is cut, which is half of what a straddling body
+			// looks like.** A seam plane that moved changes which half of the
+			// body is drawn, so a surface holding the old image is holding a body
+			// cut somewhere it no longer is. Four more mixes on two lanes, paid
+			// only because the plane is on every row — a scene with no portal in
+			// it folds in four zeroes and gets the same answer every frame, which
+			// is what the skip wants.
+			d = MixSignature(d, Pair(BitsOf(instance.SeamNormal.X), BitsOf(instance.SeamNormal.Y)));
+			a = MixSignature(a, Pair(BitsOf(instance.SeamNormal.Z), BitsOf(instance.SeamOffset)));
+			b = MixSignature(b, Pair(BitsOf(instance.SeamLight.X), BitsOf(instance.SeamLight.Y)));
+			c = MixSignature(c, Pair(BitsOf(instance.SeamLight.Z), 0u));
 		}
 
 		// Combined in a fixed order, so the four lanes give one value. The

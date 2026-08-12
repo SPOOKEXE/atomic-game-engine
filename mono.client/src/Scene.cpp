@@ -374,24 +374,21 @@ namespace client {
 			// mark a face nothing projects off.
 			//
 			// **One far-side copy and not two, which is what this used to
-			// draw.** `AppendPortalClones` and `AppendPortalGhosts` are the same
-			// answer reached two ways — one walks the world for things that can
-			// move, the other walks the draw list — and calling both put two
-			// copies of every straddling body on the far side, z-fighting each
-			// other. Worse, the ghost pass reads the list it is appending to, so
-			// it also ghosted the clones the line above had just added: a clone
+			// draw.** There were two passes producing it — one walked the world
+			// for things that can move, the other walked the draw list — and
+			// calling both put two copies of every straddling body on the far
+			// side, z-fighting each other. Worse, the list pass reads the list
+			// it appends to, so it also copied the entity pass's output: a copy
 			// sits across the *far* pane by construction, so it was mapped back
-			// again and a third copy landed on top of the original. What that
-			// looks like is a spare character standing near the hole.
+			// again and a third landed on top of the original. What that looks
+			// like is a spare character standing near the hole.
 			//
-			// **The clone pass is the one kept here**, because it walks entities
-			// and can therefore ask what a draw instance cannot: whether a thing
-			// is able to move at all. It visits `Motion` rows and character
-			// limbs, so the doorway's own wall is never cloned through the
-			// doorway. `client::CollectReplicatedInstances` keeps the ghost pass
-			// instead, and has to — a replica has a draw list and no simulation
-			// behind it.
-			(void)engine::scene::AppendPortalClones(store, drawList->Instances);
+			// **`CutAndCloneSeams` is the one pass now**, and it is the list one
+			// because only a list walk holds the row the original is in — which
+			// is what lets it *cut* the body at the plane rather than leave two
+			// whole copies straddling two panes. The same call serves a replica,
+			// which has a draw list and no simulation behind it.
+			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 
 			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 		}
@@ -841,12 +838,117 @@ namespace client {
 		return views.size();
 	}
 
+	namespace {
+		// Where a moved particle lives for the rest of the frame.
+		//
+		// **One buffer for every batch, and each batch takes a range of it.** The
+		// spans handed to the renderer have to survive until it has drawn them, so
+		// they cannot point at anything a loop iteration owns — and they cannot be
+		// appended to while an earlier span is outstanding unless the buffer is
+		// reserved. It is cleared once a frame and reserved to the pool's own size
+		// the first time anything crosses, so no batch's span is ever invalidated
+		// by a later batch's copy.
+		std::vector<engine::effects::ParticleInstance> &Carried() {
+			static thread_local std::vector<engine::effects::ParticleInstance> carried;
+			return carried;
+		}
+
+		// Moves every particle in a batch that has gone through a hole.
+		//
+		// **Moved and not copied**, which is the whole difference from what a
+		// straddling body needs. A body has a size and is cut by the plane; a
+		// particle is a point, wholly on one side or the other, and drawing it in
+		// both places would be two sparks where the author authored one.
+		//
+		// Returns the batch's own span when nothing crossed, so a scene with a
+		// hole in it and no particles near it copies nothing at all.
+		std::span<const engine::effects::ParticleInstance> CarryThroughSeams(
+			const std::vector<engine::scene::PortalSeam> &seams,
+			const std::vector<engine::scene::SeamTransform> &maps,
+			std::span<const engine::effects::ParticleInstance> particles
+		) {
+			bool any = false;
+			for (const engine::effects::ParticleInstance &particle : particles) {
+				for (const engine::scene::PortalSeam &seam : seams) {
+					if (!seam.Crosses && engine::scene::SeamCarries(seam, particle.Position)) {
+						any = true;
+						break;
+					}
+				}
+				if (any) {
+					break;
+				}
+			}
+
+			if (!any) {
+				return particles;
+			}
+
+			std::vector<engine::effects::ParticleInstance> &carried = Carried();
+			const size_t first = carried.size();
+
+			for (const engine::effects::ParticleInstance &particle : particles) {
+				engine::effects::ParticleInstance moved = particle;
+				for (size_t index = 0; index < seams.size(); index++) {
+					if (seams[index].Crosses ||
+						!engine::scene::SeamCarries(seams[index], particle.Position)) {
+						continue;
+					}
+
+					// `Point`, because a position moves and scales. The packed
+					// size is left alone: it is an unsigned normalised pair over a
+					// sixty-four metre ceiling, and unpacking and repacking it per
+					// particle to serve a mismatched pair of panes is a cost every
+					// matched pair would also pay for nothing.
+					moved.Position = maps[index].Point(particle.Position);
+					break;
+				}
+				carried.push_back(moved);
+			}
+
+			return {carried.data() + first, particles.size()};
+		}
+	}
+
 	size_t CollectParticleBatches(Store &store, std::vector<engine::render::ParticleBatch> &batches) {
 		batches.clear();
 
 		const auto *system = store.Resource<engine::effects::ParticleSystem>();
 		if (system == nullptr || system->Blocks.empty()) {
 			return 0;
+		}
+
+		// **The holes, so a spark that has gone through one is drawn in the room
+		// it went into.** A particle is a point rather than a body: it is on one
+		// side of a pane or the other and belongs wholly to whichever space that
+		// is, so it is *moved* rather than cut and copied. A torch carried into a
+		// doorway keeps the sparks this side of the plane where they are and the
+		// ones past it arrive in the far room, which is what stops a flame dying
+		// at the seam while the torch holding it does not.
+		//
+		// **A scratch copy, because the pool is the effects system's.** A batch is
+		// normally a span straight into `ParticleSystem::Instances` and nothing is
+		// copied at all; only an emitter with a particle actually through a hole
+		// pays for one, and it pays once per frame.
+		//
+		// **Reserved to the whole pool before anything is written, and that is
+		// load-bearing rather than tidy.** Every batch's span points into this
+		// buffer and every span has to survive until the renderer has drawn it, so
+		// a later batch that grew it would leave an earlier one pointing at freed
+		// memory. The pool is the ceiling on how much can ever be carried, so one
+		// reserve makes reallocation impossible rather than unlikely.
+		static thread_local std::vector<engine::scene::PortalSeam> seams;
+		const bool holed = engine::scene::GatherPortalSeams(store, seams) > 0;
+
+		static thread_local std::vector<engine::scene::SeamTransform> maps;
+		maps.clear();
+
+		Carried().clear();
+		if (holed) {
+			Carried().reserve(system->Instances.size());
+			for (const engine::scene::PortalSeam &seam : seams) {
+				maps.push_back(engine::scene::SeamMapping(seam));
+			}
 		}
 
 		// **Walked from the emitter column rather than from the block list**, and
@@ -878,6 +980,11 @@ namespace client {
 
 				engine::render::ParticleBatch batch;
 				batch.Particles = {system->Instances.data() + block.First, block.Live};
+
+				if (holed) {
+					batch.Particles = CarryThroughSeams(seams, maps, batch.Particles);
+				}
+
 				batch.Texture = emitter.Texture;
 				batch.FlipbookSide = static_cast<float>(engine::effects::FlipbookSide(emitter.Flipbook));
 				batch.ZOffset = emitter.ZOffset;
@@ -954,6 +1061,65 @@ namespace client {
 
 			lights.push_back(light);
 		});
+
+		// **And the same lamps again on the far side of every hole they reach.**
+		// A torch carried up to a portal lights the room beyond it, which is what
+		// "light works through a portal" means to somebody looking at one. The
+		// copy is the lamp mapped by the seam: `Point` for where it is, `Length`
+		// for how far it reaches, `Rotate` for which way a spot points — the same
+		// four applications a body, a camera and a ray go through, and mixing two
+		// of them up is a light that leads somewhere slightly wrong.
+		//
+		// **Where it lands is the same place the sub-camera stands**, which is
+		// what makes this right rather than plausible: the map carries the front
+		// of this pane to the *back* of the far one, so a lamp in front of a hole
+		// arrives behind the far pane, shining forward into the room the hole
+		// shows. A camera does exactly that and for exactly that reason.
+		//
+		// **It ignores the aperture, and is no less correct than the lamp it
+		// copies.** A transported light spills into the whole far room rather
+		// than the hole's beam — and a local light in this pipeline is unshadowed
+		// and already spills through every wall in the world. When local shadows
+		// arrive the copy inherits them for free, because it is an ordinary entry
+		// in the same buffer. `NON-EUCLIDEAN.md` Part V.3.
+		//
+		// **One hop.** A copy is never itself copied through a second seam: two
+		// hops is a geometric series inside a sixteen-entry budget, and a room
+		// two holes away is not lit by a candle.
+		{
+			static thread_local std::vector<engine::scene::PortalSeam> seams;
+			if (engine::scene::GatherPortalSeams(store, seams) > 0) {
+				const size_t own = lights.size();
+				for (size_t index = 0; index < own; index++) {
+					for (const engine::scene::PortalSeam &seam : seams) {
+						// A cross-world pane's destination is a camera stand-in
+						// in *this* world, so a lamp through one would light a
+						// spot a metre behind the pane rather than the world it
+						// leads to. The same rule the copy pass has.
+						if (seam.Crosses) {
+							continue;
+						}
+
+						// Out of reach of the hole itself, so nothing of it gets
+						// through — measured against the rectangle rather than
+						// its plane, or every lamp in a building would transport
+						// through every pane in it.
+						if (engine::scene::SeamDistance(seam, lights[index].Position) >=
+							lights[index].Range) {
+							continue;
+						}
+
+						const engine::scene::SeamTransform through = engine::scene::SeamMapping(seam);
+
+						engine::render::SceneLight copy = lights[index];
+						copy.Position = through.Point(lights[index].Position);
+						copy.Range = through.Length(lights[index].Range);
+						copy.Direction = through.Rotate(lights[index].Direction);
+						lights.push_back(copy);
+					}
+				}
+			}
+		}
 
 		if (lights.size() > engine::render::MAX_SCENE_LIGHTS) {
 			std::partial_sort(

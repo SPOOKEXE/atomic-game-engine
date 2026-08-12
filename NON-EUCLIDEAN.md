@@ -807,6 +807,39 @@ it, the pass that enforces it, and the test that would catch its absence — rat
 than as an intention. Where a contract is expensive, the cost is stated and the
 80/20 is named.
 
+## What has since landed
+
+**Five of the nine items in V.6 are built, and the four requirements are met
+except for one half of R2.** Each section below keeps its design and gains a
+statement of what it turned out to be. In short:
+
+| | Landed as | Verified by |
+|---|---|---|
+| **C1** the seam cut | `scene::CutOfSeam`, `scene::CutAndCloneSeams`, `DrawInstance::SeamNormal`/`SeamOffset`, a per-slot plane in `Renderer::Impl::DrawSlots`, a discard in `opaque.frag` **and** `shadow.frag` | `scene/tests/SurfaceCameras.cpp`; `examples/PortalSeam.luau` measured by `scripts/demos/capture-portal-seam.sh` — the straddler's pixels halve against a control bar, and an A/B with the cut disabled puts them back |
+| **C3a** the far half lit as one body | `DrawInstance::SeamLight`, `scene::SUN_DIRECTION` moved to `scene/Sunlight.hpp`, a per-slot direction in `DrawSlots` | The `front` still: the two halves of one bar are `(255,255,0)` on both sides of the glass and `(65,59,0)` on both sides of the shaded face |
+| **C3b** local lamps through a hole | `client::CollectLights`, one hop, gated on `SeamDistance < Range` | The `far` still: a cyan lamp in the near room lands a pool of light on the far room's red floor, and the far room has no lamp of its own |
+| **The portal image was tinted by its own pane** | `opaque.frag` no longer multiplies the portal branch by the instance tint | Every portal scene is brighter through the hole and unchanged around it; a grey pane was eating forty-five per cent of the far room |
+| **C2's 80/20**, the ground cast through a hole | Already built — `physics::RaycastThroughPortals`, used by `GroundCharacters` | `physics/tests/Query.cpp`, a downward ray through a horizontal pane finding the far room's floor |
+
+**And one field went away.** `DrawInstance::Movable` existed because the pass
+that copies a straddler reads a draw list and could not ask whether a thing was
+able to move. What replaced it is a better question asked of the same row —
+whether the body **fits through the hole** — which is arithmetic rather than a
+flag, and which also admits an anchored crate resting in a seam. It was also
+never set on the main client path, so the rule it carried had been dead there
+since the day it was written.
+
+**Two passes became one.** An entity walk and a draw-list walk both produced the
+far-side copy, and only a list walk can cut, because only it holds the row the
+original is in. `AppendPortalClones` keeps the entity walk for the one caller
+that cannot use a list one — a cross-world copy goes into *another world's*
+list, where this world's row is not.
+
+**What remains is V.6 items 5 to 9**, and the largest is stated honestly in
+V.3's third layer: a caster on one side of a hole still does not darken the floor
+on the other, and a seam half casts its shadow along the world's sun rather than
+along the one it is now lit by.
+
 ## V.0 The four requirements, restated as invariants
 
 | # | Requirement | Invariant |
@@ -868,21 +901,33 @@ and the clone keeps exactly that piece. The two meet at the plane with no overla
 and no gap. This is the same argument the oblique clip already makes for the
 room's own geometry; C1 extends it from the room to the things in it.
 
-### Where it goes
+### Where it goes, and where it went
 
 The awkward part is that the cut is **per instance** and every uniform in this
-pipeline is either per frame or per draw. Three options were weighed:
+pipeline is either per frame or per draw. Four options were weighed:
 
 | | Cost | Verdict |
 |---|---|---|
 | `gl_ClipDistance` from a per-instance vertex attribute | 16 bytes per instance on every instance in the world, plus a pipeline change | No. Pays for the world to serve a handful of rows |
-| A plane on `DrawInstance`, discarded in `opaque.frag` for every draw | A branch per fragment for the whole scene | No, for the same reason |
-| **A seam run: straddling halves pulled out of the main runs and submitted one at a time, with the plane in `LightingUniforms`** | One extra run in `ScenePlan`, N tiny draws where N is the number of straddling halves, one `vec4` in a uniform that is already pushed per draw | **Yes** |
+| A plane on `DrawInstance`, discarded in `opaque.frag` for every draw | A branch per fragment for the whole scene | Nearly — see below |
+| A seam run: straddling halves pulled out of the main runs and submitted one at a time | One extra run in `ScenePlan`, which the caster and mirror partitions would then have to agree with | No, and this was the plan until the draw loop was re-read |
+| **A per-slot plane, breaking the run where it changes** | One `glm::vec4` per slot, one comparison per instance in a loop that already makes three, one `vec4` in a uniform that is already pushed per draw | **Yes** |
 
-`LightingUniforms` is already pushed per draw call — `DrawSlots` has to write the
-submesh's base colour into it — so the plane is free to carry there. There are at
-most a handful of straddlers in a frame; a draw call each is nothing beside a
-whole scene pass per hole per level.
+**`Renderer::Impl::DrawSlots` already breaks a run wherever the mesh, the
+texture or the tag mask changes**, and it already pushes the whole lighting
+block per draw because it has to write the submesh's base colour into it. So the
+plane joins those three: `SlotSeam[]` beside `SlotMesh[]`, one more term in the
+run condition, one more field written into the uniform. Nothing in `ScenePlan`
+moved, the caster and mirror partitions are untouched, and a world with no hole
+in it holds one value throughout and never breaks a run on it.
+
+**That it applies to the shadow pass too was not free and is not optional.** A
+half drawn whole into the shadow map casts a whole body's shadow, so the near
+half of somebody in a doorway would darken the near floor as if none of them had
+gone through. `shadow.frag` was an empty `main` and now takes one `vec4` and
+discards on the same test; `shadow.vert` hands it a world position. The shadow
+pipeline declares one fragment uniform buffer and no samplers, which is why the
+push is a bare `vec4` rather than the whole lighting block.
 
 ### The types
 
@@ -911,26 +956,16 @@ This widens the row past its explicit padding, which
 `scene/tests/DrawInstance.cpp` asserts out loud. That assert is the design
 working: the row grows once, deliberately, with a test that says so.
 
-```cpp
-// scene/DrawInstance.hpp — ScenePlan
-
-//     [0,                 ReflectedCasters)  opaque, no mirror, casts
-//     [ReflectedCasters,  Reflected)         opaque, no mirror, no shadow
-//     [Reflected,         Seam)              opaque, cut at a seam   <-- new
-//     [Seam,              Opaque)            mirror, grouped by surface
-//     [Opaque,            Opaque + Transparent)  blended, far to near
-uint32_t Seam = 0;
-```
-
-**Between `Reflected` and the mirrors, not at the end**, because a seam half is
-opaque world geometry that a mirror and a portal must both see. Putting it after
-the surface runs would take it out of `plan.Reflected` — the exact range the
-portal pass draws — and a straddler would vanish from the picture in the hole,
-which is the artefact this whole section exists to remove.
+**`ScenePlan` did not gain a run, and that is the part worth recording.** The
+plan was to add one between `Reflected` and the mirrors, because a seam half is
+opaque world geometry that a mirror and a portal must both see — putting it after
+the surface runs would take it out of `plan.Reflected`, the exact range the portal
+pass draws, and a straddler would vanish from the picture in the hole. The
+per-slot plane makes the question moot: a half stays exactly where the ordering
+already put it, so it is inside `Reflected` for the same reason its original is.
 
 ```cpp
-// render — LightingUniforms
-// A fourth vec4 field, or Surface.zw + one more, depending on what fits:
+// render — LightingUniforms, and the shadow pass's own one-field block
 vec4 SeamPlane;   // xyz normal, w offset; xyz == 0 disables
 ```
 
@@ -949,10 +984,11 @@ must stay small — see C4 below.
 
 ### The producer
 
-`CloneThroughSeams` already computes everything needed. It gains three lines: set
-the seam plane on the clone it appends, and set it on the **original's row** — which
-means it must edit the list rather than only append to it. That is a change of
-shape and is worth naming:
+The pass that appends the copy already computes everything needed. It gains a
+few lines: set the seam plane on the copy, and set it on the **original's row** —
+which means it must edit the list rather than only append to it, and therefore
+that it must be the *list* walk rather than the entity one. That is what
+collapsed two passes into one:
 
 ```cpp
 // scene/SurfaceCameras.hpp
@@ -1114,16 +1150,21 @@ right and it is answering a different question from the proxy:
 So: keep the threshold as the ownership rule it already is, and add the proxy for
 support. They are not alternatives.
 
-### The 80/20, if the full version is too much
+### The 80/20, which was already built
 
-**Ground rays only.** `physics::RaycastThroughPortals` already continues a ray out
-of the far side of a hole, and `GroundCharacters` already casts down. Wiring the
-ground cast through the portal gives a character standing in a doorway a floor on
-whichever side is under it — which is the whole of the R1 failure a player
-notices — without a proxy, a broadphase filter or an impulse map. It leaves walls
-and ceilings unhandled, so a body can push its shoulders through a far-side wall.
+**Ground rays only, and this turned out to be done.**
+`physics::RaycastThroughPortals` continues a ray out of the far side of a hole,
+and `physics::GroundCharacters` already casts down through it — the comment in
+that function says so and `physics/tests/Query.cpp` pins it with a downward ray
+through a horizontal pane finding the far room's floor. So a character standing
+in a doorway is grounded by whichever floor is under its feet, on either side,
+today.
 
-Take the 80/20 first, and only build the proxy when a scene needs a far-side wall.
+**What is left is everything that is not a character's feet**: walls, ceilings,
+and any rigid body that is not a humanoid. A crate resting in a seam is held by
+the near room's floor and nothing else, so a far room whose floor is a stud
+higher lets it clip. That is the proxy, and it is worth building when a scene
+needs a far-side wall rather than before.
 
 ### What would catch it
 
@@ -1175,10 +1216,26 @@ seam run from C1 already submits these instances one at a time with their own
 `LightingUniforms` — the `Direction` field is right there.
 
 Cost: zero new passes, zero new textures, one extra field written on a uniform
-that is already being pushed. **Do this first.**
+that is already being pushed.
+
+**Built.** `DrawInstance::SeamLight` carries the mapped direction and
+`DrawSlots` writes it into `LightingUniforms::Direction` for the slots that have
+one. The sun had to move out of the renderer's anonymous namespace to be mapped
+at all — `scene/Sunlight.hpp` — which is a third of V.6 item 8 done as a side
+effect.
+
+**Two things had to be right and only one of them was lighting.** The join was
+still a bright half meeting an olive half after the mapped sun landed, and the
+cause was that `opaque.frag` multiplied the portal image by the *pane's own
+tint*: a grey pane was eating forty-five per cent of the far room, so everything
+seen through a hole was darker than everything beside it. Tinting is right for a
+mirror and wrong for a hole — a hole is not glass — and the portal branch stopped
+doing it. With both changes the two halves of one bar sample identically on
+either side of the glass.
 
 It does not fix the *shadow* the clone casts, which is still the world map's,
-still from `L`. That is Layer 3.
+still from `L`. That is Layer 3, and C3a makes that mismatch slightly louder
+rather than quieter: the far half is now lit by `R · L` and shadowed along `L`.
 
 ### Layer 2 — local lamps shine through the hole
 
@@ -1228,6 +1285,17 @@ Three rules the implementation must state:
 
 Cost: one walk over the seams per light, capped by the same sixteen. No new
 uniform, no new texture, no new pass.
+
+**Built**, in `client::CollectLights`, before the cut to `MAX_SCENE_LIGHTS` so a
+transported lamp competes for a slot on the same nearest-to-the-eye rule as any
+other. `examples/PortalSeam.luau` is the demonstration: one cyan lamp in the near
+room, no lamp at all in the far one, and a pool of cyan light on the far room's
+red floor centred on the pane.
+
+**Where the copy lands is the same place the sub-camera stands**, and that is
+what makes it right rather than plausible: the map carries the front of a pane to
+the *back* of the far one, so a lamp in front of a hole arrives behind the far
+pane, shining forward into the room the hole shows.
 
 ### Layer 3 — the sun's occlusion crosses the hole
 
@@ -1303,20 +1371,44 @@ through `M`, one 2048² texture, four matrices, four taps per fragment. That is
 the same order as the existing shadow pass, times four, and it is why this is
 Layer 3 rather than Layer 1.
 
-**The prerequisite nobody will enjoy.** `SUN_DIRECTION` is a `constexpr` in
-`Renderer.cpp`. Layer 3 needs the direction in `scene` — a `scene::Sun`
-component or a field on the world's `Lighting` — because the beams are fitted
-from it and the fit belongs in `graph`, which cannot reach into the renderer's
-anonymous namespace. **That refactor is worth doing on its own merits and should
-not be smuggled in under a portal ticket.**
+**The prerequisite is half done.** `SUN_DIRECTION` was a `constexpr` in
+`Renderer.cpp` and is `scene::SUN_DIRECTION` now, because C3a had to map it. What
+is still missing is a `Sun` a world can *author* — `scene::Gravity` is the shape —
+and that needs `render::Renderer::Render` to be handed one rather than assuming
+it, which is a signature every host calls.
+
+**And the design got cheaper while it was written down.** The version above maps
+the near room's casters into the far room, which needs a second instance buffer
+holding transformed copies of them — a whole upload path for a shadow. It is not
+necessary: **map the fragment back instead of the casters forward.**
+
+For a far-side fragment `p`, the occluders are whatever the near room has along
+the mapped light. So:
+
+* fit one orthographic matrix per hole along `L' = R⁻¹ · L`, to the *near* pane's
+  rectangle extruded along `-L'` — a beam, in the near room's own coordinates;
+* render the ordinary caster range into it, **unmapped**, because they are already
+  where they need to be;
+* in `opaque.frag`, take `p' = M⁻¹(p)`, reject it if it is on the near pane's own
+  side of the plane, project it through the beam matrix and sample.
+
+That reuses the existing shadow pass exactly — same instance buffer, same caster
+range, a different vertex uniform and a different viewport — and costs one mat4,
+one inverse-map mat4 and one plane per beam in a fragment uniform block, four
+beams in one atlas, and one tap each. **The frustum is still the aperture mask**,
+which is the trick the whole layer turns on.
+
+The one new cost the fragment side pays is that the lookup cannot ride
+`inLightPosition`, which the vertex shader computes from the world light: a beam
+lookup starts from `inWorldPosition` and does its own matrix products.
 
 ### What each layer is worth
 
-| Layer | Fixes | Cost | Order |
+| Layer | Fixes | Cost | State |
 |---|---|---|---|
-| C3a — shade the seam half by `M.Rotate(L)` | A body in a hole looks like one body | 4 lines, no new pass | **first** |
-| C3b — transport local lamps | A lamp near a hole lights the far room | ~40 lines in `client`, no new pass | second |
-| C3c — beam shadow maps | One shadow across the seam; a caster darkens the far floor | A render target class, a uniform, a shader loop, and a sun that lives in `scene` | last |
+| C3a — shade the seam half by `M.Rotate(L)` | A body in a hole looks like one body | One field on the row, one branch in `DrawSlots` | **built** |
+| C3b — transport local lamps | A lamp near a hole lights the far room | ~40 lines in `client`, no new pass | **built** |
+| C3c — beam shadow maps | A caster darkens the floor on the other side; a seam half shadowed by what shadows its original | A shadow atlas, a fragment uniform block, a loop of four in `opaque.frag` | open |
 
 ### What would catch it
 
@@ -1341,16 +1433,15 @@ where the plane is.
 | 4 | The eye comes to rest inside the pane | **closed** — `ClearOfPanes`, a hair for a hole and a hand for a window |
 | 5 | The picture is a frame stale on the crossing frame | **closed for same-world** — the recursive pass; a cross-world pane is still one frame behind and is the only thing that is |
 | 6 | The image goes coarse against the glass | **closed** — the sub-render is the screen's own projection, sampled by `gl_FragCoord` |
-| 7 | The two halves of a straddler are two whole bodies | **open — V.1** |
-| 8 | The two halves are lit differently | **open — V.3, layer 1** |
-| 9 | The far half stands on nothing | **open — V.2** |
+| 7 | The two halves of a straddler are two whole bodies | **closed** — `CutAndCloneSeams` cuts both at the plane, `opaque.frag` and `shadow.frag` discard past it |
+| 8 | The two halves are lit differently | **closed** — `SeamLight` carries `R · L`, and the portal image stopped being tinted by the pane's own colour, which was the larger half of it |
+| 9 | The far half stands on nothing | **closed for a character's feet** — `GroundCharacters` casts through the hole. Open for walls, ceilings and anything that is not a humanoid — V.2 |
 | 10 | **The pane's own thickness** | **open, small.** A `Part` is a box, and the portal image is applied to the *whole instance* — including its four edge faces. A one-stud-thick pane shows a one-stud band of the far room around its rim, at the wrong parallax. The contract is that a hole's pane is drawn as its **face** and not its box, or that thickness is authored below a stated fraction of the shorter half-axis and the engine warns above it. The cheaper half — the warn — is worth doing today |
 | 11 | **The recursion terminus** | **open, small.** At depth zero the pane draws its own material, which is a flat panel at the end of a corridor of holes. The demo's answer is a pink quad, deliberately wrong; a shipped world wants the far room's fog or a plain shade, behind the same flag the face markers are |
 | 12 | **The far room's own geometry may reach into the near room's half-space** | **open, authoring.** The oblique clip keeps the half-space beyond the mapped pane, so anything of the *near* room that happens to lie in that half-space is drawn inside the picture. Placing regions apart is the standing answer; `TagFilter` is the mechanism when they cannot be. This is the "overlapping space" limit from Part I, unchanged |
 | 13 | **Blended geometry inside a hole is sorted for the wrong eye** | **open, known.** There is one scene range and its transparent tail is sorted once, from the first surface camera when there is one. A sort per sub-camera would be a sort per hole per level |
 
-Seams 10 and 11 are the two that are small enough to take now and are not
-blocked on anything above them.
+Seams 10 and 11 are the two small ones left. Neither is blocked on anything.
 
 ## V.5 The disappearance audit — R4
 
@@ -1363,38 +1454,41 @@ broken in a way nobody can grep for.
 |---|---|---|---|
 | 1 | `graph::CullAndBound` against the eye frustum | Nothing from a portal — the scene passes read `State->SceneInstances`, which is the **uncalled** list, and `plan.Reflected` is a range of it. Only the screen's own draw is culled | **correct, and worth stating**: the portal pass costs the whole world per hole per level, which is the price of not culling. See #9 |
 | 2 | `scene::KeepLoaded` | An instance naming a mesh that has not arrived | Correct — a wrong cube reads as a broken asset. Applied to the foreign range too, so a far world does not come up as a field of cubes |
-| 3 | `CloneThroughSeams`' component requirement | An entity missing any of `Motion`/`CharacterLimb`, `Transform`, `PreviousTransform`, `Bounds`, `Visual`, `SurfaceAppearance`, `Tags`, `Rendered` | **Open.** A body without a `Tags` row is silently not cloned. The set should be the minimum the clone actually reads, and anything else defaulted |
+| 3 | The copy pass's component requirement | Nothing now | **Closed by becoming a list walk.** It reads the draw list, so anything the collector published is a candidate and no component set can silently exclude one |
 | 4 | The `break` after one seam | A body inside two panes gets one far half | Stated. A body in two holes at once is at the line where two holes meet |
 | 5 | `COINCIDENT_COPY` | A copy landing within a hair of its original | Correct — that is a duplicate, not a far half |
-| 6 | `SeamStraddled`'s size rule in the **ghost** pass | Anything whose reach exceeds the pane's doubled diagonal | Correct **only** because `DrawInstance::Movable` now does the real work. The size rule is a second guard on a path that already has one and should be re-read when the ghost pass next changes |
+| 6 | `CutOfSeam::Fits` | Anything wider than the hole's own footprint | **Correct, and it is now the only rule.** A body that does not fit is neither cut nor copied, which is what it did before any of this existed; a body that does fit gets both. It replaced a size heuristic and a mobility flag, each of which was wrong somewhere |
 | 7 | `scene::MAX_SURFACES` = 16, shared between mirrors, cross-world windows and holes | The seventeenth pane | Logged (`ENGINE_WARN` on a duplicate or out-of-range index). A hole that loses its slot draws flat |
 | 8 | `MAX_PORTAL_DEPTH` = 4, `PortalDepth` = 2 by default | The fifth level of a chain | Stated; the terminus is seam #11 |
 | 9 | `graph::VisiblePane` per hole per level | A hole not in the sub-camera's frustum | Correct, and it is the demo's occlusion query on the CPU. **The one thing it cannot see is a hole visible only in a mirror inside a hole**, which resolves a frame later |
 | 10 | **Particles, ribbons and billboards do not cross a seam** | Every effect, at the plane | **Open, and the most visible of these.** `CollectParticleBatches` has no seam pass, so a torch's flame vanishes as it is carried through a doorway while the torch does not. The fix is `CloneThroughSeams` for a `ParticleBatch`, which is the same map applied to a different row |
-| 11 | Anchored bodies are never cloned | A crate authored `Anchored` in a seam | Deliberate — the walk is `Motion` and `CharacterLimb`, which is what keeps a floor out of the room next door. `PortalShadow.luau` documents it as the reason its crate is unanchored |
+| 11 | ~~Anchored bodies are never copied~~ | Nothing now | **Closed.** The rule was `Motion` and `CharacterLimb`, which kept a floor out of the room next door and also refused an anchored crate resting in a seam. `Fits` does the first without the second |
 
-Items 3, 10 and 11 are the open ones. **10 is the one a player sees.**
+**Item 10 is the one left, and it is the one a player sees.** A torch carried
+through a doorway keeps its flame on one side of the plane and loses it on the
+other, because a `ParticleBatch` is a span of a system-owned buffer rather than a
+row in the draw list — so the map that copies a body has nothing to copy.
 
 ## V.6 Order of work
 
 Ranked by what a player notices per line of code, and by what unblocks what.
 
-| | Work | Fixes | Blocked on |
+| | Work | Fixes | State |
 |---|---|---|---|
-| 1 | **C1 — the seam cut** (the seam plane, the `Seam` run, the discard, `CutAndCloneSeams`) | R1, and the duplicate every free-standing pane shows | nothing |
-| 2 | **C3a — shade the far half by `M.Rotate(L)`** | R2's most visible half; a body in a hole looks like one body | C1's seam run (it is where the uniform is pushed) |
-| 3 | **C2's 80/20 — the ground cast through the hole** | R1's floor; a body in a doorway stands on whichever floor is under it | nothing |
-| 4 | **C3b — transported lamps** | R2; a light carried into a hole lights the far room | nothing |
-| 5 | **Seam #10 — particles across the seam** | R4's most visible drop | C1 (they want the same cut) |
-| 6 | **Seam #11 and #12 — the terminus and the thickness warn** | R3's two small ones | nothing |
-| 7 | **C2 in full — the kinematic proxy** | R1's walls and ceilings | a broadphase filter |
-| 8 | **A `scene::Sun`** | Nothing on its own; unblocks 9 | nothing, and it is worth doing anyway |
-| 9 | **C3c — beam shadow maps** | R2 completely; one shadow across a seam | 8 |
+| 1 | **C1 — the seam cut** (the plane on the row, the per-slot run break, the discard in both fragment shaders, `CutAndCloneSeams`) | R1, and the duplicate every free-standing pane shows | **done** |
+| 2 | **C3a — shade the far half by `M.Rotate(L)`** | R2's most visible half; a body in a hole looks like one body | **done**, and it needed the pane's tint off the portal image to show |
+| 3 | **C2's 80/20 — the ground cast through the hole** | R1's floor; a body in a doorway stands on whichever floor is under it | **was already done** |
+| 4 | **C3b — transported lamps** | R2; a light carried into a hole lights the far room | **done** |
+| 5 | **Seam #10 — particles across the seam** | R4's most visible drop | open. A `ParticleBatch` is a span of a system-owned buffer, so there is no row to copy — the map has to reach the emitter rather than the draw list |
+| 6 | **Seam #11 and #12 — the terminus and the thickness warn** | R3's two small ones | open, and neither is blocked |
+| 7 | **C2 in full — the kinematic proxy** | R1's walls and ceilings | open. Needs a broadphase filter and an impulse map |
+| 8 | **A `scene::Sun` a world can author** | Nothing on its own; unblocks 9 | a third done — the direction is `scene::SUN_DIRECTION` now; what is left is making it a resource and handing it to `Renderer::Render` |
+| 9 | **C3c — beam shadow maps** | The rest of R2: a caster darkens the floor on the other side of a hole | open, and cheaper than this document first thought — see V.3 |
 
-**Do not start 9 before 1 through 4 are in.** Every one of them is cheaper, and
-three of the four remove artefacts that would otherwise still be in the frame
-when the shadows land — which is how a large change gets blamed for a small one's
-bug.
+**1 through 4 were taken in that order and it held.** Each was cheaper than the
+one after it, and two of them turned up bugs that would otherwise have been
+blamed on 9: the portal image was being multiplied by its pane's own grey, and
+`DrawInstance::Movable` had never been set on the path that mattered.
 
 ---
 
@@ -1448,8 +1542,22 @@ The scenes in this engine that exercise each part:
 
 | Scene | Shows |
 |---|---|
-| `examples/Hallway.luau` | The smallest proof a portal is a hole. `_G.HALLWAY_VIEW` names a still |
+| `examples/Hallway.luau` | The smallest proof a portal is a hole |
 | `examples/Portals-1-world.luau` | Three rooms 300 apart and six holes, two of which no adjacency explains |
-| `examples/PortalShadow.luau` | The straddler: two halves, two shadows, and no shadow crossing the seam. `_G.SHADOW_VIEW` names a still. **This is the scene Part V.1 and V.3 are measured against** |
+| `examples/PortalSeam.luau` | **The scene V.1 and V.3 are measured against.** A ten-stud bar through a ten-stud hole beside a control bar, on a free-standing pane with nothing to hide an overhang behind, and one cyan lamp in the near room so the far room's light can only have come through the hole |
+| `examples/PortalShadow.luau` | A straddler on a checkered floor in two colours, which is where the shadow that is still wrong is read off |
 | `examples/ImmersivePortals.luau` | The cross-world window, which does not recurse |
 | `examples/PortalProbe.luau` | The authoring invariant: the half-space the clip keeps contains the middle of the room the hole names |
+
+**How a still is taken, and the mechanism that never worked.** Every one of these
+scenes used to say a global named its viewpoint — `_G.HALLWAY_VIEW` and its
+siblings — and **`_G` is readonly in the script sandbox**, so nothing outside a
+scene could ever set one. They read a `local VIEW` line now, and
+`scripts/demos/capture-portal-seam.sh` substitutes it into a copy before running
+the client with `--frames` and `--capture`. That is the only mechanism that works
+from a shell, and it is now the one the files describe.
+
+`scripts/demos/portal-seam-report.py` turns a capture into two numbers: the
+straddler's coloured pixels against the control's, which halve when the cut is
+working, and how much of the near room's cyan lamp lands on the far room's red
+floor.

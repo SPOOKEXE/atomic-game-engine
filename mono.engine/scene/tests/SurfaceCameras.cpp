@@ -994,21 +994,26 @@ TEST_CASE("a portal swallows only what goes through the hole", "[scene][surfacec
 	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 }
 
-TEST_CASE("a body standing in a portal is drawn on the far side too", "[scene][surfacecameras]") {
-	// **Half a character is what a hole without this looks like.** A pane is
+TEST_CASE("a body standing in a portal is cut and drawn on the far side", "[scene][surfacecameras]") {
+	// **Half a character is what a hole without this looks like, and two whole
+	// characters is what the first attempt at it looked like.** A pane is
 	// passable — the case below is what makes it so — so a body may straddle
 	// one, and when it does it is one set of parts in one place: whole in the
-	// room it came from and absent from the room it is walking into. The picture
-	// through the glass shows a doorway with nobody in it while the body is
-	// visibly in the doorway.
+	// room it came from and absent from the room it is walking into.
 	//
-	// Four things are silently wrong if the clone is written by eye, and this
-	// covers all of them:
+	// Appending a copy answers that and opens the other half of it: both copies
+	// are then drawn *whole*, so the original hangs out of the back of the pane
+	// and the copy hangs out of the far pane. A thick wall hides both, which is
+	// why it survived; a free-standing pane shows two crates in a doorway.
 	//
-	//   * a body clear of the pane is not cloned at all;
-	//   * a body in the pane is cloned onto the *far* pane, turned;
-	//   * the pane itself is never cloned, or a portal recurses into itself;
-	//   * a cross-world pane clones nothing, because its `Destination` is a
+	// Five things are silently wrong if this is written by eye, and this covers
+	// all of them:
+	//
+	//   * a body clear of the pane is not copied at all;
+	//   * a body in the pane is copied onto the *far* pane, turned;
+	//   * both halves carry complementary planes, so their union is one body;
+	//   * a pane is never copied through itself, or a portal recurses into it;
+	//   * a cross-world pane copies nothing here, because its `Destination` is a
 	//     camera stand-in in this world rather than a place.
 	//
 	// The geometry is this file's: pane A at the origin with its `Front` face at
@@ -1021,41 +1026,46 @@ TEST_CASE("a body standing in a portal is drawn on the far side too", "[scene][s
 	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
 	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
 
-	// What the draw-list query asks for. `Rendered` is written by
-	// `SyncRendered` from the hierarchy in a real world; set directly here
-	// because what is under test is the seam and not the visibility walk.
-	const auto drawable = [&](const Entity entity, const Vector3 &at) {
-		mirror.World.Set<Transform>(entity, Transform{CFrame(at)});
-		mirror.World.Set<engine::scene::PreviousTransform>(
-			entity, engine::scene::PreviousTransform{CFrame(at)}
-		);
-		mirror.World.Set<Bounds>(entity, Bounds{Vector3{0.5f, 1.0f, 0.5f}});
-		mirror.World.Set<engine::scene::Motion>(entity, engine::scene::Motion{});
-		mirror.World.Set<Visual>(entity, Visual{});
-		mirror.World.Set<engine::scene::SurfaceAppearance>(entity, engine::scene::SurfaceAppearance{});
-		mirror.World.Set<engine::scene::Tags>(entity, engine::scene::Tags{});
-		mirror.World.Set<engine::scene::Rendered>(entity, engine::scene::Rendered{1, {}});
+	// **A draw list rather than entities, because this pass reads one.** Only a
+	// list walk holds the row the original is in, which is what lets it cut the
+	// body as well as copy it — see `CutAndCloneSeams`. A row is a frame and a
+	// box, so a test builds one directly.
+	const auto row = [](const Vector3 &at, const Vector3 &half, int8_t surface) {
+		engine::scene::DrawInstance instance;
+		instance.Frame = CFrame(at);
+		instance.HalfExtent = half;
+		instance.Surface = surface;
+		return instance;
 	};
 
-	// Well clear of the pane, and walking nowhere near it.
-	const Entity away =
-		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Away");
-	drawable(away, Vector3{0.0f, 0.0f, 30.0f});
+	const Vector3 BODY{0.5f, 1.0f, 0.5f};
 
+	// Well clear of the pane.
 	std::vector<engine::scene::DrawInstance> drawn;
-	CHECK(engine::scene::AppendPortalClones(mirror.World, drawn) == 0);
-	CHECK(drawn.empty());
+	drawn.push_back(row(Vector3{0.0f, 0.0f, 30.0f}, BODY, -1));
 
-	// **In the pane, which is the state a clone exists for and is not a
+	CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 0);
+	CHECK(drawn.size() == 1);
+	CHECK(drawn[0].SeamNormal == Vector3{});
+
+	// **In the pane, which is the state a copy exists for and is not a
 	// crossing.** `CrossPortals` asks whether a segment changed sides between
 	// two ticks; this body has not moved at all and is standing in the hole,
 	// which it can do for as long as it likes.
-	const Entity inside =
-		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Inside");
-	drawable(inside, Vector3{0.0f, 0.0f, -0.1f});
-
+	//
+	// The pane itself is in the list too, carrying its slot, which is how this
+	// pass knows a hole from a thing in one.
 	drawn.clear();
-	REQUIRE(engine::scene::AppendPortalClones(mirror.World, drawn) == 1);
+	drawn.push_back(row(Vector3{0.0f, 0.0f, -0.1f}, BODY, -1));
+	drawn.push_back(row(Vector3{0.0f, 0.0f, 0.0f}, Vector3{8.0f, 4.5f, 0.2f}, 0));
+
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+
+	// **The pane is not among them**, though a pane straddles its own plane by
+	// construction and fits its own rectangle exactly. One copy, from the one
+	// body, appended at the end.
+	REQUIRE(drawn.size() == 3);
+	CHECK(drawn[1].SeamNormal == Vector3{});
 
 	// **At the far pane**, which is the whole claim: the body is in pane A and
 	// its copy is in pane B, a hundred units away. The same map a crossing body
@@ -1068,25 +1078,61 @@ TEST_CASE("a body standing in a portal is drawn on the far side too", "[scene][s
 	// lands on is the map's own: a pane's front hemisphere goes to the far pane's
 	// back one, so a centre a tenth *short* of A's face copies to a tenth *past*
 	// B's, and the copy pokes out of B by exactly what has pushed through A.
-	CHECK_THAT(drawn[0].Frame.Position.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
-	CHECK_THAT(drawn[0].Frame.Position.Z, Catch::Matchers::WithinAbs(-0.3f, TOLERANCE));
+	CHECK_THAT(drawn[2].Frame.Position.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK_THAT(drawn[2].Frame.Position.Z, Catch::Matchers::WithinAbs(-0.3f, TOLERANCE));
 
 	// Its own size and appearance, because it is the same body seen from
 	// somewhere else rather than a marker standing in for one.
-	CHECK(drawn[0].HalfExtent == Vector3{0.5f, 1.0f, 0.5f});
+	CHECK(drawn[2].HalfExtent == Vector3{0.5f, 1.0f, 0.5f});
 
-	// **Never a surface itself.** A cloned pane would claim the slot its
+	// **Never a surface itself.** A copied pane would claim the slot its
 	// original writes, and the renderer keeps the first camera to name an index
 	// — so the two would fight over one texture from frame to frame.
-	CHECK(drawn[0].Surface == -1);
+	CHECK(drawn[2].Surface == -1);
 
-	// **And the pane is not among them**, though a pane straddles its own plane
-	// by construction. One clone, from the one body.
+	// **The two planes, which are the cut.** The original keeps the front of
+	// pane A — its `Front` face points along -Z — and the copy keeps the front
+	// of pane B. Their union is the body and their intersection is empty, which
+	// is what stops the seam being two bodies.
+	CHECK_THAT(drawn[0].SeamNormal.Z, Catch::Matchers::WithinAbs(-1.0f, TOLERANCE));
+	CHECK_THAT(drawn[0].SeamOffset, Catch::Matchers::WithinAbs(0.2f, TOLERANCE));
+
+	// A point a tenth in front of A's face is kept by the original and refused
+	// by the copy's plane once carried through the map, and a point a tenth
+	// behind it is the other way round. Stated as the two dot products rather
+	// than as coordinates, because that is what the shader tests.
+	const auto keptBy = [](const engine::scene::DrawInstance &half, const Vector3 &at) {
+		return at.Dot(half.SeamNormal) >= half.SeamOffset;
+	};
+
+	const Vector3 nearHalf{0.0f, 0.0f, -0.3f};
+	const Vector3 farHalf{0.0f, 0.0f, -0.1f};
+
+	CHECK(keptBy(drawn[0], nearHalf));
+	CHECK(!keptBy(drawn[0], farHalf));
+
+	// The same two points carried onto the far side, where the answers swap.
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) >= 1);
+	const engine::scene::SeamTransform through = engine::scene::SeamMapping(seams[0]);
+
+	CHECK(!keptBy(drawn[2], through.Point(nearHalf)));
+	CHECK(keptBy(drawn[2], through.Point(farHalf)));
+
+	// **Nothing wider than the hole is cut**, because a single plane is exact
+	// only inside the pane's rectangle and would otherwise slice a body where
+	// the hole is not. A slab the size of a room straddles this pane and is left
+	// alone: no copy, no cut, and the room next door keeps its own floor.
+	drawn.clear();
+	drawn.push_back(row(Vector3{0.0f, 0.0f, -0.1f}, Vector3{50.0f, 0.5f, 50.0f}, -1));
+
+	CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 0);
 	CHECK(drawn.size() == 1);
+	CHECK(drawn[0].SeamNormal == Vector3{});
 
-	// **A cross-world pane clones nothing here.** `Portal::DestinationWorld`
+	// **A cross-world pane copies nothing here.** `Portal::DestinationWorld`
 	// makes `Destination` a stand-in that tells the camera where to look, so a
-	// clone through one would appear a stand-in's distance behind the pane the
+	// copy through one would appear a stand-in's distance behind the pane the
 	// body is walking into rather than in the world it is walking to. The host
 	// answers that half — `client::AttachForeignSurfaces` — and it is the same
 	// distinction that stops `CrossPortals` moving anybody through one.
@@ -1095,11 +1141,27 @@ TEST_CASE("a body standing in a portal is drawn on the far side too", "[scene][s
 	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, crossing);
 
 	drawn.clear();
-	CHECK(engine::scene::AppendPortalClones(mirror.World, drawn) == 0);
+	drawn.push_back(row(Vector3{0.0f, 0.0f, -0.1f}, BODY, -1));
+	CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 0);
 
-	// The host asks for that one by name, and gets it.
-	drawn.clear();
-	CHECK(engine::scene::AppendPortalClones(mirror.World, 0, drawn) == 1);
+	// The host asks for that one by name, and gets it — from the store, because
+	// the far world's list is where it belongs and this world's row is not in
+	// it. That path appends and does not cut.
+	const Entity inside =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Inside");
+	mirror.World.Set<Transform>(inside, Transform{CFrame(Vector3{0.0f, 0.0f, -0.1f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		inside, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, -0.1f})}
+	);
+	mirror.World.Set<Bounds>(inside, Bounds{BODY});
+	mirror.World.Set<engine::scene::Motion>(inside, engine::scene::Motion{});
+	mirror.World.Set<Visual>(inside, Visual{});
+	mirror.World.Set<engine::scene::SurfaceAppearance>(inside, engine::scene::SurfaceAppearance{});
+	mirror.World.Set<engine::scene::Tags>(inside, engine::scene::Tags{});
+	mirror.World.Set<engine::scene::Rendered>(inside, engine::scene::Rendered{1, {}});
+
+	std::vector<engine::scene::DrawInstance> foreign;
+	CHECK(engine::scene::AppendPortalClones(mirror.World, 0, foreign) == 1);
 
 	// **And nobody is moved through it**, which is the bug the two authorities
 	// produced: the engine put the body at the stand-in and the world change put
@@ -1604,6 +1666,45 @@ TEST_CASE("a body goes through the nearest hole, not the first one gathered", "[
 	CHECK_THAT(carried.Point(Vector3{0.0f, 0.0f, -2.0f}).X, Catch::Matchers::WithinAbs(200.0f, 1e-2f));
 }
 
+TEST_CASE("a point is on one side of a hole or the other", "[scene][surfacecameras]") {
+	// **A particle is a point, and a point is not a body.** A body has a size,
+	// straddles a plane and is cut by it; a spark is wholly in one space or the
+	// other, so it is *moved* through a hole rather than copied and cut. Drawing
+	// it in both places would be two sparks where the author authored one, and
+	// `client::CollectParticleBatches` is the caller this exists for — a torch
+	// carried into a doorway whose flame dies at the seam is the artefact.
+	//
+	// The geometry is this file's: pane A at the origin with its `Front` face at
+	// `z = -0.2`, so "through" is `z > -0.2`.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+
+	// In front of the face, which is the room the pane is in.
+	CHECK_FALSE(engine::scene::SeamCarries(seams[0], Vector3{0.0f, 0.0f, -2.0f}));
+
+	// Past it, inside the rectangle: through.
+	CHECK(engine::scene::SeamCarries(seams[0], Vector3{0.0f, 0.0f, 1.0f}));
+
+	// **Past the plane and beside the hole is not through it**, which is the one
+	// thing that separates this from a plane test. The rectangle is eight by
+	// four and a half, so nine studs across is outside it — and unlike
+	// `SeamStraddled` there is no widening, because a point has no reach to
+	// widen by.
+	CHECK_FALSE(engine::scene::SeamCarries(seams[0], Vector3{9.0f, 0.0f, 1.0f}));
+	CHECK_FALSE(engine::scene::SeamCarries(seams[0], Vector3{0.0f, 5.0f, 1.0f}));
+
+	// And the edge of the rectangle is inside it, so a spark exactly on the rim
+	// goes through rather than falling between the two answers.
+	CHECK(engine::scene::SeamCarries(seams[0], Vector3{8.0f, 0.0f, 1.0f}));
+}
+
 TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecameras]") {
 	// **A floor is not standing in a doorway, and the straddle test used to
 	// think it was.** Every check in that test widens by the body's own reach,
@@ -1625,10 +1726,11 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 	// in every hole — no clone in the far room, no half a body in the picture,
 	// which is the artefact this whole mechanism exists to remove.
 	//
-	// So the rule lives only where it is needed — the pass that reads a draw
-	// list and cannot ask whether a thing is able to move — and it is stated
-	// loosely, against the pane's diagonal. `SeamStraddled` has no size rule at
-	// all, because its callers filter by query.
+	// So the rule is not about size at all any more: it is whether the body
+	// **fits through the hole's own footprint**, which `CutOfSeam::Fits`
+	// answers with the body's oriented box against the pane's half-axes. A room
+	// is far wider than its own doorway and is refused; a person centred in one
+	// is not. `SeamStraddled` has no size rule of its own and never needed one.
 	std::vector<engine::scene::PortalSeam> seams;
 	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
 
@@ -1643,27 +1745,44 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 	doorway.Second = Vector3{0.0f, 2.5f, 0.0f};
 	CHECK(engine::scene::SeamStraddled(doorway, Vector3{0.0f, 0.0f, -0.2f}, 2.9f));
 
-	// The pass that draws the far half keeps its own guard, because it is the
-	// one that cannot tell a floor from a person.
+	// The pass that draws the far half is where the guard lives, because it is
+	// the one that would otherwise lay a floor across the room next door.
 	std::vector<engine::scene::DrawInstance> drawn;
 
-	// **Says it is the room**, which is now how this pass is told rather than
-	// something it infers from size.
+	// A slab the size of a room, straddling this pane. Fifty studs will not go
+	// through a sixteen-stud hole, so it is neither copied nor cut.
 	engine::scene::DrawInstance slab;
 	slab.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
 	slab.HalfExtent = Vector3{50.0f, 0.5f, 50.0f};
-	slab.Movable = false;
 	drawn.push_back(slab);
 
-	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 0);
+	CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 0);
+	CHECK(drawn[0].SeamNormal == Vector3{});
 
+	// A person-sized body in the same hole, which does fit and therefore does
+	// get both.
 	engine::scene::DrawInstance body;
 	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
 	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
-	body.Movable = true;
 	drawn.push_back(body);
 
-	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 1);
+	CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	CHECK(drawn[1].SeamNormal != Vector3{});
+
+	// **And the doorway case that broke the size rule the first time.** A pane
+	// four by five, and a character whose bounding sphere is bigger than its
+	// shorter half-axis: refused by any rule stated against a radius, admitted
+	// by one stated against the box, which is what a person walking through a
+	// doorway needs.
+	engine::scene::PortalSeam narrow = seams[0];
+	narrow.First = Vector3{2.0f, 0.0f, 0.0f};
+	narrow.Second = Vector3{0.0f, 2.5f, 0.0f};
+
+	const engine::scene::SeamTransform through = engine::scene::SeamMapping(narrow);
+	const engine::scene::SeamCut cut = engine::scene::CutOfSeam(
+		narrow, through, CFrame(Vector3{0.0f, 0.0f, -0.2f}), Vector3{1.0f, 2.0f, 1.0f}
+	);
+	CHECK(cut.Fits);
 }
 
 TEST_CASE("the near plane and the clip follow the eye into a hole", "[scene][surfacecameras]") {
@@ -1888,12 +2007,14 @@ TEST_CASE("a far-side copy that lands on its original is not drawn", "[scene][su
 	engine::scene::DrawInstance body;
 	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
 	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
-	body.Movable = true;
 	drawn.push_back(body);
 
-	// The map takes this body onto itself, so there is nothing to add.
-	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 0);
+	// The map takes this body onto itself, so there is nothing to add — and
+	// nothing to cut either, because a body with no far half must not lose its
+	// near one.
+	CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 0);
 	CHECK(drawn.size() == 1);
+	CHECK(drawn[0].SeamNormal == Vector3{});
 }
 
 TEST_CASE("a character standing in a hole is drawn on both sides of it", "[scene][surfacecameras]") {
@@ -1929,26 +2050,62 @@ TEST_CASE("a character standing in a hole is drawn on both sides of it", "[scene
 	(void)engine::scene::SyncRendered(mirror.World);
 	(void)engine::scene::PoseCharacters(mirror.World);
 
+	// The draw list a collector would build from this world, which is what the
+	// pass reads. Built here by hand because `client::CollectInstances` is a
+	// tier away and what is under test is the seam.
 	std::vector<engine::scene::DrawInstance> drawn;
-	const size_t clones = engine::scene::AppendPortalClones(mirror.World, drawn);
+	mirror.World.Each<const Transform, const Bounds, const Visual, const engine::scene::Rendered>(
+		[&drawn](
+			Entity,
+			const Transform &placement,
+			const Bounds &bounds,
+			const Visual &visual,
+			const engine::scene::Rendered &
+		) {
+			engine::scene::DrawInstance row;
+			row.Frame = placement.Frame;
+			row.HalfExtent = bounds.HalfExtent;
+			row.Surface = visual.Surface;
+			drawn.push_back(row);
+		}
+	);
+
+	const size_t rows = drawn.size();
+	REQUIRE(rows > 0);
+
+	const size_t clones = engine::scene::CutAndCloneSeams(mirror.World, drawn);
 
 	// **More than one, because a character is not one box.** The exact count is
-	// how many limbs happen to reach the plane and is the rig's business; that
-	// it is none is the bug.
+	// how many limbs happen to reach the plane *and fit through it* and is the
+	// rig's business; that it is none is the bug.
 	CHECK(clones > 0);
-	REQUIRE(drawn.size() == clones);
+	REQUIRE(drawn.size() == rows + clones);
 
 	// **And on the far side**, which is the half that says the copy is a copy
 	// through the hole rather than a second one beside the original.
 	// Within a rig's own width of the far pane rather than on it: an arm sits a
 	// stud and a half off the middle, and it is still in the far room.
-	for (const engine::scene::DrawInstance &copy : drawn) {
+	for (size_t index = rows; index < drawn.size(); index++) {
+		const engine::scene::DrawInstance &copy = drawn[index];
 		CHECK_THAT(copy.Frame.Position.X, Catch::Matchers::WithinAbs(100.0f, 3.0f));
 
-		// Never a surface of its own, or a cloned mirror would fight the
+		// Never a surface of its own, or a copied mirror would fight the
 		// original for the slot.
 		CHECK(copy.Surface == -1);
+
+		// **Cut, and cut the other way from its original.** A limb standing in
+		// a doorway is one limb: the near half is drawn here and the far half
+		// is drawn there, and the two planes are each other's image.
+		CHECK(copy.SeamNormal != Vector3{});
 	}
+
+	// Every limb that got a copy was cut in place as well, which is the half a
+	// list walk exists to do.
+	size_t cut = 0;
+	for (size_t index = 0; index < rows; index++) {
+		cut += drawn[index].SeamNormal == Vector3{} ? 0u : 1u;
+	}
+	CHECK(cut == clones);
 }
 
 TEST_CASE("the far half of a body reaches the picture in the pane", "[scene][surfacecameras]") {
@@ -1987,15 +2144,12 @@ TEST_CASE("the far half of a body reaches the picture in the pane", "[scene][sur
 	engine::scene::DrawInstance body;
 	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
 	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
-	body.Movable = true;
 	drawn.push_back(body);
 
-	const size_t clones = engine::scene::AppendPortalClones(mirror.World, drawn);
-	// Nothing in this world carries a `Motion` or a limb, so the clone comes
-	// from the ghost pass rather than the entity walk — which is the path a
-	// replica takes and the one that has to agree.
-	CHECK(clones == 0);
-	REQUIRE(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 1);
+	// Nothing in this world carries a `Motion` or a limb, and it does not
+	// matter: what decides whether a thing standing in a hole is copied is
+	// whether it fits through the hole, which this body does.
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
 
 	std::vector<uint32_t> order;
 	const engine::scene::ScenePlan plan = engine::scene::OrderScene(drawn, Vector3{0.0f, 0.0f, 20.0f}, order);

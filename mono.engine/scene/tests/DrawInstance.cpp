@@ -494,17 +494,18 @@ TEST_CASE("a signature is stable for a list that has not changed", "[scene][draw
 	CHECK(engine::scene::SignatureOf(twin) == first);
 }
 
-TEST_CASE("the last byte of the row is a field now, and it counts", "[scene][drawinstance]") {
-	// **This case used to assert the opposite, and the field it guarded is
-	// gone.** The last byte was explicit padding — there so the object
-	// representation is deterministic the day a world crosses a process — and
-	// the assertion was that a signature must not move with it, because a
-	// signature that depended on padding would be depending on nothing.
+TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]") {
+	// **A signature answers "would drawing this again produce the same image",
+	// and where a body is cut is half of what a straddling body looks like.** A
+	// surface holding an image drawn against the old plane is holding a body cut
+	// somewhere it no longer is.
 	//
-	// `Movable` took that byte at v0.15, so the row is the same width and the
-	// byte now means something: whether a copy of this instance may be drawn on
-	// the far side of a portal. That changes what the far room draws, which
-	// changes the image, which is exactly what this signature answers.
+	// This case has been three things. It began as the assertion that a
+	// signature must *not* move with the row's trailing padding, because
+	// depending on padding is depending on nothing. `Movable` then took that
+	// byte and it asserted the opposite. `Movable` is gone — what may be copied
+	// through a hole is what fits through it, which is arithmetic rather than a
+	// flag — and the seam plane is what occupies the question now.
 	DrawInstance instance;
 	instance.Frame = CFrame(Vector3(3.0f, 1.0f, -2.0f));
 	instance.Mesh = Name("drawinstance_test.Wall");
@@ -512,8 +513,15 @@ TEST_CASE("the last byte of the row is a field now, and it counts", "[scene][dra
 
 	const uint64_t before = engine::scene::SignatureOf(std::span(&instance, 1));
 
-	instance.Movable = true;
-	CHECK(engine::scene::SignatureOf(std::span(&instance, 1)) != before);
+	instance.SeamNormal = Vector3(0.0f, 0.0f, -1.0f);
+	instance.SeamOffset = 0.25f;
+	const uint64_t cut = engine::scene::SignatureOf(std::span(&instance, 1));
+	CHECK(cut != before);
+
+	// And so does the sun it is lit by, which is the other half of one body
+	// across a seam.
+	instance.SeamLight = Vector3(0.0f, -1.0f, 0.0f);
+	CHECK(engine::scene::SignatureOf(std::span(&instance, 1)) != cut);
 
 	// **The type is packed today, and that is why this is an assert rather than
 	// a claim in a comment.** `core::Name` is a four-byte id and `Color3` ends
@@ -526,8 +534,14 @@ TEST_CASE("the last byte of the row is a field now, and it counts", "[scene][dra
 	// stops working. The signature is field-wise and cannot develop that; this
 	// assert is here so the next person to widen the type is told which
 	// assumption they just changed.
+	//
+	// **It survived the seam fields**, which is the case worth recording: the
+	// single-byte fields — `Surface`, `CastShadow`, `Alpha` — sit inside one
+	// four-byte word, so a four-aligned `Vector3` lands immediately after them
+	// and opens nothing. A fourth byte-sized field would still fit; a fifth is
+	// what would widen the row.
 	static_assert(
-		sizeof(DrawInstance) == offsetof(DrawInstance, Movable) + sizeof(DrawInstance::Movable),
+		sizeof(DrawInstance) == offsetof(DrawInstance, SeamLight) + sizeof(DrawInstance::SeamLight),
 		"DrawInstance has grown padding. scene::SignatureOf is field-wise and is unaffected, "
 		"but anything reading this type as bytes is now reading uninitialised memory."
 	);

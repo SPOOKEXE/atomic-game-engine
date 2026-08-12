@@ -146,38 +146,71 @@ namespace engine::scene {
 		// the mode that keeps a hair card opaque and out of that pass entirely.
 		AlphaMode Alpha = AlphaMode::Opaque;
 
-		// Whether this instance is a thing in the world rather than the world.
+		// **`Movable` was here and is gone.** It said whether an instance was a
+		// thing in the world rather than the world, because the pass that copies
+		// a body onto the far side of a hole reads a draw list and could not ask.
+		// What replaced it is a better question asked of the same row: whether
+		// the body **fits through the hole**, which `scene::CutOfSeam` answers
+		// from the box and the pane's own rectangle. A room does not fit through
+		// its own doorway and a person does, which is the distinction `Movable`
+		// was standing in for — and unlike `Movable` it also admits an anchored
+		// crate resting in a seam, which is as much a thing standing in the hole
+		// as anything that walked there.
 		//
-		// **What `AppendPortalGhosts` cannot otherwise ask.** That pass reads a
-		// draw list, where an instance is a frame and a box and nothing else, so
-		// it had to guess from size whether something straddling a pane was a
-		// body worth copying to the far side or the room the pane is cut into.
-		// Every guess it could make was wrong somewhere: measured against the
-		// pane's shorter half-axis it refused every character, because a person
-		// is very nearly as big as the doorway they walk through; measured
-		// loosely enough to admit one, it admitted the floor — and a floor
-		// copied through a doorway is the far room's ground laid over the near
-		// one, meeting it along a hard straight line through the middle of the
-		// scene.
+		// `Alpha` and `CastShadow` took the padding bytes before it; `Texture`
+		// and `TagMask` did not fit and the type grew by eight for them. The
+		// fields below are the addition that widened it again, and the static
+		// assert in `tests/DrawInstance.cpp` is what says so out loud.
+
+		// The half-space this instance keeps, as a world plane: the unit normal
+		// and the offset along it, keeping `dot(p, SeamNormal) >= SeamOffset`.
 		//
-		// The collector knows and the pass does not, so the collector says.
-		// `client::CollectReplicatedInstances` sets it from `Motion` and
-		// `CharacterLimb`, which is the same pair `scene::CloneThroughSeams`
-		// walks for the same reason.
+		// **A body standing in a portal is one body cut at the plane, not two
+		// bodies.** `CutAndCloneSeams` appends a copy of a straddler on the far
+		// side of the hole, and without a cut both copies are drawn whole: the
+		// original hangs out of the back of the pane into the room it is walking
+		// into, and the copy hangs out of the far pane back into the room it came
+		// from. A pane set into a thick wall hides both overhangs, which is why
+		// that survived three scenes; a free-standing pane shows two crates in a
+		// doorway. The near half and the far half meet at the plane with no
+		// overlap and no gap, and what fills the missing half of each is the
+		// picture in the hole.
 		//
-		// **False by default, which is the safe direction.** A host filling this
-		// struct by hand has not thought about portals, and the failure of a
-		// missing copy is half a body in one doorway while the failure of a
-		// wrong one is a second floor across the room.
+		// **A zero normal means whole**, which is every instance in an ordinary
+		// scene — the test in `opaque.frag` is behind that check, and the
+		// renderer breaks a draw run only where the plane changes, so a world
+		// with no portal in it pays nothing at all.
+		//
+		// **Two fields rather than one four-vector, because `core` has no
+		// `Vector4`** and a type the whole engine then has to have an opinion
+		// about is a poor price for a plane that lives on one row.
 		//
 		// @since v0.15
-		bool Movable = false;
+		core::Vector3 SeamNormal{0.0f, 0.0f, 0.0f};
+		float SeamOffset = 0.0f;
 
-		// Took the last byte of explicit padding, which is what named padding is
-		// for — a field that fits goes in the hole rather than widening the row.
-		// `Alpha` took the one before it; `Texture` and `TagMask` did not fit and
-		// the type grew by eight for them. The next addition widens it, and the
-		// static assert in `tests/DrawInstance.cpp` is what says so out loud.
+		// Which way the sun comes from *for this half*, or zero for the world's.
+		//
+		// **A copy turned by `R` has to be lit by `R · L`.** The far half of a
+		// body standing in a hole is the near half mapped through the seam, so
+		// its normals are `R · n` — and shading those with the world's own `L`
+		// gives a body whose two halves are lit by two suns that differ by
+		// exactly the turn between the panes. On a quarter-turn pair that is a
+		// bright face meeting an olive one down the middle of a crate, which
+		// reads as the copy being a different object.
+		//
+		// `R · L` makes `dot(R n, R L)` equal `dot(n, L)` for every normal, so
+		// the two halves shade identically and the join is invisible. It is the
+		// cheapest half of light through a hole and the only one that needs
+		// nothing from the shadow pipeline — `NON-EUCLIDEAN.md` Part V.3.
+		//
+		// **The ambient and the upward bounce are not turned**, and cannot be
+		// without turning the world's up as well. They are the two terms that do
+		// not depend on the light's direction, so what is left is a fraction of
+		// a tone across the seam rather than a face.
+		//
+		// @since v0.15
+		core::Vector3 SeamLight{0.0f, 0.0f, 0.0f};
 	};
 
 	// Produces the order a draw list should be submitted in.

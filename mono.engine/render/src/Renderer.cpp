@@ -8,6 +8,7 @@
 #include <engine/render/TextureTable.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Tagging.hpp>
 
 #include <SDL3/SDL_gpu.h>
@@ -202,6 +203,70 @@ namespace engine::render {
 			// be silently zeroed by the next draw — a bug that presents as "the
 			// effect only works on some parts".
 			glm::vec4 Mirror{0.0f, 0.0f, 0.0f, 0.0f};
+
+			// The face normal of the pane this draw is, for a portal, and a zero
+			// vector for everything else.
+			//
+			// **Because a pane is a box and a hole is a rectangle.** The image is
+			// chosen per draw and a draw is a whole instance, so a pane's four
+			// edge faces read the sub-render as well — a hole comes out as wide
+			// as the slab it is cut in, with a band of the far room running round
+			// its rim at a parallax nothing else in the frame has. A thin pane
+			// hides that in a fraction of a stud; a portal set in a wall does not.
+			//
+			// So the rim falls through to the pane's own material, which is what
+			// a frame is, and the front and back faces show the picture — both of
+			// them, because a hole is a hole from either side and the warp already
+			// answers which.
+			glm::vec4 PaneNormal{0.0f, 0.0f, 0.0f, 0.0f};
+
+			// The half-space this draw keeps: xyz a unit world normal, w the offset
+			// along it. A zero normal keeps everything, which is every draw in a
+			// world with no portal in it.
+			//
+			// **Written by `DrawSlots` from the slot's own plane**, like the flipbook
+			// cell and unlike the fields the caller sets, because the run it belongs
+			// to is chosen by that plane — a caller passing one here would be
+			// overwritten by the slot's.
+			glm::vec4 SeamPlane{0.0f, 0.0f, 0.0f, 0.0f};
+		};
+
+		// How many holes may transport a shadow in one frame.
+		//
+		// **Four, in one 2x2 atlas, chosen by which holes are nearest the eye.**
+		// Every fragment tests every beam, so the count is a cost per pixel and
+		// not per hole; four is what a corridor needs and is two matrix products
+		// and a tap each. Anything past it is logged rather than dropped
+		// silently — a shadow that stops crossing when a fifth pane comes on
+		// screen reads as the feature not working.
+		constexpr uint32_t MAX_PORTAL_BEAMS = 4;
+
+		// What `opaque.frag` needs to look a fragment up in one hole's beam.
+		//
+		// **Two matrices and a plane per beam, and the second matrix is the
+		// surprising one.** The casters are left in the near room and the
+		// *receiver* is mapped back to it — see `NON-EUCLIDEAN.md` Part V.3 —
+		// so a far-side fragment goes through `Back` before it goes through
+		// `Light`, and the plane is what says it was on the far side to begin
+		// with.
+		struct BeamUniforms {
+			// The beam's own view-projection, in the near room's coordinates.
+			glm::mat4 Light[MAX_PORTAL_BEAMS];
+
+			// The far side back to the near one: the partner pane's own warp,
+			// which is this pane's exact inverse.
+			glm::mat4 Back[MAX_PORTAL_BEAMS];
+
+			// The near pane's plane, as xyz normal and w offset. A mapped
+			// fragment on the wrong side of it is in the near room already and
+			// is shadowed by the world map rather than by this.
+			glm::vec4 Plane[MAX_PORTAL_BEAMS];
+
+			// Where this beam sits in the atlas: xy the scale, zw the offset.
+			glm::vec4 Region[MAX_PORTAL_BEAMS];
+
+			// x: how many of the four are in use.
+			glm::vec4 Count{0.0f, 0.0f, 0.0f, 0.0f};
 		};
 
 		// Mix renderer-owned view data into the scene signature.
@@ -302,8 +367,20 @@ namespace engine::render {
 		// The one directional light this pipeline has.
 		//
 		// One directional light; shadow fitting and shading share its direction.
-		constexpr glm::vec3 SUN_DIRECTION{-0.45f, -0.8f, -0.4f};
-		constexpr glm::vec4 SUN_AMBIENT{0.26f, 0.28f, 0.34f, 1.0f};
+		// **`scene::SUN_DIRECTION`, converted rather than repeated.** The number
+		// moved to `scene` when `CutAndCloneSeams` had to map it through a seam —
+		// the far half of a body in a hole is lit by `R · L` — and a second
+		// spelling here would be two suns that agree until somebody edits one.
+		//
+		// **The default, and no longer the answer.** `Renderer::SetSun` is what a
+		// host calls with the world's `scene::Sun`, and a host that never calls it
+		// draws with exactly what this engine has always drawn with.
+		constexpr glm::vec3 SUN_DIRECTION{
+			scene::SUN_DIRECTION.X, scene::SUN_DIRECTION.Y, scene::SUN_DIRECTION.Z
+		};
+		constexpr glm::vec4 SUN_AMBIENT{
+			scene::SUN_AMBIENT.R, scene::SUN_AMBIENT.G, scene::SUN_AMBIENT.B, 1.0f
+		};
 
 		// Measured shadow-map resolution for the current scene scale.
 		constexpr uint32_t SHADOW_RESOLUTION = 2048;
@@ -476,6 +553,16 @@ namespace engine::render {
 		// would be written once and read once.
 		uint32_t PortalDepth = 2;
 
+		// The world's directional light, as the shader wants it.
+		//
+		// **Held rather than taken per frame, for `SetSurfaceBounces`' reason**:
+		// it is a property of what is being drawn rather than of this frame, and
+		// threading it through `Render` would put it in a signature every host
+		// calls to say the same thing on every frame. `client::PushSunlight` is
+		// what writes it from `scene::SunOf`.
+		glm::vec3 Sun{SUN_DIRECTION};
+		glm::vec4 Ambient{SUN_AMBIENT};
+
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
 		//
@@ -487,6 +574,22 @@ namespace engine::render {
 
 		// Each slot's tag mask, for the surface passes that filter by one.
 		std::vector<uint32_t> SlotTags;
+
+		// The half-space each slot keeps, as a world plane: xyz the unit normal,
+		// w the offset, and a zero normal for "whole".
+		//
+		// **A per-slot plane rather than a run of its own in the plan.** A body
+		// standing in a portal is cut at the pane and its far half is drawn in the
+		// room beyond; the cut is per instance and every uniform here is per frame
+		// or per draw, so it is carried the way the tag mask is — the run breaks
+		// where the plane changes, exactly as it breaks where the mesh does. A
+		// world with no hole in it holds one value throughout and pays one compare
+		// per instance for it. See `scene::DrawInstance::SeamNormal`.
+		std::vector<glm::vec4> SlotSeam;
+
+		// Which way the sun comes from for each slot, or a zero vector for the
+		// world's own. `scene::DrawInstance::SeamLight` carries the argument.
+		std::vector<glm::vec4> SlotSeamLight;
 
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
@@ -878,6 +981,19 @@ namespace engine::render {
 		SDL_GPUTexture *ShadowTexture = nullptr;
 		SDL_GPUSampler *ShadowSampler = nullptr;
 
+		// The beams: up to four holes' worth of shadow, in one 2x2 atlas.
+		//
+		// **One texture rather than four, because a fragment binds samplers and
+		// not maps.** Every fragment tests every live beam, so four textures
+		// would be four more samplers on every draw in the frame to serve a
+		// handful of pixels near a doorway. The atlas costs one sub-rectangle per
+		// beam in the uniform and one viewport per beam in the pass.
+		SDL_GPUTexture *BeamTexture = nullptr;
+
+		// What every pass pushes, whether or not anything crossed. A count of
+		// zero is the ordinary case and the shader's loop ends immediately.
+		BeamUniforms Beams;
+
 		// --- the surface target ----------------------------------------------
 		//
 		// Surface targets use colour and depth, with ping-pong textures to prevent
@@ -1044,6 +1160,13 @@ namespace engine::render {
 		SDL_GPUSampler *SurfaceSampler = nullptr;
 
 		bool EnsureShadow();
+
+		// The beam atlas, made on the frame a hole first transports a shadow.
+		//
+		// **Shares `ShadowSampler`**, because it is the same kind of map read the
+		// same way — a depth texture clamped at the edge, with the fragment
+		// shader range-checking anyway.
+		bool EnsureBeams();
 
 		// The one sampler every offscreen scene texture is read through.
 		//
@@ -1236,12 +1359,12 @@ namespace engine::render {
 			// count above records.
 			"opaque.frag",
 			SDL_GPU_SHADERSTAGE_FRAGMENT,
-			3,
-			2
+			4,
+			3
 		);
 
 		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
@@ -1662,12 +1785,18 @@ namespace engine::render {
 				// undefined behaviour on some backends and a validation error on
 				// others. Those two are genuinely absent features rather than
 				// defaulted ones, and their uniform flags still say so.
+				// **A fourth sampler for the beams**, bound from the member
+				// rather than passed in: which holes transport a shadow is a
+				// property of the frame and not of one draw, and threading it
+				// through would put it in a signature five passes call.
 				const SDL_GPUTextureSamplerBinding samplers[] = {
 					{shadow != nullptr ? shadow : FallbackTexture, shadowSampler},
 					{surface != nullptr ? surface : FallbackTexture, surfaceSampler},
 					{sampled != nullptr ? sampled : FallbackTexture, Textures.Sampler()},
+					{BeamTexture != nullptr ? BeamTexture : FallbackTexture,
+					 ShadowSampler != nullptr ? ShadowSampler : shadowSampler},
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 3);
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 4);
 
 				LightingUniforms uniforms = *lighting;
 
@@ -1701,7 +1830,35 @@ namespace engine::render {
 				// lost the precision these effects step by, and a scan line that
 				// coarsens over an afternoon is a bug nobody would reproduce.
 				uniforms.Mirror.y = static_cast<float>(std::fmod(AnimationSeconds, 1000.0));
+
+				// **The slot's own plane, and the run above guarantees they agree.**
+				// A run is broken wherever the plane changes, so every instance in
+				// this draw is cut the same way — which is what makes a per-instance
+				// fact expressible in a per-draw uniform.
+				uniforms.SeamPlane = SlotSeam[slot];
+
+				// **The far half of a body in a hole is lit by the sun turned the way
+				// the body was.** Its normals are the near half's rotated by the
+				// seam, so the world's own direction would shade one body with two
+				// suns a quarter apart. Set per draw for the same reason the plane is,
+				// and only where the row asked for it — a zero vector is every
+				// instance that is not half of something.
+				const glm::vec3 mapped{SlotSeamLight[slot]};
+				if (glm::dot(mapped, mapped) > 0.0f) {
+					uniforms.Direction = glm::vec4{mapped, 0.0f};
+				}
+
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
+			} else {
+				// **Depth only, and it still has to know where the body is cut.** A
+				// half drawn whole into the shadow map casts a whole body's shadow,
+				// so the near half of somebody in a doorway would darken the floor as
+				// if none of them had gone through. `shadow.frag` takes the plane and
+				// discards on the same test `opaque.frag` makes; it is one `vec4`
+				// per draw and no samplers, which is why this is a push of its own
+				// rather than the whole lighting block.
+				const glm::vec4 plane = SlotSeam[slot];
+				SDL_PushGPUFragmentUniformData(command, 0, &plane, sizeof(plane));
 			}
 
 			SDL_DrawGPUIndexedPrimitives(
@@ -1728,9 +1885,17 @@ namespace engine::render {
 			const MeshEntry *const mesh = SlotMesh[slot];
 			const core::Name texture = SlotTexture[slot];
 
+			// **And the seam plane joins the mesh and the texture in what ends a
+			// run.** It is a per-draw uniform, so two instances cut differently
+			// cannot share a draw; a world with no hole in it holds one value
+			// throughout and never breaks on it.
+			const glm::vec4 seam = SlotSeam[slot];
+			const glm::vec4 seamLight = SlotSeamLight[slot];
+
 			uint32_t run = 1;
 			while (slot + run < first + count && SlotMesh[slot + run] == mesh &&
-				   SlotTexture[slot + run] == texture &&
+				   SlotTexture[slot + run] == texture && SlotSeam[slot + run] == seam &&
+				   SlotSeamLight[slot + run] == seamLight &&
 				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
 				run++;
 			}
@@ -2424,6 +2589,40 @@ namespace engine::render {
 		return EnsureDepthIn(DepthTexture, DepthWidth, DepthHeight, width, height);
 	}
 
+	bool Renderer::Impl::EnsureBeams() {
+		if (BeamTexture != nullptr) {
+			return true;
+		}
+
+		// The shadow map's own sampler and format, so the two are read the same
+		// way — and `EnsureShadow` is what makes both.
+		if (!EnsureShadow()) {
+			return false;
+		}
+
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+		info.format = DepthFormat;
+		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+		// **The world map's resolution for the whole atlas**, so one beam gets a
+		// quarter of it in each direction. A beam covers one doorway rather than
+		// a scene, so a quarter of the texels over a hundredth of the area is
+		// several times the density the world map has.
+		info.width = SHADOW_RESOLUTION;
+		info.height = SHADOW_RESOLUTION;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		BeamTexture = SDL_CreateGPUTexture(Device, &info);
+		if (!BeamTexture) {
+			ENGINE_ERROR("portal beam texture: {}", SDL_GetError());
+			return false;
+		}
+		return true;
+	}
+
 	bool Renderer::Impl::EnsureShadow() {
 		if (ShadowTexture != nullptr) {
 			return true;
@@ -2936,6 +3135,9 @@ namespace engine::render {
 		if (State->ShadowTexture) {
 			SDL_ReleaseGPUTexture(device, State->ShadowTexture);
 		}
+		if (State->BeamTexture) {
+			SDL_ReleaseGPUTexture(device, State->BeamTexture);
+		}
 		if (State->ShadowSampler) {
 			SDL_ReleaseGPUSampler(device, State->ShadowSampler);
 		}
@@ -3095,6 +3297,23 @@ namespace engine::render {
 			// targets per level per slot.
 			State->PortalDepth = std::min(depth, MAX_PORTAL_DEPTH);
 		}
+	}
+
+	void Renderer::SetSun(const core::Vector3 &direction, const core::Color3 &ambient) {
+		if (State == nullptr) {
+			return;
+		}
+
+		// **Normalised by the caller and checked here.** `scene::SunOf` already
+		// does it, and a direction of zero arriving from anywhere else would
+		// shade every surface by `dot(n, 0)` — a world that goes flat grey with
+		// nothing in the log to say why.
+		const float length = direction.Magnitude();
+		if (length > 0.0f) {
+			State->Sun = glm::vec3{direction.X / length, direction.Y / length, direction.Z / length};
+		}
+
+		State->Ambient = glm::vec4{ambient.R, ambient.G, ambient.B, 1.0f};
 	}
 
 	uint32_t Renderer::PortalDepth() const {
@@ -3699,9 +3918,8 @@ namespace engine::render {
 		// Built here rather than before the cull only because the cull is now
 		// what produces the bound. Nothing between the two reads it, and its
 		// first use is the shadow pass.
-		const glm::mat4 lightViewProjection = graph::FitDirectionalLight(
-			sceneBounds, core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
-		);
+		const glm::mat4 lightViewProjection =
+			graph::FitDirectionalLight(sceneBounds, core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z});
 
 		// Ordered over the survivors, so the two passes are two ranges of one
 		// buffer. Opaque first in whatever order the world produced, then the
@@ -4084,6 +4302,8 @@ namespace engine::render {
 					State->SlotMesh.resize(uploadCount);
 					State->SlotTexture.resize(uploadCount);
 					State->SlotTags.resize(uploadCount);
+					State->SlotSeam.resize(uploadCount);
+					State->SlotSeamLight.resize(uploadCount);
 
 					// **The mesh is resolved once and used twice.** `ToGpu` needs
 					// it to stretch the instance into its `Size` box and the draw
@@ -4094,6 +4314,14 @@ namespace engine::render {
 						State->SlotMesh[slot] = &mesh;
 						State->SlotTexture[slot] = instance.Texture;
 						State->SlotTags[slot] = instance.TagMask;
+						State->SlotSeam[slot] = glm::vec4{
+							instance.SeamNormal.X,
+							instance.SeamNormal.Y,
+							instance.SeamNormal.Z,
+							instance.SeamOffset
+						};
+						State->SlotSeamLight[slot] =
+							glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
 						return &mesh;
 					};
 
@@ -4367,6 +4595,200 @@ namespace engine::render {
 			SDL_EndGPURenderPass(pass);
 		}
 
+		// --- portal beams ----------------------------------------------------
+		//
+		// **A hole carries occlusion as well as a picture.** Both rooms already
+		// have the world's sun, so what a portal transports is not light but the
+		// *absence* of it: a caster standing in front of a hole darkens the floor
+		// beyond it, and a body cut at the seam is shadowed by whatever shadows
+		// its other half. Adding a second contribution instead would double-light
+		// every floor near a doorway.
+		//
+		// **The casters are left where they are and the receiver is mapped
+		// back**, which is the whole reason this is affordable. The obvious
+		// arrangement renders the near room's casters *transformed* into the far
+		// room, and that needs a second instance buffer holding a mapped copy of
+		// the world. Mapping the other way needs none: a far-side fragment goes
+		// through `Back` into the near room and is looked up there, where the
+		// casters already are. `NON-EUCLIDEAN.md` Part V.3 is the derivation.
+		//
+		// **The frustum is the aperture.** `graph::FitPortalLight` fits the sides
+		// of the box to the pane's own rectangle, so a fragment the beam does not
+		// reach projects outside `0..1` and the lookup already reads that as lit.
+		// There is no rectangle test in the shader because the matrix is one.
+		State->Beams = BeamUniforms{};
+
+		if (havePortals && haveShadow && State->EnsureBeams()) {
+			ENGINE_PROFILE_CAT("portal beams", core::ProfileCategory::Render);
+
+			// The holes nearest the eye, because every fragment tests every live
+			// beam and four is what a corridor needs.
+			struct Beam {
+				const PortalView *Pane = nullptr;
+				const PortalView *Partner = nullptr;
+				float Distance = 0.0f;
+			};
+
+			Beam ordered[scene::MAX_SURFACES];
+			size_t candidates = 0;
+
+			for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+				const PortalView *const portal = portalOf[slot];
+				if (portal == nullptr || portal->Partner < 0) {
+					continue;
+				}
+
+				// **A pane with no partner in this frame's set carries nothing**,
+				// because the map back is the partner's own warp — one map per
+				// pane, and a pair's two are each other's inverse. Deriving an
+				// inverse here would be a second arithmetic to get wrong.
+				const PortalView *const partner = portalOf[static_cast<uint8_t>(portal->Partner)];
+				if (partner == nullptr) {
+					continue;
+				}
+
+				ordered[candidates++] = Beam{
+					portal,
+					partner,
+					scene::RectangleDistance(
+						portal->Centre, portal->First, portal->Second, cameraFrame.Position
+					)
+				};
+			}
+
+			std::sort(ordered, ordered + candidates, [](const Beam &left, const Beam &right) {
+				return left.Distance < right.Distance;
+			});
+
+			if (candidates > MAX_PORTAL_BEAMS) {
+				// **Logged rather than dropped quietly.** A shadow that stops
+				// crossing when a fifth pane comes on screen reads as the feature
+				// not working at all, which is a much harder thing to look for
+				// than a line saying which holes were left out.
+				ENGINE_WARN(
+					"{} holes could carry a shadow and only {} may; the farther ones do not",
+					candidates,
+					MAX_PORTAL_BEAMS
+				);
+			}
+
+			const auto live = static_cast<uint32_t>(std::min<size_t>(candidates, MAX_PORTAL_BEAMS));
+
+			const auto half = static_cast<float>(SHADOW_RESOLUTION / 2);
+
+			for (uint32_t index = 0; index < live; index++) {
+				const Beam &beam = ordered[index];
+
+				State->Beams.Light[index] = graph::FitPortalLight(
+					sceneBounds,
+					beam.Pane->Centre,
+					beam.Pane->First,
+					beam.Pane->Second,
+					core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z}
+				);
+
+				State->Beams.Back[index] = scene::SeamMatrix(beam.Partner->Warp);
+
+				State->Beams.Plane[index] = glm::vec4{
+					beam.Pane->Normal.X,
+					beam.Pane->Normal.Y,
+					beam.Pane->Normal.Z,
+					beam.Pane->Normal.Dot(beam.Pane->Centre)
+				};
+
+				// Half the atlas on each axis, in the reading order the viewport
+				// below uses.
+				State->Beams.Region[index] = glm::vec4{
+					0.5f, 0.5f, static_cast<float>(index % 2) * 0.5f, static_cast<float>(index / 2) * 0.5f
+				};
+
+				SDL_GPUDepthStencilTargetInfo beamTarget{};
+				beamTarget.texture = State->BeamTexture;
+				beamTarget.clear_depth = 1.0f;
+
+				// **The first beam clears the whole atlas and the rest load it.**
+				// A clear is not confined by the viewport, so clearing per beam
+				// would wipe the ones already drawn — and a quadrant nobody wrote
+				// stays at the far plane, which the lookup reads as lit.
+				beamTarget.load_op = index == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+				beamTarget.store_op = SDL_GPU_STOREOP_STORE;
+				beamTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+				beamTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+				beamTarget.cycle = false;
+
+				SDL_GPURenderPass *beamPass = SDL_BeginGPURenderPass(command, nullptr, 0, &beamTarget);
+				SDL_BindGPUGraphicsPipeline(beamPass, State->ShadowPipeline);
+
+				const SDL_GPUViewport beamViewport{
+					static_cast<float>(index % 2) * half,
+					static_cast<float>(index / 2) * half,
+					half,
+					half,
+					0.0f,
+					1.0f
+				};
+				SDL_SetGPUViewport(beamPass, &beamViewport);
+
+				const SDL_Rect beamScissor{
+					static_cast<int>(index % 2) * static_cast<int>(half),
+					static_cast<int>(index / 2) * static_cast<int>(half),
+					static_cast<int>(half),
+					static_cast<int>(half)
+				};
+				SDL_SetGPUScissor(beamPass, &beamScissor);
+
+				const SDL_GPUBufferBinding beamBindings[] = {
+					{State->Meshes.Vertices(), 0},
+					{State->InstanceBuffer, 0},
+				};
+				SDL_BindGPUVertexBuffers(beamPass, 0, beamBindings, 2);
+
+				const SDL_GPUBufferBinding beamIndices{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(beamPass, &beamIndices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+				SDL_PushGPUVertexUniformData(command, 0, &State->Beams.Light[index], sizeof(glm::mat4));
+
+				// The same caster runs the world's own shadow map draws, for the
+				// same reason: a caster outside the beam is culled by the matrix
+				// rather than by a list.
+				uint64_t beamTriangles = 0;
+				if (reflectedCasters > 0) {
+					result.DrawCalls += State->DrawSlots(
+						command,
+						beamPass,
+						0,
+						reflectedCasters,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						0,
+						beamTriangles
+					);
+				}
+				if (surfaceCasters > 0) {
+					result.DrawCalls += State->DrawSlots(
+						command,
+						beamPass,
+						sceneReflected,
+						surfaceCasters,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						0,
+						beamTriangles
+					);
+				}
+
+				SDL_EndGPURenderPass(beamPass);
+			}
+
+			State->Beams.Count.x = static_cast<float>(live);
+		}
+
 		// --- surface pass ----------------------------------------------------
 		//
 		// The same scene range, from each surface camera, into that surface's
@@ -4493,6 +4915,14 @@ namespace engine::render {
 					// reason this is a second buffer rather than fields on the
 					// per-draw `LightingUniforms`.
 					SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+
+					// **The beams, beside the lights and for the same reason.**
+					// Which holes carry a shadow is a fact about the frame, so it
+					// is pushed once per pass rather than per draw — and it is
+					// pushed even when there are none, because a stale block from
+					// a previous frame would shadow through a hole that is no
+					// longer there.
+					SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
 					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
 					const SDL_GPUBufferBinding vertexBindings[] = {
@@ -4518,8 +4948,8 @@ namespace engine::render {
 					// the near-plane hack, and moved when the camera was re-aimed but
 					// not when the floor was.
 					const LightingUniforms surfaceLighting{
-						glm::vec4{SUN_DIRECTION, 0.0f},
-						SUN_AMBIENT,
+						glm::vec4{State->Sun, 0.0f},
+						State->Ambient,
 						glm::vec4{
 							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
 						},
@@ -4662,8 +5092,8 @@ namespace engine::render {
 								shown.PreviousSampling,
 							};
 							LightingUniforms mirrorLighting{
-								glm::vec4{SUN_DIRECTION, 0.0f},
-								SUN_AMBIENT,
+								glm::vec4{State->Sun, 0.0f},
+								State->Ambient,
 								glm::vec4{
 									haveShadow ? 1.0f : 0.0f,
 									1.0f / static_cast<float>(SHADOW_RESOLUTION),
@@ -5003,6 +5433,14 @@ namespace engine::render {
 					SDL_SetGPUScissor(pass, &portalScissor);
 
 					SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+
+					// **The beams, beside the lights and for the same reason.**
+					// Which holes carry a shadow is a fact about the frame, so it
+					// is pushed once per pass rather than per draw — and it is
+					// pushed even when there are none, because a stale block from
+					// a previous frame would shadow through a hole that is no
+					// longer there.
+					SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
 					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
 					const SDL_GPUBufferBinding portalBindings[] = {
@@ -5022,8 +5460,8 @@ namespace engine::render {
 					SDL_PushGPUVertexUniformData(command, 0, &subFrameUniforms, sizeof(subFrameUniforms));
 
 					const LightingUniforms subLighting{
-						glm::vec4{SUN_DIRECTION, 0.0f},
-						SUN_AMBIENT,
+						glm::vec4{State->Sun, 0.0f},
+						State->Ambient,
 						glm::vec4{
 							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
 						},
@@ -5062,6 +5500,23 @@ namespace engine::render {
 							// 2 is the screen-position lookup — see `opaque.frag`.
 							paneLighting.Flags.z = 2.0f;
 							paneTexture = seen->Colour;
+							paneLighting.PaneNormal =
+								glm::vec4{inner.Normal.X, inner.Normal.Y, inner.Normal.Z, 0.0f};
+						} else {
+							// **The terminus, and it is a shade rather than the
+							// pane's own material.** This is the deepest level the
+							// recursion goes to, so a hole seen here has nothing
+							// behind it — and a lit grey slab at the end of a
+							// corridor of holes reads as a wall somebody built,
+							// which is the one thing the corridor is trying not to
+							// look like. CodeParade draws pink here, deliberately
+							// wrong, because their demo is about the mechanism; a
+							// shipped world wants the chain to fade.
+							//
+							// The ambient is what it fades to, which is the far
+							// room's own unlit tone and needs no second uniform to
+							// say — 3 is the flat branch in `opaque.frag`.
+							paneLighting.Flags.z = 3.0f;
 						}
 
 						result.DrawCalls += State->DrawSlots(
@@ -5183,6 +5638,14 @@ namespace engine::render {
 			// per-draw `LightingUniforms`.
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 
+			// **The beams, beside the lights and for the same reason.**
+			// Which holes carry a shadow is a fact about the frame, so it
+			// is pushed once per pass rather than per draw — and it is
+			// pushed even when there are none, because a stale block from
+			// a previous frame would shadow through a hole that is no
+			// longer there.
+			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
+
 			// **The world's rectangle inside an attachment that is larger than
 			// it.** Without this the pass inherits a viewport covering the whole
 			// texture, and a block-rounded target would draw the world into
@@ -5254,8 +5717,8 @@ namespace engine::render {
 				// is per draw, so the split is a third draw rather than a
 				// per-fragment branch on data the shader does not have.
 				const LightingUniforms lighting{
-					glm::vec4{SUN_DIRECTION, 0.0f},
-					SUN_AMBIENT,
+					glm::vec4{State->Sun, 0.0f},
+					State->Ambient,
 					glm::vec4{
 						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 0.0f
 					},
@@ -5371,6 +5834,12 @@ namespace engine::render {
 								// `opaque.frag`.
 								holed.Flags.z = 2.0f;
 								holed.Flags.w = 1.0f;
+								holed.PaneNormal = glm::vec4{
+									portalOf[index]->Normal.X,
+									portalOf[index]->Normal.Y,
+									portalOf[index]->Normal.Z,
+									0.0f
+								};
 
 								bindScreen(seen->Colour);
 								mirroredUniforms = holed;
@@ -5411,8 +5880,8 @@ namespace engine::render {
 								shown.Sampling,
 							};
 							LightingUniforms mirrored{
-								glm::vec4{SUN_DIRECTION, 0.0f},
-								SUN_AMBIENT,
+								glm::vec4{State->Sun, 0.0f},
+								State->Ambient,
 								glm::vec4{
 									haveShadow ? 1.0f : 0.0f,
 									1.0f / static_cast<float>(SHADOW_RESOLUTION),

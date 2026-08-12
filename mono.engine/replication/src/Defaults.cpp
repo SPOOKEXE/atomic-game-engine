@@ -48,6 +48,16 @@ namespace engine::replication {
 		// hypothetical: excluding it broke `studio.playlink`'s "a mirror arrives
 		// on the client whole", which is the case that exists to catch exactly
 		// this. An authored `Camera` instance is scene content like any other.
+		// **A portal proxy is a piece of another room, made and unmade inside one
+		// tick.** It exists so a body standing in a hole has the far room's floor
+		// under it — `physics/Portals.hpp` — and it is never the same entity two
+		// ticks running, so replicating one would be a create and a destroy per
+		// tick per proxy on the wire, describing geometry the client already has
+		// on the other side of the pane.
+		if (component == "scene.PortalProxy") {
+			return true;
+		}
+
 		if (component == "scene.ActiveCamera" || component == "scene.CameraController") {
 			return true;
 		}

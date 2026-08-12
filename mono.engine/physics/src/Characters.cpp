@@ -3,14 +3,15 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
+#include <engine/physics/Portals.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/spatial/LayerMask.hpp>
 
 #include <vector>
-#include <engine/spatial/LayerMask.hpp>
 
 namespace engine::physics {
 
@@ -242,8 +243,26 @@ namespace engine::physics {
 			(void)scene::OpenPortals(store);
 		});
 
+		// **The far room's floor, under anything standing in a hole.** Beside
+		// `portal.open` because it is the other half of what lets a body be in a
+		// pane: that one stops the pane solving contacts, and this one gives the
+		// half that has gone through something to solve against. Before the
+		// broadphase, which is in `Simulation`, so a proxy is indexed on the tick
+		// it exists for.
+		scheduler.Add("portal.ghost", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			(void)GhostPortalBodies(store);
+		});
+
 		scheduler.Add("character.portal", ecs::Phase::PostSimulation, [](ecs::Store &store) {
 			(void)scene::CrossPortals(store);
+		});
+
+		// **After the crossing**, so a body that walked through this tick is
+		// already on the far side when its proxies go — and unconditionally, or a
+		// proxy outlives the seam that explains it and becomes a wall nobody can
+		// see.
+		scheduler.Add("portal.retire", ecs::Phase::PostSimulation, [](ecs::Store &store) {
+			(void)RetirePortalProxies(store);
 		});
 
 		scheduler.Add("character.pose", ecs::Phase::PreRender, [](ecs::Store &store) {

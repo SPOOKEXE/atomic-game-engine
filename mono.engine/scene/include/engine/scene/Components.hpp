@@ -288,6 +288,38 @@ namespace engine::scene {
 	// shape the narrow phase intersects. A sphere's AABB is not a sphere.
 	//
 	// @since v0.4
+	// Marks a collider that exists only because its owner is standing in a hole.
+	//
+	// **A body in a seam is in two rooms and the solver knows about one.** A
+	// character walking into a doorway is held up by the near room's floor and by
+	// nothing on the far side, so a far room whose floor is a stud higher lets it
+	// clip and one a stud lower lets it hang. `scene::CutAndCloneSeams` answers
+	// the same question for the picture; this is the contact half, and the two
+	// are deliberately different mechanisms — a picture and a contact have
+	// nothing to share but the seam.
+	//
+	// **What is mapped is the far room's geometry, not the body.** The obvious
+	// arrangement is a kinematic twin of the body placed on the far side, and it
+	// needs every contact the twin resolves mapped back through the seam as an
+	// impulse on the original — a second solver path, in a module that has one.
+	// Mapping the other way needs none of that: the far room's colliders are
+	// copied *into the near room* through the inverse seam, where they are
+	// ordinary static geometry and the body is pushed by them in its own space.
+	// The same trick a shadow through a hole wants, for the same reason.
+	//
+	// **Not saved, not replicated, not drawn.** A proxy is created in
+	// `PreSimulation` and destroyed in `PostSimulation`, so it never survives the
+	// tick that made it; it is parented to nothing, so `SyncRendered` never marks
+	// it and the tree that serialises never reaches it; and
+	// `replication::LocalToTheClient` names it, so nothing puts it on the wire.
+	//
+	// @since v0.15
+	struct PortalProxy {
+		// The body this was made for, so a proxy never collides with the very
+		// thing it is holding up.
+		ecs::Entity Owner = ecs::NULL_ENTITY;
+	};
+
 	struct Collider {
 		// The shape's dimensions, in metres, read according to `Shape`: box
 		// half-extents on each axis, sphere radius in X, cylinder radius in X

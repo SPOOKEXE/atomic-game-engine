@@ -67,18 +67,6 @@ namespace client {
 					const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(entity);
 					const Tags *tags = store.Get<Tags>(entity);
 
-					// **Whether this is a thing in the world or the world.**
-					// `AppendPortalGhosts` copies bodies standing in a hole onto
-					// its far side and reads a draw list, so it cannot ask — and
-					// every rule it inferred from size was wrong somewhere. The
-					// same two components `scene::CloneThroughSeams` walks
-					// answer it here, where the entity is still in hand: a body
-					// that can move, or a limb posed off one. Everything else is
-					// the room, and a room copied through its own doorway is a
-					// second floor inside the first.
-					const bool movable = store.Has<engine::scene::Motion>(entity) ||
-										 store.Has<engine::scene::CharacterLimb>(entity);
-
 					// Preserve every replicated visual field.
 					drawList->Instances.push_back(
 						DrawInstance{
@@ -96,7 +84,6 @@ namespace client {
 							visual.Surface,
 							visual.CastShadow,
 							appearance != nullptr ? appearance->Mode : AlphaMode::Opaque,
-							movable,
 						}
 					);
 				}
@@ -112,7 +99,7 @@ namespace client {
 			// a body lines up with the near half rather than trailing it by
 			// however far the character walked since the last tick. After the
 			// metric for the reason `client::CollectInstances` gives.
-			(void)engine::scene::AppendPortalGhosts(store, drawList->Instances);
+			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 
 			engine::core::Metrics::Count("replica.behind.ticks", buffer->Behind());
 			engine::core::Metrics::Count("replica.stalls", static_cast<double>(buffer->Stats().Stalls));

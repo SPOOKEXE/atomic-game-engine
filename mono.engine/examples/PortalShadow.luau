@@ -163,8 +163,13 @@ lamp("FarLamp", Vector3.new(GAP, 26, 0))
 
 block("SpawnLocation", Vector3.new(6, 1, 6), CFrame.new(Vector3.new(0, 0.5, 16)), BLUE_B)
 
--- `_G.SHADOW_VIEW` names a still for a headless capture; unset, walk it.
-local WHICH = _G.SHADOW_VIEW or ""
+-- `VIEW` names a still for a headless capture; empty, walk it.
+-- **A line this file rewrites rather than a global.** `_G` is readonly in the
+-- script sandbox, so nothing outside a scene can set one — the capture scripts
+-- copy the file and substitute the line below, which is the only mechanism that
+-- actually works from a shell.
+local VIEW = ""
+local WHICH = VIEW
 local viewpoint: CFrame? = nil
 
 if WHICH == "seam" then

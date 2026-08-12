@@ -397,7 +397,7 @@ block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 30), FLOOR)
 --
 -- **Off by default, because this scene is meant to be walked.** A
 -- `workspace.CurrentCamera` overrides the character's, so setting one
--- unconditionally would make the demo a video. `_G.TUNNELS_VIEW` names a
+-- unconditionally would make the demo a video. `VIEW` below names a
 -- viewpoint for a headless capture — which is how a change to the portal pass
 -- gets looked at without a display.
 -- **Unset means no camera at all**, which is the difference between this and
@@ -406,7 +406,12 @@ block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 30), FLOOR)
 -- `CurrentCamera` left standing there would override the character's.
 local viewpoint: CFrame? = nil
 
-local WHICH = _G.TUNNELS_VIEW
+-- **A line this file rewrites rather than a global.** `_G` is readonly in the
+-- script sandbox, so nothing outside a scene can set one — the capture scripts
+-- copy the file and substitute the line below, which is the only mechanism that
+-- actually works from a shell.
+local VIEW = ""
+local WHICH = if VIEW == "" then nil else VIEW
 
 if WHICH == "long" then
 	-- Outside the west tunnel's north mouth, looking down it. The far end is

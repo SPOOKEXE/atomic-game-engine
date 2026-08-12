@@ -121,7 +121,12 @@ local view = Instance.new("Camera")
 view.Name = "Viewer"
 view.FieldOfView = 70
 
-if (_G.PROBE_VIEW or "") == "exit" then
+-- **A line this file rewrites rather than a global.** `_G` is readonly in the
+-- script sandbox, so nothing outside a scene can set one — the capture scripts
+-- copy the file and substitute the line below, which is the only mechanism that
+-- actually works from a shell.
+local VIEW = ""
+if VIEW == "exit" then
 	view.CFrame = CFrame.new(Vector3.new(114, 5, 0)) * CFrame.Angles(0, math.pi / 2, 0)
 else
 	view.CFrame = CFrame.new(Vector3.new(0, 5, -14)) * CFrame.Angles(0, math.pi, 0)

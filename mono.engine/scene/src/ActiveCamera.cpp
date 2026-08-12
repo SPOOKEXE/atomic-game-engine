@@ -109,6 +109,18 @@ namespace engine::scene {
 		);
 	}
 
+	glm::mat4 SeamMatrix(const SeamTransform &through) {
+		const glm::mat4 rigid = through.Frame.ToMatrix();
+		if (through.Scale == 1.0f) {
+			return rigid;
+		}
+
+		const glm::vec3 origin{through.Origin.X, through.Origin.Y, through.Origin.Z};
+		return rigid * glm::translate(glm::mat4{1.0f}, origin) *
+			   glm::scale(glm::mat4{1.0f}, glm::vec3{through.Scale}) *
+			   glm::translate(glm::mat4{1.0f}, -origin);
+	}
+
 	glm::mat4 SurfaceMapping(const SurfaceLens &lens) {
 		const glm::mat4 rigid = lens.Mapping.ToMatrix();
 

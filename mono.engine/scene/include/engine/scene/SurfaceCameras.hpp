@@ -514,6 +514,27 @@ namespace engine::scene {
 	// @since v0.15
 	float PortalClipBias(float nearestSeam);
 
+	// Whether a point has gone through the hole.
+	//
+	// **A point rather than a body, which is what makes it a different question
+	// from `SeamStraddled`.** A body has a size, straddles a plane and is cut by
+	// it; a point is on one side or the other and belongs wholly to whichever
+	// space that is. A particle is the case this exists for — a torch's flame
+	// carried into a doorway has some of its sparks on this side of the plane
+	// and some past it, and the ones past it are in the far room and are drawn
+	// there.
+	//
+	// **Behind the pane's face *and* inside its rectangle**, with no widening.
+	// The widening `SeamStraddled` applies is slack for a body's reach, and a
+	// point has none — a spark a stud to the side of a doorway has not gone
+	// through the doorway, it is beside it.
+	//
+	// @param seam The portal.
+	// @param at   The point.
+	// @return Whether it is on the far side of the hole.
+	// @since v0.15
+	bool SeamCarries(const PortalSeam &seam, const core::Vector3 &at);
+
 	// Whether a box centred on `at` reaches across the seam inside its rectangle.
 	//
 	// **The straddle test, which is not the crossing test.** `CrossPortals` asks
@@ -529,6 +550,72 @@ namespace engine::scene {
 	// @return Whether the body occupies the pane.
 	// @since v0.15
 	bool SeamStraddled(const PortalSeam &seam, const core::Vector3 &at, float reach);
+
+	// Where a body standing in a seam is cut, and whether it may be cut at all.
+	//
+	// **One body cut at the plane, rather than two bodies drawn whole.** A
+	// straddler is copied to the far side of its hole so the far room has
+	// something to show; without a cut both copies are complete, and the extra
+	// halves are drawn where the hole is not. With a pane set into a thick wall
+	// the wall hides them both — which is why this went unnoticed through three
+	// scenes — and with a free-standing pane it is visibly two crates in a
+	// doorway, which is what `examples/PortalShadow.luau` shows.
+	//
+	// The two half-spaces are complementary through the map, so their union is
+	// exactly the body and their intersection is empty. What fills the half each
+	// copy has lost is the picture in the hole: the near half's missing part is
+	// the far copy, seen through the pane, and the sub-camera's oblique clip
+	// takes the far copy's.
+	//
+	// @since v0.15
+	struct SeamCut {
+		// The plane the *original* keeps, which is the front of the pane it is
+		// standing in: `dot(p, NearNormal) >= NearOffset`.
+		core::Vector3 NearNormal;
+		float NearOffset = 0.0f;
+
+		// The plane the *copy* keeps, which is the front of the far pane.
+		core::Vector3 FarNormal;
+		float FarOffset = 0.0f;
+
+		// Whether the body fits through the hole's own footprint.
+		//
+		// **A body wider than the hole must not be cut, and that is the one
+		// rule here that is not arithmetic.** The cut is a single plane, so it
+		// is exact only for the part of the body that is inside the pane's
+		// rectangle; anything hanging past the rim would be sliced by a plane
+		// that continues where the hole does not, and what that looks like is a
+		// crate with a flat face for no visible reason. A body that does not fit
+		// is drawn whole on both sides, exactly as it was before this existed —
+		// its overhang is the old artefact and is not made worse, and a hole it
+		// cannot fit through is not a hole it is walking into.
+		//
+		// Measured with the body's **oriented box** against the pane's own
+		// half-axes rather than with the bounding sphere `SeamStraddled` uses. A
+		// sphere is what refused every character the last time size was made a
+		// rule here: a five-stud figure has a radius of three and a doorway a
+		// half-axis of two, so nothing would ever fit. A limb is a flat box and
+		// its reach *across* a doorway is a fraction of its reach along itself.
+		bool Fits = false;
+	};
+
+	// Works out where a straddling body is cut by one seam.
+	//
+	// @param seam       The portal it is standing in.
+	// @param through    `SeamMapping(seam)`, taken by the caller because it
+	//                   already has it and building it twice is two answers to
+	//                   one question.
+	// @param frame      Where the body is, interpolated for the frame being
+	//                   drawn rather than at the tick boundary.
+	// @param halfExtent Its half-extent on its own axes.
+	// @return The two planes, and whether they may be applied at all.
+	// @since v0.15
+	SeamCut CutOfSeam(
+		const PortalSeam &seam,
+		const SeamTransform &through,
+		const core::CFrame &frame,
+		const core::Vector3 &halfExtent
+	);
 
 	// Every linked portal in the world.
 	//
@@ -751,18 +838,53 @@ namespace engine::scene {
 	// @since v0.14
 	size_t OpenPortals(ecs::Store &store);
 
-	// Appends a copy of every body standing in a portal, on the far side of it.
+	// Cuts everything standing in a portal at the plane, and appends its far
+	// half on the other side.
 	//
-	// **Half a character is the artefact this removes.** A pane is a hole and a
+	// **Half a character is the artefact this removes, and two whole characters
+	// is the artefact the first attempt at it left behind.** Appending a copy
+	// fixed the first half and introduced the second: both copies were drawn
+	// *whole*, so the original hung out of the back of the pane into the room it
+	// was walking into and the copy hung out of the far pane back into the room
+	// it came from. A pane set into a thick wall hides both overhangs, which is
+	// why that survived three scenes; a free-standing pane is visibly two crates
+	// in a doorway. `NON-EUCLIDEAN.md` Part V.1.
+	//
+	// So: one body, cut at the plane. Each half keeps the front of its own pane
+	// — `CutOfSeam` is where the two planes come from and why they are
+	// complementary by construction — and what fills the half each has lost is
+	// the picture in the hole.
+	//
+	// **What may be cut is what fits through the hole.** There is no test here
+	// for whether a thing can move, and both rules that preceded it were wrong:
+	// against the pane's shorter half-axis every character was refused, because
+	// a person is very nearly as big as the doorway they walk through; against
+	// `Motion` and `CharacterLimb` an anchored crate resting in a seam showed
+	// nothing on the far side, though it is as much a thing standing in the hole
+	// as anything that walked there. `CutOfSeam::Fits` is the physical statement
+	// instead — a body wider than the hole is not standing in the hole — and it
+	// excludes the room the pane is cut into without having to know that is what
+	// it is doing.
+	//
+	// **One pass rather than two, which is what this used to be.** An entity
+	// walk and a draw-list walk both produced this copy, and calling both put
+	// two of them on the far side, z-fighting; worse, the list walk read the
+	// list the entity walk had just appended to and ghosted the ghosts. Only a
+	// list walk can cut, because only it holds the row the original is in, so
+	// the list walk is the one that survived — and it reads the *interpolated*
+	// frame a client actually drew rather than a tick position, which matters
+	// because a far half a frame behind its own body is a seam that opens and
+	// closes as you walk.
+	//
+	// A pane is a hole and a
 	// body may straddle it — `OpenPortals` exists to allow exactly that — but
 	// the body is one set of parts in one place, so the far room draws nothing
 	// and the near room draws all of it. Standing in the seam, you are whole on
 	// the side you came from and absent on the side you are walking into, which
 	// is the one thing a picture of a hole and a hole must not share.
 	//
-	// A clone is the standard answer and it is cheap here: the map onto the far
-	// side is `SeamMapping`, the same product the camera and a crossing body go
-	// through, and a `DrawInstance` is a frame and a box.
+	// The map onto the far side is `SeamMapping`, the same product the camera
+	// and a crossing body go through, and a `DrawInstance` is a frame and a box.
 	//
 	// **A draw instance rather than an entity**, for `AppendSurfaceFaceMarkers`'
 	// reason and more of it: a clone lives for one frame, must never be
@@ -783,62 +905,35 @@ namespace engine::scene {
 	// is where that half is answered.
 	//
 	// @param store The world.
-	// @param out   The draw list to append to. Nothing already in it is touched.
-	// @return How many clones were appended.
+	// @param out   The draw list. Read and appended to, and the rows of
+	//              straddling bodies already in it are cut in place.
+	// @return How many far halves were appended, which is how many things are
+	//         standing in a hole. Zero on nearly every frame.
 	// @since v0.15
-	size_t AppendPortalClones(ecs::Store &store, std::vector<DrawInstance> &out);
+	size_t CutAndCloneSeams(ecs::Store &store, std::vector<DrawInstance> &out);
 
-	// The same, through one named pane, whether or not it crosses worlds.
+	// Appends a copy of every movable body standing in one named pane, on the
+	// far side of it, whether or not that pane crosses worlds.
 	//
 	// **What a host calls once it has the far world's draw list in its hands.**
-	// A cross-world pane is skipped by the overload above because its clone does
+	// A cross-world pane is skipped by `CutAndCloneSeams` because its copy does
 	// not belong in this world's list — it belongs beside the *other* world's,
 	// which only something holding the universe can assemble.
-	// `client::AttachForeignSurfaces` is that caller, and it appends the clone
+	// `client::AttachForeignSurfaces` is that caller, and it appends the copy
 	// straight after the far world's rows so the two are one range.
+	//
+	// **An entity walk, and it has to be**, which is the one place the two
+	// halves of this file differ: the body is in *this* store and the list being
+	// appended to is another world's, so there is no row here to read or to cut.
+	// A cross-world copy is therefore uncut — it is a window rather than a hole,
+	// and a body does not straddle a window, it is teleported through one.
 	//
 	// @param store   The world the body is standing in.
 	// @param surface Which surface slot the pane samples.
 	// @param out     The list to append to. Nothing already in it is touched.
-	// @return How many clones were appended.
+	// @return How many copies were appended.
 	// @since v0.15
 	size_t AppendPortalClones(ecs::Store &store, int8_t surface, std::vector<DrawInstance> &out);
-
-	// Appends the far half of anything standing in a portal.
-	//
-	// **A body in a hole is in two places, and the renderer only knew about
-	// one.** `CrossPortals` moves a body when its step changes side, so for the
-	// ticks it takes to walk through, the body is a single object sitting across
-	// the plane — near half in this room, far half nowhere. What a player sees
-	// is themselves sliced off at the seam: the near half drawn, and the far
-	// half missing from the picture in the pane, because the picture is of a
-	// room the body is not in yet.
-	//
-	// This is the other copy. Every instance straddling a pane's rectangle is
-	// appended again at `destination · half-turn · source⁻¹` — the same map the
-	// camera and the body go through — so the two halves meet at the plane.
-	// Neither copy needs clipping: the pane's own image covers the near half's
-	// overhang, and the surface camera's oblique clip takes the ghost's.
-	//
-	// **A draw instance rather than an entity**, exactly as
-	// `AppendSurfaceFaceMarkers` is one and for the same reason: nothing is
-	// added to the world, so it does not serialise, cannot be selected, and no
-	// script can find a second copy of a character it did not make.
-	//
-	// **Reads the list rather than the world**, so it works on a replica with no
-	// simulation in it, and so a ghost is built from the *interpolated* frame a
-	// client actually drew rather than from the tick position — a ghost half a
-	// frame behind its own body is a seam that opens and closes as you walk.
-	//
-	// Same-world pairs only. A `Portal::DestinationWorld` ghost belongs in the
-	// far world's draw list, which is a host's to append and not a store's.
-	//
-	// @param store The world.
-	// @param out   The draw list to read and append to.
-	// @return How many ghosts were appended. Zero in every scene where nobody is
-	//         standing in a hole, which is nearly every frame.
-	// @since v0.15
-	size_t AppendPortalGhosts(ecs::Store &store, std::vector<DrawInstance> &out);
 
 	// Appends a thin translucent bar lying on each face a surface camera
 	// projects off.

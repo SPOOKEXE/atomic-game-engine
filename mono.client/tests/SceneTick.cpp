@@ -478,7 +478,17 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// scene genuinely does not need to run: what it writes is a property of the
 	// scene rather than of the tick, so a world that resumes gets it on the
 	// first tick it takes and nothing in between could have walked anywhere.
-	REQUIRE(timings.size() == 19);
+	//
+	// **And twenty-one for the pair that holds a body up in one.** `portal.open`
+	// lets a body be inside a pane and nothing then had it standing on anything:
+	// the floor under the half that has gone through is in the other room, so a
+	// crate in a doorway was held by the near room alone. `portal.ghost` copies
+	// the far room's colliders into this one through the inverse seam, where they
+	// are ordinary static geometry the solver pushes with; `portal.retire` takes
+	// them away again in `PostSimulation`, because a proxy that outlived its tick
+	// is a piece of another room standing invisibly in this one. Both are a query
+	// that returns at its first line in a world with no portal in it.
+	REQUIRE(timings.size() == 21);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

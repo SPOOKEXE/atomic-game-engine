@@ -859,6 +859,28 @@ namespace engine::render {
 		// @since v0.15
 		uint32_t PortalDepth() const;
 
+		// Which way the world's one directional light shines, and what reaches
+		// what it does not.
+		//
+		// **A knob rather than an argument to `Render`, for `SetPortalDepth`'s
+		// reason**: it is a property of the world being drawn rather than of one
+		// frame, and threading it through would put it in a signature every host
+		// calls to repeat the same two values every frame.
+		//
+		// A renderer that is never told draws with `scene::SUN_DIRECTION` and
+		// `scene::SUN_AMBIENT`, which are the numbers this engine has always
+		// drawn with — so a host that does not care is not made to care.
+		//
+		// **The direction is what the shadow map is fitted along as well as what
+		// the shader shades with**, so setting it moves both together. That is
+		// the whole reason it is one call.
+		//
+		// @param direction Where it shines towards. Normalised here; a zero
+		//                  vector is ignored rather than obeyed.
+		// @param ambient   What reaches a surface the sun does not.
+		// @since v0.15
+		void SetSun(const core::Vector3 &direction, const core::Color3 &ambient);
+
 		// The backend handle for a registered texture, for an interface pass to
 		// sample.
 		//

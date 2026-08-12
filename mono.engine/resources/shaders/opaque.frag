@@ -14,6 +14,15 @@ layout(set = 2, binding = 0) uniform sampler2D shadowMap;
 layout(set = 2, binding = 1) uniform sampler2D surfaceMap;
 layout(set = 2, binding = 2) uniform sampler2D colourMap;
 
+// The beams: up to four holes' worth of shadow, in one 2x2 atlas.
+//
+// **A hole carries occlusion and not light.** Both rooms already have the
+// world's sun, so what crosses a portal is the *absence* of it — a caster in
+// front of a hole darkens the floor beyond it. Taking the darker of the two is
+// what makes that coherent with one global sun; adding a second contribution
+// would double-light every floor near a doorway.
+layout(set = 2, binding = 3) uniform sampler2D beamMap;
+
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
 	vec4 Ambient;
@@ -22,8 +31,10 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// y: one texel of the shadow map, for the sample offsets.
 	// z: how this draw reads `surfaceMap`. 0 draws its own tint; 1 projects
 	//    through `SurfaceViewProjection` and is a **mirror**; 2 reads by screen
-	//    position and is a **portal**. See `SurfacePane` below for why those are
-	//    two lookups rather than one.
+	//    position and is a **portal**; 3 is a portal at the **end of the
+	//    recursion**, which has no image to read and shades flat. See
+	//    `SurfacePane` below for why the first two are two lookups rather than
+	//    one.
 	// w: how opaque the projected image is, 0 to 1. See the composite below.
 	vec4 Flags;
 
@@ -45,6 +56,26 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: which `scene::SurfaceEffect` the projected image goes through.
 	// y: the animation clock, for the effects that move.
 	vec4 Mirror;
+
+	// The face normal of the pane this draw is, for a portal, and zero
+	// otherwise.
+	//
+	// **A pane is a box and a hole is a rectangle.** Without this the pane's
+	// four edge faces read the sub-render too, so a hole comes out as wide as
+	// the slab it is cut in with a band of the far room round its rim at a
+	// parallax nothing else in the frame has. The rim falls through to the
+	// pane's own material instead, which is what a frame is.
+	vec4 PaneNormal;
+
+	// The half-space this draw keeps: xyz a unit world normal, w the offset
+	// along it. A zero normal keeps everything, which is every draw in a world
+	// with no portal in it.
+	//
+	// **A body standing in a hole is one body cut at the plane.** Its far half
+	// is drawn as a second instance in the room beyond, and without the cut both
+	// are drawn whole — the original hanging out of the back of the pane and the
+	// copy out of the far one. See `scene::DrawInstance::SeamNormal`.
+	vec4 SeamPlane;
 } lighting;
 
 // The effect ordinals, which are `scene::SurfaceEffect`'s and are the format.
@@ -217,6 +248,81 @@ layout(set = 3, binding = 1) uniform Lights {
 	vec4 Count;
 } lights;
 
+// How many holes may carry a shadow in one frame. `render::MAX_PORTAL_BEAMS`.
+#define MAX_BEAMS 4
+
+// One hole's beam, and what a far-side fragment has to go through to read it.
+//
+// **The casters are left in the near room and the receiver is mapped back**,
+// which is the whole reason this costs two matrix products rather than a second
+// copy of the world. `Back` carries a fragment from the far side of a hole to
+// the near side; `Plane` is what says it was on the far side to begin with; and
+// `Light` is the beam's own matrix, fitted to the pane's rectangle so that the
+// frustum *is* the aperture — a fragment the beam does not reach projects
+// outside `0..1`, which the range check below already reads as lit.
+layout(set = 3, binding = 2) uniform Beams {
+	mat4 Light[MAX_BEAMS];
+	mat4 Back[MAX_BEAMS];
+
+	// xyz the near pane's normal, w its offset along it.
+	vec4 Plane[MAX_BEAMS];
+
+	// xy the scale into the atlas, zw the offset.
+	vec4 Region[MAX_BEAMS];
+
+	// x: how many are in use.
+	vec4 Count;
+} beams;
+
+// How much of the sun reaches this fragment through the holes in the world.
+//
+// One, meaning unshadowed, for every fragment in every scene with no portal in
+// it — the loop ends at its first test.
+float BeamFactor() {
+	float lit = 1.0;
+
+	int count = int(beams.Count.x);
+	for (int index = 0; index < MAX_BEAMS; index++) {
+		if (index >= count) {
+			break;
+		}
+
+		// **Behind the near pane's face is the far side**, which is where a
+		// fragment has to have come from for this beam to say anything about it.
+		// A fragment already in the near room is shadowed by the world's own map
+		// and would otherwise be shadowed twice.
+		vec4 back = beams.Back[index] * vec4(inWorldPosition, 1.0);
+		vec3 near = back.xyz / max(back.w, 1e-6);
+
+		if (dot(near, beams.Plane[index].xyz) <= beams.Plane[index].w) {
+			continue;
+		}
+
+		vec4 lightPosition = beams.Light[index] * vec4(near, 1.0);
+		vec3 projected = lightPosition.xyz / max(lightPosition.w, 1e-6);
+		if (projected.z > 1.0 || projected.z < 0.0) {
+			continue;
+		}
+
+		// The same convention the world map's lookup uses, then folded into this
+		// beam's quadrant of the atlas.
+		vec2 uv = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
+		if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+			continue;
+		}
+
+		vec2 atlas = uv * beams.Region[index].xy + beams.Region[index].zw;
+
+		// **One tap, where the world map takes four.** A beam's edge is the
+		// hole's own rim, which is a hard edge in the geometry as well — a soft
+		// one there would read as the hole being out of focus.
+		float closest = texture(beamMap, atlas).r;
+		lit = min(lit, (projected.z - 0.0025) <= closest ? 1.0 : 0.0);
+	}
+
+	return lit;
+}
+
 // What the local lights add at this fragment.
 //
 // **Added to the directional term rather than replacing it**, so a scene with no
@@ -344,11 +450,29 @@ void main() {
 		discard;
 	}
 
+	// **The seam, before any shading is computed.** A fragment on the far side of
+	// the plane this instance was cut at belongs to the other half of the body,
+	// which is drawn as its own instance in the room through the hole.
+	//
+	// **A discard rather than a clip plane**, because this pipeline declares no
+	// clip-distance slot and the draws this applies to are a handful of
+	// instances a frame — the run breaks wherever the plane changes, so it is
+	// only ever the halves that pay for the branch. It does defeat early-Z on
+	// those draws, which is why what may be cut is bounded by what fits through
+	// the hole.
+	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
+		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
+		discard;
+	}
+
 	vec3 albedo = inColour.rgb * sampled.rgb * lighting.BaseColour.rgb;
 
 	// Ambient is unshadowed and direct light is not, which is what makes a
 	// shadow dark rather than black.
-	float shadow = ShadowFactor(normal, toLight);
+	// **The darker of the two, never the sum.** The world's map says what this
+	// room's own geometry blocks and a beam says what the room through a hole
+	// blocks; light that fails either test does not arrive.
+	float shadow = min(ShadowFactor(normal, toLight), BeamFactor());
 	vec3 lit = albedo * (lighting.Ambient.rgb + vec3(lambert * shadow + bounce) + LocalLight(normal));
 
 	// **A portal pane reads the sub-render by screen position**, which is the
@@ -368,9 +492,37 @@ void main() {
 	// cannot be — the target covers the same rectangle as the frame this
 	// fragment is in — and a bounds test would only be a way to fail on a
 	// rounding error at the very edge of the pane.
-	if (lighting.Flags.z > 1.5) {
+	// **The end of the chain, which is a shade and not a wall.** A hole at the
+	// deepest level the recursion goes to has no sub-render to sample, and
+	// drawing its own lit material there puts a grey slab at the end of a
+	// corridor of holes — the one thing a corridor of holes must not look like.
+	// The ambient is the far room's own unlit tone, so the chain fades into it
+	// rather than stopping against something.
+	if (lighting.Flags.z > 2.5) {
+		outColour = vec4(lighting.Ambient.rgb, max(alpha, lighting.Flags.w));
+		return;
+	}
+
+	// **Both faces and neither rim.** A hole is a hole from either side — the
+	// warp already answers which — so the test is on the axis rather than on the
+	// sign, and a face square to the pane's own normal shows the picture while
+	// one across it does not. A zero normal is every draw that is not a portal
+	// pane, and it accepts everything.
+	const bool onPane = dot(lighting.PaneNormal.xyz, lighting.PaneNormal.xyz) <= 0.0 ||
+		abs(dot(normalize(inNormal), lighting.PaneNormal.xyz)) > 0.5;
+
+	if (lighting.Flags.z > 1.5 && onPane) {
 		vec2 portalUv = gl_FragCoord.xy / vec2(textureSize(surfaceMap, 0));
-		vec3 image = texture(surfaceMap, portalUv).rgb * inColour.rgb;
+
+		// **Untinted, unlike the mirror below, because a hole is not glass.**
+		// A coloured mirror is a real thing and multiplying its image by the
+		// pane's own colour is how it is authored; a portal showing the room
+		// beyond dimmed by whatever grey the pane happens to be is a trap every
+		// scene walks into, because a pane is grey by default and forty-five per
+		// cent of the far room's light disappears without anything saying so.
+		// What you see through a hole is what is there. `ImageTransparency` is
+		// still how a pane is faded towards its own material.
+		vec3 image = texture(surfaceMap, portalUv).rgb;
 
 		float imageAlpha = lighting.Flags.w;
 		outColour = vec4(mix(lit, image, imageAlpha), max(alpha, imageAlpha));
