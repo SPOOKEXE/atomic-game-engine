@@ -544,3 +544,177 @@ because it carries `Surface = -1` and the original's transparency, and the
 ordering has no other opinion. The surface camera's oblique clip then takes the
 copy's near half, and the pane's own image covers the original's overhang, so the
 two meet at the plane.
+
+---
+
+## Three from the next run
+
+### The character drifted on every round trip
+
+`LANDING_CLEARANCE` was added to every crossing unconditionally, so a body that
+walked through a hole and back came out a little beside where it started, and
+again on the next trip. What was wanted is that nothing *rests* within the
+clearance of a plane — a minimum, not an offset. It is a floor now: a body whose
+step already ended a metre past the pane gets nothing added, and only a step that
+finished inside the band is nudged out to it. The tests that pinned the old
+behaviour now pin the absence of the drift.
+
+### The green patch: the ghost pass stopped guessing
+
+The far-side pass reads a draw list, where an instance is a frame and a box and
+nothing else, so it had to infer from *size* whether something straddling a pane
+was a body worth copying or the room the pane is cut into. Every rule it could
+infer was wrong somewhere. Against the pane's shorter half-axis it refused every
+character, because a person is very nearly as big as the doorway they walk
+through. Loose enough to admit one, it admitted the floor — and a floor copied
+through a doorway is the far room's ground laid over the near one.
+
+The collector knows and the pass does not, so the collector says.
+`DrawInstance::Movable` took the row's last byte of explicit padding — the type
+is the same width — and is set from `Motion` and `CharacterLimb`, the same pair
+the clone walk uses. The size heuristics are gone entirely.
+
+**The one byte of padding was carrying a test.** A case asserted that a
+signature must *not* move with `Reserved`, because depending on padding is
+depending on nothing. That byte means something now, so the case asserts the
+opposite and says why.
+
+### The pixelation: the target is sized to what the pane covers
+
+Not the texture being too small in absolute terms, and not only the fit. A
+surface camera is fitted to its pane, so its texture maps one-to-one onto the
+pane's screen footprint: a pane covering half the screen wants half the screen's
+pixels, and a fixed size whatever it covers spreads the same texels over a
+rectangle several times larger.
+
+`graph::VisibleSurfaces` already had every pane's world box, so it now reports
+screen coverage alongside visibility, and the renderer doubles the target between
+the authored size and the viewport as a pane grows. Powers of two, because a
+continuous size would recreate two textures and a depth buffer every frame; a
+step down costs a whole step, so standing on a threshold does not oscillate.
+
+**The stop condition is "already at least the screen", not "the next step would
+exceed it".** The second reads as safer and did nothing at all: a surface
+authored at more than half the viewport could never take a step, which is every
+surface in a scene that sized its panes sensibly. Overshooting by one doubling
+costs texels nobody samples; stopping short costs the sharpness this is for.
+
+---
+
+# The pivot: a portal is not a surface camera
+
+**This document and `docs/NON-EUCLIDEAN.md` both argued the opposite, at length,
+and both were wrong.** The claim was that a portal is "a `SurfaceCamera` with a
+different rule for where it stands", and that anything starting with a portal
+pass of its own would be a second copy of the surface pass. That reasoning held
+for the *first* thing a portal has to do — show somewhere else in a rectangle —
+and quietly failed for everything after it.
+
+## The line that settles it
+
+`Renderer.cpp`, in the surface pass, where one surface draws another:
+
+    const FrameUniforms mirrorFrame{
+        state.ViewProjection,      // the camera this pass is rendering from
+        lightViewProjection,
+        shown.PreviousSampling,    // the *other* surface's own matrix
+    };
+
+When surface A's pass draws pane B, it projects B's texture with **B's own
+camera** — and every surface camera is placed from the *eye*. So the image of B
+inside A is B-as-seen-from-the-eye, pasted into a view rendered from A's camera.
+
+That is not a stale image. It is the wrong viewpoint, and no number of bounces
+fixes it, because what is wrong is the camera and not the texture's age. The
+in-frame recursion added earlier removes the *lag* and leaves the *error*. For a
+mirror the error is small and the file has always said so; for a corridor of
+holes it is the whole picture.
+
+CodeParade's demo does not have this problem because it never has it to have: the
+sub-camera is derived from the **current** camera —
+
+    Camera portalCam = cam;
+    portalCam.ClipOblique(pos - normal*extra_clip, -normal);
+    portalCam.worldView *= warp->delta;
+
+— so the warps compose down the recursion by construction. Ours cannot compose,
+because a slot holds one camera and that camera is a function of the eye.
+
+## What else falls out of the same mistake
+
+Every awkward thing fought in this document is the mirror abstraction leaking:
+
+| Symptom | Why it exists | Under a portal pass |
+|---|---|---|
+| Pixelation up close | The texture is fitted to the *pane*, so at wide angles the texels go where the viewer is not looking | Gone. The sub-view uses the screen's own projection and the quad samples by screen position: one texel per pixel, always |
+| `FitExtents`, `FIT_MARGIN`, `MINIMUM_DEPTH`, `FIT_MINIMUM_SPAN` | A frustum has to be fitted to a rectangle | All gone. Nothing is fitted |
+| The eye-frustum clamp | Recovering texels the fit wasted | Gone with the fit |
+| Adaptive target resolution | Chasing the fit's resolution | Gone; the target is the viewport |
+| `EDGE_ON_MARGIN` exemptions | A reflected camera flips at its own plane | Not a portal concern at all |
+| Sixteen slots, shared with mirrors | One texture per surface | A depth-indexed pool, sized to recursion depth and what is visible |
+| `SurfaceLens::Mapping` + `MappingOrigin` + `MappingScale` | Carrying the warp to a *sampling* matrix | The warp lives in the sub-camera. Nothing to carry |
+| The bounce loop | Approximating recursion | Real recursion, deepest first |
+
+## What survives, which is most of the last week
+
+**Everything about traversal and simulation is untouched**, and that is the
+larger half of the work: `PortalSeam`, `SeamTransform` and its four named
+applications, `SeamMapping`, `CrossPortals`, `LANDING_CLEARANCE`,
+`NearestCrossing`, `PortalTransit`, `ClearOfPanes`, `OpenPortals`,
+`RaycastThroughPortals`, the clone and ghost passes, `DrawInstance::Movable`, and
+scale-carrying holes. None of it knows what a `SurfaceCamera` is; all of it is
+about where a body, a ray or an eye goes.
+
+`scene::SurfaceProjection`'s oblique clip survives too — it is applied to the
+screen's projection instead of a fitted one, which is what Lengyel's method is
+for and what the demo does.
+
+**`SurfaceCamera` keeps mirrors and keeps every line written for them.** The fit,
+the off-axis frustum, the edge-on band, the slot budget, `FPS`, the visibility
+gate: all of it is correct for a reflection and stays. What it stops being is the
+thing a portal is built out of.
+
+## The shape of the pass
+
+Modelled on `temp/NonEuclidean/NonEuclidean/Portal.cpp` and `Engine.cpp`:
+
+1. `render::PortalView` — a pane rectangle, the warp as a `SeamTransform`, an
+   optional tag filter, and which foreign instance range it draws. Handed to
+   `Renderer::Render` beside the surfaces, not as one of them.
+2. A recursive `DrawPortals(camera, depth)`:
+   - for each portal whose pane is visible from `camera`, and while `depth > 0`
+   - build `sub = camera` with the warp applied to its view and Lengyel's skew
+     onto the mapped pane
+   - render the scene from `sub` into a target from a depth-indexed pool, calling
+     `DrawPortals(sub, depth - 1)` inside it
+   - draw the pane's quad sampling that target **by screen position**
+3. Termination at depth zero: draw the pane flat. The demo uses pink; a shipped
+   world wants the far room's fog or a plain shade, and it belongs behind the
+   same flag the face markers are.
+4. Visibility per portal per level, which is the demo's occlusion query and can
+   start as the CPU frustum test `graph::VisibleSurfaces` already does.
+
+The one genuinely new piece is a shader path that samples by screen position.
+`opaque.frag` projects a fragment through a matrix and tests 0..1; a portal quad
+divides its own clip position and reads there. That is four lines and is the
+demo's whole `portal.frag`.
+
+## The open question, which is not mine to settle
+
+**Cross-world portals.** `Portal::DestinationWorld` shows another *world* through
+a pane, and today it works because a surface is a texture and a host can render
+anything into it — `client::AttachForeignSurfaces` hands the far world's
+instances over as a range. A recursive pass composes cameras through a warp, and
+a warp into another world's coordinate space is a stated frame rather than a
+derived one. Two ways:
+
+- **Keep cross-world panes on the surface path.** They are a *window* onto a
+  second simulation rather than a hole in one space, and they do not recurse.
+  Cheapest, and the split is defensible: same-world holes recurse, cross-world
+  windows do not.
+- **Give the pass a world per level.** Recursion carries which store to draw, so
+  a hole into another world is a hole. More honest and more work, and it needs
+  the far world's draw list available at each level rather than as one appended
+  range.
+
+The first is what I would do first.

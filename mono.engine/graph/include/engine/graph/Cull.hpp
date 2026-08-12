@@ -97,17 +97,35 @@ namespace engine::graph {
 	// later, which is the same one-frame budget the surface pass already runs
 	// on.
 	//
+	// **And how much of the screen each pane covers**, which is what decides how
+	// many texels its image needs. A surface camera is fitted to its pane, so
+	// the texture maps one-to-one onto the pane's screen footprint: a pane
+	// filling half the screen wants half the screen's pixels, and giving it a
+	// fixed thousand-and-twenty-four whatever it covers is what makes a portal
+	// go blocky as you walk up to it. Coverage is reported as a fraction of the
+	// viewport's larger axis, so a caller multiplies rather than reasons.
+	//
+	// **One for a pane the camera is inside or behind.** A box straddling the
+	// camera's own plane has no bounded projection, and the useful answer there
+	// is "as much as you have" rather than a number produced by dividing by a
+	// negative `w`.
+	//
 	// @param instances The whole draw list, culled or not.
-	// @param camera    The viewer's frustum.
+	// @param camera    The viewer's world-to-clip matrix. The frustum is taken
+	//                  from it rather than passed beside it, so the two cannot
+	//                  describe different cameras.
 	// @param surfaces  The surface cameras this frame accepted.
 	// @param visible   Indexed by slot, cleared then filled. Must be at least as
 	//                  long as the highest index in `surfaces`, plus one.
+	// @param coverage  Indexed by slot, cleared then filled with 0..1. Optional;
+	//                  pass an empty span to skip the projection entirely.
 	// @return How many slots came back visible.
 	// @since v0.15
 	size_t VisibleSurfaces(
 		std::span<const scene::DrawInstance> instances,
-		const Frustum &camera,
+		const glm::mat4 &camera,
 		std::span<const SurfaceEye> surfaces,
-		std::span<bool> visible
+		std::span<bool> visible,
+		std::span<float> coverage = {}
 	);
 }

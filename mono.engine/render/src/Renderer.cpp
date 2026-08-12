@@ -234,6 +234,61 @@ namespace engine::render {
 			return now - drawn >= 1.0 / static_cast<double>(fps);
 		}
 
+		// How many times over the authored surface size a pane needs, given how
+		// much of the screen it covers.
+		//
+		// **A surface camera is fitted to its pane, so its texture maps one to
+		// one onto the pane's screen footprint.** A pane covering half the screen
+		// therefore wants half the screen's pixels, and handing it a fixed size
+		// whatever it covers is what makes a portal go coarse as you walk up to
+		// it — the texels are all there, they are just spread over a rectangle
+		// several times larger than the one they were authored for.
+		//
+		// **Powers of two, because the alternative is reallocating a render
+		// target every frame.** A continuous size would recreate two textures and
+		// a depth buffer on every step the viewer takes; doubling gives at most a
+		// handful of distinct sizes over the whole approach, and the step is
+		// where the hysteresis below can sit.
+		//
+		// **It only grows.** The authored size is the floor — a scene that asked
+		// for a large mirror keeps it — and the screen is the ceiling, because
+		// nothing is served by rendering more texels than the pane can occupy.
+		//
+		// @param authored The larger of the authored dimensions.
+		// @param coverage 0..1 of the viewport's larger axis.
+		// @param screen   The larger viewport dimension.
+		// @param current  The scale in force, so a step down needs a whole step.
+		uint32_t SurfaceScale(uint32_t authored, float coverage, uint32_t screen, uint32_t current) {
+			if (authored == 0 || screen == 0 || !(coverage > 0.0f)) {
+				return std::max(current, 1u);
+			}
+
+			const auto needed = static_cast<uint32_t>(std::ceil(coverage * static_cast<float>(screen)));
+
+			// **The stop is "already at least the screen", not "the next step
+			// would exceed it".** The second reads as safer and is why this did
+			// nothing at all on the first run: a surface authored at more than
+			// half the viewport could never take a step, which is every surface
+			// in a scene that sized its panes sensibly. Overshooting the screen
+			// by one doubling costs texels nobody samples; stopping short costs
+			// the sharpness this exists for.
+			uint32_t scale = 1;
+			while (authored * scale < needed && authored * scale < screen && scale < 16u) {
+				scale *= 2u;
+			}
+
+			// **A step down costs a whole step, which is what stops the size
+			// oscillating on the boundary.** Walking towards a pane crosses each
+			// threshold once; without this, standing exactly on one would
+			// recreate the target every other frame for as long as somebody stood
+			// still.
+			if (current > scale && authored * current <= needed * 2u) {
+				return current;
+			}
+
+			return scale;
+		}
+
 		uint64_t MixMatrix(uint64_t hash, const glm::mat4 &matrix) {
 			for (int column = 0; column < 4; column++) {
 				for (int row = 0; row < 4; row++) {
@@ -3329,13 +3384,16 @@ namespace engine::render {
 		// already answers for every instance, and building a second frustum
 		// from the same camera would be a second answer to it.
 		graph::Frustum cameraFrustum{};
+
+		// The same camera as a matrix, because deciding a surface's *resolution*
+		// needs "how much of the screen" and a frustum only answers "any of it".
+		glm::mat4 cameraMatrix{1.0f};
 		{
 			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
 
 			const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-			cameraFrustum = graph::Frustum::FromViewProjection(
-				scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection
-			);
+			cameraMatrix = scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection;
+			cameraFrustum = graph::Frustum::FromViewProjection(cameraMatrix);
 			visibleCount = graph::CullAndBound(instances, cameraFrustum, State->Visible, sceneBounds);
 		}
 
@@ -3465,10 +3523,65 @@ namespace engine::render {
 		// **Allocated for every accepted view before anything is ordered**, so
 		// a view whose texture cannot be made drops out of the frame here rather
 		// than half way through the pass loop.
+		// **Whether anything can see each pane, which is the other half of the
+		// refresh decision and the half this pass did not have.** The signature
+		// answers "did the image change"; nothing answered "is the image
+		// looked at", so a room of mirrors redrew every one of them on every
+		// frame anything moved — including the ones behind the viewer and the
+		// ones a wall stands in front of. That cost is per pane and the scenes
+		// this exists for are the ones with several.
+		//
+		// **Two sweeps and deliberately not a fixed point.** A pane visible only
+		// *inside another mirror* is a real case — two facing panes, or a portal
+		// seen through a portal — so main-camera visibility alone would freeze
+		// it. The union with the other surfaces' own frusta covers it in one
+		// pass: a pane seen inside a surface that is itself on screen refreshes
+		// now, and one buried two bounces deep refreshes a frame later. That is
+		// the same one-frame budget the whole surface pass already runs on, and
+		// iterating to closure here would spend the saving this exists for.
+		bool surfaceVisible[scene::MAX_SURFACES] = {};
+		float surfaceCoverage[scene::MAX_SURFACES] = {};
+		if (acceptedCount > 0) {
+			graph::SurfaceEye eyes[scene::MAX_SURFACES];
+			for (size_t index = 0; index < acceptedCount; index++) {
+				eyes[index].ViewProjection = accepted[index].ViewProjection;
+				eyes[index].Index = static_cast<int8_t>(accepted[index].Index);
+			}
+
+			// **In `graph` rather than here, and that is the seam rather than
+			// tidiness.** The decision is boxes against frusta over a draw list,
+			// which is what that module is, and a rule this pass held privately
+			// would be a rule no suite could reach — `Renderer::Render` needs a
+			// device and the answer does not.
+			(void)graph::VisibleSurfaces(
+				instances,
+				cameraMatrix,
+				std::span<const graph::SurfaceEye>(eyes, acceptedCount),
+				std::span<bool>(surfaceVisible, scene::MAX_SURFACES),
+				std::span<float>(surfaceCoverage, scene::MAX_SURFACES)
+			);
+		}
+
 		size_t liveCount = 0;
 		for (size_t index = 0; index < acceptedCount; index++) {
 			const AcceptedView &view = accepted[index];
-			if (State->EnsureSurface(targetSlot, view.Index, view.View->Width, view.View->Height)) {
+
+			// **Sized to what the pane covers, not to what was authored.** The
+			// authored size is a floor and the screen is a ceiling; between them
+			// the target doubles as the pane grows on screen, which is what stops
+			// a portal going coarse when you walk into it. See `SurfaceScale`.
+			const uint32_t authored = std::max<uint32_t>(view.View->Width, view.View->Height);
+			const Impl::SurfaceSlotState &sized = bank.Surfaces[view.Index];
+			const uint32_t held = std::max<uint32_t>(sized.Width, sized.Height);
+			const uint32_t current = authored > 0 && held >= authored ? held / authored : 1u;
+
+			const uint32_t scale = SurfaceScale(
+				authored, surfaceCoverage[view.Index], std::max<uint32_t>(sceneWidth, sceneHeight), current
+			);
+
+			if (State->EnsureSurface(
+					targetSlot, view.Index, view.View->Width * scale, view.View->Height * scale
+				)) {
 				accepted[liveCount++] = view;
 			}
 		}
@@ -3502,43 +3615,6 @@ namespace engine::render {
 		// idea of what time it is** and a second clock read here would let a
 		// surface's interval drift against the flipbooks in it.
 		const double frameSeconds = State->AnimationSeconds;
-
-		// **Whether anything can see each pane, which is the other half of the
-		// refresh decision and the half this pass did not have.** The signature
-		// answers "did the image change"; nothing answered "is the image
-		// looked at", so a room of mirrors redrew every one of them on every
-		// frame anything moved — including the ones behind the viewer and the
-		// ones a wall stands in front of. That cost is per pane and the scenes
-		// this exists for are the ones with several.
-		//
-		// **Two sweeps and deliberately not a fixed point.** A pane visible only
-		// *inside another mirror* is a real case — two facing panes, or a portal
-		// seen through a portal — so main-camera visibility alone would freeze
-		// it. The union with the other surfaces' own frusta covers it in one
-		// pass: a pane seen inside a surface that is itself on screen refreshes
-		// now, and one buried two bounces deep refreshes a frame later. That is
-		// the same one-frame budget the whole surface pass already runs on, and
-		// iterating to closure here would spend the saving this exists for.
-		bool surfaceVisible[scene::MAX_SURFACES] = {};
-		if (wantSurface) {
-			graph::SurfaceEye eyes[scene::MAX_SURFACES];
-			for (size_t index = 0; index < acceptedCount; index++) {
-				eyes[index].ViewProjection = accepted[index].ViewProjection;
-				eyes[index].Index = static_cast<int8_t>(accepted[index].Index);
-			}
-
-			// **In `graph` rather than here, and that is the seam rather than
-			// tidiness.** The decision is boxes against frusta over a draw list,
-			// which is what that module is, and a rule this pass held privately
-			// would be a rule no suite could reach — `Renderer::Render` needs a
-			// device and the answer does not.
-			(void)graph::VisibleSurfaces(
-				instances,
-				cameraFrustum,
-				std::span<const graph::SurfaceEye>(eyes, acceptedCount),
-				std::span<bool>(surfaceVisible, scene::MAX_SURFACES)
-			);
-		}
 
 		uint64_t surfaceSignature = 0;
 		size_t refreshCount = 0;

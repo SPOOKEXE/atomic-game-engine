@@ -904,13 +904,14 @@ TEST_CASE("a body that walks into a portal comes out of the far one", "[scene][s
 	// body that walks into A has to arrive in the room it was looking at. One
 	// metre of clearance in front of A becomes one metre in front of B.
 	//
-	// **Plus the landing clearance, which is why this is not exactly `-1`.** A
-	// crosser is put down a hundredth of a metre further out than its own step
-	// ended, so that nothing can come to rest on a plane it has just crossed and
-	// be sent back through by a tick of jitter. See `LANDING_CLEARANCE`.
+	// **Exactly where the step ended, mapped — the clearance is a floor and not
+	// an offset.** A crosser whose step already finished well past the plane
+	// gets nothing added, which is what stops a round trip landing beside where
+	// it started. See `LANDING_CLEARANCE`, and the case below for the step that
+	// does need it.
 	const Vector3 landed = mirror.World.Get<Transform>(walker)->Frame.Position;
 	CHECK_THAT(landed.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
-	CHECK_THAT(landed.Z, Catch::Matchers::WithinAbs(-1.01f, TOLERANCE));
+	CHECK_THAT(landed.Z, Catch::Matchers::WithinAbs(-1.0f, TOLERANCE));
 
 	// **And clear of the plane rather than merely past it**, which is the
 	// property the number is for: the pane's front face is at `z = -0.2`, the
@@ -1641,9 +1642,12 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 	// one that cannot tell a floor from a person.
 	std::vector<engine::scene::DrawInstance> drawn;
 
+	// **Says it is the room**, which is now how this pass is told rather than
+	// something it infers from size.
 	engine::scene::DrawInstance slab;
 	slab.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
 	slab.HalfExtent = Vector3{50.0f, 0.5f, 50.0f};
+	slab.Movable = false;
 	drawn.push_back(slab);
 
 	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 0);
@@ -1651,6 +1655,7 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 	engine::scene::DrawInstance body;
 	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
 	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
+	body.Movable = true;
 	drawn.push_back(body);
 
 	CHECK(engine::scene::AppendPortalGhosts(mirror.World, drawn) == 1);
@@ -1723,6 +1728,7 @@ TEST_CASE("a far-side copy that lands on its original is not drawn", "[scene][su
 	engine::scene::DrawInstance body;
 	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
 	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
+	body.Movable = true;
 	drawn.push_back(body);
 
 	// The map takes this body onto itself, so there is nothing to add.
@@ -1821,6 +1827,7 @@ TEST_CASE("the far half of a body reaches the picture in the pane", "[scene][sur
 	engine::scene::DrawInstance body;
 	body.Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
 	body.HalfExtent = Vector3{1.0f, 2.0f, 1.0f};
+	body.Movable = true;
 	drawn.push_back(body);
 
 	const size_t clones = engine::scene::AppendPortalClones(mirror.World, drawn);

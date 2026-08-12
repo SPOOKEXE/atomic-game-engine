@@ -494,11 +494,17 @@ TEST_CASE("a signature is stable for a list that has not changed", "[scene][draw
 	CHECK(engine::scene::SignatureOf(twin) == first);
 }
 
-TEST_CASE("a signature ignores the bytes that carry no meaning", "[scene][drawinstance]") {
-	// `Reserved` is explicit padding. It exists so the object representation is
-	// deterministic the day a world crosses a process, and it says nothing about
-	// what is drawn — so a signature that moved with it would be depending on
-	// padding by name.
+TEST_CASE("the last byte of the row is a field now, and it counts", "[scene][drawinstance]") {
+	// **This case used to assert the opposite, and the field it guarded is
+	// gone.** The last byte was explicit padding — there so the object
+	// representation is deterministic the day a world crosses a process — and
+	// the assertion was that a signature must not move with it, because a
+	// signature that depended on padding would be depending on nothing.
+	//
+	// `Movable` took that byte at v0.15, so the row is the same width and the
+	// byte now means something: whether a copy of this instance may be drawn on
+	// the far side of a portal. That changes what the far room draws, which
+	// changes the image, which is exactly what this signature answers.
 	DrawInstance instance;
 	instance.Frame = CFrame(Vector3(3.0f, 1.0f, -2.0f));
 	instance.Mesh = Name("drawinstance_test.Wall");
@@ -506,13 +512,8 @@ TEST_CASE("a signature ignores the bytes that carry no meaning", "[scene][drawin
 
 	const uint64_t before = engine::scene::SignatureOf(std::span(&instance, 1));
 
-	// **One byte, because `Reserved` is one byte.** This wrote two until v0.10,
-	// which was out of bounds the whole time and landed in whatever followed the
-	// object — harmless by luck until removing `Material` moved the field and the
-	// stack canary caught it. The array's own comment says why there is one:
-	// `Alpha` took the second.
-	instance.Reserved[0] = 0xAB;
-	CHECK(engine::scene::SignatureOf(std::span(&instance, 1)) == before);
+	instance.Movable = true;
+	CHECK(engine::scene::SignatureOf(std::span(&instance, 1)) != before);
 
 	// **The type is packed today, and that is why this is an assert rather than
 	// a claim in a comment.** `core::Name` is a four-byte id and `Color3` ends
@@ -526,7 +527,7 @@ TEST_CASE("a signature ignores the bytes that carry no meaning", "[scene][drawin
 	// assert is here so the next person to widen the type is told which
 	// assumption they just changed.
 	static_assert(
-		sizeof(DrawInstance) == offsetof(DrawInstance, Reserved) + sizeof(DrawInstance::Reserved),
+		sizeof(DrawInstance) == offsetof(DrawInstance, Movable) + sizeof(DrawInstance::Movable),
 		"DrawInstance has grown padding. scene::SignatureOf is field-wise and is unaffected, "
 		"but anything reading this type as bytes is now reading uninitialised memory."
 	);

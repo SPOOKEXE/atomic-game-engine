@@ -27,14 +27,20 @@ namespace {
 	// projection here — that function is the one place the engine decides what
 	// a camera's matrices are, and a frustum derived from a second answer would
 	// be testing agreement with something nothing else uses.
-	Frustum Looking(const Vector3 &from = Vector3::Zero, float aspect = 16.0f / 9.0f) {
+	//
+	// The same camera as a matrix, which is what `VisibleSurfaces` takes: it
+	// answers "how much of the screen" as well as "any of it", and a frustum
+	// cannot say the first.
+	glm::mat4 LookingMatrix(const Vector3 &from = Vector3::Zero, float aspect = 16.0f / 9.0f) {
 		Camera camera;
 		camera.NearPlane = 0.1f;
 		camera.FarPlane = 100.0f;
 
-		return Frustum::FromViewProjection(
-			engine::scene::ResolveCamera(CFrame{from}, camera, aspect).ViewProjection
-		);
+		return engine::scene::ResolveCamera(CFrame{from}, camera, aspect).ViewProjection;
+	}
+
+	Frustum Looking(const Vector3 &from = Vector3::Zero, float aspect = 16.0f / 9.0f) {
+		return Frustum::FromViewProjection(LookingMatrix(from, aspect));
 	}
 
 	DrawInstance At(const Vector3 &position, float halfExtent = 0.5f) {
@@ -202,7 +208,10 @@ TEST_CASE("a surface whose pane nothing can see is not visible", "[graph][cull]"
 
 	bool visible[2] = {true, true};
 	const size_t seen = engine::graph::VisibleSurfaces(
-		instances, Looking(), std::span<const engine::graph::SurfaceEye>(eyes, 2), std::span<bool>(visible, 2)
+		instances,
+		LookingMatrix(),
+		std::span<const engine::graph::SurfaceEye>(eyes, 2),
+		std::span<bool>(visible, 2)
 	);
 
 	CHECK(seen == 1);
@@ -244,7 +253,10 @@ TEST_CASE("a surface visible only inside another surface still counts", "[graph]
 
 	bool visible[2] = {};
 	const size_t seen = engine::graph::VisibleSurfaces(
-		instances, Looking(), std::span<const engine::graph::SurfaceEye>(eyes, 2), std::span<bool>(visible, 2)
+		instances,
+		LookingMatrix(),
+		std::span<const engine::graph::SurfaceEye>(eyes, 2),
+		std::span<bool>(visible, 2)
 	);
 
 	CHECK(seen == 2);
@@ -269,7 +281,7 @@ TEST_CASE("a surface with no pane in the draw list is not visible", "[graph][cul
 	CHECK(
 		engine::graph::VisibleSurfaces(
 			instances,
-			Looking(),
+			LookingMatrix(),
 			std::span<const engine::graph::SurfaceEye>(eyes, 1),
 			std::span<bool>(visible, 1)
 		) == 0
@@ -316,4 +328,63 @@ TEST_CASE("a surface's rate cap drops frames rather than queueing them", "[graph
 	CHECK(due(1.0, 0.0f, 1.0));
 	CHECK(due(1.0, -30.0f, 1.0));
 	CHECK(due(1.0, 120.0f, 1.0));
+}
+
+TEST_CASE("a surface's coverage is what its resolution is chosen from", "[graph][cull]") {
+	// **A surface camera is fitted to its pane, so its texture maps one to one
+	// onto the pane's screen footprint.** A pane covering half the screen wants
+	// half the screen's pixels; handing it a fixed size whatever it covers is
+	// what makes a portal go coarse as you walk up to it, because the texels are
+	// all still there and simply spread over a much larger rectangle.
+	DrawInstance small = At(Vector3{0.0f, 0.0f, -40.0f}, 1.0f);
+	small.Surface = 0;
+
+	DrawInstance close = At(Vector3{0.0f, 0.0f, -2.0f}, 1.0f);
+	close.Surface = 1;
+
+	const std::vector<DrawInstance> instances{small, close};
+
+	engine::graph::SurfaceEye eyes[2];
+	eyes[0].Index = 0;
+	eyes[1].Index = 1;
+
+	bool visible[2] = {};
+	float coverage[2] = {};
+	REQUIRE(
+		engine::graph::VisibleSurfaces(
+			instances,
+			LookingMatrix(),
+			std::span<const engine::graph::SurfaceEye>(eyes, 2),
+			std::span<bool>(visible, 2),
+			std::span<float>(coverage, 2)
+		) == 2
+	);
+
+	// The far one is a sliver of the screen; the near one is most of it.
+	CHECK(coverage[0] > 0.0f);
+	CHECK(coverage[0] < 0.15f);
+	CHECK(coverage[1] > coverage[0] * 4.0f);
+	CHECK(coverage[1] <= 1.0f);
+
+	// **A pane the camera is inside gives one rather than a number from a
+	// negative divide.** A box straddling the camera's own plane has no bounded
+	// projection, and "as much as you have" is the honest answer.
+	DrawInstance around = At(Vector3::Zero, 5.0f);
+	around.Surface = 0;
+
+	const std::vector<DrawInstance> swallowed{around};
+	engine::graph::SurfaceEye one[1];
+	one[0].Index = 0;
+
+	bool alsoVisible[1] = {};
+	float alsoCoverage[1] = {};
+	(void)engine::graph::VisibleSurfaces(
+		swallowed,
+		LookingMatrix(),
+		std::span<const engine::graph::SurfaceEye>(one, 1),
+		std::span<bool>(alsoVisible, 1),
+		std::span<float>(alsoCoverage, 1)
+	);
+
+	CHECK(alsoCoverage[0] == 1.0f);
 }

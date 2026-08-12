@@ -27,16 +27,66 @@ namespace engine::graph {
 		return visible.size();
 	}
 
+	namespace {
+		// How much of the screen a world box covers, as a fraction of the larger
+		// viewport axis.
+		//
+		// **Clip space and not the frustum**, because a frustum answers "is any
+		// of it in" and this needs "how much". The eight corners are projected
+		// and their normalised bounding box measured; the span of normalised
+		// device coordinates is two, so half the larger span is the fraction.
+		//
+		// **A corner at or behind the camera's plane gives one.** Its projection
+		// is unbounded and its sign flips, so any number derived from it is
+		// noise — and a box straddling the camera is one filling the screen,
+		// which is the answer "one" already means.
+		float ScreenCoverage(const glm::mat4 &camera, const core::AABB &box) {
+			float left = 1.0f;
+			float right = -1.0f;
+			float bottom = 1.0f;
+			float top = -1.0f;
+
+			for (int corner = 0; corner < 8; corner++) {
+				const glm::vec4 point(
+					(corner & 1) != 0 ? box.Maximum.X : box.Minimum.X,
+					(corner & 2) != 0 ? box.Maximum.Y : box.Minimum.Y,
+					(corner & 4) != 0 ? box.Maximum.Z : box.Minimum.Z,
+					1.0f
+				);
+
+				const glm::vec4 clip = camera * point;
+				if (!(clip.w > 1.0e-4f)) {
+					return 1.0f;
+				}
+
+				const float x = clip.x / clip.w;
+				const float y = clip.y / clip.w;
+				left = std::min(left, x);
+				right = std::max(right, x);
+				bottom = std::min(bottom, y);
+				top = std::max(top, y);
+			}
+
+			return std::clamp(std::max(right - left, top - bottom) * 0.5f, 0.0f, 1.0f);
+		}
+	}
+
 	size_t VisibleSurfaces(
 		std::span<const scene::DrawInstance> instances,
-		const Frustum &camera,
+		const glm::mat4 &cameraMatrix,
 		std::span<const SurfaceEye> surfaces,
-		std::span<bool> visible
+		std::span<bool> visible,
+		std::span<float> coverage
 	) {
 		ENGINE_PROFILE_CAT("graph.surface visibility", core::ProfileCategory::Render);
 
+		const Frustum camera = Frustum::FromViewProjection(cameraMatrix);
+
 		for (size_t slot = 0; slot < visible.size(); slot++) {
 			visible[slot] = false;
+		}
+		for (size_t slot = 0; slot < coverage.size(); slot++) {
+			coverage[slot] = 0.0f;
 		}
 
 		if (surfaces.empty()) {
@@ -77,6 +127,10 @@ namespace engine::graph {
 			const auto slot = static_cast<size_t>(eye.Index);
 			visible[slot] = present[slot] != 0u && camera.Intersects(panes[slot]);
 			seen += visible[slot] ? 1u : 0u;
+
+			if (slot < coverage.size() && visible[slot]) {
+				coverage[slot] = ScreenCoverage(cameraMatrix, panes[slot]);
+			}
 		}
 
 		// **Read from a snapshot, so the answer cannot depend on the order the

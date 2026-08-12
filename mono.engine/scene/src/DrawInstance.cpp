@@ -115,7 +115,10 @@ namespace engine::scene {
 			// the same image", and a texture swap, a tag change or an alpha mode
 			// change all produce a different one.
 			b = MixSignature(b, Pair(instance.Texture.Id(), static_cast<uint32_t>(instance.TagMask)));
-			c = MixSignature(c, static_cast<uint64_t>(instance.Alpha));
+			// **And whether it may be copied through a hole**, which changes
+			// what the far side of a portal draws and is therefore a change to
+			// the image. See `DrawInstance::Movable`.
+			c = MixSignature(c, Pair(static_cast<uint32_t>(instance.Alpha), instance.Movable ? 1u : 0u));
 		}
 
 		// Combined in a fixed order, so the four lanes give one value. The

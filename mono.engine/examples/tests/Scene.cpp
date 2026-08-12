@@ -524,14 +524,15 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// the scene's, and it is what stops "inside the pane" being somewhere a
 	// character can stand.
 	//
-	// **And a hundredth further, which is `scene`'s `LANDING_CLEARANCE`.** A
-	// crosser is put down clear of the plane rather than wherever its own step
-	// happened to end, so that a body cannot come to rest on a plane it just
-	// crossed and be sent back through it by a tick of jitter.
+	// **And exactly there, because `scene`'s `LANDING_CLEARANCE` is a floor
+	// rather than an offset.** A crosser whose step already ended clear of the
+	// plane gets nothing added — adding it unconditionally moved a body a little
+	// on every crossing, so walking through a hole and back landed you beside
+	// where you started.
 	const engine::core::Vector3 landed = store.Get<engine::scene::Transform>(walker)->Frame.Position;
 	CHECK(landed.X == Approx(-20.0f).margin(1e-3f));
 	CHECK(landed.Y == Approx(6.0f).margin(1e-3f));
-	CHECK(landed.Z == Approx(-0.26f).margin(1e-3f));
+	CHECK(landed.Z == Approx(-0.25f).margin(1e-3f));
 
 	// **Turned with it, at the speed it had.** West became north, which is the
 	// quarter turn the building is missing. A pair glued the other way round

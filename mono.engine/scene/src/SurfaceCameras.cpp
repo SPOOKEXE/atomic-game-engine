@@ -1748,6 +1748,25 @@ namespace engine::scene {
 				continue;
 			}
 
+			// **The room is not a thing standing in the hole, and this pass
+			// stopped trying to work out which is which.** It reads a draw list,
+			// where an instance is a frame and a box and nothing else, so every
+			// rule it could infer from size was wrong somewhere: measured
+			// against the pane's shorter half-axis it refused every character,
+			// because a person is very nearly as big as the doorway they walk
+			// through; loose enough to admit one, it admitted the floor — and a
+			// floor copied through a doorway is the far room's ground laid over
+			// the near one, meeting it along a hard straight line through the
+			// middle of the scene.
+			//
+			// The collector knows and this does not, so the collector says. See
+			// `DrawInstance::Movable`, which `CloneThroughSeams` answers by
+			// walking `Motion` and `CharacterLimb` and a replica's collector
+			// answers by asking for the same two.
+			if (!body.Movable) {
+				continue;
+			}
+
 			// A sphere around the instance rather than its oriented box, which
 			// is conservative in the only direction that costs nothing: a false
 			// positive is a ghost the oblique clip throws away, and a false
@@ -1759,29 +1778,6 @@ namespace engine::scene {
 				// far half of a body in one belongs in the *other world's* list,
 				// which is a host's to append — see the header.
 				if (seam.Crosses) {
-					continue;
-				}
-
-				// **The room is not a thing standing in the hole, and this pass
-				// cannot ask which it is.** `CloneThroughSeams` walks bodies
-				// that can move and character limbs, so a floor is never a
-				// candidate there. This one reads a draw list, where an
-				// instance is a frame and a box and nothing else — so without a
-				// guard a floor slab fifty studs across, whose reach is seventy,
-				// is "within reach" of every plane in the building and "inside"
-				// every rectangle in it, and the far room's floor gets laid over
-				// the near one along a hard straight line through the scene.
-				//
-				// **Against the pane's diagonal and doubled**, which is loose on
-				// purpose. A person is very nearly as big as the doorway they
-				// walk through — the rule this replaces compared against the
-				// *shorter half-axis* and refused every character in every hole,
-				// which is the artefact this pass exists to remove wearing the
-				// costume of a fix for a different one. What has to be caught is
-				// the room, and a room is bigger than its own doorway by an
-				// order of magnitude rather than by a factor of two.
-				const float diagonal = std::sqrt(seam.First.Dot(seam.First) + seam.Second.Dot(seam.Second));
-				if (radius > diagonal * 2.0f) {
 					continue;
 				}
 
@@ -2024,10 +2020,21 @@ namespace engine::scene {
 					// destination as the same distance out of the far pane. See
 					// `LANDING_CLEARANCE`.
 					//
+					// **A floor on the depth rather than a push, and the
+					// difference is a drift you can see.** Adding the clearance
+					// unconditionally moves every crossing by it, so a body that
+					// walks through a hole and back comes out beside where it
+					// started, and again on the next round trip. What is wanted
+					// is that nothing *rests* within the clearance of a plane,
+					// which is a minimum and not an offset: a body that ended
+					// its step a metre past the pane already has it, and gets
+					// nothing added.
+					//
 					// Away from the side it came in on, which is the direction it
 					// was already travelling.
-					const Vector3 clear =
-						hole.Normal * (SeamOffset(hole, was) > 0.0f ? -LANDING_CLEARANCE : LANDING_CLEARANCE);
+					const float side = SeamOffset(hole, was) > 0.0f ? -1.0f : 1.0f;
+					const float depth = std::abs(SeamOffset(hole, now));
+					const Vector3 clear = hole.Normal * (side * std::max(LANDING_CLEARANCE - depth, 0.0f));
 
 					// **The placement and the velocity, by the same transform.**
 					// Forgetting the second is the bug that looks like physics:

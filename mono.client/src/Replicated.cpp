@@ -67,6 +67,18 @@ namespace client {
 					const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(entity);
 					const Tags *tags = store.Get<Tags>(entity);
 
+					// **Whether this is a thing in the world or the world.**
+					// `AppendPortalGhosts` copies bodies standing in a hole onto
+					// its far side and reads a draw list, so it cannot ask — and
+					// every rule it inferred from size was wrong somewhere. The
+					// same two components `scene::CloneThroughSeams` walks
+					// answer it here, where the entity is still in hand: a body
+					// that can move, or a limb posed off one. Everything else is
+					// the room, and a room copied through its own doorway is a
+					// second floor inside the first.
+					const bool movable = store.Has<engine::scene::Motion>(entity) ||
+										 store.Has<engine::scene::CharacterLimb>(entity);
+
 					// Preserve every replicated visual field.
 					drawList->Instances.push_back(
 						DrawInstance{
@@ -84,6 +96,7 @@ namespace client {
 							visual.Surface,
 							visual.CastShadow,
 							appearance != nullptr ? appearance->Mode : AlphaMode::Opaque,
+							movable,
 						}
 					);
 				}

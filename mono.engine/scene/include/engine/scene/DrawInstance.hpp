@@ -146,16 +146,38 @@ namespace engine::scene {
 		// the mode that keeps a hair card opaque and out of that pass entirely.
 		AlphaMode Alpha = AlphaMode::Opaque;
 
-		// Explicit padding, for the reason every other `Reserved` in the engine
-		// exists: this type crosses as its object representation the day a world
-		// is a process, and uninitialised bytes make two runs of one scene
-		// produce different files.
+		// Whether this instance is a thing in the world rather than the world.
 		//
-		// One now, not two. `Alpha` took the second, which is what named
-		// padding is for — a field that fits goes in the hole rather than
-		// widening the row. `Texture` and `TagMask` did not fit and the type
-		// grew by eight for them.
-		uint8_t Reserved[1] = {};
+		// **What `AppendPortalGhosts` cannot otherwise ask.** That pass reads a
+		// draw list, where an instance is a frame and a box and nothing else, so
+		// it had to guess from size whether something straddling a pane was a
+		// body worth copying to the far side or the room the pane is cut into.
+		// Every guess it could make was wrong somewhere: measured against the
+		// pane's shorter half-axis it refused every character, because a person
+		// is very nearly as big as the doorway they walk through; measured
+		// loosely enough to admit one, it admitted the floor — and a floor
+		// copied through a doorway is the far room's ground laid over the near
+		// one, meeting it along a hard straight line through the middle of the
+		// scene.
+		//
+		// The collector knows and the pass does not, so the collector says.
+		// `client::CollectReplicatedInstances` sets it from `Motion` and
+		// `CharacterLimb`, which is the same pair `scene::CloneThroughSeams`
+		// walks for the same reason.
+		//
+		// **False by default, which is the safe direction.** A host filling this
+		// struct by hand has not thought about portals, and the failure of a
+		// missing copy is half a body in one doorway while the failure of a
+		// wrong one is a second floor across the room.
+		//
+		// @since v0.15
+		bool Movable = false;
+
+		// Took the last byte of explicit padding, which is what named padding is
+		// for — a field that fits goes in the hole rather than widening the row.
+		// `Alpha` took the one before it; `Texture` and `TagMask` did not fit and
+		// the type grew by eight for them. The next addition widens it, and the
+		// static assert in `tests/DrawInstance.cpp` is what says so out loud.
 	};
 
 	// Produces the order a draw list should be submitted in.
