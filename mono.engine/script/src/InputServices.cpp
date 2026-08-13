@@ -574,6 +574,20 @@ namespace engine::script {
 		) {
 			LuauContext &live = ContextOf(state);
 
+			// **What a `:Once` connection spends, collected here and retired
+			// below.** `SignalTable::Fire` deliberately does not retire anything
+			// itself — only the VM knows how to release a callable, and a
+			// disconnect arriving from inside a fire may be about a value still
+			// on the stack — so every direct caller of `Fire` owes this, and this
+			// one did not pay it. A `UserInputService` signal connected with
+			// `:Once` fired on every edge for ever, which is a handler a script
+			// cannot get rid of and did not ask to keep.
+			//
+			// `FireSignal` in `LuauSignals.cpp` and `FireJsSignal` in
+			// `JsSurface.cpp` have always done this; those two are what this is
+			// copied from rather than invented beside.
+			std::vector<ConnectionId> spent;
+
 			live.Signals.Fire(
 				SignalKind::PropertyChanged, ecs::NULL_ENTITY, [&](const Connection &connection) {
 					if (connection.Property != signal) {
@@ -592,8 +606,27 @@ namespace engine::script {
 						}
 						lua_pop(state, 1);
 					}
+
+					if (connection.Once) {
+						spent.push_back(connection.Id);
+					}
 				}
 			);
+
+			// **After the fire and not inside it**, which is the reason the list
+			// exists at all: a `:Once` handler that connects another one would
+			// otherwise have the connection list compacted underneath the walk
+			// that is still reading it.
+			//
+			// **The name filter is not applied here**, and it does not need to
+			// be: only connections the walk above actually called were pushed, so
+			// a `:Once` on a *different* input signal is untouched.
+			for (const ConnectionId id : spent) {
+				CallbackRef released = 0;
+				if (live.Signals.Disconnect(id, released)) {
+					lua_unref(state, released);
+				}
+			}
 		}
 
 		// Hands one key edge to the first bound action that claims it.

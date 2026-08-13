@@ -142,6 +142,13 @@ namespace engine::script {
 			std::string firstError;
 			JSValue argument = report == nullptr ? JS_UNDEFINED : MakeJsInputObject(context, *report);
 
+			// **What a `Once` connection spends.** `SignalTable::Fire` retires
+			// nothing itself — only the VM knows how to release a callable — so
+			// every direct caller owes this, and the Luau twin of this function
+			// did not pay it either. `FireJsSignal` in `JsSurface.cpp` is what
+			// this is copied from.
+			std::vector<ConnectionId> spent;
+
 			bound.Signals.Fire(
 				SignalKind::PropertyChanged, ecs::NULL_ENTITY, [&](const Connection &connection) {
 					if (connection.Property != signal) {
@@ -164,8 +171,23 @@ namespace engine::script {
 						firstError = ThrownBy(context, "an input listener failed");
 					}
 					JS_FreeValue(context, result);
+
+					if (connection.Once) {
+						spent.push_back(connection.Id);
+					}
 				}
 			);
+
+			// After the fire and not inside it, so a `Once` handler that connects
+			// another one does not have the list compacted under the walk still
+			// reading it. Only connections this walk called are in `spent`, so a
+			// `Once` on a different input signal is untouched.
+			for (const ConnectionId id : spent) {
+				CallbackRef released = 0;
+				if (bound.Signals.Disconnect(id, released)) {
+					Release(context, released);
+				}
+			}
 
 			JS_FreeValue(context, argument);
 			return firstError;

@@ -1314,6 +1314,71 @@ TEST_CASE("InputChanged fires, which it had never done", "[scripting]") {
 	)");
 }
 
+TEST_CASE("a :Once input handler retires after one edge, in both languages", "[scripting]") {
+	// **`SignalTable::Fire` retires nothing itself, and every direct caller owes
+	// it.** Only the VM knows how to release a callable, and a disconnect can
+	// arrive from inside a fire about a value still on the stack — so the table
+	// hands back what a `Once` connection spent and the caller disconnects it.
+	// `FireSignal` and `FireJsSignal` have always done that; both input pumps
+	// were written later and neither did, so `:Once` on a `UserInputService`
+	// signal fired on **every** edge for ever. A handler a script cannot get rid
+	// of and did not ask to keep.
+	//
+	// **Two edges and a count, not one edge and a flag.** A test that fired once
+	// and checked the handler ran would have passed against the broken code —
+	// what is wrong is only visible on the *second* edge.
+	//
+	// Both languages, because the fault was in both pumps and a fix to one is how
+	// the two drift.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store("script_test");
+		store.SetResource(engine::scene::InputState{});
+
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+
+		const bool luau = language == Language::Luau;
+		// **The count is written into the workspace's name**, which is the trick
+		// the parity harness uses: it is the one piece of world state both
+		// languages spell the same way and C++ can read back without an
+		// attribute API the store does not expose.
+		const std::string source = luau ? R"(
+			local counted = 0
+			game:GetService('UserInputService').InputChanged:Once(function()
+				counted = counted + 1
+				workspace.Name = tostring(counted)
+			end)
+		)"
+										: R"(
+			let counted = 0;
+			game.GetService('UserInputService').InputChanged.Once(() => {
+				counted = counted + 1;
+				workspace.Name = String(counted);
+			});
+		)";
+
+		INFO((luau ? "luau" : "javascript"));
+		MustRun(*runtime, source.c_str());
+
+		for (int edge = 0; edge < 2; edge++) {
+			auto *live = store.ResourceMutable<engine::scene::InputState>();
+			live->MouseDelta = engine::core::Vector2{1.0f, 0.0f};
+			REQUIRE(runtime->Heartbeat(0.016f));
+		}
+
+		// **"1", from two edges.** "2" is the defect: the connection was never
+		// retired, so it kept answering long after it had spent itself.
+		//
+		// Held before the chunk runs, because the chunk renames it —
+		// `scene::WorkspaceOf` is a lookup by name over the roots.
+		CHECK(std::string(store.InstanceNameOf(workspace).Text()) == "1");
+	}
+}
+
 TEST_CASE("the window's focus edges reach a script", "[scripting]") {
 	RegisterClasses();
 	Store store("script_test");
