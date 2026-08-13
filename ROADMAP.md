@@ -40,12 +40,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] properly ensure everything are components and not OOP under the hood
 - [_] i also realised that i don't have a way to control whether changes are client-sided or server-sided when i edit in the explorer/properties. how could i do this considering multiple clients + server support - with run-mode only and play-mode. studio only.
 - [_] deferred `D00111`: listing an HTTP origin's contents — its tab names the address and says why it cannot enumerate
-- [_] code cleanup, separate systems under services (internal and scripting exposed)
-- [_] layout proper channels for cross-world communication (with scripting binds like CrossWorldService)
 - [_] fix grid projection in run/play mode - no longer shows up in the world on any viewport.
-- [_] thoroughly implement common services with scripting binds
-- [_] thoroughly implement extra functions like PlayerGui:... with scripting binds
-- [_] thoroughly implement user input system with scripting binds
 - [_] deferred `D00110`: a variety of default shaders, once something can select one
 - [_] deferred `D00114`: no type inference — a local from `Instance.new("Part")` resolves because the class is on the line, one from `FindFirstChild` falls back to the union of every scriptable property
 - [_] deferred `D00115`: a character's limbs pay wire for transforms the receiver overwrites, because replication filters by component and not by entity
@@ -54,6 +49,14 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] svg rendering support (and ensure cdn supports it too)
 - [_] gif rendering support (and ensure cdn supports it too)
 - [_] convert "Meshes" demo into a "Assets" demo world that visualises each type of asset in the world: meshpart, textures, gifs, images, audio, video
+
+---
+
+- [_] thoroughly implement common services with scripting binds
+- [_] thoroughly implement extra functions like PlayerGui:... with scripting binds
+- [_] thoroughly implement user input system with scripting binds
+- [_] code cleanup, separate systems under services (internal and scripting exposed)
+- [_] layout proper channels for cross-world communication (with scripting binds like CrossWorldService)
 
 ### v0.16
 
