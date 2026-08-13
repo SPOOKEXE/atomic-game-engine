@@ -780,6 +780,73 @@ far spawn pad and `(11,13,21)` far sky. `client/tests/Presentation.cpp` pins it
 without a device: exactly one row is dropped, every row that crosses carries
 `Surface < 0`, and the far world's room is still all there.
 
+### A cross-world pane was a window, and it had to become a hole
+
+**"It renders full cubes through the portal."** A body standing in a cross-world
+seam was drawn *whole* in the room it was leaving and *whole* again in the room
+it was entering — overlapping the picture in the glass, joined nowhere. The two
+same-world halves of this had worked since v0.15; the cross-world half had never
+had them, and the header said so out loud:
+
+> A cross-world copy is therefore uncut — it is a window rather than a hole, and
+> a body does not straddle a window, it is teleported through one.
+
+That is the sentence the report contradicts, and it was load-bearing: it excused
+`CutAndCloneSeams` skipping a crossing seam entirely, and it excused
+`CloneThroughSeams` building its copy field by field with no cut on it.
+
+**Three things followed from it, and each was its own missing feature:**
+
+* **Neither half was cut.** The copy carried no seam plane, and the original was
+  never visited, so nothing partitioned the body. This is the report.
+* **Only movable things crossed.** The copy came from an entity walk over
+  `Motion` and `CharacterLimb` — "what goes through a portal is what can move",
+  a rule the same-world side had already retired, because an anchored crate
+  resting in a seam is as much a thing standing in the hole as anything that
+  walked there. A mesh nobody made movable had no far half either.
+* **The duplicate guard was asked the wrong question.** `COINCIDENT_COPY`
+  refuses a copy that lands on its original. Two worlds laid out the same way —
+  every authored pair, and what makes a hole read as an opening — give a map
+  that is a half-turn about the pane's own axis, so a body standing dead centre
+  in the doorway comes out at its own coordinates, turned right around. Inside
+  one list that copy is on top of its original and has to go; across two worlds
+  the same coordinates are a different space. One question for both refused the
+  most important crossing there is.
+
+**The fix is one rule in one function.** `FarHalfOfRow` takes a drawn row and a
+seam and produces the far half, cut, sized and lit. `CutAndCloneSeams` calls it
+and cuts the original too — *including for a crossing seam*, where it keeps the
+cut and drops the copy. `AppendPortalClones` calls it from a host holding both
+worlds and keeps the copy. Neither has its own idea of what may cross.
+
+Reading rows rather than entities also takes the interpolated frame the world is
+actually drawn with, so the two halves cannot end up a tick apart — and it means
+a mesh crosses for the same reason a box does, which is that both are rows.
+
+**What that cost, and what replaced it.** An entity walk could refuse a pane and
+a stand-in *by name*; a row walk cannot, and a world composited from another
+world's list has no names in it — nor any surface slot, if it has no camera. So
+the refusals are stated as what a thing is:
+
+* **A pane is exactly the rectangle the seam was measured from**, so "fits
+  through the hole" became strictly smaller than the hole. Which is also the
+  plain reading: to go through a hole you have to be smaller than it.
+* **A straddler has volume on both sides**, measured as the box's support along
+  the seam normal against its offset from the plane. A face marker is three
+  hundredths of a stud thick lying on the pane's own face — it passes a
+  bounding-sphere straddle test, fits the rectangle easily, and has no far half
+  to cut. Markers are appended *after* the same-world cut pass, so a row walk is
+  the first thing that ever saw one.
+* **Nothing invisible**, which is the stand-in rule from the section below,
+  arriving here for the second time and the same reason.
+
+Four cases in `scene/tests/SurfaceCameras.cpp` pin it: the halves partition the
+body (carried through the seam and tested, rather than asserted as a sign, so it
+holds for a pair turned, moved or resized); an anchored crate and a mesh cross
+and arrive with their appearance intact; the pane, a marker, an invisible row
+and a room-sized slab all do not; and a body on the map's own fixed point
+crosses worlds while the same arrangement inside one room refuses it.
+
 ### The stand-in that drew solid, which is the same rule one step on
 
 **The rule above has a second half, and the second half is invisibility.** A pane

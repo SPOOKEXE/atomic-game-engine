@@ -34,6 +34,7 @@
 #include <cmath>
 #include <format>
 #include <numbers>
+#include <span>
 
 namespace client {
 
@@ -487,6 +488,13 @@ namespace client {
 			return 0;
 		}
 
+		// **This world's own rows, counted before anything is appended to
+		// them.** The far world's straddlers land in `drawn` further down, and
+		// handing those back to `AppendPortalClones` as a source would clone a
+		// clone — a body that walked in from the far room would be copied
+		// straight back into it. What crosses is what this world drew.
+		const auto ownRows = drawn.size();
+
 		// This world's name, which is how the far end recognises a pane that
 		// leads back here. Resolved once: `NameOf` is a registry lookup and the
 		// answer cannot change while the frame is being assembled.
@@ -670,9 +678,13 @@ namespace client {
 					return;
 				}
 
-				// The same slots the copy above filtered by, gathered once.
-				for (const int8_t slot : returning) {
-					(void)engine::scene::AppendPortalClones(store, slot, drawn);
+				// The same slots the copy above filtered by, gathered once, and
+				// the same rows the copy above read — so what arrives in this
+				// room is the far half of exactly what the far world drew.
+				if (const auto *list = store.Resource<DrawList>()) {
+					for (const int8_t slot : returning) {
+						(void)engine::scene::AppendPortalClones(store, slot, list->Instances, drawn);
+					}
 				}
 			});
 
@@ -688,8 +700,9 @@ namespace client {
 			// A `SurfaceView` names one span, and a second one would be a second
 			// draw and a second reason for the two to fall out of order.
 			const auto surface = entry.Surface;
-			universe.Enter(world, [&foreign, surface](Store &store) {
-				(void)engine::scene::AppendPortalClones(store, surface, foreign);
+			const std::span<const DrawInstance> own(drawn.data(), ownRows);
+			universe.Enter(world, [&foreign, own, surface](Store &store) {
+				(void)engine::scene::AppendPortalClones(store, surface, own, foreign);
 			});
 
 			const auto count = static_cast<uint32_t>(foreign.size() - first);

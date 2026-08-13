@@ -178,6 +178,7 @@
 #include <engine/scene/DrawInstance.hpp>
 
 #include <cstddef>
+#include <span>
 #include <vector>
 
 namespace engine::ecs {
@@ -898,11 +899,14 @@ namespace engine::scene {
 	// the far room looking at the far pane — which is what a body sticking out
 	// of a portal looks like, and is what the original does at the near pane.
 	//
-	// **Cross-world panes are skipped.** `Portal::DestinationWorld` says why:
-	// their `Destination` is a camera stand-in in *this* world, so a clone
-	// through one would appear a metre behind the pane the body is walking into
-	// rather than in the world it is walking to. `client::AttachForeignSurfaces`
-	// is where that half is answered.
+	// **A cross-world pane gets the cut and not the copy.** Its
+	// `Destination` is a camera stand-in in *this* world, so a clone through one
+	// would appear a metre behind the pane the body is walking into rather than
+	// in the world it is walking to — that copy is `AppendPortalClones`' job,
+	// from a host holding both worlds. The *cut* is this pass's either way: the
+	// body poking out of the back of the glass is a row right here, and leaving
+	// it whole draws the body twice over, whole in the room it is leaving and
+	// whole again in the room it is entering, joined nowhere.
 	//
 	// @param store The world.
 	// @param out   The draw list. Read and appended to, and the rows of
@@ -912,28 +916,44 @@ namespace engine::scene {
 	// @since v0.15
 	size_t CutAndCloneSeams(ecs::Store &store, std::vector<DrawInstance> &out);
 
-	// Appends a copy of every movable body standing in one named pane, on the
+	// Appends the far half of everything standing in one named pane, cut to the
 	// far side of it, whether or not that pane crosses worlds.
 	//
 	// **What a host calls once it has the far world's draw list in its hands.**
-	// A cross-world pane is skipped by `CutAndCloneSeams` because its copy does
-	// not belong in this world's list — it belongs beside the *other* world's,
-	// which only something holding the universe can assemble.
-	// `client::AttachForeignSurfaces` is that caller, and it appends the copy
-	// straight after the far world's rows so the two are one range.
+	// A cross-world pane's copy does not belong in the list its body is drawn
+	// from — it belongs beside the *other* world's, which only something holding
+	// the universe can assemble. `client::AttachForeignSurfaces` is that caller,
+	// and it appends the copy straight after the far world's rows so the two are
+	// one range.
 	//
-	// **An entity walk, and it has to be**, which is the one place the two
-	// halves of this file differ: the body is in *this* store and the list being
-	// appended to is another world's, so there is no row here to read or to cut.
-	// A cross-world copy is therefore uncut — it is a window rather than a hole,
-	// and a body does not straddle a window, it is teleported through one.
+	// **A draw list in and a draw list out**, which is what keeps this and
+	// `CutAndCloneSeams` answering the same question. It was an entity walk over
+	// bodies carrying `Motion` or `CharacterLimb` — "what goes through a portal
+	// is what can move" — and that rule was already retired on the same-world
+	// side, where an anchored crate resting in a seam is as much a thing
+	// standing in the hole as anything that walked there. Reading rows also
+	// takes the interpolated frame the frame is actually drawn with, rather than
+	// re-deriving it and landing a half-body a tick away from its other half.
+	//
+	// **And the copy is cut.** A cross-world pane used to be argued as a window
+	// rather than a hole — nothing straddles a window — which drew a body in the
+	// doorway whole on this side and whole again on the far one, joined nowhere.
+	// The two halves now get the same complementary planes a same-world pair
+	// gets. The *original* is cut by `CutAndCloneSeams`, in the list it lives
+	// in, which does that for a crossing seam as well.
 	//
 	// @param store   The world the body is standing in.
 	// @param surface Which surface slot the pane samples.
+	// @param source  That world's rows, as they will be drawn.
 	// @param out     The list to append to. Nothing already in it is touched.
-	// @return How many copies were appended.
+	// @return How many far halves were appended.
 	// @since v0.15
-	size_t AppendPortalClones(ecs::Store &store, int8_t surface, std::vector<DrawInstance> &out);
+	size_t AppendPortalClones(
+		ecs::Store &store,
+		int8_t surface,
+		std::span<const DrawInstance> source,
+		std::vector<DrawInstance> &out
+	);
 
 	// Appends a thin translucent bar lying on each face a surface camera
 	// projects off.
