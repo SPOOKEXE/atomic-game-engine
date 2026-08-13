@@ -1,6 +1,6 @@
 #include <engine/core/Log.hpp>
-#include <engine/core/Profiling.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
@@ -10,13 +10,15 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
-#include <cstring>
 #include <cstdio>
+#include <cstring>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <span>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
+#include <vector>
 
 namespace studio {
 
@@ -46,13 +48,17 @@ namespace studio {
 		// corner. Bumping costs everybody the arrangement they dragged into
 		// place, which is why `mono.studio/AGENTS.md` says to do it when a
 		// panel is added and not otherwise.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v6";
+		// **v8 because Live Instances is a panel the saved layout has never
+		// heard of**, and a panel a layout does not know about opens floating in
+		// a corner — which is exactly the failure it exists to fix.
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v8";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
 		constexpr const char *EXPLORER = "Explorer";
 		constexpr const char *PROPERTIES = "Properties";
 		constexpr const char *WORLDS = "Worlds";
+		constexpr const char *INSTANCES = "Live Instances";
 		constexpr const char *SCRIPTS = "Script Editor";
 		constexpr const char *OUTPUT = "Output";
 		// **The title reads "Preferences" and the id stays "Studio Settings".**
@@ -71,28 +77,10 @@ namespace studio {
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,
-			VIEWPORT2,
-			EXPLORER,
-			WORLDS,
-			PROPERTIES,
-			SCRIPTS,
-			OUTPUT,
-			"Command Bar",
-			SETTINGS,
-			STATISTICS,
-			FRAMEGRAPH,
-			"History",
-			"Assets",
-			"Network",
-			"Team Create",
-			"Control (MCP)",
-			"Plugins",
-			"Bus",
-			"Find Instances",
-			"Script Profile",
-			"Changes",
-			"Debugger",
+			VIEWPORT,  VIEWPORT2,		 EXPLORER,		   WORLDS,		  INSTANCES,	   PROPERTIES,
+			SCRIPTS,   OUTPUT,			 "Command Bar",	   SETTINGS,	  STATISTICS,	   FRAMEGRAPH,
+			"History", "Assets",		 "Network",		   "Team Create", "Control (MCP)", "Plugins",
+			"Bus",	   "Find Instances", "Script Profile", "Changes",	  "Debugger",
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -100,7 +88,12 @@ namespace studio {
 		// **Only when imgui has no layout of its own.** Rebuilding every run
 		// would throw away wherever somebody dragged a panel to, which is the
 		// single most annoying thing an editor can do.
-		void BuildDefaultLayout(ImGuiID dockspace) {
+		// @param dockspace   The dockspace node to fill.
+		// @param extraTitles The extra viewport panels, in index order. Passed in
+		//                    rather than spelled here because the editor owns
+		//                    both how many there are and what they are called —
+		//                    see `Editor::ResizeViewports`.
+		void BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles) {
 			ImGui::DockBuilderRemoveNode(dockspace);
 			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
 			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
@@ -111,7 +104,8 @@ namespace studio {
 			// edge. Splitting them across the window makes every edit a
 			// diagonal mouse journey.
 			ImGuiID centre = dockspace;
-			const ImGuiID right = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.24f, nullptr, &centre);
+			const ImGuiID right =
+				ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.24f, nullptr, &centre);
 			const ImGuiID bottom =
 				ImGui::DockBuilderSplitNode(centre, ImGuiDir_Down, 0.28f, nullptr, &centre);
 
@@ -133,16 +127,21 @@ namespace studio {
 				ImGui::DockBuilderSplitNode(rightHalf, ImGuiDir_Left, 0.5f, nullptr, &rightHalf);
 
 			ImGui::DockBuilderDockWindow(VIEWPORT, leftHalf);
-			ImGui::DockBuilderDockWindow(VIEWPORT2, rightHalf);
 
-			// Three and four share the halves rather than splitting further:
-			// four quarters of a centre pane are four pictures too small to
-			// judge anything by, and a panel can be dragged wherever somebody
-			// actually wants it.
-			ImGui::DockBuilderDockWindow("Viewport 3", leftHalf);
-			ImGui::DockBuilderDockWindow("Viewport 4", rightHalf);
+			// Everything past the second shares the two halves rather than
+			// splitting further: four quarters of a centre pane are four
+			// pictures too small to judge anything by, and a panel can be
+			// dragged wherever somebody actually wants it. They alternate so an
+			// author who opens two more gets one on each side.
+			for (size_t index = 0; index < extraTitles.size(); index++) {
+				ImGui::DockBuilderDockWindow(extraTitles[index], index % 2 == 0 ? rightHalf : leftHalf);
+			}
 			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
 			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
+
+			// Beside the Worlds panel, because they answer the two halves of one
+			// question: what this game *has*, and what of it is *running*.
+			ImGui::DockBuilderDockWindow(INSTANCES, rightUpper);
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
 			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
 			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
@@ -219,9 +218,18 @@ namespace studio {
 			dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
 		}
 
+		// The panels the layout has to place, gathered once for either branch
+		// below. `ViewportState::Title` owns the strings; this is a view of
+		// them, and it lives no longer than the two calls under it.
+		std::vector<const char *> extraTitles;
+		extraTitles.reserve(Extras.size());
+		for (const ViewportState &view : Extras) {
+			extraTitles.push_back(view.Title.c_str());
+		}
+
 		if (ResetLayout) {
 			ResetLayout = false;
-			BuildDefaultLayout(dockspace);
+			BuildDefaultLayout(dockspace, extraTitles);
 		}
 
 		static bool built = false;
@@ -229,7 +237,7 @@ namespace studio {
 			built = true;
 			if (ImGui::DockBuilderGetNode(dockspace) == nullptr ||
 				ImGui::DockBuilderGetNode(dockspace)->IsLeafNode()) {
-				BuildDefaultLayout(dockspace);
+				BuildDefaultLayout(dockspace, extraTitles);
 			}
 		}
 
@@ -250,9 +258,21 @@ namespace studio {
 		// question you already know the answer to by the time you have opened
 		// the graph. A closed panel returns immediately and costs a span of
 		// almost nothing, which is the correct reading rather than an absence.
+		// The `+` on a tab strip is added by whichever panel draws first in each
+		// node — see `DrawViewport` — so the record of which nodes have one is a
+		// within-frame fact, like `ViewportClaimed` above it.
+		TabbedNodes.clear();
+
 		{
 			ENGINE_PROFILE_CAT("viewports", engine::core::ProfileCategory::Render);
-			for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
+
+			// **Every extra panel skins as `VIEWPORT2`, whatever it is called.**
+			// The settings page offers a colour per entry in `SkinnablePanels`,
+			// and one entry per viewport would be a list that grows as panels
+			// are added — so "the main viewport" and "an extra viewport" are the
+			// two things somebody can colour, which is the distinction that was
+			// there when there were exactly two.
+			for (size_t index = 0; index < 1 + Extras.size(); index++) {
 				Skinned(index == 0 ? VIEWPORT : VIEWPORT2, [&] { DrawViewport(index); });
 			}
 		}
@@ -261,6 +281,19 @@ namespace studio {
 		// `DrawViewport` for why asking per panel could not work.
 		ResolveFocusedViewport();
 
+		// The `+` somebody pressed on a tab strip, applied out here for the
+		// reason the button records rather than acts.
+		if (PendingViewport > 0) {
+			const size_t from = PendingViewport - 1;
+			PendingViewport = 0;
+
+			const size_t made = AddViewportBeside(from);
+			if (ViewportState *view = ExtraAt(made); view != nullptr) {
+				view->DockInto = PendingViewportDock;
+			}
+			PendingViewportDock = 0;
+		}
+
 		{
 			ENGINE_PROFILE_CAT("explorer", engine::core::ProfileCategory::Render);
 			Skinned(EXPLORER, [&] { DrawExplorer(); });
@@ -268,6 +301,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("worlds", engine::core::ProfileCategory::Render);
 			Skinned(WORLDS, [&] { DrawWorlds(); });
+			Skinned(INSTANCES, [&] { DrawLiveInstances(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("properties", engine::core::ProfileCategory::Render);
@@ -318,6 +352,7 @@ namespace studio {
 			Skinned("Team Create", [&] { DrawTeamCreate(); });
 			Skinned("Control (MCP)", [&] { DrawControl(); });
 			Skinned("Plugins", [&] { DrawPlugins(); });
+			Skinned("Demo Nodes", [&] { DrawNodeDemo(); });
 
 			// **Not `Skinned`, and that is the difference between the two
 			// halves of this feature.** Every panel above is the editor's and
@@ -444,7 +479,7 @@ namespace studio {
 		constexpr size_t NONE = ~size_t{0};
 		size_t target = NONE;
 
-		for (size_t index = 1; index <= EXTRA_VIEWPORTS; index++) {
+		for (size_t index = 1; index <= Extras.size(); index++) {
 			const ViewportState &view = Extras[index - 1];
 			if (view.Open && (view.Hovered || view.Active || view.Panning)) {
 				target = index;
@@ -468,6 +503,75 @@ namespace studio {
 			}
 		}
 
+		// **A viewport showing a client with a body in it is played, not
+		// flown.** Both readings of WASD are legitimate and only one can have
+		// the frame; the presence of a character settles it, which is
+		// discoverable without a menu — you press Play, you walk. A client view
+		// that has not received its character yet still flies, so the panel is
+		// usable in the gap.
+		//
+		// The free camera is skipped entirely rather than driven as well: two
+		// things moving on one key is the state where neither works.
+		//
+		// **Every client viewport is visited, and at most one of them is
+		// driven.** This used to call `DrivePlayer` for the target panel alone,
+		// which was wrong twice over.
+		//
+		// The first is what it did to the *other* panels: `scene::InputState` is
+		// a resource on each client world and it has to be maintained every
+		// frame the way a real client maintains its own. A panel nobody visited
+		// kept the last keys it was given, so a second client view walked for
+		// ever on a key released in the first, and alt-tabbing out of the editor
+		// left whoever was moving still moving.
+		//
+		// The second is what it did to the target: the search above accepts a
+		// panel that is `Panning`, and the call passed only `hovered` and
+		// `active` on. So a panel selected *because* it was panning arrived here
+		// looking like a panel nobody was touching — it took the frame, decided
+		// it was not being driven, and cleared the keys it had just been given.
+		// `Panning` stays set when a middle-drag is released off the picture, so
+		// from then on that client viewport erased its own keyboard every frame:
+		// the character had a move direction on a fraction of the ticks, and
+		// since `scene::StepCharacters` *replaces* horizontal velocity rather
+		// than accumulating it, that reads as a character that does not move at
+		// all. Which is exactly how it was reported.
+		//
+		// Passing `false` for every panel but the target is what keeps the "at
+		// most one walks" rule that made a single call site look right: the
+		// others are not skipped, they are told they have nothing.
+		const WorldId driven = target == NONE ? WorldId{} : ViewportWorld(target);
+
+		size_t played = NONE;
+		for (size_t index = 0; index <= Extras.size(); index++) {
+			const ViewportState *panel = ExtraAt(index);
+			if (panel == nullptr ? !ShowViewport : !panel->Open) {
+				continue;
+			}
+
+			// **Two panels showing one world is one world, and the one being
+			// driven wins.** A second view of the same client — which the `+` on
+			// a tab strip makes in one click, and which the main panel becomes
+			// for free whenever the active scene *is* a client — would otherwise
+			// arrive here as "not the target" and clear the very keys the target
+			// had just been given. `scene::InputState` is per world and not per
+			// panel; releasing it has to be a statement about the world.
+			const bool mine = index == target;
+			if (!mine && ViewportWorld(index) == driven) {
+				continue;
+			}
+			const bool pointer =
+				panel != nullptr ? panel->Hovered || panel->Panning : ViewportHovered || ViewportPanning;
+
+			if (DrivePlayer(
+					ViewportWorld(index),
+					mine && pointer,
+					mine && (panel != nullptr ? panel->Active : ViewportActive),
+					mine && FocusedIsViewport && FocusedViewport == index
+				)) {
+				played = index;
+			}
+		}
+
 		if (target == NONE) {
 			return;
 		}
@@ -476,6 +580,10 @@ namespace studio {
 		// fields — the one place the extras array does not hold the state.
 		ViewportState *view = ExtraAt(target);
 		const bool focused = FocusedIsViewport && FocusedViewport == target;
+
+		if (played == target) {
+			return;
+		}
 
 		if (view == nullptr) {
 			DriveCameraFor(
@@ -492,7 +600,13 @@ namespace studio {
 		}
 
 		DriveCameraFor(
-			view->Frame, view->Yaw, view->Pitch, view->Speed, view->Hovered, view->Active, view->Panning,
+			view->Frame,
+			view->Yaw,
+			view->Pitch,
+			view->Speed,
+			view->Hovered,
+			view->Active,
+			view->Panning,
 			focused
 		);
 	}
@@ -676,16 +790,11 @@ namespace studio {
 		ViewportState *extra = ExtraAt(index);
 		const bool second = extra != nullptr;
 
-		// imgui remembers a window by its title, so the titles are fixed rather
-		// than built per call — a name that changed would be a panel the saved
-		// layout has never heard of.
-		static const char *const TITLES[] = {"Viewport", "Viewport 2", "Viewport 3", "Viewport 4"};
-
-		// **The second panel is a different world by default and says which.**
-		// Two viewports both showing the active world is one view drawn twice;
-		// the reason to open the second is to watch the server's world beside
-		// the client's, or one subarea beside another while both tick.
-		const char *title = TITLES[index < 4 ? index : 0];
+		// imgui remembers a window by its title, so a panel's title is minted
+		// once when the panel is and then never changes — a name that moved
+		// would be a panel the saved layout has never heard of. See
+		// `ViewportState::Title`.
+		const char *title = ViewportTitle(index);
 		bool *open = second ? &extra->Open : &ShowViewport;
 		engine::render::SceneTarget &target = second ? extra->Target : WorldTarget;
 
@@ -696,12 +805,56 @@ namespace studio {
 			return;
 		}
 
+		// A panel opened from another's tab strip joins that strip, once. See
+		// `ViewportState::DockInto`.
+		if (extra != nullptr && extra->DockInto != 0) {
+			ImGui::SetNextWindowDockID(extra->DockInto, ImGuiCond_Always);
+			extra->DockInto = 0;
+		}
+
 		// No padding, so the image is the panel rather than a picture inside it.
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		const bool shown = ImGui::Begin(
-			title, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
-		);
+		const bool shown =
+			ImGui::Begin(title, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		ImGui::PopStyleVar();
+
+		// **A `+` at the end of the tabs this panel is docked in.** Another view
+		// of what you are looking at is the commonest thing to want and was two
+		// clicks through a menu; here it is one, in the place a browser has put
+		// it for twenty years.
+		//
+		// `DockNodeBeginAmendTabBar` is imgui's own supported way to put an item
+		// on a dock node's tab bar — the alternative is a strip of our own above
+		// the image, which would sit *under* the tabs and read as belonging to
+		// the wrong thing.
+		//
+		// **Once per node per frame.** Every viewport sharing a node would
+		// otherwise each add one, and the strip would grow a `+` per tab.
+		if (shown) {
+			if (ImGuiDockNode *node = ImGui::GetWindowDockNode(); node != nullptr) {
+				const bool first =
+					std::find(TabbedNodes.begin(), TabbedNodes.end(), node->ID) == TabbedNodes.end();
+
+				if (first && ImGui::DockNodeBeginAmendTabBar(node)) {
+					TabbedNodes.push_back(node->ID);
+
+					if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
+						// **Recorded, not done here.** This is inside an amended
+						// tab bar and inside this panel's `Begin`; opening a
+						// window from in here would nest one window inside
+						// another. `ApplyPendingActions`' rule, applied to
+						// imgui's stack rather than to the store's.
+						PendingViewport = index + 1;
+						PendingViewportDock = node->ID;
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Another view of this scene");
+					}
+
+					ImGui::DockNodeEndAmendTabBar();
+				}
+			}
+		}
 
 		if (!shown) {
 			// Collapsed or behind another tab. The target is dropped rather than
@@ -765,10 +918,7 @@ namespace studio {
 		if (void *texture = Renderer.SceneTexture(index); texture != nullptr) {
 			const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
 			ImGui::Image(
-				reinterpret_cast<ImTextureID>(texture),
-				size,
-				ImVec2(0.0f, 0.0f),
-				ImVec2(extent.U, extent.V)
+				reinterpret_cast<ImTextureID>(texture), size, ImVec2(0.0f, 0.0f), ImVec2(extent.U, extent.V)
 			);
 		} else {
 			// The first frame, and any frame after a resize the renderer has not
@@ -857,8 +1007,8 @@ namespace studio {
 		// window from a click on a non-interactive item — so without this the
 		// toolbar went on describing whichever panel imgui happened to focus
 		// last, which is exactly what it did. See `FocusedViewport`.
-		if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
-						ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
+		if (hovered &&
+			(ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 			ImGui::SetWindowFocus();
 			FocusedViewport = index;
 
@@ -888,40 +1038,38 @@ namespace studio {
 		// window nor the font, and was exactly what this cost once.
 		ImGui::BeginGroup();
 		{
-			const engine::ui::ScopedFont small(
-				engine::ui::Typeface::Interface, engine::ui::TextSize::Small
-			);
+			const engine::ui::ScopedFont small(engine::ui::Typeface::Interface, engine::ui::TextSize::Small);
 
-		const engine::core::Name scene =
-			Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
-		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-		ImGui::Text(
-			"%s   %u x %u   %u draw   %llu tris   %u culled",
-			scene.IsValid() ? Label(scene) : "(no scene)",
-			target.Width,
-			target.Height,
-			LastFrame.DrawCalls,
-			static_cast<unsigned long long>(LastFrame.Triangles),
-			LastFrame.Culled
-		);
-		ImGui::PopStyleColor();
-
-		// **This panel's world, not "the" mode.** With scenes running
-		// independently, a viewport showing an edited world must not warn that
-		// Stop will throw the edits away — and one showing a running world must,
-		// whatever the other panels are doing. An author who has forgotten which
-		// of two scenes is live is exactly who this line is for.
-		if (const RunMode panelMode = ModeOf(ViewportWorld(index)); panelMode != RunMode::Edit) {
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::Text("%s - Stop restores this scene", Describe(panelMode));
-			ImGui::PopStyleColor();
-		}
-
-		if (ViewportActive) {
+			const engine::core::Name scene =
+				Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-			ImGui::Text("WASD / QE   %.0f u/s   wheel to change", static_cast<double>(CameraSpeed));
+			ImGui::Text(
+				"%s   %u x %u   %u draw   %llu tris   %u culled",
+				scene.IsValid() ? Label(scene) : "(no scene)",
+				target.Width,
+				target.Height,
+				LastFrame.DrawCalls,
+				static_cast<unsigned long long>(LastFrame.Triangles),
+				LastFrame.Culled
+			);
 			ImGui::PopStyleColor();
-		}
+
+			// **This panel's world, not "the" mode.** With scenes running
+			// independently, a viewport showing an edited world must not warn that
+			// Stop will throw the edits away — and one showing a running world must,
+			// whatever the other panels are doing. An author who has forgotten which
+			// of two scenes is live is exactly who this line is for.
+			if (const RunMode panelMode = ModeOf(ViewportWorld(index)); panelMode != RunMode::Edit) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				ImGui::Text("%s - Stop restores this scene", Describe(panelMode));
+				ImGui::PopStyleColor();
+			}
+
+			if (ViewportActive) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::Text("WASD / QE   %.0f u/s   wheel to change", static_cast<double>(CameraSpeed));
+				ImGui::PopStyleColor();
+			}
 		}
 
 		ImGui::EndGroup();
@@ -929,18 +1077,31 @@ namespace studio {
 	}
 
 	void Editor::DrawViewMenu() {
-		ImGui::MenuItem("Viewport", nullptr, &ShowViewport);
-
-		// **The second view, and it is what "server beside client" is made
-		// of.** Off by default: a second viewport halves the refresh rate of
-		// both, so it is a thing somebody opens when they want it rather than
-		// a cost everybody pays.
-		for (size_t index = 0; index < EXTRA_VIEWPORTS; index++) {
-			const char *names[] = {"Viewport 2", "Viewport 3", "Viewport 4"};
-			ImGui::MenuItem(names[index], nullptr, &Extras[index].Open);
+		// **One entry for every viewport there is or could be.** A row per panel
+		// was right while there were four of them and is not now they are minted
+		// on demand: the list grew as somebody worked, most of it was off, and
+		// the one thing anybody came to this menu for — another view — was at
+		// the bottom of it.
+		//
+		// **It is still the way back**, which is this menu's whole job.
+		// `AddViewport` reopens a closed panel before it makes a new one and
+		// reopens the main one first of all, so a viewport somebody shut from
+		// its title bar comes back from here rather than being lost.
+		//
+		// N open viewports each refresh at a Nth of the frame rate, which is why
+		// there is no ceiling and no default beyond the first — see
+		// `DrawingViewport`.
+		if (ImGui::MenuItem("New Viewport")) {
+			AddViewport();
 		}
 		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
+
+		// **Beside Worlds, and it is the way back to a view rather than to a
+		// panel.** A viewport pinned to a client and then closed used to be
+		// recoverable only because the replica had a row among the scenes; the
+		// server's view had nothing at all. Both are rows here now.
+		ImGui::MenuItem("Live Instances", nullptr, &ShowLiveInstances);
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
 		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
@@ -970,6 +1131,7 @@ namespace studio {
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
+		ImGui::MenuItem("Demo Nodes", nullptr, &ShowNodeDemo);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
@@ -1088,9 +1250,8 @@ namespace studio {
 			// wrong guess builds a game into one world.
 			if (ImGui::MenuItem("Sync Rojo Universe...")) {
 				AskingRojoUniverse = true;
-				PathBuffer = GamePath.empty()
-								 ? std::string("main.universe.json")
-								 : (GamePath.parent_path() / "main.universe.json").string();
+				PathBuffer = GamePath.empty() ? std::string("main.universe.json")
+											  : (GamePath.parent_path() / "main.universe.json").string();
 			}
 
 			ImGui::Separator();
@@ -1105,10 +1266,9 @@ namespace studio {
 			}
 			if (ImGui::MenuItem("Save As...", Keybinds::Of(Action::SaveAs).Text().c_str())) {
 				AskingSaveAs = true;
-				PathBuffer =
-					GamePath.empty()
-						? std::string(Label(GameName)) + std::string(engine::game::GAME_EXTENSION)
-						: GamePath.string();
+				PathBuffer = GamePath.empty()
+								 ? std::string(Label(GameName)) + std::string(engine::game::GAME_EXTENSION)
+								 : GamePath.string();
 			}
 
 			ImGui::Separator();
@@ -1128,8 +1288,8 @@ namespace studio {
 			}
 			if (ImGui::MenuItem("Export Active World...", nullptr, false, Active.IsValid())) {
 				AskingExport = true;
-				PathBuffer = std::string(Label(Universe->NameOf(Active))) +
-							 std::string(engine::game::WORLD_EXTENSION);
+				PathBuffer =
+					std::string(Label(Universe->NameOf(Active))) + std::string(engine::game::WORLD_EXTENSION);
 			}
 
 			// **Beside the world export rather than beside Save As**, because
@@ -1138,8 +1298,7 @@ namespace studio {
 			// extension is what tells them apart afterwards.
 			if (ImGui::MenuItem("Export Universe...", nullptr, false, Universe->Count() > 0)) {
 				AskingExportUniverse = true;
-				PathBuffer =
-					std::string(Label(GameName, "Game")) + std::string(engine::game::GAME_EXTENSION);
+				PathBuffer = std::string(Label(GameName, "Game")) + std::string(engine::game::GAME_EXTENSION);
 			}
 
 			ImGui::Separator();
@@ -1177,7 +1336,8 @@ namespace studio {
 
 				// The reason, on hover, for a greyed row. A menu item that is
 				// disabled and silent is one somebody clicks twice.
-				if (!state.Ready && !state.Reason.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				if (!state.Ready && !state.Reason.empty() &&
+					ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 					ImGui::SetTooltip("%s", state.Reason.c_str());
 				}
 			};
@@ -1258,13 +1418,13 @@ namespace studio {
 			const RunMode mode = ModeOf(scope);
 
 			if (ImGui::MenuItem(
-					"Play (server + client)", Keybinds::Of(Action::Play).Text().c_str(),
-					mode == RunMode::Play
+					"Play (server + client)", Keybinds::Of(Action::Play).Text().c_str(), mode == RunMode::Play
 				)) {
 				SetRunMode(scope, mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
 			}
 			if (ImGui::MenuItem(
-					"Run (server only)", Keybinds::Of(Action::RunServer).Text().c_str(),
+					"Run (server only)",
+					Keybinds::Of(Action::RunServer).Text().c_str(),
 					mode == RunMode::Server
 				)) {
 				SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
@@ -1336,8 +1496,8 @@ namespace studio {
 		if (Keybinds::Fired(Action::Save)) {
 			if (GamePath.empty()) {
 				AskingSaveAs = true;
-				PathBuffer = std::string(Label(GameName, "Untitled")) +
-							 std::string(engine::game::GAME_EXTENSION);
+				PathBuffer =
+					std::string(Label(GameName, "Untitled")) + std::string(engine::game::GAME_EXTENSION);
 			} else {
 				SaveGame(GamePath);
 			}
@@ -1454,9 +1614,8 @@ namespace studio {
 		// The panel that owns the focused window, which is the window itself
 		// unless focus landed on a child of it — a combo or a popup inside the
 		// viewport is still the viewport for this purpose.
-		const ImGuiWindow *focused = context->NavWindow->RootWindow != nullptr
-										 ? context->NavWindow->RootWindow
-										 : context->NavWindow;
+		const ImGuiWindow *focused =
+			context->NavWindow->RootWindow != nullptr ? context->NavWindow->RootWindow : context->NavWindow;
 
 		// **Which panel the keyboard is in, decided in the same place and from
 		// the same window.** A binding scoped to the tree must not fire while
@@ -1475,10 +1634,8 @@ namespace studio {
 			Keybinds::SetScope(Scope::Viewport);
 		}
 
-		static const char *const TITLES[] = {"Viewport", "Viewport 2", "Viewport 3", "Viewport 4"};
-
-		for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
-			const ImGuiWindow *window = ImGui::FindWindowByName(TITLES[index]);
+		for (size_t index = 0; index < 1 + Extras.size(); index++) {
+			const ImGuiWindow *window = ImGui::FindWindowByName(ViewportTitle(index));
 			if (window == nullptr) {
 				continue;
 			}
@@ -1547,7 +1704,18 @@ namespace studio {
 		// switching viewports genuinely swaps the transport rather than
 		// relabelling it. A universe is a collection of scenes and each of them
 		// runs, pauses and stops on its own — see `Editor::WorldRun`.
-		const WorldId scope = ViewportWorld(FocusedViewport);
+		const WorldId focused = ViewportWorld(FocusedViewport);
+
+		// **A client view belongs to a run and is not one, so the transport asks
+		// the run it is part of.** A replica carries no run record — `ModeOf`
+		// answers `Edit` for it — so every button here read "nothing is running"
+		// while looking at a live client, and Play would have started a *second*
+		// run inside the replica world: a snapshot of somebody else's view, with
+		// its scripts started, ticking beside the server it is a copy of.
+		const WorldRun *owner = RunOwning(focused);
+		const bool client = IsReplicaWorld(focused);
+		const WorldId scope = client && owner != nullptr ? owner->World : focused;
+
 		const RunMode mode = ModeOf(scope);
 		const bool running = mode != RunMode::Edit;
 		const bool paused = IsPaused(scope);
@@ -1575,10 +1743,57 @@ namespace studio {
 		}
 		ImGui::SameLine();
 
-		if (ImGui::Button("Stop")) {
-			SetRunMode(scope, RunMode::Edit);
+		// **Stop means "this client leaves" while a client view is focused.**
+		// Stopping the whole run from a panel showing one player's screen is the
+		// larger of the two things somebody could mean and the one they cannot
+		// undo — the server's own view is a click away and still stops
+		// everything. The label says which of the two this press is.
+		if (ImGui::Button(client ? "Stop Client" : "Stop")) {
+			if (client) {
+				(void)RemovePlayer(focused);
+			} else {
+				SetRunMode(scope, RunMode::Edit);
+			}
+		}
+		if (client && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("removes this client and its player\nstop the scene from the server's view");
 		}
 		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+
+		// **Players, and they are what turn Run into Play one at a time.** A
+		// `RunMode::Server` run is a dedicated server with nobody in it; Spawn
+		// Player admits somebody, gives them a character and opens a viewport
+		// they can see it from. A Play run gains a second client, which is the
+		// arrangement that shows a bug two clients disagree about and the one a
+		// single replica cannot.
+		//
+		// **Scoped to the viewport you are in, like every other button here.**
+		// `RunOwning` is what makes that work from a *client* panel as well as
+		// from the server's — pressing Remove Player while looking at a client
+		// removes that one, which is the only reading somebody would expect.
+		ImGui::BeginDisabled(!running);
+		if (ImGui::Button("Spawn Player")) {
+			(void)SpawnPlayer(focused);
+		}
+		ImGui::SameLine();
+
+		const size_t players = owner == nullptr ? 0 : owner->Links.size();
+
+		ImGui::BeginDisabled(players == 0);
+		if (ImGui::Button("Remove Player")) {
+			(void)RemovePlayer(focused);
+		}
+		ImGui::EndDisabled();
+		ImGui::EndDisabled();
+
+		if (running) {
+			ImGui::SameLine();
+			ImGui::TextDisabled("%zu player%s", players, players == 1 ? "" : "s");
+		}
 
 		ImGui::SameLine();
 		ImGui::TextDisabled("|");
@@ -1687,6 +1902,18 @@ namespace studio {
 		item("Script", 2);
 		item("View", 3);
 
+		// **Always there, whether or not anything is installed.** A tab that
+		// appeared once a plugin loaded would be the answer to "where do
+		// plugins go" only for people who already had one — and the row says
+		// which of the two empty states it is.
+		item("Plugins", 4);
+
+		// **Demos, last, because they are the tab nobody needs while working.**
+		// What is on it is a thing to look at rather than a tool to use, and
+		// putting it before Plugins would push a row somebody uses every day one
+		// place further along.
+		item("Demo", 5);
+
 		ImGui::EndTabBar();
 
 		switch (tab) {
@@ -1701,6 +1928,12 @@ namespace studio {
 			break;
 		case 3:
 			DrawViewTools();
+			break;
+		case 4:
+			DrawPluginTools();
+			break;
+		case 5:
+			DrawDemoTools();
 			break;
 		default:
 			// No tab is open only on the frame the bar is first submitted, and
@@ -1722,10 +1955,10 @@ namespace studio {
 		// first time either is tuned.
 		//
 		// The floor is where the vendored faces stop being readable and the
-		// ceiling is where stretching the atlas's glyphs starts to look like a
-		// mistake rather than a setting — `SetWindowFontScale` resizes what has
-		// already been rasterised, so a long way from 1 goes soft in both
-		// directions.
+		// ceiling is where one line of code is wide enough that reading it
+		// becomes scrolling. Both ends stay sharp: a zoom is a font pushed at a
+		// size, which imgui rasterises at that size, rather than a stretch of
+		// glyphs baked at another one.
 		constexpr float ZOOM_MINIMUM = 0.6f;
 		constexpr float ZOOM_MAXIMUM = 3.0f;
 		constexpr float ZOOM_STEP = 0.1f;
@@ -1927,16 +2160,16 @@ namespace studio {
 			// **Monospace, because this is a log.** A stack trace, a table of
 			// numbers and a printed table all line up in one and none of them do
 			// in a proportional face.
+			//
+			// **The zoom is the size it is pushed at, and it scales the font
+			// rather than the interface.** `Options::Scale` rebuilds every
+			// metric in the editor and needs a restart to rasterise the faces at
+			// the new size; this is one panel's text, and wanting a bigger stack
+			// trace is not wanting a bigger properties panel. The same call the
+			// script editor makes, for the reason given on `ScopedFont`.
 			const engine::ui::ScopedFont code(
-				engine::ui::Typeface::Monospace, engine::ui::TextSize::Small
+				engine::ui::Typeface::Monospace, engine::ui::TextSize::Small, OutputZoom
 			);
-
-			// **Scales the font rather than the interface.** `Options::Scale`
-			// rebuilds every metric in the editor and needs a restart to
-			// rasterise the faces at the new size; this is one panel's text,
-			// and wanting a bigger stack trace is not wanting a bigger
-			// properties panel.
-			ImGui::SetWindowFontScale(OutputZoom);
 
 			size_t shown = 0;
 
@@ -1957,7 +2190,7 @@ namespace studio {
 
 				shown++;
 
-				const unsigned int colour = isError	  ? engine::ui::ErrorColour()
+				const unsigned int colour = isError		? engine::ui::ErrorColour()
 											: isWarning ? engine::ui::WarningColour()
 														: 0u;
 
@@ -1974,9 +2207,7 @@ namespace studio {
 				// pointer rather than only the one the press started on.
 				ImGui::PushID(static_cast<int>(message.Serial));
 				ImGui::Selectable(
-					message.Text.c_str(),
-					OutputSelected(message.Serial),
-					ImGuiSelectableFlags_AllowOverlap
+					message.Text.c_str(), OutputSelected(message.Serial), ImGuiSelectableFlags_AllowOverlap
 				);
 
 				if (ImGui::IsItemClicked()) {
@@ -2011,11 +2242,6 @@ namespace studio {
 					Output.size() - shown
 				);
 			}
-
-			// **Restored before the child ends.** The scale is a property of
-			// the window rather than of the widget, so leaving it set would
-			// zoom whatever the panel draws next as well.
-			ImGui::SetWindowFontScale(1.0f);
 
 			// Pinned to the bottom while the view is already there, and left
 			// alone when it is not. Scrolling up to read an error and being
@@ -2081,7 +2307,7 @@ namespace studio {
 		// hide a scene running behind you. A count is the honest summary; the
 		// toolbar and the Worlds panel say which.
 		const size_t live = Runs.size();
-		const std::string state = live == 0	 ? std::string("Edit")
+		const std::string state = live == 0	  ? std::string("Edit")
 								  : live == 1 ? std::string(Describe(Runs.front().Mode)) + " (1 scene)"
 											  : std::to_string(live) + " scenes running";
 

@@ -94,8 +94,14 @@ namespace studio {
 		out << "# atomic studio content sources\n";
 		out << "# one line per origin, in priority order:\n";
 		out << "#   name | kind | location | on/off | read|write|both | ingest key\n";
+		out << "# raw = a folder of unprocessed art this editor may bake from\n";
 		out << "cache = " << CachePath.generic_string() << "\n";
 		out << "publisher = " << PublisherKey << "\n";
+		out << "memory-only = " << (MemoryOnly ? "on" : "off") << "\n";
+
+		for (const std::filesystem::path &folder : RawFolders) {
+			out << "raw = " << folder.generic_string() << "\n";
+		}
 
 		for (const Source &source : Sources) {
 			// The separator is a pipe rather than a comma because a Windows
@@ -119,6 +125,13 @@ namespace studio {
 		Sources.clear();
 		CachePath.clear();
 		PublisherKey.clear();
+		RawFolders.clear();
+
+		// **Not reset to `true` with the rest.** A file written before raw
+		// folders existed says nothing about this, and the default is the safe
+		// answer — a store that quietly started collecting baked copies of
+		// somebody's art folder would be the wrong way to be wrong.
+		MemoryOnly = true;
 
 		std::string line;
 		while (std::getline(in, line)) {
@@ -139,6 +152,16 @@ namespace studio {
 			}
 			if (key == "publisher") {
 				PublisherKey = std::string(value);
+				continue;
+			}
+			if (key == "raw") {
+				RawFolders.emplace_back(value);
+				continue;
+			}
+			if (key == "memory-only") {
+				// Anything unrecognised reads as on, which is the answer that
+				// writes nothing to somebody's disk.
+				MemoryOnly = value != "off";
 				continue;
 			}
 			if (key != "source") {

@@ -8,6 +8,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/game/Play.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/physics/Query.hpp>
@@ -15,7 +16,9 @@
 #include <engine/replication/Priority.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Awake.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/world/Lifecycle.hpp>
@@ -637,6 +640,34 @@ namespace server {
 				}
 
 				Players[client.Index] = Occupant{player, client.Generation};
+
+				// **And a body, which is the other half of admitting somebody.**
+				// A `Player` with no character is a row in a service that nothing
+				// draws and nothing can move — every world this repository shipped
+				// before now was in exactly that state, so `--listen` produced a
+				// scene a client could watch and never enter.
+				//
+				// Ownership of the root goes to this player inside `LoadCharacter`,
+				// which is what makes the client's own movement authoritative and
+				// nobody else's.
+				const engine::ecs::Entity character = engine::scene::LoadCharacter(store, player);
+				if (character == engine::ecs::NULL_ENTITY) {
+					ENGINE_WARN("server: '{}' has no character — the world has no Workspace", name);
+				}
+
+				// **Which player is theirs, over the user channel.** It cannot be
+				// replicated: `scene::LocalPlayer` is one resource per world and
+				// the answer differs per client, so it travels as a per-client
+				// message — `game/Join.hpp` carries the whole argument.
+				const std::vector<std::byte> notice =
+					engine::game::EncodeJoinNotice(engine::game::JoinNotice{player});
+				if (!Replication->SendTo(client, notice, PollNow)) {
+					// **Not fatal, and said out loud.** A client that never
+					// learns its player watches the world and cannot move in it,
+					// which is a symptom with no other explanation attached.
+					ENGINE_WARN("server: could not tell '{}' which player is theirs", name);
+				}
+
 				ENGINE_INFO("server: {} joined as '{}'", name, Worlds().NameOf(PrimaryWorld).Text());
 			});
 		});
@@ -753,6 +784,26 @@ namespace server {
 		return true;
 	}
 
+	void Server::ApplyMove(engine::replication::ClientId client, const engine::game::MoveInput &move) {
+		const auto found = Players.find(client.Index);
+		if (found == Players.end() || found->second.Generation != client.Generation) {
+			// A move from a connection this server has no player for. Ordinary
+			// during the tick between a drop and the next poll, so it is
+			// dropped without a count.
+			return;
+		}
+
+		const engine::ecs::Entity player = found->second.Instance;
+
+		// **The write itself is `game`'s**, because the studio applies the same
+		// move from a `PlayLink` with no socket in the middle — two copies of
+		// "which field does a move touch" is the shape that drifts, and drifts
+		// first in the editor.
+		Worlds().Enter(PrimaryWorld, [player, &move](engine::ecs::Store &store) {
+			(void)engine::game::ApplyMoveInput(store, player, move);
+		});
+	}
+
 	void Server::ApplyInputs() {
 		using engine::replication::Rewind;
 
@@ -765,6 +816,17 @@ namespace server {
 			const float latency = Replication->RoundTripMilliseconds(submission.Client);
 
 			for (const engine::replication::Input &input : submission.Inputs) {
+				// **Movement first, because it is the tagged one.** A shot is
+				// seven untagged floats, so the order has to be "try the message
+				// that identifies itself, then the one that does not" — the
+				// reverse would eventually read a move as a shot at whatever
+				// three of its bytes happened to spell.
+				engine::game::MoveInput move;
+				if (engine::game::DecodeMoveInput(input.Bytes, move)) {
+					ApplyMove(submission.Client, move);
+					continue;
+				}
+
 				engine::examples::Shot shot;
 				if (!engine::examples::DecodeShot(input.Bytes, shot)) {
 					// A client sending something this is not is either running
@@ -1093,6 +1155,10 @@ namespace server {
 		if (Replication == nullptr) {
 			return;
 		}
+
+		// Recorded before the poll, because `OnAdmitted` fires from inside it
+		// and the join notice it sends has to be stamped with this tick's clock.
+		PollNow = nowSeconds;
 
 		// Inbound first, so an acknowledgement that arrived this tick is counted
 		// before this tick's delta is built against it.

@@ -27,6 +27,23 @@ namespace engine::physics {
 		return found != RestingList.end() && found->Owner == entity && found->Asleep;
 	}
 
+	bool PhysicsWorld::Wake(ecs::Entity entity) {
+		const RestingBody probe{entity, 0.0f, false};
+		const auto found = std::lower_bound(RestingList.begin(), RestingList.end(), probe);
+		if (found == RestingList.end() || found->Owner != entity) {
+			return false;
+		}
+
+		const bool was = found->Asleep;
+
+		// **Erased rather than reset in place**, which keeps the list's
+		// invariant trivially: it is sorted by owner and holds only bodies with
+		// rest accumulated, so a body with none has no row. The next tick that
+		// finds it still puts it back.
+		RestingList.erase(found);
+		return was;
+	}
+
 	size_t PhysicsWorld::SleepingBodies() const {
 		size_t count = 0;
 		for (const RestingBody &body : RestingList) {

@@ -38,7 +38,7 @@ namespace {
 		advert.Admits = Access::Public;
 		advert.Protocol = 7;
 		advert.At = Endpoint::LoopbackIPv4(7777);
-		advert.Name = "Declan's game";
+		advert.Name = "User's game";
 		advert.Detail = "Baseplate";
 		advert.Peers = 3;
 		advert.PeerLimit = 16;

@@ -386,6 +386,30 @@ namespace client {
 		// @param nowSeconds The current time.
 		void PollServer(double nowSeconds);
 
+		// Copies this frame's keyboard and pointer onto a world's `InputState`.
+		//
+		// **One function because two worlds want it**, and they are not the same
+		// kind of world: every simulated world takes it so that a script polling
+		// `UserInputService` gets the same answer wherever it runs, and the
+		// replicated world takes it because since v0.14 it holds this client's
+		// camera and character.
+		//
+		// @param store The world to write into. Does nothing when it has no
+		//        `InputState` resource.
+		void WriteInput(engine::ecs::Store &store);
+
+		// Sends what the player is asking their character to do.
+		//
+		// **The intent and never the result**, which is the division
+		// `Server::ApplyInputs` already states for shooting: a client says which
+		// way it is walking and the host decides where that puts it. The
+		// alternative — simulating the character here and submitting its
+		// transform — puts a physics step on both ends and hands a client the
+		// ability to state where its own body is.
+		//
+		// @param nowSeconds The current time.
+		void SubmitMove(double nowSeconds);
+
 		// Gathers what the F4 panel shows, and moves the rate window on.
 		//
 		// **Not `const`, and not idempotent.** A byte *rate* is a derivative and
@@ -638,6 +662,42 @@ namespace client {
 		// was deleted stops being drawn — a list assembled from what is in the
 		// world cannot outlive what is in the world.
 		std::vector<engine::render::SurfaceView> Surfaces;
+
+		// **The same-world holes, which are not surfaces and have their own
+		// pass.** Rebuilt each frame for `Surfaces`' reason, and gathered
+		// *before* it: a slot a portal owns is one `CollectSurfaceViews` must
+		// leave alone, or the pane would be drawn twice from two different
+		// viewpoints. See `render::PortalView`.
+		std::vector<engine::render::PortalView> Portals;
+
+		// Another world's rows, for a pane that shows one.
+		//
+		// **The standalone client did not assemble these at all until v0.15**,
+		// which meant a `Portal::DestinationWorld` pane worked in the studio and
+		// showed its own world here — a mirror where a window was authored, with
+		// nothing in any log to say so. `client::AttachForeignSurfaces` fills it
+		// and points the pane's `SurfaceView` at a range of it.
+		std::vector<engine::scene::DrawInstance> Foreign;
+
+		// This world's rows with the far side of anybody standing in one of its
+		// cross-world panes appended.
+		//
+		// **A copy, and only taken when there is a cross-world pane in the
+		// world.** `Views` owns the published list and hands out a `const` span
+		// — rightly, since it is the buffer the renderer reads — so the return
+		// leg has nowhere to be appended without one. That copy is a memcpy of
+		// the whole draw list, which is worth paying for a world with a window
+		// in it and not worth paying for every other world, so `Windowed` below
+		// decides.
+		std::vector<engine::scene::DrawInstance> Drawn;
+
+		// Whether the drawn world holds a pane that names another world.
+		//
+		// Set while the world is open, because that is the only place the
+		// question can be asked cheaply, and read after every `Enter` has closed
+		// — `Universe::Enter` is not re-entrant and attaching enters the far
+		// world.
+		bool Windowed = false;
 
 		// This frame's particle batches, one per emitter with something alive.
 		//

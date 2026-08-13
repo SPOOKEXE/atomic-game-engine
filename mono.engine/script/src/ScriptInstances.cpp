@@ -1,9 +1,11 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 
 #include <algorithm>
@@ -22,6 +24,131 @@ namespace engine::script {
 		// visits one. A flag on the row would have to be loaded and branched on
 		// for every script in the world, every tick, to answer a question that
 		// changes once in a game's life.
+		// The enum a script picks a language from, spelled once.
+		const core::Name &LanguageEnum() {
+			static const core::Name name("ScriptLanguage");
+			return name;
+		}
+
+		// One container's path, as a property.
+		//
+		// **A template over the two, because they are the same property twice.**
+		// Two hand-written copies of a getter and a setter is where the Luau one
+		// and the JavaScript one eventually disagree about what an empty path
+		// means.
+		template <typename Container> ecs::PropertyDescriptor ContainerProperty(const char *name) {
+			ecs::PropertyDescriptor property;
+			property.Name = core::Name(name);
+			// **`Name`, not `String`.** `Classes::TypeOf` maps a `core::Name`
+			// field to `PropertyType::Name`, and every caller sizes its buffer
+			// from the type — a descriptor claiming `String` is handed a
+			// `std::string` and refused by the size check, silently, which is a
+			// property that reads as absent everywhere: no panel row, and
+			// nothing written to a game file.
+			property.Type = ecs::PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Container>()});
+			property.Writes = property.Reads;
+
+			// **Not scriptable** — `LuaSourceContainer` carries the argument.
+			property.Scriptable = false;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Container *held = store.Get<Container>(instance);
+				*static_cast<core::Name *>(out) = held != nullptr ? held->Path : core::Name{};
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Container held;
+				if (const Container *current = store.Get<Container>(instance); current != nullptr) {
+					held = *current;
+				}
+				held.Path = *static_cast<const core::Name *>(value);
+				store.Set(instance, held);
+				return true;
+			};
+			return property;
+		}
+
+		// The program this instance actually runs.
+		//
+		// **Reads through the selector and writes through the extension**, which
+		// is the pair that makes one field usable while there are two
+		// containers: an author setting `Source = "thing.js"` means "run this
+		// JavaScript", and `SetSourcePath` is the one place that decides which
+		// container a path belongs in.
+		ecs::PropertyDescriptor SourceProperty() {
+			ecs::PropertyDescriptor property;
+			property.Name = core::Name("Source");
+			// **`Name`, not `String`.** `Classes::TypeOf` maps a `core::Name`
+			// field to `PropertyType::Name`, and every caller sizes its buffer
+			// from the type — a descriptor claiming `String` is handed a
+			// `std::string` and refused by the size check, silently, which is a
+			// property that reads as absent everywhere: no panel row, and
+			// nothing written to a game file.
+			property.Type = ecs::PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Reads = &ecs::ComponentSet::Intern({
+				ecs::Components::Of<LuaSourceContainer>(),
+				ecs::Components::Of<JavaScriptSourceContainer>(),
+				ecs::Components::Of<CodeSourceContainerSelector>(),
+			});
+			property.Writes = property.Reads;
+			property.Scriptable = false;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				*static_cast<core::Name *>(out) = ActiveSourceOf(store, instance);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				SetSourcePath(store, instance, *static_cast<const core::Name *>(value));
+				return true;
+			};
+			return property;
+		}
+
+		// Which container runs, as an enum a script may set.
+		ecs::PropertyDescriptor LanguageProperty() {
+			ecs::EnumTable::Register(LanguageEnum().Text(), "Luau");
+			ecs::EnumTable::Register(LanguageEnum().Text(), "JavaScript");
+
+			ecs::PropertyDescriptor property;
+			property.Name = core::Name("Language");
+			property.Type = ecs::PropertyType::Enum;
+			property.Size = sizeof(core::Name);
+			property.EnumName = LanguageEnum();
+			property.Reads =
+				&ecs::ComponentSet::Intern({ecs::Components::Of<CodeSourceContainerSelector>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const auto ordinal = static_cast<size_t>(ActiveLanguageOf(store, instance));
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(core::Name("ScriptLanguage"), ordinal);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						core::Name("ScriptLanguage"), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				CodeSourceContainerSelector selector;
+				if (const auto *current = store.Get<CodeSourceContainerSelector>(instance)) {
+					selector = *current;
+				}
+				selector.Active = static_cast<Language>(ordinal);
+				store.Set(instance, selector);
+				return true;
+			};
+			return property;
+		}
+
 		ecs::PropertyDescriptor DisabledProperty() {
 			ecs::PropertyDescriptor property;
 			property.Name = core::Name("Disabled");
@@ -78,7 +205,12 @@ namespace engine::script {
 			// how a script asks "is this thing code" without enumerating the
 			// leaf classes, and inheritance here is set inclusion so the query
 			// costs nothing extra.
-			const std::array source{ecs::Components::Of<Source>()};
+			// **The Luau container is in the class set and the JavaScript one is
+			// not.** A world of Luau scripts should pay for one column, not two,
+			// and `SetSourcePath` adds the other the moment a `.js` path is put
+			// on an instance — the same trade `RigidBody` makes by being absent
+			// from `BasePart`.
+			const std::array source{ecs::Components::Of<LuaSourceContainer>()};
 			const ecs::ClassId container = ecs::Classes::Register("LuaSourceContainer", instance, source);
 
 			// **`Disabled` is not in either class's set**, exactly as
@@ -96,10 +228,86 @@ namespace engine::script {
 			// the opposite of what a module is for.
 			ecs::Classes::Register("ModuleScript", container, {});
 
-			ecs::Classes::Property<&Source::Path>(container, "Source");
+			// --- the two containers, and the switch between them --------------
+			//
+			// **`Source` is the active one and is what every tool already asks
+			// for**, so the name stays. What changed underneath is that there
+			// are two programs and something choosing between them.
+			//
+			// **None of the three source paths is scriptable.** A script that
+			// could write another script's source is the sandbox escape that
+			// makes the step budget, the memory ceiling and the host role
+			// decorative — `LuaSourceContainer` carries the argument. The
+			// properties panel, a game file and the Rojo sync all still write
+			// them, because they are the author rather than the program.
+			ecs::Classes::Computed(container, SourceProperty());
+			ecs::Classes::Computed(container, ContainerProperty<LuaSourceContainer>("LuaSource"));
+			ecs::Classes::Computed(
+				container, ContainerProperty<JavaScriptSourceContainer>("JavaScriptSource")
+			);
+
+			// **And the one part of it a script may set.** Which language an
+			// instance runs is a decision a game can legitimately make — a mod
+			// swapping an implementation, a test running one behaviour twice —
+			// and none of it requires reading a line of anybody's source.
+			ecs::Classes::Computed(container, LanguageProperty());
+
 			ecs::Classes::Computed(container, DisabledProperty());
 			return script;
 		}
+	}
+
+	core::Name ActiveSourceOf(const ecs::Store &store, ecs::Entity instance) {
+		if (ActiveLanguageOf(store, instance) == Language::JavaScript) {
+			const JavaScriptSourceContainer *js = store.Get<JavaScriptSourceContainer>(instance);
+			return js != nullptr ? js->Path : core::Name{};
+		}
+
+		const LuaSourceContainer *lua = store.Get<LuaSourceContainer>(instance);
+		return lua != nullptr ? lua->Path : core::Name{};
+	}
+
+	Language ActiveLanguageOf(const ecs::Store &store, ecs::Entity instance) {
+		// **No selector means Luau**, which is what every script in this engine
+		// was before there were two — so a world loaded from an older file runs
+		// exactly as it did.
+		const CodeSourceContainerSelector *selector =
+			store.Get<CodeSourceContainerSelector>(instance);
+		return selector != nullptr ? selector->Active : Language::Luau;
+	}
+
+	void SetSourcePath(ecs::Store &store, ecs::Entity instance, core::Name path) {
+		// **The extension decides, and it decides in one place.** `LanguageOf`
+		// is what says a `.ts` file is JavaScript; a caller picking the
+		// container itself would be a second answer to that, and the two would
+		// disagree the first time a extension was added to one of them.
+		const Language language = LanguageOf(path.IsValid() ? path.Text() : std::string_view{});
+
+		if (language == Language::JavaScript) {
+			JavaScriptSourceContainer held;
+			if (const auto *current = store.Get<JavaScriptSourceContainer>(instance)) {
+				held = *current;
+			}
+			held.Path = path;
+			store.Set(instance, held);
+		} else {
+			LuaSourceContainer held;
+			if (const auto *current = store.Get<LuaSourceContainer>(instance)) {
+				held = *current;
+			}
+			held.Path = path;
+			store.Set(instance, held);
+		}
+
+		// **The selector follows the write, so one assignment does the obvious
+		// thing.** An author setting `Source` to a `.js` file means "run this",
+		// not "fill the JavaScript slot and go on running the Luau one".
+		CodeSourceContainerSelector selector;
+		if (const auto *current = store.Get<CodeSourceContainerSelector>(instance)) {
+			selector = *current;
+		}
+		selector.Active = language;
+		store.Set(instance, selector);
 	}
 
 	ecs::ClassId ScriptClass() {
@@ -119,11 +327,15 @@ namespace engine::script {
 		const ecs::ClassId localId = ecs::Classes::Find(core::Name("LocalScript"));
 
 		std::vector<ecs::Entity> found;
-		store.Each<const Source>([&](ecs::Entity entity, const Source &) {
+		// **The Luau container is what every script instance has**, whichever
+		// language it is set to run: it is in the class set, so this walk finds
+		// a JavaScript script too — and `ActiveSourceOf` is what decides what
+		// each one actually runs.
+		store.Each<const LuaSourceContainer>([&](ecs::Entity entity, const LuaSourceContainer &) {
 			// A disabled script is in another archetype, so this query does not
 			// visit one — but the check is here anyway, because `Each` matches
-			// on `Source` alone and a caller could add the tag to a row this
-			// query already found in the same tick.
+			// on the container alone and a caller could add the tag to a row
+			// this query already found in the same tick.
 			if (store.Has<Disabled>(entity)) {
 				return;
 			}
@@ -162,7 +374,7 @@ namespace engine::script {
 			return ecs::NULL_ENTITY;
 		}
 
-		store.Set(instance, Source{core::Name(path)});
+		SetSourcePath(store, instance, core::Name(path));
 		return instance;
 	}
 
@@ -284,7 +496,7 @@ namespace engine::script {
 			return ecs::NULL_ENTITY;
 		}
 
-		store.Set(instance, Source{core::Name(path)});
+		SetSourcePath(store, instance, core::Name(path));
 		return instance;
 	}
 }

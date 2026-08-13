@@ -8,11 +8,13 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <thread>
 #include <vector>
@@ -418,4 +420,118 @@ TEST_CASE("two worlds ticked in parallel equal two ticked serially", "[physics][
 	CHECK(parallelFirst == serialFirst);
 	CHECK(parallelSecond == serialSecond);
 	CHECK_FALSE(serialFirst == serialSecond);
+}
+
+// --- what a part is made of ---------------------------------------------------
+
+// **A part's own numbers beat its material's, and the solver is where that has
+// to be true.** `scene::PhysicsProperties` is the crate that is deliberately
+// heavier or the ramp that is deliberately slippery; a component the properties
+// panel writes and nothing reads would be four floats of decoration.
+TEST_CASE("a custom density is the mass the solver uses", "[physics][behaviour]") {
+	using engine::scene::PhysicsProperties;
+
+	// **Momentum, because resting on a floor proves nothing.** A box at rest
+	// sits at the same height whatever it weighs, so a case that only dropped
+	// one would pass with the density thrown away. What mass decides is how
+	// much of a shove survives a collision: an inelastic hit leaves the pair
+	// moving at `m1 v / (m1 + m2)`, so the same shove into a heavier target
+	// leaves a slower pair — and the two runs below differ in nothing except
+	// the target's density.
+	const auto shove = [](bool dense) {
+		Store store(dense ? "physics_test.density.heavy" : "physics_test.density.light");
+		Scheduler scheduler;
+		RegisterPhysicsSystems(scheduler);
+		PreparePhysicsWorld(store);
+
+		// No gravity and no floor: this is about one impact, and a floor would
+		// add friction to what is being measured.
+		const Entity pusher = Place(store, Part{.Position = Vector3{-2.0f, 0.0f, 0.0f}});
+		const Entity target = Place(store, Part{.Position = Vector3{0.0f, 0.0f, 0.0f}});
+
+		if (dense) {
+			PhysicsProperties heavy;
+			heavy.Custom = true;
+			heavy.Density = 8.0f;
+			store.Set<PhysicsProperties>(target, heavy);
+		}
+
+		Motion moving;
+		moving.Linear = Vector3{4.0f, 0.0f, 0.0f};
+		store.Set<Motion>(pusher, moving);
+
+		for (int tick = 0; tick < 60; tick++) {
+			scheduler.Tick(store, SIXTY_HERTZ);
+		}
+		return store.Get<Motion>(target)->Linear.X;
+	};
+
+	const float light = shove(false);
+	const float heavy = shove(true);
+
+	// The lighter target is carried away faster than the heavier one. Both are
+	// moving — a target that never moved would mean the impact never happened
+	// and the comparison would be between two zeros.
+	INFO("light " << light << " heavy " << heavy);
+	CHECK(light > 0.1f);
+	CHECK(heavy > 0.0f);
+	CHECK(heavy < light * 0.6f);
+
+	// And the mass a properties panel would show is the one the density
+	// implies — one cubic metre at eight kilograms a metre.
+	// The mass rule on its own, with no classes registered: `Place` builds the
+	// three components by hand, which is all `MassOf` reads.
+	Store store("physics_test.density.mass");
+	const Entity part = Place(store, Part{});
+
+	PhysicsProperties eight;
+	eight.Custom = true;
+	eight.Density = 8.0f;
+	store.Set<PhysicsProperties>(part, eight);
+
+	CHECK(
+		engine::scene::MassOf(
+			*store.Get<Collider>(part), *store.Get<RigidBody>(part), store.Get<PhysicsProperties>(part)
+		) == Approx(8.0f)
+	);
+}
+
+TEST_CASE("a custom elasticity makes a part bounce", "[physics][behaviour]") {
+	using engine::scene::PhysicsProperties;
+
+	Store store("physics_test.elastic");
+	Scheduler scheduler;
+	Drive(scheduler);
+	PreparePhysicsWorld(store);
+
+	Floor(store);
+
+	const Entity dead = Place(store, Part{.Position = Vector3{-2.0f, 4.0f, 0.0f}});
+	const Entity bouncy = Place(store, Part{.Position = Vector3{2.0f, 4.0f, 0.0f}});
+
+	PhysicsProperties rubber;
+	rubber.Custom = true;
+	rubber.Elasticity = 0.8f;
+	store.Set<PhysicsProperties>(bouncy, rubber);
+
+	// Long enough to hit, and short enough that the bounce has not been
+	// re-absorbed. The comparison is between the two rather than against a
+	// number, because what is under test is that the override reached the
+	// solver — not what a particular restitution integrates to.
+	float highest = 0.0f;
+	bool landed = false;
+	for (int tick = 0; tick < 120; tick++) {
+		scheduler.Tick(store, SIXTY_HERTZ);
+		landed = landed || HeightOf(store, bouncy) < 0.6f;
+		if (landed) {
+			highest = std::max(highest, HeightOf(store, bouncy));
+		}
+	}
+
+	CHECK(landed);
+	CHECK(highest > 0.7f);
+
+	// The one with no override took the material's restitution, which is zero:
+	// it stops dead.
+	CHECK(HeightOf(store, dead) == Approx(0.5f).margin(0.05f));
 }

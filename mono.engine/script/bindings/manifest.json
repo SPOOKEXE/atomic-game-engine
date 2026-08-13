@@ -44,17 +44,24 @@
 			"name": "BasePart",
 			"parent": "PVInstance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.Pivot", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
+				{"name": "AngularDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "CanCollide", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "CustomPhysicalProperties", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Elasticity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
 				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Mass", "type": "float", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.Collider", "scene.PhysicsProperties", "scene.RigidBody"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
@@ -69,17 +76,24 @@
 			"name": "Part",
 			"parent": "BasePart",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.Pivot", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
+				{"name": "AngularDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "CanCollide", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "CustomPhysicalProperties", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Elasticity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
 				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Mass", "type": "float", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.Collider", "scene.PhysicsProperties", "scene.RigidBody"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
@@ -91,20 +105,41 @@
 			]
 		},
 		{
+			"name": "Model",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+			]
+		},
+		{
 			"name": "MeshPart",
 			"parent": "BasePart",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.Pivot", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
+				{"name": "AngularDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "CanCollide", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "CustomPhysicalProperties", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Elasticity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
 				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Mass", "type": "float", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.Collider", "scene.PhysicsProperties", "scene.RigidBody"], "writes": []},
 				{"name": "MeshId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -144,6 +179,32 @@
 			"properties": [
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Effect", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SurfaceEffect", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "FPS", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "FarPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "FieldOfView", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "ImageTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NearPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "TagFilter", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
+			]
+		},
+		{
+			"name": "Portal",
+			"parent": "SurfaceCamera",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Camera", "scene.Pivot", "scene.Portal", "scene.SurfaceCamera", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Destination", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Portal"], "writes": ["scene.Portal"]},
+				{"name": "DestinationWorld", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Portal"], "writes": ["scene.Portal"]},
+				{"name": "Effect", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SurfaceEffect", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "FPS", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "FarPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "FieldOfView", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
@@ -320,48 +381,60 @@
 			"name": "LuaSourceContainer",
 			"parent": "Instance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.Source"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.LuaSourceContainer"],
 			"properties": [
 				{"name": "Disabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["script.Disabled"], "writes": ["script.Disabled"]},
+				{"name": "JavaScriptSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.JavaScriptSourceContainer"], "writes": ["script.JavaScriptSourceContainer"]},
+				{"name": "Language", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ScriptLanguage", "reads": ["script.CodeSourceContainerSelector"], "writes": ["script.CodeSourceContainerSelector"]},
+				{"name": "LuaSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.LuaSourceContainer"], "writes": ["script.LuaSourceContainer"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.Source"], "writes": ["script.Source"]}
+				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"], "writes": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"]}
 			]
 		},
 		{
 			"name": "Script",
 			"parent": "LuaSourceContainer",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.Source"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.LuaSourceContainer"],
 			"properties": [
 				{"name": "Disabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["script.Disabled"], "writes": ["script.Disabled"]},
+				{"name": "JavaScriptSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.JavaScriptSourceContainer"], "writes": ["script.JavaScriptSourceContainer"]},
+				{"name": "Language", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ScriptLanguage", "reads": ["script.CodeSourceContainerSelector"], "writes": ["script.CodeSourceContainerSelector"]},
+				{"name": "LuaSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.LuaSourceContainer"], "writes": ["script.LuaSourceContainer"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.Source"], "writes": ["script.Source"]}
+				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"], "writes": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"]}
 			]
 		},
 		{
 			"name": "LocalScript",
 			"parent": "LuaSourceContainer",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.Source"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.LuaSourceContainer"],
 			"properties": [
 				{"name": "Disabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["script.Disabled"], "writes": ["script.Disabled"]},
+				{"name": "JavaScriptSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.JavaScriptSourceContainer"], "writes": ["script.JavaScriptSourceContainer"]},
+				{"name": "Language", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ScriptLanguage", "reads": ["script.CodeSourceContainerSelector"], "writes": ["script.CodeSourceContainerSelector"]},
+				{"name": "LuaSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.LuaSourceContainer"], "writes": ["script.LuaSourceContainer"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.Source"], "writes": ["script.Source"]}
+				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"], "writes": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"]}
 			]
 		},
 		{
 			"name": "ModuleScript",
 			"parent": "LuaSourceContainer",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.Source"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.LuaSourceContainer"],
 			"properties": [
 				{"name": "Disabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["script.Disabled"], "writes": ["script.Disabled"]},
+				{"name": "JavaScriptSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.JavaScriptSourceContainer"], "writes": ["script.JavaScriptSourceContainer"]},
+				{"name": "Language", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ScriptLanguage", "reads": ["script.CodeSourceContainerSelector"], "writes": ["script.CodeSourceContainerSelector"]},
+				{"name": "LuaSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.LuaSourceContainer"], "writes": ["script.LuaSourceContainer"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.Source"], "writes": ["script.Source"]}
+				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"], "writes": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"]}
 			]
 		},
 		{
@@ -1546,6 +1619,7 @@
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
+				{"name": "Character", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["scene.PlayerCharacter"], "writes": ["scene.PlayerCharacter"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
 			]
@@ -1573,6 +1647,7 @@
 		{"name": "ParticleFlipbookMode", "members": ["Loop", "OneShot", "PingPong", "Random"]},
 		{"name": "ParticleOrientation", "members": ["FacingCamera", "FacingCameraWorldUp", "VelocityParallel", "VelocityPerpendicular"]},
 		{"name": "ScaleType", "members": ["Stretch", "Slice", "Tile", "Fit", "Crop"]},
+		{"name": "ScriptLanguage", "members": ["Luau", "JavaScript"]},
 		{"name": "ScrollingDirection", "members": ["X", "Y", "XY"]},
 		{"name": "ServiceScope", "members": ["Shared", "Server", "Client"]},
 		{"name": "SizeConstraint", "members": ["RelativeXY", "RelativeXX", "RelativeYY"]},

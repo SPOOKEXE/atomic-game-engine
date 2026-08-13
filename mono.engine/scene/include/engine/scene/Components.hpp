@@ -100,6 +100,43 @@ namespace engine::scene {
 		core::CFrame Frame;
 	};
 
+	// That this body went through a portal, and how far the portal turned it.
+	//
+	// **A record rather than a movement, and the difference is which machine
+	// needs it.** `scene::CrossPortals` maps a crossing body's placement and its
+	// velocity, and that is the whole of the simulation — but a player's view
+	// direction is not in either. It lives in `CameraController::Angles`, which
+	// is a *resource on whichever host is looking*: a client's own, never the
+	// authority's. So the host that moves the body cannot turn the camera, and
+	// the host that owns the camera never sees the crossing — it receives a
+	// transform that has already arrived somewhere else.
+	//
+	// This is the fact that crosses between them. It hangs off the body, so
+	// replication carries it with everything else that body owns, and the eye
+	// following it is a client reading its own subject's row.
+	//
+	// **The serial is what makes it an event.** A `Turn` on its own is a value
+	// that happens to be the same after two identical crossings, so a delta
+	// carrying only the angle would deliver the first and swallow the second —
+	// a portal that works once. A counter changes on every crossing whatever the
+	// angle was, and a consumer that has seen a number knows it has acted.
+	//
+	// @since v0.15
+	struct PortalTransit {
+		// How many times this body has been through a hole. Starts at one:
+		// zero is "never", which is what a consumer that has seen nothing holds.
+		uint32_t Serial = 0;
+
+		// The yaw the last crossing turned it by, in radians, and only the yaw.
+		//
+		// **Only the yaw, because only the yaw is the player's to keep.** Pitch
+		// is theirs and a portal that rolled a camera would be one nobody could
+		// walk through twice. Measured off the map itself rather than off the
+		// body, so it is the same number for anything that goes through and does
+		// not depend on which way the crosser happened to be facing.
+		float Turn = 0.0f;
+	};
+
 	// How far a thing reaches from its own origin, on each local axis.
 	//
 	// **The single source a world AABB is derived from**, by both the broad
@@ -251,6 +288,38 @@ namespace engine::scene {
 	// shape the narrow phase intersects. A sphere's AABB is not a sphere.
 	//
 	// @since v0.4
+	// Marks a collider that exists only because its owner is standing in a hole.
+	//
+	// **A body in a seam is in two rooms and the solver knows about one.** A
+	// character walking into a doorway is held up by the near room's floor and by
+	// nothing on the far side, so a far room whose floor is a stud higher lets it
+	// clip and one a stud lower lets it hang. `scene::CutAndCloneSeams` answers
+	// the same question for the picture; this is the contact half, and the two
+	// are deliberately different mechanisms — a picture and a contact have
+	// nothing to share but the seam.
+	//
+	// **What is mapped is the far room's geometry, not the body.** The obvious
+	// arrangement is a kinematic twin of the body placed on the far side, and it
+	// needs every contact the twin resolves mapped back through the seam as an
+	// impulse on the original — a second solver path, in a module that has one.
+	// Mapping the other way needs none of that: the far room's colliders are
+	// copied *into the near room* through the inverse seam, where they are
+	// ordinary static geometry and the body is pushed by them in its own space.
+	// The same trick a shadow through a hole wants, for the same reason.
+	//
+	// **Not saved, not replicated, not drawn.** A proxy is created in
+	// `PreSimulation` and destroyed in `PostSimulation`, so it never survives the
+	// tick that made it; it is parented to nothing, so `SyncRendered` never marks
+	// it and the tree that serialises never reaches it; and
+	// `replication::LocalToTheClient` names it, so nothing puts it on the wire.
+	//
+	// @since v0.15
+	struct PortalProxy {
+		// The body this was made for, so a proxy never collides with the very
+		// thing it is holding up.
+		ecs::Entity Owner = ecs::NULL_ENTITY;
+	};
+
 	struct Collider {
 		// The shape's dimensions, in metres, read according to `Shape`: box
 		// half-extents on each axis, sphere radius in X, cylinder radius in X
@@ -283,6 +352,56 @@ namespace engine::scene {
 
 		// Explicit padding, for the reason `RigidBody::Reserved` gives.
 		uint16_t Reserved = 0;
+	};
+
+	// What one part overrides about the physics of its own material.
+	//
+	// **Roblox's `CustomPhysicalProperties`, as a component.** `Surface` names a
+	// material and `SurfaceTable` says what that material feels like, which is
+	// the right shape for the ninety-nine parts in a scene made of the same
+	// wood. This is the hundredth: the crate that is deliberately heavier, the
+	// ramp that is deliberately slippery. It is an override of a shared fact and
+	// not a replacement for it.
+	//
+	// **`Custom` decides, and it is a field rather than the component's
+	// presence.** The component is on every `BasePart` — `SurfaceAppearance`
+	// carries the argument for a dense column over an optional one, and a
+	// properties panel that could only show these fields on *some* parts would
+	// be a panel with a hole in it. So the flag is what says "use these numbers
+	// rather than the material's", and a part nobody has touched is four floats
+	// of defaults that nothing reads.
+	//
+	// **Density and not mass.** `RigidBody::Mass` is what the solver wants and
+	// stays the one place a mass is written; this is what a mass is *made* of,
+	// so a part resized after its density was set weighs what its new size says
+	// rather than what it weighed before. `scene::MassOf` is the one rule, and
+	// both the solver and the properties panel ask it.
+	//
+	// **Drag is deliberately not here.** `RigidBody::LinearDamping` and
+	// `AngularDamping` are drag and have been since v0.4; a second pair on this
+	// component would be two places to write one number, and the panel shows the
+	// pair that the integrator actually reads.
+	//
+	// @since v0.14
+	struct PhysicsProperties {
+		// Kilograms per cubic metre, used with the collider's volume when
+		// `Custom` is set. Roblox's default part density.
+		float Density = 0.7f;
+
+		// Coulomb friction, replacing the material's when `Custom` is set.
+		float Friction = 0.5f;
+
+		// Restitution — 0 for a dead stop, 1 for a lossless bounce — replacing
+		// the material's when `Custom` is set.
+		float Elasticity = 0.0f;
+
+		// Whether any of the three above are used at all.
+		bool Custom = false;
+
+		// Explicit padding, for the reason `RigidBody::Reserved` gives: three
+		// uninitialised bytes go straight into a snapshot and make two runs of
+		// one scene differ.
+		uint8_t Reserved[3] = {};
 	};
 
 	// What a thing is made of, as far as a contact is concerned.
@@ -763,6 +882,36 @@ namespace engine::scene {
 		// other, once, wherever the camera is authored.
 		uint32_t TagFilter = 0;
 
+		// How many times a second this surface may redraw.
+		//
+		// **A surface is a whole scene render and there is no reason it should
+		// keep the screen's rate.** A room of mirrors at 165 hertz is a room of
+		// full scene passes at 165 hertz, and nothing a viewer can see in a
+		// pane at arm's length needs them: a reflection is already a frame
+		// behind by construction, and the eye cannot tell a reflection updated
+		// at 120 from one updated at 165 while it can very much tell the
+		// difference in frame time.
+		//
+		// **120 by default rather than uncapped**, because that is the rate
+		// above which nobody has reported seeing the difference and below which
+		// several people have reported the cost. A display slower than this
+		// never reaches the cap and pays nothing for it; a fast one draws the
+		// world at its own rate and the mirrors at this one.
+		//
+		// **Zero is uncapped**, which is what a surface wants when it is the
+		// subject rather than the scenery — a camera feed somebody is looking
+		// straight at, or a test that needs one render per frame.
+		//
+		// **Frames are dropped, never queued.** A surface past its interval
+		// draws on the next frame that asks; one inside it keeps the texture it
+		// has, and its matrices keep describing the camera that drew it, which
+		// is the same contract the content signature already gives. So a capped
+		// surface is not a delayed surface, it is one whose staleness has a
+		// stated bound.
+		//
+		// @since v0.15
+		float FPS = 120.0f;
+
 		// What the image is put through before a pane shows it.
 		//
 		// **A grade on the way out, not a second render.** The surface pass is
@@ -810,6 +959,197 @@ namespace engine::scene {
 		// sum, so the day the reserve runs out is a failing case rather than a
 		// hole full of uninitialised bytes in a snapshot.
 		uint8_t Reserved[1] = {};
+	};
+
+	// Where a surface camera sends the other end of its hole.
+	//
+	// **A portal is a `SurfaceCamera` with a different rule for where it
+	// stands, and this component is that rule.** Everything downstream is
+	// unchanged: the camera is still placed by `AimSurfaceCameras`, still
+	// rendered by the surface pass, still projected onto the pane by
+	// `opaque.frag`, still filtered by `TagFilter`. What changes is one matrix —
+	// a mirror reflects the eye through its own plane, and a portal maps it
+	// through `destination · source⁻¹`.
+	//
+	// **The non-Euclidean part is that nothing constrains the pair of frames to
+	// describe one space.** A destination rotated, moved or scaled anywhere at
+	// all gives a room bigger on the inside, or a corridor that turns through
+	// more than four right angles — with no separate feature, no exotic maths
+	// and no second renderer. `NON-EUCLIDEAN.md` is the investigation that
+	// settled this, and it is the whole insight of the demo it was filed
+	// against.
+	//
+	// @since v0.14
+	struct Portal {
+		// The part this one leads to.
+		//
+		// **An entity rather than a name, because both ends are in one world.**
+		// Rule 3 forbids a handle that crosses a world boundary and this never
+		// does: a portal pairs two parts of one store, which is exactly the case
+		// `PropertyType::Reference` exists for.
+		//
+		// `NULL_ENTITY`, or a destination that has been deleted, **falls back to
+		// a mirror** rather than to a blank pane. A surface that stopped
+		// reflecting reads as something to go and fix; a pane that vanished
+		// reads as a rendering bug.
+		ecs::Entity Destination;
+
+		// Which world's contents the pane shows, or an invalid `Name` for this
+		// one.
+		//
+		// **A name and not a handle, which is the only shape rule 3 allows.** An
+		// `ecs::Entity` names a row in one store and means something else in
+		// every other; a world's name is what already crosses — `Postbox::
+		// Teleport` addresses by it for the same reason — so this is the same
+		// arrangement a teleport uses, applied to what a camera draws instead of
+		// to where a player goes.
+		//
+		// **`Destination` is still read, and still has to be a part in *this*
+		// world.** It is what the camera is placed against: `AimSurfaceCameras`
+		// maps the eye through `destination · source⁻¹` and that arithmetic
+		// needs a `Transform` and `Bounds` it can reach. So a cross-world portal
+		// is authored as a local stand-in placed where the far world's pane is,
+		// and this field then says whose *instances* are drawn through it.
+		//
+		// That is exact when the two worlds share a coordinate frame — which is
+		// the arrangement anybody builds a portal pair in, and the one the
+		// `immersive-portals-demo` scenes use. A far world laid out somewhere
+		// else entirely wants its offset baked into the stand-in's placement,
+		// which is the same lie a same-world portal already tells and is
+		// `NON-EUCLIDEAN.md`'s whole subject.
+		//
+		// **The host resolves it, not `AimSurfaceCameras`.** A store cannot
+		// reach another store; `client::AttachForeignSurfaces` is what looks the
+		// world up, copies its draw list and points the surface at it. A name
+		// that matches no world leaves the pane showing this world, which is the
+		// same fallback an unlinked portal gets and fails the same visible way.
+		//
+		// @since v0.14
+		core::Name DestinationWorld;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		//
+		// An `Entity` is eight bytes and a `Name` is four, so the type's own
+		// alignment leaves four the compiler inserted and nobody declared —
+		// written to a save file by `Column::Write`, which sends `sizeof(T)`
+		// bytes and does not know which of them a member claimed.
+		uint8_t Reserved[4] = {};
+	};
+
+	// The frustum a surface camera renders through, fitted to its pane.
+	//
+	// **Derived every frame and never authored**, which is why it is a component
+	// rather than a property: `AimSurfaceCameras` writes it beside the
+	// `Transform` it writes, from the same measurement of the same pane, and a
+	// number here that disagreed with that placement would be a frustum aimed at
+	// somewhere the camera is not.
+	//
+	// **It does not cross the wire.** A reflection is *of the viewer*, so a lens
+	// computed on the authority is correct for the authority's camera and wrong
+	// for every client watching — `client/Replicated.hpp` states that rule for
+	// the placement and this is the same fact. `replication::LocalToTheClient`
+	// names it, and both ends recompute it from the mirror that *does* cross.
+	//
+	// **Off-axis, which is what makes it a window rather than a cone.** The four
+	// extents are independent, so a viewer standing to one side gets a frustum
+	// that leans — covering exactly the pane and nothing else. The symmetric fit
+	// this replaces spent half its texels on the far side of the face normal,
+	// and `SurfaceCameras.hpp` named an off-axis frustum as what it was waiting
+	// for.
+	//
+	// @since v0.14
+	struct SurfaceLens {
+		// The frustum's edges at `NearPlane`, in view space.
+		//
+		// Signed and independent: `Left` is negative and `Right` positive for a
+		// viewer square on, and both slide the same way as the viewer moves
+		// aside. That asymmetry is the point — see the type's comment.
+		//@{
+		float Left = -0.1f;
+		float Right = 0.1f;
+		float Bottom = -0.1f;
+		float Top = 0.1f;
+		//@}
+
+		// Near clipping distance, in metres. The extents above are measured at
+		// this plane, so the two cannot be read apart.
+		float NearPlane = 0.1f;
+
+		// Far clipping distance, in metres.
+		float FarPlane = 500.0f;
+
+		// The plane everything behind is clipped against, in world space.
+		//
+		// **A real oblique clip, and on a portal it is not optional.** The
+		// destination is set into a wall, so the wall itself, its back face and
+		// whatever stands behind it are all inside the frustum and would draw
+		// over the view — the hole would show the back of the wall it leads
+		// through. Skewing the projection's near plane onto this one is
+		// Lengyel's method and is what removes them.
+		//
+		// A mirror wants the same thing for a smaller reason: the pane's own
+		// plane, so the frame and the back of the glass do not occlude the
+		// reflection. That used to be approximated by pushing `NearPlane` out
+		// parallel to the face, which over-clips at grazing angles.
+		//
+		// **A zero normal means no oblique clip**, and the ordinary near plane
+		// is used unmodified. That is what an unparented surface camera gets.
+		core::Vector3 ClipNormal;
+
+		// The plane's distance along `ClipNormal` from the origin, so that a
+		// point `p` is kept when `ClipNormal · p - ClipDistance >= 0`.
+		float ClipDistance = 0.0f;
+
+		// What moved the pane into the space this camera was fitted to.
+		//
+		// **The other half of the portal, and without it a hole shows nothing.**
+		// A pane reads its image by projecting *its own world position* through
+		// the camera's matrix — `opaque.vert` does exactly that. For a mirror
+		// the camera was fitted to the pane where it stands, so the raw position
+		// lands on the image. For a portal the camera was fitted to the pane
+		// **mapped to the destination**, three hundred units away in the demo,
+		// and the raw position projects to somewhere outside the frustum
+		// entirely: every fragment fails the `0..1` test and the pane falls back
+		// to its own colour. That is a portal that places a camera, fits a
+		// frustum, renders a texture and shows none of it.
+		//
+		// So the sampling matrix is `ViewProjection · Mapping` while the surface
+		// is *rendered* with `ViewProjection` alone. The two are one code path
+		// again, because this is the same transform the placement used.
+		//
+		// **Identity for a mirror rather than the reflection**, and the two
+		// agree wherever it matters: a reflection fixes every point of the plane
+		// it reflects through, so on the pane's own face they are the same map.
+		// They differ off it — the sides and back of the pane's box — and
+		// identity is what a mirror has always sampled with there.
+		//
+		// **The rigid half only.** A hole between two panes of different sizes
+		// maps by a similarity, and the scale it carries lives in the two fields
+		// below because a `CFrame` is a position and a rotation and nothing else.
+		// `scene::SeamTransform` is the whole map and is what both halves are
+		// taken from.
+		core::CFrame Mapping;
+
+		// The point `MappingScale` is taken about, which is the source pane's
+		// centre in world space.
+		//
+		// **Carried rather than derived from the pane**, because the pane a
+		// consumer has is a box and the centre this needs is the centre of one
+		// *face* of it — which is `ReachOf` and a face id away, and is exactly
+		// the sort of second derivation that ends up disagreeing by a
+		// half-extent.
+		//
+		// @since v0.15
+		core::Vector3 MappingOrigin;
+
+		// How much bigger the far pane is, from `scene::PortalSeam::Scale`.
+		//
+		// One for a mirror, one for a matched pair, and one for anything a host
+		// fills in by hand — so a consumer that has never heard of a scaled
+		// portal composes the same matrix it always did.
+		//
+		// @since v0.15
+		float MappingScale = 1.0f;
 	};
 
 	// A point on a part, carried with it.

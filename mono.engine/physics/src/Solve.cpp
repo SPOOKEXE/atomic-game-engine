@@ -11,6 +11,7 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Solver.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 
@@ -86,8 +87,17 @@ namespace engine::physics {
 			return response;
 		}
 
-		core::Vector3 VelocityAt(const SolverBody &body, const core::Vector3 &lever) {
-			return body.LinearVelocity + body.AngularVelocity.Cross(lever);
+		// How fast the two bodies are separating along one direction, at the
+		// contact point that direction belongs to.
+		//
+		// Positive means moving apart. The angular halves read the precomputed
+		// torques rather than building the point velocities, which is the same
+		// scalar triple product written the cheap way round — see
+		// `ContactAxis::FirstTorque`.
+		float ClosingSpeed(const SolverBody &first, const SolverBody &second, const ContactAxis &axis) {
+			return (second.LinearVelocity - first.LinearVelocity).Dot(axis.Direction) +
+				   second.AngularVelocity.Dot(axis.SecondTorque) -
+				   first.AngularVelocity.Dot(axis.FirstTorque);
 		}
 
 		// Two unit directions across `normal`, spanning the contact plane.
@@ -105,39 +115,40 @@ namespace engine::physics {
 			second = normal.Cross(first);
 		}
 
-		// The mass the pair presents along one direction at one contact point.
-		float EffectiveMass(
+		// Resolves one impulse direction: the two angular responses and the mass
+		// that falls out of them.
+		//
+		// The effective mass is the reciprocal of the responses projected back
+		// onto the direction, so asking for it separately would be computing
+		// them twice. `axis.Direction` must already be set.
+		void PrepareAxis(
 			const SolverBody &first,
 			const SolverBody &second,
 			const core::Vector3 &firstLever,
 			const core::Vector3 &secondLever,
-			const core::Vector3 &direction
+			ContactAxis &axis
 		) {
+			axis.FirstTorque = firstLever.Cross(axis.Direction);
+			axis.SecondTorque = secondLever.Cross(axis.Direction);
+			axis.FirstAngular = AngularResponse(first, axis.FirstTorque);
+			axis.SecondAngular = AngularResponse(second, axis.SecondTorque);
+
 			const float linear = first.InverseMass + second.InverseMass;
-			const float angular =
-				direction.Dot(AngularResponse(first, firstLever.Cross(direction)).Cross(firstLever)) +
-				direction.Dot(AngularResponse(second, secondLever.Cross(direction)).Cross(secondLever));
+			const float angular = axis.FirstAngular.Dot(axis.FirstTorque) +
+								  axis.SecondAngular.Dot(axis.SecondTorque);
 			const float total = linear + angular;
-			return total > 0.0f ? 1.0f / total : 0.0f;
+			axis.Mass = total > 0.0f ? 1.0f / total : 0.0f;
 		}
 
-		void ApplyImpulse(
-			SolverBody &first,
-			SolverBody &second,
-			const ContactRow &row,
-			const core::Vector3 &direction,
-			float magnitude
-		) {
+		void ApplyImpulse(SolverBody &first, SolverBody &second, const ContactAxis &axis, float magnitude) {
 			// The normal points from the first body toward the second, so a
 			// positive impulse pushes the second away and the first back. Every
 			// pair function obeys that one convention, which is why this is the
 			// only place the sign appears.
-			first.LinearVelocity = first.LinearVelocity - direction * (magnitude * first.InverseMass);
-			first.AngularVelocity =
-				first.AngularVelocity - AngularResponse(first, row.FirstLever.Cross(direction)) * magnitude;
-			second.LinearVelocity = second.LinearVelocity + direction * (magnitude * second.InverseMass);
-			second.AngularVelocity = second.AngularVelocity +
-									 AngularResponse(second, row.SecondLever.Cross(direction)) * magnitude;
+			first.LinearVelocity = first.LinearVelocity - axis.Direction * (magnitude * first.InverseMass);
+			first.AngularVelocity = first.AngularVelocity - axis.FirstAngular * magnitude;
+			second.LinearVelocity = second.LinearVelocity + axis.Direction * (magnitude * second.InverseMass);
+			second.AngularVelocity = second.AngularVelocity + axis.SecondAngular * magnitude;
 		}
 
 		// The same push, against the velocity that only moves positions.
@@ -145,8 +156,9 @@ namespace engine::physics {
 		// Translation only. See `SolverBody::CorrectionLinear` for why there is
 		// no angular half: a rotation nothing damps is a lean that grows.
 		void ApplyCorrection(SolverBody &first, SolverBody &second, const ContactRow &row, float magnitude) {
-			first.CorrectionLinear = first.CorrectionLinear - row.Normal * (magnitude * first.InverseMass);
-			second.CorrectionLinear = second.CorrectionLinear + row.Normal * (magnitude * second.InverseMass);
+			const core::Vector3 &normal = row.Along[ContactRow::NORMAL].Direction;
+			first.CorrectionLinear = first.CorrectionLinear - normal * (magnitude * first.InverseMass);
+			second.CorrectionLinear = second.CorrectionLinear + normal * (magnitude * second.InverseMass);
 		}
 
 		size_t IndexOf(const std::vector<SolverBody> &bodies, ecs::Entity entity) {
@@ -181,17 +193,28 @@ namespace engine::physics {
 			bool Dynamic = false;
 		};
 
-		BodyFacts FactsFor(const scene::RigidBody *body, const scene::Collider *collider) {
+		BodyFacts FactsFor(
+			const scene::RigidBody *body,
+			const scene::Collider *collider,
+			const scene::PhysicsProperties *physical
+		) {
 			if (body == nullptr || collider == nullptr) {
 				// No `RigidBody` is not a static body — `scene::Enums` is
 				// explicit that it is not a body at all. It still stops things,
 				// which is exactly what an infinite mass does.
 				return BodyFacts{};
 			}
-			if (body->Kind != scene::BodyKind::Dynamic || !(body->Mass > 0.0f)) {
+
+			// **`scene::MassOf` and not `body->Mass`, because density is a mass
+			// too.** A part with `CustomPhysicalProperties` weighs its density
+			// times its volume, and the properties panel shows the same number
+			// through the same function — a solver with its own arithmetic here
+			// would be a part that weighs one thing and reads as another.
+			const float mass = scene::MassOf(*collider, *body, physical);
+			if (body->Kind != scene::BodyKind::Dynamic || !(mass > 0.0f)) {
 				return BodyFacts{};
 			}
-			return BodyFacts{1.0f / body->Mass, InverseInertiaOf(*collider, body->Mass), true};
+			return BodyFacts{1.0f / mass, InverseInertiaOf(*collider, mass), true};
 		}
 	}
 
@@ -216,26 +239,43 @@ namespace engine::physics {
 		// constraint to solve and no velocity for `Publish` to write back, so
 		// gathering every dynamic row would be a pass over the world to find
 		// the few that are in contact — the shape `CODE_QUALITY.md` names.
-		const auto named = [](ecs::Entity owner) {
-			SolverBody body;
-			body.Owner = owner;
-			return body;
-		};
+		//
+		// **The sort is over entity ids, not over bodies.** Two entries per
+		// manifold go in and only `Owner` is meaningful at this point, so
+		// sorting `SolverBody` moved a hundred and twenty bytes to order the
+		// eight the comparison reads. At ten thousand bodies that was megabytes
+		// of moves for kilobytes of information.
+		std::vector<ecs::Entity> &owners = PipelineInternals::BodyOwners(*world);
+		owners.clear();
+		owners.reserve(manifolds.size() * 2);
 		for (const ContactManifold &manifold : manifolds) {
-			bodies.push_back(named(manifold.A));
-			bodies.push_back(named(manifold.B));
+			owners.push_back(manifold.A);
+			owners.push_back(manifold.B);
 		}
-		std::sort(bodies.begin(), bodies.end(), [](const SolverBody &left, const SolverBody &right) {
-			return left.Owner.Id < right.Owner.Id;
+		std::sort(owners.begin(), owners.end(), [](ecs::Entity left, ecs::Entity right) {
+			return left.Id < right.Id;
 		});
-		bodies.erase(
-			std::unique(
-				bodies.begin(),
-				bodies.end(),
-				[](const SolverBody &left, const SolverBody &right) { return left.Owner == right.Owner; }
-			),
-			bodies.end()
-		);
+		owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
+
+		bodies.resize(owners.size());
+		for (size_t index = 0; index < owners.size(); index++) {
+			bodies[index] = SolverBody{};
+			bodies[index].Owner = owners[index];
+		}
+
+		// **Every manifold's two body indices, resolved once.** Three later
+		// passes want them, and a binary search per pass per side is four
+		// searches per manifold over an array that no longer fits in cache once
+		// a scene is large.
+		std::vector<std::pair<uint32_t, uint32_t>> &located = PipelineInternals::ManifoldBodies(*world);
+		located.clear();
+		located.reserve(manifolds.size());
+		for (const ContactManifold &manifold : manifolds) {
+			located.emplace_back(
+				static_cast<uint32_t>(IndexOf(bodies, manifold.A)),
+				static_cast<uint32_t>(IndexOf(bodies, manifold.B))
+			);
+		}
 
 		// Sorted by entity, which makes every lookup below a binary search and
 		// makes the body array a function of the scene rather than of the order
@@ -285,7 +325,22 @@ namespace engine::physics {
 			body.Friction = properties.Friction;
 			body.Restitution = properties.Restitution;
 
-			const BodyFacts facts = FactsFor(rigid, collider);
+			// **The part's own numbers win over its material's.** `Surface`
+			// names what a thing is made of and this is the crate that is
+			// deliberately slippery — `scene::PhysicsProperties` carries the
+			// argument for it being an override rather than a replacement, and
+			// `Custom` is what says whether there is one at all.
+			//
+			// One read per body per tick, beside the `Surface` read above and
+			// for the same reason: this is where a body's row is resolved once,
+			// before a single impulse is computed.
+			const scene::PhysicsProperties *physical = store.Get<scene::PhysicsProperties>(body.Owner);
+			if (physical != nullptr && physical->Custom) {
+				body.Friction = physical->Friction;
+				body.Restitution = physical->Elasticity;
+			}
+
+			const BodyFacts facts = FactsFor(rigid, collider, physical);
 			body.InverseMass = facts.InverseMass;
 			body.InverseInertia = facts.InverseInertia;
 			body.Movable = facts.Dynamic;
@@ -299,9 +354,9 @@ namespace engine::physics {
 		// with it. One pass in pair order, so a stack wakes one layer per tick
 		// — bounded, deterministic, and visibly a settling stack rather than a
 		// whole scene jumping at once.
-		for (const ContactManifold &manifold : manifolds) {
-			SolverBody &first = bodies[IndexOf(bodies, manifold.A)];
-			SolverBody &second = bodies[IndexOf(bodies, manifold.B)];
+		for (size_t at = 0; at < manifolds.size(); at++) {
+			SolverBody &first = bodies[located[at].first];
+			SolverBody &second = bodies[located[at].second];
 
 			const float firstSpeed = first.LinearVelocity.Magnitude();
 			const float secondSpeed = second.LinearVelocity.Magnitude();
@@ -325,7 +380,9 @@ namespace engine::physics {
 		}
 
 		// --- set up ----------------------------------------------------------
-		for (const ContactManifold &manifold : manifolds) {
+		for (size_t at = 0; at < manifolds.size(); at++) {
+			const ContactManifold &manifold = manifolds[at];
+
 			// A trigger reports and never pushes. Skipping it here rather than
 			// zeroing its impulse keeps it out of the iteration entirely, so a
 			// world made of triggers costs the solver nothing.
@@ -333,8 +390,8 @@ namespace engine::physics {
 				continue;
 			}
 
-			const size_t firstIndex = IndexOf(bodies, manifold.A);
-			const size_t secondIndex = IndexOf(bodies, manifold.B);
+			const size_t firstIndex = located[at].first;
+			const size_t secondIndex = located[at].second;
 			if (!bodies[firstIndex].Movable && !bodies[secondIndex].Movable) {
 				continue;
 			}
@@ -352,25 +409,32 @@ namespace engine::physics {
 			for (size_t point = 0; point < manifold.PointCount; point++) {
 				const ContactPoint &contact = manifold.Points[point];
 
+				// The lever arms are what turn an impulse into a torque, and the
+				// reason a four-point manifold holds a box against rotation.
+				// They stay local: every use of them is here, folded into the
+				// three axes below, and a row the sweeps have to reload is a
+				// row that costs sixteen passes over the cache.
+				const core::Vector3 firstLever = contact.Position - first.Centre;
+				const core::Vector3 secondLever = contact.Position - second.Centre;
+
 				ContactRow row;
 				row.First = firstIndex;
 				row.Second = secondIndex;
-				row.Normal = manifold.Normal;
-				row.FirstLever = contact.Position - first.Centre;
-				row.SecondLever = contact.Position - second.Centre;
 				row.Friction = friction;
 				row.Feature = contact.Feature;
-				TangentsFor(row.Normal, row.Tangent[0], row.Tangent[1]);
 
-				row.NormalMass = EffectiveMass(first, second, row.FirstLever, row.SecondLever, row.Normal);
+				row.Along[ContactRow::NORMAL].Direction = manifold.Normal;
+				TangentsFor(
+					manifold.Normal,
+					row.Along[ContactRow::TANGENT].Direction,
+					row.Along[ContactRow::TANGENT + 1].Direction
+				);
+				for (ContactAxis &axis : row.Along) {
+					PrepareAxis(first, second, firstLever, secondLever, axis);
+				}
 
 				const float shared = first.InverseMass + second.InverseMass;
 				row.CorrectionMass = shared > 0.0f ? 1.0f / shared : 0.0f;
-
-				row.TangentMass[0] =
-					EffectiveMass(first, second, row.FirstLever, row.SecondLever, row.Tangent[0]);
-				row.TangentMass[1] =
-					EffectiveMass(first, second, row.FirstLever, row.SecondLever, row.Tangent[1]);
 
 				const float excess = contact.Penetration - PENETRATION_SLOP;
 				const float unwind =
@@ -382,18 +446,16 @@ namespace engine::physics {
 				// recomputed per iteration — an iteration that recomputed it
 				// would keep finding a smaller closing speed and add energy
 				// chasing it.
-				const float closing =
-					-(VelocityAt(second, row.SecondLever) - VelocityAt(first, row.FirstLever))
-						 .Dot(row.Normal);
+				const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
 				row.Bounce = closing > BOUNCE_THRESHOLD ? restitution * closing : 0.0f;
 
 				const ContactImpulse *cached = FindImpulse(
 					PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B, contact.Feature
 				);
 				if (cached != nullptr) {
-					row.NormalImpulse = cached->Normal;
-					row.TangentImpulse[0] = cached->Tangent[0];
-					row.TangentImpulse[1] = cached->Tangent[1];
+					row.Along[ContactRow::NORMAL].Impulse = cached->Normal;
+					row.Along[ContactRow::TANGENT].Impulse = cached->Tangent[0];
+					row.Along[ContactRow::TANGENT + 1].Impulse = cached->Tangent[1];
 				}
 
 				rows.push_back(row);
@@ -409,9 +471,9 @@ namespace engine::physics {
 		for (const ContactRow &row : rows) {
 			SolverBody &first = bodies[row.First];
 			SolverBody &second = bodies[row.Second];
-			ApplyImpulse(first, second, row, row.Normal, row.NormalImpulse);
-			ApplyImpulse(first, second, row, row.Tangent[0], row.TangentImpulse[0]);
-			ApplyImpulse(first, second, row, row.Tangent[1], row.TangentImpulse[1]);
+			for (const ContactAxis &axis : row.Along) {
+				ApplyImpulse(first, second, axis, axis.Impulse);
+			}
 		}
 
 		// --- iterate ---------------------------------------------------------
@@ -422,49 +484,65 @@ namespace engine::physics {
 		// See `Solver.hpp` for what a parallel version would actually have to
 		// be.
 		for (size_t sweep = 0; sweep < SOLVER_ITERATIONS; sweep++) {
-			for (ContactRow &row : rows) {
+			for (size_t at = 0; at < rows.size(); at++) {
+				ContactRow &row = rows[at];
+
+				// **The two bodies of the row after this one, fetched early.**
+				// The rows stream in order and the prefetcher handles them; the
+				// bodies they name are two random offsets into an array that
+				// stops fitting in cache somewhere around a few thousand
+				// contacts, and the row's arithmetic cannot start until they
+				// arrive. Asking for them one row ahead is what turns that wait
+				// into work already done. A hint only — it changes no result,
+				// and the bounds test costs one predictable branch per row.
+				if (at + 1 < rows.size()) {
+					__builtin_prefetch(&bodies[rows[at + 1].First]);
+					__builtin_prefetch(&bodies[rows[at + 1].Second]);
+				}
+
 				SolverBody &first = bodies[row.First];
 				SolverBody &second = bodies[row.Second];
+
+				ContactAxis &normal = row.Along[ContactRow::NORMAL];
 
 				// Friction before the normal, using the normal impulse the
 				// previous sweep settled on. The other order lets a contact
 				// that has just gained its normal impulse apply friction it has
 				// not earned yet, which reads as a box that slides less on the
 				// tick it lands than on every tick after.
-				for (size_t axis = 0; axis < 2; axis++) {
-					const float sliding =
-						(VelocityAt(second, row.SecondLever) - VelocityAt(first, row.FirstLever))
-							.Dot(row.Tangent[axis]);
-					const float limit = row.Friction * row.NormalImpulse;
-					const float wanted = row.TangentImpulse[axis] - sliding * row.TangentMass[axis];
+				const float limit = row.Friction * normal.Impulse;
+				for (size_t slot = ContactRow::TANGENT; slot < 3; slot++) {
+					ContactAxis &tangent = row.Along[slot];
+					const float sliding = ClosingSpeed(first, second, tangent);
+					const float wanted = tangent.Impulse - sliding * tangent.Mass;
 					const float clamped = wanted < -limit ? -limit : (wanted > limit ? limit : wanted);
-					const float applied = clamped - row.TangentImpulse[axis];
-					row.TangentImpulse[axis] = clamped;
-					ApplyImpulse(first, second, row, row.Tangent[axis], applied);
+					const float applied = clamped - tangent.Impulse;
+					tangent.Impulse = clamped;
+					ApplyImpulse(first, second, tangent, applied);
 				}
 
-				const float separating =
-					(VelocityAt(second, row.SecondLever) - VelocityAt(first, row.FirstLever)).Dot(row.Normal);
+				const float separating = ClosingSpeed(first, second, normal);
 
 				// **No penetration term here.** The overlap is unwound by the
 				// correction sweep below, against velocities that never reach a
 				// `scene::Motion` — so a body at rest ends the tick at rest
 				// rather than carrying one tick of gravity upward forever.
-				const float wanted = row.NormalImpulse + (row.Bounce - separating) * row.NormalMass;
+				const float wanted = normal.Impulse + (row.Bounce - separating) * normal.Mass;
 
 				// Clamped at zero because a contact pushes and never pulls. The
 				// accumulated form is what makes the clamp correct across
 				// sweeps: clamping the increment instead would let a row that
 				// over-pushed early keep the excess forever.
 				const float clamped = wanted > 0.0f ? wanted : 0.0f;
-				const float applied = clamped - row.NormalImpulse;
-				row.NormalImpulse = clamped;
-				ApplyImpulse(first, second, row, row.Normal, applied);
+				const float applied = clamped - normal.Impulse;
+				normal.Impulse = clamped;
+				ApplyImpulse(first, second, normal, applied);
 
 				// The correction sweep. Its own effective mass, because it is a
 				// translation-only constraint and the row's normal mass carries
 				// the lever arms of one that is not.
-				const float drifting = (second.CorrectionLinear - first.CorrectionLinear).Dot(row.Normal);
+				const float drifting =
+					(second.CorrectionLinear - first.CorrectionLinear).Dot(normal.Direction);
 				const float wantedCorrection =
 					row.CorrectionImpulse + (row.Bias - drifting) * row.CorrectionMass;
 				const float clampedCorrection = wantedCorrection > 0.0f ? wantedCorrection : 0.0f;
@@ -483,8 +561,8 @@ namespace engine::physics {
 					bodies[row.First].Owner,
 					bodies[row.Second].Owner,
 					row.Feature,
-					row.NormalImpulse,
-					{row.TangentImpulse[0], row.TangentImpulse[1]},
+					row.Along[ContactRow::NORMAL].Impulse,
+					{row.Along[ContactRow::TANGENT].Impulse, row.Along[ContactRow::TANGENT + 1].Impulse},
 				}
 			);
 		}

@@ -36,6 +36,241 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00116
+
+**A client cannot ask its server to teleport it, so `TeleportService` is
+server-only and says so.** The binding refuses on a replica — `Postbox::Teleport`
+is an authority operation and `world/Postbox.hpp` has said so since v0.2 — and
+that refusal is currently the whole of the story: there is no request channel a
+`LocalScript` could use to ask for one.
+
+**The shape it would take is already in the tree and is deliberately not
+generalised yet.** `replication::MessageKind::User` carries `game::JoinNotice`
+down and `Connector::Submit` carries `game::MoveInput` up; a client-initiated
+teleport is a third message on the same two channels. What stops it being written
+now is that a request is not an act — the host has to decide whether to honour
+it, and "who may ask to be moved where" is a game's policy rather than an
+engine's. A binding that queued the request and left the policy unwritten would
+be an engine deciding it by default.
+
+**Reopen trigger: a game that wants a client to start a teleport.** Every
+teleport this engine has a use for is decided by a server script — a pad, a
+round ending, a matchmaker — and all of those already work.
+
+### [_] D00115
+
+**Replication filters by component and not by entity, so a character's limbs pay
+wire for transforms that are overwritten the moment they land.** A character is
+six parts and one of them moves: `scene::PoseCharacters` derives the other five
+from the root, on whichever machine draws, precisely so that they cannot come
+apart at speed. The offsets have to cross once. The *transforms* do not, and they
+cross every tick anyway, because `replication::Authority::Replicate` names
+`scene.Transform` for the whole world rather than for a set of rows.
+
+**Measured shape rather than a measured number.** Five extra rows per character
+per tick, each a ten-byte quantised `CFrame` — so about fifty bytes a character a
+tick before framing, against roughly ten for the root alone. At thirty ticks and
+twenty players that is on the order of thirty kilobytes a second of state the
+receiver discards on arrival. Real, and not urgent: `replication::DistancePriority`
+already bounds what a tick sends, so the cost lands as *other* rows arriving later
+rather than as bandwidth nobody budgeted.
+
+**Why it is not fixed by moving the limbs off `scene.`** They are `Part`
+instances and authored content — they are in the save file, the explorer and the
+properties panel — and a component prefix is how a module says what is shared.
+Renaming to dodge the filter would make a character's parts a different kind of
+thing from every other part.
+
+**What it wants is a per-entity opt-out on the authority**, which is a change to
+`Authority` rather than to `scene`: something like a `NotReplicated` tag the
+delta pass skips rows for. That is a wire-format-adjacent decision and worth
+making once, with a second consumer to check it against — a rag-doll, a particle
+proxy, anything else derived on the receiver.
+
+**Reopen trigger: a second thing derived on the receiver that also crosses, or a
+bandwidth measurement that names limbs.**
+
+### [_] D00114
+
+**The script editor's completion does not infer types, and the one shape it does
+resolve is the one written on the line.** `studio/Complete.hpp` walks left from
+the caret over identifier characters, dots and colons; it is not a parser and
+does not pretend to be. `local p = Instance.new("Part")` then `p.` offers
+`BasePart`'s properties, because the class name is *there in the text*. `local p
+= part:FindFirstChild("Hit")` then `p.` offers the union of every scriptable
+property in the class table instead — a longer list, never a wrong one, and
+never `f().` at all.
+
+**Worth carrying, because the union degrades honestly.** Everything offered is a
+name some class really has, so nothing in the list fails at run time; what is
+missing is narrowing, and the cost is scrolling. That is a different class of
+problem from the one the completion was built to end, where a name came from a
+description of the surface rather than the surface.
+
+Closing it means one of:
+
+- **Link the vendored language server.** `mono.vendor/luau-lsp` builds
+  `Luau.LanguageServer` as a static library and already type-checks against
+  `engine.d.luau`, so the inference exists and is correct. It buys **Luau only**
+  — JavaScript would need an entirely separate implementation, and this feature
+  was asked for in both languages — and it puts `Luau::Frontend` behind a studio
+  header, which `script/AGENTS.md`'s first rule exists to prevent for the VM and
+  which deserves the same argument here before it is done.
+- **Follow assignments within the buffer.** Cheaper and worse: resolve
+  `FindFirstChild` and `:Clone()` to the declared class of their receiver, and
+  stop. It covers most real scripts and is wrong in ways nobody can predict,
+  which is the property that makes a wrong completion worse than a broad one.
+
+**What must not happen is a guess presented as a fact.** The union is a
+completion list that says "one of these classes has this"; a narrowed list that
+narrowed incorrectly says "this class has this", and an author has no way to tell
+the second from the truth.
+
+### [_] D00113
+
+**There are two node graph implementations and there should be one.**
+`studio/NodeGraph.hpp` is the editor's, added at v0.14 for the Demo Nodes panel;
+`~/Documents/GitHub/node-graph-template/cpp` is the standalone library the same
+design came from. They are one design in two repositories, which is the debt
+`AGENTS.md` calls the most expensive kind — both will accumulate callers and the
+neglected one is the one that goes wrong.
+
+It is worth carrying **while this is a demo panel and nothing depends on it**.
+The moment something does — and `ROADMAP.md` has two candidates, the render
+pipeline as a node editor and `Engine::bakegraph`'s pipeline documents — the two
+become one, by one of:
+
+- **Vendor the template as a submodule** under `mono.vendor/`, which is how every
+  other outside dependency arrives here. It needs the template repository to have
+  a remote whose commits this repository can name, which today it does not.
+- **Promote the studio's copy to an engine module.** Right if the engine
+  evaluates graphs at runtime rather than only editing them — a bake pipeline
+  does — and it needs a tier, an `expected_graph.json` entry and a decision about
+  where `std::any` payloads sit relative to `Engine::bakegraph`'s own node
+  vocabulary, which already describes nodes without carrying decoders.
+
+**What must not happen is a third one.** A render-pipeline editor that started
+its own registry and its own canvas would make this three, and the first
+divergence would be in the part nobody tests: the cycle guard or the hash.
+
+### [x] D00112
+
+**Portals can be walked through; the frame you cross on still shows the wrong
+side.** `NON-EUCLIDEAN.md` filed six rows of work at v0.14 and this entry
+carried the last two. Traversal closed at v0.14; the seam did not.
+
+**Traversal, which this entry said was blocked and now is not.** It was waiting
+on a body to move — the character controller was `ROADMAP.md` v0.15 and arrived
+early. `scene::CrossPortals` is the whole of it: the crossing is the segment
+between `PreviousTransform` and `Transform`, tested for a change of side through
+the pane's plane inside the pane's rectangle, and a body that crosses is
+multiplied by `destination · half-turn · source⁻¹` — the *same* product
+`AimSurfaceCameras` puts the camera through. The velocity is mapped by it too,
+without which the body arrives aimed the way it was aimed in the frame it left
+and walks out sideways.
+
+**Two decisions inside it worth not relitigating.** The transform is derived
+rather than read off `SurfaceLens::Mapping`, because that component is
+presentation — fitted to the local eye, kept off the wire by
+`replication::LocalToTheClient` — and a dedicated server never aims a surface at
+all, so a traversal that read it would work in the editor and not on a server.
+And a pane is crossed from **either** side, mapping through the crosser's own
+face frame, for the same reason `AimSurfaceCameras` picks a side per *viewer*: a
+hole is not a one-way door and both answers are right.
+
+**The seam is what is left, and it is a rendering decision rather than a
+feature.** A surface's texture is last frame's, which is what breaks the
+dependency cycle between a surface and the scene it shows. On a mirror that is
+invisible; on a hole somebody walks through, at 60 fps, on the frame they cross,
+it is a visible seam. Removing it means rendering the portal chain inside the
+frame, deepest first — the one property the surface pass trades away for being
+cheap, and a change that belongs with the render-graph work `ROADMAP.md` files
+behind a prototype project.
+
+**Closed at v0.15, and the last row was much smaller than this entry says.**
+The seam was that a surface samples the *other* surfaces from the textures they
+held last frame. Removing it does not need a recursive pass with its own budget —
+it needs the existing pass to run again: each bounce makes the previous one's
+output the read side, and after `n` bounces a chain `n` deep is resolved inside
+the frame, deepest first. The ping-pong pair each slot already carried is what
+makes it safe. `Renderer::SetSurfaceBounces`, two by default, and `NON-EUCLIDEAN.md`
+is the reading of CodeParade's demo that the work came out of.
+
+**Part of what looked like the seam was not the seam, and is gone.** v0.15 found
+that `EDGE_ON_MARGIN` — a mirror's fix for a camera that flips 180 degrees as a
+viewer crosses its plane — was being applied to holes as well, so a portal drew
+*nothing at all* within 0.3 studs of its own plane. That band is exactly where
+somebody walking through spends the crossing. A linked portal has no
+discontinuity to blank: the frame the viewer's side flips is the frame the
+viewer is carried through the pane, and the two cancel. What is left of this
+entry is the one-frame staleness above and nothing else. `NON-EUCLIDEAN.md` is the
+reading of CodeParade's demo that turned it up.
+
+**Two smaller things worth knowing before building on this.** Sixteen surfaces
+per world, shared with mirrors, which is a reasonable limit for this kind of
+level and not for a world dotted with holes. And physics has no per-region
+filter, so two rooms genuinely occupying the same coordinates would share one
+broadphase — `SurfaceCamera::TagFilter` already covers the rendering half.
+Placing the regions apart and letting the portals lie avoids both, and is what
+the demo does.
+
+**What must not happen is a second renderer.** Anything beginning with a portal
+pass of its own would be a copy of the surface pass under a different name, and
+the two would drift on the first lighting change.
+
+### [_] D00111
+
+**An HTTP origin has no route that says what it holds.** v0.14 gave the assets
+panel a tab per content source; a `Directory` source is listed by reading the
+manifest in its `processed/` folder, and an `Http` one shows its address and a
+sentence saying it serves by name. That sentence is true of the protocol rather
+than of the panel: `delivery::AssetClient` fetches a manifest through the whole
+priority list and reports what verified, and nothing asks *one* origin what it
+has.
+
+Two ways to close it, and the choice is the work:
+
+- **A client per source.** `MakeAssetClient` over a one-entry `DeliverySettings`
+  would answer honestly with no new protocol, at the cost of a client per tab
+  with its own lifetime, its own pump and its own failure to report. Pumping
+  those only while a tab is open is a state machine the panel does not have
+  today.
+- **A listing route on `cdn::Service`.** Cheaper to consume and a wider origin:
+  anything an origin will enumerate is something an unauthenticated caller can
+  enumerate, so it needs the ingest key's argument made again for reads.
+
+**What must not happen is the panel guessing.** Drawing the live client's
+catalogue under a named origin's tab would attribute every name to whichever
+origin the tab happened to be, and the first time two origins disagreed the
+panel would be confidently wrong about where content came from.
+
+### [_] D00110
+
+**A library of default shaders needs a consumer, and there is not one.** v0.14
+moved every built-in shader into `Engine::resources`, which is the half of that
+roadmap item with a home to move to. The other half — "a variety of default
+shaders" — would be GLSL that nothing loads: a shader reaches the GPU here only
+by being named in `Renderer::Impl::CreatePipelines` or `InterfacePass`, and both
+name a fixed set that matches the files one for one.
+
+The two things that would give a variety somewhere to plug in are both filed
+already and both above this in the stack:
+
+- **`ShaderScript`.** Named in `render/ShaderCompiler.hpp` and in
+  `render/AGENTS.md` as the reason a *runtime* compiler exists, and declared
+  nowhere — there is no class, no property and no path from a world to a
+  compile. Until there is, an author cannot select a shader by name at all.
+- **The render graph as a node system**, which `ROADMAP.md` files under v0.??.
+  That is where a pass gets to say which shader it wants, and where a permutation
+  stops being a file somebody adds by hand.
+
+**Adding the files first is the trap worth naming.** Six unlit/toon/water
+fragments in `resources/shaders/` would compile, stage, pass every test and be
+loaded by nothing — and each would then be a thing a later pipeline design has
+to either adopt or explain. `resources/AGENTS.md` says the same rule for meshes
+and textures: a default that can be generated should not be a file, and a
+default nothing consumes should not exist yet.
+
 ### [_] D00109
 
 **Filed as `D00108` and renumbered, because that number was already taken.**
@@ -495,7 +730,8 @@ through it — so two viewports each update at half the rate.**
 - **The flat spelling still resolves everywhere**, so this is a cosmetic gap with a workaround rather than a broken surface: `Enum_Material` is what the declaration file declares and what the editor understands.
 - **Three ways to close it, and none is obviously right yet.** Teach luau-lsp the prefix, which means a patch to a vendored tool and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork. Switch `luau-lsp.platform.type` to `roblox`, which makes the editor typecheck against Roblox's class tree rather than this engine's — worse than the squiggle. Or generate an `Enum.luau` module and have scripts `require` it, which works in both and costs a line at the top of every file.
 - **Re-examined at v0.13 and deliberately left as it is, because all three ways out cost more than the problem.** Patching luau-lsp is a fork to maintain against a moving target for a cosmetic squiggle. Switching to the `roblox` platform typechecks against the wrong class tree. And generating an `Enum.luau` to require has a hazard the entry did not name: `local Enum = require(...)` **shadows the runtime `Enum` global**, so every value use — `Enum.Material.Plastic` — would then resolve through the module rather than the engine, and the fix for the annotation would break the thing the annotation is about. `scriptcheck` reports 35 enums reachable as `Enum.<Name>` in a type position, so the build is not what is wrong; one editor is.
-- **Reopen trigger: somebody writing enum annotations often enough to be annoyed.** The engine's own scripts have three.
+- **v0.14 settled which spelling authored scripts use, and it is the dotted one.** An enum is `Enum.<set>.<member>` as a value, so it is `Enum.<set>` as a type, and a script that spelled the type `Enum_NormalId` would be naming the declaration file's internal vocabulary rather than the language's. `Portals-1-world.luau` is the first to write one. The build checks it — `scriptcheck` reports 36 enums reachable under the prefix — so what is left is one editor disagreeing with one line, which is what this entry has always been about rather than a choice still to make.
+- **Reopen trigger: an editor squiggle somebody actually trips over.** The engine's own scripts have four annotations between them, and one of them is dotted.
 
 ### [_] D00030
 

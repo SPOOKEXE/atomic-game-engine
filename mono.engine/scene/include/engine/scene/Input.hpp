@@ -223,6 +223,28 @@ namespace engine::scene {
 		// Which were down when the previous frame's input was written.
 		KeyBits Previous;
 
+		// Which keys have gone down since a tick last consumed the edges.
+		//
+		// **The frame/tick mismatch, made a field instead of a workaround.**
+		// `Down` and `Previous` answer "was this pressed *this frame*", and a
+		// frame is the wrong unit for anything the simulation acts on: frames
+		// outnumber ticks, so a key tapped and released between two ticks was
+		// pressed on a frame no tick ever looked at. A jump read that way is
+		// dropped about two times in three, and both hosts had independently
+		// grown the same private latch to hide it — `PlayLink::PendingJump` and
+		// `client::Client::PendingJump`, each bypassing `InputState` entirely
+		// and each having to be wired to its own character by hand.
+		//
+		// **Sticky until `ConsumeTaps`**, which is what makes it correct rather
+		// than merely longer-lived: the writer ORs every frame's press edge in
+		// here, and the tick that acts on it clears it. Nothing is read twice
+		// and nothing is missed.
+		//
+		// `WasKeyPressed` deliberately does *not* consult this — a script's
+		// `InputBegan` is a per-frame event and must stay one. `WasKeyTapped`
+		// is the tick-shaped question.
+		KeyBits Pressed;
+
 		// Where the pointer is, in pixels from the top-left of the window.
 		core::Vector2 MousePosition;
 
@@ -270,8 +292,12 @@ namespace engine::scene {
 		// not know which of them a member claimed. `Reserved` has to reach the
 		// end or it is not doing the job it is here for; this is the only
 		// component in the module where it did not, and the rest are the reason
-		// the rule is worth keeping. `sizeof` is unchanged at 48, so no file
-		// written before this changes meaning.
+		// the rule is worth keeping.
+		//
+		// `sizeof` is 64 since `Pressed` joined the two key sets above it — a
+		// save written before that reads its input resource back wrong, which
+		// is a break the pre-release format is allowed and the dropped jump was
+		// not.
 		uint8_t Reserved[8] = {};
 
 		// Whether a key is down now.
@@ -296,6 +322,47 @@ namespace engine::scene {
 		// @return `true` on the frame it was released.
 		bool WasKeyReleased(KeyCode key) const {
 			return !Down.Has(key) && Previous.Has(key);
+		}
+
+		// Records this frame's press edges, so a tick can still see them.
+		//
+		// **Called by whoever writes `Down`, once per frame, after it is
+		// filled.** It is the writer's job rather than the reader's because
+		// only the writer knows a frame happened: a reader that latched on its
+		// own would collapse two presses in one tick into one.
+		void LatchPresses() {
+			for (size_t word = 0; word < sizeof(Down.Words) / sizeof(Down.Words[0]); word++) {
+				Pressed.Words[word] |= Down.Words[word] & ~Previous.Words[word];
+			}
+		}
+
+		// Whether a key went down since a tick last consumed the edges.
+		//
+		// **What a simulation should ask instead of `WasKeyPressed`.** A tap
+		// that began and ended between two ticks is invisible to the frame-shaped
+		// question and answered correctly by this one.
+		//
+		// **The latch alone, and deliberately not `|| WasKeyPressed(key)`.**
+		// Folding the live frame edge in here would put a bit in the answer that
+		// `ConsumeTaps` cannot clear, and ticks are not rationed to one per
+		// frame: a host catching up runs several between two writes, and the
+		// second would read the same press the first had just consumed. One
+		// press, two jumps. `LatchPresses` already folds the current frame's
+		// edge into `Pressed`, so nothing is lost by asking only the latch.
+		//
+		// @param key The key.
+		// @return `true` when it was pressed since the last `ConsumeTaps`.
+		bool WasKeyTapped(KeyCode key) const {
+			return Pressed.Has(key);
+		}
+
+		// Forgets the latched press edges.
+		//
+		// **Once per tick, by the one consumer that acts on them.** Two callers
+		// would mean the second never sees a tap the first cleared, which is the
+		// dropped jump again with an extra step.
+		void ConsumeTaps() {
+			Pressed = KeyBits{};
 		}
 
 		// Whether a mouse button is down now.

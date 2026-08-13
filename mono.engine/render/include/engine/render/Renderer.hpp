@@ -14,6 +14,12 @@
 #include <engine/render/Overlay.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
+
+// `SurfaceView::Projection` is a matrix. glm has always arrived here through
+// `core/types/CFrame.hpp` and `graph/Frustum.hpp`, but a header that names a
+// type should say where it comes from rather than rely on a neighbour.
+#include <glm/mat4x4.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -68,6 +74,12 @@ namespace engine::render {
 	//
 	// Surface textures are double-buffered; nested reflections are one frame stale.
 	//
+	// **Mirrors and cross-world windows, and since v0.15 nothing else.** A
+	// same-world portal used to be one of these and is a `PortalView` now, for
+	// the reason that type states in full: a surface camera is placed from the
+	// eye, so a chain of them is drawn from the wrong viewpoint rather than
+	// merely from stale textures.
+	//
 	// @since v0.6
 	struct SurfaceView {
 		// Which surface index this renders, matching `scene::Visual::Surface` on
@@ -86,8 +98,38 @@ namespace engine::render {
 		// Where the surface camera is, in world space.
 		core::CFrame Frame;
 
-		// Its field of view and clipping distances.
-		scene::Camera Lens;
+		// What it renders through, already built.
+		//
+		// **A projection handed in rather than a field of view derived here**,
+		// and the change is what a portal rests on. A surface frustum is fitted
+		// to a pane's four corners and is therefore **off-axis** — the four
+		// edges lean independently, so a viewer standing to one side gets
+		// exactly the pane instead of twice its width; and for a portal it is
+		// also **obliquely clipped**, with the near plane skewed onto the
+		// destination's plane so the wall the hole leads through cannot draw
+		// across it. Neither is expressible as an angle and two distances,
+		// which is what this field used to be.
+		//
+		// Built by `scene::SurfaceProjection` from the `scene::SurfaceLens` that
+		// `scene::AimSurfaceCameras` fits, so the renderer neither measures a
+		// pane nor knows what a portal is.
+		//
+		// @since v0.14
+		glm::mat4 Projection{1.0f};
+
+		// What moved the pane into the space this view was fitted to.
+		//
+		// **A pane samples its image by projecting its own world position, so a
+		// camera that was fitted somewhere else needs the pane taken there
+		// too.** The surface is rendered with the view's own matrix and read
+		// back with that matrix times this one; `scene::SurfaceLens::Mapping` is
+		// where the two are argued out.
+		//
+		// Identity is a mirror, and is what a host that has never heard of a
+		// portal leaves it as — including one filling this struct by hand.
+		//
+		// @since v0.14
+		glm::mat4 Mapping{1.0f};
 
 		// How wide the texture is. Square is not required; a wide mirror wants a
 		// wide target, and giving it a square one wastes half the texels.
@@ -131,7 +173,144 @@ namespace engine::render {
 		// it for one surface would be partitioning it for all of them, and the
 		// screen pass would then draw the group instead of the world.
 		uint32_t TagFilter = 0;
+
+		// How many times a second this surface may redraw, or zero for every
+		// frame.
+		//
+		// From `scene::SurfaceCamera::FPS`, and honoured beside the content
+		// signature rather than instead of it: a surface redraws when its image
+		// has changed **and** it is visible **and** its interval has elapsed.
+		// The three are independent reasons to skip, and a surface that fails
+		// any of them keeps the texture it has along with the matrices that
+		// drew it.
+		//
+		// **Needs `Renderer::SetAnimationTime`**, which is the frame clock this
+		// class already has. A host that never sets one leaves it at zero, and
+		// a surface capped against a clock that never advances would render once
+		// and freeze — so a non-advancing clock is treated as uncapped.
+		//
+		// @since v0.15
+		float FPS = 0.0f;
+
+		// Which instances this surface draws, when they are not this world's.
+		//
+		// **What makes a portal able to show another world**, and it is a range
+		// rather than a second draw list because the renderer uploads one
+		// instance buffer per frame. A host that wants world B seen through
+		// world A's pane puts B's instances in `Render`'s `foreign` argument and
+		// names that range here; the surface pass then draws exactly it.
+		//
+		// **An offset into `foreign`, not into the world's own list**, and the
+		// two are separate arguments for the reason that split exists: joined,
+		// the far world would be culled, ordered and drawn as part of this one.
+		// The renderer moves the range into buffer space itself, after the
+		// ordering that would otherwise have invalidated it.
+		//
+		// **`Count == 0` means "this world", which is every mirror and every
+		// same-world portal.** Those draw the `scene::ScenePlan`'s own runs —
+		// the world minus the pane being rendered, plus every other pane — which
+		// is the arrangement that makes a mirror of a mirror work and is not
+		// something a foreign range can participate in: the plan describes this
+		// world's partitioning and knows nothing about the appended tail.
+		//
+		// So a foreign surface is drawn **plainly and in one run**. A pane in
+		// the far world shows as a flat pane rather than as a recursive image,
+		// which is the same fallback a surface with no frame yet already gets
+		// and is right for the same reason — a hole through a hole into a third
+		// world is a feature nobody has asked for and would need a plan per
+		// world per frame to serve.
+		//
+		// @since v0.14
+		//@{
+		uint32_t InstanceFirst = 0;
+		uint32_t InstanceCount = 0;
+		//@}
 	};
+
+	// One same-world portal, as the recursive pass needs it.
+	//
+	// **Beside `surfaces` and never one of them, because a portal is not a
+	// surface camera.** A `SurfaceView` says where a camera stands, and every
+	// surface camera is placed from the *eye* — so when one surface pass draws
+	// another surface's pane it projects that pane's texture with a matrix taken
+	// from the eye rather than from the camera the pass is rendering from. For a
+	// mirror that error is small; for a portal seen through a portal it is the
+	// whole picture, and no number of bounces removes it, because what is wrong
+	// is the camera and not the texture's age.
+	//
+	// A portal's sub-camera is derived from the camera the recursion is
+	// *currently* at — the warp applied to that camera's own frame, its own
+	// projection skewed onto the mapped pane — so warps compose down the
+	// recursion by construction. `NON-EUCLIDEAN.md`'s Part III is the whole
+	// argument and CodeParade's `Portal.cpp` is the model.
+	//
+	// **Same-world only.** A `scene::Portal` naming a `DestinationWorld` is a
+	// window onto a second simulation rather than a hole in one space: it keeps
+	// its `SurfaceView`, draws a foreign instance range, and does not recurse.
+	//
+	// @since v0.15
+	struct PortalView {
+		// Which surface slot the pane's draw instances carry, from
+		// `scene::DrawInstance::Surface`.
+		//
+		// **How the pass finds the pane's geometry, and it draws no geometry of
+		// its own.** The quad is the pane part already in the draw list, which
+		// `scene::PartitionSurfaces` has already grouped into a run of its own —
+		// so there is no second mesh, no vertex buffer, and nothing coplanar with
+		// the pane to fight it for depth.
+		int8_t Index = 0;
+
+		// The slot of the hole at the far end of this one, or -1 for none.
+		//
+		// **Skipped by the level this one opens**, which is CodeParade's
+		// `skipPortal` argument and is the same saving. A sub-camera stands at
+		// the far pane looking away from it, so the far pane is at the level's
+		// own clip plane: rendering through it produces a scene that is then
+		// entirely clipped away, at the cost of a full sub-render. Cheaper to
+		// name it than to draw it and throw it away.
+		int8_t Partner = -1;
+
+		// The pane's plane and rectangle in world space, exactly as
+		// `scene::PortalSeam` states them: `Centre ± First ± Second` is the four
+		// corners and `Normal` is the face's own normal.
+		//
+		// **The rectangle and not the pane's box**, because what has to be culled
+		// per level is the hole rather than the slab it is cut into, and because
+		// the sub-camera is derived by mapping *this* rectangle rather than
+		// anything the draw list holds.
+		//@{
+		core::Vector3 Centre;
+		core::Vector3 Normal;
+		core::Vector3 First;
+		core::Vector3 Second;
+		//@}
+
+		// The map to the far side.
+		//
+		// **One map and not one per side, which is the point.** It carries this
+		// pane's front hemisphere to the far pane's back one and its back to the
+		// far pane's front, so it is right at the top level and right at every
+		// level below where the sub-camera has stepped through — and it is the
+		// exact map `scene::CrossPortals` moves a body by, so what the hole shows
+		// and where walking into it puts you cannot come apart. CodeParade's
+		// `Portal::Warp::delta`, which is likewise one matrix for both sides.
+		scene::SeamTransform Warp;
+
+		// Which tags an instance must carry to be drawn through this hole, or
+		// zero for all of them. `SurfaceView::TagFilter`'s argument, unchanged.
+		uint32_t TagFilter = 0;
+	};
+
+	// How many levels of portal recursion a renderer will go to.
+	//
+	// **A ceiling rather than a budget**, because the pool is allocated per level
+	// per slot at viewport resolution: four levels of a sixteen-slot scene would
+	// be sixty-four full-screen colour and depth pairs, which is video memory
+	// nobody asked for. Anything a caller asks for above this is clamped, with
+	// the frame drawn rather than refused.
+	//
+	// @since v0.15
+	inline constexpr uint32_t MAX_PORTAL_DEPTH = 4;
 
 	// How many local lights one frame may carry.
 	//
@@ -411,6 +590,18 @@ namespace engine::render {
 		// @since v0.8
 		uint32_t SurfacePasses = 0;
 
+		// How many portal sub-renders this frame ran.
+		//
+		// **Reported separately from `SurfacePasses` because it is the number
+		// that goes up fastest.** A level is a whole scene rendered from a
+		// camera that did not exist a moment ago, and the count is holes times
+		// levels in the worst case — so this is where a corridor of portals
+		// shows up, and where `graph::VisiblePane` doing its job shows up as the
+		// same corridor costing two.
+		//
+		// @since v0.15
+		uint32_t PortalPasses = 0;
+
 		// How many ribbon vertices were submitted this frame.
 		//
 		// Two per segment, so a beam is twenty-two and a trail is at most
@@ -492,9 +683,25 @@ namespace engine::render {
 		// and a headless `Render` with no scene target draws nothing rather than
 		// pretending to.
 		//
+		// **How many frames the CPU may queue ahead of the GPU is a policy, and
+		// the caller owns it.** One means `SDL_SubmitGPUCommandBuffer` blocks
+		// until the GPU has finished the previous frame — the CPU and the GPU
+		// take turns, the picture is as close to the input as this engine can
+		// make it, and a GPU-bound scene loses the rate the overlap was buying.
+		// Two or three let the CPU run ahead and cost a frame or two of latency
+		// for it.
+		//
+		// **The default is one because this is an editor's renderer**, and the
+		// argument is in `Initialise` beside the call. A caller measuring
+		// throughput, or presenting something nobody is dragging, should say so
+		// rather than have this decided for it.
+		//
 		// @param window SDL window to claim, or null for headless.
+		// @param framesInFlight How many frames the CPU may queue ahead.
+		//        Clamped to 1..3; ignored when headless, which has no swapchain
+		//        to be ahead of.
 		// @return True when the device, pipelines and geometry are ready.
-		bool Initialise(SDL_Window *window);
+		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1);
 
 		// Whether this renderer has a window to present to.
 		//
@@ -585,6 +792,94 @@ namespace engine::render {
 		// @param seconds Seconds since the session began.
 		// @since v0.10
 		void SetAnimationTime(double seconds);
+
+		// How many times the surface pass runs per frame.
+		//
+		// **In-frame recursion, and it is a loop rather than a second
+		// renderer.** A surface pass samples the *other* surfaces, and with one
+		// bounce it samples the textures they held last frame — so a portal seen
+		// through a portal resolves one level per frame, and the frame somebody
+		// walks through a hole shows a seam. That is the whole of `D00112`.
+		//
+		// Running the pass again makes the previous bounce's output the read
+		// side, so after `n` bounces a chain `n` deep is resolved inside the
+		// frame, deepest first. The ping-pong pair each slot already carries is
+		// what makes it safe: a bounce writes one texture and reads the other,
+		// and the flip between bounces swaps them.
+		//
+		// **Linear in visible surfaces**, because each bounce is a scene pass
+		// per surface that is refreshing. Two is the default and is what closes
+		// the case anybody sees; a corridor built out of holes can ask for more,
+		// and a scene that wants the old cheapness can ask for one.
+		//
+		// Floored at one — zero would mean no surface pass at all, which has a
+		// clearer spelling.
+		//
+		// @param bounces How many times to run it.
+		// @since v0.15
+		void SetSurfaceBounces(uint32_t bounces);
+
+		// What it is set to, or zero before the renderer has a device.
+		//
+		// @since v0.15
+		uint32_t SurfaceBounces() const;
+
+		// How deep the recursive portal pass goes.
+		//
+		// **Not `SurfaceBounces` under another name, and the two measure
+		// different things.** A bounce runs the whole surface pass again to let
+		// one frame's textures propagate between panes; a portal *level* is a
+		// scene rendered from a sub-camera derived from the level above it, with
+		// its own cull and its own target. Depth two is a hole seen through a
+		// hole, resolved inside the frame, from the right viewpoint at each
+		// level.
+		//
+		// **Costs one scene render per visible portal per level**, which is
+		// `portals ^ depth` in the worst case and is exactly why
+		// `graph::VisiblePane` is asked at every level rather than once for the
+		// eye. CodeParade's demo affords four because its portals are the whole
+		// scene; ours share a frame with mirrors, shadows and a world.
+		//
+		// **One by default, and that is a backend limit rather than a budget.**
+		// Above one, a level's target is rendered into once per hole at the level
+		// above — so within one command buffer the same texture is written,
+		// sampled, and written again, and SDL's Vulkan backend hangs the device on
+		// it. The default's comment in the source carries the measurement. Raising
+		// this draws correctly and is not currently safe to ship at.
+		//
+		// Zero draws every pane flat and runs no sub-render, which is the
+		// termination case made reachable rather than a separate switch.
+		//
+		// @param depth How many levels. Clamped to `MAX_PORTAL_DEPTH`.
+		// @since v0.15
+		void SetPortalDepth(uint32_t depth);
+
+		// What it is set to, or zero before the renderer has a device.
+		//
+		// @since v0.15
+		uint32_t PortalDepth() const;
+
+		// Which way the world's one directional light shines, and what reaches
+		// what it does not.
+		//
+		// **A knob rather than an argument to `Render`, for `SetPortalDepth`'s
+		// reason**: it is a property of the world being drawn rather than of one
+		// frame, and threading it through would put it in a signature every host
+		// calls to repeat the same two values every frame.
+		//
+		// A renderer that is never told draws with `scene::SUN_DIRECTION` and
+		// `scene::SUN_AMBIENT`, which are the numbers this engine has always
+		// drawn with — so a host that does not care is not made to care.
+		//
+		// **The direction is what the shadow map is fitted along as well as what
+		// the shader shades with**, so setting it moves both together. That is
+		// the whole reason it is one call.
+		//
+		// @param direction Where it shines towards. Normalised here; a zero
+		//                  vector is ignored rather than obeyed.
+		// @param ambient   What reaches a surface the sun does not.
+		// @since v0.15
+		void SetSun(const core::Vector3 &direction, const core::Color3 &ambient);
 
 		// The backend handle for a registered texture, for an interface pass to
 		// sample.
@@ -781,6 +1076,34 @@ namespace engine::render {
 		//                    the one that should be choosing which: the renderer
 		//                    has no idea which lamp matters. `client::CollectLights`
 		//                    picks the nearest to the eye.
+		// @param foreign    Instances belonging to *other* worlds, drawn only
+		//                    through the surfaces that name them by
+		//                    `SurfaceView::InstanceFirst`.
+		//
+		//                    **Separate from `instances` because everything this
+		//                    call does to `instances` is wrong for these.** They
+		//                    are not culled against this camera, not sorted into
+		//                    this view's plan, and never submitted by the screen
+		//                    pass or the shadow pass — a second world is not
+		//                    part of this world's frame, it is a picture hanging
+		//                    in it. They were appended to `instances` by the host
+		//                    until v0.14, and the two rooms drew on top of each
+		//                    other.
+		//
+		//                    They still share the one instance buffer: the
+		//                    renderer copies them in after this world's rows and
+		//                    shifts each surface's range to match.
+		// @param portals    The same-world holes, drawn by the recursive pass
+		//                    instead of by a surface camera.
+		//
+		//                    **Beside `surfaces` rather than among them**, which
+		//                    is the whole of `PortalView`: a surface's camera is
+		//                    a function of the eye and cannot compose down a
+		//                    recursion, and a portal's has to. A slot named here
+		//                    must not also be named in `surfaces` — the pane
+		//                    would be drawn twice, once by each pass, and the
+		//                    renderer drops the surface with a line in the log
+		//                    rather than choosing silently.
 		// @return Submitted draw counts and whether the frame was presented.
 		FrameResult Render(
 			const core::CFrame &cameraFrame,
@@ -794,7 +1117,9 @@ namespace engine::render {
 			std::span<const ParticleBatch> particles = {},
 			std::span<const effects::RibbonVertex> ribbonVertices = {},
 			std::span<const effects::RibbonRun> ribbonRuns = {},
-			std::span<const SceneLight> lights = {}
+			std::span<const SceneLight> lights = {},
+			std::span<const scene::DrawInstance> foreign = {},
+			std::span<const PortalView> portals = {}
 		);
 
 		// The texture the most recent `Render` drew that slot's world into.

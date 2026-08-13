@@ -110,6 +110,20 @@ namespace engine::scene {
 		// How far to the side a shift-locked camera sits, in metres.
 		float ShoulderOffset = 2.0f;
 
+		// Which of the subject's portal crossings this camera has already
+		// turned for.
+		//
+		// **The consumer's half of `scene::PortalTransit`**, and it is on the
+		// controller rather than beside the counter because it is a fact about
+		// this *viewer*: two clients watching the same character each have to
+		// turn their own eye once, and a flag on the body would let the first
+		// one to read it clear the news for everybody else. Zero is "seen
+		// nothing", which is what a camera holds before its subject has been
+		// anywhere.
+		//
+		// @since v0.15
+		uint32_t SeenTransit = 0;
+
 		// How it is driven.
 		CameraMode Mode = CameraMode::Classic;
 
@@ -135,6 +149,20 @@ namespace engine::scene {
 	//
 	// @since v0.10
 	struct Humanoid {
+		// The part this steers, or a null entity when it steers the entity it
+		// is on.
+		//
+		// **Roblox puts a `Humanoid` beside the parts rather than on one**, so
+		// the thing that holds the walk speed and the thing the solver pushes
+		// are two different rows — see `Characters.hpp`. A null handle means the
+		// older arrangement, where a single part carries both, and that is what
+		// every scripted NPC in the repository and every case in
+		// `tests/Controls.cpp` still is.
+		//
+		// **Widest first**, so the object representation a snapshot writes holds
+		// no padding between this and the vector below it.
+		ecs::Entity RootPart;
+
 		// Which way the character has been told to go, in world space.
 		//
 		// **A direction and not a velocity**, which is Roblox's `MoveDirection`
@@ -144,10 +172,34 @@ namespace engine::scene {
 		core::Vector3 MoveDirection;
 
 		// How fast it walks, in metres per second.
+		//
+		// **Roblox's number is 16 and it is 16 *studs*.** A stud is about 0.28 m,
+		// so the same feel in this engine's units is nearer 4.5 — see `JumpSpeed`
+		// below for why the two are stated together and why the figure here is
+		// not simply converted. Left where a run of the examples put it, because
+		// what a character *feels* like is an authoring decision and not a units
+		// bug the way the jump was.
 		float WalkSpeed = 16.0f;
 
-		// How fast it leaves the ground when it jumps.
-		float JumpSpeed = 50.0f;
+		// How fast it leaves the ground when it jumps, in metres per second.
+		//
+		// **50 was Roblox's `JumpPower`, and Roblox's gravity is 196.2.** That
+		// pairing gives a jump about 6 studs high. `scene::Gravity` deliberately
+		// does *not* copy 196.2 — this engine measures a part sized `2` as two
+		// metres, so it uses Earth's 9.81 and says so at length — and 50 m/s
+		// against 9.81 m/s² is an apex of a hundred and thirty metres, reached
+		// five seconds after take-off.
+		//
+		// That is the bug somebody reports as "jump freezes in mid-air": the
+		// character is not stuck, it is coasting through the top of an arc so
+		// slow and so tall that a second of it looks like a hang, and the ground
+		// it left is off the bottom of the screen. Nothing in the solver, the
+		// sleep heuristic or the ground query is involved.
+		//
+		// The figure is chosen against the height rather than converted: half of
+		// `CHARACTER_HEIGHT` is a jump you can read, and `v = sqrt(2 g h)` with
+		// h = 2.5 m gives 7.
+		float JumpSpeed = 7.0f;
 
 		// How tall the capsule is, in metres.
 		float Height = 5.0f;
@@ -191,9 +243,46 @@ namespace engine::scene {
 	//
 	// Does nothing when the controller is disabled or `Scriptable`.
 	//
+	// **Except for the portal turn, which happens first and happens anyway.**
+	// See `FollowPortalTransit`: a disabled camera still belongs to a body that
+	// may have gone through a hole, and a scripted one still hands its yaw to
+	// `ReadMoveIntent`. Skipping it for either would leave the yaw pointing at
+	// the room the player came from.
+	//
 	// @param store The world.
 	// @return `true` when the angles or the distance moved.
 	bool UpdateCameraControl(ecs::Store &store);
+
+	// Turns the camera by however far a portal turned the body it follows.
+	//
+	// **The client end of `scene::PortalTransit`, and it is a separate function
+	// because it is a separate machine.** `CrossPortals` maps a crossing body
+	// and its velocity on whichever host simulates it; the yaw a player steers
+	// by lives in `CameraController::Angles`, which is a resource on whichever
+	// host is *looking*. In a studio Play or against a real server those are two
+	// worlds. So the crossing is recorded on the body, replication carries it
+	// across with everything else the body owns, and this reads it where the eye
+	// actually is.
+	//
+	// What it fixes is unmistakable when it is missing: you walk forward through
+	// a hole whose pair turns a corner, and on the far side the view is still
+	// pointing the way you came in — ninety degrees off your own body, facing a
+	// wall, with W walking you sideways because `ReadMoveIntent` is relative to
+	// this yaw.
+	//
+	// **Once per crossing per viewer.** `CameraController::SeenTransit` is the
+	// counter this has already acted on, so a client that misses the frame a
+	// delta lands still turns on the next one, and one that runs twice in a
+	// frame does not turn twice.
+	//
+	// Called by `UpdateCameraControl` before anything else it does, so every
+	// host that installs the camera pass gets it without a second entry in the
+	// schedule.
+	//
+	// @param store The world.
+	// @return `true` when the yaw was turned.
+	// @since v0.15
+	bool FollowPortalTransit(ecs::Store &store);
 
 	// Places the live camera from the controller's angles.
 	//
@@ -207,6 +296,34 @@ namespace engine::scene {
 	// @param store The world.
 	// @return `true` when a camera was placed.
 	bool PlaceCamera(ecs::Store &store);
+
+	// What the player is asking their character to do this frame.
+	//
+	// @since v0.14
+	struct MoveIntent {
+		// Where they want to go, in world space, already normalised.
+		core::Vector3 Direction;
+
+		// Whether the jump key went down this frame.
+		bool Jump = false;
+	};
+
+	// Reads the keyboard into an intent, and applies it to nothing.
+	//
+	// **Split out of `UpdateCharacterControl` because a connected client needs
+	// the intent without the application.** A client does not simulate its own
+	// character — the host does, and the client sends what it wants through
+	// `game::MoveInput` — so the arithmetic that turns W into "away from the
+	// camera" has to be reachable on its own. The alternative was a second copy
+	// of it in `mono.client`, which is where the diagonal-speed bug would come
+	// back.
+	//
+	// Const, because it writes nothing at all.
+	//
+	// @param store The world.
+	// @return The intent. Zero direction and no jump when the window is not
+	//         focused or the world has no `InputState`.
+	MoveIntent ReadMoveIntent(const ecs::Store &store);
 
 	// Turns this frame's input into a `Humanoid::MoveDirection`.
 	//

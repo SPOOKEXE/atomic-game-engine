@@ -94,7 +94,18 @@ namespace engine::script {
 	}
 
 	void RegisterScriptComponents() {
-		ecs::Components::Register<Source>("script.Source");
+		// **Three where there was one `script.Source`.** An instance holds a
+		// program per language and something choosing between them —
+		// `LuaSourceContainer` carries why that is not one field with a flag.
+		// A game file written before this reads as a world of scripts with no
+		// containers, which is a world of empty scripts rather than a world that
+		// refuses to load: save-format breaks are acceptable while this is
+		// pre-release, and this one is visible rather than silent.
+		ecs::Components::Register<LuaSourceContainer>("script.LuaSourceContainer");
+		ecs::Components::Register<JavaScriptSourceContainer>("script.JavaScriptSourceContainer");
+		ecs::Components::Register<CodeSourceContainerSelector>(
+			"script.CodeSourceContainerSelector"
+		);
 		ecs::Components::Register<Disabled>("script.Disabled");
 		ecs::Components::Register<SourceCache>("script.SourceCache", WriteSourceCaches, ReadSourceCaches);
 	}

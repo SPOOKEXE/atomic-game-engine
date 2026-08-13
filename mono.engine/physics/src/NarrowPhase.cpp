@@ -62,10 +62,36 @@ namespace engine::physics {
 		manifolds.clear();
 		PipelineInternals::Events(*world).clear();
 
+		// **Serial, and measured rather than assumed.** A pair function is pure
+		// — it reads two placed shapes and writes one manifold — so splitting
+		// the pair list across workers gives bit-for-bit the same answer, and
+		// the obvious thing to do is dispatch it. Measured on a twenty-four
+		// thread machine it was **twice as slow**: writing a slot per candidate
+		// so workers never share a cursor costs a pass over several megabytes,
+		// and the dispatch itself loses badly whenever the cores are already
+		// busy with something else. Worth retrying on an idle machine against
+		// `benchmarks/Solver.cpp`'s phase rows; not worth carrying on this
+		// evidence.
+		//
+		// The pair list is sorted, so every pair that names the same first
+		// collider arrives in one run — a body against the six things around it
+		// is one lookup rather than six. `BroadPhase` sorts for determinism and
+		// this is the second thing that sort buys. The second side varies within
+		// a run and is resolved each time.
+		ecs::Entity resolved;
+		PlacedCollider first;
+
 		for (const CandidatePair &pair : world->Pairs()) {
-			const PlacedCollider first = Resolve(store, pair.A);
+			if (pair.A != resolved) {
+				first = Resolve(store, pair.A);
+				resolved = pair.A;
+			}
+			if (!first.Present) {
+				continue;
+			}
+
 			const PlacedCollider second = Resolve(store, pair.B);
-			if (!first.Present || !second.Present) {
+			if (!second.Present) {
 				continue;
 			}
 

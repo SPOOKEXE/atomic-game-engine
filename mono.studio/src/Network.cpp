@@ -166,6 +166,12 @@ namespace studio {
 					: "no usable read source — check the addresses and that a row is enabled";
 		}
 
+		// **The assets panel's tabs are the same list read a different way**, so
+		// they are rebuilt with the clients rather than waiting for somebody to
+		// reopen the panel. An origin added on the Content page and no tab for
+		// it reads as the row not having been saved.
+		AssetTabs = BuildCatalogue(Content);
+
 		// **Built even when delivery is not.** An uploader verifies nothing, so
 		// it does not need a publisher key — and an editor being used to *seed*
 		// an origin is exactly the case where no manifest has been signed yet

@@ -22,6 +22,16 @@ namespace assetc {
 		std::filesystem::path Input;
 
 		// Where the baked tree goes. Created if it is not there.
+		//
+		// **Empty means nothing is written and every row carries its bytes
+		// instead** — see `Baked::Payload`. That is one branch at the point of
+		// emission rather than a second entry point, because everything that
+		// makes a bake *correct* is in the walk above it: a model's texture
+		// references are rewritten through `BakedName`, a texture is resized
+		// against its decoded dimensions, a material's colour map is rewritten
+		// the same way. A separate in-memory baker would be a second place to
+		// spell all of that, and the one that drifted would be the one nothing
+		// published from.
 		std::filesystem::path Output;
 
 		// The size, in metres, every imported model's longest axis is scaled
@@ -136,6 +146,23 @@ namespace assetc {
 		//
 		// File failures remain rows; run-start failures use `failure`.
 		std::string Failure;
+
+		// What was baked, when `Settings::Output` is empty.
+		//
+		// **For a caller that wants the asset and not a file.** The editor's
+		// raw folders are the case: a person points at their art directory and
+		// expects to see it in the viewport, and writing a baked copy beside it
+		// — or into somebody's content store — is a side effect they did not
+		// ask for and would have to clean up. Kept here rather than returned
+		// separately so a row still says what it is, what it weighs and why it
+		// failed, in one place.
+		//
+		// Empty on a run with an output directory: the bytes are the file, and
+		// holding a second copy of a two-hundred-megabyte tree in memory to say
+		// so would be a bake that runs out of memory on success.
+		//
+		// @since v0.14
+		std::vector<std::byte> Payload;
 	};
 
 	// What a whole run did.

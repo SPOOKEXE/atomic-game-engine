@@ -141,6 +141,10 @@ int main(int argc, char **argv) {
 		"grant-key", "HEX", "64 hex characters — the secret shared with the server that issues grants"
 	);
 	arguments.Value("port", "N", "Port to listen on (default: 9080; 0 binds an ephemeral one)");
+	arguments.Value(
+		"ingest-key", "SECRET", "Accept uploads at /ingest from whoever sends this as x-atomic-ingest"
+	);
+	arguments.Value("inbox", "DIR", "Where uploads land (default: the store's raw/ beside --store)");
 	arguments.Value("upstream", "NAME=HOST:PORT", "An origin to forward a miss to. Repeatable");
 	arguments.Flag("allow-upstream", "Forward a miss to an upstream. Off unless asked for");
 	arguments.Flag("no-local-first", "Always ask an upstream, even when the content is here — a pure proxy");
@@ -304,6 +308,37 @@ int main(int argc, char **argv) {
 	service.Port = engine::delivery::DEFAULT_ORIGIN_PORT;
 	if (auto port = arguments.Get("port")) {
 		service.Port = static_cast<uint16_t>(std::atoi(std::string(*port).c_str()));
+	}
+
+	// **Uploads are off until a key is given, and the key is the whole of the
+	// admission check.** `cdn::IngestSettings` carries what that buys and what
+	// it does not: an inbox holds unsigned content that no client will look at
+	// until a publisher has signed a manifest naming it, so losing this secret
+	// costs disk rather than trust.
+	//
+	// Reachable from a flag as of v0.14. The origin has accepted uploads since
+	// v0.10 and no program could be told to — so the editor's Upload button had
+	// a write source it could configure, a key it could send, and nothing
+	// anywhere that would take them.
+	if (auto key = arguments.Get("ingest-key"); key.has_value() && !key->empty()) {
+		service.Ingest.Key = std::string(*key);
+
+		// **A store called `processed/` is a local store, and its inbox is the
+		// `raw/` beside it** — which is where `PublishLocal` reads from, so an
+		// upload lands somewhere a publish will find it. Anywhere else the
+		// store is a bare directory of chunks with no such sibling, and putting
+		// an inbox *inside* it is at least a path somebody can predict.
+		service.Ingest.Inbox = arguments.Get("inbox").has_value()
+								   ? std::filesystem::path(*arguments.Get("inbox"))
+							   : storePath.filename() == "processed"
+								   ? storePath.parent_path() / "raw"
+								   : storePath / "inbox";
+	} else if (arguments.Get("inbox").has_value()) {
+		// An inbox with no key refuses every upload — `IngestSettings::Key`
+		// says so — and an origin that looks configured for uploads and takes
+		// none is the failure worth naming here rather than at request time.
+		ENGINE_ERROR("cdn: --inbox needs --ingest-key, or nothing would be accepted");
+		return 2;
 	}
 
 	// Read before the store is handed over, and read once: counting chunks

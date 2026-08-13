@@ -47,27 +47,32 @@ namespace engine::physics {
 	// `dev` preset, measured as the furthest any box ends up from the column it
 	// started in — the number that says whether a stack stands up.
 	//
+	// The cost column was re-measured after the row layout changed in v0.14; the
+	// error column is from the original run, because the change was arithmetic
+	// — the same sweeps in the same order — and not an algorithm the drift
+	// would answer differently.
+	//
 	// | Iterations | Solve, 3520 contacts | Per contact | Tower drift | Bottom sink |
 	// |---|---|---|---|---|
-	// | 4 | 1276 us ± 18 | 0.36 us | 143 mm | 0.4 mm |
-	// | 8 | 2073 us ± 21 | 0.59 us | 32 mm | 2.1 mm |
-	// | 12 | 2859 us ± 56 | 0.81 us | 16 mm | 1.9 mm |
-	// | **16** | **2891 us ± 73** | **0.82 us** | **13 mm** | **1.5 mm** |
-	// | 24 | 4062 us ± 124 | 1.15 us | 24 mm | 0.7 mm |
+	// | 4 | 819 us ± 87 | 0.23 us | 143 mm | 0.4 mm |
+	// | 8 | 1118 us ± 129 | 0.32 us | 32 mm | 2.1 mm |
+	// | 12 | 1473 us ± 128 | 0.42 us | 16 mm | 1.9 mm |
+	// | **16** | **1785 us ± 226** | **0.51 us** | **13 mm** | **1.5 mm** |
+	// | 24 | 2385 us ± 129 | 0.68 us | 24 mm | 0.7 mm |
 	//
 	// Sixteen, because the drift curve flattens between twelve and sixteen and
 	// does not improve after — twenty-four is worse, which is a toppling tower
 	// being chaotic rather than the solver getting worse, and either way it is
-	// not an argument for paying forty per cent more. Below twelve the tower
-	// visibly slumps.
+	// not an argument for paying a third more. Below twelve the tower visibly
+	// slumps.
 	//
-	// Cost per contact is flat across scene size — 0.82 us at 3520 contacts,
-	// 0.82 at 18040, 0.83 at 10688 in taller stacks — so it really is a
+	// Cost per contact is flat across scene size — 0.51 us at 3520 contacts,
+	// 0.56 at 18040, 0.55 at 10688 in taller stacks — so it really is a
 	// per-contact figure and a scene's solver budget is a multiplication.
 	//
 	// **The warm start is what makes sixteen enough, and it costs nothing.**
 	// The same benchmark with the impulse cache emptied every tick runs in
-	// 2783 us ± 40, which is inside the spread: the lookup is a binary search
+	// 1619 us ± 114, which is inside the spread: the lookup is a binary search
 	// over a sorted array. What it buys is accuracy — the same tower drifts
 	// 105 mm instead of 13 with the cache emptied, because every tick starts
 	// its search from zero instead of from the answer the previous tick found.

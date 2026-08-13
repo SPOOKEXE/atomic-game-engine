@@ -225,14 +225,28 @@ namespace studio {
 
 		// --- what is there ----------------------------------------------------
 		//
-		// Two tabs because they are two different questions. `raw/` answers "did
-		// my file get in"; the manifest answers "what can I name in a scene", and
-		// nothing is in the second until somebody publishes.
+		// **One tab per place, then the two questions that are about this
+		// machine.** A published list on its own could not say *where* a name
+		// lives, which is the question with two origins configured — so the
+		// catalogue tabs come first, in priority order, with the merged view in
+		// front of them and the engine's own beside it. `raw/` still answers
+		// "did my file get in" and the gallery answers "what is actually used",
+		// and neither is a place content can be fetched from.
 		if (ImGui::BeginTabBar("##store")) {
-			if (ImGui::BeginTabItem("Published")) {
-				DrawPublishedList();
-				ImGui::EndTabItem();
+			for (size_t index = 0; index < AssetTabs.size(); index++) {
+				const CatalogueTab &tab = AssetTabs[index];
+
+				// **The id is pinned to the position and the label is not.**
+				// Two origins may be called the same thing — nothing stops
+				// somebody naming two rows "cdn" — and two tabs sharing an id
+				// is one tab that flickers between two contents.
+				const std::string label = tab.Title + "###asset-place-" + std::to_string(index);
+				if (ImGui::BeginTabItem(label.c_str())) {
+					DrawCatalogueList(tab);
+					ImGui::EndTabItem();
+				}
 			}
+
 			if (ImGui::BeginTabItem("Raw")) {
 				DrawRawList();
 				ImGui::EndTabItem();
@@ -281,8 +295,8 @@ namespace studio {
 		// So exactly one mesh row is alive at a time and it is the one being
 		// pointed at, which is the row somebody wants to see.
 		if (PreviewIsRendered(kind) && !name.empty() && name == PreviewShowing) {
-			if (void *const slot = Renderer.SceneTexture(PREVIEW_SLOT); slot != nullptr) {
-				const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(PREVIEW_SLOT);
+			if (void *const slot = Renderer.SceneTexture(PreviewSlot()); slot != nullptr) {
+				const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(PreviewSlot());
 
 				// **Sampled to its extent rather than whole.** The target is
 				// rounded up to a block and the render fills the corner, so
@@ -406,6 +420,56 @@ namespace studio {
 		return true;
 	}
 
+	bool Editor::LoadRawAsset(const std::filesystem::path &folder, const std::string &relative) {
+		// **The tree is the truth here, so no resolver is passed.** A model in a
+		// raw folder still sits beside its `tex/` directory — the flattening
+		// that made `cdn::StoreTextureResolver` necessary is what `ImportFile`
+		// does, and nothing has imported this.
+		assetc::Settings settings;
+		settings.Input = folder;
+		settings.Only = relative;
+
+		// **A unit box, matching `contentimport` and `BakeRawAsset` exactly.**
+		// The three feed one renderer and a mesh has to be the same size
+		// whichever produced it — one baked at authored scale would draw
+		// differently and be culled against the wrong bounds.
+		settings.ModelSize = 1.0f;
+
+		// **Empty output is the memory-only case**, which is the default and
+		// the reason this exists: looking at somebody's art folder must not
+		// write a baked copy of it anywhere.
+		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		if (!Content.MemoryOnly) {
+			settings.Output = paths.Baked;
+		}
+
+		std::string failure;
+		const assetc::Report report = assetc::Bake(settings, failure);
+		if (!failure.empty() || report.Assets.empty()) {
+			AssetStatus = failure.empty() ? "nothing to bake" : failure;
+			ENGINE_WARN("assets: raw bake {}: {}", relative, AssetStatus);
+			return false;
+		}
+
+		const assetc::Baked &one = report.Assets.front();
+		if (!one.Failure.empty()) {
+			AssetStatus = one.Failure;
+			ENGINE_WARN("assets: raw bake {}: {}", relative, one.Failure);
+			return false;
+		}
+
+		if (Content.MemoryOnly) {
+			RegisterBakedAsset(one.Payload, one.Output);
+			AssetStatus = "loaded " + one.Output + " — in this editor only, nothing was written";
+		} else {
+			RegisterBakedAsset(paths.Baked / one.Output, one.Output);
+			AssetStatus = "baked " + one.Output + " into the store — publish to share it";
+		}
+
+		ENGINE_INFO("assets: {}", AssetStatus);
+		return true;
+	}
+
 	void Editor::RegisterBakedAsset(const std::filesystem::path &path, const std::string &name) {
 		std::ifstream file(path, std::ios::binary);
 		if (!file) {
@@ -416,9 +480,15 @@ namespace studio {
 			return;
 		}
 
-		engine::core::ByteReader reader(
-			{reinterpret_cast<const std::byte *>(raw.data()), raw.size()}
-		);
+		RegisterBakedAsset({reinterpret_cast<const std::byte *>(raw.data()), raw.size()}, name);
+	}
+
+	void Editor::RegisterBakedAsset(std::span<const std::byte> bytes, const std::string &name) {
+		if (bytes.empty()) {
+			return;
+		}
+
+		engine::core::ByteReader reader(bytes);
 		const engine::core::Name interned(name);
 
 		// **Only the two kinds this editor can show.** A sound or a script baked
@@ -441,20 +511,63 @@ namespace studio {
 		}
 	}
 
-	void Editor::DrawPublishedList() {
-		ImGui::Text("%zu asset(s)", PickerContents.size());
+	void Editor::DrawCatalogueList(const CatalogueTab &tab) {
+		// **Where it is, above what it holds.** A tab titled with somebody's
+		// name for an origin says nothing about which folder or host that is,
+		// and "why is this list empty" is almost always answered by the address.
+		if (!tab.Location.empty()) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextUnformatted(tab.Location.c_str());
+			ImGui::PopStyleColor();
+		}
 
-		if (PickerContents.empty()) {
-			ImGui::TextDisabled("nothing published yet — import files above, then Publish");
+		ImGui::Text("%zu asset(s)", tab.Entries.size());
+
+		if (!tab.Note.empty()) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped("%s", tab.Note.c_str());
+			ImGui::PopStyleColor();
+		}
+
+		if (tab.Entries.empty()) {
 			return;
 		}
 
+		// **Baking everything is one button and one confirmation-by-count**,
+		// because a raw folder is somebody's whole art directory and a click
+		// that decoded four thousand files without warning is a click nobody
+		// forgives. The count is on the button, which is the warning.
+		if (tab.Origin == CatalogueOrigin::Raw) {
+			const std::string all = "Bake and load all " + std::to_string(tab.Entries.size());
+			if (ImGui::Button(all.c_str())) {
+				size_t loaded = 0;
+				for (const CatalogueEntry &entry : tab.Entries) {
+					loaded += LoadRawAsset(tab.Location, entry.Unbaked) ? 1 : 0;
+				}
+				AssetStatus = std::to_string(loaded) + " of " + std::to_string(tab.Entries.size()) +
+							  " loaded from " + tab.Title;
+			}
+
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextUnformatted(
+				Content.MemoryOnly ? "memory-only — nothing is written" : "writing into the store's baked/"
+			);
+			ImGui::PopStyleColor();
+		}
+
+		// **One column more in the merged tab.** Everywhere else the source is
+		// the tab somebody is looking at, and a column repeating it would be the
+		// same word on every row.
+		const bool showSource = tab.Origin == CatalogueOrigin::All;
+		const int columns = showSource ? 5 : 4;
+
 		ImGui::SetNextItemWidth(-1.0f);
-		TextField("##published-filter", AssetFilter, "filter");
+		TextField("##catalogue-filter", AssetFilter, "filter");
 
 		if (!ImGui::BeginTable(
-				"published",
-				4,
+				"catalogue",
+				columns,
 				ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
 					ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti
 			)) {
@@ -470,25 +583,28 @@ namespace studio {
 		);
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_DefaultSort);
 		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f));
+		if (showSource) {
+			ImGui::TableSetupColumn("Where", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(110.0f));
+		}
 		ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(90.0f));
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableHeadersRow();
 
 		// Filtered first, so the sort below orders what is actually drawn.
-		std::vector<const cdn::PublishedEntry *> shown;
-		shown.reserve(PickerContents.size());
-		for (const cdn::PublishedEntry &entry : PickerContents) {
+		std::vector<const CatalogueEntry *> shown;
+		shown.reserve(tab.Entries.size());
+		for (const CatalogueEntry &entry : tab.Entries) {
 			int score = 0;
 			if (FuzzyMatch(AssetFilter, entry.Name, score)) {
 				shown.push_back(&entry);
 			}
 		}
 
-		// **The view is sorted and the store is not.** `PickerContents` is what
-		// the manifest says, in the order it says it; a click on a header must
-		// not reorder the thing every other panel reads.
+		// **The view is sorted and the catalogue is not.** `AssetTabs` is what
+		// each place said it holds, in name order, and the merged tab is built
+		// from those vectors; a click on a header must not reorder them.
 		if (const ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs()) {
-			SortPublished(shown, specs);
+			SortCatalogue(shown, specs, showSource);
 		}
 
 		ImGuiListClipper clipper;
@@ -496,7 +612,7 @@ namespace studio {
 
 		while (clipper.Step()) {
 			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-				const cdn::PublishedEntry &entry = *shown[static_cast<size_t>(row)];
+				const CatalogueEntry &entry = *shown[static_cast<size_t>(row)];
 
 				ImGui::TableNextRow();
 
@@ -522,7 +638,48 @@ namespace studio {
 				ImGui::TableNextColumn();
 				ImGui::TextUnformatted(KindName(entry.Kind));
 
+				if (showSource) {
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(entry.Source.c_str());
+				}
+
 				ImGui::TableNextColumn();
+
+				// **The address column is where an unbaked row is acted on.**
+				// It has no address to show — nothing has hashed it, because
+				// nothing has baked it — and a per-row button is what turns
+				// "this folder holds a crate" into a crate in the viewport.
+				//
+				// **Only on the folder's own tab**, because the folder is the
+				// tab's location and a merged row does not carry it. A button
+				// that guessed which of several raw folders a name came from
+				// would bake the wrong file the first time two folders held one.
+				if (!entry.Unbaked.empty()) {
+					if (tab.Origin != CatalogueOrigin::Raw) {
+						ImGui::TextDisabled("unbaked");
+						continue;
+					}
+
+					ImGui::PushID(row);
+					if (ImGui::SmallButton("Load")) {
+						LoadRawAsset(tab.Location, entry.Unbaked);
+					}
+					ImGui::PopID();
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("%s", entry.Unbaked.c_str());
+					}
+					continue;
+				}
+
+				// **A generated asset says so rather than showing zeros.** Its
+				// address is all-zero because it has none — nothing fetches a
+				// built-in — and eight zeros in an address column reads as a
+				// publish that went wrong.
+				if (entry.Root.IsZero()) {
+					ImGui::TextDisabled("generated");
+					continue;
+				}
+
 				const std::string hex = entry.Root.ToHex();
 				ImGui::TextUnformatted(hex.substr(0, 8).c_str());
 				if (ImGui::IsItemHovered()) {
@@ -534,8 +691,8 @@ namespace studio {
 		ImGui::EndTable();
 	}
 
-	void Editor::SortPublished(
-		std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs
+	void Editor::SortCatalogue(
+		std::vector<const CatalogueEntry *> &rows, const ImGuiTableSortSpecs *specs, bool showSource
 	) {
 		if (specs == nullptr || specs->SpecsCount == 0) {
 			return;
@@ -552,7 +709,7 @@ namespace studio {
 			std::stable_sort(
 				rows.begin(),
 				rows.end(),
-				[&](const cdn::PublishedEntry *left, const cdn::PublishedEntry *right) {
+				[&](const CatalogueEntry *left, const CatalogueEntry *right) {
 					bool less = false;
 					switch (spec.ColumnIndex) {
 					case 1:
@@ -567,6 +724,17 @@ namespace studio {
 							   std::string_view(KindName(right->Kind));
 						break;
 					case 3:
+						// **Column three is two different columns.** The merged
+						// tab draws "Where" here and the address after it; every
+						// other tab has no "Where" at all, so the same index is
+						// its address column. imgui reports a position and not a
+						// name, so the caller's layout is what disambiguates —
+						// sorting by the wrong field is the kind of thing that
+						// looks like an unstable sort rather than a bug.
+						less = showSource ? left->Source < right->Source
+										  : left->Root.ToHex() < right->Root.ToHex();
+						break;
+					case 4:
 						less = left->Root.ToHex() < right->Root.ToHex();
 						break;
 					default:
@@ -719,6 +887,13 @@ namespace studio {
 		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
 		PickerRaw = cdn::RawContents(paths);
 		PickerContents = cdn::PublishedContents(paths);
+
+		// **Built from the configured sources rather than from this machine's
+		// store alone.** The store is one of those sources — the default list's
+		// first row points at exactly this folder — so it needs no special case
+		// here, and an editor pointed at somebody else's published tree lists
+		// that one the same way.
+		AssetTabs = BuildCatalogue(Content);
 	}
 
 	void Editor::ImportAssetPath(const std::string &given) {

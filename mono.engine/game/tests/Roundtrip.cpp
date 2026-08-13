@@ -539,9 +539,10 @@ TEST_CASE("a script's text is in the file, not a path to it", "[game][roundtrip]
 		const Entity script = store.FindFirstRoot("Main");
 		REQUIRE(script != NULL_ENTITY);
 
-		const auto *source = store.Get<engine::script::Source>(script);
-		REQUIRE(source != nullptr);
-		CHECK(source->Path == Name("Scripts/Main.luau"));
+		// The active container's path — a `.luau` file lands in the Luau one and
+		// the selector follows it, which `script::SetSourcePath` decides once.
+		CHECK(engine::script::ActiveSourceOf(store, script) == Name("Scripts/Main.luau"));
+		CHECK(engine::script::ActiveLanguageOf(store, script) == engine::script::Language::Luau);
 	});
 
 	std::filesystem::remove(path);

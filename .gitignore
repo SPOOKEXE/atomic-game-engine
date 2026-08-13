@@ -6,6 +6,7 @@
 # in on purpose — everyone gets the same ones. Anything ending .local is yours.
 .claude/settings.local.json
 .claude/*.local.json
+.claude/worktrees/
 
 # Editor and tooling
 compile_commands.json
@@ -31,3 +32,4 @@ __pycache__/
 *.pyc
 .opencode/
 *.aworld
+

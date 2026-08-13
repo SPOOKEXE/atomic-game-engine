@@ -139,4 +139,64 @@ namespace engine::graph {
 
 		return projection * view;
 	}
+
+	glm::mat4 FitPortalLight(
+		const core::AABB &bounds,
+		const core::Vector3 &centre,
+		const core::Vector3 &first,
+		const core::Vector3 &second,
+		const core::Vector3 &direction
+	) {
+		const float length = direction.Magnitude();
+		if (length <= 0.0f) {
+			return glm::mat4{1.0f};
+		}
+
+		const core::Vector3 forward = direction / length;
+
+		// **How far the rectangle reaches across the light**, which is what the
+		// sides of the box are fitted to. Four corners projected onto the light's
+		// own right and up, and the extreme of each — the same min and max over
+		// four projected positions that fits a surface camera to a pane, for the
+		// same reason: a rectangle seen at an angle is not its own width.
+		const glm::vec3 ahead = ToGlm(forward);
+		const glm::vec3 up =
+			std::abs(forward.Y) > 0.99f ? glm::vec3{0.0f, 0.0f, 1.0f} : glm::vec3{0.0f, 1.0f, 0.0f};
+
+		const glm::vec3 right = glm::normalize(glm::cross(ahead, up));
+		const glm::vec3 above = glm::cross(right, ahead);
+
+		float halfWide = 0.0f;
+		float halfHigh = 0.0f;
+		for (int corner = 0; corner < 4; corner++) {
+			const float alongFirst = (corner & 1) != 0 ? 1.0f : -1.0f;
+			const float alongSecond = (corner & 2) != 0 ? 1.0f : -1.0f;
+
+			const glm::vec3 offset = ToGlm(first) * alongFirst + ToGlm(second) * alongSecond;
+			halfWide = std::max(halfWide, std::abs(glm::dot(offset, right)));
+			halfHigh = std::max(halfHigh, std::abs(glm::dot(offset, above)));
+		}
+
+		// A rectangle with no area is a pane nobody can see through, and a beam
+		// of no width would divide by nothing on the way to a projection.
+		if (halfWide <= 1.0e-4f || halfHigh <= 1.0e-4f) {
+			return glm::mat4{1.0f};
+		}
+
+		// **The depth is the scene's, not the rectangle's.** What has to be in
+		// range is every caster between the sun and the hole and every receiver
+		// the beam reaches after it — and the second of those is as far away as
+		// the room is long. Measured as the bounding sphere's radius for
+		// `FitDirectionalLight`'s reason: it does not change as the light turns.
+		const float radius = std::max(bounds.Size().Magnitude() * 0.5f, 1.0e-3f);
+
+		const glm::vec3 middle = ToGlm(centre);
+		const glm::vec3 eye = middle - ahead * radius;
+
+		const glm::mat4 view = glm::lookAt(eye, middle, up);
+		const glm::mat4 projection =
+			glm::orthoZO(-halfWide, halfWide, -halfHigh, halfHigh, 0.0f, radius * 2.0f);
+
+		return projection * view;
+	}
 }

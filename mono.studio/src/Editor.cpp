@@ -8,6 +8,7 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
@@ -18,6 +19,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -64,12 +66,35 @@ namespace studio {
 		constexpr std::string_view DEFAULT_GAME = "Untitled";
 		constexpr std::string_view DEFAULT_WORLD = "Start";
 
-		// The two worlds a new game opens with. See `Editor::NewGame` for why
-		// there are two of them and why they are these two.
+		// The worlds a new game opens with. See `Editor::NewGame` for why there
+		// is more than one of them and why they are these.
 		constexpr std::string_view SKYGRID_WORLD = "SkyGrid";
 		constexpr std::string_view MIRROR_WORLD = "Mirrors";
 		constexpr std::string_view MESHGRID_WORLD = "Meshes";
 		constexpr std::string_view SLIDE_WORLD = "Slide";
+		constexpr std::string_view PORTAL_WORLD = "Portals";
+		constexpr std::string_view TUNNELS_WORLD = "Tunnels";
+
+		// **The pair, and they are a pair on purpose.** A teleport needs
+		// somewhere to go, and until v0.14 there were five worlds a player could
+		// not be in — no characters, so no players, so a `TeleportService` with
+		// one destination would have been a delete. These two are the smallest
+		// arrangement where pressing Play, walking onto a pad and arriving
+		// somewhere else is a thing an author can do without writing anything.
+		constexpr std::string_view PLAYGROUND_WORLD = "Playground";
+		constexpr std::string_view ARENA_WORLD = "Arena";
+
+		// **The second pair, and it demonstrates the other kind of crossing.**
+		// The pads above move a player between worlds by standing on a tile;
+		// these move one by walking through a hole, which is the thing a portal
+		// is for and the thing a portal could not do while its pane collided.
+		//
+		// Two worlds rather than one scene with two panes, because what is being
+		// shown is a live destination: `ImmersivePortals.luau` holds both awake
+		// so neither is a frozen picture of the other. See its header for which
+		// half of "cross-world" is finished and which is the renderer's.
+		constexpr std::string_view IMMERSIVE_ONE = "immersive-portals-demo-1";
+		constexpr std::string_view IMMERSIVE_TWO = "immersive-portals-demo-2";
 	}
 
 	// The engine log, teed into the Output panel.
@@ -144,10 +169,105 @@ namespace studio {
 		return "?";
 	}
 
-	Editor::Editor() = default;
+	// **The panels exist before `Initialise`, because a test skips it.** Several
+	// tests drive an `Editor` straight from its constructor; an `Extras` left
+	// empty until start-up would make every panel lookup in those a bounds check
+	// that returns null rather than the main viewport's neighbour.
+	Editor::Editor() {
+		ResizeViewports(DEFAULT_EXTRA_VIEWPORTS);
+	}
 
 	Editor::~Editor() {
 		Shutdown();
+	}
+
+	void Editor::ResizeViewports(size_t extras) {
+		const size_t previous = Extras.size();
+
+		Extras.resize(extras);
+		Viewers.resize(1 + extras);
+		Overlays.resize(1 + extras);
+		GuiLists.resize(1 + extras);
+		GuiRouters.resize(1 + extras);
+
+		// **"Viewport 2" upwards, and the main panel is plain "Viewport".** The
+		// numbering is what a person reads in the View menu and what the saved
+		// layout keys its dock node on, so it is derived from the index and
+		// never from creation order — panel 5 is "Viewport 6" in every session
+		// whether it was made first or last.
+		for (size_t index = previous; index < Extras.size(); index++) {
+			Extras[index].Title = "Viewport " + std::to_string(index + 2);
+
+			// Where the main camera is. See `AddViewport`: a panel left at the
+			// identity opens looking at nothing.
+			Extras[index].Yaw = CameraYaw;
+			Extras[index].Pitch = CameraPitch;
+			Extras[index].Frame = CameraFrame;
+		}
+	}
+
+	size_t Editor::AddViewport() {
+		// **The main panel first, because the View menu no longer names it.**
+		// Every panel in this program is closable and the menu is the only way
+		// back — `mono.studio/AGENTS.md` — and with one entry standing for every
+		// viewport, that entry has to be the way back to the first one too. A
+		// person who shut Viewport from its title bar presses New Viewport and
+		// gets it, rather than a second panel beside a hole.
+		if (!ShowViewport) {
+			ShowViewport = true;
+			return 0;
+		}
+
+		return AddExtraViewport();
+	}
+
+	size_t Editor::AddExtraViewport() {
+		for (size_t index = 0; index < Extras.size(); index++) {
+			if (!Extras[index].Open) {
+				Extras[index].Open = true;
+				return index + 1;
+			}
+		}
+
+		ResizeViewports(Extras.size() + 1);
+		Extras.back().Open = true;
+		return Extras.size();
+	}
+
+	size_t Editor::AddViewportBeside(size_t index) {
+		const WorldId showing = ViewportWorld(index);
+
+		// **An extra, never the main one.** `AddViewport` hands the main panel
+		// back first because the menu has to be able to reopen it — but the main
+		// panel follows the active world by construction, so a `+` that returned
+		// it would open a view of a different scene from the one it was pressed
+		// on.
+		const size_t made = AddExtraViewport();
+
+		// **Pinned to the world the panel it came from is showing, rather than
+		// left following the active one.** The button is on that panel's tab
+		// strip, so "another view of this" is what pressing it means — a new
+		// panel that jumped to whatever scene happened to be active would be a
+		// second view of something else.
+		if (ViewportState *view = ExtraAt(made); view != nullptr) {
+			view->World = showing;
+
+			// Where the panel it was opened from is looking, so the two start
+			// as one picture and diverge as somebody moves. Opening at the
+			// identity looks past the world and reads as a panel that does not
+			// work — `Initialise` gives the same reason.
+			if (const ViewportState *from = ExtraAt(index); from != nullptr) {
+				view->Frame = from->Frame;
+				view->Yaw = from->Yaw;
+				view->Pitch = from->Pitch;
+			} else {
+				view->Frame = CameraFrame;
+				view->Yaw = CameraYaw;
+				view->Pitch = CameraPitch;
+			}
+		}
+
+		return made;
 	}
 
 	bool Editor::Initialise(const Options &options) {
@@ -161,7 +281,19 @@ namespace studio {
 		ShowFrameGraph = Settings.ShowFrameGraph;
 		ShowAssets = Settings.ShowAssetsPanel;
 		IdleCloseSeconds = Settings.IdleCloseSeconds;
-		Extras[0].Open = Settings.ShowSecondViewport;
+
+		// **Counted from the main panel, so `--viewports 1` is the default and
+		// `--viewports 6` makes the five it does not already have.** The main
+		// one is always there; only the extras are opened here.
+		if (Settings.StartViewports > 1) {
+			const size_t wanted = Settings.StartViewports - 1;
+			if (wanted > Extras.size()) {
+				ResizeViewports(wanted);
+			}
+			for (size_t index = 0; index < wanted; index++) {
+				Extras[index].Open = true;
+			}
+		}
 
 		// Before anything reads a file. Changing it later would leave whatever
 		// had already loaded pointing at the old tree.
@@ -189,7 +321,7 @@ namespace studio {
 		}
 
 		// Null when headless, which is what puts the renderer in that mode.
-		if (!Renderer.Initialise(Window)) {
+		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
 			return false;
 		}
 
@@ -308,6 +440,19 @@ namespace studio {
 			NewGame();
 		}
 
+		// **After the game, because a sync builds *into* a scene.** With no game
+		// named that scene is the empty one `NewGame` just made, which is the
+		// case somebody pointing this at a Rojo repository wants: the project is
+		// the whole content of the run.
+		if (!Settings.RojoProject.empty()) {
+			const std::string name = Settings.RojoProject.filename().string();
+			if (name.size() > 14 && name.compare(name.size() - 14, 14, ".universe.json") == 0) {
+				SyncRojoWorlds(Settings.RojoProject);
+			} else {
+				SyncRojo(Settings.RojoProject);
+			}
+		}
+
 		// **The scene a capture was asked for, made the active one.** The
 		// capture photographs whichever world the drawing viewport shows, so
 		// naming one has to move the viewport rather than reach past it — there
@@ -338,10 +483,14 @@ namespace studio {
 		CameraPitch = -0.45f;
 		CameraFrame = CFrame(Vector3{18.0f, 14.0f, 18.0f});
 
-		// **The second viewport starts where the first does.** Left at the
+		// **Every extra viewport starts where the main one does.** Left at the
 		// identity it sits at the origin looking down an axis, which is inside
 		// or past whatever the world holds — a panel that opens showing nothing
 		// reads as a panel that does not work, and that is exactly how it read.
+		//
+		// This is the pass for the panels that already exist; `ResizeViewports`
+		// does the same for any made later, which is why the camera is placed
+		// just above rather than just below.
 		for (ViewportState &view : Extras) {
 			view.Yaw = CameraYaw;
 			view.Pitch = CameraPitch;
@@ -638,6 +787,14 @@ namespace studio {
 
 		Advancing = true;
 		Universe->Tick(frameSeconds);
+
+		// **After the tick, because a teleport is applied at the barrier.** A
+		// script's `TeleportService:Teleport` destroys the player in this world
+		// immediately and the destination rebuilds them when the driver delivers
+		// — which is inside `Universe::Tick`. Looking before it would see the
+		// player gone and the arrival not yet made, and this would drop a client
+		// that was mid-flight.
+		FollowTeleports();
 	}
 
 	void Editor::Present(float frameSeconds) {
@@ -688,6 +845,10 @@ namespace studio {
 			// for a picture while drawing, and this builds a couple of them in
 			// the gap. See Thumbnails.cpp.
 			PumpThumbnails();
+
+			// The node demo's own previews, bounded the same way and in the same
+			// gap — see `PumpNodeDemoImages`.
+			PumpNodeDemoImages();
 		}
 
 		{
@@ -947,6 +1108,55 @@ namespace studio {
 		);
 	}
 
+	void Editor::PresentPortalDestinations(WorldId shown, float frameSeconds) {
+		if (!shown.IsValid() || Universe == nullptr) {
+			return;
+		}
+
+		// Gathered inside the store and acted on outside it, which is the rule
+		// every cross-world step in this file keeps: `Universe::Enter` is not
+		// re-entrant and presenting a world enters it.
+		//
+		// **By name, because that is what a portal carries.** A destination
+		// world is named rather than handled for the reason `TeleportService`
+		// names one: a handle out of another world is the thing rule 3 exists to
+		// refuse, and a name is resolved against the universe by whoever holds
+		// both — which is this class and nothing below it.
+		std::vector<Name> wanted;
+
+		Universe->Enter(shown, [&wanted](Store &store) {
+			store.Each<const engine::scene::Portal>(
+				[&wanted](engine::ecs::Entity, const engine::scene::Portal &portal) {
+					if (!portal.DestinationWorld.IsValid()) {
+						return;
+					}
+					if (std::find(wanted.begin(), wanted.end(), portal.DestinationWorld) == wanted.end()) {
+						wanted.push_back(portal.DestinationWorld);
+					}
+				}
+			);
+		});
+
+		for (const Name &name : wanted) {
+			for (const WorldId candidate : Universe->Worlds()) {
+				if (candidate == shown || Universe->NameOf(candidate) != name) {
+					continue;
+				}
+
+				// **The same alpha rule as the panel's own world**, which is
+				// `PresentationAlpha`'s whole subject: a world nothing is
+				// advancing has no next tick to interpolate towards, and asking
+				// for its accumulator draws every part at its birthplace.
+				Universe->Present(
+					candidate,
+					frameSeconds,
+					PresentationAlpha(Advancing, Universe->StateOf(candidate), Universe->AlphaOf(candidate))
+				);
+				break;
+			}
+		}
+	}
+
 	void Editor::PresentWorld(float frameSeconds) {
 		// **Which panel this frame draws.** `Renderer::Render` owns the whole
 		// frame — swapchain, interface, present — so it draws one world per
@@ -960,17 +1170,19 @@ namespace studio {
 		// per call, and N open panels therefore take turns. Each keeps its own
 		// target and shows the last texture drawn into it.
 		//
-		// Skipping the closed ones matters: rotating through four slots with
-		// one panel open would redraw it every fourth frame for no reason.
-		size_t candidates[2 + EXTRA_VIEWPORTS];
-		size_t candidateCount = 0;
+		// Skipping the closed ones matters, and matters more the more panels
+		// exist: rotating through every slot with one panel open would redraw
+		// that panel once per slot for no reason.
+		// **Reused between frames rather than built fresh**, because this runs
+		// every frame and the panel count only changes when somebody opens one.
+		Candidates.clear();
 
 		if (ShowViewport) {
-			candidates[candidateCount++] = 0;
+			Candidates.push_back(0);
 		}
-		for (size_t index = 0; index < EXTRA_VIEWPORTS; index++) {
+		for (size_t index = 0; index < Extras.size(); index++) {
 			if (Extras[index].Open) {
-				candidates[candidateCount++] = index + 1;
+				Candidates.push_back(index + 1);
 			}
 		}
 
@@ -994,7 +1206,7 @@ namespace studio {
 		// updates a second on a thing being looked at, which is not something an
 		// eye can see; a window that stops being drawn is.
 		if (!PreviewWanted.empty()) {
-			candidates[candidateCount++] = PREVIEW_SLOT;
+			Candidates.push_back(PreviewSlot());
 		}
 
 		// **A closed panel gives its camera back, every frame rather than on an
@@ -1002,7 +1214,7 @@ namespace studio {
 		// because imgui says its window is, and it can be shut by the title bar,
 		// by a menu item or by a saved layout arriving from disk. Reconciling
 		// against the list that was just built covers all three, and costs a
-		// walk of four entries on a frame where nothing changed.
+		// walk of the panel list on a frame where nothing changed.
 		//
 		// Without it a session that has opened and closed panels leaves a camera
 		// in the world for each one: undriven, listed in the explorer, saved
@@ -1015,21 +1227,21 @@ namespace studio {
 			}
 		}
 
-		if (candidateCount == 0) {
+		if (Candidates.empty()) {
 			// Nothing to draw into. The frame still runs — the chrome is drawn
 			// and presented — so the editor does not freeze when every viewport
 			// is closed.
 			DrawingViewport = 0;
 		} else {
-			RoundRobin = (RoundRobin + 1) % candidateCount;
-			DrawingViewport = candidates[RoundRobin];
+			RoundRobin = (RoundRobin + 1) % Candidates.size();
+			DrawingViewport = Candidates[RoundRobin];
 		}
 
 		// **This frame belongs to the preview**, and it is spent the same way a
 		// viewport spends one: `Render` owns the swapchain, so whichever slot the
 		// rotation picked gets the whole call. The difference from what this used
 		// to do is only that it had to be *picked*.
-		if (DrawingViewport == PREVIEW_SLOT) {
+		if (DrawingViewport == PreviewSlot()) {
 			if (RenderPreviewSlot()) {
 				PreviewWanted.clear();
 				return;
@@ -1039,7 +1251,7 @@ namespace studio {
 			// entry that has gone. Fall through to the first viewport rather than
 			// spending the frame on nothing.
 			PreviewWanted.clear();
-			DrawingViewport = candidateCount > 1 ? candidates[0] : 0;
+			DrawingViewport = Candidates.size() > 1 ? Candidates[0] : 0;
 		}
 
 		ViewportState *extra = ExtraAt(DrawingViewport);
@@ -1130,7 +1342,29 @@ namespace studio {
 		// which is a reflection that lags the camera by one frame and reads as
 		// a mirror that is not tracking.
 		if (shown.IsValid() && IsReplicaWorld(shown)) {
-			Universe->Enter(shown, [&](Store &store) { (void)client::AimReplicaViewer(store, eye, lens); });
+			Universe->Enter(shown, [&](Store &store) {
+				const Entity camera = client::AimReplicaViewer(store, eye, lens);
+
+				// **And read it back, which is what makes a client view a
+				// client's view.** A replica with a character places its own
+				// camera — `replica-camera` turns it with the mouse and sits it
+				// behind the body — and `AimReplicaViewer` steps aside when it
+				// does. Continuing to draw from `eye` would show the editor's
+				// free camera looking at a world somebody is walking around in,
+				// which is the picture this panel exists not to be.
+				//
+				// With no character the two are the same value, because `eye` is
+				// what `AimReplicaViewer` just wrote — so this folds both cases
+				// into one read rather than a condition.
+				if (store.Alive(camera)) {
+					if (const auto *placement = store.Get<engine::scene::Transform>(camera)) {
+						eye = placement->Frame;
+					}
+					if (const auto *found = store.Get<engine::scene::Camera>(camera)) {
+						lens = *found;
+					}
+				}
+			});
 		}
 
 		// **And the same for a world that is not a replica, which is the half
@@ -1183,6 +1417,11 @@ namespace studio {
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
 		std::vector<engine::scene::DrawInstance> drawn;
 
+		// Whatever *other* worlds this panel's portals look into. Kept apart
+		// from `drawn` all the way to the renderer — see `Renderer::Render`'s
+		// `foreign` argument for what joining them costs.
+		std::vector<engine::scene::DrawInstance> foreign;
+
 		// **Cleared before the world is asked, not inside the ask.** A viewport
 		// with no world would otherwise keep whatever the last world it drew
 		// held — a mirror in a scene that is no longer on screen, rendering into
@@ -1212,12 +1451,64 @@ namespace studio {
 				// makes; a second way of finding a scene's surface cameras would
 				// be a second thing to keep in step with what `SurfaceSize` and
 				// `Surface` mean.
-				(void)client::CollectSurfaceViews(store, Surfaces);
+				// **The holes first, because they claim slots the surfaces then
+				// leave alone.** Same-world portals are drawn by the recursive
+				// pass; only cross-world ones stay surfaces. See
+				// `render::PortalView`.
+				(void)client::CollectPortalViews(store, Portals);
+				(void)client::CollectSurfaceViews(store, Surfaces, Portals);
 
 				// TODO(render-pipeline): the world's pipelines were installed here
 				// on first sight of the world, and the chosen key went into the
 				// view below. See `client::InstallWorldPipelines`.
 			});
+
+			// **The far world draws itself first, and this is the step that was
+			// missing.** `Universe::Present` is what runs `PreRender`, and
+			// `PreRender` is where `collect-instances` builds a world's
+			// `client::DrawList` — so a world builds a draw list exactly when
+			// somebody presents it, and until now the only world presented for a
+			// panel was the one the panel shows.
+			//
+			// A cross-world portal names a scene that is usually *not* on
+			// screen. Its list was therefore whatever it held the last time it
+			// was looked at directly: empty for a world nobody had opened, which
+			// `AttachForeignSurfaces` reads as "nothing published yet" and skips
+			// — leaving the pane showing this world, which is a mirror and is
+			// exactly the "the other side does not render" report. Or, worse,
+			// stale: a still photograph of the far world taken whenever it was
+			// last in a panel, which is the one thing `ImmersivePortals.luau`
+			// holds both worlds awake to avoid.
+			//
+			// **So the destination is presented, and it is presented here.** The
+			// far world renders itself, in its own pass, from its own camera —
+			// and what crosses to this panel is the result rather than the
+			// responsibility. `Present` runs no simulation, so this neither
+			// ticks the far world nor decides anything about it; it asks it for
+			// this frame's picture.
+			//
+			// Immediately before the attach, because the attach reads exactly
+			// what this produces — and outside the `Enter` above, for the reason
+			// the attach gives.
+			PresentPortalDestinations(shown, frameSeconds);
+
+			// **Outside the `Enter`, because it enters other worlds.** A portal
+			// naming another scene needs that scene's draw list, and
+			// `Universe::Enter` is not re-entrant — so this is the one step that
+			// has to happen once the source store has been let go of. It fills
+			// `foreign` with the far world's instances and points the surface at
+			// a range of it; a frame with no cross-world portal in it clears
+			// `foreign` and touches nothing else.
+			//
+			// **`drawn` goes in beside it, because a hole has two mouths.** The
+			// far side of anybody standing in *this* world's pane belongs in the
+			// picture the pane shows; the near side of anybody standing in the
+			// *far* world's pane back to here belongs in this room, in front of
+			// the pane, and so on the end of this world's own rows. The second
+			// of those is what a cross-world portal was missing, and missing it
+			// is what made one draw only from A into B and never back.
+			(void)client::AttachForeignSurfaces(*Universe, shown, drawn, foreign, Surfaces);
+
 			instances = &drawn;
 		}
 
@@ -1252,7 +1543,13 @@ namespace studio {
 			Surfaces,
 			&Interface,
 			target.IsValid() ? &target : nullptr,
-			DrawingViewport
+			DrawingViewport,
+			{},
+			{},
+			{},
+			{},
+			foreign,
+			Portals
 		);
 
 		// **Presented, or simply drawn when there is nowhere to present.**
@@ -1406,6 +1703,46 @@ namespace studio {
 		// replicated in. A body handed to a player who then leaves would
 		// otherwise be owned by a dead entity for the rest of the session.
 		engine::scene::RegisterOwnershipSystem(systems);
+
+		// **The teleport admitter is not registered here, and that is the
+		// correction.** It belongs to every world whether or not scripts run —
+		// `script::RegisterTeleportAdmission` carries the whole argument — and
+		// `client::InstallPresentation` above already installs it, because the
+		// studio and the standalone client share that call. Adding it a second
+		// time here is what made every arrival admit twice: `ecs::Scheduler`
+		// does not dedupe by name, so two copies of the system both ran, and a
+		// cross-world portal produced two players and two characters per
+		// crossing — one adopted by the play link and one orphan nobody drives,
+		// one more of them on every teleport.
+		//
+		// The admitter itself now takes what it admits out of the inbox, so a
+		// third registration would cost a walk over an empty list rather than a
+		// third person. This comment is here so the next person does not add one
+		// back for the same good reason.
+
+		// **And the characters, for the same reason the ownership reclaim is
+		// here: the studio is an authority.** A world played in this process is
+		// simulated in this process, so the ground query, the step and the pose
+		// belong to it exactly as they belong to `mono.server`. Without them a
+		// character spawned by a `PlayLink` would stand at its spawn point for
+		// ever with a perfectly good move direction on it.
+		//
+		// **The input half is not here**, and that is the split
+		// `physics/Characters.hpp` states: a keyboard belongs to whoever has
+		// one, and in this editor that is a *viewport* rather than a world. See
+		// `Editor::DrivePlayer`, which writes the client world's `InputState`
+		// and lets `PlayLink::Step` read it.
+		//
+		// **And the call itself is not here either, because `InstallControls`
+		// already made it.** Every world this editor builds goes through
+		// `client::InstallPresentation`, which installs the input system and
+		// then `physics::RegisterCharacterSystems` beside it; a second call here
+		// registered the whole chain twice, so `character.link`,
+		// `character.control`, `character.portal` and `character.pose` each ran
+		// twice per tick against the same rows. It was not what stopped a
+		// character walking, but it doubled the ground query and the step for
+		// every character in the editor, and a live `profile_frame` listing the
+		// same system name twice under one phase is how it was found.
 	}
 
 	void Editor::NewGame() {
@@ -1470,6 +1807,42 @@ namespace studio {
 		// block ahead is the solver. A slide that works looks like a slide.
 		const WorldId slide = AddWorld(Name(SLIDE_WORLD));
 
+		// **A fifth, and it is the one that is not a place.** The other four are
+		// ordinary space seen four ways; this one is three rooms three hundred
+		// units apart with six holes between them, two of which put the same
+		// room through opposite walls of the one being stood in.
+		//
+		// **It is here because a `Portal` is invisible in a properties panel.**
+		// The class is a `SurfaceCamera` with one extra reference on it, so a
+		// template without it leaves the v0.14 headline as a class in the insert
+		// menu and a paragraph in the roadmap — which is the "an API with no
+		// caller" the interface world was added to avoid, one version on.
+		//
+		// It also exercises a rendering path the mirror world cannot reach on
+		// its own: an off-axis frustum whose extents are genuinely asymmetric,
+		// and the oblique clip doing work. A mirror's clip plane is its own pane
+		// and over-clipping there is invisible; a portal's is a wall the camera
+		// stands inside, and getting it wrong draws the back of that wall over
+		// the whole hole.
+		const WorldId portals = AddWorld(Name(PORTAL_WORLD));
+
+		// **A sixth, and it is the portal world's claim made walkable.** The
+		// three rooms above prove a hole *renders*; two tunnels whose insides
+		// are not the length their outsides promise prove it is a hole rather
+		// than a picture, which is the only claim a `Portal` makes that a
+		// `SurfaceCamera` does not. It is also the pane arrangement neither of
+		// the other portal worlds has: panes part-way *down* a corridor rather
+		// than filling a doorway, back to back a stud apart, with a walker
+		// crossing one while another shows the space they are crossing.
+		const WorldId tunnels = AddWorld(Name(TUNNELS_WORLD));
+
+		// The two a person actually stands in. See the constants above.
+		const WorldId playground = AddWorld(Name(PLAYGROUND_WORLD));
+		const WorldId arena = AddWorld(Name(ARENA_WORLD));
+
+		const WorldId immersiveOne = AddWorld(Name(IMMERSIVE_ONE));
+		const WorldId immersiveTwo = AddWorld(Name(IMMERSIVE_TWO));
+
 		Active = grid;
 		SelectionWorld = Active;
 
@@ -1525,6 +1898,51 @@ namespace studio {
 			InstallExampleScript(store, "Slide.luau", "SlideScene");
 		});
 
+		// Three floors, three ceilings and twelve walls, all laid by the script
+		// — and a baseplate under them would be a floor stretched between rooms
+		// that are supposed to have nothing between them.
+		Universe->Enter(portals, [this](Store &store) {
+			InstallExampleScript(store, "Portals-1-world.luau", "PortalScene");
+		});
+
+		// Two shells and a black plain, all laid by the script — and a baseplate
+		// under them would be a second surface coplanar with the one the scene
+		// lays, which is the z-fighting the mirror world's comment describes.
+		Universe->Enter(tunnels, [this](Store &store) {
+			InstallExampleScript(store, "Tunnels.luau", "TunnelsScene");
+		});
+
+		// **Two scripts each, and the split is the point.** The world's geometry
+		// is one file and the pad naming the *other* world is another, because a
+		// scene that names a destination only works in a universe that has one —
+		// and `Playground.luau` is also what `scripts/demos/run-local-server.sh`
+		// hosts on its own. `PlaygroundPad.luau` carries the whole argument.
+		Universe->Enter(playground, [this](Store &store) {
+			InstallExampleScript(store, "Playground.luau", "PlaygroundScene");
+			InstallExampleScript(store, "PlaygroundPad.luau", "PlaygroundPadScript");
+		});
+
+		Universe->Enter(arena, [this](Store &store) {
+			InstallExampleScript(store, "Arena.luau", "ArenaScene");
+			InstallExampleScript(store, "ArenaPad.luau", "ArenaPadScript");
+		});
+
+		// **One script in both, and the world's own name is what it branches
+		// on.** Two files mirroring each other by hand drift; one file cannot
+		// disagree with itself. `Mirrors-4-worlds.luau` settled that argument
+		// and this is the same shape at a smaller count.
+		//
+		// Each lays its own floor, its own spawn and its own block, so neither
+		// wants the editor's baseplate under it for the reason the mirror world
+		// gives: two coplanar surfaces is z-fighting.
+		Universe->Enter(immersiveOne, [this](Store &store) {
+			InstallExampleScript(store, "ImmersivePortals.luau", "ImmersivePortalsScene");
+		});
+
+		Universe->Enter(immersiveTwo, [this](Store &store) {
+			InstallExampleScript(store, "ImmersivePortals.luau", "ImmersivePortalsScene");
+		});
+
 		// **A viewport each, pinned rather than left following the active
 		// world.** An extra viewport with no world of its own draws whatever is
 		// being edited, so two panels would show one scene twice and the
@@ -1542,12 +1960,17 @@ namespace studio {
 		ExpandWorldTree(mirrors);
 		ExpandWorldTree(meshes);
 		ExpandWorldTree(slide);
+		ExpandWorldTree(portals);
+		ExpandWorldTree(tunnels);
+		ExpandWorldTree(playground);
+		ExpandWorldTree(arena);
 
 		// Enough frames to outlast a first-run layout rebuild. See
 		// `FocusWorlds`.
 		FocusWorlds = 4;
 
-		Say("new game: four worlds — skygrid, mirrors, meshes and slide — ticking in parallel");
+		Say("new game: eight worlds — skygrid, mirrors, meshes, slide, portals, "
+			"tunnels, playground and arena — ticking in parallel");
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
@@ -2302,108 +2725,36 @@ namespace studio {
 			Say("script error: " + failure, LogLevel::Error);
 		}
 
+		Runs.push_back(std::move(run));
+
 		// **The client half, and only for Play.** Run is a dedicated server:
 		// there is no client in the process, so there is nothing to replicate to
 		// and a replica world would be a view of nobody. Play is both halves,
-		// which this is what makes true — until now the difference between the
-		// two modes was which scripts ran and what `IsServer()` answered, and a
-		// property that never crossed a wire looked exactly like one that did.
+		// which this is what makes true.
+		//
+		// **After the run is recorded, because `SpawnPlayer` finds the run by
+		// world.** That ordering is not incidental — it is what makes the Play
+		// path and the Spawn Player button the same path, so there is one place
+		// that admits somebody and one place that can be wrong about it.
 		//
 		// **Started after the scripts**, so the join snapshot describes a world
 		// that has been built rather than an empty one. It would converge either
 		// way — the snapshot is re-sent until it is acknowledged — but a client
 		// view that opens blank and fills in reads as a bug in the link.
+		//
+		// **Two clients is what Play asks for by default**, because two is what
+		// turns "the replica disagrees with the server" into "these two clients
+		// disagree", which is the bug class a play test exists for and the one a
+		// single replica cannot show. `--play-clients` is the knob.
 		if (mode == RunMode::Play) {
-			// **One loop, N clients.** Two clients is what turns "the replica
-			// disagrees with the server" into "these two clients disagree",
-			// which is the bug class a play test exists for and the one a single
-			// replica cannot show. The first is pinned to a viewport; the rest
-			// are ordinary worlds reachable from the scene selector, for the
-			// same reason only one was pinned before — a panel per client is
-			// three pictures nobody asked for and a slice of the centre pane
-			// each.
 			for (int client = 0; client < PlayClients; client++) {
-				auto link = std::make_unique<PlayLink>();
-
-				const std::string label =
-					PlayClients == 1 ? std::string("client") : "client " + std::to_string(client + 1);
-
-				std::string linkError;
-				if (link->Start(*Universe, world, Settings.TickRate, linkError, label)) {
-					// **A viewport pinned to it, or the whole thing is invisible.**
-					// The point of a client view is the *difference* between it and
-					// the server's, and a difference nobody is shown is a feature
-					// that exists in a log line. An extra viewport with no world of
-					// its own draws whatever is being edited, so pinning is what
-					// stops the second panel showing the server's scene twice.
-					//
-					// The first free panel, and one that is already pinned somewhere
-					// is left alone: somebody who put a viewport on another scene
-					// meant it, and taking that panel would be the editor
-					// rearranging their layout when they pressed Play.
-					//
-					// **At most one, and this was over-reach when it was written.**
-					// `--run play` starts every world in the game, so a rule of "one
-					// panel per run" opened a viewport per *world* — three or four
-					// pictures nobody asked for, each one a slice of the centre pane
-					// and a turn in `PresentWorld`'s round robin, so every view also
-					// refreshed a third as often. One client view is the feature;
-					// the rest are reachable from the scene selector like any other
-					// world.
-					const bool anotherIsShown =
-						std::any_of(Runs.begin(), Runs.end(), [](const WorldRun &other) {
-							return std::any_of(
-								other.Links.begin(),
-								other.Links.end(),
-								[](const std::unique_ptr<PlayLink> &link) {
-									return link != nullptr && link->IsRunning();
-								}
-							);
-						});
-
-					// **Hoisted out of the loop it disables.** It cannot change
-					// across iterations, so testing it inside the body made a reader
-					// check every iteration for a mutation that is not there.
-					if (!anotherIsShown) {
-						const WorldId replica = link->ReplicaWorld();
-
-						for (ViewportState &view : Extras) {
-							if (view.World.IsValid() && view.World != replica) {
-								continue;
-							}
-
-							view.World = replica;
-							view.Open = true;
-
-							// Where the main camera is, so the two panels start
-							// looking at the same thing from the same place. Two
-							// views of one game from different angles is a
-							// comparison somebody has to do in their head.
-							view.Frame = CameraFrame;
-							view.Yaw = CameraYaw;
-							view.Pitch = CameraPitch;
-							break;
-						}
-					}
-
-					run.Links.push_back(std::move(link));
-				} else {
-					// **Not fatal, and the run goes on without it.** A Play that
-					// refused to start because its client view could not be made
-					// would be a studio you cannot use to fix whatever broke it —
-					// and the server half is exactly what Run already gives, so
-					// there is a working thing to fall back to.
-					Say("no client view: " + linkError, LogLevel::Warning);
-
-					// And no point asking for the rest: whatever refused the first
-					// one refuses them all, and four copies of one warning is a log
-					// nobody reads.
+				if (!SpawnPlayer(world)) {
+					// Whatever refused the first one refuses them all, and four
+					// copies of one warning is a log nobody reads.
 					break;
 				}
 			}
 		}
-
-		Runs.push_back(std::move(run));
 
 		// **The player goes to the first world started.** A run whose player was
 		// nowhere would have the lifecycle close scenes before anybody had
@@ -2413,6 +2764,14 @@ namespace studio {
 			PlayerWorld = world;
 			Lives.clear();
 		}
+
+		// **The panel that lists what is running, opened when something starts
+		// running.** It is the only way back to a view that has been closed —
+		// the server's especially, which is not a world of its own and therefore
+		// appears in no other list — and a way back nobody has found is not one.
+		// Enough frames to outlast a first-run layout rebuild, as `FocusWorlds`.
+		ShowLiveInstances = true;
+		FocusInstances = 4;
 
 		SyncWorldStates();
 		return true;
@@ -2449,6 +2808,49 @@ namespace studio {
 			link->Stop(*Universe);
 		}
 		record->Links.clear();
+
+		// **And every client that is *playing* this world, whoever owns it.**
+		// A `PlayLink` belongs to the run an author pressed Play on and keeps
+		// that home for its whole life, but the world it plays moves: walk a
+		// character through a portal and `FollowTeleports` re-homes the link to
+		// the destination, in the same run. After one crossing the two disagree
+		// — `Claimed` above says the same thing from the other end — so the loop
+		// above, which reads the *run's* list, stops the clients that arrived
+		// from here and not the ones that arrived *at* here.
+		//
+		// What that looked like is the report it came from: stop the server and
+		// its client stays open, watching a world that is about to be destroyed
+		// and rebuilt underneath it, listed in the instances panel under some
+		// other run and named after a scene it left. The lifecycle then had a
+		// live replica of a dead authority, which is the one arrangement none of
+		// `IsReplicaWorld`'s callers can answer for.
+		//
+		// **Before the destroy, exactly like the loop above**, and by authority
+		// world rather than by run because that is the fact that decides whether
+		// a client survives this call.
+		for (WorldRun &other : Runs) {
+			if (other.World == world) {
+				continue;
+			}
+
+			for (auto link = other.Links.begin(); link != other.Links.end();) {
+				if (*link == nullptr || !(*link)->IsRunning() || (*link)->AuthorityWorld() != world) {
+					++link;
+					continue;
+				}
+
+				const WorldId replica = (*link)->ReplicaWorld();
+				for (ViewportState &view : Extras) {
+					if (view.World == replica) {
+						view.World = WorldId{};
+						view.Follow = engine::ecs::NULL_ENTITY;
+					}
+				}
+
+				(*link)->Stop(*Universe);
+				link = other.Links.erase(link);
+			}
+		}
 
 		// **The runtime goes before the restore.** It holds a `Store &` and the
 		// store is the universe's; the world is about to be destroyed, so a
@@ -2572,11 +2974,10 @@ namespace studio {
 		tab.Instance = instance;
 
 		Universe->Enter(world, [&](Store &store) {
-			const auto *source = store.Get<engine::script::Source>(instance);
-			if (source == nullptr) {
-				return;
-			}
-			tab.Path = source->Path;
+			// **Whichever container the instance is set to run**, so opening a
+			// script that has been switched to JavaScript edits the JavaScript
+			// rather than the Luau it still holds.
+			tab.Path = engine::script::ActiveSourceOf(store, instance);
 
 			if (!tab.Path.IsValid()) {
 				return;
@@ -2618,8 +3019,9 @@ namespace studio {
 				const std::string leaf = name.IsValid() ? std::string(Label(name)) : "Script";
 				tab.Path = Name("Scripts/" + leaf + ".luau");
 
-				const engine::script::Source source{tab.Path};
-				store.Set(tab.Instance, source);
+				// One rule for which container a path belongs in, and the
+				// selector follows it — `script::SetSourcePath`.
+				engine::script::SetSourcePath(store, tab.Instance, tab.Path);
 			}
 
 			auto *cache = store.ResourceMutable<engine::script::SourceCache>();

@@ -19,6 +19,45 @@ namespace engine::assets {
 			"engine.Cylinder",
 		};
 
+		// The texture names, indexed by the enum, for `NAMES`' reason.
+		constexpr std::array<std::string_view, BUILTIN_TEXTURE_COUNT> TEXTURE_NAMES{
+			"engine.Checker",
+		};
+
+		// How wide the built-in sheets are, in pixels, and how wide one check
+		// is. Square, and the check divides the side, so the pattern repeats
+		// across a tiled surface with no seam at the join.
+		constexpr uint32_t TEXTURE_SIDE = 64;
+		constexpr uint32_t CHECK = 8;
+
+		// The two colours, as RGBA. A mid pink and a mid grey: light enough to
+		// read the shading of the surface under them, far enough apart to count
+		// the checks at a distance, and neither of them the full-saturation
+		// magenta that means something has gone wrong.
+		constexpr std::array<uint8_t, 4> PINK{0xE8, 0x8A, 0xB0, 0xFF};
+		constexpr std::array<uint8_t, 4> GREY{0x96, 0x96, 0x9B, 0xFF};
+
+		TextureData MakeChecker() {
+			TextureData image;
+			image.Width = TEXTURE_SIDE;
+			image.Height = TEXTURE_SIDE;
+			image.Format = TextureFormat::RGBA8;
+			image.Pixels.resize(static_cast<size_t>(TEXTURE_SIDE) * TEXTURE_SIDE * 4);
+
+			for (uint32_t y = 0; y < TEXTURE_SIDE; y++) {
+				for (uint32_t x = 0; x < TEXTURE_SIDE; x++) {
+					const bool pink = ((x / CHECK) + (y / CHECK)) % 2 == 0;
+					const std::array<uint8_t, 4> &colour = pink ? PINK : GREY;
+
+					const size_t at = (static_cast<size_t>(y) * TEXTURE_SIDE + x) * 4;
+					for (size_t channel = 0; channel < colour.size(); channel++) {
+						image.Pixels[at + channel] = static_cast<std::byte>(colour[channel]);
+					}
+				}
+			}
+			return image;
+		}
+
 		// How many segments a round built-in is cut into around its axis.
 		//
 		// **Fixed rather than a parameter**, because a built-in has to be the
@@ -332,10 +371,25 @@ namespace engine::assets {
 		return index < BUILTIN_MESH_COUNT ? NAMES[index] : NAMES[0];
 	}
 
+	std::string_view BuiltinName(BuiltinTexture texture) {
+		const auto index = static_cast<uint8_t>(texture);
+		return index < BUILTIN_TEXTURE_COUNT ? TEXTURE_NAMES[index] : TEXTURE_NAMES[0];
+	}
+
 	bool BuiltinFromName(std::string_view name, BuiltinMesh &out) {
 		for (uint8_t index = 0; index < BUILTIN_MESH_COUNT; index++) {
 			if (NAMES[index] == name) {
 				out = static_cast<BuiltinMesh>(index);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool BuiltinFromName(std::string_view name, BuiltinTexture &out) {
+		for (uint8_t index = 0; index < BUILTIN_TEXTURE_COUNT; index++) {
+			if (TEXTURE_NAMES[index] == name) {
+				out = static_cast<BuiltinTexture>(index);
 				return true;
 			}
 		}
@@ -367,5 +421,13 @@ namespace engine::assets {
 
 		data.ComputeBounds();
 		return data;
+	}
+
+	TextureData MakeBuiltin(BuiltinTexture texture) {
+		switch (texture) {
+		case BuiltinTexture::Checker:
+			return MakeChecker();
+		}
+		return MakeChecker();
 	}
 }

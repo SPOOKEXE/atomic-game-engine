@@ -9,6 +9,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Shooting.hpp>
+#include <engine/game/Play.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Rewind.hpp>
@@ -299,6 +300,18 @@ namespace server {
 
 		// Applies every pending input, server-authoritatively.
 		void ApplyInputs();
+
+		// Writes one client's move onto the humanoid it is allowed to move.
+		//
+		// **The lookup is the whole of the security here.** A client names
+		// nothing — it says only which way it is trying to walk — so the body
+		// the intent lands on is the one this server assigned to that
+		// connection, and a client that sent a hundred moves still moves one
+		// character.
+		//
+		// @param client Who sent it.
+		// @param move   What they asked for, already normalised by the decoder.
+		void ApplyMove(engine::replication::ClientId client, const engine::game::MoveInput &move);
 
 		// Where an entity is, for the priority score and its occlusion query.
 		// Not `const`: it enters a world, which takes it.
@@ -650,6 +663,15 @@ namespace server {
 		// would put a wall clock in the middle of the tick — which is the thing
 		// `net/AGENTS.md` bans.
 		double DiscoveryNow = 0.0;
+
+		// The clock the last `ServeClients` was called with.
+		//
+		// **Because an admission callback has no time of its own.** `Listener::
+		// OnAdmitted` fires from inside `Poll`, and the join notice it sends
+		// needs the same `nowSeconds` every other send on this link takes —
+		// reading a clock there would be a second time source in a program whose
+		// whole tick is passed in.
+		double PollNow = 0.0;
 
 		// The content origin this process serves, when one was asked for.
 		//

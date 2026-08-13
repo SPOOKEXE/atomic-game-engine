@@ -1,6 +1,6 @@
 #include <engine/core/Log.hpp>
-#include <engine/core/Paths.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/resources/Shaders.hpp>
 
 #include <SDL3/SDL_gpu.h>
 
@@ -13,7 +13,7 @@ namespace engine::render {
 
 	namespace {
 		std::vector<uint8_t> ReadShader(std::string_view name) {
-			const auto path = core::Paths::Shaders("render") / (std::string(name) + ".spv");
+			const auto path = resources::Shader(name);
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
 			if (!file) {
 				ENGINE_ERROR("interface pass: shader not found: {}", path.string());

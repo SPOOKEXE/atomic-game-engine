@@ -7,6 +7,44 @@ include_guard(GLOBAL)
 
 set(MONO_VENDOR "${CMAKE_SOURCE_DIR}/mono.vendor")
 
+# --- third-party code is optimised even in a debug build ---------------------
+#
+# **First-party code builds at -O0 on purpose and third-party code has no such
+# reason.** `AGENTS.md` argues the first half: a profile should measure what
+# this engine does rather than what the optimiser rescued, and an algorithm that
+# is only fast at -O2 is a slow algorithm with a fast compiler. Neither sentence
+# is about SDL.
+#
+# What it cost, measured on the editor: `SDL_SubmitGPUCommandBuffer` is where the
+# Vulkan backend turns a recorded command buffer into queue submissions —
+# barrier tracking, descriptor and pipeline hashing, the pending-destroy sweep —
+# and at -O0 that is the single most expensive thing in a frame. The `submit`
+# span read **17 ms in `dev` against a p50 of 0.2 ms in `release`** on the same
+# scene and the same machine. An editor nobody can drag a splitter in is one
+# nobody develops in, and every `dev` profile taken there says "the renderer is
+# slow" about somebody else's `-O0`.
+#
+# **Set before the first `add_subdirectory` and never restored**, because every
+# vendor tree below is added from this file: the variables are inherited by each
+# subdirectory scope and first-party targets get their flags from
+# `MONO_COMPILE_OPTIONS`, which is applied per target and wins by coming later
+# on the command line. Debug information is deliberately kept — a stack through
+# SDL should still name its frames.
+#
+# Off with `-DMONO_OPTIMISE_VENDOR=OFF`, which is what to pass when the thing
+# being debugged *is* a vendored library.
+option(MONO_OPTIMISE_VENDOR "Build third-party code optimised, whatever the build type" ON)
+
+if(MONO_OPTIMISE_VENDOR AND NOT MSVC)
+	set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O2")
+	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O2")
+elseif(MONO_OPTIMISE_VENDOR AND MSVC)
+	# `/Od` is in the Debug defaults and the later flag wins, so this is an
+	# append rather than a replacement here too.
+	set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /O2")
+	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /O2")
+endif()
+
 if(NOT EXISTS "${MONO_VENDOR}/glm/CMakeLists.txt")
 	message(FATAL_ERROR
 		"mono.vendor/ is empty. Run `just setup`, or:\n"

@@ -1,6 +1,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/world/Postbox.hpp>
 #include <engine/world/World.hpp>
 
 #include <algorithm>
@@ -10,6 +11,18 @@ namespace engine::world {
 
 	World::World(WorldId id, const WorldSettings &settings)
 		: Handle(id), Settings_(settings), Store_(settings.Name.Text()), Timestep(settings.TickRate) {
+		// **Before anything can touch a mailbox, including this world's own
+		// tick.** A `Store::Resource<T>` on a type nobody registered mints one
+		// under the *compiler's* spelling — `engine::world::Inbox` rather than
+		// `world.Inbox` — and the failure is not here: it is the next `Universe`
+		// to register them properly, aborting with "a type has one name" in
+		// whichever test order happened to reach it first.
+		//
+		// `script::OpenServices` already says this for the bindings; the tick
+		// below drains an inbox, so a world is now a toucher too. Idempotent, so
+		// it costs a hash lookup per world.
+		RegisterMailboxTypes();
+
 		// The root exists from the start, so no system has to check whether the
 		// world has one. It is this world's `workspace`.
 		RootEntity = Store_.Create("workspace");
@@ -55,6 +68,27 @@ namespace engine::world {
 				// call after this one. Clearing at the end would hand the
 				// renderer an empty set every frame.
 				Store_.ClearChanges();
+
+				// **Catch-up ticks after the first see an empty inbox, and that
+				// is exactly-once delivery.** A barrier fills this world's inbox
+				// at most once per host frame and this loop may run several
+				// ticks in that frame — so without this, a world owing three
+				// ticks handed the same message to its systems three times. It
+				// was found as a teleport that admitted the same player three
+				// times into the destination world.
+				//
+				// **The first tick of the batch keeps it**, because that one is
+				// the delivery: the barrier ran immediately before this call and
+				// `Universe::Tick` is what orders the two. The mail also
+				// survives this whole call, so a caller reading `Postbox::
+				// Deliveries` after a tick still sees what arrived — which is
+				// what every bus suite does and what the router's own
+				// replace-on-next-mail rule was already promising.
+				if (tick > 0) {
+					if (Inbox *inbox = Store_.ResourceMutable<Inbox>(); inbox != nullptr) {
+						inbox->Arrived.clear();
+					}
+				}
 
 				Store_.AdvanceTick(Timestep.Delta());
 				Scheduler_.RunPhases(Store_, ecs::Phase::PreSimulation, ecs::Phase::PostSimulation);

@@ -2,6 +2,7 @@
 
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -546,4 +547,56 @@ TEST_CASE("a unit bake keeps a model inside the box its bounds describe", "[asse
 		{mesh.Maximum.X - mesh.Minimum.X, mesh.Maximum.Y - mesh.Minimum.Y, mesh.Maximum.Z - mesh.Minimum.Z}
 	);
 	CHECK(longest == Catch::Approx(1.0f).margin(1e-3f));
+}
+
+// --- baking into memory -------------------------------------------------------
+
+TEST_CASE("an empty output bakes into the report and writes nothing", "[assetc][memory]") {
+	const Scratch scratch("memory");
+	scratch.Write("art/tile.bmp", std::span(BMP));
+
+	Settings settings;
+	settings.Input = scratch.In();
+	// **Empty on purpose.** This is what the editor's memory-only raw folders
+	// pass: a person pointed at their art directory and did not ask for a baked
+	// copy of it to appear anywhere.
+	settings.Output.clear();
+
+	std::string failure;
+	const Report report = assetc::Bake(settings, failure);
+	REQUIRE(failure.empty());
+	REQUIRE(report.Failures == 0);
+	REQUIRE(report.Assets.size() == 1);
+
+	const assetc::Baked &baked = report.Assets.front();
+	REQUIRE(baked.Output == "art/tile.atex");
+	REQUIRE(baked.Kind == AssetKind::Texture);
+	REQUIRE_FALSE(baked.Payload.empty());
+	REQUIRE(baked.Bytes == baked.Payload.size());
+
+	// The bytes are a texture and not the source file — the whole point is that
+	// the *bake* happened, only the writing did not.
+	engine::core::ByteReader reader({baked.Payload.data(), baked.Payload.size()});
+	engine::assets::TextureData image;
+	REQUIRE(engine::assets::Texture::Read(reader, image));
+	REQUIRE(image.IsValid());
+
+	// Nothing on disk beside the input, which is the property that makes this
+	// safe to point at somebody's art folder.
+	std::error_code error;
+	REQUIRE_FALSE(fs::exists(scratch.Out(), error));
+}
+
+TEST_CASE("a bake to disk carries no payload", "[assetc][memory]") {
+	const Scratch scratch("memory-disk");
+	scratch.Write("tile.bmp", std::span(BMP));
+
+	const Report report = Baked(scratch, Settings{});
+	REQUIRE(report.Assets.size() == 1);
+
+	// **A run with an output writes files and holds none of them.** Keeping a
+	// copy of every asset as well would make a large tree a bake that runs out
+	// of memory on success — `Baked::Payload` says so and this is what checks it.
+	REQUIRE(report.Assets.front().Payload.empty());
+	REQUIRE(fs::exists(scratch.Out() / "tile.atex"));
 }

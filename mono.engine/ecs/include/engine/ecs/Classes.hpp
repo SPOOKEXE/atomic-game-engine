@@ -273,6 +273,30 @@ namespace engine::ecs {
 		// owns) are the three today.
 		bool Writable = true;
 
+		// False for a property a *script* may not touch, in either direction.
+		//
+		// **A different question from `Writable`, and the difference is who is
+		// asking.** `Writable` is about the value: a mass derived from a density
+		// has no assignment that could mean anything, so nobody may write it —
+		// not a script, not a panel, not a file. This is about the *caller*: a
+		// script container's source is edited by an author every day, and a
+		// script rewriting another script's source is the sandbox escape that
+		// makes every other boundary in this engine decorative.
+		//
+		// **Enforced in the two script bindings and nowhere else.** The
+		// properties panel, a game file, the Rojo sync and the control surface
+		// all write through `Store::SetProperty` and are unaffected — they are
+		// the author, not the program. The bindings generator leaves a
+		// non-scriptable property out of the Luau and TypeScript declarations
+		// entirely, so a script that reaches for one fails at typecheck rather
+		// than at run time.
+		//
+		// Roblox draws the same line and calls it the same thing: `Source` is
+		// editable in Studio and not from a game script.
+		//
+		// @since v0.14
+		bool Scriptable = true;
+
 		// Which set an `Enum` property's value must belong to.
 		//
 		// Invalid for every other type. Named rather than pointed at, so the

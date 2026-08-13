@@ -3,6 +3,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
@@ -13,6 +14,8 @@
 #include <engine/physics/Shapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>
@@ -29,6 +32,7 @@
 #include <cmath>
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 TEST_SUITE_ID("engine.physics.query")
 // The indexes these walk, and the fact that a candidate is a box and not a
@@ -260,6 +264,112 @@ TEST_CASE("a raycast respects the layer mask", "[physics][query]") {
 	CHECK(hit->Owner == wanted);
 }
 
+TEST_CASE("a raycast carries on out of the far side of a portal", "[physics][query]") {
+	// **The floor a body in the seam is standing on is in the other room.** A
+	// pane is a hole — `scene::OpenPortals` takes its collider out of the solver
+	// so a body can be inside one — so a character halfway through has the near
+	// room's floor under it only for as long as that floor reaches the doorway.
+	// A ray that stopped at the glass answered "nothing under you" for a
+	// character everybody can see standing on something, and
+	// `physics::GroundCharacters` reads that answer directly: what it looks like
+	// is falling out of the world in the one metre where you should not.
+	//
+	// Pane A sits at the origin with its `Front` face at `z = -0.2`; pane B is a
+	// hundred units along X with its own face at `(100, 0, -0.2)`. Nothing is on
+	// the near side at all, and a slab sits behind B.
+	Store store("query.portalray");
+	PreparePhysicsWorld(store, 2.0f);
+	engine::scene::RegisterSceneClasses();
+
+	// **The panes keep their colliders**, because that is what a real one has:
+	// `scene::OpenPortals` turns a portal's pane into a *trigger* rather than
+	// removing it, so contacts are still reported and `Raycast` still answers
+	// with it. A test that deleted them would pass while every portal ray in the
+	// engine stopped on the glass.
+	const auto part = [&](const char *name, const Vector3 &at, const Vector3 &half) {
+		const Entity entity = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), name);
+		store.Set<Transform>(entity, Transform{CFrame(at)});
+		store.Set<engine::scene::Bounds>(entity, engine::scene::Bounds{half});
+
+		Collider collider;
+		collider.Extent = half;
+		store.Set<Collider>(entity, collider);
+		return entity;
+	};
+
+	const Entity paneA = part("PaneA", Vector3::Zero, Vector3{8.0f, 4.5f, 0.2f});
+	const Entity paneB = part("PaneB", Vector3{100.0f, 0.0f, 0.0f}, Vector3{8.0f, 4.5f, 0.2f});
+
+	const Entity camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+	store.Set<engine::scene::SurfaceCamera>(camera, engine::scene::SurfaceCamera{});
+	store.Set<engine::scene::Portal>(camera, engine::scene::Portal{paneB});
+	store.SetParent(camera, paneA);
+
+	// **The return pane, because a hole is a pair.** Without it B is ordinary
+	// scenery and the ray that comes out of it hits its own glass — which is
+	// what `OpenPortals` exists to stop, and is only ever true of a pane nobody
+	// linked back.
+	const Entity mouth = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Mouth");
+	store.Set<engine::scene::SurfaceCamera>(mouth, engine::scene::SurfaceCamera{});
+	store.Set<engine::scene::Portal>(mouth, engine::scene::Portal{paneA});
+	store.SetParent(mouth, paneB);
+
+	// The far room's slab, one and a third metres past B's face. **On the side
+	// the hole actually opens onto**: the map carries a pane's front hemisphere
+	// to the far pane's back one, so a ray that goes in the back of A comes out
+	// the front of B travelling away from it.
+	const Entity beyond =
+		Place(store, Placed{.Position = Vector3{100.0f, 0.0f, 1.6f}, .Extent = Vector3{4.0f, 4.0f, 0.5f}});
+	Index(store);
+
+	const Ray down{Vector3{0.0f, 0.0f, 1.0f}, Vector3{0.0f, 0.0f, -1.0f}};
+
+	REQUIRE(engine::scene::OpenPortals(store) == 2);
+	Index(store);
+
+	// **The near room holds nothing but the pane**, so what an ordinary raycast
+	// finds is the glass — which is the whole obstacle this exists to look past,
+	// and is why the case is the one it claims to be rather than a hit that
+	// would have happened anyway.
+	const std::optional<ColliderHit> plain = Raycast(store, down, 5.0f);
+	REQUIRE(plain.has_value());
+	CHECK(plain->Owner == paneA);
+
+	// A metre and a fifth to the glass, then one and three tenths on the far
+	// side. **Measured from the original origin**, so a caller comparing against
+	// its own reach never has to know a hole was involved.
+	const std::optional<ColliderHit> through = engine::physics::RaycastThroughPortals(store, down, 5.0f);
+	REQUIRE(through.has_value());
+	CHECK(through->Owner == beyond);
+	CHECK(through->Distance == Approx(2.5f).margin(1e-3f));
+
+	// **In the far room's own space**, which is the useful answer: the normal is
+	// the surface a body actually rests on, and mapping it back would describe a
+	// face that is not there.
+	CHECK(through->Position.X == Approx(100.0f).margin(1e-3f));
+
+	// **A reach that stops short of the plane crosses nothing, and the pane is
+	// then just a pane.** The continuation is a continuation and not a second
+	// free query: what is cast on the far side is the remainder, and a ray that
+	// never reaches the hole has no remainder to spend. Looking past the glass
+	// is something a *crossing* earns, which is what keeps the frame of a hole,
+	// and the wall it is cut in, solid.
+	const std::optional<ColliderHit> shortOf = engine::physics::RaycastThroughPortals(store, down, 1.0f);
+	REQUIRE(shortOf.has_value());
+	CHECK(shortOf->Owner == paneA);
+
+	// **Something solid before the glass wins.** Continuing past it would let
+	// every ray in the room see through geometry, which is the one thing a hole
+	// must not make true of everything else.
+	const Entity wall =
+		Place(store, Placed{.Position = Vector3{0.0f, 0.0f, 0.5f}, .Extent = Vector3{4.0f, 4.0f, 0.1f}});
+	Index(store);
+
+	const std::optional<ColliderHit> stopped = engine::physics::RaycastThroughPortals(store, down, 5.0f);
+	REQUIRE(stopped.has_value());
+	CHECK(stopped->Owner == wall);
+}
+
 TEST_CASE("a raycast with no direction or no distance finds nothing", "[physics][query]") {
 	Store store("query.degenerate");
 	PreparePhysicsWorld(store, 2.0f);
@@ -471,4 +581,48 @@ TEST_CASE("a shape cast sweeps a rotated shape by its own bound", "[physics][que
 
 	REQUIRE(result.Written == 1);
 	CHECK(found[0] == beside);
+}
+
+TEST_CASE("a raycast can look straight through the thing casting it", "[physics][query]") {
+	// **The case a character controller is, and it is not an edge case.** A
+	// humanoid asks what is under its feet by casting from just *inside* them —
+	// a ray that begins exactly on a face is a coin flip about whether it hits
+	// it, and the coin lands differently on two machines, which is a desync
+	// arriving through a character controller. With a root collider the full
+	// height of the character, that origin is inside its own box, so the nearest
+	// hit is always itself.
+	//
+	// **Testing the answer afterwards cannot recover it**, which is the whole
+	// point of this parameter and the reason the studio found it as a character
+	// resting perfectly still on a plate it could not jump off: `Raycast`
+	// returns the nearest hit and the floor was never in the answer.
+	Store store("query.ignore");
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity caster =
+		Place(store, Placed{.Position = Vector3{0.0f, 2.5f, 0.0f}, .Extent = Vector3{1.0f, 2.5f, 0.5f}});
+	const Entity floor = Place(
+		store,
+		Placed{.Position = Vector3{0.0f, -2.0f, 0.0f}, .Extent = Vector3{50.0f, 2.0f, 50.0f}, .Moving = false}
+	);
+	Index(store);
+
+	// From a tenth of a metre above the caster's own sole, straight down.
+	const Ray under{Vector3{0.0f, 0.1f, 0.0f}, Vector3{0.0f, -1.0f, 0.0f}};
+
+	const std::optional<ColliderHit> itself = Raycast(store, under, 0.25f);
+	REQUIRE(itself.has_value());
+	CHECK(itself->Owner == caster);
+
+	const std::optional<ColliderHit> ground = Raycast(store, under, 0.25f, LayerMask::All(), caster);
+	REQUIRE(ground.has_value());
+	CHECK(ground->Owner == floor);
+
+	// **Ignoring something that is not in the way changes nothing**, and a null
+	// entity ignores nobody — which is what makes the parameter safe to default.
+	const std::optional<ColliderHit> unaffected = Raycast(store, under, 0.25f, LayerMask::All(), floor);
+	REQUIRE(unaffected.has_value());
+	CHECK(unaffected->Owner == caster);
+
+	CHECK(Raycast(store, under, 0.25f, LayerMask::All(), Entity{})->Owner == caster);
 }

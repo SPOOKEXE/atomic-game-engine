@@ -28,6 +28,8 @@ namespace engine::script {
 			return Language::JavaScript;
 		}
 
+		ScriptSurface Surface() const override;
+
 	  private:
 		// Drains promise reactions until there are none left.
 		//

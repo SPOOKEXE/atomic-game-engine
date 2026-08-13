@@ -58,6 +58,22 @@ something. `server` proves the client tier is absent; `cdn` proves the content
 origin needs no graphics stack at all — it configures where there is no Vulkan
 SDK, no SDL and no shader compiler.
 
+**Third-party code is optimised in every preset, and only first-party code is
+not.** `AGENTS.md`'s argument for `-O0` — a profile should measure what this
+engine does rather than what the optimiser rescued — is about this engine, and
+SDL is not it. Measured on the editor: `SDL_SubmitGPUCommandBuffer` is where the
+Vulkan backend turns a recorded command buffer into queue submissions, and the
+`submit` span read **17 ms in a `dev` build against a p50 of 0.2 ms in
+`release`** on one scene and one machine. That is not the renderer being slow;
+it is somebody else's library at `-O0`, and it made every `dev` profile point at
+the wrong thing.
+
+So `MONO_OPTIMISE_VENDOR` is on by default and `mono.vendor` builds at `-O2`
+with its debug information kept. First-party targets append their own `-O0`
+after it and the later flag wins, so `dev` still measures unoptimised engine
+code. Pass `-DMONO_OPTIMISE_VENDOR=OFF` when the thing being debugged *is* a
+vendored library.
+
 The first configure of a client preset builds glslang, SPIRV-Tools and shaderc,
 so that the `glslc` compiling the engine's shaders is pinned rather than
 whatever is on your PATH. It is the slowest part of a fresh build and it happens
@@ -210,7 +226,7 @@ Each preset writes to `.cache/build/<preset>/`:
 
 ```
 .cache/build/dev/
-├─ client/       the client — binary, SDL3, shaders/render/
+├─ client/       the client — binary, SDL3, shaders/resources/
 ├─ server/       the server — no shaders, no SDL
 ├─ cdn/          the content origin — no shaders, no SDL
 ├─ tools/        testrunner
@@ -299,6 +315,7 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--verbose` | off | log at trace level |
 | `--force-serial-compute` | off | run parallel dispatches on one thread |
 | `--game PATH` | — | open a game file at startup |
+| `--rojo PATH` | `$ATOMIC_ROJO_PROJECT` | sync a Rojo project or universe once the scene exists |
 | `--width`, `--height` | 1600×900 | window size |
 | `--scale FACTOR` | 1.0 | multiplies every font and padding |
 | `--tick-rate HZ` | 60 | simulation rate while running |
@@ -307,13 +324,43 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--headless` | off | run with no window at all; needs `--frames` |
 | `--run MODE` | `edit` | start in `edit`, `server` or `play` |
 | `--uncapped` | off | draw with no frame rate ceiling |
+| `--frames-in-flight N` | 1 | frames the CPU may queue ahead of the GPU, 1 to 3 |
 | `--stats`, `--graph` | off | open the statistics or frame-graph panel |
 | `--assets` | off | open the assets manager |
-| `--viewport2` | off | open the second viewport |
+| `--viewports N` | 1 | open N viewport panels; `--viewport2` is the old spelling of `--viewports 2` |
 | `--profile-snapshot PATH` | — | write a frame-graph snapshot on exit |
 | `--idle-close SECONDS` | 300 | close an empty world after this long |
 | `--mcp-port PORT` | off | open the loopback control surface |
 | `--override-assets-directory DIR` | — | read staged data from here |
+
+**`--rojo` is how an external project is checked without driving the menu.**
+Syncing is otherwise a file prompt and two clicks, which makes "does this
+repository still sync" something nobody verifies. With no flag the editor reads
+`ATOMIC_ROJO_PROJECT`, so a shell that works on one game can carry it — the flag
+is for one run and the variable is for a day, and nothing writes the variable
+back. A path ending `.universe.json` syncs every world it names; anything else
+is read as one project into the scene that is open.
+
+```sh
+ATOMIC_ROJO_PROJECT=~/Documents/GitHub/raceapet/default.project.json \
+  ./.cache/build/dev/studio/studio --headless --frames 3
+# synced 1356 instances, 1082 scripts from RaceAPet
+```
+
+The count is the check. It should equal the number of `.luau`, `.lua` and
+`.json` files the project's `$path`s actually reach — a package whose
+`default.project.json` maps `lib` contributes `lib`, and nothing else it was
+published with.
+
+**`submit` is where the GPU is paid for, and one frame in flight is why.** The
+passes above it only *record* commands; `SDL_SubmitGPUCommandBuffer` is where the
+driver gets the work, and with `--frames-in-flight 1` — the default — it blocks
+until the GPU has finished the previous frame. So a long `submit` on the frame
+graph means the GPU is the limit, not the code above it. Raising it to 2 lets the
+CPU run ahead and costs a frame of latency between the mouse and the picture,
+which is the trade an editor usually wants the other way round. Measured on the
+four-world demo: p99 6.9 ms at one, 6.1 ms at two, and the same 0.21 ms median
+either way.
 
 **The editor is not paced by the display.** It starts with vertical sync off and
 a 120 fps ceiling, because sync puts a whole refresh — 16.7 ms on a 60 Hz panel,
@@ -328,6 +375,48 @@ ceiling for a run, which is what to pass when the number being read is the
 frame's own cost — otherwise the sleep padding each frame out to 8.3 ms is
 measured as that cost. On a device with no immediate present mode the editor says
 so and stays paced by the display.
+
+### The Demo tab *(v0.14)*
+
+The ribbon's last tab, and its one entry is **Demo Nodes** — a typed node graph
+with live evaluation. It changes nothing in the scene; it is there to be looked
+at, and to be the place the two node systems `ROADMAP.md` wants get designed
+against rather than invented twice.
+
+```
+drag port → port      connect. Types must match, or it says why it refused
+drag a wired input    picks the link up and moves it
+drag port → empty     a palette of what would fit there
+right click           the palette anywhere
+middle or alt-drag    pan · wheel zooms to the cursor
+Del · F               delete the selection · fit
+```
+
+What it computes is terrain. **Noise, Ridged, Domain Warp, Terrace, Slope,
+Threshold and Combine** are the sync half — they run inside the frame, so a
+slider drag re-runs the chain between frames. **Colourise** turns a height field
+into an actual picture, which is what the thumbnails on the nodes are drawing.
+
+**Erode** and **Staged Task** are the async half. Erosion is genuinely slow at
+256², so it runs on a worker and the node grows a progress bar and the stage it
+is on; the frame keeps drawing. Two staged tasks in two branches run at once
+because the evaluator starts every node whose inputs are ready — there is no
+scheduler deciding it, readiness *is* the schedule.
+
+Three properties worth knowing while using it:
+
+- **A result is cached against a hash** of the node's parameters and its inputs'
+  hashes, so one slider recomputes exactly the sub-tree below it. Dragging a
+  node recomputes nothing: position is not in the hash.
+- **A node whose input is still being computed waits** rather than running with
+  the unconnected fallback, which would cache a picture of nothing under a hash
+  that claims otherwise.
+- **Live** follows every edit; turn it off and drive it with **Build** when the
+  graph has a six-second task in it.
+
+The inspector down the right-hand side shows the selected node's picture large —
+the same texture the node draws, so it costs one conversion — with its stages and
+whatever number it produced.
 
 ### Driving it with no display
 
@@ -492,6 +581,41 @@ two VMs differ. `game:GetService("Workspace")` and `RunService:IsServer()` are
 Luau's, and each file says what its own VM installs rather than what the other
 one has.
 
+### Autocomplete in the studio's own editor
+
+The above is for the editor you already use. The Script Editor in the studio has
+its own, and it needs no language server and no configuration:
+
+| key | what it does |
+| --- | --- |
+| `Ctrl+Space` | offer a list, whatever is under the caret |
+| `.` or `:`, or two characters | offer one automatically |
+| `Up` / `Down` | move through it |
+| `Enter`, or a click | accept |
+| `Escape` | dismiss |
+| `Tab` | still indents — it is never the accept key |
+
+It offers classes inside `Instance.new("`, properties after a `.`, methods and
+signals after a `:`, enum sets and their members, the globals of whichever
+language the script's `CodeSourceContainerSelector` selected, that language's
+keywords, the identifiers already in the file, and **the names of the instances
+beside the script in the tree** — which is the one thing luau-lsp cannot know,
+because it reads files and not a world.
+
+**None of that list is written down anywhere.** Classes, properties and enums
+come from `ecs::Classes` and `ecs::EnumTable`; the globals and instance methods
+come from `script::Runtime::Surface`, which walks the global table of a VM built
+for the purpose. A global added anywhere in `mono.engine/script` is offered with
+nothing else changing, and one removed stops being offered in the same commit.
+The reason it is built that way rather than from a list is in
+`script/Vocabulary.hpp`, and it is two bugs this engine has already shipped.
+
+It does **not** infer types. A local from `Instance.new("Part")` resolves,
+because the class is written on the line; one from `FindFirstChild` gets the
+union of every scriptable property instead — a longer list, never a wrong one.
+`D00114` carries what narrowing it would take and why the obvious answer only
+helps one of the two languages.
+
 ### What happens today
 
 The Luau runtime, QuickJS runtime, bindings and game-file reader are active.
@@ -537,12 +661,56 @@ example, so seeing one is a command rather than a path to look up:
 | `run-interface` | a `ScreenGui` built entirely from a script |
 | `run-mirrors` | one room of mirrors, each with a different effect — the rendering path |
 | `run-mirrors-4-worlds` | four worlds composited into one frame |
+| `run-portals` | a square building with three rooms in it, and a lap that closes early |
+| `run-non-euclidean` | six exhibits, each a room that lies about its own size |
 | `run-meshes` | imported meshes and textures. Wants `--cdn` |
 | `run-mesh-grid` | bakes and publishes art, then draws it |
+| `run-local-server` | one server and several clients, all on this machine |
+
+### Somebody to be *(v0.14)*
+
+```sh
+scripts/demos/run-local-server.sh              # a server and two clients
+scripts/demos/run-local-server.sh 4            # four clients instead
+PORT=9100 scripts/demos/run-local-server.sh    # a different port
+SCENE=Slide.luau scripts/demos/run-local-server.sh
+```
+
+**A server hosting `Playground.luau`, and a client window per player.** Each one
+is admitted, given a blocky character on the spawn pad and told which player it
+is; WASD walks it, Space jumps, the right mouse button turns the camera. Every
+client sees every other character move, because the movement happens once — on
+the server — and what crosses is the intent going up and the transform coming
+down.
+
+**This is not `mono.unified_server_client`, and the difference is the reason to
+run it.** That harness cuts `net` out of the middle to prove the
+serialise/deserialise seam; this puts the socket, the handshake, the cipher and
+the bandwidth budget back, and adds the thing neither of them had — more than
+one player. `--net` is on by default in the script because the F4 panel is where
+this demo is read from: two characters that do not move have three explanations,
+and the panel separates them.
+
+**The same arrangement without a second program is the studio.** Press Play and
+the editor hosts both halves in its own viewports: a server view and a client
+view, with a character in the client one. `Spawn Player` and `Remove Player` on
+the ribbon act on the viewport you are in, so a Run becomes a Play one client at
+a time, and two clients is what turns "the replica disagrees with the server"
+into "these two clients disagree". A new game opens with a **Playground** and an
+**Arena**, and a pad in each that teleports you to the other.
+
+**Live Instances** is where those two halves are listed, and it opens itself when
+a run starts. A row per server and a row per client, each with the counts that
+say whether a client is keeping up, and a `View` on each that is the way back to
+that instance's viewport — closing a view no longer loses it. `Stop` on a client
+row removes that client, which is also what the ribbon's Stop does while you are
+looking at one, and `+ Player` on a server row admits another. A client view is
+listed here rather than among the scenes in the Worlds panel: it exists only
+between Play and Stop and there is nothing about it to author.
 
 ### Things fall *(v0.13)*
 
-A new game opens with four worlds now, and the fourth is **Slide** — a curved
+A new game gained a fourth world at v0.13, and it is **Slide** — a curved
 ramp with blocks that spawn at the top, slide down, launch off the lip and are
 destroyed ten seconds later. It is the first world this engine ever simulated.
 
@@ -660,6 +828,75 @@ answer for what happens when the file is missing on somebody else's machine —
 which is the render graph `ROADMAP.md` puts behind a prototype project, not a
 field. Every effect here is a handful of instructions on the fragment that
 samples an image somebody already rendered.
+
+### Holes that lead somewhere else *(v0.14)*
+
+A `Portal` is a `SurfaceCamera` with one more property on it, and that property
+is the whole feature:
+
+```lua
+local hole = Instance.new("Portal")
+hole.Face = Enum.NormalId.Back
+hole.Destination = someOtherWall   -- and the wall is now a hole
+hole.Parent = pane
+```
+
+A mirror puts its camera where the eye would be reflected through the pane's own
+plane. A portal puts it through `destination · half-turn · source⁻¹` instead.
+Everything after that is the mirror's path unchanged — the same surface pass, the
+same projected sampling in `opaque.frag`, the same per-surface `TagFilter`, the
+same one-frame-old texture — so a hole costs a mirror and nothing else.
+
+**Nothing constrains the two panes to describe one space**, and that is the
+non-Euclidean part. A destination turned, moved, or placed three hundred units
+away is still a legal pair, so a room can be bigger on the inside and a corridor
+can turn through more than four right angles. `run-portals` is a square building
+with four quarters and three rooms in it: hall, library and garden clockwise
+round the middle, and one pair of holes joining the garden's west wall to the
+hall's south wall, where the fourth room would have been. The two panes are
+perpendicular, so the pair carries a quarter turn — walk the loop and you make
+three right turns and arrive where you started, facing the way you set off. The
+middle of that building is a cone point with ninety degrees missing.
+`NON-EUCLIDEAN.md` is the investigation behind it.
+
+**`Face` is resolved on the destination too, and it is the one rule to know.**
+The far frame is built by applying the *portal's own* `Face` to the destination's
+transform, so the destination must be a part whose matching face points at the
+space the hole should show. Aim it at a wall whose matching face points the other
+way and nothing complains — the pane renders, and it shows the empty space behind
+that wall. For unrotated rooms that means the wall on the same side of the far
+room; rotating the destination is the general answer.
+
+**A destination that is missing, cleared or deleted falls back to a mirror**
+rather than to a blank pane. A surface that stopped reflecting reads as something
+to fix; a pane that vanished reads as a broken renderer.
+
+**You can walk through these.** `scene::CrossPortals` maps a body — and its
+velocity, and the camera's yaw when the body is the one the camera follows —
+through the same product the picture goes through, and `scene::OpenPortals`
+takes the pane's collider out of the solver's way so a walker reaches it at all.
+Press Play in the studio on `run-portals`' scene, or host it with
+`scripts/demos/run-local-server.sh`; the standalone client has no character and
+walks the lap on rails instead. What is left of `docs/DEFERRED.md` D00112 is the
+seam on the frame you cross, which needs the portal chain rendered inside the
+frame, deepest first.
+
+**A pane must be one part and it should be white.** One part because the
+rectangle a surface camera is fitted to and the rectangle `CrossPortals` tests
+against is that part's face — a hole built out of several is several holes
+against a budget of sixteen. White because `opaque.frag` tints the projected
+image by the pane's own colour, so a grey pane shows the far room dimmed, which
+reads as a lighting bug in a room that is lit correctly.
+
+**`run-non-euclidean` is the catalogue rather than the mechanism.** Six exhibits
+in a row, twelve holes, and the camera sweeps past them: a tunnel shorter inside
+than out and one longer inside than out, a house with four doors onto three
+rooms, a pillar with a different room behind each side, a hill whose bottom
+opens onto its own top, and a cell that holds four times the volume it occupies.
+Every one of them is the same pair of panes with the destination moved — no new
+engine code, which is the point. The one shape it *cannot* express is the tunnel
+that changes your scale, because the map through a portal is rigid; that is
+filed with D00112 as well.
 
 ```sh
 scripts/demos/run-terrain.sh                 # uncapped, held at 165 fps
@@ -1069,7 +1306,7 @@ extra socket and broadcasts nothing.
 ### On the same switch
 
 ```sh
-server --listen 0 --advertise --session-name "Declan's game"
+server --listen 0 --advertise --session-name "User's game"
 client --browse
 ```
 
@@ -1284,6 +1521,10 @@ Publishing and serving are **two invocations, and the split is deliberate**: the
 signing key belongs to whoever publishes the game and the origin holds none,
 which is what makes it safe to deploy on hardware nobody here owns.
 
+[`SETUP-CDN.md`](SETUP-CDN.md) is the walkthrough — a folder on your own machine,
+a store served from a directory, an origin on localhost, and what it takes to
+reach one from somewhere else. What follows here is the reference.
+
 ### Publish a directory of files
 
 ```sh
@@ -1329,6 +1570,8 @@ curl -o group.zst -H "x-atomic-grant: HEX" http://127.0.0.1:9080/bundle/<root>
 --signing-key HEX        64 hex characters — the Ed25519 seed to sign a publish with
 --grant-key HEX          64 hex characters — the secret shared with the server
 --port N                 Port to listen on (default 9080; 0 binds an ephemeral one)
+--ingest-key SECRET      Accept uploads at /ingest from whoever sends this
+--inbox DIR              Where uploads land (default: the raw/ beside a processed store)
 --upstream NAME=HOST:PORT   An origin to forward a miss to. Repeatable
 --allow-upstream         Forward a miss. Off unless asked for
 --no-local-first         Always ask an upstream — a pure proxy
@@ -2250,7 +2493,7 @@ cp -r .cache/build/dev/client /somewhere/else
 /somewhere/else/client --stats
 ```
 
-The binary finds `libSDL3.so.0` and `shaders/render/` beside itself, not
+The binary finds `libSDL3.so.0` and `shaders/resources/` beside itself, not
 relative to the working directory. If you need it to read data from elsewhere —
 pointing a release build at a working tree, or a test at a fixture directory —
 use `--override-assets-directory`.

@@ -722,11 +722,34 @@ namespace engine::script {
 	// @param instance The instance to push.
 	void PushInstanceValue(lua_State *state, ecs::Entity instance);
 
+	// Reads an `Instance` argument, raising a type error when it is not one.
+	//
+	// **Shared rather than copied**, because the second copy is the one that
+	// forgets the tag check and reads eight bytes of somebody else's userdata
+	// as an entity handle. `Instances.cpp` owns the tag and this is how anything
+	// else asks it.
+	//
+	// @param state The VM.
+	// @param index The stack index.
+	// @return The entity the instance names.
+	ecs::Entity CheckInstanceArgument(lua_State *state, int index);
+
 	// Installs `Instance`, and the metatable that turns `part.Size = v` into a
 	// property write.
 	//
 	// @param state The VM.
 	void OpenInstances(lua_State *state);
+
+	// The signals `InstanceIndex` answers from its branch chain.
+	//
+	// **Here because a branch cannot be walked.** Everything else the editor
+	// offers is read back out of a live VM — the globals from its global table,
+	// the instance methods from the registry table `OpenInstances` fills — and a
+	// signal is the one member that exists only as a string comparison. See
+	// `script::InstanceSignals`, which is the public face of this.
+	//
+	// @return The signal names, in the order the chain tests them.
+	std::vector<std::string_view> LuauInstanceSignalNames();
 
 	// Installs the world clock under names that do not lie about it.
 	//

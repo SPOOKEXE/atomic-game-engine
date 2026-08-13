@@ -39,41 +39,28 @@ namespace engine::physics {
 		BasisFor(const ShapeInstance &shape, const core::Vector3 &axis, const core::Vector3 &direction) {
 			const core::Vector3 radial = direction - axis * direction.Dot(axis);
 			const core::Vector3 first =
-				radial.MagnitudeSquared() > RADIAL_EPSILON ? radial.Unit() : shape.Frame.RightVector();
+				radial.MagnitudeSquared() > RADIAL_EPSILON ? radial.Unit() : shape.Axis[0];
 			return RimBasis{first, axis.Cross(first)};
 		}
 
-		// The three world axes of a box, in the order X, Y, Z.
-		//
-		// Right-handed, so `X.Cross(Y) == Z` — which is what the face winding
-		// below relies on to point its edge planes inward.
-		struct BoxAxes {
-			core::Vector3 Axis[3];
-		};
-
-		BoxAxes AxesOf(const core::CFrame &frame) {
-			return BoxAxes{
-				{frame.RightVector(), frame.UpVector(), frame.VectorToWorldSpace(core::Vector3::ZAxis)}
-			};
-		}
-
 		// The face of a box whose outward normal is closest to `direction`.
+		//
+		// `shape.Axis` is right-handed, so `X.Cross(Y) == Z` — which is what the
+		// face winding below relies on to point its edge planes inward.
 		SupportFeature BoxFace(const ShapeInstance &shape, const core::Vector3 &direction) {
-			const BoxAxes axes = AxesOf(shape.Frame);
-
 			size_t best = 0;
 			float bestAlignment = -1.0f;
 			for (size_t index = 0; index < 3; index++) {
-				const float alignment = std::abs(direction.Dot(axes.Axis[index]));
+				const float alignment = std::abs(direction.Dot(shape.Axis[index]));
 				if (alignment > bestAlignment) {
 					bestAlignment = alignment;
 					best = index;
 				}
 			}
 
-			const bool positive = direction.Dot(axes.Axis[best]) >= 0.0f;
+			const bool positive = direction.Dot(shape.Axis[best]) >= 0.0f;
 			const float sign = positive ? 1.0f : -1.0f;
-			const core::Vector3 outward = axes.Axis[best] * sign;
+			const core::Vector3 outward = shape.Axis[best] * sign;
 
 			// The two axes the face spans, ordered so `first.Cross(second)` is
 			// the outward normal. That is what makes the four points below wind
@@ -83,8 +70,8 @@ namespace engine::physics {
 			const size_t secondAxis = positive ? other[best][1] : other[best][0];
 
 			const float extent[3] = {shape.Extent.X, shape.Extent.Y, shape.Extent.Z};
-			const core::Vector3 first = axes.Axis[firstAxis] * extent[firstAxis];
-			const core::Vector3 second = axes.Axis[secondAxis] * extent[secondAxis];
+			const core::Vector3 first = shape.Axis[firstAxis] * extent[firstAxis];
+			const core::Vector3 second = shape.Axis[secondAxis] * extent[secondAxis];
 			const core::Vector3 centre = shape.Frame.Position + outward * extent[best];
 
 			SupportFeature face;
@@ -122,7 +109,7 @@ namespace engine::physics {
 				// touches, which is two points and never one. A single point
 				// here is a cylinder that rolls on its side while resting.
 				const core::Vector3 outward =
-					across > RADIAL_EPSILON ? radial / across : shape.Frame.RightVector();
+					across > RADIAL_EPSILON ? radial / across : shape.Axis[0];
 				const core::Vector3 centre = shape.Frame.Position + outward * radius;
 				feature.Plane = outward;
 				feature.Count = 2;
@@ -154,6 +141,14 @@ namespace engine::physics {
 		}
 	}
 
+	ShapeInstance::ShapeInstance(
+		const core::CFrame &frame, const core::Vector3 &extent, scene::ShapeKind shape
+	)
+		: Frame(frame),
+		  Extent(extent),
+		  Axis{frame.RightVector(), frame.UpVector(), frame.VectorToWorldSpace(core::Vector3::ZAxis)},
+		  Shape(shape) {}
+
 	core::Vector3 ToLocalPoint(const core::CFrame &frame, const core::Vector3 &point) {
 		return ToLocalVector(frame, point - frame.Position);
 	}
@@ -165,12 +160,10 @@ namespace engine::physics {
 
 	float ProjectionRadius(const ShapeInstance &shape, const core::Vector3 &axis) {
 		switch (shape.Shape) {
-		case scene::ShapeKind::Box: {
-			const BoxAxes axes = AxesOf(shape.Frame);
-			return std::abs(axis.Dot(axes.Axis[0])) * shape.Extent.X +
-				   std::abs(axis.Dot(axes.Axis[1])) * shape.Extent.Y +
-				   std::abs(axis.Dot(axes.Axis[2])) * shape.Extent.Z;
-		}
+		case scene::ShapeKind::Box:
+			return std::abs(axis.Dot(shape.Axis[0])) * shape.Extent.X +
+				   std::abs(axis.Dot(shape.Axis[1])) * shape.Extent.Y +
+				   std::abs(axis.Dot(shape.Axis[2])) * shape.Extent.Z;
 
 		case scene::ShapeKind::Sphere:
 			// Rotation-invariant, which is the whole reason a sphere is one
@@ -201,12 +194,11 @@ namespace engine::physics {
 	core::Vector3 SupportPoint(const ShapeInstance &shape, const core::Vector3 &direction) {
 		switch (shape.Shape) {
 		case scene::ShapeKind::Box: {
-			const BoxAxes axes = AxesOf(shape.Frame);
 			const float extent[3] = {shape.Extent.X, shape.Extent.Y, shape.Extent.Z};
 			core::Vector3 point = shape.Frame.Position;
 			for (size_t index = 0; index < 3; index++) {
-				const float sign = direction.Dot(axes.Axis[index]) >= 0.0f ? 1.0f : -1.0f;
-				point = point + axes.Axis[index] * (extent[index] * sign);
+				const float sign = direction.Dot(shape.Axis[index]) >= 0.0f ? 1.0f : -1.0f;
+				point = point + shape.Axis[index] * (extent[index] * sign);
 			}
 			return point;
 		}
