@@ -4,6 +4,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -87,6 +88,48 @@ namespace engine::scene {
 				*static_cast<Entity *>(out) = local != nullptr ? local->Instance : NULL_ENTITY;
 				return true;
 			};
+			return property;
+		}
+
+		// `Player.Character`, and the whole of what a game has to say to make a
+		// body walk.
+		//
+		// **Writable, unlike `Players.LocalPlayer` beside it.** Roblox assigns
+		// this from `Player:LoadCharacter()` and lets a game assign it directly;
+		// so does this. `SetPlayerCharacter` carries the argument for what the
+		// assignment does — it is the setter, not a field write, because
+		// binding a model to a player is three rows and an ownership grant
+		// rather than one entity handle.
+		//
+		// **Computed rather than a field**, because a `Player` is registered
+		// with an empty component set: `PlayerCharacter` is added to the row
+		// when the first character is assigned and is absent before that, which
+		// a generated field property has no way to answer nil for.
+		PropertyDescriptor CharacterProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Character");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(Entity);
+			property.Kind = PropertyKind::Computed;
+
+			// Names the row the answer comes from, so a `.Changed` listener
+			// fires when a player is given or loses a body. `CurrentCamera` says
+			// why naming the nearest component beats naming nothing.
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<PlayerCharacter>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				// **Nil rather than a failure for a player who has none.** A
+				// player between a death and a respawn is an ordinary state, and
+				// `if player.Character then` is how a script asks about it.
+				*static_cast<Entity *>(out) = CharacterOf(store, instance);
+				return true;
+			};
+
+			property.Set = [](Store &store, Entity instance, const void *value) -> bool {
+				return SetPlayerCharacter(store, instance, *static_cast<const Entity *>(value));
+			};
+
 			return property;
 		}
 
@@ -286,7 +329,13 @@ namespace engine::scene {
 			// has. Derived from `Instance` rather than from `Service` so the
 			// class picker's service exclusion does not hide it, and so a world
 			// can hold as many as it has occupants.
-			Classes::Register("Player", instance, {});
+			const ClassId player = Classes::Register("Player", instance, {});
+
+			// **The one hook a game needs to make a character walk.** Setting it
+			// is what links a model to a player, and every consumer downstream —
+			// the client's move submission, the host's move application, the
+			// camera — reads that link rather than being told separately.
+			Classes::Computed(player, CharacterProperty());
 
 			Classes::Computed(service, ScopeProperty());
 

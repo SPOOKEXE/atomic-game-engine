@@ -2,12 +2,14 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cmath>
@@ -176,6 +178,22 @@ namespace server {
 		// reads ownership yet, because the day something does is the day this
 		// being absent is a bug rather than a gap.
 		engine::scene::RegisterOwnershipSystem(scheduler);
+
+		// **Who a teleport brings in, and it must not depend on scripts.** A
+		// destination is chosen by a script in *another* world, so a world can be
+		// somebody's destination without containing a line of code — and
+		// admitting used to happen inside the Luau runtime's own delivery pump.
+		// A world with no runtime took the payload into its inbox and left it
+		// there: destroyed in the world you left, never built in the world you
+		// went to. `script::RegisterTeleportAdmission` carries the argument.
+		engine::script::RegisterTeleportAdmission(scheduler);
+
+		// **A server grounds, steps and poses its own characters.** Until this
+		// the three lived in `mono.client` alone, so a character on a dedicated
+		// server walked and could never jump — `Humanoid::Grounded` had no
+		// writer. The input half stays out: a server has no keyboard, and what
+		// moves a client-owned character here is its submitted `Motion`.
+		engine::physics::RegisterCharacterSystems(scheduler);
 	}
 
 	void RegisterPlaceholderComponents() {

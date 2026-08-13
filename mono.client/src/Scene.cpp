@@ -12,9 +12,11 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Characters.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
@@ -25,12 +27,14 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/script/Runtime.hpp>
 
 #include <algorithm>
 #include <client/Scene.hpp>
 #include <cmath>
 #include <format>
 #include <numbers>
+#include <span>
 
 namespace client {
 
@@ -366,6 +370,28 @@ namespace client {
 			// query, so there is no row to size the list against. `push_back`
 			// past the shrink costs one reallocation on the frame a mirror is
 			// created and nothing after it — the capacity stays.
+			// **Before the markers, so a marker is never cloned.** A face bar is
+			// a debugging aid lying on a pane, which means it straddles that
+			// pane by construction — and a bar cloned onto the far side would
+			// mark a face nothing projects off.
+			//
+			// **One far-side copy and not two, which is what this used to
+			// draw.** There were two passes producing it — one walked the world
+			// for things that can move, the other walked the draw list — and
+			// calling both put two copies of every straddling body on the far
+			// side, z-fighting each other. Worse, the list pass reads the list
+			// it appends to, so it also copied the entity pass's output: a copy
+			// sits across the *far* pane by construction, so it was mapped back
+			// again and a third landed on top of the original. What that looks
+			// like is a spare character standing near the hole.
+			//
+			// **`CutAndCloneSeams` is the one pass now**, and it is the list one
+			// because only a list walk holds the row the original is in — which
+			// is what lets it *cut* the body at the plane rather than leave two
+			// whole copies straddling two panes. The same call serves a replica,
+			// which has a draw list and no simulation behind it.
+			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+
 			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 		}
 	}
@@ -442,23 +468,390 @@ namespace client {
 		}
 	}
 
-	size_t CollectSurfaceViews(Store &store, std::vector<engine::render::SurfaceView> &views) {
+	size_t AttachForeignSurfaces(
+		engine::world::Universe &universe,
+		engine::world::WorldId world,
+		std::vector<engine::scene::DrawInstance> &drawn,
+		std::vector<engine::scene::DrawInstance> &foreign,
+		std::vector<engine::render::SurfaceView> &views
+	) {
+		// **Cleared on every path, including the ones that attach nothing.** The
+		// vector is kept between frames so a steady scene stops allocating, and
+		// a host that stopped looking through a portal would otherwise keep
+		// uploading last frame's copy of another world for ever.
+		//
+		// **`drawn` is not**, because it arrives holding this world's own rows.
+		// This pass adds to it rather than owning it.
+		foreign.clear();
+
+		if (views.empty() || !world.IsValid()) {
+			return 0;
+		}
+
+		// **This world's own rows, counted before anything is appended to
+		// them.** The far world's straddlers land in `drawn` further down, and
+		// handing those back to `AppendPortalClones` as a source would clone a
+		// clone — a body that walked in from the far room would be copied
+		// straight back into it. What crosses is what this world drew.
+		const auto ownRows = drawn.size();
+
+		// This world's name, which is how the far end recognises a pane that
+		// leads back here. Resolved once: `NameOf` is a registry lookup and the
+		// answer cannot change while the frame is being assembled.
+		const engine::core::Name here = universe.NameOf(world);
+
+		// Which surface index wants which world, gathered while inside the
+		// source store and used entirely outside it — `Universe::Enter` is not
+		// re-entrant, and the far world has to be entered to be read.
+		struct Wanted {
+			int8_t Surface = 0;
+			engine::core::Name World;
+		};
+
+		std::vector<Wanted> wanted;
+
+		universe.Enter(world, [&wanted](Store &store) {
+			store.Each<const engine::scene::Portal, const engine::scene::SurfaceCamera>(
+				[&wanted](
+					engine::ecs::Entity,
+					const engine::scene::Portal &portal,
+					const engine::scene::SurfaceCamera &camera
+				) {
+					if (!portal.DestinationWorld.IsValid()) {
+						return;
+					}
+					wanted.push_back(Wanted{camera.Surface, portal.DestinationWorld});
+				}
+			);
+		});
+
+		if (wanted.empty()) {
+			return 0;
+		}
+
+		size_t attached = 0;
+
+		// Which far worlds have already had their own straddlers brought back
+		// here. Two panes onto one world is an ordinary arrangement — a room
+		// with a window at each end — and the far world's bodies belong in this
+		// world's list once, not once per pane.
+		std::vector<engine::world::WorldId> paired;
+
+		// The far world's panes that lead back here, by surface slot. Gathered
+		// before anything is cloned because `AppendPortalClones` walks the store
+		// itself, and a walk started inside another walk is a nesting the ECS
+		// does not owe anybody.
+		std::vector<int8_t> returning;
+
+		for (const Wanted &entry : wanted) {
+			// **The name resolved against the universe, every frame.** A world
+			// created or destroyed between two frames is ordinary in an editor,
+			// and caching the handle would outlive one of those.
+			engine::world::WorldId found;
+			for (const engine::world::WorldId candidate : universe.Worlds()) {
+				if (universe.NameOf(candidate) == entry.World) {
+					found = candidate;
+					break;
+				}
+			}
+
+			// A name matching nothing, or naming the world we are already in,
+			// leaves the surface exactly as `CollectSurfaceViews` left it — this
+			// world's own image, which is a mirror and is visible as one.
+			if (!found.IsValid() || found == world) {
+				continue;
+			}
+
+			// **Whether the far end still owes this one its own straddlers.** A
+			// hole has two mouths and a body may be standing in either, so the
+			// visit below does both halves of one pair in one entry — see the
+			// `paired` note under it.
+			const bool returns =
+				here.IsValid() && std::find(paired.begin(), paired.end(), found) == paired.end();
+			if (returns) {
+				paired.push_back(found);
+			}
+
+			const auto first = static_cast<uint32_t>(foreign.size());
+			universe.Enter(found, [&foreign, &drawn, &returning, here, returns](Store &store) {
+				// **The far world's own panes back to here, gathered before its
+				// rows are copied**, because they decide which of those rows may
+				// be copied at all.
+				returning.clear();
+				store.Each<const engine::scene::Portal, const engine::scene::SurfaceCamera>(
+					[&returning, here](
+						engine::ecs::Entity,
+						const engine::scene::Portal &portal,
+						const engine::scene::SurfaceCamera &camera
+					) {
+						if (portal.DestinationWorld != here) {
+							return;
+						}
+						if (std::find(returning.begin(), returning.end(), camera.Surface) ==
+							returning.end()) {
+							returning.push_back(camera.Surface);
+						}
+					}
+				);
+
+				// **A pane is not drawn into the picture of the hole that leads
+				// back to it**, which is the rule a mirror has always had about
+				// itself and which a cross-world pair had nowhere to state.
+				//
+				// **It blanked the feature outright, and looked like the pass
+				// failing.** A pair is laid out the same way at both ends — that
+				// is what makes a hole read as an opening rather than as a
+				// painting — so the far world's own slab stands exactly where
+				// this pane's camera is aimed, at about the distance the frustum
+				// is fitted to, and it is the same rectangle that frustum covers.
+				// It therefore fills the image edge to edge, in one flat colour,
+				// and every room behind it is hidden. What that reads as is "the
+				// other world does not render its objects": the floor shows
+				// wherever the slab does not quite reach, and nothing else ever
+				// does.
+				//
+				// Selected by **slot** rather than by entity, because a draw
+				// instance carries a surface index and no identity — and the
+				// slots wanted are exactly the ones gathered above.
+				//
+				// **An invisible row is left behind too, and this range is the
+				// only draw path that has to say so.** Everywhere else a fully
+				// transparent part *is* drawn — into the blended run, where an
+				// alpha of nothing contributes nothing. The foreign range has no
+				// runs: `SurfaceView` names one span and the surface pass submits
+				// it as a single plain draw, bypassing the plan that would have
+				// partitioned it. So a part authored invisible arrives at the
+				// **opaque** pipeline and draws solid.
+				//
+				// **And every cross-world portal has exactly such a part in the
+				// worst possible place.** `Portal::Destination` is a stand-in — a
+				// transform and a size saying where the hole leads — authored
+				// invisible and set at the pane, which is where this camera is
+				// aimed and the size the frustum is fitted to. It filled most of
+				// the picture with one flat colour, and how much depended on
+				// where the viewer stood: the report was "certain angles produce
+				// the artifact".
+				//
+				// Dropped here rather than teaching the range about blending,
+				// which is the 80/20: nothing is lost, because there was no
+				// picture in it. **A *partly* transparent part in the far world
+				// is still drawn opaque** — that limit is stated in
+				// `NON-EUCLIDEAN.md` rather than hidden here.
+				if (const auto *list = store.Resource<DrawList>()) {
+					for (const DrawInstance &instance : list->Instances) {
+						if (instance.Surface >= 0 &&
+							std::find(returning.begin(), returning.end(), instance.Surface) !=
+								returning.end()) {
+							continue;
+						}
+						if (instance.Transparency >= 1.0f) {
+							continue;
+						}
+						foreign.push_back(instance);
+					}
+				}
+
+				// **And whoever is standing in the far world's own pane, on
+				// this side of it — which is the half that was missing and is
+				// why a cross-world hole only worked one way round.** The two
+				// mouths of a pair are not one job done twice: the clone below
+				// this block carries *our* bodies into the picture the pane
+				// shows, and this one carries *theirs* into the room the pane is
+				// set in. Without it a body walking into the far mouth was whole
+				// in the world it was leaving and absent from this one, so the
+				// hole drew a body from A into B and nothing from B into A.
+				//
+				// **Into this world's own list rather than into `foreign`**,
+				// because that is where the far body's near half actually is: it
+				// stands in this room, in front of this world's pane, and is
+				// culled, sorted and lit with everything else here. `foreign` is
+				// the picture *inside* the glass, and the far body is already in
+				// it — the far world drew itself.
+				//
+				// **Selected by name and never by `entry.Surface`.** A surface
+				// slot numbers a camera within one store, so the near pane's
+				// index says nothing about which of the far world's cameras
+				// leads back — pointing it at that index picks whichever of the
+				// far world's panes happens to share the number, which is any of
+				// them or none.
+				if (!returns) {
+					return;
+				}
+
+				// The same slots the copy above filtered by, gathered once, and
+				// the same rows the copy above read — so what arrives in this
+				// room is the far half of exactly what the far world drew.
+				if (const auto *list = store.Resource<DrawList>()) {
+					for (const int8_t slot : returning) {
+						(void)engine::scene::AppendPortalClones(store, slot, list->Instances, drawn);
+					}
+				}
+			});
+
+			// **And whoever is standing in the pane, on the far side of it.**
+			// The far world holds no copy of a body that is still in this one, so
+			// without this a character halfway through a cross-world portal is
+			// whole in the room it is leaving and absent from the picture of the
+			// room it is entering — which is the artefact `AppendPortalClones`
+			// removes for a same-world pane, seen through the one boundary that
+			// pass cannot answer for itself.
+			//
+			// **Appended after the far world's rows, so the two are one range.**
+			// A `SurfaceView` names one span, and a second one would be a second
+			// draw and a second reason for the two to fall out of order.
+			const auto surface = entry.Surface;
+			const std::span<const DrawInstance> own(drawn.data(), ownRows);
+			universe.Enter(world, [&foreign, own, surface](Store &store) {
+				(void)engine::scene::AppendPortalClones(store, surface, own, foreign);
+			});
+
+			const auto count = static_cast<uint32_t>(foreign.size() - first);
+			if (count == 0) {
+				// A world that has published nothing yet. Left showing this
+				// world rather than pointed at an empty range, because an empty
+				// range clears the surface to the pass's own colour and reads as
+				// a hole into nothing.
+				continue;
+			}
+
+			for (engine::render::SurfaceView &view : views) {
+				if (view.Index != entry.Surface) {
+					continue;
+				}
+				view.InstanceFirst = first;
+				view.InstanceCount = count;
+				attached++;
+			}
+		}
+
+		return attached;
+	}
+
+	size_t CollectPortalViews(Store &store, std::vector<engine::render::PortalView> &portals) {
+		portals.clear();
+
+		// **`GatherPortalSeams`, and never a second measurement of the same
+		// hole.** The rectangle and the map are what `CrossPortals` moves a body
+		// through; a picture that derived them its own way would be a picture
+		// that disagrees with where somebody comes out, which is the exact class
+		// of bug that made the camera and the body pick different panes.
+		static thread_local std::vector<engine::scene::PortalSeam> seams;
+		if (engine::scene::GatherPortalSeams(store, seams) == 0) {
+			return 0;
+		}
+
+		for (const engine::scene::PortalSeam &seam : seams) {
+			// **A cross-world pane stays on the surface path**, because a warp
+			// into another world's coordinate space is a stated frame rather than
+			// a derived one — `Portal::DestinationWorld` and
+			// `AttachForeignSurfaces` are the whole of that arrangement, and it
+			// does not recurse.
+			if (seam.Crosses || seam.Surface < 0) {
+				continue;
+			}
+
+			engine::render::PortalView portal;
+			portal.Index = seam.Surface;
+			portal.Centre = seam.Centre;
+			portal.Normal = seam.Normal;
+			portal.First = seam.First;
+			portal.Second = seam.Second;
+
+			// **The same one map a body is carried by.** `SeamMapping` states it
+			// once for the pane rather than once per side, so what the hole shows
+			// and where walking into it puts you are the same arithmetic.
+			portal.Warp = engine::scene::SeamMapping(seam);
+			portal.TagFilter = seam.TagFilter;
+
+			// The hole at the far end, so the level this one opens can skip it.
+			// A pair is two seams whose `Far` and `Pane` cross over, which is the
+			// only place that pairing is written down.
+			for (const engine::scene::PortalSeam &other : seams) {
+				if (other.Pane == seam.Far && !other.Crosses) {
+					portal.Partner = other.Surface;
+					break;
+				}
+			}
+
+			portals.push_back(portal);
+		}
+
+		return portals.size();
+	}
+
+	size_t CollectSurfaceViews(
+		Store &store,
+		std::vector<engine::render::SurfaceView> &views,
+		std::span<const engine::render::PortalView> portals
+	) {
 		views.clear();
 		Ordered().clear();
 
 		store.Each<const engine::scene::SurfaceCamera, const engine::scene::Camera, const Transform>(
-			[&views](
+			[&views, &store, portals](
 				Entity entity,
 				const engine::scene::SurfaceCamera &target,
 				const engine::scene::Camera &lens,
 				const Transform &placement
 			) {
+				// **A slot the recursive pass owns gets no surface camera.** Both
+				// would draw the same pane — one from a camera derived from this
+				// level and one from a camera placed off the eye — and the second
+				// is the viewpoint error the pass exists to remove. Skipped here
+				// rather than refused in the renderer so the cost of aiming it is
+				// the only thing wasted.
+				const auto claimed = [&](int8_t slot) {
+					for (const engine::render::PortalView &portal : portals) {
+						if (portal.Index == slot) {
+							return true;
+						}
+					}
+					return false;
+				};
+
+				if (claimed(target.Surface)) {
+					return;
+				}
+
 				engine::render::SurfaceView view;
 				view.Index = target.Surface;
 				view.Frame = placement.Frame;
-				view.Lens = lens;
 				view.Width = target.Width;
 				view.Height = target.Height;
+
+				// **The fitted frustum when there is one, and the plain camera
+				// when there is not.** `AimSurfaceCameras` writes a
+				// `SurfaceLens` for every camera it places — which is every one
+				// parented to a part — and that lens is off-axis and possibly
+				// obliquely clipped, neither of which a field of view can say.
+				//
+				// A surface camera parented to the *world* is placed by whoever
+				// authored it and gets no lens, so it keeps the ordinary
+				// perspective build from its `Camera`. `SurfaceCameras.hpp`
+				// promises that arrangement still works, and this is where the
+				// promise is kept.
+				if (const engine::scene::SurfaceLens *fitted =
+						store.template Get<engine::scene::SurfaceLens>(entity);
+					fitted != nullptr) {
+					view.Projection = engine::scene::SurfaceProjection(*fitted, placement.Frame);
+
+					// **And what took the pane to where that frustum was
+					// fitted**, which for a portal is not nothing. The image is
+					// read back by projecting the pane's own world position, so
+					// a camera fitted three hundred units away needs the pane
+					// carried there too — see `scene::SurfaceLens::Mapping`. A
+					// mirror's is the identity and this line is free.
+					//
+					// **Composed by `SurfaceMapping` rather than here**, because
+					// the lens holds a rotation, a centre and a scale and the
+					// order those go in is the sort of thing that is wrong once
+					// and then wrong everywhere.
+					view.Mapping = engine::scene::SurfaceMapping(*fitted);
+				} else {
+					const float aspect = static_cast<float>(target.Width) /
+										 static_cast<float>(std::max<uint16_t>(target.Height, 1));
+					view.Projection = engine::scene::ResolveCamera(placement.Frame, lens, aspect).Projection;
+				}
 
 				// **Opacity here, transparency in the component**, and the flip
 				// happens once. `scene::SurfaceCamera::ImageTransparency` is
@@ -476,6 +869,13 @@ namespace client {
 				// Copied straight across: the renderer applies it and nothing
 				// between here and there has an opinion about it.
 				view.Effect = target.Effect;
+
+				// **And how often it may redraw**, which is the same kind of
+				// pass-through. A surface is a whole scene render and there is
+				// no reason it should keep the screen's rate — see
+				// `scene::SurfaceCamera::FPS` for why the default is a rate
+				// rather than "every frame".
+				view.FPS = target.FPS;
 
 				// **Copied rather than resolved.** The filter is already a mask
 				// on the component, because a name would be a lookup per
@@ -509,12 +909,117 @@ namespace client {
 		return views.size();
 	}
 
+	namespace {
+		// Where a moved particle lives for the rest of the frame.
+		//
+		// **One buffer for every batch, and each batch takes a range of it.** The
+		// spans handed to the renderer have to survive until it has drawn them, so
+		// they cannot point at anything a loop iteration owns — and they cannot be
+		// appended to while an earlier span is outstanding unless the buffer is
+		// reserved. It is cleared once a frame and reserved to the pool's own size
+		// the first time anything crosses, so no batch's span is ever invalidated
+		// by a later batch's copy.
+		std::vector<engine::effects::ParticleInstance> &Carried() {
+			static thread_local std::vector<engine::effects::ParticleInstance> carried;
+			return carried;
+		}
+
+		// Moves every particle in a batch that has gone through a hole.
+		//
+		// **Moved and not copied**, which is the whole difference from what a
+		// straddling body needs. A body has a size and is cut by the plane; a
+		// particle is a point, wholly on one side or the other, and drawing it in
+		// both places would be two sparks where the author authored one.
+		//
+		// Returns the batch's own span when nothing crossed, so a scene with a
+		// hole in it and no particles near it copies nothing at all.
+		std::span<const engine::effects::ParticleInstance> CarryThroughSeams(
+			const std::vector<engine::scene::PortalSeam> &seams,
+			const std::vector<engine::scene::SeamTransform> &maps,
+			std::span<const engine::effects::ParticleInstance> particles
+		) {
+			bool any = false;
+			for (const engine::effects::ParticleInstance &particle : particles) {
+				for (const engine::scene::PortalSeam &seam : seams) {
+					if (!seam.Crosses && engine::scene::SeamCarries(seam, particle.Position)) {
+						any = true;
+						break;
+					}
+				}
+				if (any) {
+					break;
+				}
+			}
+
+			if (!any) {
+				return particles;
+			}
+
+			std::vector<engine::effects::ParticleInstance> &carried = Carried();
+			const size_t first = carried.size();
+
+			for (const engine::effects::ParticleInstance &particle : particles) {
+				engine::effects::ParticleInstance moved = particle;
+				for (size_t index = 0; index < seams.size(); index++) {
+					if (seams[index].Crosses ||
+						!engine::scene::SeamCarries(seams[index], particle.Position)) {
+						continue;
+					}
+
+					// `Point`, because a position moves and scales. The packed
+					// size is left alone: it is an unsigned normalised pair over a
+					// sixty-four metre ceiling, and unpacking and repacking it per
+					// particle to serve a mismatched pair of panes is a cost every
+					// matched pair would also pay for nothing.
+					moved.Position = maps[index].Point(particle.Position);
+					break;
+				}
+				carried.push_back(moved);
+			}
+
+			return {carried.data() + first, particles.size()};
+		}
+	}
+
 	size_t CollectParticleBatches(Store &store, std::vector<engine::render::ParticleBatch> &batches) {
 		batches.clear();
 
 		const auto *system = store.Resource<engine::effects::ParticleSystem>();
 		if (system == nullptr || system->Blocks.empty()) {
 			return 0;
+		}
+
+		// **The holes, so a spark that has gone through one is drawn in the room
+		// it went into.** A particle is a point rather than a body: it is on one
+		// side of a pane or the other and belongs wholly to whichever space that
+		// is, so it is *moved* rather than cut and copied. A torch carried into a
+		// doorway keeps the sparks this side of the plane where they are and the
+		// ones past it arrive in the far room, which is what stops a flame dying
+		// at the seam while the torch holding it does not.
+		//
+		// **A scratch copy, because the pool is the effects system's.** A batch is
+		// normally a span straight into `ParticleSystem::Instances` and nothing is
+		// copied at all; only an emitter with a particle actually through a hole
+		// pays for one, and it pays once per frame.
+		//
+		// **Reserved to the whole pool before anything is written, and that is
+		// load-bearing rather than tidy.** Every batch's span points into this
+		// buffer and every span has to survive until the renderer has drawn it, so
+		// a later batch that grew it would leave an earlier one pointing at freed
+		// memory. The pool is the ceiling on how much can ever be carried, so one
+		// reserve makes reallocation impossible rather than unlikely.
+		static thread_local std::vector<engine::scene::PortalSeam> seams;
+		const bool holed = engine::scene::GatherPortalSeams(store, seams) > 0;
+
+		static thread_local std::vector<engine::scene::SeamTransform> maps;
+		maps.clear();
+
+		Carried().clear();
+		if (holed) {
+			Carried().reserve(system->Instances.size());
+			for (const engine::scene::PortalSeam &seam : seams) {
+				maps.push_back(engine::scene::SeamMapping(seam));
+			}
 		}
 
 		// **Walked from the emitter column rather than from the block list**, and
@@ -546,6 +1051,11 @@ namespace client {
 
 				engine::render::ParticleBatch batch;
 				batch.Particles = {system->Instances.data() + block.First, block.Live};
+
+				if (holed) {
+					batch.Particles = CarryThroughSeams(seams, maps, batch.Particles);
+				}
+
 				batch.Texture = emitter.Texture;
 				batch.FlipbookSide = static_cast<float>(engine::effects::FlipbookSide(emitter.Flipbook));
 				batch.ZOffset = emitter.ZOffset;
@@ -623,6 +1133,65 @@ namespace client {
 			lights.push_back(light);
 		});
 
+		// **And the same lamps again on the far side of every hole they reach.**
+		// A torch carried up to a portal lights the room beyond it, which is what
+		// "light works through a portal" means to somebody looking at one. The
+		// copy is the lamp mapped by the seam: `Point` for where it is, `Length`
+		// for how far it reaches, `Rotate` for which way a spot points — the same
+		// four applications a body, a camera and a ray go through, and mixing two
+		// of them up is a light that leads somewhere slightly wrong.
+		//
+		// **Where it lands is the same place the sub-camera stands**, which is
+		// what makes this right rather than plausible: the map carries the front
+		// of this pane to the *back* of the far one, so a lamp in front of a hole
+		// arrives behind the far pane, shining forward into the room the hole
+		// shows. A camera does exactly that and for exactly that reason.
+		//
+		// **It ignores the aperture, and is no less correct than the lamp it
+		// copies.** A transported light spills into the whole far room rather
+		// than the hole's beam — and a local light in this pipeline is unshadowed
+		// and already spills through every wall in the world. When local shadows
+		// arrive the copy inherits them for free, because it is an ordinary entry
+		// in the same buffer. `NON-EUCLIDEAN.md` Part V.3.
+		//
+		// **One hop.** A copy is never itself copied through a second seam: two
+		// hops is a geometric series inside a sixteen-entry budget, and a room
+		// two holes away is not lit by a candle.
+		{
+			static thread_local std::vector<engine::scene::PortalSeam> seams;
+			if (engine::scene::GatherPortalSeams(store, seams) > 0) {
+				const size_t own = lights.size();
+				for (size_t index = 0; index < own; index++) {
+					for (const engine::scene::PortalSeam &seam : seams) {
+						// A cross-world pane's destination is a camera stand-in
+						// in *this* world, so a lamp through one would light a
+						// spot a metre behind the pane rather than the world it
+						// leads to. The same rule the copy pass has.
+						if (seam.Crosses) {
+							continue;
+						}
+
+						// Out of reach of the hole itself, so nothing of it gets
+						// through — measured against the rectangle rather than
+						// its plane, or every lamp in a building would transport
+						// through every pane in it.
+						if (engine::scene::SeamDistance(seam, lights[index].Position) >=
+							lights[index].Range) {
+							continue;
+						}
+
+						const engine::scene::SeamTransform through = engine::scene::SeamMapping(seam);
+
+						engine::render::SceneLight copy = lights[index];
+						copy.Position = through.Point(lights[index].Position);
+						copy.Range = through.Length(lights[index].Range);
+						copy.Direction = through.Rotate(lights[index].Direction);
+						lights.push_back(copy);
+					}
+				}
+			}
+		}
+
 		if (lights.size() > engine::render::MAX_SCENE_LIGHTS) {
 			std::partial_sort(
 				lights.begin(),
@@ -643,46 +1212,6 @@ namespace client {
 	}
 
 	namespace {
-		// Writes `Humanoid::Grounded` from a downward ray.
-		//
-		// **Here rather than in `scene`, because `scene` may not link
-		// `physics`.** `scene::StepCharacters` reads the flag and never computes
-		// it, which is the same shape `replication::DistancePriority` has: the
-		// arithmetic in the shared module, the query in whatever can run one.
-		void GroundCharacters(Store &store) {
-			store.Each<engine::scene::Humanoid, const Transform>([&store](
-																	 engine::ecs::Entity entity,
-																	 engine::scene::Humanoid &humanoid,
-																	 const Transform &placement
-																 ) {
-				if (!humanoid.Enabled) {
-					return;
-				}
-
-				// From just inside the feet to just below them. **Starting
-				// inside rather than at the surface**, because a ray that
-				// begins exactly on a face is a coin flip about whether it hits
-				// it — and the coin lands differently on two machines, which is
-				// a desync arriving through a character controller.
-				const Vector3 feet = placement.Frame.Position - Vector3{0.0f, humanoid.Height * 0.5f, 0.0f};
-
-				const engine::core::Ray ray{feet + Vector3{0.0f, 0.1f, 0.0f}, Vector3{0.0f, -1.0f, 0.0f}};
-
-				const auto hit = engine::physics::Raycast(store, ray, 0.1f + humanoid.GroundTolerance);
-
-				// **The character's own collider is rejected here rather than
-				// excluded from the query**, because `physics::Raycast` filters
-				// by layer and not by entity. One compare against the nearest
-				// hit is cheaper than a layer per character, and it is right
-				// for the case that matters: a humanoid standing on itself.
-				//
-				// What it does not handle is a *multi-part* character standing
-				// on its own leg. That wants an ignore list on the query, which
-				// is `physics`' to add and not this function's to work around.
-				humanoid.Grounded = hit.has_value() && hit->Owner != entity;
-			});
-		}
-
 		// The three effects systems, installed together because they are one
 		// dependency chain and installing two of the three is a scene where
 		// nothing emits.
@@ -797,11 +1326,13 @@ namespace client {
 				(void)engine::scene::UpdateCharacterControl(world);
 			});
 
-			scheduler.Add("ground-characters", Phase::PreSimulation, GroundCharacters);
-
-			scheduler.Add("step-characters", Phase::Simulation, [](Store &world) {
-				(void)engine::scene::StepCharacters(world, static_cast<float>(world.Time().Delta));
-			});
+			// **The other three are `physics`', because grounding needs a
+			// query.** They used to be a static `GroundCharacters` in this file
+			// plus two lambdas beside it, which meant a dedicated server hosting
+			// the same world had no grounding at all and its characters could
+			// never jump. `physics::RegisterCharacterSystems` is the one
+			// installation, and a client, a server and the studio share it.
+			engine::physics::RegisterCharacterSystems(scheduler);
 		}
 
 		// How many particles a world's pool holds when nobody has said.
@@ -986,6 +1517,15 @@ namespace client {
 		// two copies of a system that writes `PreviousTransform` can both be
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
+
+		// **Who a teleport brings in, and it must not depend on scripts.** A
+		// destination is chosen by a script in *another* world, so a world can be
+		// somebody's destination without containing a line of code — and
+		// admitting used to happen inside the Luau runtime's own delivery pump.
+		// A world with no runtime took the payload into its inbox and left it
+		// there: destroyed in the world you left, never built in the world you
+		// went to. `script::RegisterTeleportAdmission` carries the argument.
+		engine::script::RegisterTeleportAdmission(scheduler);
 
 		// **`PreRender`, ahead of everything that reads a `SurfaceAppearance`.**
 		// A `Material` instance names an asset and the part it hangs off is what

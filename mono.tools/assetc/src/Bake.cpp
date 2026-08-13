@@ -109,6 +109,32 @@ namespace assetc {
 			return file.good();
 		}
 
+		// Puts one baked asset wherever the settings say it goes, and records
+		// what that cost.
+		//
+		// **One branch, at the only point where a bake touches its output.**
+		// Everything above this — the decode, the fit, the resize, the texture
+		// rewriting — is the same work whether the result becomes a file or
+		// stays in the caller's hands, and a second baker for the second case
+		// would be a second copy of all of it. `Settings::Output` carries the
+		// argument in full.
+		void Emit(const Settings &settings, Report &report, Baked &baked, std::span<const std::byte> bytes) {
+			baked.Bytes = bytes.size();
+
+			if (settings.Output.empty()) {
+				baked.Payload.assign(bytes.begin(), bytes.end());
+				report.OutputBytes += bytes.size();
+				return;
+			}
+
+			if (!WriteFile(settings.Output / baked.Output, bytes)) {
+				baked.Failure = "cannot write";
+				report.Failures++;
+				return;
+			}
+			report.OutputBytes += bytes.size();
+		}
+
 		// Resolves relative references without allowing traversal outside the tree.
 		bool Resolve(std::string_view directory, std::string_view relative, std::string &out) {
 			std::vector<std::string> parts;
@@ -254,10 +280,16 @@ namespace assetc {
 			failure = "assetc: " + settings.Input.string() + " is not a directory";
 			return report;
 		}
-		fs::create_directories(settings.Output, error);
-		if (error) {
-			failure = "assetc: cannot create " + settings.Output.string();
-			return report;
+		// **No output directory is a run that writes nothing**, not a run
+		// rooted at the working directory — `Settings::Output` says so, and
+		// creating "" here would have made that an empty path joined onto every
+		// name instead.
+		if (!settings.Output.empty()) {
+			fs::create_directories(settings.Output, error);
+			if (error) {
+				failure = "assetc: cannot create " + settings.Output.string();
+				return report;
+			}
 		}
 
 		// Sort sources so reports are deterministic across filesystems.
@@ -362,13 +394,7 @@ namespace assetc {
 
 				baked.Output = BakedName(relative);
 				baked.Kind = AssetKind::Material;
-				baked.Bytes = writer.Size();
-				if (!WriteFile(settings.Output / baked.Output, writer.Bytes())) {
-					baked.Failure = "cannot write";
-					report.Failures++;
-				} else {
-					report.OutputBytes += writer.Size();
-				}
+				Emit(settings, report, baked, writer.Bytes());
 				report.Assets.push_back(std::move(baked));
 				continue;
 			}
@@ -381,13 +407,7 @@ namespace assetc {
 				// Preserve unknown files unless explicitly disabled.
 				baked.Output = relative;
 				baked.Kind = engine::assets::KindOfName(relative);
-				baked.Bytes = bytes.size();
-				if (!WriteFile(settings.Output / relative, bytes)) {
-					baked.Failure = "cannot write";
-					report.Failures++;
-				} else {
-					report.OutputBytes += bytes.size();
-				}
+				Emit(settings, report, baked, bytes);
 				report.Assets.push_back(std::move(baked));
 				continue;
 			}
@@ -496,13 +516,7 @@ namespace assetc {
 				}
 
 				baked.Kind = AssetKind::Mesh;
-				baked.Bytes = writer.Size();
-				if (!WriteFile(settings.Output / baked.Output, writer.Bytes())) {
-					baked.Failure = "cannot write";
-					report.Failures++;
-				} else {
-					report.OutputBytes += writer.Size();
-				}
+				Emit(settings, report, baked, writer.Bytes());
 				report.Assets.push_back(std::move(baked));
 				continue;
 			}
@@ -537,13 +551,7 @@ namespace assetc {
 			}
 
 			baked.Kind = exports.back().Kind;
-			baked.Bytes = exports.back().Bytes.size();
-			if (!WriteFile(settings.Output / baked.Output, exports.back().Bytes)) {
-				baked.Failure = "cannot write";
-				report.Failures++;
-			} else {
-				report.OutputBytes += baked.Bytes;
-			}
+			Emit(settings, report, baked, exports.back().Bytes);
 			report.Assets.push_back(std::move(baked));
 		}
 

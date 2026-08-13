@@ -26,11 +26,25 @@
 // | `X.meta.json` | properties patched onto whatever `X` built |
 // | `init.meta.json` in `D/` | the same, patched onto `D` |
 // | `X.project.json` | that project, built under the node that named it |
+// | `default.project.json` in `D/` | `D` **is** that project, and `D` is not also walked |
 // | `X.txt` | a `StringValue` holding the file |
 // | `X.csv` | a `LocalizationTable` holding the file |
 //
 // `.lua` is accepted everywhere `.luau` is, because Rojo's own table is written
 // in terms of `.lua` and a project may predate the newer extension.
+//
+// **`default.project.json` replacing its folder is what makes an installed
+// package arrive once.** Every wally dependency is a directory holding a project
+// file whose whole tree is a `$path` — `{"tree": {"$path": "lib"}}` — beside the
+// tests and examples it was published with. Following the project *and* walking
+// the folder built the package twice, once under the name it publishes and once
+// under the folder's own, and two copies of a `ModuleScript` are two modules
+// with two states. Measured against a real game: 2012 scripts where 1082 files
+// could be one, the difference being every installed package.
+//
+// The other half of that rule is that the nested project's **root** maps onto
+// the node that included it, path and all. A build that started at the root's
+// *children* built nothing for a package, because a package's root has none.
 //
 // `init` is the one that looks like a special case and is not: Rojo uses it so a
 // script can have children, which is exactly what an instance tree is for.

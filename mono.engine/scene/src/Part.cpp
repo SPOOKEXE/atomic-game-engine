@@ -289,6 +289,54 @@ namespace engine::scene {
 			return property;
 		}
 
+		// Mass: what the part weighs, and it is read-only for the reason
+		// Roblox's is.
+		//
+		// **Derived, so there is nothing to write it to.** A part with
+		// `CustomPhysicalProperties` weighs its density times its volume, and a
+		// part without one weighs whatever `RigidBody::Mass` says — `MassOf` is
+		// the rule and the solver asks the same function. Offering a setter
+		// would mean deciding which of the two inputs an assignment moves, and
+		// both answers are wrong: writing density makes a resize change what was
+		// just set, and writing `RigidBody::Mass` makes it silently disagree
+		// with the density beside it.
+		//
+		// An anchored part has no `RigidBody` and answers zero, which is what
+		// the solver reads as immovable — the honest number for a thing the
+		// world may not move.
+		PropertyDescriptor MassProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Mass");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Reads = &ecs::ComponentSet::Intern({
+				ecs::Components::Of<RigidBody>(),
+				ecs::Components::Of<Collider>(),
+				ecs::Components::Of<PhysicsProperties>(),
+			});
+
+			// **Declared rather than implied by the missing setter.** A panel
+			// greys a row on this flag and a script's assignment is refused by
+			// it; leaving it true with no `Set` would be a property that reads
+			// as editable and silently does nothing.
+			property.Writable = false;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const RigidBody *body = store.Get<RigidBody>(instance);
+				const Collider *collider = store.Get<Collider>(instance);
+				if (body == nullptr || collider == nullptr) {
+					*static_cast<float *>(out) = 0.0f;
+					return true;
+				}
+				*static_cast<float *>(out) = MassOf(*collider, *body, store.Get<PhysicsProperties>(instance));
+				return true;
+			};
+
+			// No `Set`. A descriptor with none is read-only, which is what a
+			// panel greys out and what a script's assignment is refused by.
+			return property;
+		}
+
 		// Anchored: whether the world may move it — and the one property that
 		// is not stored anywhere.
 		//
@@ -508,6 +556,102 @@ namespace engine::scene {
 				}
 
 				surface->Effect = static_cast<SurfaceEffect>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
+		// Destination: the part on the far side of a portal.
+		//
+		// **A reference, because both ends are in one world.** Rule 3 forbids a
+		// handle that crosses a world boundary and this never does — a portal
+		// pairs two parts of one store, which is the case `PropertyType::Reference`
+		// exists for. `CurrentCameraProperty` in `Services.cpp` is the same shape.
+		//
+		// **Refused for anything that is not a part in space**, because that is
+		// the whole of what the aim needs: a `Transform` to build the far face
+		// frame from, and `Bounds` to find where that face is. Pointing a portal
+		// at a `Folder` would be a portal that silently stayed a mirror, and a
+		// mistake refused where it was made beats one discovered by looking at
+		// the wall.
+		//
+		// **Clearing is allowed** — `portal.Destination = nil` turns it back
+		// into a mirror, which is also what a deleted destination does.
+		PropertyDescriptor DestinationProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Destination");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(ecs::Entity);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Portal>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Portal *portal = store.Get<Portal>(instance);
+				if (portal == nullptr) {
+					return false;
+				}
+				*static_cast<ecs::Entity *>(out) = portal->Destination;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Portal *portal = store.GetMutable<Portal>(instance);
+				if (portal == nullptr) {
+					return false;
+				}
+
+				const auto destination = *static_cast<const ecs::Entity *>(value);
+				if (destination != ecs::NULL_ENTITY && (store.Get<Transform>(destination) == nullptr ||
+														store.Get<Bounds>(destination) == nullptr)) {
+					return false;
+				}
+
+				portal->Destination = destination;
+				return true;
+			};
+
+			return property;
+		}
+
+		// DestinationWorld: whose contents the pane shows.
+		//
+		// **A `PropertyType::Name` and not a `String`**, for the reason
+		// `TagFilterProperty` records the hard way: `String` marshals a
+		// `std::string` and this getter moves a `core::Name`, and declaring the
+		// wrong one type-checks and fails at the first script that assigns to it.
+		//
+		// Unvalidated on purpose, unlike `Destination` above. A world is looked
+		// up by name at draw time by whoever is drawing, and the destination
+		// world may legitimately not exist yet — a script naming one that a
+		// later `AddWorld` creates is ordinary, and refusing the assignment here
+		// would make authoring order significant for no gain. A name matching
+		// nothing shows this world, which is visible.
+		PropertyDescriptor DestinationWorldProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("DestinationWorld");
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Portal>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Portal *portal = store.Get<Portal>(instance);
+				if (portal == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) = portal->DestinationWorld;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Portal *portal = store.GetMutable<Portal>(instance);
+				if (portal == nullptr) {
+					return false;
+				}
+				portal->DestinationWorld = *static_cast<const core::Name *>(value);
 				return true;
 			};
 
@@ -1091,6 +1235,15 @@ namespace engine::scene {
 				// carries the whole argument.
 				ecs::Components::Of<SurfaceAppearance>(),
 				ecs::Components::Of<Tags>(),
+
+				// **On the class, so every part has one, for
+				// `SurfaceAppearance`'s reason.** A properties panel that could
+				// only show density and friction on the parts somebody had
+				// already customised would be a panel with a hole in it, and an
+				// optional component is a join per row for four floats. The
+				// flag inside says whether any of it is used —
+				// `PhysicsProperties::Custom`.
+				ecs::Components::Of<PhysicsProperties>(),
 			};
 			const ecs::ClassId basePart = ecs::Classes::Register("BasePart", pvInstance, base);
 
@@ -1101,6 +1254,14 @@ namespace engine::scene {
 			// `PartDesc::Anchored`'s decision, and putting them in the class
 			// set would land static geometry in the dynamic archetype.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});
+
+			// **A `Model` is a `PVInstance` and adds nothing.** It is a
+			// container with a place in the world, which is exactly what
+			// `PVInstance` already is — so what the class buys is the
+			// vocabulary: `Instance.new("Model")` resolves, `:IsA("Model")`
+			// answers, and a character is a thing rather than six loose parts
+			// under Workspace. `scene::MakeCharacter` is its first caller.
+			(void)ecs::Classes::Register("Model", pvInstance, {});
 
 			// **A `MeshPart` is a `BasePart` whose mesh came from somewhere
 			// else**, and that is the whole of the difference. It adds no
@@ -1149,6 +1310,21 @@ namespace engine::scene {
 			const std::array surface{ecs::Components::Of<SurfaceCamera>()};
 			const ecs::ClassId surfaceCameraClass =
 				ecs::Classes::Register("SurfaceCamera", cameraClass, surface);
+
+			// **A `Portal` is a `SurfaceCamera` that has been told where the
+			// other end is, and deriving says exactly that.** Everything a
+			// mirror has it keeps — the face, the surface size, the image
+			// transparency, the effect, the tag filter — because a portal
+			// renders through the same pass, projects onto its pane the same
+			// way, and differs only in where its camera stands.
+			//
+			// **A class rather than a property on `SurfaceCamera`**, so a scene
+			// says which of the two it means. Instantiating one is the whole
+			// declaration: `Instance.new("Portal")` reads as a hole, where a
+			// mirror with a nil destination would read as a mirror somebody had
+			// not finished configuring.
+			const std::array portal{ecs::Components::Of<Portal>()};
+			const ecs::ClassId portalClass = ecs::Classes::Register("Portal", surfaceCameraClass, portal);
 
 			// **A sound is an `Instance`, not a `PVInstance`, and the omission
 			// is the design.** It has no place of its own: under `Workspace` it
@@ -1335,6 +1511,35 @@ namespace engine::scene {
 			ecs::Classes::Property<&Visual::Tint>(basePart, "Color");
 			ecs::Classes::Property<&Visual::Visible>(basePart, "Visible");
 
+			// --- what it is made of ---------------------------------------
+			//
+			// **Roblox spells this as one `PhysicalProperties` value and this
+			// spells it as four fields.** The value type would need a
+			// `PropertyType` of its own, a Luau userdata, a wire form and a
+			// panel row that edits four numbers inside one cell — for a thing
+			// every caller immediately takes apart again. Four properties are
+			// four rows a panel already knows how to draw and four names a
+			// script already knows how to set.
+			//
+			// `CustomPhysicalProperties` keeps Roblox's name because it is the
+			// one an author looks for, and it is the switch: without it the
+			// three below are ignored and the part feels like its material.
+			ecs::Classes::Property<&PhysicsProperties::Custom>(basePart, "CustomPhysicalProperties");
+			ecs::Classes::Property<&PhysicsProperties::Density>(basePart, "Density");
+			ecs::Classes::Property<&PhysicsProperties::Friction>(basePart, "Friction");
+			ecs::Classes::Property<&PhysicsProperties::Elasticity>(basePart, "Elasticity");
+
+			// **Drag, under the names the integrator already reads.** A second
+			// pair on `PhysicsProperties` would be two places to write one
+			// number; these are `RigidBody`'s own fields, so a part that is
+			// anchored has neither — which is honest, because an anchored part
+			// has no motion to damp and Roblox's `Anchored` part ignores drag
+			// in the same way.
+			ecs::Classes::Property<&RigidBody::LinearDamping>(basePart, "LinearDamping");
+			ecs::Classes::Property<&RigidBody::AngularDamping>(basePart, "AngularDamping");
+
+			ecs::Classes::Computed(basePart, MassProperty());
+
 			// **`Mesh` and `ColorMap` are not here, and that is v0.10's
 			// correction.** `BasePart` is what `Part`, `MeshPart` and a future
 			// `UnionOperation` *share*, and geometry loaded from a file is not
@@ -1442,14 +1647,27 @@ namespace engine::scene {
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
 			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
 
-			// The surface camera's three. `SurfaceSize` above is inherited, so a
+			// The surface camera's four. `SurfaceSize` above is inherited, so a
 			// `SurfaceCamera` can still be resized like any other.
 			ecs::Classes::ClampedProperty<&SurfaceCamera::ImageTransparency, 0.0f, 1.0f>(
 				surfaceCameraClass, "ImageTransparency"
 			);
+
+			// **How often the surface may redraw, and zero is uncapped.** A
+			// plain property rather than a clamped one: a ceiling here would be
+			// a second opinion about what a display can do, and the floor is
+			// already meaningful — see `SurfaceCamera::FPS`. A negative value
+			// is refused where it is read rather than where it is written, so
+			// a script that computes one gets the uncapped behaviour instead of
+			// a surface that never draws again.
+			ecs::Classes::Property<&SurfaceCamera::FPS>(surfaceCameraClass, "FPS");
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
 			ecs::Classes::Computed(surfaceCameraClass, SurfaceEffectProperty());
 			ecs::Classes::Computed(surfaceCameraClass, TagFilterProperty());
+
+			// The portal's one, and the whole of the feature is in it.
+			ecs::Classes::Computed(portalClass, DestinationProperty());
+			ecs::Classes::Computed(portalClass, DestinationWorldProperty());
 
 			// The sound's six. All plain fields, which is unusual enough here
 			// to be worth saying: nothing about a sound is a doubled
@@ -1588,6 +1806,42 @@ namespace engine::scene {
 	// the *order* of the two would decide which id each class got, which is
 	// rule 4's hazard arriving inside one process. So there is one static, and
 	// every accessor goes through it.
+	float VolumeOf(const Collider &collider) {
+		// Half-extents, as everywhere else in this module — `InverseInertiaOf`
+		// reads the same field the same way.
+		const float x = std::max(collider.Extent.X, 0.0f);
+		const float y = std::max(collider.Extent.Y, 0.0f);
+		const float z = std::max(collider.Extent.Z, 0.0f);
+
+		switch (collider.Shape) {
+		case ShapeKind::Box:
+			return 8.0f * x * y * z;
+		case ShapeKind::Sphere:
+			return (4.0f / 3.0f) * std::numbers::pi_v<float> * x * x * x;
+		case ShapeKind::Cylinder:
+			// Radius from X, half-height from Y — the axes `InverseInertiaOf`
+			// puts the barrel along.
+			return std::numbers::pi_v<float> * x * x * (2.0f * y);
+		}
+		return 0.0f;
+	}
+
+	float MassOf(const Collider &collider, const RigidBody &body, const PhysicsProperties *properties) {
+		if (properties == nullptr || !properties->Custom) {
+			return std::max(body.Mass, 0.0f);
+		}
+
+		// **A zero-volume shape keeps the authored mass rather than becoming
+		// weightless.** A part with no extent is a scene being built rather than
+		// a thing with no substance, and a mass of zero is what the solver reads
+		// as immovable — the opposite of what a density of nearly nothing means.
+		const float volume = VolumeOf(collider);
+		if (!(volume > 0.0f) || !(properties->Density > 0.0f)) {
+			return std::max(body.Mass, 0.0f);
+		}
+		return properties->Density * volume;
+	}
+
 	void EnsureClassTree() {
 		static const ecs::ClassId root = RegisterTree();
 		(void)root;

@@ -144,13 +144,46 @@ namespace studio {
 		//        — rule 4 — so two clients that took one name would be two
 		//        worlds nothing could tell apart, in a panel or in a recording.
 		// @return `false` when the replica world could not be created.
+		// @param adopt     A `Player` already in `authority` to take over rather
+		//        than admitting a new one. **What makes a teleport followable**:
+		//        the destination world has already rebuilt the player from the
+		//        arriving payload, and a link that admitted a second one would
+		//        put the same person in the world twice.
 		bool Start(
 			engine::world::Universe &universe,
 			engine::world::WorldId authority,
 			double tickRate,
 			std::string &error,
-			std::string_view label = "client"
+			std::string_view label = "client",
+			engine::ecs::Entity adopt = engine::ecs::Entity{}
 		);
+
+		// How many frames this client's player has been missing for.
+		//
+		// **A teleport is not instant and cannot be**, which is what this
+		// counts. The departure destroys the player during a tick; the envelope
+		// is routed at that tick's barrier; the destination admits the arrival
+		// when *its* script heartbeat next pumps its inbox — so there is a
+		// window, at least one tick wide, where the player is in neither world.
+		// An editor that declared the client lost on the first frame of that
+		// window would kill every teleport it followed, which is exactly what it
+		// did before this existed.
+		//
+		// Reset by arriving. Read by `Editor::FollowTeleports`.
+		int &Missing() {
+			return Missing_;
+		}
+
+		// What this client's player is called.
+		//
+		// **A name and not a handle, because a teleport does not move one.**
+		// Nothing crosses a world boundary but bytes, so the player in the
+		// destination is a different entity that happens to be the same person —
+		// and the only thing the two share is what they are called. `Editor::
+		// FollowTeleports` is the one reader.
+		const std::string &PlayerName() const {
+			return PlayerName_;
+		}
 
 		// Publishes this tick, hands the messages over, and acknowledges.
 		//
@@ -175,9 +208,34 @@ namespace studio {
 			return Replica_;
 		}
 
+		// The world this client is a client *of*.
+		//
+		// **Not the same as the run's world once a teleport has been followed**,
+		// and that difference is a bug this accessor exists to have prevented: a
+		// link that moved to another scene still belongs to the run that started
+		// it, so asking the run's world whether this client's player is alive
+		// answers "no" for ever and follows the same teleport every frame.
+		engine::world::WorldId AuthorityWorld() const {
+			return Authority_;
+		}
+
 		// Whether this link is running.
 		bool IsRunning() const {
 			return Replica_.IsValid();
+		}
+
+		// The `Player` this client is, in the *authority's* world.
+		//
+		// **The authority's handle, and a replica's handle for the same thing.**
+		// A replica applies structure with the entity ids it was sent, so the
+		// two ends agree on numbering by construction — `game::JoinNotice` says
+		// the same about a real wire, and it is what lets one handle be looked
+		// up in either store.
+		//
+		// Null for a world with no `Players` service, which is every scene
+		// nobody furnished.
+		engine::ecs::Entity Player() const {
+			return Player_;
 		}
 
 		// What the last step moved.
@@ -192,6 +250,15 @@ namespace studio {
 		engine::replication::Authority Server;
 		engine::replication::Replica Client;
 		engine::replication::ClientId Handle;
+
+		// The player this client was given, in the authority's world.
+		engine::ecs::Entity Player_;
+
+		// What that player is called, which is all a teleport carries.
+		std::string PlayerName_;
+
+		// Frames since this client's player stopped being anywhere.
+		int Missing_ = 0;
 
 		LinkReport Last;
 	};

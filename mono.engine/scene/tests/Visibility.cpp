@@ -12,6 +12,7 @@
 // `physics::SyncBroadphase` and `gui::Compiled` both open with.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
@@ -348,4 +349,103 @@ TEST_CASE("the signature never crosses a snapshot alive", "[scene][visibility]")
 	restored.Remove<Rendered>(part);
 	CHECK(SyncRendered(restored) == 1);
 	CHECK(restored.Has<Rendered>(part));
+}
+
+// --- the frame a row is interpolated from -------------------------------------
+
+// **The flash, asserted.** `client::BuildDrawList` draws
+// `PreviousTransform.NLerp(Transform, alpha)`, so a row whose previous frame is
+// the identity is drawn sliding in from the origin — which is what every block
+// `examples/Slide.luau` spawns did, for the five frames between being parented
+// and the next tick's `capture-previous`.
+//
+// The rule this checks is narrow on purpose: a row that was **not drawn last
+// frame** did not travel from anywhere, so the frame it is interpolated from is
+// where it is. A row that was already drawn keeps its history, because that
+// history *is* the motion — clearing it on every write is the fix that was tried
+// first and it turns every scripted animation into stepped motion at the tick
+// rate.
+TEST_CASE("a row drawn for the first time is not interpolated from the origin", "[scene][visibility]") {
+	visibility_test::Ready();
+
+	Store store("visibility_test.arrival");
+	const Entity workspace = InstallServices(store);
+
+	// Made outside the tree and placed, exactly as `Instance.new("Part")` and
+	// then a `Position` write leave it: a real transform and a previous frame
+	// nothing has ever written.
+	const Entity part = MakePart(store, PartDesc{});
+	REQUIRE(part != NULL_ENTITY);
+
+	Transform placed;
+	placed.Frame = engine::core::CFrame(engine::core::Vector3{40.0f, 9.0f, -3.0f});
+	store.Set(part, placed);
+
+	const engine::scene::PreviousTransform *before =
+		store.Get<engine::scene::PreviousTransform>(part);
+	REQUIRE(before != nullptr);
+	CHECK(before->Frame.Position.X == 0.0f);
+
+	// Parenting it is what puts it on screen, and the sync is what notices.
+	REQUIRE(store.SetParent(part, workspace));
+	CHECK(SyncRendered(store) == 1);
+
+	const engine::scene::PreviousTransform *after =
+		store.Get<engine::scene::PreviousTransform>(part);
+	REQUIRE(after != nullptr);
+	CHECK(after->Frame.Position.X == 40.0f);
+	CHECK(after->Frame.Position.Y == 9.0f);
+	CHECK(after->Frame.Position.Z == -3.0f);
+}
+
+TEST_CASE("a row already on screen keeps the frame it came from", "[scene][visibility]") {
+	visibility_test::Ready();
+
+	Store store("visibility_test.moving");
+	const Entity workspace = InstallServices(store);
+	const Entity part = visibility_test::PartIn(store, workspace);
+
+	CHECK(SyncRendered(store) == 1);
+
+	// Moved the way a script animating something does, once per tick.
+	Transform moved;
+	moved.Frame = engine::core::CFrame(engine::core::Vector3{5.0f, 0.0f, 0.0f});
+	store.Set(part, moved);
+
+	CHECK(SyncRendered(store) == 1);
+
+	// **Still the old frame**, which is what buys smooth motion between ticks.
+	// If this ever reads 5, the seeding above has stopped asking whether the row
+	// is new and every animation in the engine is stepping at the tick rate.
+	const engine::scene::PreviousTransform *previous =
+		store.Get<engine::scene::PreviousTransform>(part);
+	REQUIRE(previous != nullptr);
+	CHECK(previous->Frame.Position.X == 0.0f);
+}
+
+TEST_CASE("a part shown again after being moved while hidden does not slide", "[scene][visibility]") {
+	visibility_test::Ready();
+
+	Store store("visibility_test.hidden");
+	const Entity workspace = InstallServices(store);
+	const Entity part = visibility_test::PartIn(store, workspace);
+
+	CHECK(SyncRendered(store) == 1);
+
+	visibility_test::SetVisible(store, part, false);
+	CHECK(SyncRendered(store) == 0);
+
+	Transform moved;
+	moved.Frame = engine::core::CFrame(engine::core::Vector3{0.0f, 100.0f, 0.0f});
+	store.Set(part, moved);
+
+	visibility_test::SetVisible(store, part, true);
+	CHECK(SyncRendered(store) == 1);
+
+	// It did not travel a hundred studs — nobody was watching, and drawing the
+	// journey is inventing motion that never happened.
+	const engine::scene::PreviousTransform *previous =
+		store.Get<engine::scene::PreviousTransform>(part);
+	REQUIRE(previous != nullptr);
+	CHECK(previous->Frame.Position.Y == 100.0f);
 }

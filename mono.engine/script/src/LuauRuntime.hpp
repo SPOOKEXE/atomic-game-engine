@@ -27,6 +27,8 @@ namespace engine::script {
 			return Language::Luau;
 		}
 
+		ScriptSurface Surface() const override;
+
 		// The interrupt counter the step budget already maintains.
 		//
 		// **Nothing is added to the hot path to produce this.** `Interrupt` runs

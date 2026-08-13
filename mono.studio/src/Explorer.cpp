@@ -1,13 +1,14 @@
+#include "PerCallSite.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
-#include "PerCallSite.hpp"
-
 #include <algorithm>
 #include <imgui.h>
+#include <studio/Complete.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
@@ -55,49 +56,17 @@ namespace studio {
 				KnownClasses = Classes::Count();
 				Results.clear();
 
-				const ClassId instanceClass = Classes::Find(Name("Instance"));
-
-				// **Services are excluded as a category, not as nine names.** A
-				// world has exactly one of each and `scene::InstallServices`
-				// is what puts them there, so offering `ServerStorage` in the
-				// palette offers a second one that nothing resolves and every
-				// `GetService` ignores. Asking `IsA` rather than listing them
-				// is what keeps a tenth service out of this function — the same
-				// property the `Instance` filter above already has.
-				const ClassId serviceClass = Classes::Find(Name("Service"));
-
+				// **The filter is `InsertableClasses`, not a copy of it here.**
+				// Which classes an author may name is now asked in two places —
+				// this palette and the script editor's completion popup — and
+				// `mono.tools/bindings` says why the answer may only live in
+				// one: the abstract bases are excluded by name, the run time
+				// would mint them perfectly happily, and two lists of names
+				// that must agree are two lists that eventually do not.
 				std::vector<std::pair<int, ClassId>> scored;
-				for (size_t index = 0; index < KnownClasses; index++) {
-					const ClassId id{static_cast<uint32_t>(index)};
-					const engine::ecs::ClassInfo &info = Classes::Describe(id);
-
-					if (!info.Name.IsValid()) {
-						continue;
-					}
-
-					// Everything under `Instance`, which is every class an
-					// author can put in a tree. A class registered by some
-					// other module for its own storage is not one of those and
-					// is not offered.
-					if (instanceClass.IsValid() && !Classes::IsA(id, instanceClass)) {
-						continue;
-					}
-
-					if (serviceClass.IsValid() && Classes::IsA(id, serviceClass)) {
-						continue;
-					}
-
-					// The abstract bases. Roblox does not let you insert an
-					// `Instance` or a `BasePart` either, and offering them
-					// would produce rows nothing knows how to draw.
-					const std::string_view name = Label(info.Name);
-					if (name == "Instance" || name == "PVInstance" || name == "BasePart" ||
-						name == "LuaSourceContainer") {
-						continue;
-					}
-
+				for (const ClassId id : InsertableClasses()) {
 					int score = 0;
-					if (FuzzyMatch(Query, name, score)) {
+					if (FuzzyMatch(Query, Label(Classes::Describe(id).Name), score)) {
 						scored.emplace_back(score, id);
 					}
 				}

@@ -83,10 +83,16 @@ namespace engine::script {
 
 		// Compare the stored spelling directly. Interning each lookup takes the
 		// process-wide registry lock and adds a hash lookup to every property access.
+		// **A non-scriptable property is not found, rather than found and
+		// refused.** `PropertyDescriptor::Scriptable` is about who is asking,
+		// and the honest answer to a script asking for a script's `Source` is
+		// the same one it gets for a member that does not exist — otherwise the
+		// error message itself tells a program what is there to reach for. It
+		// also means the read path needs no second check: this is the one door.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, std::string_view name) {
 			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
 				if (property.Spelling == name) {
-					return &property;
+					return property.Scriptable ? &property : nullptr;
 				}
 			}
 			return nullptr;
@@ -529,6 +535,35 @@ namespace engine::script {
 		}
 
 		// --- the metatable ---------------------------------------------------
+
+		// The signals `InstanceIndex` answers, in the order it tests them.
+		//
+		// **A list beside a branch chain, which is the shape this file
+		// otherwise refuses.** It is here because the chain below is not
+		// enumerable: a signal is not a property and not a member of any table,
+		// so it exists only as a string comparison, and nothing can walk a
+		// comparison. An editor offering `part.Changed` has to be told.
+		//
+		// The duplication is real and is why `engine.script.vocabulary` checks
+		// every entry against a live VM rather than trusting this to stay in
+		// step. Add a branch below, add a name here, and the suite says so if
+		// you forget.
+		constexpr std::string_view SIGNALS[] = {
+			"Changed",
+			"ChildAdded",
+			"ChildRemoved",
+			"DescendantAdded",
+			"DescendantRemoving",
+			"AncestryChanged",
+			"PlayerAdded",
+			"PlayerRemoving",
+			"Activated",
+			"InputBegan",
+			"InputEnded",
+			"MouseEnter",
+			"MouseLeave",
+			"MouseMoved",
+		};
 
 		int InstanceIndex(lua_State *state) {
 			Store &store = StoreOf(state);
@@ -1274,11 +1309,21 @@ namespace engine::script {
 		PushInstance(state, instance);
 	}
 
+	std::vector<std::string_view> LuauInstanceSignalNames() {
+		return {std::begin(SIGNALS), std::end(SIGNALS)};
+	}
+
 	void OpenInstances(lua_State *state) {
 		LuauContext &context = ContextOf(state);
 
 		// The method table, in the registry so `__index` hands back one shared
 		// closure per method rather than building one per access.
+		//
+		// **The editor reads this same table back**, rather than a list of
+		// method names kept beside it: `LuauRuntime::Vocabulary` walks the
+		// registry entry below, so a method added here is offered in the script
+		// editor with nothing else changing. `LuauEcs` appends five more to it
+		// and those arrive the same way.
 		static const struct {
 			const char *Name;
 			lua_CFunction Function;
@@ -1575,4 +1620,8 @@ namespace engine::script {
 		lua_newtable(state);
 		lua_setfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");
 	}
+	ecs::Entity CheckInstanceArgument(lua_State *state, int index) {
+		return CheckInstance(state, index);
+	}
+
 }

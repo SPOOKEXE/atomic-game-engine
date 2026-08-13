@@ -749,6 +749,53 @@ namespace studio {
 			ImGui::TextDisabled("64 lowercase hex characters; `cdn --publish` prints it");
 		}
 
+		ImGui::SeparatorText("Raw folders");
+
+		// **Not origins, and the page has to say why.** Everything above is a
+		// place content is *fetched* from, and a fetch is only ever of something
+		// a signed manifest names. A folder of PNGs has neither, so these are
+		// baked by this editor for this editor — `ContentSources::RawFolders`
+		// carries the argument, and the assets panel repeats it on the tab.
+		ImGui::TextDisabled("art folders this editor bakes from directly; nothing here reaches a client");
+
+		if (ImGui::Checkbox("Memory-only", &Content.MemoryOnly)) {
+			changed = true;
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled(
+			Content.MemoryOnly ? "baked results are kept in this process and written nowhere"
+							   : "baked results are also written into the store's baked/, ready to publish"
+		);
+
+		int dropFolder = -1;
+		for (size_t index = 0; index < Content.RawFolders.size(); ++index) {
+			ImGui::PushID(static_cast<int>(index + Content.Sources.size()));
+
+			std::string folder = Content.RawFolders[index].generic_string();
+			ImGui::SetNextItemWidth(-engine::ui::Scaled(40.0f));
+			if (TextField("##rawfolder", folder, "a folder of unprocessed art")) {
+				Content.RawFolders[index] = std::filesystem::path(folder);
+				changed = true;
+			}
+
+			ImGui::SameLine();
+			if (ImGui::SmallButton("x")) {
+				dropFolder = static_cast<int>(index);
+			}
+			ImGui::PopID();
+		}
+
+		// After the loop, because it mutates the vector the loop is walking.
+		if (dropFolder >= 0) {
+			Content.RawFolders.erase(Content.RawFolders.begin() + dropFolder);
+			changed = true;
+		}
+
+		if (ImGui::Button("Add raw folder")) {
+			Content.RawFolders.emplace_back();
+			changed = true;
+		}
+
 		ImGui::SeparatorText("Cache");
 
 		std::string cache = Content.CachePath.generic_string();

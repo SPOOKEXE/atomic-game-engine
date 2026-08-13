@@ -136,18 +136,41 @@ TEST_CASE("a part moved in Edit mode is drawn where it was moved to", "[studio][
 	CHECK(drawn.Z == Catch::Approx(moved.Z));
 }
 
-// **The failure, asserted rather than described.** This is what the editor did:
-// a never-advanced accumulator is zero, zero means "draw the previous frame",
-// and the previous frame of a part the editor made is the identity. Without
-// this case the one above passes for a `PresentationAlpha` that always returns
-// one, and there would be nothing to say *why* it must.
-TEST_CASE("presenting an unticked world at its accumulator draws the origin", "[studio][presentation]") {
+// **The failure, asserted rather than described.** A never-advanced accumulator
+// is zero, zero means "draw the previous frame", and in a world nothing ticks
+// the previous frame is however the part was last *drawn* — which is not where
+// the editor has since dragged it to. Without this case the one above passes
+// for a `PresentationAlpha` that always returns one, and there would be nothing
+// to say *why* it must.
+//
+// **It used to assert the origin, and that was the same bug seen one step
+// earlier.** A part the editor had just made was drawn interpolating from the
+// identity, because nothing had ever written its `PreviousTransform` — so the
+// stale frame and the origin were the same place and this case could not tell
+// them apart. `scene::SyncRendered` now seeds the previous frame of a row the
+// moment it is first drawn (a thing that has just appeared did not come from
+// anywhere), so the part draws where it was rather than at the origin, and this
+// case says what it always meant: at alpha zero you get the *last drawn*
+// position and not the current one.
+TEST_CASE("presenting an unticked world at its accumulator draws a stale frame", "[studio][presentation]") {
 	Universe universe;
 	const WorldId world = Scene(universe, "studio.presentation.stale");
 
-	universe.Enter(world, [](Store &store) {
+	const Vector3 placed{1.0f, 2.0f, 3.0f};
+	universe.Enter(world, [&placed](Store &store) {
 		const Entity part = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Dragged");
-		const Vector3 moved{12.0f, 3.0f, -5.0f};
+		REQUIRE(store.SetProperty(part, Name("Position"), &placed, sizeof(placed)));
+	});
+
+	// Drawn once where it was placed, which is what gives it a previous frame
+	// to be stale about. A part that has never been drawn has no history, and
+	// asserting against one would be asserting against the seeding above.
+	const Vector3 first = DrawnAt(universe, world, 1.0f);
+	CHECK(first.X == Catch::Approx(placed.X));
+
+	const Vector3 moved{12.0f, 3.0f, -5.0f};
+	universe.Enter(world, [&moved](Store &store) {
+		const Entity part = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Dragged");
 		REQUIRE(store.SetProperty(part, Name("Position"), &moved, sizeof(moved)));
 	});
 
@@ -156,7 +179,11 @@ TEST_CASE("presenting an unticked world at its accumulator draws the origin", "[
 
 	const Vector3 drawn = DrawnAt(universe, world, universe.AlphaOf(world));
 
-	CHECK(drawn.X == Catch::Approx(0.0f));
-	CHECK(drawn.Y == Catch::Approx(0.0f));
-	CHECK(drawn.Z == Catch::Approx(0.0f));
+	CHECK(drawn.X == Catch::Approx(placed.X));
+	CHECK(drawn.Y == Catch::Approx(placed.Y));
+	CHECK(drawn.Z == Catch::Approx(placed.Z));
+
+	// And emphatically not where the editor moved it to, which is the whole
+	// point: `PresentationAlpha` returning one is what closes that gap.
+	CHECK(drawn.X != Catch::Approx(moved.X));
 }

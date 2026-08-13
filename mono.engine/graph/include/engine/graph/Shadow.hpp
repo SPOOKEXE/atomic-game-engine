@@ -54,6 +54,44 @@ namespace engine::graph {
 	// @return `Projection * View` for the light.
 	glm::mat4 FitDirectionalLight(const core::AABB &bounds, const core::Vector3 &direction);
 
+	// The same, for the beam of light that gets through one hole.
+	//
+	// **The frustum is the aperture, and that is the whole trick.** Light does
+	// not cross a portal everywhere — it crosses through the rectangle and
+	// nowhere else — so a shadow map for a hole has to answer only for the
+	// fragments that rectangle's beam reaches. Fitting the sides of the box to
+	// the pane's own rectangle makes the map *be* the mask: anything outside the
+	// beam projects outside `0..1` and the lookup already reads that as lit.
+	//
+	// **Fitted to the rectangle across the light and to `bounds` along it.** A
+	// beam is as wide as its hole and as long as the room, and the two halves
+	// come from different places: the sides are the pane, and the depth has to
+	// cover every caster between the sun and the rectangle *and* every receiver
+	// the beam reaches, which is the scene.
+	//
+	// `NON-EUCLIDEAN.md` Part V.3 is the derivation, and the surprising half of
+	// it is which way the map goes: the near room's casters are left where they
+	// are and the far-side *fragment* is mapped back, so this matrix is built in
+	// the near room's own coordinates and needs nothing transformed.
+	//
+	// @param bounds    What the light must be able to see, in world space. Only
+	//                  its extent along `direction` is used.
+	// @param centre    The middle of the pane's rectangle.
+	// @param first     One half-axis of it, as a vector.
+	// @param second    The other.
+	// @param direction Which way the light travels. A zero direction, or a
+	//                  degenerate rectangle, yields the identity — which
+	//                  shadows nothing rather than shadowing everything.
+	// @return `Projection * View` for the beam.
+	// @since v0.15
+	glm::mat4 FitPortalLight(
+		const core::AABB &bounds,
+		const core::Vector3 &centre,
+		const core::Vector3 &first,
+		const core::Vector3 &second,
+		const core::Vector3 &direction
+	);
+
 	// The box every instance in a draw list occupies.
 	//
 	// What `FitDirectionalLight` is fitted to. Separate because a caller may

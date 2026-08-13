@@ -488,6 +488,97 @@ namespace studio {
 		}
 	}
 
+	void Editor::DrawPluginTools() {
+		// **Reload first, and always present.** It is the one control that is
+		// useful when *nothing* is running, which is exactly when somebody is on
+		// this tab — a plugin they have just written and just fixed.
+		if (ImGui::Button("Reload", ImVec2(84.0f, 0.0f))) {
+			LoadPlugins();
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Restarts every plugin against the active scene");
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Manage", ImVec2(84.0f, 0.0f))) {
+			ShowPlugins = true;
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("%s", PluginRoot().string().c_str());
+		}
+
+		size_t drawn = 0;
+		for (LoadedPlugin &plugin : Plugins) {
+			// **A stopped plugin's toolbar is not drawn.** Its buttons call
+			// handlers in a runtime that has been torn down, and a button that
+			// looks live and cannot run is worse than one that is not there —
+			// the Manage panel is where a stopped plugin is explained.
+			if (!plugin.Running) {
+				continue;
+			}
+
+			for (size_t bar = 0; bar < plugin.Toolbars.size(); bar++) {
+				PluginToolbar &toolbar = plugin.Toolbars[bar];
+
+				ImGui::SameLine();
+				ImGui::TextDisabled("|");
+				ImGui::SameLine();
+
+				// The toolbar's own name, dimmed, so a row of buttons from three
+				// plugins can be read as three groups.
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::TextUnformatted(toolbar.Name.c_str());
+				ImGui::PopStyleColor();
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", plugin.Manifest.Name.c_str());
+				}
+				drawn++;
+
+				for (size_t at = 0; at < toolbar.Buttons.size(); at++) {
+					PluginButton &button = toolbar.Buttons[at];
+					ImGui::SameLine();
+
+					// The id keeps two buttons of one name apart; the label is
+					// what somebody reads.
+					const std::string id = button.Name + "###plugin." + plugin.Manifest.Name + "." +
+										   std::to_string(bar) + "." + std::to_string(at);
+
+					const bool pressed = button.Active
+											 ? ImGui::Selectable(id.c_str(), true, 0, ImVec2(92.0f, 0.0f))
+											 : ImGui::Button(id.c_str(), ImVec2(92.0f, 0.0f));
+
+					if (!button.Tooltip.empty() && ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("%s", button.Tooltip.c_str());
+					}
+
+					if (pressed) {
+						// **Not drawing.** A click handler runs the plugin's own
+						// code, which may open a widget or change the selection;
+						// letting it draw here would put its widgets on the
+						// toolbar rather than in their own window.
+						InvokePlugin(plugin, button.OnClick, false);
+					}
+				}
+			}
+		}
+
+		if (drawn > 0) {
+			return;
+		}
+
+		// **Says which of the two nothings it is.** No plugins installed and
+		// plugins installed that asked for no toolbar are different situations,
+		// and a single "nothing here" would send somebody looking in the wrong
+		// place.
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+		ImGui::TextDisabled(
+			Plugins.empty() ? "no plugins installed — Manage says where they go"
+							: "nothing installed a toolbar — Manage says what is running"
+		);
+	}
+
 	void Editor::DrawPlugins() {
 		if (!ShowPlugins) {
 			return;
@@ -509,55 +600,11 @@ namespace studio {
 
 		ImGui::Spacing();
 
-		// --- what the plugins asked for --------------------------------------
-		//
-		// **Above the list, because this is the half somebody uses.** The table
-		// below is for working out why a plugin is not running; the toolbars are
-		// what it is for when it is.
-		bool anyToolbar = false;
-		for (LoadedPlugin &plugin : Plugins) {
-			for (size_t bar = 0; bar < plugin.Toolbars.size(); bar++) {
-				PluginToolbar &toolbar = plugin.Toolbars[bar];
-				anyToolbar = true;
-
-				ImGui::SeparatorText(toolbar.Name.c_str());
-
-				for (size_t at = 0; at < toolbar.Buttons.size(); at++) {
-					PluginButton &button = toolbar.Buttons[at];
-
-					if (at > 0) {
-						ImGui::SameLine();
-					}
-
-					// The id keeps two buttons of one name apart; the label is
-					// what somebody reads.
-					const std::string id = button.Name + "###plugin." + plugin.Manifest.Name + "." +
-										   std::to_string(bar) + "." + std::to_string(at);
-
-					const bool pressed = button.Active
-											 ? ImGui::Selectable(id.c_str(), true, 0, ImVec2(92.0f, 0.0f))
-											 : ImGui::Button(id.c_str(), ImVec2(92.0f, 0.0f));
-
-					if (!button.Tooltip.empty() && ImGui::IsItemHovered()) {
-						ImGui::SetTooltip("%s", button.Tooltip.c_str());
-					}
-
-					if (pressed) {
-						// **Not drawing.** A click handler runs the plugin's own
-						// code, which may open a widget or change the selection;
-						// letting it draw here would put its widgets in this
-						// panel rather than in its own.
-						InvokePlugin(plugin, button.OnClick, false);
-					}
-				}
-			}
-		}
-
-		if (anyToolbar) {
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-		}
+		// **The toolbars are not here any more; they are the ribbon's Plugins
+		// tab.** A toolbar button is pressed while working and this panel is
+		// opened when something is wrong, so the two belong in different places
+		// — and drawing them in both would be two sets of the same buttons that
+		// could disagree about which is active. `DrawPluginTools` is the one.
 
 		if (Plugins.empty()) {
 			ImGui::TextDisabled("nothing installed");

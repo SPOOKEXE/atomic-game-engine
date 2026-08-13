@@ -28,6 +28,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/script/Language.hpp>
 
 #include <filesystem>
 #include <string>
@@ -37,15 +38,101 @@ namespace engine::script {
 
 	class Runtime;
 
-	// Where a script's program is read from.
+	// Where a script's Luau program is read from.
 	//
-	// @since v0.6
-	struct Source {
-		// The path, relative to the assets root. An invalid name is a script
-		// with nothing to run, which is a legal state — an author makes the
+	// **One container per language, and an instance may hold both.** A script
+	// being ported does not stop being one script: the Luau it has and the
+	// JavaScript it is becoming are two programs of one instance, and a single
+	// `Source` field made switching between them a destructive edit — the old
+	// text was overwritten by the new one, and going back meant having kept a
+	// copy somewhere the engine knew nothing about.
+	//
+	// **The path, not the text.** `SourceCache` holds text keyed by path and is
+	// a world resource, for the reason it gives: a component must be trivially
+	// copyable to be a column, so it cannot hold an unbounded string.
+	//
+	// **Not scriptable, and that is the security boundary rather than a
+	// preference.** A script that could write another script's source is a
+	// sandbox escape that makes every other boundary in this engine decorative
+	// — the step budget, the memory ceiling and the host role all assume the
+	// program is the one an author wrote. The properties panel, a game file and
+	// the Rojo sync all write it, because they are the author.
+	// `ecs::PropertyDescriptor::Scriptable` carries the mechanism.
+	//
+	// @since v0.14
+	struct LuaSourceContainer {
+		// The path, relative to the assets root. An invalid name is a container
+		// with nothing in it, which is a legal state — an author makes the
 		// instance before choosing the file.
 		core::Name Path;
 	};
+
+	// Where a script's JavaScript program is read from.
+	//
+	// The twin of `LuaSourceContainer`, and deliberately a second component
+	// rather than a second field on one: an archetype is what a query walks, so
+	// a world of Luau scripts pays nothing for the JavaScript column it does
+	// not have.
+	//
+	// @since v0.14
+	struct JavaScriptSourceContainer {
+		// The path, relative to the assets root.
+		core::Name Path;
+	};
+
+	// Which of an instance's containers is the program it runs.
+	//
+	// **The one part of this a script may set.** Choosing which language a
+	// script runs is a decision a game can legitimately make at run time — a
+	// mod switching an implementation, a test running the same behaviour twice
+	// — and none of it requires reading or writing a line of anybody's source.
+	// So this is scriptable and the two containers are not, which is the whole
+	// point of splitting the selection out of them.
+	//
+	// **Absent means Luau**, which is what every script in this engine was
+	// before there were two, so a world loaded from an older file runs exactly
+	// as it did.
+	//
+	// @since v0.14
+	struct CodeSourceContainerSelector {
+		// Which container `ActiveSourceOf` answers with.
+		Language Active = Language::Luau;
+	};
+
+	// The path of whichever container the selector points at.
+	//
+	// **One rule, asked by everybody.** Both runtimes, the debugger, the script
+	// editor and the game file all need "what does this instance run", and four
+	// answers to that is three chances to run the wrong program.
+	//
+	// @param store    The world.
+	// @param instance The script instance.
+	// @return The path, or an invalid name when the selected container is empty
+	//         or absent.
+	// @since v0.14
+	core::Name ActiveSourceOf(const ecs::Store &store, ecs::Entity instance);
+
+	// Which language an instance is set to run.
+	//
+	// @param store    The world.
+	// @param instance The script instance.
+	// @return The selector's language, or `Language::Luau` when there is none.
+	// @since v0.14
+	Language ActiveLanguageOf(const ecs::Store &store, ecs::Entity instance);
+
+	// Points an instance at a path, filling the container the extension names.
+	//
+	// **The extension decides which container, and the selector follows it.**
+	// That is what makes `--script thing.js` and a Rojo `.luau` file both do the
+	// obvious thing with one call, and it is where `LanguageOf` is applied — a
+	// caller choosing the container itself would be a second place that decides
+	// what a `.ts` file is.
+	//
+	// @param store    The world.
+	// @param instance The script instance.
+	// @param path     The path to run.
+	// @since v0.14
+	void SetSourcePath(ecs::Store &store, ecs::Entity instance, core::Name path);
 
 	// A script the host must not run.
 	//

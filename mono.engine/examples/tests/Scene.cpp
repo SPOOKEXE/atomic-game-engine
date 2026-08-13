@@ -8,6 +8,7 @@
 // world, through the same bindings a game would use.
 
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
@@ -15,6 +16,7 @@
 #include <engine/gui/Layout.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -28,6 +30,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <numbers>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -311,6 +314,382 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 		CHECK(reflected->Frame.Position.Y == Approx(viewer->Frame.Position.Y));
 		CHECK(reflected->Frame.Position.Z == Approx(viewer->Frame.Position.Z));
 	}
+}
+
+TEST_CASE("every portal shows the room it names", "[examples][scene]") {
+	// **The one thing about a portal a headless test can decide, and it is the
+	// thing that was wrong.** Where the camera stands is `scene`'s to assert and
+	// `scene/tests/SurfaceCameras.cpp` does; what a *scene* gets wrong is which
+	// part it points a hole at, and the failure is silent: `Face` is resolved on
+	// the destination as well, so naming a wall whose matching face points out of
+	// its room places a camera, fits a frustum, renders — and shows the empty
+	// space behind that wall. Every assertion this suite had before would have
+	// passed on it, and it did.
+	//
+	// The invariant that catches it needs no arithmetic from the scene: **the
+	// half-space the oblique clip keeps has to contain the middle of the room the
+	// hole leads to.** A hole aimed outward keeps the half-space on the other
+	// side, so the room it names is behind the camera's clip plane and the sign
+	// flips.
+	//
+	// This scene makes that easy to get wrong in a second way, which is why the
+	// case ends with a body rather than a camera: its two panes are
+	// perpendicular, so the destination carries a quarter turn, and a turn is
+	// the one part of a pairing that can be right for the picture and backwards
+	// for the walk.
+	const StagedAssets assets;
+
+	Store store("portals");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Portals-1-world.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The middles of the two rooms the pair joins. The third — the library —
+	// has no hole in it, because an ordinary doorway is what the walk uses to
+	// get there and that is the contrast the scene is built on.
+	const engine::core::Vector3 HALL{-20.0f, 7.5f, -20.0f};
+	const engine::core::Vector3 GARDEN{20.0f, 7.5f, 20.0f};
+
+	struct Hole {
+		const char *Pane;
+		const char *Destination;
+
+		// The middle of the room this hole leads to, and whether the scene's own
+		// viewer stands on the side of the pane that shows it.
+		//
+		// **Only one of a pair can be checked from one eye**, and that is a fact
+		// about holes rather than a gap in the test: the two panes are in two
+		// rooms, the surface pass places each from whichever side the viewer is
+		// on, and a pane seen from behind keeps the other half-space. The scene
+		// opens outside the west wall, which is in front of the hall's pane and
+		// behind the garden's.
+		engine::core::Vector3 Room;
+		bool Facing;
+	};
+	const Hole holes[] = {
+		{"HallSouth", "GardenWest", GARDEN, true},
+		{"GardenWest", "HallSouth", HALL, false},
+	};
+
+	// Found by component rather than by name, so renaming a portal in the scene
+	// is not a test failure — what it leads to is.
+	const auto portalOn = [&store](Entity pane) {
+		Entity found = engine::ecs::NULL_ENTITY;
+		store.EachChild(pane, [&](Entity child) {
+			if (found == engine::ecs::NULL_ENTITY && store.Get<engine::scene::Portal>(child) != nullptr) {
+				found = child;
+			}
+		});
+		return found;
+	};
+
+	for (const Hole &hole : holes) {
+		INFO(hole.Pane);
+
+		const Entity pane = InScene(store, hole.Pane);
+		REQUIRE(pane != engine::ecs::NULL_ENTITY);
+
+		const Entity portal = portalOn(pane);
+		REQUIRE(portal != engine::ecs::NULL_ENTITY);
+
+		// **A `Portal` is a `SurfaceCamera`**, which is what makes it cost the
+		// mirror's path and nothing more.
+		CHECK(store.Get<SurfaceCamera>(portal) != nullptr);
+		CHECK(store.Get<engine::scene::Portal>(portal)->Destination == InScene(store, hole.Destination));
+	}
+
+	REQUIRE(engine::scene::AimSurfaceCameras(store) == 2);
+
+	const auto *viewer = store.Get<engine::scene::Transform>(InScene(store, "Viewer"));
+	REQUIRE(viewer != nullptr);
+
+	bool seen[engine::scene::MAX_SURFACES] = {};
+
+	for (const Hole &hole : holes) {
+		INFO(hole.Pane);
+
+		const Entity pane = InScene(store, hole.Pane);
+		const Entity portal = portalOn(pane);
+
+		// A target each, as `MAX_SURFACES` allows sixteen of.
+		const int8_t index = store.Get<SurfaceCamera>(portal)->Surface;
+		REQUIRE(index >= 0);
+		REQUIRE(static_cast<size_t>(index) < engine::scene::MAX_SURFACES);
+		CHECK(store.Get<Visual>(pane)->Surface == index);
+		CHECK_FALSE(seen[index]);
+		seen[index] = true;
+
+		const auto *lens = store.Get<engine::scene::SurfaceLens>(portal);
+		REQUIRE(lens != nullptr);
+
+		// **The oblique clip is doing work, which a mirror's cannot show.** A
+		// portal's destination sits in a wall, so the plane is what stops the far
+		// side of that wall drawing over the whole hole.
+		REQUIRE(lens->ClipNormal.Magnitude() > 0.5f);
+
+		if (!hole.Facing) {
+			// Aimed from an eye behind this pane. Nothing about the half-space it
+			// keeps is meaningful, so it is only here to be counted.
+			continue;
+		}
+
+		// The room the hole leads to is in front of the clip plane.
+		const float room = lens->ClipNormal.Dot(hole.Room) - lens->ClipDistance;
+		INFO("clip half-space at the far room's middle: " << room);
+		CHECK(room > 0.0f);
+
+		const auto &placed = store.Get<engine::scene::Transform>(portal)->Frame;
+
+		// And the camera is outside that room looking into it, rather than
+		// standing in it looking out — the other half of the same mistake.
+		CHECK(lens->ClipNormal.Dot(placed.Position) - lens->ClipDistance < 0.0f);
+		CHECK(placed.LookVector().Dot(lens->ClipNormal) > 0.9f);
+
+		// **Rigid, which is what separates a portal from a badly scaled one.**
+		// The map is a rotation and a translation, so the camera stands as far
+		// from the destination's face as the eye does from the source's — and
+		// that is measured here rather than assumed, because a scale slipped into
+		// the matrix would leave every other check in this case passing.
+		const auto *source = store.Get<engine::scene::Transform>(pane);
+		const auto *bounds = store.Get<engine::scene::Bounds>(pane);
+		REQUIRE(source != nullptr);
+		REQUIRE(bounds != nullptr);
+
+		// **Rotated into the world, because one pane in this scene is turned.**
+		// The hall's south wall carries the quarter turn that makes the corner,
+		// so `NormalOf(Face)` is the axis in the *part's* frame and only the
+		// reach is measurable there — a test that treated the local normal as the
+		// world one would measure the wrong gap on exactly the pane the scene
+		// exists to demonstrate.
+		const engine::core::Vector3 local = engine::scene::NormalOf(store.Get<SurfaceCamera>(portal)->Face);
+		const engine::core::Vector3 normal = source->Frame.VectorToWorldSpace(local).Unit();
+		const engine::core::Vector3 reach{
+			std::abs(local.X) * bounds->HalfExtent.X,
+			std::abs(local.Y) * bounds->HalfExtent.Y,
+			std::abs(local.Z) * bounds->HalfExtent.Z,
+		};
+
+		const float eyeToFace =
+			std::abs((viewer->Frame.Position - source->Frame.Position).Dot(normal)) - reach.Magnitude();
+		const float cameraToFarFace = std::abs(lens->ClipNormal.Dot(placed.Position) - lens->ClipDistance);
+		CHECK(cameraToFarFace == Approx(eyeToFace).margin(1e-2f));
+	}
+
+	// Motion on the far side of every hole, six per room. A still portal is
+	// indistinguishable from a painted mural.
+	CHECK(CountNamed(store, "Drifter") == 18);
+
+	// **And the walk closes, which is the claim the pictures cannot make.**
+	// `scene/tests/SurfaceCameras.cpp` proves `CrossPortals` maps a body through
+	// the same matrix as the camera; what is scene-specific — and what a pair of
+	// perpendicular panes can get backwards while every image still looks right
+	// — is *which way round* the two ends are glued. Walk west out of the garden
+	// and the hall has to arrive ahead of you, not behind or beside you.
+	//
+	// It is also what pins the rails camera in the scene file: those legs are
+	// this arithmetic, written out by hand because a script has no `Inverse`.
+	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
+
+	// **Watched by a camera, because a player is a body and an eye.** The yaw is
+	// where a player's view direction actually lives, so a pair that turns a
+	// corner has to turn it — a body that comes out walking north under a camera
+	// still pointing west is the view snapping to a wall on the frame you cross,
+	// and W walking you sideways from then on. West is a yaw of a quarter turn
+	// under `PlaceCamera`'s convention.
+	engine::scene::CameraController watching;
+	watching.Subject = walker;
+	watching.Angles = engine::core::Vector2{0.0f, std::numbers::pi_v<float> / 2.0f};
+	store.SetResource(watching);
+
+	store.Set<engine::scene::Transform>(
+		walker, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 6.0f, 20.0f})}
+	);
+	store.Set<engine::scene::PreviousTransform>(
+		walker,
+		engine::scene::PreviousTransform{engine::core::CFrame(engine::core::Vector3{3.0f, 6.0f, 20.0f})}
+	);
+	store.Set<engine::scene::Motion>(
+		walker, engine::scene::Motion{engine::core::Vector3{-16.0f, 0.0f, 0.0f}, engine::core::Vector3::Zero}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(store) == 1);
+
+	// **As far past the hall's face as it went past the garden's**, at the
+	// height it left at, and at the middle of the wall because that is where it
+	// crossed. The panes are a quarter of a metre thick, so a body that stepped
+	// to the middle of one steps out an eighth past the other — the thinness is
+	// the scene's, and it is what stops "inside the pane" being somewhere a
+	// character can stand.
+	//
+	// **And exactly there, because `scene`'s `LANDING_CLEARANCE` is a floor
+	// rather than an offset.** A crosser whose step already ended clear of the
+	// plane gets nothing added — adding it unconditionally moved a body a little
+	// on every crossing, so walking through a hole and back landed you beside
+	// where you started.
+	const engine::core::Vector3 landed = store.Get<engine::scene::Transform>(walker)->Frame.Position;
+	CHECK(landed.X == Approx(-20.0f).margin(1e-3f));
+	CHECK(landed.Y == Approx(6.0f).margin(1e-3f));
+	CHECK(landed.Z == Approx(-0.25f).margin(1e-3f));
+
+	// **Turned with it, at the speed it had.** West became north, which is the
+	// quarter turn the building is missing. A pair glued the other way round
+	// sends this one south, back into the wall it came out of.
+	const engine::core::Vector3 speed = store.Get<engine::scene::Motion>(walker)->Linear;
+	CHECK(speed.X == Approx(0.0f).margin(1e-3f));
+	CHECK(speed.Z == Approx(-16.0f).margin(1e-3f));
+
+	// **And the eye turns with it — on the machine the eye is on.** The
+	// crossing writes `scene::PortalTransit` on the body rather than reaching
+	// for a camera, because the host that moves a character and the host that
+	// draws for its player are two different worlds the moment a server is
+	// involved. `FollowPortalTransit` is the other end, and running it here is
+	// what a client's camera pass does every frame.
+	CHECK(store.Get<engine::scene::PortalTransit>(walker)->Serial == 1u);
+	CHECK(engine::scene::FollowPortalTransit(store));
+
+	// A yaw of zero is north, which is the way the walk carries on.
+	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+
+	// **Once, however many times it is asked.** A camera that turned again on
+	// the next frame would spin a quarter turn per frame for ever.
+	CHECK_FALSE(engine::scene::FollowPortalTransit(store));
+	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+}
+
+TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples][scene]") {
+	// **The claim this scene makes is a pair of lengths, so the lengths are what
+	// is asserted.** Every other portal example can be checked by asking whether
+	// a hole renders; this one is only interesting if walking through a
+	// thirty-two stud building takes four studs and walking through a four stud
+	// one takes twenty-eight. Both are `CrossPortals` arithmetic against panes
+	// the script placed, which is exactly what a wrongly aimed pane breaks.
+	//
+	// It is also the one arrangement the other portal scenes do not have: panes
+	// part-way *down* a corridor rather than filling a doorway, two of them back
+	// to back a stud apart, and a middle that belongs to a different building
+	// from the shell around it.
+	const StagedAssets assets;
+
+	Store store("tunnels");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Tunnels.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	const auto zOf = [&store](const char *name) {
+		const Entity found = InScene(store, name);
+		REQUIRE(found != engine::ecs::NULL_ENTITY);
+		return store.Get<engine::scene::Transform>(found)->Frame.Position.Z;
+	};
+
+	// The two shells, end to end. These are what an eye on the plain measures.
+	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "LongFloor"))->HalfExtent.Z == Approx(16.0f));
+	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "ShortFloor"))->HalfExtent.Z == Approx(2.0f));
+
+	// And the panes, which are what a body measures. The west tunnel's walk is
+	// its two stubs; the east tunnel's is its two studs plus the west tunnel's
+	// whole middle.
+	const float westWalk = (16.0f - zOf("LongSkipNorth")) * 2.0f;
+	const float eastWalk = (2.0f - zOf("ShortNorth")) * 2.0f + zOf("MiddleNorth") * 2.0f;
+
+	INFO("west walk " << westWalk << ", east walk " << eastWalk);
+	CHECK(westWalk == Approx(4.0f));
+	CHECK(eastWalk == Approx(28.0f));
+
+	// Something moving in each, because a still portal is indistinguishable from
+	// a painted mural — and because the timing of a crossing is the half of the
+	// illusion a screenshot cannot carry.
+	CHECK(CountNamed(store, "LongDrifter") == 1);
+	CHECK(CountNamed(store, "ShortDrifter") == 1);
+
+	// **Three pairs, six holes, each naming the other back.** A pane whose
+	// partner did not name it is a mirror, and a mirror in either of these
+	// tunnels is a wall across the walk.
+	//
+	// Checked by component rather than by aiming, because aiming needs an eye
+	// and this scene deliberately has no camera in it.
+	const auto portalOn = [&store](const char *name) {
+		const Entity pane = InScene(store, name);
+		REQUIRE(pane != engine::ecs::NULL_ENTITY);
+
+		Entity found = engine::ecs::NULL_ENTITY;
+		store.EachChild(pane, [&](Entity child) {
+			if (found == engine::ecs::NULL_ENTITY && store.Get<engine::scene::Portal>(child) != nullptr) {
+				found = child;
+			}
+		});
+		REQUIRE(found != engine::ecs::NULL_ENTITY);
+		return store.Get<engine::scene::Portal>(found)->Destination;
+	};
+
+	const char *const pairs[][2] = {
+		{"LongSkipNorth", "LongSkipSouth"},
+		{"ShortNorth", "MiddleNorth"},
+		{"ShortSouth", "MiddleSouth"},
+	};
+
+	for (const auto &pair : pairs) {
+		INFO(pair[0] << " <-> " << pair[1]);
+		CHECK(portalOn(pair[0]) == InScene(store, pair[1]));
+		CHECK(portalOn(pair[1]) == InScene(store, pair[0]));
+	}
+
+	// A body walking one step, put down where the step ended.
+	//
+	// **The seam is the pane's *face*, not its middle** — `GatherSeams` pushes
+	// the centre out by the reach along the normal — so a pane a quarter thick
+	// standing at `z` has its plane an eighth beyond that. Each step below ends
+	// five eighths past its plane and therefore lands five eighths past the far
+	// one: `LANDING_CLEARANCE` is a floor rather than an offset, and a step that
+	// already cleared it gets nothing added.
+	//
+	// Every walk is on the tunnel's centre line, so the half-turn in the map has
+	// no transverse offset to flip and the landing is a pure translation.
+	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
+
+	const auto step = [&store, walker](float fromX, float fromZ, float toX, float toZ) {
+		store.Set<engine::scene::PreviousTransform>(
+			walker, engine::scene::PreviousTransform{engine::core::CFrame({fromX, 4.0f, fromZ})}
+		);
+		store.Set<engine::scene::Transform>(
+			walker, engine::scene::Transform{engine::core::CFrame({toX, 4.0f, toZ})}
+		);
+		store.Set<engine::scene::Motion>(
+			walker, engine::scene::Motion{{0.0f, 0.0f, toZ - fromZ}, engine::core::Vector3::Zero}
+		);
+
+		REQUIRE(engine::scene::CrossPortals(store) == 1);
+		return store.Get<engine::scene::Transform>(walker)->Frame.Position;
+	};
+
+	// **Long outside, short inside.** Two studs into a thirty-two stud building
+	// and the walk is already at the far end's last two studs.
+	const engine::core::Vector3 skipped = step(-20.0f, 14.5f, -20.0f, 13.5f);
+	CHECK(skipped.X == Approx(-20.0f).margin(1e-3f));
+	CHECK(skipped.Y == Approx(4.0f).margin(1e-3f));
+	CHECK(skipped.Z == Approx(-14.75f).margin(1e-3f));
+
+	// **Short outside, long inside, and it lands in the other building.** One
+	// stud into a four stud box, and the arrival is twenty-six studs of corridor
+	// inside the west tunnel's middle — the space the walk above stepped over.
+	const engine::core::Vector3 entered = step(20.0f, 1.5f, 20.0f, 0.5f);
+	CHECK(entered.X == Approx(-20.0f).margin(1e-3f));
+	CHECK(entered.Z == Approx(12.25f).margin(1e-3f));
+
+	// And out the far end of the box it never left.
+	const engine::core::Vector3 left = step(-20.0f, -12.5f, -20.0f, -13.5f);
+	CHECK(left.X == Approx(20.0f).margin(1e-3f));
+	CHECK(left.Z == Approx(-1.75f).margin(1e-3f));
+
+	// **Nothing is set as the world's camera**, which is what makes this one
+	// walkable where `Hallway.luau` is a capture: a `CurrentCamera` standing in
+	// a world somebody presses Play in overrides the character's own.
+	CHECK(InScene(store, "Viewer") == engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {

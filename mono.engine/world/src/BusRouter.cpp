@@ -235,6 +235,7 @@ namespace engine::world {
 		// forever. Clearing keeps the buffer, which is this version's standing
 		// discipline: preallocate and reuse by default.
 		Fanout.resize(directory.Registry.size());
+		DeliveredAt.resize(directory.Registry.size(), 0);
 		for (std::vector<Delivery> &pending : Fanout) {
 			pending.clear();
 		}
@@ -416,17 +417,43 @@ namespace engine::world {
 			//
 			// Swapping gives the world its arrivals and gives the fanout the
 			// world's old buffer, which is cleared at the next barrier. Neither
-			// side allocates once the high-water mark is reached, and the
-			// observable behaviour is unchanged: an inbox is still replaced
-			// wholesale rather than appended to, so a system that forgets to
-			// drain it still misses messages rather than accumulating them.
+			// side allocates once the high-water mark is reached, and an inbox
+			// is still replaced wholesale rather than appended to, so a system
+			// that forgets to drain it still misses messages rather than
+			// accumulating them.
 			if (Inbox *inbox = store.ResourceMutable<Inbox>(); inbox != nullptr) {
-				inbox->Arrived.swap(Fanout[index]);
+				// **An empty barrier leaves a full inbox alone.** A barrier runs
+				// once per host frame and a world's systems run at the world's
+				// own tick rate, so a host drawing faster than it ticks holds
+				// two or three barriers per tick — this editor measured 200
+				// against 91. Replacing unconditionally therefore handed the
+				// world an empty buffer and took an unread delivery away with
+				// it, and a teleport could be sent, routed, delivered and lost.
+				//
+				// Replacement itself is kept, because a barrier that *does*
+				// carry mail is the case this file's opening line is about: a
+				// world that forgets to drain misses messages rather than
+				// accumulating a backlog. What clears a read inbox is the tick
+				// that read it — `world::World::Tick` — which is the only place
+				// that knows a tick happened at all.
+				if (!Fanout[index].empty()) {
+					inbox->Arrived.swap(Fanout[index]);
+					DeliveredAt[index] = store.Time().Tick;
+				} else if (!inbox->Arrived.empty() && store.Time().Tick != DeliveredAt[index]) {
+					// The world's clock has moved since this arrived, so its
+					// systems have had their look. Dropped here rather than
+					// replaced, which is the same promise this file opens with —
+					// a system that forgets to drain misses messages rather than
+					// accumulating a backlog — now kept without also taking mail
+					// from a world that never got a tick to read it in.
+					inbox->Arrived.clear();
+				}
 			} else {
 				// First barrier for this world. One copy, once.
 				Inbox first;
 				first.Arrived = std::move(Fanout[index]);
 				store.SetResource(first);
+				DeliveredAt[index] = store.Time().Tick;
 			}
 
 			// The budget is per tick, so it resets where every other per-tick

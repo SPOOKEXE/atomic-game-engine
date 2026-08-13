@@ -35,10 +35,13 @@
 //
 // @tier L9 · shared
 
+#include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/script/Debugger.hpp>
 #include <engine/script/Host.hpp>
+#include <engine/script/Language.hpp>
+#include <engine/script/Vocabulary.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -49,30 +52,6 @@
 #include <vector>
 
 namespace engine::script {
-
-	// Which VM runs a script.
-	//
-	// @since v0.5
-	enum class Language : uint8_t {
-		// Luau, from `mono.vendor/luau`.
-		Luau,
-
-		// JavaScript, from `mono.vendor/quickjs`. TypeScript is the typed
-		// authoring surface over this one — it erases its types by design, so
-		// there is nothing else for a "TypeScript VM" to have been.
-		JavaScript,
-	};
-
-	// The language a file's extension names.
-	//
-	// `.luau` and `.lua` are Luau; `.js`, `.mjs` and `.ts` are JavaScript. A
-	// `.ts` file is expected to have been type-stripped already — nothing in
-	// the C++ build compiles TypeScript, and nothing should: the engine loads
-	// what a toolchain emitted.
-	//
-	// @param path The file name or path.
-	// @return The language, defaulting to Luau when the extension says nothing.
-	Language LanguageOf(std::string_view path);
 
 	// Where a script is standing.
 	//
@@ -279,6 +258,31 @@ namespace engine::script {
 		// @return The language.
 		virtual Language Which() const = 0;
 
+		// What a script running here may name.
+		//
+		// **Asked of the runtime rather than kept in a table**, because there is
+		// no table: a global is one of about fifty `lua_setglobal` and
+		// `JS_SetPropertyStr` calls spread across fifteen files, and a list of
+		// them written anywhere else is a copy that goes stale silently. The
+		// editor's completion is built from this, so a global added anywhere in
+		// this module is offered without a second edit. `Vocabulary.hpp` carries
+		// the argument and the two bugs that paid for it.
+		//
+		// **Call it on a runtime that has not run anything.** JavaScript's
+		// chunks share one global object — `JavaScriptRuntime` says why — so a
+		// script that had assigned a global would appear in the answer as though
+		// the engine installed it.
+		//
+		// The default is empty rather than pure virtual: a runtime that cannot
+		// describe itself is a completion list with no engine names in it, which
+		// is a degraded editor and not a broken one.
+		//
+		// @return The globals and the instance members.
+		// @since v0.14
+		virtual ScriptSurface Surface() const {
+			return {};
+		}
+
 		// The error from the last `Run` or `RunFile` that returned false.
 		//
 		// @return The message, or empty when nothing has failed.
@@ -470,4 +474,50 @@ namespace engine::script {
 	bool RunScriptFile(
 		ecs::Store &store, const std::string &path, std::string &error, const RuntimeLimits &limits = {}
 	);
+
+	// Takes in everybody a teleport has sent to this world.
+	//
+	// **A world that is not running scripts still has to accept people.** This
+	// used to happen inside the Luau runtime's own delivery pump, which meant a
+	// teleport was only ever admitted by a world with a *Luau* script actually
+	// executing — so a destination the studio was not playing, a world whose
+	// scripts are JavaScript, or a scene furnished entirely by C++ took the
+	// payload into its inbox and left it there. The player was destroyed in the
+	// world they left, never built in the world they went to, and the host that
+	// followed them searched every world and found nobody.
+	//
+	// That is what an immersive cross-world portal looks like when it goes
+	// wrong: the far room draws, live, through the pane — because a picture is a
+	// draw list and needs no runtime — and walking into it deletes you.
+	//
+	// **Here rather than in `world`, because admitting is a `scene` act.** What
+	// arrives is a name and a payload; what is built is a `Player`, a character
+	// and a `StringValue` of teleport data, all from *this* world's own class
+	// definitions. `world` may not name any of those, and that is the rule that
+	// keeps two worlds from having to agree on class versions.
+	//
+	// **Idempotent within a tick and safe to call beside a runtime.** It reads
+	// the same delivery list the pump reads and admits only `BusKind::Teleport`;
+	// the pump no longer touches those, so there is exactly one admitter however
+	// many runtimes a world has.
+	//
+	// @param store The destination world.
+	// @return How many players were admitted. Zero on nearly every tick.
+	// @since v0.15
+	size_t AdmitTeleports(ecs::Store &store);
+
+	// Installs `AdmitTeleports` as a system on a world.
+	//
+	// **`PreSimulation`, so somebody who arrived this tick is simulated this
+	// tick** rather than standing still for one — which at sixty ticks is
+	// invisible and at a low tick rate is a body that appears already falling.
+	//
+	// **Every world, whether or not it runs scripts.** A destination is chosen
+	// by a script in *another* world, so a world can be a destination without
+	// containing a single line of code — which is exactly the case that was
+	// broken.
+	//
+	// @param scheduler The world's scheduler.
+	// @since v0.15
+	void RegisterTeleportAdmission(ecs::Scheduler &scheduler);
 }

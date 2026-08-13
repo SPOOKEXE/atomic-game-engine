@@ -1017,6 +1017,22 @@ declare extern type MessagingService with
 	function SubscribeAsync(self, topic: string, handler: (message: any) -> ()): ()
 end
 
+declare extern type TeleportService with
+	-- Sends a player to another world in this universe, with an optional
+	-- payload. The player is removed from *this* world by the call: nothing
+	-- crosses but a name and the data, and the destination rebuilds them.
+	function Teleport(self, placeName: string, player: Instance, data: any?): ()
+
+	-- What arrived with this client's player, or nil. Nil on a server, where
+	-- there is no local player to have arrived.
+	function GetLocalPlayerTeleportData(self): any
+
+	-- What arrived with this player, or nil for one that walked in the front
+	-- door. The server's half of the call above: the authority decides where an
+	-- arriving character stands and needs to see what the sender wrote.
+	function GetTeleportData(self, player: Instance): any
+end
+
 declare extern type MemoryStoreService with
 	function GetAsync(self, key: string): (any, BusStatus, number)
 	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
@@ -1099,6 +1115,7 @@ end
 -- --- the globals -----------------------------------------------------------
 
 declare MessagingService: MessagingService
+declare TeleportService: TeleportService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
@@ -1262,6 +1279,17 @@ declare task: {
 			// out of the loop below as well, and every class in this file
 			// carried the field twice.
 			for (const PropertyDescriptor &property : OwnProperties(info)) {
+				// **A property a script may not touch is not declared to
+				// scripts.** `PropertyDescriptor::Scriptable` is enforced in
+				// both bindings by answering "no such member"; a declaration
+				// here would tell an author about a member that then does not
+				// exist, which is worse than not mentioning it — a typecheck
+				// that passes and a run that fails is the pairing this file
+				// exists to prevent.
+				if (!property.Scriptable) {
+					continue;
+				}
+
 				out << "\t";
 
 				// **`read` is Luau's `readonly`, and without it the two
@@ -1483,6 +1511,7 @@ declare task: {
 		// not in the tree for the walk above to find.
 		out << "\tRunService: RunService,\n";
 		out << "\tMessagingService: MessagingService,\n";
+		out << "\tTeleportService: TeleportService,\n";
 		out << "\tContentService: ContentService,\n";
 		out << "\tMemoryStoreService: MemoryStoreService,\n";
 		out << "\tDataStoreService: DataStoreService,\n";
@@ -1966,6 +1995,14 @@ declare interface MessagingService {
 	SubscribeAsync(topic: string, handler: (message: unknown) => void): void;
 }
 
+declare interface TeleportService {
+	Teleport(placeName: string, player: Instance, data?: unknown): void;
+	GetLocalPlayerTeleportData(): unknown;
+
+	/** What arrived with this player, or nil for one that walked in the front door. */
+	GetTeleportData(player: Instance): unknown;
+}
+
 declare interface MemoryStoreService {
 	GetAsync(key: string): Promise<StoreReply>;
 	SetAsync(key: string, value: unknown): Promise<StoreReply>;
@@ -1986,6 +2023,7 @@ declare interface RunService {
 // --- the globals -----------------------------------------------------------
 
 declare const MessagingService: MessagingService;
+declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
@@ -2129,6 +2167,11 @@ declare const task: {
 			// writable — is the right one, and it is the one that survives now
 			// that nothing competes with it.
 			for (const PropertyDescriptor &property : OwnProperties(info)) {
+				// Left out for the reason the Luau half above gives.
+				if (!property.Scriptable) {
+					continue;
+				}
+
 				out << "\t";
 				if (!property.Writable) {
 					out << "readonly ";

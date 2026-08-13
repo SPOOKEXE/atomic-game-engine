@@ -1121,6 +1121,16 @@ namespace engine::ecs {
 		return fired;
 	}
 
+	void Store::MarkChangedRaw(Entity entity, ComponentId component) {
+		RequireOwningThread("MarkChanged");
+
+		// **Through the same door a mutable get uses**, so there is one
+		// definition of what marking a row means. `GetComponentMutable` marks
+		// and then hands back a pointer; the pointer is what this call does not
+		// want, and every other line of it is exactly right.
+		(void)GetComponentMutable(*State, entity, component);
+	}
+
 	void Store::MarkAllChangedRaw(ComponentId component) {
 		RequireOwningThread("MarkAllChanged");
 

@@ -630,6 +630,20 @@ namespace {
 			            "Again": { "$className": "Folder", "$path": "." } }
 			})");
 
+			// **A package as a package manager writes one**: a project whose
+			// whole tree is a `$path`, beside the source and tests it was
+			// published with. This is the shape every wally dependency has, and
+			// the two ways of getting it wrong are both silent — building
+			// nothing because the root has no children, or building the folder
+			// *as well* and ending up with two copies of every module.
+			Write("src/Wally/default.project.json", R"({
+			  "name": "Wally",
+			  "tree": { "$path": "lib" }
+			})");
+			Write("src/Wally/lib/Module.luau", "return {}\n");
+			Write("src/Wally/lib/Inner/Deep.luau", "return {}\n");
+			Write("src/Wally/test/Spec.luau", "return {}\n");
+
 			// **The same awkward cases `Data.json` carries, in TOML.** Rojo maps
 			// the two to the same `ModuleScript`, so the emitter is shared and
 			// the interesting question is whether the *parse* reaches it intact
@@ -847,6 +861,36 @@ TEST_CASE("a nested project is followed, and a cycle in one is not", "[studio][r
 	// case that recurses until the stack runs out without the check — a crash
 	// with no line number, from a file somebody copy-pasted a `$path` into.
 	CHECK(Mentioned(report, "includes itself"));
+}
+
+TEST_CASE("a package's project replaces its folder rather than joining it", "[studio][rojosync]") {
+	TableTree tree;
+	Store store("rojo_table");
+	engine::scene::EnsureClassTree();
+
+	RojoSyncReport report;
+	const Entity shared = SyncTable(store, tree, report);
+
+	const Entity wally = Child(store, shared, "Wally");
+	REQUIRE(wally != NULL_ENTITY);
+
+	// **The root `$path` is built into the including node.** A package's project
+	// file is a root with a path and no children, so a sync that only walked the
+	// children built nothing at all — and the modules a game requires by name
+	// were simply absent, which reads as a broken package rather than as a
+	// missing rule.
+	REQUIRE(Child(store, wally, "Module") != NULL_ENTITY);
+	REQUIRE(Child(store, Child(store, wally, "Inner"), "Deep") != NULL_ENTITY);
+
+	// **And the folder beside it is not walked.** `lib/` reached the tree under
+	// the package's own name, so a `lib` folder here would be the second copy —
+	// two `ModuleScript`s of one file, which are two modules with two states.
+	CHECK(Child(store, wally, "lib") == NULL_ENTITY);
+
+	// The package's tests are outside its `$path` and are not a game's problem.
+	// Building them would put a test framework's requires into a shipped place.
+	CHECK(Child(store, wally, "test") == NULL_ENTITY);
+	CHECK(Child(store, wally, "Spec") == NULL_ENTITY);
 }
 
 TEST_CASE("the unbuilt mappings are named by what they are", "[studio][rojosync]") {

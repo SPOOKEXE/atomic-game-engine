@@ -21,10 +21,10 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
-#include <optional>
 #include <array>
 #include <cmath>
 #include <imgui.h>
+#include <optional>
 #include <studio/Editor.hpp>
 #include <vector>
 
@@ -87,7 +87,7 @@ namespace studio {
 		// is after `DriveCamera` and is therefore the camera `PresentWorld` is
 		// about to render with.
 		const ViewportState *extra = ExtraAt(viewport);
-		const CFrame frame = extra != nullptr ? extra->Frame : CameraFrame;
+		CFrame frame = extra != nullptr ? extra->Frame : CameraFrame;
 
 		// **The lens does not need `PresentWorld`'s far-plane adjustment.** For
 		// a perspective matrix the divide is by `w = -z_view`, which depends on
@@ -109,6 +109,35 @@ namespace studio {
 					if (const auto *component = store.Get<engine::scene::Camera>(follow)) {
 						lens = *component;
 					}
+				}
+			});
+		}
+
+		// **A client view is drawn from the client's own camera, so the overlay
+		// has to be too.** `PresentWorld` reads a replica's `ActiveCamera` back
+		// after presenting it — a replica holding a character places its eye
+		// behind the body and `AimReplicaViewer` steps aside — and this
+		// projection was still the editor's free camera. Everything built from
+		// it was therefore aimed somewhere the panel was not looking: the grid
+		// slid across the floor as the player walked, the selection outline sat
+		// beside the part it outlined, and a click picked whatever was under the
+		// free camera's ray.
+		//
+		// **Read rather than resolved.** `AimReplicaViewer` writes, and an
+		// overlay pass that placed a camera would be a second author of the
+		// eye — running in the imgui half of the frame, where the store is being
+		// read by three other passes.
+		if (shown.IsValid() && Universe != nullptr && IsReplicaWorld(shown)) {
+			Universe->Enter(shown, [&](Store &store) {
+				const auto *active = store.Resource<engine::scene::ActiveCamera>();
+				if (active == nullptr || !store.Alive(active->Entity)) {
+					return;
+				}
+				if (const auto *placement = store.Get<engine::scene::Transform>(active->Entity)) {
+					frame = placement->Frame;
+				}
+				if (const auto *found = store.Get<engine::scene::Camera>(active->Entity)) {
+					lens = *found;
 				}
 			});
 		}
@@ -164,7 +193,7 @@ namespace studio {
 		// Safe only because nothing between the passes moves a camera, and
 		// nothing does: `DriveCamera` ran earlier in the `camera` span and this
 		// function only draws.
-		std::array<PanelProjection, 1 + EXTRA_VIEWPORTS> projections;
+		std::vector<PanelProjection> projections(Overlays.size());
 		for (size_t index = 0; index < Overlays.size(); index++) {
 			projections[index] = ProjectionFor(index);
 		}
@@ -260,7 +289,14 @@ namespace studio {
 			// the transport: with two viewports running two worlds, one of them
 			// may be playing while the other is still being edited, and the one
 			// being edited keeps its grid.
-			const bool authoring = ModeOf(ViewportWorld(index)) == RunMode::Edit;
+			//
+			// **A client view is a play test whatever its mode says.** A replica
+			// carries no run record of its own, so `ModeOf` answers `Edit` for
+			// it and the grid was drawn over the one picture in this editor that
+			// is exactly what a player sees. It is also the panel the argument
+			// above is strongest about.
+			const WorldId shown = ViewportWorld(index);
+			const bool authoring = ModeOf(shown) == RunMode::Edit && !IsReplicaWorld(shown);
 
 			if (ShowGrid && authoring) {
 				const Vector3 eye = panel.Eye;
@@ -330,7 +366,6 @@ namespace studio {
 			// The selection, boxed. **Drawn per panel rather than once**,
 			// because two viewports showing the same world both have to show it
 			// and they have different projections.
-			const WorldId shown = ViewportWorld(index);
 			if (shown.IsValid() && shown == SelectionWorld && !Selection.empty() && Universe != nullptr) {
 				const ImU32 outline = engine::ui::AccentColour();
 
@@ -404,8 +439,7 @@ namespace studio {
 						// looked at rather than a control being aimed at, so it
 						// should grow with the part and shrink into the
 						// distance exactly as the part does.
-						const float reach =
-							std::max({half.X, half.Y, half.Z, 0.05f}) * FACING_REACH;
+						const float reach = std::max({half.X, half.Y, half.Z, 0.05f}) * FACING_REACH;
 
 						const Vector3 face = transform->Frame.Position + look * half.Z;
 						const Vector3 ballAt = face + look * reach;
@@ -638,9 +672,8 @@ namespace studio {
 					}
 
 					const glm::vec2 toCursor = cursor - origin;
-					const float t = std::clamp(
-						(toCursor.x * along.x + toCursor.y * along.y) / lengthSquared, 0.0f, 1.0f
-					);
+					const float t =
+						std::clamp((toCursor.x * along.x + toCursor.y * along.y) / lengthSquared, 0.0f, 1.0f);
 					const glm::vec2 nearest = origin + along * t;
 					const glm::vec2 gap = cursor - nearest;
 
@@ -857,8 +890,7 @@ namespace studio {
 									// is turned to. A *vector* rather than a
 									// point: a translation has no origin.
 									offset.Position =
-										was.Position +
-										frame.Inverse().VectorToWorldSpace(axis * delta);
+										was.Position + frame.Inverse().VectorToWorldSpace(axis * delta);
 								} else {
 									// **About the pivot's own position, not the
 									// selection's centre.** A move gizmo swings a
@@ -869,21 +901,16 @@ namespace studio {
 									// The axis is a world one, so it is carried
 									// into the part's frame the same way the
 									// translation is.
-									const Vector3 local =
-										frame.Inverse().VectorToWorldSpace(axis).Unit();
-									const glm::quat spin = glm::angleAxis(
-										radians, glm::vec3(local.X, local.Y, local.Z)
-									);
+									const Vector3 local = frame.Inverse().VectorToWorldSpace(axis).Unit();
+									const glm::quat spin =
+										glm::angleAxis(radians, glm::vec3(local.X, local.Y, local.Z));
 
 									offset = CFrame(was.Position) * CFrame(Vector3{}, spin) *
 											 CFrame(was.Position).Inverse() * was;
 								}
 
 								(void)store.SetProperty(
-									instance,
-									engine::core::Name("PivotOffset"),
-									&offset,
-									sizeof(offset)
+									instance, engine::core::Name("PivotOffset"), &offset, sizeof(offset)
 								);
 								continue;
 							}
@@ -1032,8 +1059,7 @@ namespace studio {
 							// because holding the far face still while the near
 							// one moves is exactly a centre that moves by half
 							// of what the size gained.
-							if (Dragging.Mode != ToolMode::Scale ||
-								Dragging.Sides == ScaleSide::Side) {
+							if (Dragging.Mode != ToolMode::Scale || Dragging.Sides == ScaleSide::Side) {
 								store.Set<engine::scene::Transform>(instance, moved);
 							}
 						}
@@ -1069,8 +1095,7 @@ namespace studio {
 					// exactly what happened before this line existed. Refusing
 					// to record the drag at all would be a worse answer to
 					// somebody else's bookkeeping.
-					const std::optional<std::string> group =
-						Commands->TryBeginRecording(what, what);
+					const std::optional<std::string> group = Commands->TryBeginRecording(what, what);
 
 					// A one-sided resize moves the centre to hold the far face
 					// still, so the placement changed too and has to be part of
@@ -1258,8 +1283,8 @@ namespace studio {
 			if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left) || !panel.ContainsPanel(cursor)) {
 				return false;
 			}
-			if (!(viewport == 0 ? ViewportHovered : (ExtraAt(viewport) != nullptr &&
-													ExtraAt(viewport)->Hovered))) {
+			if (!(viewport == 0 ? ViewportHovered
+								: (ExtraAt(viewport) != nullptr && ExtraAt(viewport)->Hovered))) {
 				return false;
 			}
 
@@ -1378,8 +1403,7 @@ namespace studio {
 		const size_t primary = static_cast<size_t>(std::distance(
 			SurfaceDragging.Instances.begin(),
 			std::find(
-				SurfaceDragging.Instances.begin(), SurfaceDragging.Instances.end(),
-				SurfaceDragging.Primary
+				SurfaceDragging.Instances.begin(), SurfaceDragging.Instances.end(), SurfaceDragging.Primary
 			)
 		));
 		if (primary >= SurfaceDragging.Instances.size()) {
@@ -1399,12 +1423,10 @@ namespace studio {
 		// depends on it.** How far the box reaches toward the surface is a
 		// function of which way it is turned, so aligning after placing would
 		// leave the part hanging above a slope or buried in it.
-		const glm::quat rotation =
-			DragAligns ? AlignedTo(was, resting->Normal) : was.Rotation();
+		const glm::quat rotation = DragAligns ? AlignedTo(was, resting->Normal) : was.Rotation();
 
 		const CFrame turned(was.Position, rotation);
-		Vector3 position =
-			resting->Position + resting->Normal * SupportAlong(turned, half, resting->Normal);
+		Vector3 position = resting->Position + resting->Normal * SupportAlong(turned, half, resting->Normal);
 
 		// Snapping applies to where it lands, not to how far it travelled: a
 		// drag has no origin to step from, and rounding the destination is what

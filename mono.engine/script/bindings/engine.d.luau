@@ -261,6 +261,9 @@ end
 declare extern type Enum_ScaleType extends EnumItem with
 end
 
+declare extern type Enum_ScriptLanguage extends EnumItem with
+end
+
 declare extern type Enum_ScrollingDirection extends EnumItem with
 end
 
@@ -485,6 +488,10 @@ declare Enum: {
 		Tile: Enum_ScaleType,
 		Fit: Enum_ScaleType,
 		Crop: Enum_ScaleType,
+	},
+	ScriptLanguage: {
+		Luau: Enum_ScriptLanguage,
+		JavaScript: Enum_ScriptLanguage,
 	},
 	ScrollingDirection: {
 		X: Enum_ScrollingDirection,
@@ -820,17 +827,27 @@ declare extern type BasePart extends PVInstance with
 	AlphaCutoff: number
 	AlphaMode: Enum_AlphaMode
 	Anchored: boolean
+	AngularDamping: number
 	CanCollide: boolean
 	CastShadow: boolean
 	CollisionGroup: string
 	Color: Color3
+	CustomPhysicalProperties: boolean
+	Density: number
+	Elasticity: number
+	Friction: number
+	LinearDamping: number
 	Locked: boolean
+	read Mass: number
 	Size: Vector3
 	Transparency: number
 	Visible: boolean
 end
 
 declare extern type Part extends BasePart with
+end
+
+declare extern type Model extends PVInstance with
 end
 
 declare extern type MeshPart extends BasePart with
@@ -848,9 +865,15 @@ end
 
 declare extern type SurfaceCamera extends Camera with
 	Effect: Enum_SurfaceEffect
+	FPS: number
 	Face: Enum_NormalId
 	ImageTransparency: number
 	TagFilter: string
+end
+
+declare extern type Portal extends SurfaceCamera with
+	Destination: Instance
+	DestinationWorld: string
 end
 
 declare extern type Sound extends Instance with
@@ -913,7 +936,7 @@ end
 
 declare extern type LuaSourceContainer extends Instance with
 	Disabled: boolean
-	Source: string
+	Language: Enum_ScriptLanguage
 end
 
 declare extern type Script extends LuaSourceContainer with
@@ -1347,6 +1370,7 @@ declare extern type Players extends Service with
 end
 
 declare extern type Player extends Instance with
+	Character: Instance
 end
 
 -- --- the bus services ------------------------------------------------------
@@ -1356,6 +1380,22 @@ export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchW
 declare extern type MessagingService with
 	function PublishAsync(self, topic: string, message: any): (any, BusStatus, number)
 	function SubscribeAsync(self, topic: string, handler: (message: any) -> ()): ()
+end
+
+declare extern type TeleportService with
+	-- Sends a player to another world in this universe, with an optional
+	-- payload. The player is removed from *this* world by the call: nothing
+	-- crosses but a name and the data, and the destination rebuilds them.
+	function Teleport(self, placeName: string, player: Instance, data: any?): ()
+
+	-- What arrived with this client's player, or nil. Nil on a server, where
+	-- there is no local player to have arrived.
+	function GetLocalPlayerTeleportData(self): any
+
+	-- What arrived with this player, or nil for one that walked in the front
+	-- door. The server's half of the call above: the authority decides where an
+	-- arriving character stands and needs to see what the sender wrote.
+	function GetTeleportData(self, player: Instance): any
 end
 
 declare extern type MemoryStoreService with
@@ -1440,6 +1480,7 @@ end
 -- --- the globals -----------------------------------------------------------
 
 declare MessagingService: MessagingService
+declare TeleportService: TeleportService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
@@ -1539,6 +1580,7 @@ type Services = {
 	Players: Players,
 	RunService: RunService,
 	MessagingService: MessagingService,
+	TeleportService: TeleportService,
 	ContentService: ContentService,
 	MemoryStoreService: MemoryStoreService,
 	DataStoreService: DataStoreService,
@@ -1549,9 +1591,11 @@ type CreatableInstances = {
 	PVInstance: PVInstance,
 	BasePart: BasePart,
 	Part: Part,
+	Model: Model,
 	MeshPart: MeshPart,
 	Camera: Camera,
 	SurfaceCamera: SurfaceCamera,
+	Portal: Portal,
 	Sound: Sound,
 	Attachment: Attachment,
 	Material: Material,

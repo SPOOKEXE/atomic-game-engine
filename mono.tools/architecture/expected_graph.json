@@ -16,14 +16,36 @@
     "`net` and below every program, which is why four rows gained it at once and",
     "no row gained anything else. It is `shared` and links only `core` and",
     "`net`, so the server row is still headless and the cdn row still configures",
-    "on a machine with no Vulkan SDK."
+    "on a machine with no Vulkan SDK.",
+    "",
+    "v0.14 adds `resources` — the engine's built-in GLSL, moved out of `render`.",
+    "It is linked for its files rather than its symbols: `mono_add_program` stages",
+    "the shaders of every module a program links, so the rows that gained it are",
+    "exactly the rows that draw. The server row gained nothing and still stages no",
+    "shaders/ directory."
   ],
   "modules": {
+    "assetc": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "bake",
+        "bakegraph",
+        "core"
+      ]
+    },
     "assets": {
       "tier": "shared",
       "links": [
         "core"
       ]
+    },
+    "audio": {
+      "tier": "client",
+      "links": [
+        "core"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
     },
     "bake": {
       "tier": "shared",
@@ -38,22 +60,6 @@
       "links": [
         "core"
       ]
-    },
-    "assetc": {
-      "tier": "shared",
-      "links": [
-        "assets",
-        "bake",
-        "bakegraph",
-        "core"
-      ]
-    },
-    "audio": {
-      "tier": "client",
-      "links": [
-        "core"
-      ],
-      "requires": "MONO_BUILD_CLIENT"
     },
     "cdn": {
       "tier": "shared",
@@ -86,6 +92,7 @@
         "physics",
         "render",
         "replication",
+        "resources",
         "scene",
         "script",
         "spatial",
@@ -240,6 +247,7 @@
         "graph",
         "gui",
         "parallel",
+        "resources",
         "scene",
         "spatial"
       ],
@@ -255,6 +263,13 @@
         "parallel",
         "world"
       ]
+    },
+    "resources": {
+      "tier": "client",
+      "links": [
+        "core"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
     },
     "scene": {
       "tier": "shared",
@@ -335,6 +350,7 @@
         "physics",
         "render",
         "replication",
+        "resources",
         "scene",
         "script",
         "server",
@@ -361,6 +377,7 @@
         "gui",
         "parallel",
         "render",
+        "resources",
         "scene",
         "spatial"
       ],
@@ -389,6 +406,7 @@
         "physics",
         "render",
         "replication",
+        "resources",
         "scene",
         "script",
         "server",
@@ -440,6 +458,7 @@
         "physics",
         "render",
         "replication",
+        "resources",
         "scene",
         "script",
         "spatial",
@@ -498,6 +517,7 @@
         "physics",
         "render",
         "replication",
+        "resources",
         "scene",
         "script",
         "server",
@@ -530,6 +550,7 @@
         "physics",
         "render",
         "replication",
+        "resources",
         "scene",
         "script",
         "server",

@@ -15,14 +15,14 @@
 //
 // | Pair | Touching | Separated |
 // |---|---|---|
-// | sphere against sphere | 14 ns ± 3 | |
-// | sphere against cylinder | 45 ns ± 4 | |
-// | box against sphere | 57 ns ± 4 | |
-// | cylinder against cylinder | 216 ns ± 15 | 92 ns ± 2 |
-// | box against box | 436 ns ± 29 | 113 ns ± 9 |
-// | box against cylinder | 566 ns ± 31 | |
+// | sphere against sphere | 15 ns ± 0 | |
+// | sphere against cylinder | 46 ns ± 0 | |
+// | box against sphere | 56 ns ± 4 | |
+// | cylinder against cylinder | 163 ns ± 14 | 72 ns ± 58 |
+// | box against box | 295 ns ± 155 | 67 ns ± 18 |
+// | box against cylinder | 389 ns ± 176 | |
 //
-// **The two analytic pairs are thirty times cheaper than the two that clip**,
+// **The two analytic pairs are twenty times cheaper than the two that clip**,
 // which is the shape to expect: a sphere against anything is a closest point
 // and a subtraction, and everything else is an axis search followed by a
 // polygon clip. Box-cylinder is the most expensive of the six because its axis
@@ -34,8 +34,14 @@
 // case: a broad phase hands over boxes that overlap, and most of the shapes
 // inside them do not.
 //
+// **`ShapeInstance` resolving its frame axes once is what these numbers are
+// standing on.** The axis search asks for a projection radius twice per
+// candidate, and a `CFrame` holds a quaternion — so deriving the three world
+// axes inside that question made box-box rotate the same six vectors ninety
+// times per pair. It was a third of the cost of every row that clips.
+//
 // In a world, over colliders every third one of which is a different shape:
-// 209 us ± 17 for 2000 and 3561 us ± 107 for 8000. That climbs faster than the
+// 187 us ± 57 for 2000 and 3140 us ± 516 for 8000. That climbs faster than the
 // count because the scene volume is fixed, so density rises with it and the
 // pair count is quadratic in density — the same reason the broad-phase suite
 // beside this one climbs.

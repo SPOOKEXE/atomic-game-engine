@@ -5,6 +5,8 @@
 // test binary needs something to link, and a program that is one executable's
 // worth of globbed sources cannot be driven by one.
 
+#include <algorithm>
+#include <cstdlib>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Log.hpp>
@@ -30,17 +32,22 @@ int main(int argc, char **argv) {
 	arguments.Flag("stats", "Open the statistics panel (F7)");
 	arguments.Flag("graph", "Open the frame graph (F8)");
 	arguments.Flag("assets", "Open the assets manager");
-	arguments.Flag("viewport2", "Open the second viewport");
+	arguments.Flag("viewport2", "Open the second viewport (same as --viewports 2)");
 
 	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
+	arguments.Value("rojo", "PATH", "Sync this Rojo project or universe at startup ($ATOMIC_ROJO_PROJECT)");
 	arguments.Value("width", "PX", "Window width (default 1600)");
 	arguments.Value("height", "PX", "Window height (default 900)");
 	arguments.Value("scale", "FACTOR", "Interface scale (default 1.0)");
 	arguments.Value("tick-rate", "HZ", "Simulation ticks per second while running (default 60)");
 	arguments.Value("frames", "N", "Exit after N presented frames");
+	arguments.Value("viewports", "N", "Open N viewport panels at startup (default 1)");
 	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
 	arguments.Value("capture-world", "NAME", "Point --capture at this scene rather than the active one");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
+	arguments.Value(
+		"frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3"
+	);
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
 
@@ -110,7 +117,15 @@ int main(int argc, char **argv) {
 	options.ShowStatistics = arguments.Has("stats") || preferences.ShowStatistics;
 	options.ShowFrameGraph = arguments.Has("graph") || preferences.ShowFrameGraph;
 	options.ShowAssetsPanel = arguments.Has("assets") || preferences.ShowAssets;
-	options.ShowSecondViewport = arguments.Has("viewport2");
+	// **`--viewport2` is the old spelling of `--viewports 2` and still works.**
+	// Whichever asks for more wins, because both mean "open at least this many"
+	// and neither can sensibly close a panel the other opened.
+	//
+	// The floor of one is not politeness about bad input: `StartViewports` is
+	// unsigned, so a negative would arrive as a request for four billion panels.
+	options.StartViewports = static_cast<size_t>(std::max<int64_t>(
+		{arguments.GetInteger("viewports", 1), arguments.Has("viewport2") ? 2 : 1, 1}
+	));
 
 	// A headless run has no window to close, so without a budget it would never
 	// stop. Refused rather than given a default, because a default here is a
@@ -122,6 +137,18 @@ int main(int argc, char **argv) {
 
 	if (auto game = arguments.Get("game")) {
 		options.Game = std::filesystem::path(*game);
+	}
+
+	// **The flag, or the variable when there is no flag.** Same reconciliation
+	// as every other option on this page and in the same direction: what
+	// somebody typed for this run wins over what their shell has been carrying
+	// all day. Nothing writes the variable back, so `--rojo` cannot make an
+	// environment sticky.
+	if (auto project = arguments.Get("rojo")) {
+		options.RojoProject = std::filesystem::path(*project);
+	} else if (const char *environment = std::getenv("ATOMIC_ROJO_PROJECT");
+			   environment != nullptr && environment[0] != '\0') {
+		options.RojoProject = std::filesystem::path(environment);
 	}
 	if (auto mode = arguments.Get("run")) {
 		if (*mode == "play") {
@@ -147,6 +174,7 @@ int main(int argc, char **argv) {
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
 	}
+	options.FramesInFlight = static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
 	options.IdleCloseSeconds = static_cast<float>(arguments.GetNumber("idle-close", options.IdleCloseSeconds));
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.Assets = std::filesystem::path(*assets);

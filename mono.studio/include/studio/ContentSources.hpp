@@ -58,6 +58,36 @@ namespace studio {
 		// characters. Empty means delivery is not configured.
 		std::string PublisherKey;
 
+		// Folders of unprocessed art this editor may bake from directly.
+		//
+		// **Not `Sources`, and the separation is the point.** A `Source` is a
+		// place `delivery::AssetClient` fetches from, and everything it fetches
+		// is named by a signed manifest — CDN.md §1's whole argument. A folder
+		// of PNGs has no manifest and no signature, so admitting one as a source
+		// would mean either a client that trusts a directory or a manifest
+		// somebody has to fabricate. Neither is worth having.
+		//
+		// What this is instead is an **authoring** convenience: the editor bakes
+		// what it needs, when it needs it, and registers the result into its own
+		// tables. Nothing reaches a client from here until it has been imported,
+		// published and signed like everything else — and the assets panel says
+		// so on the tab.
+		//
+		// @since v0.14
+		std::vector<std::filesystem::path> RawFolders;
+
+		// Whether baking from a raw folder keeps the result in memory.
+		//
+		// **On by default, because the folder is somebody's own art directory.**
+		// Baking a copy of it into their content store the first time they look
+		// at a texture is a side effect they did not ask for and would have to
+		// clean up — and the common case for pointing at a raw folder is
+		// *looking*, not shipping. Turning it off writes each baked asset into
+		// the local store's `baked/`, which is where a publish reads from.
+		//
+		// @since v0.14
+		bool MemoryOnly = true;
+
 		// The list a fresh install starts with: one origin, on this machine.
 		//
 		// @return Sources naming `127.0.0.1:9080` and nothing else.

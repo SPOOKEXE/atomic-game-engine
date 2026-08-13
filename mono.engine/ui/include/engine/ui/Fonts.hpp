@@ -115,7 +115,24 @@ namespace engine::ui {
 		//
 		// @param face Which family.
 		// @param size How big.
-		ScopedFont(Typeface face, TextSize size = TextSize::Body);
+		// @param scale Multiplied into that size, for a panel that zooms its
+		//              own text.
+		//
+		//              **This rather than `SetWindowFontScale`, because a
+		//              per-window scale does not reach the child window an
+		//              `InputTextMultiline` makes for itself.** imgui records
+		//              the parent's scale on the child and then never reads it
+		//              back — `FontWindowScaleParents` is written in `Begin`
+		//              and consumed nowhere — so a code field scaled that way
+		//              zooms its frame and leaves the code in it alone. A
+		//              pushed *size* is context state and applies to whatever
+		//              is drawn until it is popped, child windows included.
+		//
+		//              It is also what imgui asks for now: 1.92 obsoleted
+		//              `SetWindowFontScale`, and rasterises at the size given
+		//              here rather than stretching glyphs the atlas already
+		//              had, so a long way from 1 stays sharp.
+		ScopedFont(Typeface face, TextSize size = TextSize::Body, float scale = 1.0f);
 
 		// Pops it, if one was pushed.
 		~ScopedFont();

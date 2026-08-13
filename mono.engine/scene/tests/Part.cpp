@@ -627,3 +627,129 @@ TEST_CASE("something with no placement has no pivot to move", "[scene][part]") {
 	CHECK(engine::scene::PivotOf(store, folder).Position == Vector3(0.0f, 0.0f, 0.0f));
 	CHECK_FALSE(engine::scene::PivotTo(store, folder, engine::core::CFrame(Vector3(5.0f, 0.0f, 0.0f))));
 }
+
+// --- what a part is made of ---------------------------------------------------
+
+TEST_CASE("a part weighs its density times its volume, when it has one", "[scene][part]") {
+	using engine::scene::Collider;
+	using engine::scene::MassOf;
+	using engine::scene::PhysicsProperties;
+	using engine::scene::RigidBody;
+	using engine::scene::ShapeKind;
+	using engine::scene::VolumeOf;
+
+	Collider box;
+	box.Shape = ShapeKind::Box;
+	box.Extent = Vector3{1.0f, 0.5f, 2.0f};
+
+	// Half-extents, as every other consumer of `Collider::Extent` reads them —
+	// a two-by-one-by-four metre box.
+	CHECK(VolumeOf(box) == Catch::Approx(8.0f));
+
+	RigidBody body;
+	body.Mass = 3.0f;
+
+	// **Without the flag the authored mass stands**, which is what makes the
+	// component free to be on every part: four floats nothing reads.
+	PhysicsProperties properties;
+	CHECK(MassOf(box, body, nullptr) == Catch::Approx(3.0f));
+	CHECK(MassOf(box, body, &properties) == Catch::Approx(3.0f));
+
+	properties.Custom = true;
+	properties.Density = 2.0f;
+	CHECK(MassOf(box, body, &properties) == Catch::Approx(16.0f));
+
+	// **Resizing changes what it weighs, which is the whole reason this is
+	// density and not mass.** A part scaled up by an author is heavier without
+	// anybody editing a second number.
+	box.Extent = Vector3{2.0f, 0.5f, 2.0f};
+	CHECK(MassOf(box, body, &properties) == Catch::Approx(32.0f));
+
+	// A shape with no volume, or no density, keeps the authored mass rather
+	// than becoming weightless — a zero mass is what the solver reads as
+	// immovable, which is the opposite of nearly nothing.
+	Collider flat = box;
+	flat.Extent = Vector3{0.0f, 0.5f, 2.0f};
+	CHECK(MassOf(flat, body, &properties) == Catch::Approx(3.0f));
+
+	properties.Density = 0.0f;
+	CHECK(MassOf(box, body, &properties) == Catch::Approx(3.0f));
+}
+
+TEST_CASE("a sphere and a cylinder have the volumes they look like", "[scene][part]") {
+	using engine::scene::Collider;
+	using engine::scene::ShapeKind;
+	using engine::scene::VolumeOf;
+
+	Collider sphere;
+	sphere.Shape = ShapeKind::Sphere;
+	sphere.Extent = Vector3{2.0f, 2.0f, 2.0f};
+	CHECK(VolumeOf(sphere) == Catch::Approx(33.5103f).epsilon(0.001));
+
+	Collider cylinder;
+	cylinder.Shape = ShapeKind::Cylinder;
+	cylinder.Extent = Vector3{1.0f, 3.0f, 1.0f};
+	CHECK(VolumeOf(cylinder) == Catch::Approx(18.8496f).epsilon(0.001));
+}
+
+TEST_CASE("the physical properties are on every part and readable by name", "[scene][part]") {
+	using engine::scene::PhysicsProperties;
+
+	Store store("physical_test");
+	engine::scene::RegisterSceneClasses();
+
+	const Entity part = store.CreateInstance(engine::scene::PartClass(), "Crate");
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	// On the class, so a properties panel can show the rows on any part rather
+	// than only on the ones somebody has already customised.
+	REQUIRE(store.Get<PhysicsProperties>(part) != nullptr);
+
+	bool custom = true;
+	REQUIRE(store.GetProperty(part, Name("CustomPhysicalProperties"), &custom, sizeof(custom)));
+	CHECK_FALSE(custom);
+
+	custom = true;
+	REQUIRE(store.SetProperty(part, Name("CustomPhysicalProperties"), &custom, sizeof(custom)));
+
+	const float density = 4.0f;
+	const float friction = 0.9f;
+	const float elasticity = 0.25f;
+	REQUIRE(store.SetProperty(part, Name("Density"), &density, sizeof(density)));
+	REQUIRE(store.SetProperty(part, Name("Friction"), &friction, sizeof(friction)));
+	REQUIRE(store.SetProperty(part, Name("Elasticity"), &elasticity, sizeof(elasticity)));
+
+	const PhysicsProperties *stored = store.Get<PhysicsProperties>(part);
+	REQUIRE(stored != nullptr);
+	CHECK(stored->Custom);
+	CHECK(stored->Density == Catch::Approx(4.0f));
+	CHECK(stored->Friction == Catch::Approx(0.9f));
+	CHECK(stored->Elasticity == Catch::Approx(0.25f));
+
+	// **A part made by `Instance.new` is anchored here**, because `RigidBody`
+	// and `Motion` are not class components — `MakePart` says whether a part has
+	// them and a bare `CreateInstance` says no. So it has to be unanchored
+	// before it has a mass at all, which is also what a script does.
+	float mass = 0.0f;
+	REQUIRE(store.GetProperty(part, Name("Mass"), &mass, sizeof(mass)));
+	CHECK(mass == Catch::Approx(0.0f));
+
+	const bool moving = false;
+	REQUIRE(store.SetProperty(part, Name("Anchored"), &moving, sizeof(moving)));
+
+	// **Mass is read-only**, because writing it would mean deciding which of
+	// density and size an assignment moves, and both answers are wrong. A
+	// default part is one cubic metre, so four is its density.
+	REQUIRE(store.GetProperty(part, Name("Mass"), &mass, sizeof(mass)));
+	CHECK(mass == Catch::Approx(4.0f));
+
+	const float refused = 99.0f;
+	CHECK_FALSE(store.SetProperty(part, Name("Mass"), &refused, sizeof(refused)));
+
+	// An anchored part has no body to weigh, and says zero rather than
+	// inventing one.
+	const bool anchored = true;
+	REQUIRE(store.SetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
+	REQUIRE(store.GetProperty(part, Name("Mass"), &mass, sizeof(mass)));
+	CHECK(mass == Catch::Approx(0.0f));
+}

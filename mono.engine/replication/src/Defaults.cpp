@@ -48,6 +48,16 @@ namespace engine::replication {
 		// hypothetical: excluding it broke `studio.playlink`'s "a mirror arrives
 		// on the client whole", which is the case that exists to catch exactly
 		// this. An authored `Camera` instance is scene content like any other.
+		// **A portal proxy is a piece of another room, made and unmade inside one
+		// tick.** It exists so a body standing in a hole has the far room's floor
+		// under it — `physics/Portals.hpp` — and it is never the same entity two
+		// ticks running, so replicating one would be a create and a destroy per
+		// tick per proxy on the wire, describing geometry the client already has
+		// on the other side of the pane.
+		if (component == "scene.PortalProxy") {
+			return true;
+		}
+
 		if (component == "scene.ActiveCamera" || component == "scene.CameraController") {
 			return true;
 		}
@@ -76,6 +86,26 @@ namespace engine::replication {
 		// wire for something the far side is about to overwrite.
 		if (component == "scene.PreviousTransform" || component == "scene.Rendered" ||
 			component == "scene.QuickHash") {
+			return true;
+		}
+
+		// **The same argument as `scene.Camera`'s, arriving one step further
+		// on.** A `SurfaceCamera` crosses because it is authored scene content;
+		// the *frustum fitted to its pane* does not, because that fit is made
+		// from where the local eye is standing. The authority's answer is
+		// correct for the authority's camera and wrong for every client
+		// watching — which is the rule `client/Replicated.hpp` states for the
+		// placement, and a lens is the placement's other half.
+		//
+		// Both ends run `AimSurfaceCameras` and recompute it, so what crosses is
+		// the mirror and never the aim. Replicating it would pay wire to send
+		// every client a frustum aimed at somebody else's eye, which the
+		// receiver then overwrites — wrong *and* wasteful, and wrong in a way
+		// that would only show on a second machine.
+		//
+		// `scene.Portal` is deliberately not here: which part a portal leads to
+		// is a fact about the scene, not about the viewer.
+		if (component == "scene.SurfaceLens") {
 			return true;
 		}
 

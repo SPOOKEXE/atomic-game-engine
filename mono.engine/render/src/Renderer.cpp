@@ -1,5 +1,6 @@
+#include "SurfaceScale.hpp"
+
 #include <engine/core/Log.hpp>
-#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Shadow.hpp>
@@ -7,7 +8,9 @@
 #include <engine/render/MissingTexture.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/TextureTable.hpp>
+#include <engine/resources/Shaders.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Tagging.hpp>
 
 #include <SDL3/SDL_gpu.h>
@@ -16,9 +19,11 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <vector>
 
 namespace engine::render {
@@ -200,6 +205,70 @@ namespace engine::render {
 			// be silently zeroed by the next draw — a bug that presents as "the
 			// effect only works on some parts".
 			glm::vec4 Mirror{0.0f, 0.0f, 0.0f, 0.0f};
+
+			// The face normal of the pane this draw is, for a portal, and a zero
+			// vector for everything else.
+			//
+			// **Because a pane is a box and a hole is a rectangle.** The image is
+			// chosen per draw and a draw is a whole instance, so a pane's four
+			// edge faces read the sub-render as well — a hole comes out as wide
+			// as the slab it is cut in, with a band of the far room running round
+			// its rim at a parallax nothing else in the frame has. A thin pane
+			// hides that in a fraction of a stud; a portal set in a wall does not.
+			//
+			// So the rim falls through to the pane's own material, which is what
+			// a frame is, and the front and back faces show the picture — both of
+			// them, because a hole is a hole from either side and the warp already
+			// answers which.
+			glm::vec4 PaneNormal{0.0f, 0.0f, 0.0f, 0.0f};
+
+			// The half-space this draw keeps: xyz a unit world normal, w the offset
+			// along it. A zero normal keeps everything, which is every draw in a
+			// world with no portal in it.
+			//
+			// **Written by `DrawSlots` from the slot's own plane**, like the flipbook
+			// cell and unlike the fields the caller sets, because the run it belongs
+			// to is chosen by that plane — a caller passing one here would be
+			// overwritten by the slot's.
+			glm::vec4 SeamPlane{0.0f, 0.0f, 0.0f, 0.0f};
+		};
+
+		// How many holes may transport a shadow in one frame.
+		//
+		// **Four, in one 2x2 atlas, chosen by which holes are nearest the eye.**
+		// Every fragment tests every beam, so the count is a cost per pixel and
+		// not per hole; four is what a corridor needs and is two matrix products
+		// and a tap each. Anything past it is logged rather than dropped
+		// silently — a shadow that stops crossing when a fifth pane comes on
+		// screen reads as the feature not working.
+		constexpr uint32_t MAX_PORTAL_BEAMS = 4;
+
+		// What `opaque.frag` needs to look a fragment up in one hole's beam.
+		//
+		// **Two matrices and a plane per beam, and the second matrix is the
+		// surprising one.** The casters are left in the near room and the
+		// *receiver* is mapped back to it — see `NON-EUCLIDEAN.md` Part V.3 —
+		// so a far-side fragment goes through `Back` before it goes through
+		// `Light`, and the plane is what says it was on the far side to begin
+		// with.
+		struct BeamUniforms {
+			// The beam's own view-projection, in the near room's coordinates.
+			glm::mat4 Light[MAX_PORTAL_BEAMS];
+
+			// The far side back to the near one: the partner pane's own warp,
+			// which is this pane's exact inverse.
+			glm::mat4 Back[MAX_PORTAL_BEAMS];
+
+			// The near pane's plane, as xyz normal and w offset. A mapped
+			// fragment on the wrong side of it is in the near room already and
+			// is shadowed by the world map rather than by this.
+			glm::vec4 Plane[MAX_PORTAL_BEAMS];
+
+			// Where this beam sits in the atlas: xy the scale, zw the offset.
+			glm::vec4 Region[MAX_PORTAL_BEAMS];
+
+			// x: how many of the four are in use.
+			glm::vec4 Count{0.0f, 0.0f, 0.0f, 0.0f};
 		};
 
 		// Mix renderer-owned view data into the scene signature.
@@ -207,6 +276,30 @@ namespace engine::render {
 			uint32_t bits = 0;
 			std::memcpy(&bits, &value, sizeof(bits));
 			return scene::MixSignature(hash, bits);
+		}
+
+		// Whether a surface's rate cap has elapsed.
+		//
+		// **Three ways to be uncapped, and all three are "yes" rather than
+		// "no".** A rate of zero is the documented way to ask for every frame; a
+		// negative one is a script that computed something silly, and answering
+		// "never draw again" to that would be a surface that goes black for a
+		// mistake nothing reports; and a clock that has not advanced — a host
+		// that never calls `SetAnimationTime`, or a paused one — would otherwise
+		// freeze every capped surface in the world after its first frame.
+		//
+		// The bias is the same one culling takes: when the answer is not
+		// certain, do the work. A surface drawn too often costs a pass, and one
+		// skipped wrongly is a frozen picture nobody can explain.
+		//
+		// @param drawn When the slot last drew, or negative for never.
+		// @param fps   The cap, or zero for none.
+		// @param now   The frame clock.
+		bool DueToDraw(double drawn, float fps, double now) {
+			if (!(fps > 0.0f) || drawn < 0.0 || !(now > drawn)) {
+				return true;
+			}
+			return now - drawn >= 1.0 / static_cast<double>(fps);
 		}
 
 		uint64_t MixMatrix(uint64_t hash, const glm::mat4 &matrix) {
@@ -221,8 +314,20 @@ namespace engine::render {
 		// The one directional light this pipeline has.
 		//
 		// One directional light; shadow fitting and shading share its direction.
-		constexpr glm::vec3 SUN_DIRECTION{-0.45f, -0.8f, -0.4f};
-		constexpr glm::vec4 SUN_AMBIENT{0.26f, 0.28f, 0.34f, 1.0f};
+		// **`scene::SUN_DIRECTION`, converted rather than repeated.** The number
+		// moved to `scene` when `CutAndCloneSeams` had to map it through a seam —
+		// the far half of a body in a hole is lit by `R · L` — and a second
+		// spelling here would be two suns that agree until somebody edits one.
+		//
+		// **The default, and no longer the answer.** `Renderer::SetSun` is what a
+		// host calls with the world's `scene::Sun`, and a host that never calls it
+		// draws with exactly what this engine has always drawn with.
+		constexpr glm::vec3 SUN_DIRECTION{
+			scene::SUN_DIRECTION.X, scene::SUN_DIRECTION.Y, scene::SUN_DIRECTION.Z
+		};
+		constexpr glm::vec4 SUN_AMBIENT{
+			scene::SUN_AMBIENT.R, scene::SUN_AMBIENT.G, scene::SUN_AMBIENT.B, 1.0f
+		};
 
 		// Measured shadow-map resolution for the current scene scale.
 		constexpr uint32_t SHADOW_RESOLUTION = 2048;
@@ -333,6 +438,13 @@ namespace engine::render {
 		// Kept on the state rather than made per frame, so a steady scene stops
 		// allocating after its first one — the rule every buffer here follows.
 		std::vector<scene::DrawInstance> Drawable;
+
+		// The same, for the rows belonging to *other* worlds — see `Render`'s
+		// `foreign` argument. A separate buffer rather than a tail on `Drawable`
+		// because every pass but the surface pass must not see these, and a
+		// shared buffer is one `.size()` away from them all seeing them.
+		std::vector<scene::DrawInstance> DrawableForeign;
+
 		std::vector<uint32_t> SceneOrder;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
@@ -348,6 +460,56 @@ namespace engine::render {
 		// drift, and a recorded run could not replay.
 		double AnimationSeconds = 0.0;
 
+		// How many times the surface pass runs per frame.
+		//
+		// **One bounce is what this pipeline always did**, and it is why a
+		// portal seen through a portal resolved over frames: each surface
+		// sampled the others from the textures they held *last* frame. Two is
+		// the first value that closes `D00112` for the case anybody sees — the
+		// hole you are walking through, showing a hole — and every further
+		// bounce buys one more level of depth for one more scene pass per
+		// visible surface.
+		//
+		// **Two by default rather than CodeParade's four**, because that demo's
+		// portals are the whole scene and ours share a budget with mirrors,
+		// shadows and a world. The cost is linear and the knob is public, so a
+		// scene built around a corridor of holes can ask for more.
+		uint32_t SurfaceBounces = 2;
+
+		// How many levels the recursive portal pass goes to.
+		//
+		// **One, and it is a backend limit rather than a taste.** Two is what the
+		// pass is for — a hole through a hole, resolved inside the frame from the
+		// right viewpoint at each level — and it draws correctly. What it also
+		// does, on SDL's Vulkan backend, is hang the device: at two levels a
+		// level-zero target is rendered into once per level-one hole, so within
+		// one command buffer the same texture is written, sampled, written again
+		// and sampled again, and `SDL_WaitForGPUIdle` at shutdown then never
+		// returns.
+		//
+		// Measured rather than suspected, on `Portals-1-world.luau` at twenty
+		// frames: twenty of twenty runs hang at depth two and none of thirteen at
+		// depth one. Forcing the nested pane to draw flat — the same recursion,
+		// the same pass count, nothing sampled — is clean, which is what pins it
+		// to the write-after-read rather than to the volume of work. Cycling the
+		// colour target halves it and does not close it.
+		//
+		// **The knob is public and unclamped below `MAX_PORTAL_DEPTH`**, so this
+		// is a default and not a wall; what it needs to be raised safely is a
+		// command buffer per top-level hole, which is where each level-zero target
+		// would be written once and read once.
+		uint32_t PortalDepth = 2;
+
+		// The world's directional light, as the shader wants it.
+		//
+		// **Held rather than taken per frame, for `SetSurfaceBounces`' reason**:
+		// it is a property of what is being drawn rather than of this frame, and
+		// threading it through `Render` would put it in a signature every host
+		// calls to say the same thing on every frame. `client::PushSunlight` is
+		// what writes it from `scene::SunOf`.
+		glm::vec3 Sun{SUN_DIRECTION};
+		glm::vec4 Ambient{SUN_AMBIENT};
+
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
 		//
@@ -359,6 +521,22 @@ namespace engine::render {
 
 		// Each slot's tag mask, for the surface passes that filter by one.
 		std::vector<uint32_t> SlotTags;
+
+		// The half-space each slot keeps, as a world plane: xyz the unit normal,
+		// w the offset, and a zero normal for "whole".
+		//
+		// **A per-slot plane rather than a run of its own in the plan.** A body
+		// standing in a portal is cut at the pane and its far half is drawn in the
+		// room beyond; the cut is per instance and every uniform here is per frame
+		// or per draw, so it is carried the way the tag mask is — the run breaks
+		// where the plane changes, exactly as it breaks where the mesh does. A
+		// world with no hole in it holds one value throughout and pays one compare
+		// per instance for it. See `scene::DrawInstance::SeamNormal`.
+		std::vector<glm::vec4> SlotSeam;
+
+		// Which way the sun comes from for each slot, or a zero vector for the
+		// world's own. `scene::DrawInstance::SeamLight` carries the argument.
+		std::vector<glm::vec4> SlotSeamLight;
 
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
@@ -750,6 +928,19 @@ namespace engine::render {
 		SDL_GPUTexture *ShadowTexture = nullptr;
 		SDL_GPUSampler *ShadowSampler = nullptr;
 
+		// The beams: up to four holes' worth of shadow, in one 2x2 atlas.
+		//
+		// **One texture rather than four, because a fragment binds samplers and
+		// not maps.** Every fragment tests every live beam, so four textures
+		// would be four more samplers on every draw in the frame to serve a
+		// handful of pixels near a doorway. The atlas costs one sub-rectangle per
+		// beam in the uniform and one viewport per beam in the pass.
+		SDL_GPUTexture *BeamTexture = nullptr;
+
+		// What every pass pushes, whether or not anything crossed. A count of
+		// zero is the ordinary case and the shader's loop ends immediately.
+		BeamUniforms Beams;
+
 		// --- the surface target ----------------------------------------------
 		//
 		// Surface targets use colour and depth, with ping-pong textures to prevent
@@ -770,16 +961,38 @@ namespace engine::render {
 			// tint rather than sampling whatever the driver handed back.
 			bool Ready = false;
 
+			// The frame clock when this slot last drew, for
+			// `SurfaceView::FPS`.
+			//
+			// **Per slot rather than one stamp for the pass**, because the
+			// surfaces do not refresh together and never have: one that has
+			// never rendered has nothing to compare against, and one whose
+			// content has not moved is skipped for a different reason entirely.
+			// A shared stamp would let a mirror that redrew for its own reasons
+			// reset the interval of every other mirror in the room.
+			double Drawn = -1.0;
+
 			// World to this surface camera's clip space, for the frame just
-			// written. What the screen pass projects with.
+			// written. What the surface pass renders with.
 			glm::mat4 ViewProjection{1.0f};
 
-			// The same, for the frame before — which is the one another surface
-			// pass samples, and it must be projected with the matrix that
-			// *rendered* it. Projecting last frame's texture with this frame's
-			// camera is a reflection that slides as the viewer moves, and it
-			// reads as a mis-aimed camera rather than as a stale matrix.
+			// The same, with the pane's own map folded in. **What a pane
+			// projects with, which is not the matrix the texture was rendered
+			// with.** A mirror's map is the identity and the two are equal; a
+			// portal's takes the pane to where its camera was fitted, and
+			// without it every fragment projects outside the image. See
+			// `scene::SurfaceLens::Mapping`.
+			glm::mat4 Sampling{1.0f};
+
+			// The pair again, for the frame before — which is the one another
+			// surface pass samples, and it must be projected with the matrix
+			// that *rendered* it. Projecting last frame's texture with this
+			// frame's camera is a reflection that slides as the viewer moves,
+			// and it reads as a mis-aimed camera rather than as a stale matrix.
+			//@{
 			glm::mat4 PreviousViewProjection{1.0f};
+			glm::mat4 PreviousSampling{1.0f};
+			//@}
 
 			// How solid this surface's image is, from the view that wrote it.
 			float ImageOpacity = 1.0f;
@@ -816,8 +1029,49 @@ namespace engine::render {
 		// every surface texture on alternate frames, which is the same
 		// reallocation `SCENE_TARGET_BLOCK` exists to avoid one layer up. The
 		// high-water mark is bounded by `scene::MAX_SURFACES`.
+		// One level of one portal's recursion: the picture seen through that hole
+		// from the camera the level above stands at.
+		//
+		// **No ping-pong pair, unlike a surface slot, and the difference is what
+		// makes the pass a recursion rather than an iteration.** A surface reads
+		// its neighbours' textures while they read its, so a pair is the only way
+		// to stop a pass sampling what another pass is writing in the same
+		// bounce. A portal level is written by the recursion and read exactly
+		// once, by the level above it, after that write has finished — depth-first
+		// order is the ordering, so there is nothing to alternate between.
+		//
+		// **No signature, no rate cap and no `Ready` either.** All three are ways
+		// of keeping a texture across frames, and a level's contents are only
+		// meaningful for the camera that produced them — which is this frame's.
+		struct PortalTarget {
+			SDL_GPUTexture *Colour = nullptr;
+			SDL_GPUTexture *Depth = nullptr;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+		};
+
+		// The pool, indexed by level and then by slot.
+		//
+		// **Per level per slot, and both indices are needed.** Per level alone
+		// would be enough if a level were consumed the instant it was written —
+		// which it is not: level `L` renders the scene and *then* draws every
+		// hole visible from it, so all of level `L-1` has to survive until the
+		// last of them is drawn. Per slot alone would have two levels of one hole
+		// writing the same texture.
+		//
+		// Allocated on the frame a level is first reached and kept after, for
+		// `SurfaceBank`'s reason: a viewer who walks away from a corridor of
+		// holes and back again should not pay two full-screen allocations for it.
+		struct PortalLevel {
+			PortalTarget Targets[scene::MAX_SURFACES];
+		};
+
 		struct SurfaceBank {
 			SurfaceSlotState Surfaces[scene::MAX_SURFACES];
+
+			// **Grown to the depth actually reached**, so a world with no holes
+			// in it costs one empty vector per viewport and nothing else.
+			std::vector<PortalLevel> Portals;
 		};
 
 		// **One bank per viewport, and that is what makes a mirror a mirror when
@@ -853,7 +1107,43 @@ namespace engine::render {
 		SDL_GPUSampler *SurfaceSampler = nullptr;
 
 		bool EnsureShadow();
+
+		// The beam atlas, made on the frame a hole first transports a shadow.
+		//
+		// **Shares `ShadowSampler`**, because it is the same kind of map read the
+		// same way — a depth texture clamped at the edge, with the fragment
+		// shader range-checking anyway.
+		bool EnsureBeams();
+
+		// The one sampler every offscreen scene texture is read through.
+		//
+		// **Its own call because two passes need it and only one of them used to
+		// create it.** It was made inside `EnsureSurface`, which a world of
+		// nothing but portals never reaches — so the portal pass captured a null
+		// sampler and handed it to `SDL_BindGPUFragmentSamplers`, which
+		// dereferences it. A scene with a single mirror in it hid that
+		// completely.
+		//
+		// Linear and clamped: the clamp is what stops a fragment at the very edge
+		// of a pane wrapping to the far side of the picture.
+		bool EnsureSurfaceSampler();
+
 		bool EnsureSurface(size_t viewport, uint8_t index, uint32_t width, uint32_t height);
+
+		// One portal level's colour and depth, at the size of the attachment the
+		// level above draws into.
+		//
+		// **The attachment's size and not the viewport's**, which is what makes
+		// `opaque.frag`'s screen-position lookup exact: the pane divides its own
+		// `gl_FragCoord` by `textureSize`, so the texel it reads is the pixel it
+		// is standing on only while the two rectangles are the same. A level
+		// rendered at anything else would need a scale factor pushed to the
+		// shader, which is a uniform that can be wrong.
+		//
+		// @return `false` when either texture could not be made, which drops that
+		//         hole to a flat pane for the frame rather than the frame.
+		PortalTarget *
+		EnsurePortal(size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height);
 
 		// One opaque white texel, bound wherever a real texture is missing.
 		//
@@ -975,8 +1265,9 @@ namespace engine::render {
 		std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
 	) const {
 		// Staged under the owning module's name, so that two modules cannot
-		// collide on a common file name like fullscreen.vert.
-		const auto path = core::Paths::Shaders("render") / (std::string(name) + ".spv");
+		// collide on a common file name like fullscreen.vert. The built-in GLSL
+		// is `Engine::resources`, which is what that name is.
+		const auto path = resources::Shader(name);
 
 		const auto code = ReadFile(path);
 		if (code.empty()) {
@@ -1015,12 +1306,12 @@ namespace engine::render {
 			// count above records.
 			"opaque.frag",
 			SDL_GPU_SHADERSTAGE_FRAGMENT,
-			3,
-			2
+			4,
+			3
 		);
 
 		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
@@ -1069,6 +1360,22 @@ namespace engine::render {
 		opaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
 		// The cube winds counter-clockwise when seen from outside.
 		opaque.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+
+		// **Clip against the near plane rather than clamping to it, which a
+		// portal depends on and everything else quietly wanted.** SDL zeroes
+		// this field, and false means *clamp*: a fragment in front of the near
+		// plane is not discarded, it is pushed to depth zero and drawn. For an
+		// ordinary camera that is a wall you have walked into filling the screen
+		// instead of vanishing, which reads as a bug nobody files.
+		//
+		// For a portal it is the whole feature failing. The oblique clip works
+		// by skewing the near plane onto the destination's pane, so *everything
+		// the hole should not show is behind the near plane* — the wall the
+		// destination is set into, its back face, and the room behind it.
+		// Clamped, all of it draws at depth zero and fills the hole with the
+		// wall it leads through. The matrix was right, the placement was right,
+		// and the picture was a flat grey wall. See `scene::SurfaceLens`.
+		opaque.rasterizer_state.enable_depth_clip = true;
 		opaque.depth_stencil_state.enable_depth_test = true;
 		opaque.depth_stencil_state.enable_depth_write = true;
 		opaque.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
@@ -1425,12 +1732,18 @@ namespace engine::render {
 				// undefined behaviour on some backends and a validation error on
 				// others. Those two are genuinely absent features rather than
 				// defaulted ones, and their uniform flags still say so.
+				// **A fourth sampler for the beams**, bound from the member
+				// rather than passed in: which holes transport a shadow is a
+				// property of the frame and not of one draw, and threading it
+				// through would put it in a signature five passes call.
 				const SDL_GPUTextureSamplerBinding samplers[] = {
 					{shadow != nullptr ? shadow : FallbackTexture, shadowSampler},
 					{surface != nullptr ? surface : FallbackTexture, surfaceSampler},
 					{sampled != nullptr ? sampled : FallbackTexture, Textures.Sampler()},
+					{BeamTexture != nullptr ? BeamTexture : FallbackTexture,
+					 ShadowSampler != nullptr ? ShadowSampler : shadowSampler},
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 3);
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 4);
 
 				LightingUniforms uniforms = *lighting;
 
@@ -1464,7 +1777,35 @@ namespace engine::render {
 				// lost the precision these effects step by, and a scan line that
 				// coarsens over an afternoon is a bug nobody would reproduce.
 				uniforms.Mirror.y = static_cast<float>(std::fmod(AnimationSeconds, 1000.0));
+
+				// **The slot's own plane, and the run above guarantees they agree.**
+				// A run is broken wherever the plane changes, so every instance in
+				// this draw is cut the same way — which is what makes a per-instance
+				// fact expressible in a per-draw uniform.
+				uniforms.SeamPlane = SlotSeam[slot];
+
+				// **The far half of a body in a hole is lit by the sun turned the way
+				// the body was.** Its normals are the near half's rotated by the
+				// seam, so the world's own direction would shade one body with two
+				// suns a quarter apart. Set per draw for the same reason the plane is,
+				// and only where the row asked for it — a zero vector is every
+				// instance that is not half of something.
+				const glm::vec3 mapped{SlotSeamLight[slot]};
+				if (glm::dot(mapped, mapped) > 0.0f) {
+					uniforms.Direction = glm::vec4{mapped, 0.0f};
+				}
+
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
+			} else {
+				// **Depth only, and it still has to know where the body is cut.** A
+				// half drawn whole into the shadow map casts a whole body's shadow,
+				// so the near half of somebody in a doorway would darken the floor as
+				// if none of them had gone through. `shadow.frag` takes the plane and
+				// discards on the same test `opaque.frag` makes; it is one `vec4`
+				// per draw and no samplers, which is why this is a push of its own
+				// rather than the whole lighting block.
+				const glm::vec4 plane = SlotSeam[slot];
+				SDL_PushGPUFragmentUniformData(command, 0, &plane, sizeof(plane));
 			}
 
 			SDL_DrawGPUIndexedPrimitives(
@@ -1491,9 +1832,17 @@ namespace engine::render {
 			const MeshEntry *const mesh = SlotMesh[slot];
 			const core::Name texture = SlotTexture[slot];
 
+			// **And the seam plane joins the mesh and the texture in what ends a
+			// run.** It is a per-draw uniform, so two instances cut differently
+			// cannot share a draw; a world with no hole in it holds one value
+			// throughout and never breaks on it.
+			const glm::vec4 seam = SlotSeam[slot];
+			const glm::vec4 seamLight = SlotSeamLight[slot];
+
 			uint32_t run = 1;
 			while (slot + run < first + count && SlotMesh[slot + run] == mesh &&
-				   SlotTexture[slot + run] == texture &&
+				   SlotTexture[slot + run] == texture && SlotSeam[slot + run] == seam &&
+				   SlotSeamLight[slot + run] == seamLight &&
 				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
 				run++;
 			}
@@ -2187,6 +2536,40 @@ namespace engine::render {
 		return EnsureDepthIn(DepthTexture, DepthWidth, DepthHeight, width, height);
 	}
 
+	bool Renderer::Impl::EnsureBeams() {
+		if (BeamTexture != nullptr) {
+			return true;
+		}
+
+		// The shadow map's own sampler and format, so the two are read the same
+		// way — and `EnsureShadow` is what makes both.
+		if (!EnsureShadow()) {
+			return false;
+		}
+
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+		info.format = DepthFormat;
+		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+		// **The world map's resolution for the whole atlas**, so one beam gets a
+		// quarter of it in each direction. A beam covers one doorway rather than
+		// a scene, so a quarter of the texels over a hundredth of the area is
+		// several times the density the world map has.
+		info.width = SHADOW_RESOLUTION;
+		info.height = SHADOW_RESOLUTION;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		BeamTexture = SDL_CreateGPUTexture(Device, &info);
+		if (!BeamTexture) {
+			ENGINE_ERROR("portal beam texture: {}", SDL_GetError());
+			return false;
+		}
+		return true;
+	}
+
 	bool Renderer::Impl::EnsureShadow() {
 		if (ShadowTexture != nullptr) {
 			return true;
@@ -2233,6 +2616,27 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::Impl::EnsureSurfaceSampler() {
+		if (SurfaceSampler != nullptr) {
+			return true;
+		}
+
+		SDL_GPUSamplerCreateInfo sampler{};
+		sampler.min_filter = SDL_GPU_FILTER_LINEAR;
+		sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
+		sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+
+		SurfaceSampler = SDL_CreateGPUSampler(Device, &sampler);
+		if (SurfaceSampler == nullptr) {
+			ENGINE_ERROR("surface sampler: {}", SDL_GetError());
+			return false;
+		}
+		return true;
+	}
+
 	bool Renderer::Impl::EnsureSurface(size_t viewport, uint8_t index, uint32_t width, uint32_t height) {
 		if (index >= scene::MAX_SURFACES) {
 			return false;
@@ -2244,21 +2648,128 @@ namespace engine::render {
 			return true;
 		}
 
-		for (SDL_GPUTexture *&texture : state.Texture) {
-			if (texture) {
-				SDL_ReleaseGPUTexture(Device, texture);
-				texture = nullptr;
+		if (!EnsureSurfaceSampler()) {
+			return false;
+		}
+
+		// **Built beside what the slot already holds, and swapped in only once
+		// all four exist.** Releasing first is what turned a device that could
+		// not honour the new size into a pane with no texture at all: the slot
+		// kept its old `Width`, so every later frame asked for the same size,
+		// failed the same way, and the pane drew its own flat tint for the rest
+		// of the run. A resize that cannot be made is a resize that does not
+		// happen, and the picture the slot has is still a picture.
+		SDL_GPUTextureCreateInfo colour{};
+		colour.type = SDL_GPU_TEXTURETYPE_2D;
+		colour.format = ColourFormat();
+		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		colour.width = width;
+		colour.height = height;
+		colour.layer_count_or_depth = 1;
+		colour.num_levels = 1;
+		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		SDL_GPUTextureCreateInfo depth{};
+		depth.type = SDL_GPU_TEXTURETYPE_2D;
+		depth.format = DepthFormat;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.width = width;
+		depth.height = height;
+		depth.layer_count_or_depth = 1;
+		depth.num_levels = 1;
+		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		SDL_GPUTexture *made[2] = {nullptr, nullptr};
+		SDL_GPUTexture *madeDepth = nullptr;
+
+		const auto abandon = [&]() {
+			for (SDL_GPUTexture *texture : made) {
+				if (texture != nullptr) {
+					SDL_ReleaseGPUTexture(Device, texture);
+				}
+			}
+			if (madeDepth != nullptr) {
+				SDL_ReleaseGPUTexture(Device, madeDepth);
+			}
+			// **True when the slot still has its old pair**, because the caller's
+			// question is "may this surface be rendered", not "was it resized".
+			return state.Texture[0] != nullptr;
+		};
+
+		for (SDL_GPUTexture *&texture : made) {
+			texture = SDL_CreateGPUTexture(Device, &colour);
+			if (texture == nullptr) {
+				ENGINE_ERROR(
+					"viewport {} surface {} texture {}x{}: {}", viewport, index, width, height, SDL_GetError()
+				);
+				return abandon();
 			}
 		}
-		if (state.Depth) {
-			SDL_ReleaseGPUTexture(Device, state.Depth);
-			state.Depth = nullptr;
+
+		madeDepth = SDL_CreateGPUTexture(Device, &depth);
+		if (madeDepth == nullptr) {
+			ENGINE_ERROR(
+				"viewport {} surface {} depth {}x{}: {}", viewport, index, width, height, SDL_GetError()
+			);
+			return abandon();
 		}
+
+		for (SDL_GPUTexture *&texture : state.Texture) {
+			if (texture != nullptr) {
+				SDL_ReleaseGPUTexture(Device, texture);
+			}
+		}
+		if (state.Depth != nullptr) {
+			SDL_ReleaseGPUTexture(Device, state.Depth);
+		}
+
+		state.Texture[0] = made[0];
+		state.Texture[1] = made[1];
+		state.Depth = madeDepth;
 
 		// Resized, so whatever it held is gone. A mirror that showed the last
 		// frame at the old resolution stretched across the new one would be a
 		// visible artefact on exactly the frame a window was dragged.
 		state.Ready = false;
+
+		// And it owes a draw immediately rather than at the end of its next
+		// interval, which is what a resized slot with a live stamp would do:
+		// hold an empty texture for up to a frame's worth of cap while the pane
+		// showed its own tint.
+		state.Drawn = -1.0;
+
+		state.Width = width;
+		state.Height = height;
+		return true;
+	}
+
+	Renderer::Impl::PortalTarget *Renderer::Impl::EnsurePortal(
+		size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height
+	) {
+		if (index >= scene::MAX_SURFACES || level >= MAX_PORTAL_DEPTH || width == 0 || height == 0) {
+			return nullptr;
+		}
+
+		SurfaceBank &bank = SurfacesAt(viewport);
+		if (bank.Portals.size() <= level) {
+			bank.Portals.resize(level + 1);
+		}
+
+		PortalTarget &target = bank.Portals[level].Targets[index];
+		if (target.Colour != nullptr && width == target.Width && height == target.Height) {
+			return &target;
+		}
+
+		if (target.Colour != nullptr) {
+			SDL_ReleaseGPUTexture(Device, target.Colour);
+			target.Colour = nullptr;
+		}
+		if (target.Depth != nullptr) {
+			SDL_ReleaseGPUTexture(Device, target.Depth);
+			target.Depth = nullptr;
+		}
+		target.Width = 0;
+		target.Height = 0;
 
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
@@ -2270,14 +2781,18 @@ namespace engine::render {
 		colour.num_levels = 1;
 		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		for (SDL_GPUTexture *&texture : state.Texture) {
-			texture = SDL_CreateGPUTexture(Device, &colour);
-			if (!texture) {
-				ENGINE_ERROR(
-					"viewport {} surface {} texture {}x{}: {}", viewport, index, width, height, SDL_GetError()
-				);
-				return false;
-			}
+		target.Colour = SDL_CreateGPUTexture(Device, &colour);
+		if (target.Colour == nullptr) {
+			ENGINE_ERROR(
+				"viewport {} portal level {} slot {} colour {}x{}: {}",
+				viewport,
+				level,
+				index,
+				width,
+				height,
+				SDL_GetError()
+			);
+			return nullptr;
 		}
 
 		SDL_GPUTextureCreateInfo depth{};
@@ -2290,33 +2805,31 @@ namespace engine::render {
 		depth.num_levels = 1;
 		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		state.Depth = SDL_CreateGPUTexture(Device, &depth);
-		if (!state.Depth) {
+		target.Depth = SDL_CreateGPUTexture(Device, &depth);
+		if (target.Depth == nullptr) {
 			ENGINE_ERROR(
-				"viewport {} surface {} depth {}x{}: {}", viewport, index, width, height, SDL_GetError()
+				"viewport {} portal level {} slot {} depth {}x{}: {}",
+				viewport,
+				level,
+				index,
+				width,
+				height,
+				SDL_GetError()
 			);
-			return false;
+			SDL_ReleaseGPUTexture(Device, target.Colour);
+			target.Colour = nullptr;
+			return nullptr;
 		}
 
-		if (SurfaceSampler == nullptr) {
-			SDL_GPUSamplerCreateInfo sampler{};
-			sampler.min_filter = SDL_GPU_FILTER_LINEAR;
-			sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
-			sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
-			sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-			sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-			sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-
-			SurfaceSampler = SDL_CreateGPUSampler(Device, &sampler);
-			if (!SurfaceSampler) {
-				ENGINE_ERROR("surface sampler: {}", SDL_GetError());
-				return false;
-			}
+		// **Shared with the surface path rather than a second one.** A portal
+		// level is sampled exactly as a mirror's texture is.
+		if (!EnsureSurfaceSampler()) {
+			return nullptr;
 		}
 
-		state.Width = width;
-		state.Height = height;
-		return true;
+		target.Width = width;
+		target.Height = height;
+		return &target;
 	}
 
 	bool Renderer::Impl::EnsureOverlay(int width, int height) {
@@ -2445,7 +2958,7 @@ namespace engine::render {
 		std::abort();
 	}
 
-	bool Renderer::Initialise(SDL_Window *window) {
+	bool Renderer::Initialise(SDL_Window *window, uint32_t framesInFlight) {
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
 		// whoever owns the object and initialised by whoever owns the window —
@@ -2492,7 +3005,13 @@ namespace engine::render {
 		// overlapped now waits, so a GPU-bound scene loses some of its rate —
 		// which is why the measurement that matters here is the one taken by
 		// hand, not the one the profiler reports.
-		if (window != nullptr && !SDL_SetGPUAllowedFramesInFlight(State->Device, 1)) {
+		// **Clamped rather than trusted.** SDL takes 1 to 3 and answers false
+		// for anything else, which would leave the device at its default with
+		// only a warning to say so — a number nobody chose deciding the feel of
+		// the editor.
+		const uint32_t queued = std::clamp<uint32_t>(framesInFlight, 1, 3);
+
+		if (window != nullptr && !SDL_SetGPUAllowedFramesInFlight(State->Device, queued)) {
 			// Not fatal. The default is a working configuration and the only
 			// thing lost is the latency this was trying to save.
 			ENGINE_WARN("SDL_SetGPUAllowedFramesInFlight: {}", SDL_GetError());
@@ -2589,6 +3108,9 @@ namespace engine::render {
 		if (State->ShadowTexture) {
 			SDL_ReleaseGPUTexture(device, State->ShadowTexture);
 		}
+		if (State->BeamTexture) {
+			SDL_ReleaseGPUTexture(device, State->BeamTexture);
+		}
 		if (State->ShadowSampler) {
 			SDL_ReleaseGPUSampler(device, State->ShadowSampler);
 		}
@@ -2601,6 +3123,17 @@ namespace engine::render {
 				}
 				if (surface.Depth) {
 					SDL_ReleaseGPUTexture(device, surface.Depth);
+				}
+			}
+
+			for (Impl::PortalLevel &level : bank.Portals) {
+				for (Impl::PortalTarget &target : level.Targets) {
+					if (target.Colour) {
+						SDL_ReleaseGPUTexture(device, target.Colour);
+					}
+					if (target.Depth) {
+						SDL_ReleaseGPUTexture(device, target.Depth);
+					}
 				}
 			}
 		}
@@ -2712,6 +3245,52 @@ namespace engine::render {
 		if (State != nullptr) {
 			State->AnimationSeconds = seconds;
 		}
+	}
+
+	void Renderer::SetSurfaceBounces(uint32_t bounces) {
+		if (State != nullptr) {
+			// Floored at one, because zero would mean no surface pass at all —
+			// which is a way of saying "no mirrors" that has a much clearer
+			// spelling elsewhere, and is not what somebody dialling this down
+			// means.
+			State->SurfaceBounces = std::max<uint32_t>(bounces, 1u);
+		}
+	}
+
+	uint32_t Renderer::SurfaceBounces() const {
+		return State == nullptr ? 0u : State->SurfaceBounces;
+	}
+
+	void Renderer::SetPortalDepth(uint32_t depth) {
+		if (State != nullptr) {
+			// **Clamped rather than floored**, which is the opposite of the
+			// bounce knob above and is right for the opposite reason: zero here
+			// is a meaningful setting — every hole draws flat and nothing
+			// recurses — while the ceiling exists because the pool is full-screen
+			// targets per level per slot.
+			State->PortalDepth = std::min(depth, MAX_PORTAL_DEPTH);
+		}
+	}
+
+	void Renderer::SetSun(const core::Vector3 &direction, const core::Color3 &ambient) {
+		if (State == nullptr) {
+			return;
+		}
+
+		// **Normalised by the caller and checked here.** `scene::SunOf` already
+		// does it, and a direction of zero arriving from anywhere else would
+		// shade every surface by `dot(n, 0)` — a world that goes flat grey with
+		// nothing in the log to say why.
+		const float length = direction.Magnitude();
+		if (length > 0.0f) {
+			State->Sun = glm::vec3{direction.X / length, direction.Y / length, direction.Z / length};
+		}
+
+		State->Ambient = glm::vec4{ambient.R, ambient.G, ambient.B, 1.0f};
+	}
+
+	uint32_t Renderer::PortalDepth() const {
+		return State == nullptr ? 0u : State->PortalDepth;
 	}
 
 	FlipbookCell Renderer::TextureCell(const core::Name &name, double seconds) const {
@@ -2932,7 +3511,9 @@ namespace engine::render {
 		std::span<const ParticleBatch> particles,
 		std::span<const effects::RibbonVertex> ribbonVertices,
 		std::span<const effects::RibbonRun> ribbonRuns,
-		std::span<const SceneLight> lights
+		std::span<const SceneLight> lights,
+		std::span<const scene::DrawInstance> foreign,
+		std::span<const PortalView> portals
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
@@ -2952,6 +3533,36 @@ namespace engine::render {
 		if (!State->Device) {
 			return result;
 		}
+
+		// How close the nearest hole is, and the near plane that follows from it.
+		//
+		// **The near plane a portal needs is not the one a scene authors.** Walk
+		// up to a doorway with a hole in it and the last hand's width of the
+		// approach is the whole illusion: an authored near plane slices the pane
+		// open there and the wall beside it disappears. `scene::PortalNearPlane`
+		// trades depth precision for that, and only while a hole is close enough
+		// to need it — CodeParade's `GH_CLAMP(NearestPortalDist() * 0.5f, ...)`,
+		// which the demo applies to its one and only camera.
+		//
+		// **Measured off the panes this frame was handed rather than off the
+		// world**, because that is the same set the pass below draws through and
+		// the renderer has no store to ask. `scene::ResolveActiveCamera` answers
+		// the same question from the seams for culling, from the same functions.
+		float nearestPane = std::numeric_limits<float>::infinity();
+		for (const PortalView &portal : portals) {
+			nearestPane = std::min(
+				nearestPane,
+				scene::RectangleDistance(portal.Centre, portal.First, portal.Second, cameraFrame.Position)
+			);
+		}
+
+		// **One adapted copy used by every projection this frame builds**, so the
+		// cull, the portal recursion and the opaque draw cannot disagree about
+		// where the near plane is. A cull run against a larger near plane than
+		// the draw uses throws away exactly the geometry the smaller one exists
+		// to keep.
+		scene::Camera drawCamera = camera;
+		drawCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, nearestPane);
 
 		// **Claimed here only if the caller did not claim it first.** `WaitForFrame`
 		// is what a latency-sensitive loop calls before it reads its input; a
@@ -3089,8 +3700,19 @@ namespace engine::render {
 			scene::KeepLoaded(
 				instances, [this](const core::Name &mesh) { return State->Meshes.Has(mesh); }, State->Drawable
 			);
+
+			// **The other worlds pay the same toll.** A destination whose meshes
+			// have not arrived here would otherwise come up as the field of
+			// cubes described above — seen through a portal, which is the one
+			// place a viewer cannot walk over and check.
+			scene::KeepLoaded(
+				foreign,
+				[this](const core::Name &mesh) { return State->Meshes.Has(mesh); },
+				State->DrawableForeign
+			);
 		}
 		instances = State->Drawable;
+		foreign = State->DrawableForeign;
 
 		// --- uploads --------------------------------------------------------
 
@@ -3129,6 +3751,11 @@ namespace engine::render {
 			// frame's matrix. See the refresh decision below.
 			glm::mat4 ViewProjection{1.0f};
 
+			// The same with the pane's map folded in, which is what the pane
+			// reads the image back through. `SurfaceView::Mapping` says why they
+			// are two matrices rather than one.
+			glm::mat4 Sampling{1.0f};
+
 			float ImageOpacity = 1.0f;
 
 			// What the pane puts the image through. Carried for the same reason
@@ -3149,6 +3776,41 @@ namespace engine::render {
 		// reach the wrong bank. See `Impl::SurfaceBanks`.
 		Impl::SurfaceBank &bank = State->SurfacesAt(targetSlot);
 
+		// **The holes, claimed before the surfaces are**, so that a slot named by
+		// both goes to the recursive pass. That order is the answer rather than a
+		// tie-break: a same-world portal handed to the surface path draws from the
+		// wrong viewpoint the moment it is seen through another hole, which is the
+		// whole reason this pass exists — whereas a portal drawn recursively and
+		// *also* given a surface camera merely wastes a scene pass on a texture
+		// nothing samples.
+		const PortalView *portalOf[scene::MAX_SURFACES] = {};
+		bool havePortals = false;
+		for (const PortalView &portal : portals) {
+			if (portal.Index < 0 || static_cast<uint8_t>(portal.Index) >= scene::MAX_SURFACES) {
+				ENGINE_WARN(
+					"portal index {} is outside 0..{}, so it draws flat",
+					portal.Index,
+					scene::MAX_SURFACES - 1
+				);
+				continue;
+			}
+
+			const auto index = static_cast<uint8_t>(portal.Index);
+			if (portalOf[index] != nullptr) {
+				ENGINE_WARN("two portals claim index {}; the second is ignored", portal.Index);
+				continue;
+			}
+
+			portalOf[index] = &portal;
+			claimed[index] = true;
+			havePortals = true;
+		}
+
+		// **Read once here, so the pass that fills the pool and the pass that
+		// samples it cannot disagree about how many levels there are.** The top
+		// level is `portalLevels - 1`, which is the index the opaque pass reads.
+		const uint32_t portalLevels = std::min(State->PortalDepth, MAX_PORTAL_DEPTH);
+
 		for (const SurfaceView &view : surfaces) {
 			if (view.Index < 0 || static_cast<uint8_t>(view.Index) >= scene::MAX_SURFACES) {
 				ENGINE_WARN(
@@ -3160,6 +3822,13 @@ namespace engine::render {
 			}
 
 			const auto index = static_cast<uint8_t>(view.Index);
+			if (portalOf[index] != nullptr) {
+				ENGINE_WARN(
+					"surface camera {} names a slot a portal already draws; the recursive pass keeps it",
+					view.Index
+				);
+				continue;
+			}
 			if (claimed[index]) {
 				ENGINE_WARN("two surface cameras claim index {}; the second is ignored", view.Index);
 				continue;
@@ -3167,13 +3836,16 @@ namespace engine::render {
 
 			claimed[index] = true;
 
-			const float aspect =
-				static_cast<float>(view.Width) / static_cast<float>(std::max(view.Height, 1u));
-
+			// **No aspect ratio, and its absence is load-bearing.** A surface
+			// frustum is fitted to the pane's four corners, so the texture's
+			// shape is already inside the extents that produced this
+			// projection; widening by the aspect again here would apply it
+			// twice and stretch every mirror in the scene.
 			AcceptedView entry;
 			entry.Index = index;
 			entry.View = &view;
-			entry.ViewProjection = scene::ResolveCamera(view.Frame, view.Lens, aspect).ViewProjection;
+			entry.ViewProjection = scene::ResolveSurfaceCamera(view.Frame, view.Projection).ViewProjection;
+			entry.Sampling = entry.ViewProjection * view.Mapping;
 			entry.ImageOpacity = std::clamp(view.ImageOpacity, 0.0f, 1.0f);
 			entry.Effect = view.Effect;
 
@@ -3190,14 +3862,23 @@ namespace engine::render {
 		// six comparisons on a box that already exists. See its comment for why
 		// this is not a cache.
 		core::AABB sceneBounds;
+
+		// **Kept past the cull, because the refresh decision below needs it
+		// too.** Whether a pane is on screen is the same question the culler
+		// already answers for every instance, and building a second frustum
+		// from the same camera would be a second answer to it.
+		graph::Frustum cameraFrustum{};
+
+		// The same camera as a matrix, because deciding a surface's *resolution*
+		// needs "how much of the screen" and a frustum only answers "any of it".
+		glm::mat4 cameraMatrix{1.0f};
 		{
 			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
 
 			const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-			const graph::Frustum frustum = graph::Frustum::FromViewProjection(
-				scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection
-			);
-			visibleCount = graph::CullAndBound(instances, frustum, State->Visible, sceneBounds);
+			cameraMatrix = scene::ResolveCamera(cameraFrame, drawCamera, aspect).ViewProjection;
+			cameraFrustum = graph::Frustum::FromViewProjection(cameraMatrix);
+			visibleCount = graph::CullAndBound(instances, cameraFrustum, State->Visible, sceneBounds);
 		}
 
 		// **Fitted to the whole draw list, not to what survived culling.** A
@@ -3210,9 +3891,8 @@ namespace engine::render {
 		// Built here rather than before the cull only because the cull is now
 		// what produces the bound. Nothing between the two reads it, and its
 		// first use is the shadow pass.
-		const glm::mat4 lightViewProjection = graph::FitDirectionalLight(
-			sceneBounds, core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
-		);
+		const glm::mat4 lightViewProjection =
+			graph::FitDirectionalLight(sceneBounds, core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z});
 
 		// Ordered over the survivors, so the two passes are two ranges of one
 		// buffer. Opaque first in whatever order the world produced, then the
@@ -3326,10 +4006,65 @@ namespace engine::render {
 		// **Allocated for every accepted view before anything is ordered**, so
 		// a view whose texture cannot be made drops out of the frame here rather
 		// than half way through the pass loop.
+		// **Whether anything can see each pane, which is the other half of the
+		// refresh decision and the half this pass did not have.** The signature
+		// answers "did the image change"; nothing answered "is the image
+		// looked at", so a room of mirrors redrew every one of them on every
+		// frame anything moved — including the ones behind the viewer and the
+		// ones a wall stands in front of. That cost is per pane and the scenes
+		// this exists for are the ones with several.
+		//
+		// **Two sweeps and deliberately not a fixed point.** A pane visible only
+		// *inside another mirror* is a real case — two facing panes, or a portal
+		// seen through a portal — so main-camera visibility alone would freeze
+		// it. The union with the other surfaces' own frusta covers it in one
+		// pass: a pane seen inside a surface that is itself on screen refreshes
+		// now, and one buried two bounces deep refreshes a frame later. That is
+		// the same one-frame budget the whole surface pass already runs on, and
+		// iterating to closure here would spend the saving this exists for.
+		bool surfaceVisible[scene::MAX_SURFACES] = {};
+		float surfaceCoverage[scene::MAX_SURFACES] = {};
+		if (acceptedCount > 0) {
+			graph::SurfaceEye eyes[scene::MAX_SURFACES];
+			for (size_t index = 0; index < acceptedCount; index++) {
+				eyes[index].ViewProjection = accepted[index].ViewProjection;
+				eyes[index].Index = static_cast<int8_t>(accepted[index].Index);
+			}
+
+			// **In `graph` rather than here, and that is the seam rather than
+			// tidiness.** The decision is boxes against frusta over a draw list,
+			// which is what that module is, and a rule this pass held privately
+			// would be a rule no suite could reach — `Renderer::Render` needs a
+			// device and the answer does not.
+			(void)graph::VisibleSurfaces(
+				instances,
+				cameraMatrix,
+				std::span<const graph::SurfaceEye>(eyes, acceptedCount),
+				std::span<bool>(surfaceVisible, scene::MAX_SURFACES),
+				std::span<float>(surfaceCoverage, scene::MAX_SURFACES)
+			);
+		}
+
 		size_t liveCount = 0;
 		for (size_t index = 0; index < acceptedCount; index++) {
 			const AcceptedView &view = accepted[index];
-			if (State->EnsureSurface(targetSlot, view.Index, view.View->Width, view.View->Height)) {
+
+			// **Sized to what the pane covers, not to what was authored.** The
+			// authored size is a floor and the screen is a ceiling; between them
+			// the target doubles as the pane grows on screen, which is what stops
+			// a portal going coarse when you walk into it. See `SurfaceScale`.
+			const uint32_t authored = std::max<uint32_t>(view.View->Width, view.View->Height);
+			const Impl::SurfaceSlotState &sized = bank.Surfaces[view.Index];
+			const uint32_t held = std::max<uint32_t>(sized.Width, sized.Height);
+			const uint32_t current = authored > 0 && held >= authored ? held / authored : 1u;
+
+			const uint32_t scale = SurfaceScale(
+				authored, surfaceCoverage[view.Index], std::max<uint32_t>(sceneWidth, sceneHeight), current
+			);
+
+			if (State->EnsureSurface(
+					targetSlot, view.Index, view.View->Width * scale, view.View->Height * scale
+				)) {
 				accepted[liveCount++] = view;
 			}
 		}
@@ -3357,6 +4092,13 @@ namespace engine::render {
 		// refresh together: one that has never rendered has nothing to compare
 		// against, and one that appeared this frame has to draw once before it
 		// can be skipped.
+		// The frame clock, which is what a rate cap is measured against.
+		//
+		// **`SetAnimationTime`'s, because the renderer already has exactly one
+		// idea of what time it is** and a second clock read here would let a
+		// surface's interval drift against the flipbooks in it.
+		const double frameSeconds = State->AnimationSeconds;
+
 		uint64_t surfaceSignature = 0;
 		size_t refreshCount = 0;
 		if (wantSurface) {
@@ -3364,10 +4106,25 @@ namespace engine::render {
 
 			surfaceSignature = scene::SignatureOf(instances);
 
+			// **And the other worlds, whose whole purpose is to be moving.** A
+			// destination that changed while this world sat still is the case a
+			// live portal exists for, and it is invisible to the line above.
+			surfaceSignature = scene::MixSignature(surfaceSignature, scene::SignatureOf(foreign));
+
 			for (size_t index = 0; index < acceptedCount; index++) {
 				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].Index);
 				surfaceSignature = MixMatrix(surfaceSignature, accepted[index].ViewProjection);
 				surfaceSignature = MixFloat(surfaceSignature, accepted[index].ImageOpacity);
+
+				// **The foreign range, because moving it is a change nothing
+				// else here would notice.** `SignatureOf(instances)` already
+				// covers the *contents* of the appended tail — the far world
+				// moving redraws the pane, which is the whole point of a live
+				// destination — but a host that reordered two foreign ranges
+				// without changing either world would leave the signature
+				// identical while each surface now names the other's instances.
+				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].View->InstanceFirst);
+				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].View->InstanceCount);
 			}
 
 			for (size_t index = 0; index < acceptedCount; index++) {
@@ -3381,12 +4138,39 @@ namespace engine::render {
 				state.ImageOpacity = accepted[index].ImageOpacity;
 				state.Effect = accepted[index].Effect;
 
-				accepted[index].Refresh = !state.Ready || state.Signature != surfaceSignature;
+				// **Three independent reasons to skip, and they are not
+				// interchangeable.** The signature says the image has not
+				// changed; visibility says nothing is looking at it; the rate
+				// says it drew recently enough. A surface has to clear all
+				// three, and each of them alone leaves the slot holding the
+				// frame it has along with the matrices that drew it.
+				//
+				// **Visibility overrides the never-rendered case.** A slot that
+				// has never drawn has nothing to compare a signature against,
+				// but it also has nothing looking at it — and `Ready` staying
+				// false is exactly right for that: the pane draws as its own
+				// tint until the frame something can see it.
+				//
+				// **The rate does not**, and that asymmetry is deliberate: a
+				// surface must draw *once* as soon as something can see it, or
+				// a pane walked up to shows its own tint for up to an interval
+				// before the picture appears.
+				const bool changed = !state.Ready || state.Signature != surfaceSignature;
+				const bool due = DueToDraw(state.Drawn, accepted[index].View->FPS, frameSeconds);
+
+				accepted[index].Refresh = surfaceVisible[accepted[index].Index] && changed && due;
 				refreshCount += accepted[index].Refresh ? 1u : 0u;
 			}
 		}
 
+		// **This world's rows, then the other worlds' — one buffer, two halves
+		// that never mix.** The head is what every pass in this frame partitions
+		// and submits; the tail exists only so a surface can name a range of it.
+		// Joining them before the plan is what drew two rooms on top of each
+		// other until v0.14, and is why `foreign` is its own argument.
 		State->SceneInstances.assign(instances.begin(), instances.end());
+		const auto ownCount = static_cast<uint32_t>(State->SceneInstances.size());
+		State->SceneInstances.insert(State->SceneInstances.end(), foreign.begin(), foreign.end());
 
 		// **Every range the three scene passes submit, from one call.** The
 		// ordering, the mirror partition and the caster partition are arithmetic
@@ -3394,10 +4178,19 @@ namespace engine::render {
 		// headless suite can get at them. A renderer is the one module a test
 		// cannot exercise, so the counts it hands to a draw call are the last
 		// place they should be computed. See `scene::ScenePlan` for the runs.
+		//
+		// **Given the head alone.** A plan over the tail as well would sort
+		// another world's parts into this one's opaque run, its mirror partition
+		// and its shadow casters — and the ordering it returns is a permutation,
+		// so it would also move the very rows a surface has already named.
 		scene::ScenePlan plan;
 		{
 			ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
-			plan = scene::OrderScene(State->SceneInstances, sceneEye, State->SceneOrder);
+			plan = scene::OrderScene(
+				std::span<const scene::DrawInstance>(State->SceneInstances).first(ownCount),
+				sceneEye,
+				State->SceneOrder
+			);
 		}
 
 		const auto sceneCount = static_cast<uint32_t>(State->SceneInstances.size());
@@ -3482,6 +4275,8 @@ namespace engine::render {
 					State->SlotMesh.resize(uploadCount);
 					State->SlotTexture.resize(uploadCount);
 					State->SlotTags.resize(uploadCount);
+					State->SlotSeam.resize(uploadCount);
+					State->SlotSeamLight.resize(uploadCount);
 
 					// **The mesh is resolved once and used twice.** `ToGpu` needs
 					// it to stretch the instance into its `Size` box and the draw
@@ -3492,6 +4287,14 @@ namespace engine::render {
 						State->SlotMesh[slot] = &mesh;
 						State->SlotTexture[slot] = instance.Texture;
 						State->SlotTags[slot] = instance.TagMask;
+						State->SlotSeam[slot] = glm::vec4{
+							instance.SeamNormal.X,
+							instance.SeamNormal.Y,
+							instance.SeamNormal.Z,
+							instance.SeamOffset
+						};
+						State->SlotSeamLight[slot] =
+							glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
 						return &mesh;
 					};
 
@@ -3500,7 +4303,20 @@ namespace engine::render {
 						out[index] = ToGpu(instance, *record(index, instance));
 					}
 
-					const size_t cameraBase = State->SceneOrder.size();
+					// **The other worlds, in the order they were handed over.**
+					// Nothing sorts them: they are drawn as one plain run by one
+					// surface, so there is no partition to build and no eye to
+					// sort towards — the pane's camera is not this frame's.
+					//
+					// Slot `ownCount + k` therefore holds `foreign[k]`, which is
+					// what lets `SurfaceView::InstanceFirst` survive a plan that
+					// permuted everything before it.
+					for (size_t index = ownCount; index < sceneCount; index++) {
+						const scene::DrawInstance &instance = State->SceneInstances[index];
+						out[index] = ToGpu(instance, *record(index, instance));
+					}
+
+					const size_t cameraBase = sceneCount;
 					auto *camera = out + cameraBase;
 					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
 						const scene::DrawInstance &instance =
@@ -3752,6 +4568,200 @@ namespace engine::render {
 			SDL_EndGPURenderPass(pass);
 		}
 
+		// --- portal beams ----------------------------------------------------
+		//
+		// **A hole carries occlusion as well as a picture.** Both rooms already
+		// have the world's sun, so what a portal transports is not light but the
+		// *absence* of it: a caster standing in front of a hole darkens the floor
+		// beyond it, and a body cut at the seam is shadowed by whatever shadows
+		// its other half. Adding a second contribution instead would double-light
+		// every floor near a doorway.
+		//
+		// **The casters are left where they are and the receiver is mapped
+		// back**, which is the whole reason this is affordable. The obvious
+		// arrangement renders the near room's casters *transformed* into the far
+		// room, and that needs a second instance buffer holding a mapped copy of
+		// the world. Mapping the other way needs none: a far-side fragment goes
+		// through `Back` into the near room and is looked up there, where the
+		// casters already are. `NON-EUCLIDEAN.md` Part V.3 is the derivation.
+		//
+		// **The frustum is the aperture.** `graph::FitPortalLight` fits the sides
+		// of the box to the pane's own rectangle, so a fragment the beam does not
+		// reach projects outside `0..1` and the lookup already reads that as lit.
+		// There is no rectangle test in the shader because the matrix is one.
+		State->Beams = BeamUniforms{};
+
+		if (havePortals && haveShadow && State->EnsureBeams()) {
+			ENGINE_PROFILE_CAT("portal beams", core::ProfileCategory::Render);
+
+			// The holes nearest the eye, because every fragment tests every live
+			// beam and four is what a corridor needs.
+			struct Beam {
+				const PortalView *Pane = nullptr;
+				const PortalView *Partner = nullptr;
+				float Distance = 0.0f;
+			};
+
+			Beam ordered[scene::MAX_SURFACES];
+			size_t candidates = 0;
+
+			for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+				const PortalView *const portal = portalOf[slot];
+				if (portal == nullptr || portal->Partner < 0) {
+					continue;
+				}
+
+				// **A pane with no partner in this frame's set carries nothing**,
+				// because the map back is the partner's own warp — one map per
+				// pane, and a pair's two are each other's inverse. Deriving an
+				// inverse here would be a second arithmetic to get wrong.
+				const PortalView *const partner = portalOf[static_cast<uint8_t>(portal->Partner)];
+				if (partner == nullptr) {
+					continue;
+				}
+
+				ordered[candidates++] = Beam{
+					portal,
+					partner,
+					scene::RectangleDistance(
+						portal->Centre, portal->First, portal->Second, cameraFrame.Position
+					)
+				};
+			}
+
+			std::sort(ordered, ordered + candidates, [](const Beam &left, const Beam &right) {
+				return left.Distance < right.Distance;
+			});
+
+			if (candidates > MAX_PORTAL_BEAMS) {
+				// **Logged rather than dropped quietly.** A shadow that stops
+				// crossing when a fifth pane comes on screen reads as the feature
+				// not working at all, which is a much harder thing to look for
+				// than a line saying which holes were left out.
+				ENGINE_WARN(
+					"{} holes could carry a shadow and only {} may; the farther ones do not",
+					candidates,
+					MAX_PORTAL_BEAMS
+				);
+			}
+
+			const auto live = static_cast<uint32_t>(std::min<size_t>(candidates, MAX_PORTAL_BEAMS));
+
+			const auto half = static_cast<float>(SHADOW_RESOLUTION / 2);
+
+			for (uint32_t index = 0; index < live; index++) {
+				const Beam &beam = ordered[index];
+
+				State->Beams.Light[index] = graph::FitPortalLight(
+					sceneBounds,
+					beam.Pane->Centre,
+					beam.Pane->First,
+					beam.Pane->Second,
+					core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z}
+				);
+
+				State->Beams.Back[index] = scene::SeamMatrix(beam.Partner->Warp);
+
+				State->Beams.Plane[index] = glm::vec4{
+					beam.Pane->Normal.X,
+					beam.Pane->Normal.Y,
+					beam.Pane->Normal.Z,
+					beam.Pane->Normal.Dot(beam.Pane->Centre)
+				};
+
+				// Half the atlas on each axis, in the reading order the viewport
+				// below uses.
+				State->Beams.Region[index] = glm::vec4{
+					0.5f, 0.5f, static_cast<float>(index % 2) * 0.5f, static_cast<float>(index / 2) * 0.5f
+				};
+
+				SDL_GPUDepthStencilTargetInfo beamTarget{};
+				beamTarget.texture = State->BeamTexture;
+				beamTarget.clear_depth = 1.0f;
+
+				// **The first beam clears the whole atlas and the rest load it.**
+				// A clear is not confined by the viewport, so clearing per beam
+				// would wipe the ones already drawn — and a quadrant nobody wrote
+				// stays at the far plane, which the lookup reads as lit.
+				beamTarget.load_op = index == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+				beamTarget.store_op = SDL_GPU_STOREOP_STORE;
+				beamTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+				beamTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+				beamTarget.cycle = false;
+
+				SDL_GPURenderPass *beamPass = SDL_BeginGPURenderPass(command, nullptr, 0, &beamTarget);
+				SDL_BindGPUGraphicsPipeline(beamPass, State->ShadowPipeline);
+
+				const SDL_GPUViewport beamViewport{
+					static_cast<float>(index % 2) * half,
+					static_cast<float>(index / 2) * half,
+					half,
+					half,
+					0.0f,
+					1.0f
+				};
+				SDL_SetGPUViewport(beamPass, &beamViewport);
+
+				const SDL_Rect beamScissor{
+					static_cast<int>(index % 2) * static_cast<int>(half),
+					static_cast<int>(index / 2) * static_cast<int>(half),
+					static_cast<int>(half),
+					static_cast<int>(half)
+				};
+				SDL_SetGPUScissor(beamPass, &beamScissor);
+
+				const SDL_GPUBufferBinding beamBindings[] = {
+					{State->Meshes.Vertices(), 0},
+					{State->InstanceBuffer, 0},
+				};
+				SDL_BindGPUVertexBuffers(beamPass, 0, beamBindings, 2);
+
+				const SDL_GPUBufferBinding beamIndices{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(beamPass, &beamIndices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+				SDL_PushGPUVertexUniformData(command, 0, &State->Beams.Light[index], sizeof(glm::mat4));
+
+				// The same caster runs the world's own shadow map draws, for the
+				// same reason: a caster outside the beam is culled by the matrix
+				// rather than by a list.
+				uint64_t beamTriangles = 0;
+				if (reflectedCasters > 0) {
+					result.DrawCalls += State->DrawSlots(
+						command,
+						beamPass,
+						0,
+						reflectedCasters,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						0,
+						beamTriangles
+					);
+				}
+				if (surfaceCasters > 0) {
+					result.DrawCalls += State->DrawSlots(
+						command,
+						beamPass,
+						sceneReflected,
+						surfaceCasters,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						0,
+						beamTriangles
+					);
+				}
+
+				SDL_EndGPURenderPass(beamPass);
+			}
+
+			State->Beams.Count.x = static_cast<float>(live);
+		}
+
 		// --- surface pass ----------------------------------------------------
 		//
 		// The same scene range, from each surface camera, into that surface's
@@ -3777,224 +4787,221 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Surface);
 
-			// **Flipped for every refreshing surface before the first pass runs,
-			// not inside the loop.** A surface pass samples the other surfaces'
-			// read slots, so every slot has to have finished flipping before any
-			// of them is read — flipping inside the loop would have the second
-			// pass sample the first surface's *new* texture, which is this
-			// frame's half-drawn image and the exact self-reference the pair
-			// exists to make impossible.
+			// **The whole pass, run once per bounce, and that is in-frame
+			// recursion.** `D00112`'s remaining half was that a surface samples
+			// the *other* surfaces from the textures they had last frame — so a
+			// portal seen through a portal resolved over frames rather than
+			// within one, and the frame somebody crossed showed a seam.
 			//
-			// **A skipped surface does not flip, and its matrices do not move.**
-			// Both halves of that are one fact: the slot still holds the frame it
-			// held, so `ViewProjection` must still be the camera that drew it and
-			// `PreviousViewProjection` the one before. Advancing either for a
-			// surface that did not render would project a texture with a camera
-			// that never took it — a reflection sliding across a pane that
-			// nothing in the scene is moving, which is the hardest possible
-			// version of this bug to attribute.
-			for (size_t index = 0; index < acceptedCount; index++) {
-				if (!accepted[index].Refresh) {
-					continue;
+			// The fix does not need a recursive pass, a second renderer, or a
+			// camera per level: it needs this loop to run again. Bounce zero
+			// draws every surface sampling last frame's neighbours; the flip at
+			// the top of bounce one makes bounce zero's output the read side, so
+			// bounce one draws every surface sampling *this frame's*
+			// neighbours. After `n` bounces a chain `n` deep is resolved inside
+			// the frame, deepest first, because that is what iterating to a
+			// fixed point does from the outside in.
+			//
+			// **The ping-pong is what makes it safe**, and it is already here.
+			// Each bounce writes `Slot` and reads `Slot ^ 1`, and the flip
+			// between bounces swaps which is which — so no pass ever samples a
+			// texture another pass is writing in the same bounce, which is the
+			// exact self-reference the pair was built to make impossible.
+			//
+			// **A surface skipped on bounce zero stays skipped**, because
+			// `Refresh` is decided once above. A slot that is not refreshing is
+			// not flipped either, so its parity never moves and its neighbours
+			// go on reading the frame it actually holds.
+			//
+			// Costs a full scene pass per visible surface per bounce, which is
+			// what buys the depth — and is why the visibility gate and
+			// `SurfaceCamera::FPS` landed first. One surface gains nothing from
+			// a second bounce, because nothing samples itself.
+			const uint32_t bounces = acceptedCount > 1 ? std::max<uint32_t>(State->SurfaceBounces, 1u) : 1u;
+
+			for (uint32_t bounce = 0; bounce < bounces; bounce++) {
+
+				// **Flipped for every refreshing surface before the first pass runs,
+				// not inside the loop.** A surface pass samples the other surfaces'
+				// read slots, so every slot has to have finished flipping before any
+				// of them is read — flipping inside the loop would have the second
+				// pass sample the first surface's *new* texture, which is this
+				// frame's half-drawn image and the exact self-reference the pair
+				// exists to make impossible.
+				//
+				// **A skipped surface does not flip, and its matrices do not move.**
+				// Both halves of that are one fact: the slot still holds the frame it
+				// held, so `ViewProjection` must still be the camera that drew it and
+				// `PreviousViewProjection` the one before. Advancing either for a
+				// surface that did not render would project a texture with a camera
+				// that never took it — a reflection sliding across a pane that
+				// nothing in the scene is moving, which is the hardest possible
+				// version of this bug to attribute.
+				for (size_t index = 0; index < acceptedCount; index++) {
+					if (!accepted[index].Refresh) {
+						continue;
+					}
+
+					Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
+					state.PreviousViewProjection = state.ViewProjection;
+					state.PreviousSampling = state.Sampling;
+					state.ViewProjection = accepted[index].ViewProjection;
+					state.Sampling = accepted[index].Sampling;
+					state.Slot ^= 1u;
 				}
 
-				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
-				state.PreviousViewProjection = state.ViewProjection;
-				state.ViewProjection = accepted[index].ViewProjection;
-				state.Slot ^= 1u;
-			}
+				for (size_t index = 0; index < acceptedCount; index++) {
+					if (!accepted[index].Refresh) {
+						continue;
+					}
 
-			for (size_t index = 0; index < acceptedCount; index++) {
-				if (!accepted[index].Refresh) {
-					continue;
-				}
+					const uint8_t self = accepted[index].Index;
 
-				const uint8_t self = accepted[index].Index;
+					// **Taken here rather than at each draw**, because `drawMirrors`
+					// below shadows `index` with its own loop over surfaces — so
+					// `accepted[index]` inside it would name a different view
+					// entirely, and the filter would silently be another surface's.
+					const uint32_t surfaceFilter = accepted[index].View->TagFilter;
+					Impl::SurfaceSlotState &state = bank.Surfaces[self];
 
-				// **Taken here rather than at each draw**, because `drawMirrors`
-				// below shadows `index` with its own loop over surfaces — so
-				// `accepted[index]` inside it would name a different view
-				// entirely, and the filter would silently be another surface's.
-				const uint32_t surfaceFilter = accepted[index].View->TagFilter;
-				Impl::SurfaceSlotState &state = bank.Surfaces[self];
+					SDL_GPUColorTargetInfo surfaceColour{};
+					surfaceColour.texture = state.Texture[state.Slot];
+					surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+					surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
+					surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
+					surfaceColour.cycle = true;
 
-				SDL_GPUColorTargetInfo surfaceColour{};
-				surfaceColour.texture = state.Texture[state.Slot];
-				surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
-				surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
-				surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
-				surfaceColour.cycle = true;
+					SDL_GPUDepthStencilTargetInfo surfaceDepth{};
+					surfaceDepth.texture = state.Depth;
+					surfaceDepth.clear_depth = 1.0f;
+					surfaceDepth.load_op = SDL_GPU_LOADOP_CLEAR;
+					surfaceDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+					surfaceDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+					surfaceDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+					surfaceDepth.cycle = true;
 
-				SDL_GPUDepthStencilTargetInfo surfaceDepth{};
-				surfaceDepth.texture = state.Depth;
-				surfaceDepth.clear_depth = 1.0f;
-				surfaceDepth.load_op = SDL_GPU_LOADOP_CLEAR;
-				surfaceDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
-				surfaceDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-				surfaceDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-				surfaceDepth.cycle = true;
+					SDL_GPURenderPass *pass =
+						SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
+					// **The light set, pushed once for the whole pass.** Uniform state
+					// on a command buffer persists until it is replaced, so one push
+					// before the draws serves every one of them — which is the whole
+					// reason this is a second buffer rather than fields on the
+					// per-draw `LightingUniforms`.
+					SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 
-				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
-				// **The light set, pushed once for the whole pass.** Uniform state
-				// on a command buffer persists until it is replaced, so one push
-				// before the draws serves every one of them — which is the whole
-				// reason this is a second buffer rather than fields on the
-				// per-draw `LightingUniforms`.
-				SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
-				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+					// **The beams, beside the lights and for the same reason.**
+					// Which holes carry a shadow is a fact about the frame, so it
+					// is pushed once per pass rather than per draw — and it is
+					// pushed even when there are none, because a stale block from
+					// a previous frame would shadow through a hole that is no
+					// longer there.
+					SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
+					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
-				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->Meshes.Vertices(), 0},
-					{State->InstanceBuffer, 0},
-				};
-				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+					const SDL_GPUBufferBinding vertexBindings[] = {
+						{State->Meshes.Vertices(), 0},
+						{State->InstanceBuffer, 0},
+					};
+					SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
 
-				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-				// **Shadowed, and pointedly not surfaced.** The mirror's own view
-				// gets the shadow map, so what it reflects is lit the way the
-				// screen lights it.
-				//
-				// **`Flags.z` is zero for the world, and it has to be.** It means
-				// "this draw samples a surface texture instead of its own tint",
-				// and it is set below for exactly the mirror runs. Setting it for
-				// the whole pass is what made the floor sample the previous
-				// frame's reflection and come out as the clear colour wherever
-				// that projection landed on untouched texels — a black wedge in
-				// the mirror that survived deleting every caster, the frame and
-				// the near-plane hack, and moved when the camera was re-aimed but
-				// not when the floor was.
-				const LightingUniforms surfaceLighting{
-					glm::vec4{SUN_DIRECTION, 0.0f},
-					SUN_AMBIENT,
-					glm::vec4{
-						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
-					},
-				};
+					// **Shadowed, and pointedly not surfaced.** The mirror's own view
+					// gets the shadow map, so what it reflects is lit the way the
+					// screen lights it.
+					//
+					// **`Flags.z` is zero for the world, and it has to be.** It means
+					// "this draw samples a surface texture instead of its own tint",
+					// and it is set below for exactly the mirror runs. Setting it for
+					// the whole pass is what made the floor sample the previous
+					// frame's reflection and come out as the clear colour wherever
+					// that projection landed on untouched texels — a black wedge in
+					// the mirror that survived deleting every caster, the frame and
+					// the near-plane hack, and moved when the camera was re-aimed but
+					// not when the floor was.
+					const LightingUniforms surfaceLighting{
+						glm::vec4{State->Sun, 0.0f},
+						State->Ambient,
+						glm::vec4{
+							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
+						},
+					};
 
-				SDL_GPUTexture *const fallback =
-					State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
-				SDL_GPUSampler *const shadowSampler =
-					State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
+					SDL_GPUTexture *const fallback =
+						State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
+					SDL_GPUSampler *const shadowSampler =
+						State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
 
-				// **The samplers are bound per draw now rather than per run**,
-				// because the third one — the colour map — changes with the
-				// mesh being drawn and the other two do not. `DrawSlots` binds
-				// all three together; what is left here is remembering which
-				// surface texture the next draws should sample.
-				SDL_GPUTexture *surfaceTexture = nullptr;
-				const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
+					// **The samplers are bound per draw now rather than per run**,
+					// because the third one — the colour map — changes with the
+					// mesh being drawn and the other two do not. `DrawSlots` binds
+					// all three together; what is left here is remembering which
+					// surface texture the next draws should sample.
+					SDL_GPUTexture *surfaceTexture = nullptr;
+					const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
 
-				const FrameUniforms worldFrame{
-					state.ViewProjection,
-					lightViewProjection,
-					glm::mat4{1.0f},
-				};
+					const FrameUniforms worldFrame{
+						state.ViewProjection,
+						lightViewProjection,
+						glm::mat4{1.0f},
+					};
 
-				const auto plainly = [&]() {
-					SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
-					bindSurface(nullptr);
-				};
+					const auto plainly = [&]() {
+						SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
+						bindSurface(nullptr);
+					};
 
-				plainly();
+					plainly();
 
-				// The world, minus every mirror. `plan.Reflected` is the
-				// non-mirror opaque run.
-				if (sceneReflected > 0) {
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						0,
-						sceneReflected,
-						&surfaceLighting,
-						fallback,
-						shadowSampler,
-						surfaceTexture,
-						State->SurfaceSampler,
-						surfaceFilter,
-						result.Triangles
-					);
-				}
-
-				// **Every mirror except this one, one draw each.** `self` is
-				// skipped because nothing sees itself in its own reflection —
-				// drawing it would fill this texture with the pane it belongs
-				// to, and the mirror would show itself rather than the room.
-				//
-				// A surface that has no frame yet, or that no camera is
-				// rendering this frame, is drawn **plainly** rather than skipped.
-				// A pane that vanishes until its mirror warms up is worse than
-				// one that is briefly its own colour, and a pane naming an index
-				// nothing renders is a scene mistake that should be visible as a
-				// flat pane rather than as a hole in the geometry.
-				//
-				// Sampled draws project with the matrix that *rendered* the
-				// texture being read — `PreviousViewProjection`, not the one
-				// just resolved — because the image is a frame old and
-				// projecting it with a fresh camera slides it across the pane.
-				const auto drawMirrors = [&](bool blended) {
-					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
-						if (index == self) {
-							continue;
-						}
-
-						const scene::SurfaceRun &run = plan.Runs[index];
-						const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
-						const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
-						if (count == 0) {
-							continue;
-						}
-
-						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
-						if (!shown.Ready || !claimed[index]) {
-							plainly();
-							result.DrawCalls += State->DrawSlots(
-								command,
-								pass,
-								first,
-								count,
-								&surfaceLighting,
-								fallback,
-								shadowSampler,
-								surfaceTexture,
-								State->SurfaceSampler,
-								surfaceFilter,
-								result.Triangles
-							);
-							continue;
-						}
-
-						const FrameUniforms mirrorFrame{
-							state.ViewProjection,
-							lightViewProjection,
-							shown.PreviousViewProjection,
-						};
-						LightingUniforms mirrorLighting{
-							glm::vec4{SUN_DIRECTION, 0.0f},
-							SUN_AMBIENT,
-							glm::vec4{
-								haveShadow ? 1.0f : 0.0f,
-								1.0f / static_cast<float>(SHADOW_RESOLUTION),
-								1.0f,
-								shown.ImageOpacity
-							},
-						};
-
-						// Which grade this surface's image goes through. On the
-						// composite rather than on the render, so switching one
-						// costs no redraw of the texture.
-						mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
-
-						SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
-						bindSurface(shown.Texture[shown.Slot ^ 1u]);
-
+					// **Another world's instances, when the host handed some over.**
+					// `SurfaceView::InstanceCount` says why this bypasses the plan:
+					// the plan partitions *this* world's draw list and knows nothing
+					// about the tail behind it, so a foreign surface is one plain run
+					// and no mirror runs at all. That is what lets a portal in one
+					// world show a live second world.
+					//
+					// **`ownCount` is what turns the host's index into a slot.** The
+					// host counts from zero within its own `foreign` list, because
+					// nothing outside this call knows where this world's rows end or
+					// that the plan reordered them.
+					//
+					// **`continue`, so the plan-driven draws below are skipped
+					// entirely.** Drawing both would put this world's floor into the
+					// far world's picture, which reads as the two rooms bleeding
+					// into each other.
+					if (accepted[index].View->InstanceCount > 0) {
 						result.DrawCalls += State->DrawSlots(
 							command,
 							pass,
-							first,
-							count,
-							&mirrorLighting,
+							ownCount + accepted[index].View->InstanceFirst,
+							accepted[index].View->InstanceCount,
+							&surfaceLighting,
+							fallback,
+							shadowSampler,
+							surfaceTexture,
+							State->SurfaceSampler,
+							surfaceFilter,
+							result.Triangles
+						);
+
+						// **Ended and left for the sweep below to mark ready**, which
+						// is the invariant this must not shortcut: a surface written
+						// this frame may not be sampled as another surface's
+						// "previous" within the same frame.
+						SDL_EndGPURenderPass(pass);
+						continue;
+					}
+
+					// The world, minus every mirror. `plan.Reflected` is the
+					// non-mirror opaque run.
+					if (sceneReflected > 0) {
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							0,
+							sceneReflected,
+							&surfaceLighting,
 							fallback,
 							shadowSampler,
 							surfaceTexture,
@@ -4003,46 +5010,134 @@ namespace engine::render {
 							result.Triangles
 						);
 					}
-				};
 
-				drawMirrors(false);
+					// **Every mirror except this one, one draw each.** `self` is
+					// skipped because nothing sees itself in its own reflection —
+					// drawing it would fill this texture with the pane it belongs
+					// to, and the mirror would show itself rather than the room.
+					//
+					// A surface that has no frame yet, or that no camera is
+					// rendering this frame, is drawn **plainly** rather than skipped.
+					// A pane that vanishes until its mirror warms up is worse than
+					// one that is briefly its own colour, and a pane naming an index
+					// nothing renders is a scene mistake that should be visible as a
+					// flat pane rather than as a hole in the geometry.
+					//
+					// Sampled draws project with the matrix that *rendered* the
+					// texture being read — `PreviousViewProjection`, not the one
+					// just resolved — because the image is a frame old and
+					// projecting it with a fresh camera slides it across the pane.
+					const auto drawMirrors = [&](bool blended) {
+						for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+							if (index == self) {
+								continue;
+							}
 
-				// **The blended tail *minus* the mirrors in it.** The opaque head
-				// already excludes them for the reason above; a pane that went
-				// transparent moved from the head to the tail and stopped being
-				// excluded, so a faded mirror reflected itself.
-				const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
-				if (blendedPlain > 0 || plan.TransparentSurfaces > 0) {
-					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+							const scene::SurfaceRun &run = plan.Runs[index];
+							const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
+							const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
+							if (count == 0) {
+								continue;
+							}
+
+							const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
+							if (!shown.Ready || !claimed[index]) {
+								plainly();
+								result.DrawCalls += State->DrawSlots(
+									command,
+									pass,
+									first,
+									count,
+									&surfaceLighting,
+									fallback,
+									shadowSampler,
+									surfaceTexture,
+									State->SurfaceSampler,
+									surfaceFilter,
+									result.Triangles
+								);
+								continue;
+							}
+
+							const FrameUniforms mirrorFrame{
+								state.ViewProjection,
+								lightViewProjection,
+								shown.PreviousSampling,
+							};
+							LightingUniforms mirrorLighting{
+								glm::vec4{State->Sun, 0.0f},
+								State->Ambient,
+								glm::vec4{
+									haveShadow ? 1.0f : 0.0f,
+									1.0f / static_cast<float>(SHADOW_RESOLUTION),
+									1.0f,
+									shown.ImageOpacity
+								},
+							};
+
+							// Which grade this surface's image goes through. On the
+							// composite rather than on the render, so switching one
+							// costs no redraw of the texture.
+							mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
+
+							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
+							bindSurface(shown.Texture[shown.Slot ^ 1u]);
+
+							result.DrawCalls += State->DrawSlots(
+								command,
+								pass,
+								first,
+								count,
+								&mirrorLighting,
+								fallback,
+								shadowSampler,
+								surfaceTexture,
+								State->SurfaceSampler,
+								surfaceFilter,
+								result.Triangles
+							);
+						}
+					};
+
+					drawMirrors(false);
+
+					// **The blended tail *minus* the mirrors in it.** The opaque head
+					// already excludes them for the reason above; a pane that went
+					// transparent moved from the head to the tail and stopped being
+					// excluded, so a faded mirror reflected itself.
+					const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
+					if (blendedPlain > 0 || plan.TransparentSurfaces > 0) {
+						SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+					}
+
+					if (blendedPlain > 0) {
+						plainly();
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							static_cast<uint32_t>(sceneOpaque),
+							blendedPlain,
+							&surfaceLighting,
+							fallback,
+							shadowSampler,
+							surfaceTexture,
+							State->SurfaceSampler,
+							surfaceFilter,
+							result.Triangles
+						);
+					}
+
+					// And the blended mirrors that are not this one, last of
+					// everything drawn into this texture.
+					if (plan.TransparentSurfaces > 0) {
+						drawMirrors(true);
+					}
+
+					SDL_EndGPURenderPass(pass);
 				}
-
-				if (blendedPlain > 0) {
-					plainly();
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						static_cast<uint32_t>(sceneOpaque),
-						blendedPlain,
-						&surfaceLighting,
-						fallback,
-						shadowSampler,
-						surfaceTexture,
-						State->SurfaceSampler,
-						surfaceFilter,
-						result.Triangles
-					);
-				}
-
-				// And the blended mirrors that are not this one, last of
-				// everything drawn into this texture.
-				if (plan.TransparentSurfaces > 0) {
-					drawMirrors(true);
-				}
-
-				SDL_EndGPURenderPass(pass);
 			}
 
-			// **Marked ready only after every pass has run**, so a surface that
+			// **Marked ready only after every bounce has run**, so a surface that
 			// was written this frame cannot be sampled as another surface's
 			// "previous" within the same frame. From here the screen pass may
 			// sample what was just written and the next frame's surface passes
@@ -4062,8 +5157,392 @@ namespace engine::render {
 				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
 				state.Ready = true;
 				state.Signature = surfaceSignature;
+
+				// **Stamped here for the same reason the signature is.** A slot
+				// only claims to have drawn at a time once a pass has actually
+				// drawn it; stamping up front would start the interval for a
+				// surface that was then skipped or abandoned, and the picture
+				// would end up an interval staler than the cap promises.
+				state.Drawn = frameSeconds;
 				result.SurfacePasses++;
 			}
+		}
+
+		// --- the portal pass -------------------------------------------------
+		//
+		// **A recursion and not a bounce, and the difference is the viewpoint.**
+		// The surface pass above resolves a chain of *mirrors* by running itself
+		// again, which works because what is stale there is only a texture's age.
+		// It cannot work for a hole: a surface camera is placed from the eye, so
+		// when one surface pass draws another pane it projects that pane's image
+		// with a matrix taken from the eye rather than from the camera the pass is
+		// rendering from. That is the wrong viewpoint, not a stale one, and no
+		// number of bounces touches it.
+		//
+		// Here each level's camera is derived from the level above it — the warp
+		// applied to *that* camera's frame, that camera's own projection skewed
+		// onto the mapped pane — so warps compose down the recursion by
+		// construction, exactly as `Portal::Draw` composes `portalCam.worldView *=
+		// warp->delta`. `NON-EUCLIDEAN.md`'s Part III is the whole argument.
+		//
+		// **Depth first, and every level's targets survive until the level above
+		// has drawn all of its panes.** That is why the pool is indexed by level
+		// *and* slot: level `L` renders the world and then draws every hole it can
+		// see, so all of level `L-1` is live at once.
+		if (havePortals && haveInstances && sceneCount > 0 && portalLevels > 0) {
+			ENGINE_PROFILE_CAT("portal pass", core::ProfileCategory::Render);
+
+			// **The unskewed screen projection, kept and re-skewed at every
+			// level.** `scene::ObliqueProjection` substitutes the whole depth row,
+			// reading two of the entries it is about to overwrite — so skewing an
+			// already-skewed matrix is not the same as skewing the original
+			// against the new plane, which is the arrangement `Camera::ClipOblique`
+			// gets for free by writing the row from the untouched half of the
+			// matrix. Starting from this every time is what makes each level's
+			// frustum the screen's own, which is what makes the screen-position
+			// lookup in `opaque.frag` exact.
+			const float portalAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
+			const glm::mat4 screenProjection =
+				scene::ResolveCamera(cameraFrame, drawCamera, portalAspect).Projection;
+
+			// **Made before anything is captured, because a world of nothing but
+			// holes never reaches `EnsureSurface`.** The sampler used to be
+			// created there, so a portal-only scene took a null one into
+			// `SDL_BindGPUFragmentSamplers` and died inside the backend — and a
+			// scene with one mirror in it hid that completely.
+			(void)State->EnsureSurfaceSampler();
+
+			SDL_GPUTexture *const portalShadow =
+				State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
+			SDL_GPUSampler *const portalShadowSampler =
+				State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
+
+			// Where a hole's sub-camera stands, and what it looks through.
+			//
+			// **Which warp is a question about this level's camera, asked again at
+			// every level.** A pane is a hole from either side, and one map serves
+			// both: it carries the pane's front hemisphere to the far pane's back
+			// one and its back to the far pane's front, so a sub-camera that has
+			// stepped through and is now on the other side of something is carried
+			// by the same matrix, the other way, for free. CodeParade's
+			// `Portal::Connect` writes the same `delta` into both warps.
+			//
+			// Which *side* still has to be asked, because the clip plane's normal
+			// is the way this camera is looking and that does flip.
+			struct SubCamera {
+				core::CFrame Frame;
+				scene::CameraMatrices Matrices;
+			};
+
+			const auto subCameraFor = [&](const PortalView &portal, const core::CFrame &from) {
+				const float side = (from.Position - portal.Centre).Dot(portal.Normal);
+				const scene::SeamTransform &warp = portal.Warp;
+
+				const core::CFrame placed = warp.Place(from);
+
+				// **The clip normal points back through the hole**, which is the
+				// one sign here worth deriving rather than trying. The map sends
+				// the eye's side of the source pane to the *opposite* side of the
+				// far one, so a sub-camera placed from an eye at `+outward` lands
+				// behind the mapped pane looking back along `outward`'s image.
+				// What has to survive clipping is everything beyond the mapped
+				// pane, so the normal is the way this camera is looking and not
+				// the way the pane faces.
+				const core::Vector3 outward = portal.Normal * (side >= 0.0f ? 1.0f : -1.0f);
+				const core::Vector3 clipNormal = warp.Rotate(outward) * -1.0f;
+
+				// **Moved back towards this camera by a sliver, so the plane
+				// keeps a little more rather than a little less.** The oblique
+				// substitution makes this plane the near plane, so everything
+				// between the sub-camera and it is thrown away — and the far
+				// room's own geometry meets the mapped pane exactly, which after
+				// two matrix products means some of it lands a float either side.
+				// The half that lands short is clipped, and what that looks like
+				// is a hairline of background around the inside of every hole,
+				// with parts poking through it.
+				//
+				// **The sign is the whole of it and it is worth deriving rather
+				// than trying.** `clipNormal` is the way this camera looks, so
+				// adding along it pushes the plane deeper into the far room and
+				// removes a slab of whatever is standing in the hole — a body
+				// straddling the seam loses its far half and reads as a character
+				// cut in two. CodeParade's `extra_clip` subtracts for this
+				// reason: `pos - normal*extra_clip` with `normal` pointing away
+				// from the camera is the pane moved *towards* it.
+				const core::Vector3 clipPoint =
+					warp.Point(portal.Centre) - clipNormal * scene::PortalClipBias(nearestPane);
+
+				return SubCamera{
+					placed,
+					scene::ResolveSurfaceCamera(
+						placed,
+						scene::ObliqueProjection(
+							screenProjection, placed, clipNormal, clipNormal.Dot(clipPoint)
+						)
+					),
+				};
+			};
+
+			// The world minus every pane, drawn into whatever pass is open.
+			//
+			// **`plan.Reflected` is exactly that run**, and it is the same range
+			// the surface pass submits — the opaque head with every instance that
+			// samples a slot taken out of it. The panes are put back by the caller,
+			// each with its own texture.
+			const auto drawWorldInto =
+				[&](SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter) {
+					if (sceneReflected > 0) {
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							0,
+							sceneReflected,
+							&plainLighting,
+							portalShadow,
+							portalShadowSampler,
+							nullptr,
+							State->SurfaceSampler,
+							filter,
+							result.Triangles
+						);
+					}
+				};
+
+			// One level: fill `bank.Portals[level][i]` for every hole `i` this
+			// camera can see, then leave them for the caller to sample.
+			//
+			// A `std::function` because it calls itself and captures the frame.
+			// The depth is bounded by `MAX_PORTAL_DEPTH`, so the recursion is four
+			// deep at worst and the indirection is paid once per hole per level
+			// beside a whole scene render.
+			std::function<void(const scene::CameraMatrices &, const core::CFrame &, uint32_t, int8_t)>
+				fillLevel;
+
+			fillLevel = [&](const scene::CameraMatrices &from,
+							const core::CFrame &fromFrame,
+							uint32_t level,
+							int8_t skip) {
+				for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+					if (portalOf[slot] == nullptr) {
+						continue;
+					}
+
+					const PortalView &portal = *portalOf[slot];
+
+					// **The hole this camera just came out of**, which is at this
+					// level's own clip plane and would render a scene that is then
+					// entirely clipped away. CodeParade's `skipPortal` argument.
+					if (portal.Index == skip) {
+						continue;
+					}
+
+					// **Per portal per level, which is what stops the cost being
+					// `holes ^ depth`.** A hole behind this level's camera costs
+					// nothing, and most of them are.
+					if (!graph::VisiblePane(
+							from.ViewProjection, portal.Centre, portal.First, portal.Second
+						)) {
+						continue;
+					}
+
+					const SubCamera sub = subCameraFor(portal, fromFrame);
+
+					if (level > 0) {
+						fillLevel(sub.Matrices, sub.Frame, level - 1, portal.Partner);
+					}
+
+					Impl::PortalTarget *target =
+						State->EnsurePortal(targetSlot, level, slot, targetWidth, targetHeight);
+					if (target == nullptr) {
+						continue;
+					}
+
+					SDL_GPUColorTargetInfo portalColour{};
+					portalColour.texture = target->Colour;
+					portalColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+					portalColour.load_op = SDL_GPU_LOADOP_CLEAR;
+					portalColour.store_op = SDL_GPU_STOREOP_STORE;
+
+					// **Not cycled, unlike a surface slot, and it was measured
+					// rather than reasoned.** Cycling hands back a fresh allocation
+					// per write, which is the right answer when two passes in one
+					// frame share a texture — and at one level nothing does: a
+					// target is written once and sampled once, by the pass above it,
+					// in that order. Asking for a fresh allocation anyway made the
+					// device hang more often rather than less. `Impl::PortalDepth`
+					// carries what happens above one level, which is where the same
+					// target *is* written twice.
+					portalColour.cycle = false;
+
+					SDL_GPUDepthStencilTargetInfo portalDepth{};
+					portalDepth.texture = target->Depth;
+					portalDepth.clear_depth = 1.0f;
+					portalDepth.load_op = SDL_GPU_LOADOP_CLEAR;
+					portalDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+					portalDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+					portalDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+					portalDepth.cycle = false;
+
+					SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &portalColour, 1, &portalDepth);
+
+					// **The same rectangle as the level above draws into.** The
+					// target is the attachment's size, and the world fills the
+					// viewport's corner of it — so a pane in the level above reads
+					// the texel it is standing on. Setting a different one here is
+					// the whole of what would make the picture slide.
+					const SDL_GPUViewport portalViewport{
+						0.0f,
+						0.0f,
+						static_cast<float>(sceneWidth),
+						static_cast<float>(sceneHeight),
+						0.0f,
+						1.0f
+					};
+					SDL_SetGPUViewport(pass, &portalViewport);
+
+					const SDL_Rect portalScissor{
+						0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)
+					};
+					SDL_SetGPUScissor(pass, &portalScissor);
+
+					SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+
+					// **The beams, beside the lights and for the same reason.**
+					// Which holes carry a shadow is a fact about the frame, so it
+					// is pushed once per pass rather than per draw — and it is
+					// pushed even when there are none, because a stale block from
+					// a previous frame would shadow through a hole that is no
+					// longer there.
+					SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
+					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+
+					const SDL_GPUBufferBinding portalBindings[] = {
+						{State->Meshes.Vertices(), 0},
+						{State->InstanceBuffer, 0},
+					};
+					SDL_BindGPUVertexBuffers(pass, 0, portalBindings, 2);
+
+					const SDL_GPUBufferBinding portalIndices{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &portalIndices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+					const FrameUniforms subFrameUniforms{
+						sub.Matrices.ViewProjection,
+						lightViewProjection,
+						glm::mat4{1.0f},
+					};
+					SDL_PushGPUVertexUniformData(command, 0, &subFrameUniforms, sizeof(subFrameUniforms));
+
+					const LightingUniforms subLighting{
+						glm::vec4{State->Sun, 0.0f},
+						State->Ambient,
+						glm::vec4{
+							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
+						},
+					};
+
+					drawWorldInto(pass, subLighting, portal.TagFilter);
+
+					// The holes this level can see, put back one at a time. Their
+					// targets are `level - 1`, filled by the call above and still
+					// untouched — which is why the pool is per level per slot.
+					for (uint8_t seenSlot = 0; seenSlot < scene::MAX_SURFACES; seenSlot++) {
+						if (portalOf[seenSlot] == nullptr || portalOf[seenSlot]->Index == portal.Partner) {
+							continue;
+						}
+
+						const PortalView &inner = *portalOf[seenSlot];
+						const scene::SurfaceRun &run = plan.Runs[seenSlot];
+						if (run.OpaqueCount == 0) {
+							continue;
+						}
+
+						if (!graph::VisiblePane(
+								sub.Matrices.ViewProjection, inner.Centre, inner.First, inner.Second
+							)) {
+							continue;
+						}
+
+						const Impl::PortalTarget *seen = level > 0 && bank.Portals.size() >= level
+															 ? &bank.Portals[level - 1].Targets[seenSlot]
+															 : nullptr;
+
+						LightingUniforms paneLighting = subLighting;
+						SDL_GPUTexture *paneTexture = nullptr;
+
+						if (seen != nullptr && seen->Colour != nullptr) {
+							// 2 is the screen-position lookup — see `opaque.frag`.
+							paneLighting.Flags.z = 2.0f;
+							paneTexture = seen->Colour;
+							paneLighting.PaneNormal =
+								glm::vec4{inner.Normal.X, inner.Normal.Y, inner.Normal.Z, 0.0f};
+						} else {
+							// **The terminus, and it is a shade rather than the
+							// pane's own material.** This is the deepest level the
+							// recursion goes to, so a hole seen here has nothing
+							// behind it — and a lit grey slab at the end of a
+							// corridor of holes reads as a wall somebody built,
+							// which is the one thing the corridor is trying not to
+							// look like. CodeParade draws pink here, deliberately
+							// wrong, because their demo is about the mechanism; a
+							// shipped world wants the chain to fade.
+							//
+							// The ambient is what it fades to, which is the far
+							// room's own unlit tone and needs no second uniform to
+							// say — 3 is the flat branch in `opaque.frag`.
+							paneLighting.Flags.z = 3.0f;
+						}
+
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							run.OpaqueFirst,
+							run.OpaqueCount,
+							&paneLighting,
+							portalShadow,
+							portalShadowSampler,
+							paneTexture,
+							State->SurfaceSampler,
+							portal.TagFilter,
+							result.Triangles
+						);
+					}
+
+					// **The blended tail, minus the panes in it.** A pane that
+					// went transparent left the opaque head and would otherwise be
+					// drawn here as ordinary glass on top of the picture it is
+					// already showing — the same exclusion the surface pass makes,
+					// for the same reason.
+					const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
+					if (blendedPlain > 0) {
+						SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+						SDL_PushGPUVertexUniformData(command, 0, &subFrameUniforms, sizeof(subFrameUniforms));
+
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							static_cast<uint32_t>(sceneOpaque),
+							blendedPlain,
+							&subLighting,
+							portalShadow,
+							portalShadowSampler,
+							nullptr,
+							State->SurfaceSampler,
+							portal.TagFilter,
+							result.Triangles
+						);
+					}
+
+					SDL_EndGPURenderPass(pass);
+					result.PortalPasses++;
+				}
+			};
+
+			fillLevel(
+				scene::CameraMatrices{glm::inverse(cameraFrame.ToMatrix()), screenProjection, cameraMatrix},
+				cameraFrame,
+				portalLevels - 1,
+				-1
+			);
 		}
 
 		// --- the interface's uploads ----------------------------------------
@@ -4132,6 +5611,14 @@ namespace engine::render {
 			// per-draw `LightingUniforms`.
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 
+			// **The beams, beside the lights and for the same reason.**
+			// Which holes carry a shadow is a fact about the frame, so it
+			// is pushed once per pass rather than per draw — and it is
+			// pushed even when there are none, because a stale block from
+			// a previous frame would shadow through a hole that is no
+			// longer there.
+			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
+
 			// **The world's rectangle inside an attachment that is larger than
 			// it.** Without this the pass inherits a viewport covering the whole
 			// texture, and a block-rounded target would draw the world into
@@ -4188,7 +5675,7 @@ namespace engine::render {
 				// give the plain geometry a projection it must never use, which
 				// is the shape of the black-wedge bug the surface pass records.
 				const glm::mat4 viewProjection =
-					scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection;
+					scene::ResolveCamera(cameraFrame, drawCamera, aspect).ViewProjection;
 
 				const FrameUniforms frameUniforms{
 					viewProjection,
@@ -4203,8 +5690,8 @@ namespace engine::render {
 				// is per draw, so the split is a third draw rather than a
 				// per-fragment branch on data the shader does not have.
 				const LightingUniforms lighting{
-					glm::vec4{SUN_DIRECTION, 0.0f},
-					SUN_AMBIENT,
+					glm::vec4{State->Sun, 0.0f},
+					State->Ambient,
 					glm::vec4{
 						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 0.0f
 					},
@@ -4290,23 +5777,84 @@ namespace engine::render {
 
 						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
 
+						// **A hole rather than a mirror, and it reads its picture
+						// by screen position.** The recursive pass has already
+						// filled the top level of the pool from *this* camera, and
+						// the target is the size of this attachment — so the pane
+						// samples the texel it is standing on and the image is
+						// pixel-exact at every distance. That is what removes the
+						// pixelation the fitted path could only mitigate.
+						//
+						// **Flat when the pool has nothing**, which is the depth-
+						// zero terminus and the frame a target could not be
+						// allocated. Its own material rather than the demo's pink:
+						// a shipped world wants the chain to end in something that
+						// looks like a pane, and the marker bars are where "which
+						// face" is answered visibly.
+						const LightingUniforms *uniforms = &lighting;
+						if (portalOf[index] != nullptr) {
+							const Impl::PortalTarget *seen =
+								portalLevels > 0 && bank.Portals.size() >= portalLevels
+									? &bank.Portals[portalLevels - 1].Targets[index]
+									: nullptr;
+
+							if (seen == nullptr || seen->Colour == nullptr) {
+								bindScreen(nullptr);
+							} else {
+								LightingUniforms holed = lighting;
+
+								// 2 is the screen-position lookup — see
+								// `opaque.frag`.
+								holed.Flags.z = 2.0f;
+								holed.Flags.w = 1.0f;
+								holed.PaneNormal = glm::vec4{
+									portalOf[index]->Normal.X,
+									portalOf[index]->Normal.Y,
+									portalOf[index]->Normal.Z,
+									0.0f
+								};
+
+								bindScreen(seen->Colour);
+								mirroredUniforms = holed;
+								uniforms = &mirroredUniforms;
+
+								result.SurfaceInstances += count;
+							}
+
+							result.DrawCalls += State->DrawSlots(
+								command,
+								pass,
+								sceneCount + first,
+								count,
+								uniforms,
+								shadow,
+								shadowSampler,
+								screenSurface,
+								surfaceSampler,
+								0,
+								result.Triangles
+							);
+
+							bindScreen(nullptr);
+							continue;
+						}
+
 						// Its own tint until the surface has a frame, and for a
 						// pane naming an index nothing renders. Skipping it
 						// instead would leave a hole in the geometry, which reads
 						// as a culling bug rather than as a mirror that has not
 						// warmed up.
-						const LightingUniforms *uniforms = &lighting;
 						if (!shown.Ready) {
 							bindScreen(nullptr);
 						} else {
 							const FrameUniforms mirrorFrame{
 								viewProjection,
 								lightViewProjection,
-								shown.ViewProjection,
+								shown.Sampling,
 							};
 							LightingUniforms mirrored{
-								glm::vec4{SUN_DIRECTION, 0.0f},
-								SUN_AMBIENT,
+								glm::vec4{State->Sun, 0.0f},
+								State->Ambient,
 								glm::vec4{
 									haveShadow ? 1.0f : 0.0f,
 									1.0f / static_cast<float>(SHADOW_RESOLUTION),

@@ -462,11 +462,11 @@ namespace studio {
 		PickerContents = cdn::PublishedContents(paths);
 		PickerRaw = cdn::RawContents(paths);
 
-		// **The engine's own meshes, at the top, and they are not in any
-		// manifest.** `assets::MakeBuiltin` generates six of them in every
-		// process — `engine.Cube` through `engine.Cylinder` — and
-		// `MeshTable::Initialise` registers all six before a single byte of
-		// content has been fetched. They are the only geometry an editor is
+		// **The engine's own assets, at the top, and they are not in any
+		// manifest.** `assets::MakeBuiltin` generates them in every process —
+		// six shapes and the checker sheet — and `MeshTable::Initialise` and
+		// `TextureTable::Initialise` register them before a single byte of
+		// content has been fetched. They are the only names an editor is
 		// guaranteed to be able to resolve.
 		//
 		// Leaving them out made the mesh picker *empty* on a machine with no
@@ -477,20 +477,21 @@ namespace studio {
 		//
 		// **Kept apart from `PickerContents` rather than mixed into it**, because
 		// that vector answers "what has this store published" — the empty-state
-		// message reads it, and six rows that are always there would make
-		// "nothing published" a sentence that could never be shown.
+		// message reads it, and rows that are always there would make "nothing
+		// published" a sentence that could never be shown.
 		//
-		// `Root` is left at its default. A built-in has no content address
-		// because it has no content — nothing fetches one — and inventing a hash
-		// for it would be a value that looks like it could be looked up.
+		// **The list itself is `EngineAssets`', not a second walk of the same
+		// enums.** The assets panel's engine tab draws that vector, and two
+		// enumerations of one set is how the picker ends up offering a sheet the
+		// panel does not list, or the reverse. `Root` stays at its default
+		// there: a built-in has no content address because it has no content.
 		PickerBuiltins.clear();
-		PickerBuiltins.reserve(engine::assets::BUILTIN_MESH_COUNT);
-		for (uint8_t index = 0; index < engine::assets::BUILTIN_MESH_COUNT; index++) {
-			const auto builtin = static_cast<engine::assets::BuiltinMesh>(index);
+		PickerBuiltins.reserve(EngineAssets().size());
+		for (const CatalogueEntry &entry : EngineAssets()) {
 			PickerBuiltins.push_back(cdn::PublishedEntry{
-				.Name = std::string(engine::assets::BuiltinName(builtin)),
-				.Kind = engine::assets::AssetKind::Mesh,
-				.Root = {},
+				.Name = entry.Name,
+				.Kind = entry.Kind,
+				.Root = entry.Root,
 			});
 		}
 	}

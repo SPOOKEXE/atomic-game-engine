@@ -127,6 +127,39 @@ namespace engine::physics {
 			store.Set<scene::Motion>(body.Owner, scene::Motion{body.LinearVelocity, body.AngularVelocity});
 		}
 
+		// --- what moved ------------------------------------------------------
+		//
+		// **The transform, which nothing was claiming.** `IntegrateMotion` moves
+		// it through `EachParallel` and says in as many words that it will not
+		// mark it — a parallel body may not write a shared bitset, and
+		// `MarkAllChanged` would cover the anchored rows and rebuild the static
+		// index every tick for ever. It leaves the claim to "a consumer that
+		// needs a replication delta out of an integrated world", and for three
+		// versions there was no such consumer, so a physics-driven body was
+		// invisible to `replication`: a character walked on the server and stood
+		// still on every client.
+		//
+		// **Every row with a `Motion`, and not the solver's body array**, which
+		// is the correction. `PhysicsWorld::Bodies` holds only the bodies a
+		// manifold names — a body nothing touches has no constraint to solve —
+		// so marking from that loop marks exactly the bodies that are *resting
+		// on something* and misses every body in the air. A character standing
+		// on a floor replicated; the moment it jumped it was in contact with
+		// nothing, its transform stopped being marked, and every client watched
+		// it hang motionless at the height it left the ground while the server
+		// sailed it through a full arc. Falling scenery had the same bug and
+		// nothing was watching for it.
+		//
+		// The right set is the one `IntegrateMotion` moved, which is every row
+		// carrying a `Motion` — awake, dynamic, and therefore integrated. A
+		// sleeping body has had its `Motion` taken away by the loop above, so it
+		// is excluded by construction rather than by a second test, and
+		// `SyncBroadphase`'s inner gate — "was a changed row one without a
+		// `Motion`" — still answers no for every row this touches.
+		store.Each<const scene::Motion>([&store](ecs::Entity entity, const scene::Motion &) {
+			store.MarkChanged<scene::Transform>(entity);
+		});
+
 		// --- events ----------------------------------------------------------
 		//
 		// A merge of this tick's manifolds against last tick's touching set,

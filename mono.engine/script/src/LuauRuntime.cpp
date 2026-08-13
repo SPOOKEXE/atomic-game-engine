@@ -285,6 +285,33 @@ namespace engine::script {
 				lua_call(state, 1, 0);
 			}
 		}
+
+		// The string keys of the table at `index`, for `Runtime::Surface`.
+		//
+		// **A raw walk, so a table whose members come from an `__index`
+		// function answers empty rather than answering wrongly.** That is the
+		// honest result: `Enum` and every instance userdata resolve their
+		// members in C++, and there is nothing there to enumerate. The editor
+		// fills those from `ecs::EnumTable` and `ecs::Classes`, which actually
+		// know.
+		std::vector<std::string> TableMembers(lua_State *state, const int index) {
+			std::vector<std::string> members;
+			if (lua_type(state, index) != LUA_TTABLE) {
+				return members;
+			}
+
+			// Absolute, because pushing the key below moves a negative one.
+			const int table = lua_absindex(state, index);
+
+			lua_pushnil(state);
+			while (lua_next(state, table) != 0) {
+				if (lua_type(state, -2) == LUA_TSTRING) {
+					members.emplace_back(lua_tostring(state, -2));
+				}
+				lua_pop(state, 1);
+			}
+			return members;
+		}
 	}
 
 	LuauContext &ContextOf(lua_State *state) {
@@ -567,8 +594,8 @@ namespace engine::script {
 				}
 			}
 
-			const Source *source = store.Get<Source>(module);
-			if (source == nullptr || !source->Path.IsValid()) {
+			const core::Name modulePath = ActiveSourceOf(store, module);
+			if (!modulePath.IsValid()) {
 				luaL_errorL(
 					state, "'%s' has no source to require", store.InstanceNameOf(module).Text().data()
 				);
@@ -576,7 +603,7 @@ namespace engine::script {
 
 			std::string program;
 			std::string error;
-			if (!ReadSource(store, source->Path, program, error)) {
+			if (!ReadSource(store, modulePath, program, error)) {
 				luaL_errorL(state, "%s", error.c_str());
 			}
 
@@ -587,7 +614,7 @@ namespace engine::script {
 			size_t bytecodeSize = 0;
 			char *bytecode = luau_compile(program.data(), program.size(), &options, &bytecodeSize);
 			if (bytecode == nullptr) {
-				luaL_errorL(state, "the compiler produced nothing for '%s'", source->Path.Text().data());
+				luaL_errorL(state, "the compiler produced nothing for '%s'", modulePath.Text().data());
 			}
 
 			// The same shape a `Script` gets: its own sandboxed thread, so a
@@ -598,7 +625,7 @@ namespace engine::script {
 			PushInstanceValue(thread, module);
 			lua_setglobal(thread, "script");
 
-			const std::string chunkName = "=" + std::string(source->Path.Text());
+			const std::string chunkName = "=" + std::string(modulePath.Text());
 			const int loaded = luau_load(thread, chunkName.c_str(), bytecode, bytecodeSize, 0);
 			std::free(bytecode);
 
@@ -665,8 +692,10 @@ namespace engine::script {
 	bool LuauRuntime::RunInstance(ecs::Entity instance) {
 		Error.clear();
 
-		const Source *source = Store.Get<Source>(instance);
-		if (source == nullptr || !source->Path.IsValid()) {
+		// **The active container** — `script::CodeSourceContainerSelector` says
+		// which of an instance's programs is the one to run.
+		const core::Name path = ActiveSourceOf(Store, instance);
+		if (!path.IsValid()) {
 			// A script with no path is a no-op rather than an error: an author
 			// makes the instance before choosing the file, and that is a legal
 			// state.
@@ -679,7 +708,7 @@ namespace engine::script {
 		// would be a second place to forget it — and the symptom would be
 		// edited code that runs from one entry point and not another.
 		std::string program;
-		if (!ReadSource(Store, source->Path, program, Error)) {
+		if (!ReadSource(Store, path, program, Error)) {
 			return false;
 		}
 
@@ -698,7 +727,7 @@ namespace engine::script {
 		// invisible to the next, which is exactly the scoping an author expects.
 		ContextOf(State).PendingScript = instance;
 
-		const bool ok = Run(program, source->Path.Text());
+		const bool ok = Run(program, path.Text());
 		ContextOf(State).PendingScript = ecs::NULL_ENTITY;
 		return ok;
 	}
@@ -841,5 +870,66 @@ namespace engine::script {
 
 	void LuauRuntime::Release(HostCallback callback) {
 		ReleaseHostCallback(State, callback);
+	}
+
+	ScriptSurface LuauRuntime::Surface() const {
+		ScriptSurface surface;
+		if (State == nullptr) {
+			return surface;
+		}
+
+		// **The globals table pushed as a value rather than walked through
+		// `LUA_GLOBALSINDEX` directly.** `lua_next` wants a real stack slot; a
+		// pseudo-index happens to work in this VM and is the sort of thing that
+		// stops working quietly, and a completion list that silently empties is
+		// indistinguishable from an engine with no API.
+		lua_pushvalue(State, LUA_GLOBALSINDEX);
+
+		lua_pushnil(State);
+		while (lua_next(State, -2) != 0) {
+			// Key at -2, value at -1. Only string keys are names a script could
+			// write; anything else is somebody using the globals table as a map.
+			if (lua_type(State, -2) == LUA_TSTRING) {
+				VocabularyEntry entry;
+				entry.Name = lua_tostring(State, -2);
+
+				switch (lua_type(State, -1)) {
+				case LUA_TFUNCTION:
+					entry.Kind = NameKind::Function;
+					break;
+				case LUA_TTABLE:
+					entry.Kind = NameKind::Container;
+					entry.Members = TableMembers(State, -1);
+					break;
+				default:
+					entry.Kind = NameKind::Value;
+					break;
+				}
+
+				surface.Globals.push_back(std::move(entry));
+			}
+
+			// The value goes, the key stays for the next step.
+			lua_pop(State, 1);
+		}
+
+		lua_pop(State, 1);
+
+		// **The same registry table `OpenInstances` filled**, so a method added
+		// there is offered here with nothing else changing — and the five
+		// `LuauEcs` appends to it arrive for free, which a list of method names
+		// kept anywhere else would have missed.
+		lua_getfield(State, LUA_REGISTRYINDEX, "engine.instance.methods");
+		surface.InstanceMembers = TableMembers(State, -1);
+		lua_pop(State, 1);
+
+		// The signals, which are a branch chain rather than a table. This is the
+		// one member list in the module that is written down; `Instances.cpp`
+		// keeps it beside the chain and `engine.script.vocabulary` checks it.
+		for (const std::string_view signal : LuauInstanceSignalNames()) {
+			surface.InstanceMembers.emplace_back(signal);
+		}
+
+		return surface;
 	}
 }

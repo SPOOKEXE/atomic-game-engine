@@ -1,3 +1,4 @@
+#include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/render/DefaultTexture.hpp>
 #include <engine/render/MissingTexture.hpp>
@@ -54,6 +55,23 @@ namespace engine::render {
 		MissingHandle = Upload(MissingTexture(), "missing", missingBytes);
 		if (MissingHandle == nullptr) {
 			return false;
+		}
+
+		// **The named built-ins, so that a sheet an author can *choose* is here
+		// before any content is.** `MeshTable::Initialise` registers the six
+		// built-in shapes for the same reason and in the same place: a name that
+		// resolves without a store, a publish or a fetch is the only thing an
+		// editor can offer on a machine that has none of the three.
+		//
+		// Registered as ordinary entries rather than as another special handle —
+		// `engine.Checker` is content that happens to be generated, and a part
+		// naming it takes the path every other texture takes.
+		for (uint8_t index = 0; index < assets::BUILTIN_TEXTURE_COUNT; index++) {
+			const auto builtin = static_cast<assets::BuiltinTexture>(index);
+			if (!Add(core::Name(assets::BuiltinName(builtin)), assets::MakeBuiltin(builtin))) {
+				ENGINE_ERROR("texture table: built-in {} was refused", assets::BuiltinName(builtin));
+				return false;
+			}
 		}
 		return true;
 	}

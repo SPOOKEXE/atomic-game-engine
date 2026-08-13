@@ -46,25 +46,14 @@ namespace registration_test {
 	// makes it show up as a failing test rather than as a snapshot that loads
 	// into a narrower world.
 	const std::vector<std::string_view> EXPECTED{
-		"scene.Transform",
-		"scene.PreviousTransform",
-		"scene.Bounds",
-		"scene.Motion",
-		"scene.RigidBody",
-		"scene.Collider",
-		"scene.Surface",
-		"scene.Visual",
-		"scene.Camera",
-		"scene.QuickHash",
-		"scene.SurfaceCamera",
-		"scene.Transient",
-		"scene.Service",
-		"scene.LightingService",
-		"scene.Rendered",
-		"scene.SurfaceTable",
-		"scene.ActiveCamera",
-		"scene.WorldBounds",
-		"scene.RenderedSignature",
+		"scene.Transform",	 "scene.PreviousTransform", "scene.Bounds",
+		"scene.Motion",		 "scene.RigidBody",			"scene.Collider",
+		"scene.Surface",	 "scene.PhysicsProperties", "scene.Visual",
+		"scene.Camera",		 "scene.QuickHash",			"scene.SurfaceCamera",
+		"scene.Transient",	 "scene.Service",			"scene.LightingService",
+		"scene.Rendered",	 "scene.SurfaceTable",		"scene.ActiveCamera",
+		"scene.WorldBounds", "scene.RenderedSignature", "scene.Portal",
+		"scene.SurfaceLens",
 	};
 }
 

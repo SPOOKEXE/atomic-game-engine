@@ -252,9 +252,55 @@ namespace engine::scene {
 				// this line goes back to `GetMutable` in the same commit.
 				if (Rendered *mark = store.GetUnobserved<Rendered>(current); mark != nullptr) {
 					mark->Mark = 1;
-				} else {
-					store.Set(current, Rendered{1, {}});
+					continue;
 				}
+
+				// --- it was not drawn last frame ------------------------------
+				//
+				// **A thing that has just appeared did not come from anywhere,
+				// and the draw list has to be told.** `client::BuildDrawList`
+				// interpolates `PreviousTransform` towards `Transform`, and a
+				// row that has only just arrived carries whatever previous frame
+				// it was *created* with — the identity, for anything
+				// `Instance.new` made and a script then placed. Drawing that
+				// interpolation is a part flying in from the origin for as long
+				// as it takes the next tick's `capture-previous` to run: at 300
+				// frames against a 60 Hz tick, five frames of it. That is the
+				// flash `examples/Slide.luau` shows on every block it spawns.
+				//
+				// **Seeded here rather than in `PlaceInstance`, which
+				// deliberately does not touch it.** An authored write to a part
+				// already on screen *is* motion, and clearing the previous frame
+				// there turns every scripted animation in the engine into
+				// stepped motion at the tick rate — `Part.cpp` carries that
+				// refutation and it still stands. The difference is *appearing*
+				// versus *moving*, and this branch is the one place that knows
+				// which of the two happened.
+				//
+				// It covers the same fault arriving by three other doors: an
+				// entity replicated into a world, one whose `Visible` was turned
+				// back on after being moved while hidden, and one reparented
+				// into `Workspace` from somewhere outside it. None of them
+				// travelled from where they were last drawn, because they were
+				// not drawn.
+				//
+				// **Before the `Set`, because that is structural.** A row may
+				// move when a component is added, and a pointer read before it
+				// does not survive — the same rule the child walk above obeys.
+				//
+				// `GetUnobserved` for the reason the `Rendered` write above
+				// gives: this is presentation state derived by this pass, and
+				// marking a dirty bit for it would falsify "an unchanged counter
+				// means nothing authored has happened" for every table holding a
+				// `Transform`.
+				if (const Transform *placed = store.Get<Transform>(current); placed != nullptr) {
+					if (PreviousTransform *previous = store.GetUnobserved<PreviousTransform>(current);
+						previous != nullptr) {
+						previous->Frame = placed->Frame;
+					}
+				}
+
+				store.Set(current, Rendered{1, {}});
 			}
 		}
 

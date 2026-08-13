@@ -25,16 +25,23 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Play.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Input.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <numbers>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -54,6 +61,7 @@ using engine::net::Transport;
 using engine::parallel::Process;
 using engine::replication::Connector;
 using engine::scene::Bounds;
+using engine::scene::Character;
 using engine::scene::Motion;
 using engine::scene::Transform;
 using engine::scene::Visual;
@@ -107,6 +115,13 @@ namespace server_replication_test {
 		// same server rather than starting one of its own.
 		uint16_t Port = 0;
 
+		// The `Player` the server said is this client's, or null until it does.
+		//
+		// **Recorded here because it is the one fact a replica cannot derive.**
+		// Every other row in `World` arrived as replicated state; this arrives
+		// as a per-client message, which is the whole point of `game/Play.hpp`.
+		Entity Mine;
+
 		bool Start(uint32_t entities, const std::string &game = {}) {
 			RegisterTypes();
 
@@ -151,6 +166,7 @@ namespace server_replication_test {
 
 				Port = port;
 				Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now);
+				ListenForJoinNotice();
 				return true;
 			}
 
@@ -167,7 +183,126 @@ namespace server_replication_test {
 			}
 			Port = port;
 			Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now);
+			ListenForJoinNotice();
 			return true;
+		}
+
+		// What `client::Client` does with the same message, in three lines.
+		//
+		// **The resource is written here and not by the caller**, because
+		// `Client::SubmitMove` refuses to send anything until the replica knows
+		// which player is its own — so a harness that recorded `Mine` and left
+		// the store ignorant of it could not exercise the keyboard path at all.
+		void ListenForJoinNotice() {
+			Link->OnUserMessage([this](std::span<const std::byte> message) {
+				engine::game::JoinNotice notice;
+				if (engine::game::DecodeJoinNotice(message, notice)) {
+					Mine = notice.Player;
+					World.SetResource(engine::scene::LocalPlayer{notice.Player});
+				}
+			});
+		}
+
+		// Sends a move, exactly as `Client::SubmitMove` does.
+		void Walk(const engine::core::Vector3 &direction, bool jump = false) {
+			engine::game::MoveInput move;
+			move.Direction = direction;
+			move.Jump = jump;
+			Link->Submit(Link->Applied(), engine::game::EncodeMoveInput(move), Now);
+		}
+
+		// Holds a set of keys down on this client, and releases everything else.
+		//
+		// **`Previous` is kept, because a jump is an edge.** `ReadMoveIntent`
+		// asks for the space bar's edge, which is the difference between the two
+		// masks — so a harness that cleared both would make every frame look
+		// like the first and every held key look like a fresh press.
+		//
+		// **And `LatchPresses` is called, because that is what a writer does.**
+		// The edge a tick acts on lives in `InputState::Pressed`, and a frame
+		// that only set bits in `Down` is a frame no writer ever recorded. This
+		// is `Client::PumpInput`'s last line, and leaving it out here would make
+		// the harness the one place in the engine where jump worked differently.
+		void Press(std::initializer_list<engine::scene::KeyCode> keys) {
+			auto *input = World.ResourceMutable<engine::scene::InputState>();
+			if (input == nullptr) {
+				World.SetResource(engine::scene::InputState{});
+				input = World.ResourceMutable<engine::scene::InputState>();
+			}
+
+			input->Previous = input->Down;
+			input->Down = {};
+			input->Focused = true;
+			for (const engine::scene::KeyCode key : keys) {
+				input->Down.Set(key, true);
+			}
+			input->LatchPresses();
+		}
+
+		// Where the camera is pointing, which is what W is measured against.
+		void LookAlong(float yawRadians) {
+			auto *camera = World.ResourceMutable<engine::scene::CameraController>();
+			if (camera == nullptr) {
+				World.SetResource(engine::scene::CameraController{});
+				camera = World.ResourceMutable<engine::scene::CameraController>();
+			}
+			camera->Angles.Y = yawRadians;
+		}
+
+		// **`Client::SubmitMove`'s body, and deliberately not a paraphrase of
+		// it.** `Walk` above takes a direction already decided, which leaves the
+		// interesting arithmetic — which world direction a key means, and what
+		// the camera has to do with it — on the far side of the assertion. This
+		// is the client half of "press W and the character walks": the same
+		// guard, the same `ReadMoveIntent`, the same codec, the same channel.
+		void SubmitMove() {
+			if (Mine == engine::ecs::NULL_ENTITY ||
+				engine::scene::CharacterOf(World, Mine) == engine::ecs::NULL_ENTITY) {
+				return;
+			}
+
+			const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(World);
+
+			engine::game::MoveInput move;
+			move.Direction = intent.Direction;
+			move.Jump = intent.Jump;
+			if (Link->Submit(Link->Applied(), engine::game::EncodeMoveInput(move), Now)) {
+				// Once it is on the wire, and not before — the same rule
+				// `Client::SubmitMove` follows, for the same reason: a tap
+				// forgotten after a failed send is a jump the server never
+				// heard about.
+				if (auto *input = World.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+					input->ConsumeTaps();
+				}
+			}
+		}
+
+		// Where this client believes its own character's body is.
+		engine::core::Vector3 MyPosition() {
+			const Character *rig = World.Get<Character>(engine::scene::CharacterOf(World, Mine));
+			if (rig == nullptr) {
+				return {};
+			}
+			const Transform *placement = World.Get<Transform>(rig->Root);
+			return placement == nullptr ? engine::core::Vector3{} : placement->Frame.Position;
+		}
+
+		// Holds `keys` for `ticks` client frames and reports where the body ended
+		// up. The keyboard is re-pressed every frame because that is what a held
+		// key *is* to `Client::WriteInput` — it rewrites the whole state each
+		// frame from the window.
+		engine::core::Vector3
+		Hold(std::initializer_list<engine::scene::KeyCode> keys, int ticks, Remote *other = nullptr) {
+			for (int tick = 0; tick < ticks; tick++) {
+				Press(keys);
+				SubmitMove();
+				Tick();
+				if (other != nullptr) {
+					other->Tick();
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(4));
+			}
+			return MyPosition();
 		}
 
 		// One client tick: say something so the server knows where to send, then
@@ -417,6 +552,239 @@ TEST_CASE("a connecting client becomes a player in the hosted world", "[server][
 
 	CHECK(withTwo > alone);
 	CHECK(withThree - withTwo == withTwo - alone);
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
+}
+
+TEST_CASE("a client is told which player is theirs, and can walk it", "[server][replication]") {
+	// **The three things that had to be true before "local server, several
+	// clients" meant anything**, and none of them could be checked in process:
+	//
+	//   * the client learns which `Player` is its own, which is per-client state
+	//     and therefore cannot be replicated;
+	//   * a body is spawned for it, and arrives whole over the wire;
+	//   * pressing a key here moves that body *there*, and the movement comes
+	//     back as replicated state rather than being simulated twice.
+	//
+	// Two clients, because one client cannot show the interesting half: each has
+	// to be told about a *different* player, and a bug that assigned both to the
+	// same one would pass every single-client check ever written.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	// A floor, so the character has somewhere to stand and does not simply fall
+	// out of the world while the test is watching it.
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_characters.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local floor = Instance.new(\"Part\")\n"
+			 << "floor.Size = Vector3.new(400, 4, 400)\n"
+			 << "floor.Position = Vector3.new(0, -2, 0)\n"
+			 << "floor.Anchored = true\n"
+			 << "floor.Parent = workspace\n";
+	}
+
+	Remote first;
+	REQUIRE(first.Start(0, scene.string()));
+	REQUIRE(first.Join(400));
+	Settle(first);
+
+	Remote second;
+	REQUIRE(second.Connect(first.Port));
+	REQUIRE(second.Join(400));
+	Settle(second);
+	Settle(first);
+
+	// Each client was told about a player, and never about the same one.
+	REQUIRE(first.Mine != engine::ecs::NULL_ENTITY);
+	REQUIRE(second.Mine != engine::ecs::NULL_ENTITY);
+	CHECK(first.Mine != second.Mine);
+
+	// **The character arrived whole**, which is a stronger claim than "some rows
+	// arrived": `Character` names two entities, and a replica that received the
+	// component without the rows it points at would be a character with no body.
+	const Entity mine = engine::scene::CharacterOf(first.World, first.Mine);
+	REQUIRE(mine != engine::ecs::NULL_ENTITY);
+
+	const Character *rig = first.World.Get<Character>(mine);
+	REQUIRE(rig != nullptr);
+	REQUIRE(first.World.Alive(rig->Root));
+	REQUIRE(first.World.Get<Transform>(rig->Root) != nullptr);
+
+	// Both characters are in both replicas — this is what makes it a game with
+	// two players in it rather than two games.
+	CHECK(engine::scene::CharacterOf(first.World, second.Mine) != engine::ecs::NULL_ENTITY);
+	CHECK(engine::scene::CharacterOf(second.World, first.Mine) != engine::ecs::NULL_ENTITY);
+
+	const engine::core::Vector3 before = first.World.Get<Transform>(rig->Root)->Frame.Position;
+
+	// **Walk, and keep walking.** An input channel is unreliable by design and
+	// the server clears what it has applied every tick, so a single submission
+	// is a single tick of movement — which is under a tenth of a metre and inside
+	// the wire's own quantisation. A client that stops sending stops moving, and
+	// that is the behaviour, not a limitation of the test.
+	//
+	// **Both clients tick throughout.** A client that stops polling stops
+	// acknowledging, and an authority with nothing acknowledged has no baseline
+	// to build the next delta against — so a second client parked for a second
+	// is a second client whose world is a second stale, which is a fact about
+	// this test's pacing rather than about the feature.
+	for (int tick = 0; tick < 200; tick++) {
+		first.Walk(engine::core::Vector3{1.0f, 0.0f, 0.0f});
+		first.Tick();
+		second.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+	}
+
+	const engine::core::Vector3 after = first.World.Get<Transform>(rig->Root)->Frame.Position;
+
+	// **Along X and not merely "somewhere else".** A character that fell through
+	// the floor also moved, and asserting a bare inequality would pass for it.
+	CHECK(after.X > before.X + 1.0f);
+
+	// And the *other* client sees the same body in the new place, which is the
+	// half that separates "the server moved it" from "everybody was told".
+	Settle(second);
+	const Entity theirs = engine::scene::CharacterOf(second.World, first.Mine);
+	const Character *seen = second.World.Get<Character>(theirs);
+	REQUIRE(seen != nullptr);
+	CHECK(second.World.Get<Transform>(seen->Root)->Frame.Position.X > before.X + 1.0f);
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
+}
+
+TEST_CASE("WASD on a client walks its character on the server", "[server][replication]") {
+	// **The case above sends a direction; this one presses a key.** `Remote::
+	// Walk` hands `EncodeMoveInput` a vector the test chose, which leaves the
+	// whole client half untested: which world direction W means, that the camera
+	// is what it is measured against, that an unfocused window walks nobody, and
+	// that the space bar leaves the ground. Every one of those is arithmetic in
+	// `scene::ReadMoveIntent` that a hand-built vector steps straight over —
+	// `Remote::SubmitMove` runs `Client::SubmitMove`'s body instead.
+	//
+	// **One case and not five, because the five share a server.** Standing a
+	// process up and joining it costs about a second; the keys do not interact,
+	// so what is worth paying for once is the world and not the assertion.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	// A floor wide enough that a character walking for a second in any of four
+	// directions is still on it, and a spawn to start from.
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_wasd.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local floor = Instance.new(\"Part\")\n"
+			 << "floor.Name = \"SpawnLocation\"\n"
+			 << "floor.Size = Vector3.new(400, 4, 400)\n"
+			 << "floor.Position = Vector3.new(0, -2, 0)\n"
+			 << "floor.Anchored = true\n"
+			 << "floor.Parent = workspace\n";
+	}
+
+	Remote client;
+	REQUIRE(client.Start(0, scene.string()));
+	REQUIRE(client.Join(400));
+	Settle(client);
+
+	REQUIRE(client.Mine != engine::ecs::NULL_ENTITY);
+	REQUIRE(engine::scene::CharacterOf(client.World, client.Mine) != engine::ecs::NULL_ENTITY);
+
+	// Looking down -Z, which is the camera's rest heading and the one
+	// `ReadMoveIntent` builds its basis from. Stated rather than assumed: every
+	// expectation below is a direction in *this* frame.
+	client.LookAlong(0.0f);
+
+	using engine::scene::KeyCode;
+
+	// How far counts as walking. **A metre**, which is a fifteenth of a second
+	// at `WalkSpeed` and hundreds of times the wire's own quantisation — so it
+	// separates "walked" from both "stood still" and "drifted".
+	constexpr float WALKED = 1.0f;
+
+	// Long enough for the round trip to matter: the input crosses a socket, the
+	// server applies it on its own tick, and the new pose comes back as ordinary
+	// replicated state. Nothing here simulates the character locally.
+	constexpr int HELD = 90;
+
+	const engine::core::Vector3 start = client.MyPosition();
+
+	// **W is away from the camera**, which with a yaw of zero is -Z. This is the
+	// assertion that would catch a keycode table wired to the wrong axis, and it
+	// is the one a hand-built direction can never make.
+	const engine::core::Vector3 north = client.Hold({KeyCode::W}, HELD);
+	CHECK(north.Z < start.Z - WALKED);
+	CHECK(std::abs(north.X - start.X) < WALKED);
+
+	// S is back the other way, and past where it started rather than merely
+	// slower — a character that only ever walked forwards would pass a test that
+	// asked for "moved".
+	const engine::core::Vector3 south = client.Hold({KeyCode::S}, HELD * 2);
+	CHECK(south.Z > north.Z + WALKED);
+
+	// D is the camera's right, which at this yaw is +X, and A is its mirror.
+	const engine::core::Vector3 east = client.Hold({KeyCode::D}, HELD);
+	CHECK(east.X > south.X + WALKED);
+
+	const engine::core::Vector3 west = client.Hold({KeyCode::A}, HELD * 2);
+	CHECK(west.X < east.X - WALKED);
+
+	// **Nothing held is nothing moved**, and this is not a tautology about the
+	// keyboard: `Humanoid::MoveDirection` is a field the server keeps, so a
+	// client that stopped sending — or one whose released keys still read as
+	// held — leaves a character walking for ever. `ReadMoveIntent` returning a
+	// zero every tick is what stops it.
+	const engine::core::Vector3 released = client.Hold({}, HELD);
+	const engine::core::Vector3 stillThere = client.Hold({}, HELD);
+	CHECK(std::abs(stillThere.X - released.X) < WALKED);
+	CHECK(std::abs(stillThere.Z - released.Z) < WALKED);
+
+	// **A quarter turn, and W now means what the camera means.** This is the
+	// whole reason `ReadMoveIntent` reads the `CameraController` at all — a game
+	// whose forward key stopped meaning forward when the camera turned is the
+	// one thing every player notices immediately. Yaw is measured about +Y, so a
+	// positive quarter turn puts "away from the camera" along -X.
+	client.LookAlong(std::numbers::pi_v<float> * 0.5f);
+	const engine::core::Vector3 turned = client.Hold({KeyCode::W}, HELD);
+	CHECK(turned.X < stillThere.X - WALKED);
+
+	// **And the space bar leaves the floor.** Jumping is the half that fails on
+	// its own: walking writes a horizontal velocity whatever the ground says,
+	// while a jump reads `Humanoid::Grounded` and does nothing without it — so a
+	// broken ground query is invisible to every check above and is the entire
+	// bug to somebody holding space. Sampled at every tick because the apex is
+	// between two of them.
+	client.LookAlong(0.0f);
+	client.Press({});
+	client.Tick();
+
+	const float ground = client.MyPosition().Y;
+
+	// **Tapped rather than held, and the alternation is the whole of it.** A
+	// jump is an edge — `ReadMoveIntent` asks `WasKeyPressed` — so space held
+	// down is one edge and therefore one submission, and the input channel is
+	// unreliable by design: a single datagram that does not arrive is a jump
+	// that silently did not happen. Releasing between presses is what a player
+	// does with a jump key anyway, and it makes the test measure the behaviour
+	// instead of the loss rate.
+	float apex = ground;
+	for (int tick = 0; tick < HELD; tick++) {
+		client.Press(tick % 2 == 0 ? std::initializer_list<KeyCode>{KeyCode::Space}
+								   : std::initializer_list<KeyCode>{});
+		client.SubmitMove();
+		client.Tick();
+		apex = std::max(apex, client.MyPosition().Y);
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+	}
+
+	CHECK(apex > ground + WALKED);
 
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);

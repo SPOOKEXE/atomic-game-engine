@@ -1066,3 +1066,144 @@ TEST_CASE("a destroyed entity leaves the replica's tree walkable", "[replication
 	pair.Client.EachChild(parent, [&](Entity child) { seen.push_back(child); });
 	REQUIRE(seen == std::vector<Entity>{children[0], children[2]});
 }
+
+// --- a spawn is not shown half-built ------------------------------------------
+
+namespace replication_test {
+	// One `ecs.Hierarchy` row, encoded the way the authority encodes one.
+	std::vector<std::byte> HierarchyRow(Entity parent) {
+		const engine::ecs::ComponentId id = engine::ecs::Components::Find(Name("ecs.Hierarchy"));
+		REQUIRE(id.IsValid());
+
+		const engine::ecs::TypeDescriptor &descriptor = engine::ecs::Components::Describe(id);
+
+		engine::ecs::Hierarchy row;
+		row.Parent = parent;
+
+		engine::core::ByteWriter writer;
+		if (descriptor.Wire.Present()) {
+			descriptor.Wire.Write(writer, &row, 1);
+		} else {
+			descriptor.Write(writer, &row, 1);
+		}
+		return std::vector<std::byte>(writer.Bytes().begin(), writer.Bytes().end());
+	}
+
+	// One part of a tick's delta, carrying a parent for one entity.
+	std::vector<std::byte> ParentPart(uint64_t tick, uint16_t part, bool final_, Entity child, Entity parent) {
+		engine::replication::Delta delta;
+		delta.Tick = tick;
+		delta.Part = part;
+		delta.Final = final_;
+
+		if (child != Entity{}) {
+			engine::replication::ComponentDelta hierarchy;
+			hierarchy.Component = Name("ecs.Hierarchy");
+			hierarchy.Entities.push_back(child);
+			hierarchy.Values = HierarchyRow(parent);
+			delta.Components.push_back(std::move(hierarchy));
+		}
+
+		engine::core::ByteWriter writer;
+		WriteMessage(writer, delta);
+		return std::vector<std::byte>(writer.Bytes().begin(), writer.Bytes().end());
+	}
+
+	// The `Structure` that says an entity now exists.
+	std::vector<std::byte> Spawn(uint64_t tick, Entity made) {
+		engine::replication::Structure structure;
+		structure.Tick = tick;
+		structure.Created.push_back(made);
+
+		engine::core::ByteWriter writer;
+		WriteMessage(writer, structure);
+		return std::vector<std::byte>(writer.Bytes().begin(), writer.Bytes().end());
+	}
+}
+
+// **The flash, at the far end of the wire.** A spawn crosses as a `Structure`
+// naming the entity and a delta carrying its rows, and the bandwidth budget
+// splits a delta — so the row that puts a part in `Workspace` can arrive a tick
+// before the row that says where it is. In between, the client's own
+// `scene::SyncRendered` reaches it and it draws at the identity: a part at the
+// origin, then a jump. `examples/Slide.luau` shows it on every block it spawns.
+//
+// So an arriving entity is unparented until the tick that made it is whole,
+// which is this module's version of what every Roblox script already does: set
+// the properties, then set `Parent`.
+TEST_CASE("a spawned entity is not put in the tree until its tick is whole", "[replication]") {
+	Pair pair;
+	const Entity room = pair.Server.Create();
+	pair.Server.Set<Spot>(room, Spot{1.0f, 0.0f});
+	REQUIRE(pair.Join());
+	REQUIRE(pair.Client.Alive(room));
+
+	// **The parent is a node of the tree, because `SetParent` refuses one that
+	// is not.** In a real world it is `Workspace` or something under it and it
+	// has a `Hierarchy` by construction; here the fixture's entities are bare,
+	// so the component is put on by hand rather than the case quietly testing a
+	// refusal.
+	pair.Client.Set<engine::ecs::Hierarchy>(room, engine::ecs::Hierarchy{});
+
+	// A handle the client has never seen, minted by the server so it is shaped
+	// like one the authority would issue.
+	const Entity child = pair.Server.Create();
+	const uint64_t tick = pair.Now + 1;
+
+	REQUIRE(pair.Replica_.Receive(pair.Client, replication_test::Spawn(tick, child)) == ApplyStatus::Ok);
+	REQUIRE(pair.Client.Alive(child));
+
+	// Part zero of the tick: it says where the entity goes and the tick is not
+	// finished, so the rest of what it is — its transform, its size, its colour
+	// — has not arrived.
+	REQUIRE(
+		pair.Replica_.Receive(pair.Client, replication_test::ParentPart(tick, 0, false, child, room)) ==
+		ApplyStatus::Ok
+	);
+
+	// **Not in the tree.** This is the whole fix: nothing walks to it, so
+	// nothing draws it, so there is no frame of it at the origin.
+	CHECK(pair.Client.ParentOf(child) == engine::ecs::NULL_ENTITY);
+
+	// The last part completes the tick.
+	REQUIRE(
+		pair.Replica_.Receive(
+			pair.Client, replication_test::ParentPart(tick, 1, true, Entity{}, Entity{})
+		) == ApplyStatus::Ok
+	);
+
+	// And now it is where the server put it.
+	CHECK(pair.Client.ParentOf(child) == room);
+}
+
+// **A bound, because content that never appears is worse than content that
+// appears in two steps.** The release is meant to come from a tick completing;
+// if partial deltas keep arriving and none ever does, holding for ever would
+// turn a bandwidth problem into a missing object with nothing to say so.
+TEST_CASE("an entity held too long is shown anyway", "[replication]") {
+	Pair pair;
+	const Entity room = pair.Server.Create();
+	pair.Server.Set<Spot>(room, Spot{1.0f, 0.0f});
+	REQUIRE(pair.Join());
+	pair.Client.Set<engine::ecs::Hierarchy>(room, engine::ecs::Hierarchy{});
+
+	const Entity child = pair.Server.Create();
+	const uint64_t tick = pair.Now + 1;
+
+	REQUIRE(pair.Replica_.Receive(pair.Client, replication_test::Spawn(tick, child)) == ApplyStatus::Ok);
+	REQUIRE(
+		pair.Replica_.Receive(pair.Client, replication_test::ParentPart(tick, 0, false, child, room)) ==
+		ApplyStatus::Ok
+	);
+	CHECK(pair.Client.ParentOf(child) == engine::ecs::NULL_ENTITY);
+
+	// Nothing ever completes. Every one of these is a part of a later tick that
+	// says nothing about the child.
+	for (uint16_t part = 1; part <= 12; part++) {
+		(void)pair.Replica_.Receive(
+			pair.Client, replication_test::ParentPart(tick + part, 0, false, Entity{}, Entity{})
+		);
+	}
+
+	CHECK(pair.Client.ParentOf(child) == room);
+}

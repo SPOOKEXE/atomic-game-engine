@@ -95,6 +95,15 @@ namespace engine::physics {
 			return world.RowList;
 		}
 
+		// The gather's sort buffer, and the body indices it resolves.
+		static std::vector<ecs::Entity> &BodyOwners(PhysicsWorld &world) {
+			return world.BodyOwners;
+		}
+
+		static std::vector<std::pair<uint32_t, uint32_t>> &ManifoldBodies(PhysicsWorld &world) {
+			return world.ManifoldBodies;
+		}
+
 		// Last tick's accumulated impulses, which this tick warm-starts from.
 		static std::vector<ContactImpulse> &ImpulseCache(PhysicsWorld &world) {
 			return world.ImpulseCache;

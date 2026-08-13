@@ -286,3 +286,81 @@ TEST_CASE("a built-in is the same geometry every call", "[assets][builtin]") {
 		}
 	}
 }
+
+// --- the sheets --------------------------------------------------------------
+
+TEST_CASE("the built-in checker is a valid, tiling, two-colour sheet", "[assets][builtin]") {
+	using engine::assets::BuiltinTexture;
+	using engine::assets::TextureFormat;
+
+	const engine::assets::TextureData sheet = MakeBuiltin(BuiltinTexture::Checker);
+
+	REQUIRE(sheet.IsValid());
+	REQUIRE(sheet.Format == TextureFormat::RGBA8);
+	REQUIRE(sheet.Width == sheet.Height);
+	REQUIRE_FALSE(sheet.IsFlipbook());
+
+	const auto at = [&](uint32_t x, uint32_t y) {
+		const size_t offset = (static_cast<size_t>(y) * sheet.Width + x) * 4;
+		return std::array<uint8_t, 4>{
+			static_cast<uint8_t>(sheet.Pixels[offset]),
+			static_cast<uint8_t>(sheet.Pixels[offset + 1]),
+			static_cast<uint8_t>(sheet.Pixels[offset + 2]),
+			static_cast<uint8_t>(sheet.Pixels[offset + 3]),
+		};
+	};
+
+	// Two colours and no more. A gradient here would mean the check arithmetic
+	// had picked up the pixel index rather than the cell index.
+	std::map<std::array<uint8_t, 4>, size_t> seen;
+	for (uint32_t y = 0; y < sheet.Height; y++) {
+		for (uint32_t x = 0; x < sheet.Width; x++) {
+			seen[at(x, y)]++;
+		}
+	}
+	REQUIRE(seen.size() == 2);
+
+	// Half each, which is what makes it read as a checkerboard rather than as
+	// a pattern with a bias — and what the cell size dividing the side buys.
+	for (const auto &[colour, count] : seen) {
+		INFO(static_cast<int>(colour[0]));
+		REQUIRE(count == static_cast<size_t>(sheet.Width) * sheet.Height / 2);
+	}
+
+	// Opaque throughout: an author's chosen sheet must not quietly be a
+	// stencil.
+	REQUIRE(at(0, 0)[3] == 0xFF);
+
+	// **The corners tile.** The sheet repeats across a surface, so the column
+	// past the right edge is column zero again — if the two edges held the same
+	// colour the seam would show as a double-width check.
+	REQUIRE(at(0, 0) != at(sheet.Width - 1, 0));
+	REQUIRE(at(0, 0) != at(0, sheet.Height - 1));
+}
+
+TEST_CASE("a built-in texture name round-trips and is namespaced", "[assets][builtin]") {
+	using engine::assets::BUILTIN_TEXTURE_COUNT;
+	using engine::assets::BuiltinTexture;
+
+	for (uint8_t index = 0; index < BUILTIN_TEXTURE_COUNT; index++) {
+		const auto texture = static_cast<BuiltinTexture>(index);
+		const std::string name(BuiltinName(texture));
+		INFO(name);
+
+		REQUIRE(name.rfind("engine.", 0) == 0);
+
+		BuiltinTexture parsed = BuiltinTexture::Checker;
+		REQUIRE(BuiltinFromName(name, parsed));
+		REQUIRE(parsed == texture);
+
+		// **A mesh name is not a texture name and the two overloads must not
+		// answer for each other.** They share a namespace prefix and a lookup
+		// that walked the wrong table would resolve `engine.Cube` to a sheet.
+		BuiltinMesh asMesh = BuiltinMesh::Cube;
+		REQUIRE_FALSE(BuiltinFromName(name, asMesh));
+	}
+
+	BuiltinTexture parsed = BuiltinTexture::Checker;
+	REQUIRE_FALSE(BuiltinFromName("engine.Cube", parsed));
+	REQUIRE_FALSE(BuiltinFromName("", parsed));
+}
