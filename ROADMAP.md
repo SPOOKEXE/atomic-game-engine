@@ -128,6 +128,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] finish portals, lighting doesnt work through it properly and in the seam the character half disappears because geometry doesn't render completey render through them properly
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms.
 - [_] consider adding C# as another scripting langauge?
 - [_] constraints system
