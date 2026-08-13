@@ -16,8 +16,10 @@
 //
 // @tier L9 · shared
 
+#include "Actions.hpp"
 #include "Changes.hpp"
 #include "Debris.hpp"
+#include "ScriptCall.hpp"
 #include "Signals.hpp"
 #include "Tasks.hpp"
 #include "Tweens.hpp"
@@ -25,12 +27,27 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Runtime.hpp>
 
+#include <cstdint>
 #include <quickjs.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace engine::script {
+
+	// One neutral service property installed in this VM, and the service it is
+	// on.
+	//
+	// **The service's name rides beside the row because a refusal needs it.**
+	// `SoundService.AmbientReverb = 1` has to say which service is refusing, and
+	// a `ServiceProperty` carries only its own name — the same sentence the Luau
+	// half builds from `ServiceSurface::Name`.
+	//
+	// @since v0.16
+	struct JsServiceProperty {
+		const ServiceProperty *Row;
+		const char *Service;
+	};
 
 	// Everything one JS runtime needs to reach the world, hung off the context
 	// rather than a static — two runtimes over two worlds must not be able to
@@ -47,6 +64,38 @@ namespace engine::script {
 		SignalTable Signals;
 		ChangeQueue Changes;
 		TaskQueue Tasks;
+
+		// What `ContextActionService` has bound, highest priority first.
+		//
+		// **Shared with the Luau side and for the three above's reason.** Which
+		// handler a press reaches is an ordering rule, and this language could
+		// not bind the service at all until the rule had one implementation —
+		// see `Actions.hpp`.
+		ActionStack Actions;
+
+		// How many GUIDs `HttpService.GenerateGUID` has handed out.
+		//
+		// **A counter rather than a clock or an entropy source, which is what
+		// makes a GUID replayable** — `HttpService.cpp` carries the argument.
+		// On the context rather than a file-static for this struct's own reason:
+		// two runtimes over two worlds must not share one stream.
+		uint64_t NextGuid = 0;
+
+		// Every neutral service method installed in this VM, flattened.
+		//
+		// **What a magic number indexes**, because `JS_NewCFunctionMagic` takes
+		// one integer where `lua_pushcclosure` takes the row's address on an
+		// upvalue. Appended to as each service is installed and never reordered:
+		// a function already built holds its index.
+		std::vector<ScriptMethod> ServiceMethods;
+
+		// Every neutral service property installed in this VM, flattened.
+		//
+		// **A second list beside `ServiceMethods` rather than one**, because a
+		// getter and a setter are reached through a different trampoline than a
+		// call and merging the two would make a magic number mean two things.
+		// Appended to as each service is installed and never reordered.
+		std::vector<JsServiceProperty> ServiceProperties;
 
 		// The two queues that step on the fixed tick delta, which are shared for
 		// the reason the three above are: what a tween or a deadline *is* names
@@ -95,6 +144,15 @@ namespace engine::script {
 		// the shared instance methods are installed on every instance, and
 		// `Play` is not a name a tween may take from every part in the world.
 		JSClassID TweenClass = 0;
+
+		// What a bound action's handler is handed as its third argument.
+		//
+		// **A class rather than a plain object**, which is what makes
+		// `typeOf(input)` answer `"InputObject"` and what stops a handler being
+		// passed something that merely looks like one. Roblox offers no
+		// constructor and neither does this: an input report is produced by the
+		// pump or not at all.
+		JSClassID InputObjectClass = 0;
 
 		// **What a `CallbackRef` means on this side.** The Luau binding puts a
 		// registry ref in that integer; this one puts an index into this

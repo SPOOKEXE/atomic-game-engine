@@ -240,3 +240,45 @@ TEST_CASE("what SoundService deliberately does not have", "[scripting][sound]") 
 		std::string::npos
 	);
 }
+
+TEST_CASE("the absent members are absent in JavaScript too, differently", "[scripting][sound]") {
+	// **The one thing about this service that could not cross, stated rather than
+	// papered over.** A Luau property-bearing service is a *userdata*, so
+	// `__index` has to answer something for a name nothing declares and raising
+	// is the only answer that does not make a typo silent. A JavaScript object
+	// has no such hook: intercepting an unknown *read* would need a `Proxy`, and
+	// `JsBindings.cpp` excludes `Proxy` deliberately because a script could then
+	// wrap an instance and intercept the whole property surface. So a missing
+	// member reads as `undefined` here and raises there.
+	//
+	// **The write half does agree**, and that took the object being sealed: the
+	// Luau twin is a userdata and a userdata has no fields, so an extensible
+	// object would have kept `SoundService.AmbientReverb = 1` as a new property
+	// and read the typo back forever. Chunks run strict, so the refused add
+	// throws.
+	Store store = Fresh("sound_absent_javascript");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+	REQUIRE(runtime != nullptr);
+
+	MustRun(*runtime, R"(
+		const SoundService = game.GetService('SoundService')
+
+		for (const absent of ['PlayLocalSound', 'GetMixerTime', 'AmbientReverb', 'DopplerScale']) {
+			if (SoundService[absent] !== undefined) {
+				throw new Error(absent + ' came back as something')
+			}
+		}
+
+		if (typeof SoundService.GetListener !== 'function') {
+			throw new Error('GetListener is missing')
+		}
+	)");
+
+	CHECK_FALSE(runtime->Run("game.GetService('SoundService').AmbientReverb = 1"));
+	CHECK_FALSE(runtime->LastError().empty());
+
+	// A declared but read-only property refuses by name in this language, which
+	// is the half that does not depend on the seal.
+	CHECK_FALSE(runtime->Run("game.GetService('UserInputService').TouchEnabled = true"));
+	CHECK(runtime->LastError().find("read-only") != std::string::npos);
+}

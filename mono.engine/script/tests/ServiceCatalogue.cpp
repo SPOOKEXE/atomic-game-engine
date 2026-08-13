@@ -32,6 +32,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <set>
 #include <string>
 
 TEST_SUITE_ID("engine.script.servicecatalogue")
@@ -95,45 +96,64 @@ TEST_CASE("every service the catalogue claims for a language is reachable in it"
 	}
 }
 
-TEST_CASE("a service the other language binds refuses by name", "[scripting][services]") {
-	// **The half that makes the mask worth carrying.** Saying "no such service"
-	// for something that exists and is bound elsewhere sends an author to check
-	// their spelling, which is the one place the answer is not. Four services
-	// are in exactly this position today, so this is the sentence a JavaScript
-	// author is most likely to see.
+TEST_CASE("every surface service is now in both languages", "[scripting][services]") {
+	// **What this case used to be, and why it is this instead.** It ran the
+	// services one language does *not* bind and asserted the refusal named the
+	// other — with a landmine on the end saying the JavaScript half must find
+	// exactly `{SoundService, UserInputService}`, set deliberately so that
+	// closing them could not land silently. They are closed: `ServiceProperty`
+	// gave a live property a neutral shape, both VMs install both services, and
+	// the loop that walked the gap now walks nothing.
+	//
+	// **The landmine is replaced rather than deleted, because the fact it
+	// guarded is still worth guarding** — it has simply become the opposite
+	// fact. Every `Always` row binds both languages, and the set below is empty
+	// and *named*: un-bind one and this fails saying which, exactly as adding one
+	// used to.
+	//
+	// The refusal path itself is not lost with it — see the case below, which
+	// exercises it against the one row that is genuinely one language's.
 	for (const Language language : {Language::Luau, Language::JavaScript}) {
 		const ServiceLanguages want =
 			language == Language::Luau ? ServiceLanguages::Luau : ServiceLanguages::JavaScript;
-		const std::string expected =
-			language == Language::Luau ? "not bound for Luau" : "not bound for JavaScript";
 
-		Store store = Fresh("catalogue_absent");
-		const auto runtime = MakeRuntime(store, language);
-		REQUIRE(runtime != nullptr);
-
-		size_t checked = 0;
+		std::set<std::string> unbound;
 		for (const ServiceDefinition &definition : Services()) {
 			if (definition.Availability != ServiceAvailability::Always) {
 				continue;
 			}
-			if (Binds(definition.Languages, want)) {
-				continue;
+			if (!Binds(definition.Languages, want)) {
+				unbound.insert(definition.Name);
 			}
-
-			INFO(definition.Name);
-			CHECK_FALSE(runtime->Run(Fetch(language, definition.Name).c_str()));
-			CHECK(runtime->LastError().find(expected) != std::string::npos);
-			checked++;
 		}
 
-		// **The JavaScript half must find some**, because the drift is real and
-		// the day it is closed this case should be *deleted* rather than left
-		// passing vacuously. Luau binds everything today, so its count is
-		// legitimately zero.
-		if (language == Language::JavaScript) {
-			CHECK(checked > 0);
-		}
+		INFO((language == Language::Luau ? "luau" : "javascript"));
+		CHECK(unbound == std::set<std::string>{});
 	}
+}
+
+TEST_CASE("a service the other language binds refuses by name", "[scripting][services]") {
+	// **The half that makes the mask worth carrying.** Saying "no such service"
+	// for something that exists and is bound elsewhere sends an author to check
+	// their spelling, which is the one place the answer is not.
+	//
+	// **`BreakpointService` is the one row left in that position, and it is a
+	// feature gap rather than a binding one** — `Debugger::Add` refuses a `.js`,
+	// `.mjs`, `.cjs`, `.ts` or `.tsx` chunk outright, so a JavaScript binding
+	// would answer "nothing can be armed" to everything. It is a `Studio` row, so
+	// a plain `MakeRuntime` installs it in neither VM; what is being asserted
+	// here is the *catalogue's* answer, which is a language refusal in JavaScript
+	// and an ordinary absence in Luau.
+	Store store = Fresh("catalogue_absent");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+	REQUIRE(runtime != nullptr);
+
+	const ServiceDefinition *breakpoints = engine::script::FindService("BreakpointService");
+	REQUIRE(breakpoints != nullptr);
+	REQUIRE_FALSE(Binds(breakpoints->Languages, ServiceLanguages::JavaScript));
+
+	CHECK_FALSE(runtime->Run(Fetch(Language::JavaScript, "BreakpointService").c_str()));
+	CHECK(runtime->LastError().find("not bound for JavaScript") != std::string::npos);
 }
 
 TEST_CASE("a name in no row still fails the old way", "[scripting][services]") {

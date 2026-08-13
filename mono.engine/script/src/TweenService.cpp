@@ -316,14 +316,14 @@ namespace engine::script {
 		// **A `ServiceMethod` row rather than a type of its own**, because the
 		// pair is exactly what one is: a name and a `lua_CFunction` that reads
 		// the context off upvalue 1.
-		static constexpr ServiceMethod TWEEN_METHODS[] = {
+		static constexpr LuauServiceMethod TWEEN_METHODS[] = {
 			{"Play", Play},
 			{"Pause", Pause},
 			{"Cancel", Cancel},
 		};
 
 		lua_newtable(state);
-		for (const ServiceMethod &method : TWEEN_METHODS) {
+		for (const LuauServiceMethod &method : TWEEN_METHODS) {
 			lua_pushlightuserdata(state, &context);
 			lua_pushcclosure(state, method.Function, method.Name, 1);
 			lua_setfield(state, -2, method.Name);
@@ -346,14 +346,14 @@ namespace engine::script {
 		lua_setfield(state, -2, "__type");
 		lua_pop(state, 1);
 
-		static constexpr ServiceMethod METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			{"GetValue", GetValue},
 			{"Create", Create},
 		};
 
 		ServiceSurface surface;
 		surface.Name = "TweenService";
-		surface.Methods = METHODS;
+		surface.LuauMethods = METHODS;
 
 		InstallService(state, surface);
 	}

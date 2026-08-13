@@ -41,17 +41,26 @@
 // which are maps, what a cycle is, what a key becomes — and a second traversal
 // here answering any of those differently would mean one value crossing a bus
 // in one shape and landing in a JSON document in another. So `JSONEncode` reads
-// the Lua value with `ReadScriptValue`, the same walker `MessagingService`
-// publishes with, and this file only turns the resulting `ScriptValue` into
-// text; `JSONDecode` is the mirror, and pushes through the same
-// `PushScriptValue`. Every table rule below is inherited rather than invented,
+// the script value with `ScriptCall::ReadValue`, the same walker
+// `MessagingService` publishes with, and this file only turns the resulting
+// `ScriptValue` into text; `JSONDecode` is the mirror, and answers through the
+// same `ReturnValue`. Every table rule below is inherited rather than invented,
 // and the ones this file adds are the ones JSON forces: what a number looks
 // like, what an escape is, and what has no JSON form at all.
 //
+// ## Neutral since v0.16
+//
+// Nothing in this file names a VM. It was four `lua_CFunction`s, which is why
+// JavaScript did not have `HttpService` at all — and the irony is that the whole
+// file was already written against a shared tree, with only the four wrappers
+// around it per language. `GenerateGUID`'s draw counter was the one piece of
+// real state, and it crosses as `ScriptCall::NextGuid`.
+//
 // @tier L9 · shared
 
-#include "Bindings.hpp"
 #include "Codec.hpp"
+#include "ScriptCall.hpp"
+#include "ServiceSurface.hpp"
 
 #include <engine/core/Random.hpp>
 
@@ -60,8 +69,6 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
-#include <lua.h>
-#include <lualib.h>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -688,23 +695,20 @@ namespace engine::script {
 		// is refused; a `Vector3`, `Color3` or `CFrame` is refused; map keys are
 		// written in sorted order; a number is written as the shortest decimal
 		// that reads back as the same double.
-		int JsonEncode(lua_State *state) {
-			// Argument 1 is the service, because every method on this table is
-			// called with a colon. The value is argument 2.
+		void JsonEncode(ScriptCall &call) {
 			ScriptValue value;
 			CodecStatus why = CodecStatus::Ok;
 
-			if (!ReadScriptValue(state, 2, value, 0, why)) {
-				luaL_errorL(state, "JSONEncode: %s", DescribeForJson(why));
+			if (!call.ReadValue(0, value, why)) {
+				call.Raise((std::string("JSONEncode: ") + DescribeForJson(why)).c_str());
 			}
 
 			std::string text;
 			if (const char *failure = WriteJson(value, text); failure != nullptr) {
-				luaL_errorL(state, "JSONEncode: %s", failure);
+				call.Raise((std::string("JSONEncode: ") + failure).c_str());
 			}
 
-			lua_pushlstring(state, text.data(), text.size());
-			return 1;
+			call.ReturnString(text);
 		}
 
 		// HttpService:JSONDecode(text) -> any
@@ -713,17 +717,15 @@ namespace engine::script {
 		// mean one-based in Luau, so a zero-based table handed to a script is a
 		// list whose first element is invisible to every idiom an author has —
 		// and the bug that produces reads as "the server sent me nine of the ten
-		// rows". `PushScriptValue` is what makes it so, which is also what makes
-		// a decoded document and a delivered message the same shape.
-		int JsonDecode(lua_State *state) {
-			size_t length = 0;
-			const char *text = luaL_checklstring(state, 2, &length);
-
-			JsonReader reader{.Text = std::string_view(text, length)};
+		// rows". `ScriptCall::ReturnValue` is what makes it so, which is also
+		// what makes a decoded document and a delivered message the same shape.
+		void JsonDecode(ScriptCall &call) {
+			const std::string text = call.AsString(0);
+			JsonReader reader{.Text = std::string_view(text)};
 
 			ScriptValue value;
 			if (!reader.Read(value, 0)) {
-				luaL_errorL(state, "JSONDecode: %s", reader.Failure);
+				call.Raise((std::string("JSONDecode: ") + reader.Failure).c_str());
 			}
 
 			// **Trailing text is an error rather than something to ignore.**
@@ -732,11 +734,10 @@ namespace engine::script {
 			// first complete value hides which.
 			reader.SkipSpace();
 			if (!reader.Done()) {
-				luaL_errorL(state, "JSONDecode: there is text after the value");
+				call.Raise("JSONDecode: there is text after the value");
 			}
 
-			PushScriptValue(state, value);
-			return 1;
+			call.ReturnValue(value);
 		}
 
 		// A stable 32-bit salt from a world's name.
@@ -793,17 +794,18 @@ namespace engine::script {
 		// Four draws of thirty-two bits each. About 190 nanoseconds, since every
 		// draw is a full SHA-256 compression — fine for naming a thing, wrong
 		// inside a per-tick loop, and `core/Random.hpp` says why.
-		int GenerateGuid(lua_State *state) {
-			LuauContext &context = UpvalueContext(state);
-
+		void GenerateGuid(ScriptCall &call) {
 			// **Braces by default**, which is Roblox's default and the surprising
 			// half of its signature. A script that passes nothing gets
 			// `{XXXXXXXX-...}`.
-			const bool braces = lua_isnoneornil(state, 2) || lua_toboolean(state, 2) != 0;
+			//
+			// **The two languages disagree about `GenerateGUID(0)`**, and the
+			// interface says why: this is each language's own truthiness, and
+			// zero is truthy in one and falsy in the other.
+			const bool braces = call.OptionalBoolean(0, true);
 
-			const uint32_t salt =
-				SaltOf(context.World != nullptr ? context.World->Name() : std::string_view());
-			const auto index = static_cast<uint32_t>(context.NextGuid++);
+			const uint32_t salt = SaltOf(call.World().Name());
+			const auto index = static_cast<uint32_t>(call.NextGuid());
 
 			std::array<uint8_t, 16> bytes{};
 			for (uint32_t word = 0; word < 4; word++) {
@@ -840,8 +842,7 @@ namespace engine::script {
 				guid.push_back('}');
 			}
 
-			lua_pushlstring(state, guid.data(), guid.size());
-			return 1;
+			call.ReturnString(guid);
 		}
 
 		// HttpService:UrlEncode(text) -> string
@@ -855,15 +856,14 @@ namespace engine::script {
 		// Byte by byte, so a UTF-8 string comes out as one `%XX` per byte, which
 		// is what a URL carries. Upper-case hex digits, which RFC 3986 §2.1
 		// prefers.
-		int UrlEncode(lua_State *state) {
-			size_t length = 0;
-			const char *text = luaL_checklstring(state, 2, &length);
+		void UrlEncode(ScriptCall &call) {
+			const std::string text = call.AsString(0);
 
 			static constexpr char HEX[] = "0123456789ABCDEF";
 			std::string encoded;
-			encoded.reserve(length);
+			encoded.reserve(text.size());
 
-			for (size_t at = 0; at < length; at++) {
+			for (size_t at = 0; at < text.size(); at++) {
 				const auto byte = static_cast<unsigned char>(text[at]);
 				const bool unreserved = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
 										(byte >= '0' && byte <= '9') || byte == '-' || byte == '_' ||
@@ -879,26 +879,27 @@ namespace engine::script {
 				encoded.push_back(HEX[byte & 0x0F]);
 			}
 
-			lua_pushlstring(state, encoded.data(), encoded.size());
-			return 1;
+			call.ReturnString(encoded);
 		}
-	}
 
-	void OpenHttpService(lua_State *state) {
 		// **Four methods, and the three that are missing are missing on
 		// purpose.** Do not add `RequestAsync`, `GetAsync` or `PostAsync` here —
 		// this file's header says what would have to be decided first.
-		static constexpr ServiceMethod METHODS[] = {
+		constexpr std::array<ServiceMethod, 4> METHODS{{
 			{"JSONEncode", JsonEncode},
 			{"JSONDecode", JsonDecode},
 			{"GenerateGUID", GenerateGuid},
 			{"UrlEncode", UrlEncode},
-		};
+		}};
+	}
 
-		ServiceSurface surface;
-		surface.Name = "HttpService";
-		surface.Methods = METHODS;
-
-		InstallService(state, surface);
+	const ServiceSurface &HttpServiceSurface() {
+		static const ServiceSurface SURFACE = [] {
+			ServiceSurface surface;
+			surface.Name = "HttpService";
+			surface.Methods = METHODS;
+			return surface;
+		}();
+		return SURFACE;
 	}
 }

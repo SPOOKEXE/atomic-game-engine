@@ -574,45 +574,6 @@ namespace engine::script {
 			return bytes;
 		}
 
-		// CrossWorldService:Send(worldName, message)
-		//
-		// **The addressed route out of a world, which `MessagingService` is not
-		// and `TeleportService` only is by accident.** A topic is a fan-out with
-		// no destination — right for "the boss died", wrong for "world B, here is
-		// the score you asked me for" — and the only other operation that names a
-		// world moves a *person*. So a game wanting to say one thing to one world
-		// had to broadcast it to everybody or send a player carrying it.
-		//
-		// **Answers the status rather than raising**, matching `PublishAsync`
-		// beside it: a world that is not running is `NoSuchWorld`, which a caller
-		// can act on. That is also the closest thing to `GetWorlds` this service
-		// has — see its declaration for why the real one needs machinery that
-		// does not exist yet.
-		int CrossWorldSend(lua_State *state) {
-			const char *world = luaL_checkstring(state, 2);
-
-			ScriptValue value;
-			CodecStatus why = CodecStatus::Ok;
-			if (!ReadScriptValue(state, 3, value, 0, why)) {
-				luaL_errorL(state, "Send needs a value it can encode: %s", Describe(why));
-			}
-
-			std::vector<std::byte> bytes;
-			const CodecStatus encoded = Encode(value, bytes);
-			if (encoded != CodecStatus::Ok) {
-				luaL_errorL(state, "Send could not encode the message: %s", Describe(encoded));
-			}
-
-			Postbox box(*UpvalueContext(state).World);
-			const Ticket ticket = box.SendTo(world, bytes);
-
-			// **Over budget is a refusal a script can see**, exactly as it is for
-			// a publish: the bus budget is per world per tick and a loop that
-			// blew it should be told rather than have its messages disappear.
-			lua_pushboolean(state, ticket.Expected());
-			return 1;
-		}
-
 		// TeleportService:Teleport(placeName, player, data?)
 		int Teleport(lua_State *state) {
 			Store &store = StoreOfUpvalue(state);
@@ -794,14 +755,18 @@ namespace engine::script {
 		// Four services, one shape.
 		//
 		// **`ServiceSurface` is the shape now**, and this is what is left of the
-		// helper that used to live here: a name and a list, handed over. It was
-		// private to this file, so the four other installers in this module each
-		// wrote the loop out again — which is the argument for the helper being
-		// somewhere every service can reach rather than for it existing at all.
-		void Install(lua_State *state, const char *name, std::span<const ServiceMethod> methods) {
+		// helper that used to live here: a name and a list, handed over.
+		//
+		// **`LuauMethods` and not `Methods`, which is the debt this file still
+		// carries.** These four are the bus services and every one of them is
+		// hand-written per language — `OpenJsMessagingService` and the rest are
+		// in `JsBindings.cpp`. They work, and moving them across is the next
+		// migration rather than this one; `ServiceSurface::LuauMethods` is where
+		// that is visible instead of implied.
+		void Install(lua_State *state, const char *name, std::span<const LuauServiceMethod> methods) {
 			ServiceSurface surface;
 			surface.Name = name;
-			surface.Methods = methods;
+			surface.LuauMethods = methods;
 			InstallService(state, surface);
 		}
 	}
@@ -831,7 +796,7 @@ namespace engine::script {
 	}
 
 	void OpenMessagingService(lua_State *state) {
-		static constexpr ServiceMethod METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			{"PublishAsync", PublishAsync},
 			{"SubscribeAsync", SubscribeAsync},
 		};
@@ -839,7 +804,7 @@ namespace engine::script {
 	}
 
 	void OpenTeleportService(lua_State *state) {
-		static constexpr ServiceMethod METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			{"Teleport", Teleport},
 			{"GetLocalPlayerTeleportData", GetLocalPlayerTeleportData},
 			{"GetTeleportData", GetTeleportData},
@@ -848,7 +813,7 @@ namespace engine::script {
 	}
 
 	void OpenMemoryStoreService(lua_State *state) {
-		static constexpr ServiceMethod METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			{"GetAsync", MemoryStoreGetAsync},
 			{"SetAsync", MemoryStoreSetAsync},
 			{"UpdateAsync", MemoryStoreUpdateAsync},
@@ -857,28 +822,11 @@ namespace engine::script {
 		Install(state, "MemoryStoreService", METHODS);
 	}
 
-	void OpenCrossWorldService(lua_State *state) {
-		static constexpr ServiceSignal SIGNALS[] = {
-			{"MessageReceived", SignalKind::CrossWorldMessage},
-		};
-
-		static constexpr ServiceMethod METHODS[] = {
-			{"Send", CrossWorldSend},
-		};
-
-		ServiceSurface surface;
-		surface.Name = "CrossWorldService";
-		surface.Methods = METHODS;
-		surface.Signals = SIGNALS;
-
-		InstallService(state, surface);
-	}
-
 	void OpenDataStoreService(lua_State *state) {
 		// **No `UpdateAsync`, unlike the memory store above.** A compare-and-set
 		// needs a version, and a durable store has none — the JavaScript side
 		// declares the same three for the same reason.
-		static constexpr ServiceMethod METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			{"GetAsync", DataStoreGetAsync},
 			{"SetAsync", DataStoreSetAsync},
 			{"RemoveAsync", DataStoreRemoveAsync},

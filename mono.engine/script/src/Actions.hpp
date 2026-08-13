@@ -73,20 +73,43 @@ namespace engine::script {
 		scene::InputSource Source = scene::InputSource::Keyboard;
 	};
 
+	// --- the four reports a frame can produce ---------------------------------
+	//
+	// **All four are shared, since `UserInputService` stopped being Luau's.**
+	// The key report always was — both pumps hand one to a bound action — and the
+	// other three lived beside the Luau signal loop while that loop was the only
+	// one. Two pumps building a report each is two answers to "what did this
+	// frame do", which is the drift the whole neutral layer exists to close: an
+	// engine where a click carried a position in one language and not in the
+	// other would be one nobody could port a handler between.
+
 	// A report for one key edge.
 	//
 	// Position and delta are zero, as Roblox's are: a keyboard event has no
 	// place on the screen.
 	//
-	// **Shared because both pumps build one.** The mouse, motion and wheel
-	// reports stay in `InputServices.cpp` beside `UserInputService`'s signals,
-	// which is the only thing that produces them — a bound action is keys only,
-	// for the reason `RunBoundActions` gives.
-	//
 	// @param key   Which key moved.
 	// @param began Whether it went down.
 	// @return The report a handler is given.
 	InputReport KeyReport(scene::KeyCode key, bool began);
+
+	// A report for one mouse button edge, or for one held button.
+	//
+	// **The delta is left at zero even though the pointer may have moved this
+	// frame**, which is Roblox's shape: motion is reported by its own
+	// `InputChanged`, and putting it on the click as well would have a handler
+	// that sums deltas count the same movement twice.
+	//
+	// @param input  This frame's input.
+	// @param button Which button moved.
+	// @param began  Whether it went down.
+	InputReport ButtonReport(const scene::InputState &input, scene::MouseButton button, bool began);
+
+	// A report for this frame's pointer motion.
+	InputReport MotionReport(const scene::InputState &input);
+
+	// A report for this frame's wheel movement.
+	InputReport WheelReport(const scene::InputState &input);
 
 	// One action bound through `ContextActionService`.
 	//

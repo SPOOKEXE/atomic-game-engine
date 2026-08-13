@@ -1,8 +1,9 @@
 // `ScriptCall` in JavaScript's currency.
 //
-// The twin of `LuauCall.cpp`, and deliberately the same shape: one adapter, one
-// trampoline, and a method table walked at install time so a neutral method
-// costs a row in `ScriptMethods.cpp` and nothing here.
+// The twin of `LuauCall.cpp`, and deliberately the same shape: one adapter, two
+// trampolines — one for an instance method and one for a service's — and a table
+// walked at install time, so a neutral method costs a row in its own file and
+// nothing here.
 //
 // ## The one genuinely different mechanism
 //
@@ -25,9 +26,12 @@
 
 #include <engine/ecs/Attributes.hpp>
 
+#include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace engine::script {
 
@@ -107,20 +111,52 @@ namespace engine::script {
 				: Context(context), Argv(argv), Argc(argc < 0 ? 0u : static_cast<size_t>(argc)),
 				  Self(JsEntityOf(context, self)) {}
 
+			// The same call on a service, whose receiver stands for nothing.
+			//
+			// **A tag rather than a flag**, matching `LuauCall::OnService`: a
+			// service method's `Subject()` is `NULL_ENTITY`, and asking
+			// `JsEntityOf` about a plain object would answer that anyway — the
+			// tag is what says it was meant.
+			struct OnService {};
+
+			JsCall(JSContext *context, OnService, int argc, JSValueConst *argv)
+				: Context(context), Argv(argv), Argc(argc < 0 ? 0u : static_cast<size_t>(argc)),
+				  Self(ecs::NULL_ENTITY) {}
+
 			~JsCall() override {
-				// A result the trampoline never took, because something raised
-				// after it was set. Freeing `JS_UNDEFINED` is a no-op, so the
-				// ordinary path costs nothing.
-				JS_FreeValue(Context, Result);
+				// Results the trampoline never took, because something raised
+				// after they were set. Empty on the ordinary path, so this costs
+				// nothing.
+				for (JSValue &value : Results) {
+					JS_FreeValue(Context, value);
+				}
 			}
 
-			// Hands the result over. `undefined` for a method that answered
-			// nothing, which is what a JavaScript function without a `return`
-			// evaluates to.
+			// Hands the result over.
+			//
+			// **`undefined` for nothing, the value itself for one, and an
+			// `Array` for several.** A method with more than one answer is a Luau
+			// shape — `ScriptCall` states the trade at the `Return` block — and an
+			// array is what a JavaScript author destructures. Nothing packs a
+			// single answer, so `GetPivot()` is a `CFrame` here exactly as it is
+			// there.
 			JSValue Take() {
-				JSValue value = Result;
-				Result = JS_UNDEFINED;
-				return value;
+				if (Results.empty()) {
+					return JS_UNDEFINED;
+				}
+
+				if (Results.size() == 1) {
+					const JSValue only = Results[0];
+					Results.clear();
+					return only;
+				}
+
+				JSValue array = JS_NewArray(Context);
+				for (size_t index = 0; index < Results.size(); index++) {
+					JS_SetPropertyUint32(Context, array, static_cast<uint32_t>(index), Results[index]);
+				}
+				Results.clear();
+				return array;
 			}
 
 			ecs::Store &World() override {
@@ -131,12 +167,28 @@ namespace engine::script {
 				return JsOf(Context).Changes;
 			}
 
+			ActionStack &Actions() override {
+				return JsOf(Context).Actions;
+			}
+
+			uint64_t NextGuid() override {
+				return JsOf(Context).NextGuid++;
+			}
+
 			Entity Subject() const override {
 				return Self;
 			}
 
 			bool IsNil(size_t index) const override {
 				return index >= Argc || JS_IsNull(Argv[index]) || JS_IsUndefined(Argv[index]);
+			}
+
+			size_t Arguments() const override {
+				return Argc;
+			}
+
+			bool ReadEnum(size_t index, Name enumName, Name &member) override {
+				return index < Argc && ReadJsEnumValue(Context, Argv[index], enumName, member);
 			}
 
 			std::string AsString(size_t index) override {
@@ -158,6 +210,27 @@ namespace engine::script {
 				std::string value(text, length);
 				JS_FreeCString(Context, text);
 				return value;
+			}
+
+			double AsNumber(size_t index) override {
+				// **By exact type, matching `luaL_checknumber`'s refusal of a
+				// table and deliberately *not* matching its acceptance of a
+				// numeric string.** `JS_ToFloat64` would take `"5"` and would
+				// also take `[]` as zero, which is the class of coercion
+				// `AsString` already refuses one member up.
+				double value = 0.0;
+				if (index >= Argc || !JS_IsNumber(Argv[index]) ||
+					JS_ToFloat64(Context, &value, Argv[index]) != 0) {
+					Raise("expected a number");
+				}
+				return value;
+			}
+
+			bool OptionalBoolean(size_t index, bool fallback) override {
+				// `JS_ToBool` and not a type check, which is this language's own
+				// truthiness — see the interface for why the two are allowed to
+				// disagree about `0` here.
+				return IsNil(index) ? fallback : JS_ToBool(Context, Argv[index]) == 1;
 			}
 
 			core::CFrame AsCFrame(size_t index) override {
@@ -254,6 +327,27 @@ namespace engine::script {
 				}
 			}
 
+			bool ReadValue(size_t index, ScriptValue &out, CodecStatus &why) override {
+				// **The shared walker and never a second one** — see the Luau
+				// adapter, which says why one table rule cannot be written twice.
+				if (index >= Argc) {
+					why = CodecStatus::Unsupported;
+					return false;
+				}
+				return ToScriptValue(Context, Argv[index], out, 0, why);
+			}
+
+			CallbackRef RetainCallback(size_t index) override {
+				if (index >= Argc || !JS_IsFunction(Context, Argv[index])) {
+					Raise("expected a function");
+				}
+				return Retain(Context, Argv[index]);
+			}
+
+			void ReleaseCallback(CallbackRef callback) override {
+				Release(Context, callback);
+			}
+
 			void ReturnNil() override {
 				// **`null` rather than `undefined`**, matching every other
 				// JavaScript instance method: `FindFirstChild` answers `null` for
@@ -266,8 +360,83 @@ namespace engine::script {
 				Set(JS_NewBool(Context, value));
 			}
 
+			void ReturnNumber(double value) override {
+				Set(JS_NewFloat64(Context, value));
+			}
+
+			void ReturnString(std::string_view value) override {
+				Set(JS_NewStringLen(Context, value.data(), value.size()));
+			}
+
+			void ReturnStrings(std::span<const std::string_view> values) override {
+				// **A real `Array` and not an object with numeric keys**, which
+				// is what the Luau half's one-based table means here: `map`,
+				// `filter` and `length` are how a JavaScript author reads a list,
+				// and none of them work on a plain object.
+				JSValue array = JS_NewArray(Context);
+				for (size_t index = 0; index < values.size(); index++) {
+					JS_SetPropertyUint32(
+						Context,
+						array,
+						static_cast<uint32_t>(index),
+						JS_NewStringLen(Context, values[index].data(), values[index].size())
+					);
+				}
+				Set(array);
+			}
+
+			void ReturnInstances(std::span<const Entity> values) override {
+				JSValue array = JS_NewArray(Context);
+				for (size_t index = 0; index < values.size(); index++) {
+					JS_SetPropertyUint32(
+						Context, array, static_cast<uint32_t>(index), MakeJsInstance(Context, values[index])
+					);
+				}
+				Set(array);
+			}
+
+			void ReturnValue(const ScriptValue &value) override {
+				Set(FromScriptValue(Context, value));
+			}
+
 			void ReturnCFrame(const core::CFrame &value) override {
 				Set(MakeCFrame(Context, value));
+			}
+
+			void ReturnVector2(const core::Vector2 &value) override {
+				Set(MakeVector2(Context, value));
+			}
+
+			void ReturnEnum(Name enumName, Name member) override {
+				Set(MakeJsEnumItem(Context, enumName, member));
+			}
+
+			void ReturnEnums(Name enumName, std::span<const Name> members) override {
+				// **A real `Array`**, for `ReturnStrings`' reason: `map`,
+				// `filter` and `length` are how a JavaScript author reads a list.
+				JSValue array = JS_NewArray(Context);
+				for (size_t index = 0; index < members.size(); index++) {
+					JS_SetPropertyUint32(
+						Context,
+						array,
+						static_cast<uint32_t>(index),
+						MakeJsEnumItem(Context, enumName, members[index])
+					);
+				}
+				Set(array);
+			}
+
+			void ReturnInputObjects(std::span<const InputReport> reports) override {
+				JSValue array = JS_NewArray(Context);
+				for (size_t index = 0; index < reports.size(); index++) {
+					JS_SetPropertyUint32(
+						Context,
+						array,
+						static_cast<uint32_t>(index),
+						MakeJsInputObject(Context, reports[index])
+					);
+				}
+				Set(array);
 			}
 
 			void ReturnInstance(ecs::Entity value) override {
@@ -310,15 +479,18 @@ namespace engine::script {
 
 		  private:
 			void Set(JSValue value) {
-				JS_FreeValue(Context, Result);
-				Result = value;
+				// **Appended rather than replacing**, so a method with more than
+				// one answer keeps them all — see `Take`. Every method but
+				// `SoundService::GetListener` calls this once, and one value is
+				// handed back unpacked.
+				Results.push_back(value);
 			}
 
 			JSContext *Context;
 			JSValueConst *Argv;
 			size_t Argc;
 			Entity Self;
-			JSValue Result = JS_UNDEFINED;
+			std::vector<JSValue> Results;
 		};
 
 		// The one C function every neutral method is installed as.
@@ -349,6 +521,91 @@ namespace engine::script {
 
 			return call.Take();
 		}
+
+		// The one C function every neutral *service* method is installed as.
+		//
+		// **The magic indexes `JsContext::ServiceMethods` rather than one shared
+		// table**, which is where this differs from the instance trampoline
+		// above: there is one instance method table and each service has a table
+		// of its own, so the rows are flattened into the context as they are
+		// installed. The Luau twin puts the row's address on an upvalue instead —
+		// `lua_pushcclosure` takes any number of values and
+		// `JS_NewCFunctionMagic` takes one integer, which is the whole of the
+		// difference.
+		JSValue
+		NeutralJsServiceMethod(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int magic) {
+			JsCall call(context, JsCall::OnService{}, argc, argv);
+
+			try {
+				JsOf(context).ServiceMethods[static_cast<size_t>(magic)](call);
+			} catch (const JsRaised &) {
+				return JS_EXCEPTION;
+			} catch (...) {
+				// **Nothing may unwind past here**, for the reason the instance
+				// trampoline gives: QuickJS is C and the frame below this one has
+				// no landing pad.
+				return JS_ThrowInternalError(context, "a service method failed");
+			}
+
+			return call.Take();
+		}
+
+		// The two C functions every neutral service *property* is installed as.
+		//
+		// **An accessor per name, which is the whole of why a property list had
+		// to exist.** The Luau half can string-compare a field inside one
+		// `__index`; `JS_DefinePropertyGetSet` registers a getter and a setter
+		// against one atom, so the names are needed at install time and a
+		// catch-all cannot supply them. There is no `Proxy` to fall back on —
+		// `JsBindings.cpp` excludes it deliberately, because a script could wrap
+		// an instance and intercept the property surface.
+		//
+		// The magic indexes `JsContext::ServiceProperties`, exactly as the
+		// service method trampoline indexes `ServiceMethods` and for its reason:
+		// `JS_NewCFunctionMagic` takes one integer where `lua_pushcclosure` takes
+		// an address.
+		JSValue NeutralJsServiceGet(JSContext *context, JSValueConst, int, JSValueConst *, int magic) {
+			const JsServiceProperty &row = JsOf(context).ServiceProperties[static_cast<size_t>(magic)];
+
+			JsCall call(context, JsCall::OnService{}, 0, nullptr);
+			try {
+				row.Row->Get(call);
+			} catch (const JsRaised &) {
+				return JS_EXCEPTION;
+			} catch (...) {
+				// **Nothing may unwind past here**, for the reason the two
+				// trampolines above give: QuickJS is C and the frame below this
+				// one has no landing pad.
+				return JS_ThrowInternalError(context, "a service property failed");
+			}
+
+			return call.Take();
+		}
+
+		JSValue
+		NeutralJsServiceSet(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int magic) {
+			const JsServiceProperty &row = JsOf(context).ServiceProperties[static_cast<size_t>(magic)];
+
+			JsCall call(context, JsCall::OnService{}, argc, argv);
+			try {
+				// **A read-only property refuses by name rather than silently
+				// dropping the write**, which is what leaving the setter
+				// undefined would do in sloppy mode. The Luau half says the same
+				// sentence from `LuauServiceNewIndex`.
+				if (row.Row->Set == nullptr) {
+					const std::string message =
+						std::string(row.Service) + "." + row.Row->Name + " is read-only";
+					call.Raise(message.c_str());
+				}
+				row.Row->Set(call);
+			} catch (const JsRaised &) {
+				return JS_EXCEPTION;
+			} catch (...) {
+				return JS_ThrowInternalError(context, "a service property failed");
+			}
+
+			return JS_UNDEFINED;
+		}
 	}
 
 	void InstallJsNeutralMethods(JSContext *context, JSValueConst methods) {
@@ -360,6 +617,60 @@ namespace engine::script {
 				method.Name,
 				JS_NewCFunctionMagic(context, NeutralJsMethod, method.Name, 1, JS_CFUNC_generic_magic, row++)
 			);
+		}
+	}
+
+	void InstallJsServiceMethods(
+		JSContext *context, JSValueConst service, std::span<const ServiceMethod> methods
+	) {
+		std::vector<ScriptMethod> &rows = JsOf(context).ServiceMethods;
+
+		for (const ServiceMethod &method : methods) {
+			const auto row = static_cast<int>(rows.size());
+			rows.push_back(method.Function);
+
+			JS_SetPropertyStr(
+				context,
+				service,
+				method.Name,
+				JS_NewCFunctionMagic(
+					context, NeutralJsServiceMethod, method.Name, 1, JS_CFUNC_generic_magic, row
+				)
+			);
+		}
+	}
+
+	void InstallJsServiceProperties(
+		JSContext *context,
+		JSValueConst service,
+		const char *name,
+		std::span<const ServiceProperty> properties
+	) {
+		std::vector<JsServiceProperty> &rows = JsOf(context).ServiceProperties;
+
+		for (const ServiceProperty &property : properties) {
+			const auto row = static_cast<int>(rows.size());
+
+			// The row's address rather than a copy: a `ServiceProperty` lives in
+			// a `static constexpr` array for the life of the program, exactly as
+			// a `ServiceMethod` does. The service's name rides along because a
+			// refusal has to say which service it is refusing for.
+			rows.push_back({&property, name});
+
+			JSValue getter = JS_NewCFunctionMagic(
+				context, NeutralJsServiceGet, property.Name, 0, JS_CFUNC_generic_magic, row
+			);
+			JSValue setter = JS_NewCFunctionMagic(
+				context, NeutralJsServiceSet, property.Name, 1, JS_CFUNC_generic_magic, row
+			);
+
+			// **The object stays a plain object, unlike the Luau half's
+			// userdata.** An accessor runs on every read here, so there is no
+			// `GETIMPORT` to defeat and nothing to tag — which is the asymmetry
+			// `ServiceSurface::Properties` describes.
+			const JSAtom atom = JS_NewAtom(context, property.Name);
+			JS_DefinePropertyGetSet(context, service, atom, getter, setter, JS_PROP_C_W_E);
+			JS_FreeAtom(context, atom);
 		}
 	}
 }

@@ -36,6 +36,15 @@
 // a group is authored content that some sounds are in, and this is the whole
 // world's level.
 //
+// ## Both languages, since v0.16
+//
+// This was Luau's alone for exactly one mechanism: `Volume` is a live property,
+// and a `ServiceSurface` could describe a method and not an accessor.
+// `ServiceProperty` closed it, and nothing about the three members below is per
+// language any more — the Luau half is a userdata because `safeenv` forces one
+// and the JavaScript half is a plain object with two accessors, and that
+// asymmetry lives in the two adapters rather than here.
+//
 // ## What is absent, and what each would need first
 //
 // - **`PlayLocalSound(sound)`** — `sound.Playing = true` already *is* it. A
@@ -80,33 +89,21 @@
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Components.hpp>
 
-#include <algorithm>
-#include <lua.h>
-#include <lualib.h>
-#include <string>
-#include <string_view>
+#include <array>
 
 namespace engine::script {
 	namespace {
 		using scene::AudioState;
 		using scene::ListenerMode;
 
-		// Where `SoundService`'s method table lives, since the service is a
+		// Where `SoundService`'s method table lives, since the Luau half is a
 		// userdata and a userdata has no fields.
 		//
-		// **One constant read by both ends**, exactly as `InputServices.cpp`
-		// keeps one: two spellings of this key is a service whose methods are all
-		// nil, with nothing in the build to say so.
+		// **One constant on the surface**, exactly as `InputServices.cpp` keeps
+		// one: `SoundServiceSurface` sets it and `LuauServiceIndex` reads it back
+		// off that same surface, so the install and the lookup cannot name
+		// different keys.
 		constexpr const char *SOUND_METHODS_KEY = "engine.soundservice.methods";
-
-		// This VM's world.
-		//
-		// `ContextOf` rather than `UpvalueContext` so the same helper is right
-		// from a bound closure and from anywhere else — `InputServices.cpp`
-		// carries the crash that taught that difference.
-		ecs::Store &WorldOf(lua_State *state) {
-			return *ContextOf(state).World;
-		}
 
 		// What the world decided, or the defaults for one that has never been
 		// told.
@@ -115,8 +112,8 @@ namespace engine::script {
 		// rule and the trap: a read that acquired a resource would put a write
 		// inside every getter, and a world that answers "as authored" is exactly
 		// what a world nobody has configured means.
-		AudioState SettingsOf(lua_State *state) {
-			const AudioState *settings = WorldOf(state).Resource<AudioState>();
+		AudioState SettingsOf(ScriptCall &call) {
+			const AudioState *settings = call.World().Resource<AudioState>();
 			return settings == nullptr ? AudioState{} : *settings;
 		}
 
@@ -126,8 +123,8 @@ namespace engine::script {
 		// `SoundService.Volume` on a world with no resource would otherwise have
 		// its write vanish, which reads as the property being ignored rather than
 		// as the world being unfurnished.
-		AudioState &MutableSettingsOf(lua_State *state) {
-			ecs::Store &store = WorldOf(state);
+		AudioState &MutableSettingsOf(ScriptCall &call) {
+			ecs::Store &store = call.World();
 			if (store.Resource<AudioState>() == nullptr) {
 				store.SetResource(AudioState{});
 			}
@@ -139,11 +136,15 @@ namespace engine::script {
 		// Roblox's two-value return exactly: the mode, then whatever that mode
 		// points at. `Camera` points at nothing and hands back nil, which is also
 		// what `SetListener` takes for it.
-		int GetListener(lua_State *state) {
-			const AudioState settings = SettingsOf(state);
+		//
+		// **The one method on any surface that answers twice**, which JavaScript
+		// spells as an array — see `ScriptCall`'s `Return` block for why that
+		// spelling difference is allowed where a record return invented for one
+		// service's shape would not be.
+		void GetListener(ScriptCall &call) {
+			const AudioState settings = SettingsOf(call);
 
-			PushEnumItem(
-				state,
+			call.ReturnEnum(
 				core::Name("ListenerType"),
 				ecs::EnumTable::MemberAt(core::Name("ListenerType"), static_cast<size_t>(settings.Mode))
 			);
@@ -152,13 +153,10 @@ namespace engine::script {
 			// a dead row. `client::SoundStage` falls back to the camera for the
 			// same case, so the two agree about what the setting now means — a
 			// handle here would say the ear is somewhere the mixer is not putting
-			// it.
-			if (settings.Mode == ListenerMode::ObjectPosition && WorldOf(state).Alive(settings.Listener)) {
-				PushInstanceValue(state, settings.Listener);
-			} else {
-				lua_pushnil(state);
-			}
-			return 2;
+			// it. `ReturnInstance` is what turns the null into each language's nil.
+			const bool pointed =
+				settings.Mode == ListenerMode::ObjectPosition && call.World().Alive(settings.Listener);
+			call.ReturnInstance(pointed ? settings.Listener : ecs::NULL_ENTITY);
 		}
 
 		// `SoundService:SetListener(listenerType, listener)`
@@ -169,16 +167,16 @@ namespace engine::script {
 		// posted a position and never a facing. So `Enum.ListenerType.CFrame` does
 		// not exist to be passed, and a script that names it fails where it names
 		// it rather than here.
-		int SetListener(lua_State *state) {
+		void SetListener(ScriptCall &call) {
 			core::Name member;
-			if (!ReadEnumValue(state, 2, core::Name("ListenerType"), member)) {
-				luaL_errorL(state, "SetListener expects an Enum.ListenerType");
+			if (!call.ReadEnum(0, core::Name("ListenerType"), member)) {
+				call.Raise("SetListener expects an Enum.ListenerType");
 			}
 
 			size_t ordinal = 0;
 			if (!ecs::EnumTable::OrdinalOf(core::Name("ListenerType"), member, ordinal) ||
 				ordinal >= static_cast<size_t>(ListenerMode::Count)) {
-				luaL_errorL(state, "unknown ListenerType");
+				call.Raise("unknown ListenerType");
 			}
 
 			const auto mode = static_cast<ListenerMode>(ordinal);
@@ -190,86 +188,64 @@ namespace engine::script {
 			// notice.
 			ecs::Entity listener;
 			if (mode == ListenerMode::ObjectPosition) {
-				listener = CheckInstanceArgument(state, 3);
-			} else if (!lua_isnoneornil(state, 3)) {
-				luaL_errorL(state, "SetListener takes no listener for Enum.ListenerType.Camera");
+				listener = call.AsInstance(1);
+			} else if (!call.IsNil(1)) {
+				call.Raise("SetListener takes no listener for Enum.ListenerType.Camera");
 			}
 
-			AudioState &settings = MutableSettingsOf(state);
+			AudioState &settings = MutableSettingsOf(call);
 			settings.Mode = mode;
 			settings.Listener = listener;
-			return 0;
 		}
 
 		// `SoundService.Volume`, read.
-		//
-		// **A userdata's `__index` and not a table field**, which
-		// `ServiceSurface::Index` forces rather than suggests: `luaL_sandbox`
-		// enables `safeenv`, so a property read off a constant global table
-		// compiles to a `GETIMPORT` resolved once per closure, and a live value
-		// would read as the value it had the first time anybody asked.
-		int SoundServiceIndex(lua_State *state) {
-			const std::string_view field = luaL_checkstring(state, 2);
-
-			if (field == "Volume") {
-				lua_pushnumber(state, SettingsOf(state).MasterVolume);
-				return 1;
-			}
-
-			// The methods, from the shared table. A userdata has no fields, so
-			// `InstallService` stashes them in the registry under the one key
-			// `OpenSoundService` also names.
-			lua_getfield(state, LUA_REGISTRYINDEX, SOUND_METHODS_KEY);
-			lua_pushvalue(state, 2);
-			lua_rawget(state, -2);
-			if (!lua_isnil(state, -1)) {
-				return 1;
-			}
-
-			luaL_errorL(state, "SoundService has no member '%s'", std::string(field).c_str());
+		void GetVolume(ScriptCall &call) {
+			call.ReturnNumber(SettingsOf(call).MasterVolume);
 		}
 
 		// `SoundService.Volume`, written.
-		int SoundServiceNewIndex(lua_State *state) {
-			const std::string_view field = luaL_checkstring(state, 2);
-
-			if (field == "Volume") {
-				// **Stored as written, including above 1.** `Sound::Volume` is on
-				// the same footing and `audio/AGENTS.md` says why: a mixer sums,
-				// exceeding ±1 inside the graph is expected, and the clamp
-				// happens once at the output stage. `client::SoundStage` is what
-				// bounds a negative gain, which is a phase inversion rather than
-				// a quieter sound.
-				MutableSettingsOf(state).MasterVolume = static_cast<float>(luaL_checknumber(state, 3));
-				return 0;
-			}
-
-			luaL_errorL(state, "SoundService.%s is read-only", std::string(field).c_str());
+		void SetVolume(ScriptCall &call) {
+			// **Stored as written, including above 1.** `Sound::Volume` is on the
+			// same footing and `audio/AGENTS.md` says why: a mixer sums, going
+			// outside unity inside the graph is expected, and the clamp happens
+			// once at the output stage. `client::SoundStage` is what bounds a
+			// negative gain, which is a phase inversion rather than a quieter
+			// sound.
+			MutableSettingsOf(call).MasterVolume = static_cast<float>(call.AsNumber(0));
 		}
 	}
 
-	void OpenSoundService(lua_State *state) {
-		// **A userdata rather than a table, because it has a property.** See
-		// `ServiceSurface::Index`, and `DEFERRED.md` D00030 for the edge that
-		// survives it: read the service through a local, which is the form a
-		// Roblox script uses anyway since `game:GetService` is a method call and
-		// cannot be an import.
-		//
-		//     local SoundService = game:GetService("SoundService")
-		//     SoundService.Volume = 0.25
-		static constexpr ServiceMethod METHODS[] = {
+	const ServiceSurface &SoundServiceSurface() {
+		static constexpr std::array<ServiceMethod, 2> METHODS{{
 			{"GetListener", GetListener},
 			{"SetListener", SetListener},
-		};
+		}};
 
-		ServiceSurface surface;
-		surface.Name = "SoundService";
-		surface.Methods = METHODS;
-		surface.Index = SoundServiceIndex;
-		surface.NewIndex = SoundServiceNewIndex;
-		surface.Tag = TAG_SOUND_SERVICE;
-		surface.MethodsKey = SOUND_METHODS_KEY;
+		static constexpr std::array<ServiceProperty, 1> PROPERTIES{{
+			{"Volume", GetVolume, SetVolume},
+		}};
 
-		InstallService(state, surface);
+		static const ServiceSurface SURFACE = [] {
+			ServiceSurface surface;
+			surface.Name = "SoundService";
+			surface.Methods = METHODS;
+			surface.Properties = PROPERTIES;
+
+			// **The one property is what makes this a userdata in Luau.** See
+			// `ServiceSurface::Properties`, and `DEFERRED.md` D00030 for the edge
+			// that survives it: read the service through a local, which is the
+			// form a Roblox script uses anyway since `game:GetService` is a method
+			// call and cannot be an import.
+			//
+			//     local SoundService = game:GetService('SoundService')
+			//     SoundService.Volume = 0.25
+			//
+			// JavaScript needs neither the userdata nor the local, because an
+			// accessor is not an import.
+			surface.Tag = TAG_SOUND_SERVICE;
+			surface.MethodsKey = SOUND_METHODS_KEY;
+			return surface;
+		}();
+		return SURFACE;
 	}
 }

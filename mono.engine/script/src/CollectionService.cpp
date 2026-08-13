@@ -15,6 +15,12 @@
 // file holds no list of its own; a list here is exactly what would make it a
 // second answer.
 //
+// **Neutral since v0.16, and nothing in this file names a VM.** The three
+// per-instance calls it mirrors moved to `ScriptMethods.cpp` at the same
+// version, so the two spellings of `AddTag` are now literally one call reached
+// two ways — which is what the file header claimed before there was a layer
+// that could make it true in both languages.
+//
 // **`Tags` is a `BasePart` component**, so tagging a bare container answers
 // `false` rather than raising — the same answer `Instance:AddTag` gives, for
 // the same reason it gives it. Which classes can be tagged is `scene`'s
@@ -49,67 +55,56 @@
 // `PumpTags` beside `PumpTree` delivers them at the barrier. That also fixes
 // the hole a diff here could never see — a system writing `Tags::Mask`
 // directly, which is what `Part.cpp`'s tag-list property does.
+//
+// @tier L9 · shared
 
-#include "Bindings.hpp"
+#include "ScriptCall.hpp"
+#include "ServiceSurface.hpp"
 
 #include <engine/core/Name.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Tagging.hpp>
 
 #include <algorithm>
-#include <lua.h>
-#include <lualib.h>
+#include <array>
+#include <cstdint>
+#include <span>
+#include <string_view>
 #include <vector>
 
 namespace engine::script {
 	namespace {
-		// The world this call's service table was installed against.
-		//
-		// Its own copy of `ContentService.cpp`'s two-liner rather than a shared
-		// helper, and that file's comment gives the reason: a header exporting
-		// a function that only makes sense inside a C closure is worse than two
-		// lines beside their only caller.
-		ecs::Store &StoreOfUpvalue(lua_State *state) {
-			return *UpvalueContext(state).World;
-		}
-
-		// Pushes names as a one-based Luau array, sorted by text.
+		// Answers names sorted by text.
 		//
 		// **By `Text()` and never by `Name::operator<`**, which orders by
 		// interning order — the order names were first constructed in this
 		// *process*. Two runs that load scenes in a different order would sort
 		// the same tags differently, which is the whole failure sorting is here
 		// to prevent.
-		int PushSortedNames(lua_State *state, std::vector<core::Name> names) {
-			std::sort(names.begin(), names.end(), [](const core::Name &left, const core::Name &right) {
-				return left.Text() < right.Text();
-			});
-
-			lua_createtable(state, static_cast<int>(names.size()), 0);
-			for (size_t index = 0; index < names.size(); index++) {
-				const std::string_view text = names[index].Text();
-				lua_pushlstring(state, text.data(), text.size());
-				lua_rawseti(state, -2, static_cast<int>(index) + 1);
+		void ReturnSortedNames(ScriptCall &call, std::span<const core::Name> names) {
+			std::vector<std::string_view> text;
+			text.reserve(names.size());
+			for (const core::Name &name : names) {
+				text.emplace_back(name.Text());
 			}
-			return 1;
+
+			std::sort(text.begin(), text.end());
+			call.ReturnStrings(text);
 		}
 
 		// `CollectionService:AddTag(instance, tag)`
 		//
 		// **The same call `Instance:AddTag` makes**, so which side a script
-		// spells it from cannot change what happens. Argument 1 is the service
-		// under a colon call, so the instance is 2 and the tag is 3.
+		// spells it from cannot change what happens.
 		//
 		// Answers `false` for an instance with no `Tags` component and for a
 		// world whose thirty-two tags are spoken for, rather than raising —
-		// `Instances.cpp` argues that one out: a full tag table is a scene
+		// `ScriptMethods.cpp` argues that one out: a full tag table is a scene
 		// mistake and not a script one. Roblox returns nothing here; a boolean
 		// is a superset, and a script that ignores it reads identically.
-		int ServiceAddTag(lua_State *state) {
-			ecs::Store &store = StoreOfUpvalue(state);
-			const ecs::Entity instance = CheckInstanceArgument(state, 2);
-			lua_pushboolean(state, scene::AddTag(store, instance, core::Name(luaL_checkstring(state, 3))));
-			return 1;
+		void ServiceAddTag(ScriptCall &call) {
+			const ecs::Entity instance = call.AsInstance(0);
+			call.ReturnBoolean(scene::AddTag(call.World(), instance, core::Name(call.AsString(1))));
 		}
 
 		// `CollectionService:RemoveTag(instance, tag)`
@@ -117,11 +112,9 @@ namespace engine::script {
 		// The name stays in the world's table — see `scene::RemoveTag` for why
 		// a bit is never freed — so `GetAllTags` still lists a tag nothing
 		// carries any more.
-		int ServiceRemoveTag(lua_State *state) {
-			ecs::Store &store = StoreOfUpvalue(state);
-			const ecs::Entity instance = CheckInstanceArgument(state, 2);
-			lua_pushboolean(state, scene::RemoveTag(store, instance, core::Name(luaL_checkstring(state, 3))));
-			return 1;
+		void ServiceRemoveTag(ScriptCall &call) {
+			const ecs::Entity instance = call.AsInstance(0);
+			call.ReturnBoolean(scene::RemoveTag(call.World(), instance, core::Name(call.AsString(1))));
 		}
 
 		// `CollectionService:HasTag(instance, tag)`
@@ -130,11 +123,9 @@ namespace engine::script {
 		// answer as "registered, and this instance does not carry it". A script
 		// that had to tell those apart is asking about the tag table rather
 		// than about the instance, and `GetAllTags` is that question.
-		int ServiceHasTag(lua_State *state) {
-			const ecs::Store &store = StoreOfUpvalue(state);
-			const ecs::Entity instance = CheckInstanceArgument(state, 2);
-			lua_pushboolean(state, scene::HasTag(store, instance, core::Name(luaL_checkstring(state, 3))));
-			return 1;
+		void ServiceHasTag(ScriptCall &call) {
+			const ecs::Entity instance = call.AsInstance(0);
+			call.ReturnBoolean(scene::HasTag(call.World(), instance, core::Name(call.AsString(1))));
 		}
 
 		// `CollectionService:GetTagged(tag)` -> `{ Instance }`
@@ -157,9 +148,9 @@ namespace engine::script {
 		// walk below is *an* order, but it is a function of which tables exist:
 		// anchoring one tagged part moves it to a different table and reorders
 		// every list it appears in.
-		int ServiceGetTagged(lua_State *state) {
-			ecs::Store &store = StoreOfUpvalue(state);
-			const core::Name tag(luaL_checkstring(state, 2));
+		void ServiceGetTagged(ScriptCall &call) {
+			const core::Name tag(call.AsString(0));
+			ecs::Store &store = call.World();
 
 			// `Resource` rather than `TagsOf`, which creates the table on first
 			// use: asking what carries a tag is not a reason to give a world a
@@ -167,8 +158,8 @@ namespace engine::script {
 			const scene::TagTable *table = store.Resource<scene::TagTable>();
 			const uint32_t bit = table != nullptr ? table->Find(tag) : 0;
 			if (bit == 0) {
-				lua_createtable(state, 0, 0);
-				return 1;
+				call.ReturnInstances({});
+				return;
 			}
 
 			std::vector<ecs::Entity> tagged;
@@ -182,12 +173,7 @@ namespace engine::script {
 				return left.Id < right.Id;
 			});
 
-			lua_createtable(state, static_cast<int>(tagged.size()), 0);
-			for (size_t index = 0; index < tagged.size(); index++) {
-				PushInstanceValue(state, tagged[index]);
-				lua_rawseti(state, -2, static_cast<int>(index) + 1);
-			}
-			return 1;
+			call.ReturnInstances(tagged);
 		}
 
 		// `CollectionService:GetTags(instance)` -> `{ string }`
@@ -196,21 +182,21 @@ namespace engine::script {
 		// everything that is not a `BasePart`, and empty for a world nothing
 		// has tagged. Both are "this instance carries nothing", which is what
 		// was asked.
-		int ServiceGetTags(lua_State *state) {
-			const ecs::Store &store = StoreOfUpvalue(state);
-			const ecs::Entity instance = CheckInstanceArgument(state, 2);
+		void ServiceGetTags(ScriptCall &call) {
+			const ecs::Entity instance = call.AsInstance(0);
+			const ecs::Store &store = call.World();
 
 			const scene::Tags *tags = store.Get<scene::Tags>(instance);
 			const scene::TagTable *table = store.Resource<scene::TagTable>();
 			if (tags == nullptr || table == nullptr) {
-				lua_createtable(state, 0, 0);
-				return 1;
+				call.ReturnStrings({});
+				return;
 			}
 
 			// `Describe` hands them back in bit order, which is registration
-			// order; `PushSortedNames` is what makes the answer independent of
-			// which script ran first.
-			return PushSortedNames(state, table->Describe(tags->Mask));
+			// order; sorting is what makes the answer independent of which
+			// script ran first.
+			ReturnSortedNames(call, table->Describe(tags->Mask));
 		}
 
 		// `CollectionService:GetAllTags()` -> `{ string }`
@@ -219,34 +205,34 @@ namespace engine::script {
 		// a bit is never freed, so a tag added and removed again is still a
 		// name the table holds. Reporting only the tags in use would mean
 		// walking every row to answer a question about the table.
-		int ServiceGetAllTags(lua_State *state) {
-			const ecs::Store &store = StoreOfUpvalue(state);
-
-			const scene::TagTable *table = store.Resource<scene::TagTable>();
+		void ServiceGetAllTags(ScriptCall &call) {
+			const scene::TagTable *table = call.World().Resource<scene::TagTable>();
 			if (table == nullptr) {
-				lua_createtable(state, 0, 0);
-				return 1;
+				call.ReturnStrings({});
+				return;
 			}
-			return PushSortedNames(state, table->Names);
+			ReturnSortedNames(call, table->Names);
 		}
-	}
 
-	void OpenCollectionService(lua_State *state) {
-		static constexpr ServiceMethod METHODS[] = {
+		constexpr std::array<ServiceMethod, 6> METHODS{{
 			{"AddTag", ServiceAddTag},
 			{"RemoveTag", ServiceRemoveTag},
 			{"HasTag", ServiceHasTag},
 			{"GetTagged", ServiceGetTagged},
 			{"GetTags", ServiceGetTags},
 			{"GetAllTags", ServiceGetAllTags},
-		};
+		}};
+	}
 
+	const ServiceSurface &CollectionServiceSurface() {
 		// No signals. The file header says what firing one honestly would take
 		// and why a signal that never fires is worse than an absent one.
-		ServiceSurface surface;
-		surface.Name = "CollectionService";
-		surface.Methods = METHODS;
-
-		InstallService(state, surface);
+		static const ServiceSurface SURFACE = [] {
+			ServiceSurface surface;
+			surface.Name = "CollectionService";
+			surface.Methods = METHODS;
+			return surface;
+		}();
+		return SURFACE;
 	}
 }

@@ -1590,6 +1590,13 @@ namespace engine::script {
 
 		InstallJsDatatypes(context, global);
 
+		// **Before the services, because one of them produces it.** A bound
+		// action's handler is handed an `InputObject`, and a class registered
+		// after the service that hands one over would be a class id of zero at
+		// the first press — the same ordering `LuauRuntime` keeps for the Luau
+		// metatable, and `UserInputService`'s five signals hand one over too.
+		InstallJsInputObject(context);
+
 		// **The services, from the catalogue.** `ServiceCatalogue.hpp` carries
 		// the argument: which services exist is one fact and it was two lists,
 		// so Luau bound nine and this language bound five with nothing in the

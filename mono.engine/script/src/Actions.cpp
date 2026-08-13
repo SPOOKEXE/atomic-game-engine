@@ -21,6 +21,40 @@ namespace engine::script {
 		return report;
 	}
 
+	InputReport ButtonReport(const scene::InputState &input, scene::MouseButton button, bool began) {
+		InputReport report;
+
+		// `MouseButton` and `InputSource` share their first members by
+		// construction — see `scene/Input.hpp` — which is what makes a button
+		// ordinal an `Enum.UserInputType` member without a table in between.
+		report.Source = static_cast<scene::InputSource>(button);
+		report.State = core::Name(began ? "Begin" : "End");
+		report.Position = core::Vector3{input.MousePosition.X, input.MousePosition.Y, 0.0f};
+		return report;
+	}
+
+	InputReport MotionReport(const scene::InputState &input) {
+		InputReport report;
+		report.Source = scene::InputSource::MouseMovement;
+		report.State = core::Name("Change");
+		report.Position = core::Vector3{input.MousePosition.X, input.MousePosition.Y, 0.0f};
+		report.Delta = core::Vector3{input.MouseDelta.X, input.MouseDelta.Y, 0.0f};
+		return report;
+	}
+
+	InputReport WheelReport(const scene::InputState &input) {
+		InputReport report;
+		report.Source = scene::InputSource::MouseWheel;
+		report.State = core::Name("Change");
+
+		// **The notch count goes in `Z` of both**, which is Roblox's odd-looking
+		// placement and the one a migrated script reads: a wheel has nowhere else
+		// to go in a `Vector3`.
+		report.Position = core::Vector3{input.MousePosition.X, input.MousePosition.Y, input.WheelDelta};
+		report.Delta = core::Vector3{0.0f, 0.0f, input.WheelDelta};
+		return report;
+	}
+
 	bool ActionStack::Bind(BoundAction action, CallbackRef &released) {
 		const auto existing = std::find_if(Bound.begin(), Bound.end(), [&action](const BoundAction &bound) {
 			return bound.Name == action.Name;

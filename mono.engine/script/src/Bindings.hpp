@@ -11,10 +11,13 @@
 // tomorrow is reachable from Luau today, because the binding never learned any
 // property's name. That is the payoff for making a property a conversion.
 
+#include "Actions.hpp"
 #include "Changes.hpp"
 #include "Codec.hpp"
 #include "Debris.hpp"
+#include "ScriptCall.hpp"
 #include "ServiceCatalogue.hpp"
+#include "ServiceSurface.hpp"
 #include "Signals.hpp"
 #include "Tasks.hpp"
 #include "Tweens.hpp"
@@ -154,34 +157,6 @@ namespace engine::script {
 		TAG_TWEEN = 26,
 	};
 
-	// One action bound through `ContextActionService`.
-	//
-	// **Declared here rather than in `InputServices.cpp` because it lives on the
-	// context**, and it lives on the context because it holds a registry
-	// reference: a `thread_local` would be shared between two VMs on one thread,
-	// so a reference minted by one would be dereferenced against the other's
-	// state. That is not a leak — it is a `lua_getref` into a different VM, which
-	// is undefined and crashed a test that had nothing to do with input.
-	//
-	// @since v0.10
-	struct BoundAction {
-		// What the script called it. Unbinding is by this name.
-		std::string Name;
-
-		// The keys it claims, as `scene::KeyCode` ordinals.
-		//
-		// **Ordinals rather than the enum**, so this header does not have to name
-		// `scene` — `Bindings.hpp` is included by every binding file and widening
-		// it for one vector is the kind of edge that spreads.
-		std::vector<uint16_t> Keys;
-
-		// The registry reference to the handler.
-		int Callback = -1;
-
-		// Higher wins. Roblox's default is zero and so is this.
-		int Priority = 0;
-	};
-
 	// Everything one Luau runtime needs, hung off the state rather than a
 	// static.
 	//
@@ -209,10 +184,12 @@ namespace engine::script {
 
 		// What `ContextActionService` has bound, highest priority first.
 		//
-		// **Sorted at bind time rather than searched at press time**, because
-		// binding is rare where pressing is not — and because the order has to be
-		// stable, which a sort on every press could not promise.
-		std::vector<BoundAction> Actions;
+		// **Shared machinery since v0.16, beside `Signals` and `Changes` and for
+		// their reason.** The stack's rules — replace by name, stable sort by
+		// priority, first claim wins — decide which handler a press reaches, and
+		// two copies of that would agree until one was fixed. See `Actions.hpp`;
+		// the callables stay this VM's, as registry refs inside a `CallbackRef`.
+		ActionStack Actions;
 
 		// The VM this context belongs to, so a `Connection` userdata can reach
 		// the table without a second upvalue on every method.
@@ -563,105 +540,11 @@ namespace engine::script {
 	// method takes the context as upvalue 1 and every one of the five had to
 	// remember, `game:GetService(name)` and the global must be **one** object and
 	// nothing said so, and adding a tenth service meant copying a sixth.
-
-	// One method on a service's table.
 	//
-	// A plain function pointer and a name, because that is all a service method
-	// is: `ServiceSurface` is what supplies the context every one of them reads.
-	struct ServiceMethod {
-		const char *Name;
-		lua_CFunction Function;
-	};
-
-	// One signal exposed as a field on a service's table.
-	//
-	// **A field and not a method**, which is Roblox's shape and is why this is
-	// its own list: `RunService.Heartbeat:Connect(f)` reads a value and calls a
-	// method *on that value*, where `RunService:IsServer()` calls a method on the
-	// service. The two cannot share a list because they are not built the same
-	// way — a signal is pushed by `PushSignal` and carries no context upvalue.
-	struct ServiceSignal {
-		const char *Name;
-		SignalKind Kind;
-	};
-
-	// Everything a surface service is, as data.
-	//
-	// **Data rather than a base class**, for the reason the container half is a
-	// table of rows: what varies between services is a name and three lists, and
-	// the code that turns those into a global is the same code every time. A
-	// service that needs something genuinely new adds a field here, once, where
-	// every service can see it — rather than a tenth private copy of the loop
-	// that nothing else can learn from.
-	struct ServiceSurface {
-		// What the global is called, and therefore what
-		// `game:GetService(name)` finds. `RunService::GetService` looks in the
-		// globals before it looks at the tree, so naming it here is the whole of
-		// making it resolvable — and it is why the global and the service are
-		// **one** table rather than two objects a script could tell apart.
-		const char *Name = nullptr;
-
-		std::span<const ServiceMethod> Methods;
-
-		// Pushed as fields before the methods, so a service may name a signal
-		// and a method the same thing and get the method. Nothing does; the
-		// order is stated so that if anything ever does, it is decided here
-		// rather than by which loop ran last.
-		std::span<const ServiceSignal> Signals;
-
-		// Property access, or null for a service with no properties.
-		//
-		// **Setting `Index` changes what the service *is*, from a table to a
-		// userdata, and that is forced rather than stylistic.** `luaL_sandbox`
-		// enables Luau's `safeenv`, which lets the compiler turn a constant
-		// global and a constant field into a `GETIMPORT` — resolved **once** and
-		// cached in the closure. On a table, the first read of a property wins
-		// forever, so a property that changes reads as one that does not. It was
-		// found by watching `__index` fire for the first read of
-		// `UserInputService.MouseBehavior` and not for the second, with no raw
-		// key on the table to explain it.
-		//
-		// A userdata's field access is never an import, so every read through a
-		// local goes to `__index` — which is the form a Roblox script is written
-		// in anyway, since `game:GetService` is a method call and cannot be an
-		// import. `DEFERRED.md` D00030 records the edge that remains: the same
-		// property read off a *bare global* still caches.
-		//
-		// So a property-bearing service needs `Tag` and `MethodsKey` as well,
-		// because a userdata has no fields to hold its methods in.
-		//
-		// `NewIndex` may be null while `Index` is not, which is a service with
-		// read-only properties.
-		//@{
-		lua_CFunction Index = nullptr;
-		lua_CFunction NewIndex = nullptr;
-		//@}
-
-		// The userdata tag, from `Bindings.hpp`'s tag block. Required when
-		// `Index` is set and ignored otherwise.
-		int Tag = 0;
-
-		// Where the method table is stashed for `Index` to find, since a
-		// userdata cannot carry one. Required when `Index` is set and ignored
-		// otherwise; the service's `Index` reads the same key.
-		const char *MethodsKey = nullptr;
-	};
-
-	// Builds one surface service and sets it as a global.
-	//
-	// **Every method gets the runtime's `LuauContext` as upvalue 1**, which is
-	// how any of them reach the store, the world and the universe — see
-	// `UpvalueContext`. That was the one invariant the five hand-rolled copies
-	// each had to remember separately, and it is the one a tenth copy would have
-	// been most likely to forget: a method installed with `lua_pushcfunction`
-	// instead compiles, links, runs, and reads a garbage pointer.
-	//
-	// **Must run before `luaL_sandbox`**, which freezes the global table. A
-	// service installed after it is silently absent.
-	//
-	// @param state   The VM.
-	// @param surface What to build.
-	void InstallService(lua_State *state, const ServiceSurface &surface);
+	// **What a service *is* moved out to `ServiceSurface.hpp` at v0.16**, and the
+	// move is what let five services reach JavaScript: a description with no VM in
+	// it is one `ServiceCatalogue.cpp` can read twice. `InstallService` and the
+	// surface types are declared there.
 
 	// Every service this language binds, from the catalogue.
 	//
@@ -689,13 +572,120 @@ namespace engine::script {
 	// and whose `IsServer`/`IsClient`/`IsStudio` say where a script is standing.
 	void OpenRunService(lua_State *state);
 
-	// Installs `UserInputService` and `ContextActionService`.
+	// Installs the `InputObject` metatable, and pushes one.
 	//
-	// **Both read `scene::InputState` and neither reads `engine::input`**, which
-	// is the tier seam `Input.hpp` exists for: this module is `shared` and the SDL
-	// pump is `client`.
-	void OpenUserInputService(lua_State *state);
-	void OpenContextActionService(lua_State *state);
+	// **The datatype before anything that produces one**, so a metatable is never
+	// looked up before it is registered — which is why `LuauRuntime` calls the
+	// first of these beside the other value types rather than leaving it to
+	// whichever service happens to install earliest. Here rather than in
+	// `Values.cpp` because `InputServices.cpp` is the only file that makes one: an
+	// `InputObject` has no constructor and cannot arrive from anywhere else.
+	//
+	// `PushInputObject` is not file-local because `LuauCall.cpp` builds the list
+	// `UserInputService:GetMouseButtonsPressed` answers with, and that method is
+	// neutral since v0.16.
+	//@{
+	void OpenInputObject(lua_State *state);
+	void PushInputObject(lua_State *state, const InputReport &report);
+	//@}
+
+	// --- the services described once, for both languages ----------------------
+	//
+	// **A surface rather than an installer, which is the whole of what made
+	// these five reachable from JavaScript.** An `Open*` function can only build
+	// the VM it was written against; a `ServiceSurface` is data, so
+	// `ServiceCatalogue.cpp` — the one file that has met both VMs — reads it
+	// twice and builds a Luau table and a JavaScript object from one
+	// description.
+	//
+	// Each returns a table with static storage duration, valid for the life of
+	// the program.
+	//@{
+
+	// `ContextActionService`, whose priority stack is what it adds over polling.
+	//
+	// **Four of its six methods are neutral and two are not**, which
+	// `ServiceSurface::LuauMethods` is how this file says so:
+	// `GetBoundActionInfo` and `GetAllBoundActionInfo` answer a record holding a
+	// list of `Enum.KeyCode` members, and an `EnumItem` has no neutral return —
+	// `ScriptValue` has no tag for one, and inventing a record return for one
+	// service's shape is what `ScriptCall.hpp` says the interface is not for.
+	const ServiceSurface &ContextActionServiceSurface();
+
+	// `ContentService`, which answers what content this world holds.
+	//
+	// **The other half of rule 4.** A script names an asset and had no way to
+	// ask what the names were, so every demo carried string literals for files
+	// that only existed if somebody had baked that exact tree. See
+	// `ContentService.cpp`.
+	//
+	// @since v0.10
+	const ServiceSurface &ContentServiceSurface();
+
+	// `CollectionService`, which answers what carries a tag.
+	//
+	// **The other side of `Instance:AddTag`.** The same three methods, plus the
+	// one neither the instance surface nor anything else in the engine could
+	// answer from a script: `GetTagged`. A scene that wanted every door had to
+	// keep its own list beside the tags, which is rule 2's second copy.
+	//
+	// No `GetInstanceAddedSignal`, and `CollectionService.cpp`'s header says
+	// what firing one honestly would take.
+	//
+	// @since v0.15
+	const ServiceSurface &CollectionServiceSurface();
+
+	// `HttpService` — **the half of it that observes nothing**.
+	//
+	// `JSONEncode`, `JSONDecode`, `GenerateGUID` and `UrlEncode`, and no
+	// `RequestAsync`, `GetAsync` or `PostAsync`. Arbitrary outbound HTTP from a
+	// game script is a security decision nobody has taken, and this engine's one
+	// existing route to the network is a signed manifest verified against a
+	// publisher key — a different thing, not a smaller one. `HttpService.cpp`
+	// carries the argument and the note asking the next reader not to add the
+	// three by reflex.
+	//
+	// @since v0.15
+	const ServiceSurface &HttpServiceSurface();
+
+	// `CrossWorldService`, the addressed route out of a world.
+	//
+	// **`MessagingService` is a fan-out and this is a channel**, which is the
+	// whole distinction: a topic has no destination, so a game saying one thing
+	// to one world had to broadcast it to everybody or send a player carrying
+	// it. `world::BusKind::Channel` is the kind, appended beside `Teleport`
+	// because a channel is a teleport with nobody attached.
+	//
+	// @since v0.15
+	const ServiceSurface &CrossWorldServiceSurface();
+
+	// `UserInputService`, over `scene::InputState`.
+	//
+	// **Reads `scene::InputState` and never `engine::input`**, which is the tier
+	// seam `Input.hpp` exists for: this module is `shared` and the SDL pump is
+	// `client`.
+	//
+	// **The last service to cross, and a property is what held it.**
+	// `MouseBehavior` and `MouseDeltaSensitivity` are live values, so the Luau
+	// half is a *userdata* that defeats `safeenv`'s `GETIMPORT` caching where the
+	// JavaScript half is a plain object with an accessor per name — see
+	// `ServiceSurface::Properties`. Both build from this one description.
+	//
+	// @since v0.16
+	const ServiceSurface &UserInputServiceSurface();
+
+	// `SoundService` — **the part of it that is not the mixer**.
+	//
+	// A `Volume` and a listener, over `scene::AudioState`. `engine::audio` is L12
+	// `client` and this module is L9 `shared`, so nothing here can name a mixer:
+	// the seam is a resource on the world that `client::SoundStage` reads, which
+	// is the arrangement `scene::InputState` established. `SoundService.cpp`
+	// lists the eleven Roblox members that are absent and what each would need
+	// first.
+	//
+	// @since v0.16
+	const ServiceSurface &SoundServiceSurface();
+	//@}
 
 	// Turns this frame's input edges into bound actions and input signals.
 	//
@@ -728,71 +718,6 @@ namespace engine::script {
 	void OpenTeleportService(lua_State *state);
 	void OpenMemoryStoreService(lua_State *state);
 	void OpenDataStoreService(lua_State *state);
-
-	// Installs `CrossWorldService`, the addressed route out of a world.
-	//
-	// **`MessagingService` is a fan-out and this is a channel**, which is the
-	// whole distinction: a topic has no destination, so a game saying one thing
-	// to one world had to broadcast it to everybody or send a player carrying
-	// it. `world::BusKind::Channel` is the kind, appended beside `Teleport`
-	// because a channel is a teleport with nobody attached.
-	//
-	// @since v0.15
-	void OpenCrossWorldService(lua_State *state);
-
-	// Installs `ContentService`, which answers what content this world holds.
-	//
-	// **The other half of rule 4.** A script names an asset and had no way to
-	// ask what the names were, so every demo carried string literals for files
-	// that only existed if somebody had baked that exact tree. See
-	// `ContentService.cpp`.
-	//
-	// @param state The VM.
-	// @since v0.10
-	void OpenContentService(lua_State *state);
-
-	// Installs `CollectionService`, which answers what carries a tag.
-	//
-	// **The other side of `Instance:AddTag`.** The same three methods, plus the
-	// one neither the instance surface nor anything else in the engine could
-	// answer from a script: `GetTagged`. A scene that wanted every door had to
-	// keep its own list beside the tags, which is rule 2's second copy.
-	//
-	// No `GetInstanceAddedSignal`, and `CollectionService.cpp`'s header says
-	// what firing one honestly would take — a change record in `scene::AddTag`
-	// and a pump at the barrier. A signal that never fired would read as a
-	// broken engine, which is the trade `v0.5` records for `Heartbeat`.
-	//
-	// @param state The VM.
-	// @since v0.15
-	void OpenCollectionService(lua_State *state);
-
-	// Installs `HttpService` — **the half of it that observes nothing**.
-	//
-	// `JSONEncode`, `JSONDecode`, `GenerateGUID` and `UrlEncode`, and no
-	// `RequestAsync`, `GetAsync` or `PostAsync`. Arbitrary outbound HTTP from a
-	// game script is a security decision nobody has taken, and this engine's one
-	// existing route to the network is a signed manifest verified against a
-	// publisher key — a different thing, not a smaller one. `HttpService.cpp`
-	// carries the argument and the note asking the next reader not to add the
-	// three by reflex.
-	//
-	// @param state The VM.
-	// @since v0.15
-	void OpenHttpService(lua_State *state);
-
-	// Installs `SoundService` — **the part of it that is not the mixer**.
-	//
-	// A `Volume` and a listener, over `scene::AudioState`. `engine::audio` is L12
-	// `client` and this module is L9 `shared`, so nothing here can name a mixer:
-	// the seam is a resource on the world that `client::SoundStage` reads, which
-	// is the arrangement `scene::InputState` established. `SoundService.cpp`
-	// lists the eleven Roblox members that are absent and what each would need
-	// first.
-	//
-	// @param state The VM.
-	// @since v0.16
-	void OpenSoundService(lua_State *state);
 
 	// Installs `TweenService`, and the `Tween` metatable it hands back.
 	//

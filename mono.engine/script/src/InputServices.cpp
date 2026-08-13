@@ -6,8 +6,11 @@
 #include <engine/scene/Input.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <lualib.h>
 #include <new>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -15,7 +18,6 @@
 namespace engine::script {
 
 	namespace {
-		using scene::InputSource;
 		using scene::InputState;
 		using scene::KeyCode;
 		using scene::MouseBehavior;
@@ -24,36 +26,30 @@ namespace engine::script {
 		// Where `UserInputService`'s method table lives, since the service is a
 		// userdata and a userdata has no fields.
 		//
-		// **One constant read by both ends.** `OpenInputServices` hands it to
-		// `InstallService` and `InputServiceIndex` reads it back; two spellings
-		// of one key is a service whose methods are all nil, with nothing in the
-		// build to say so.
+		// **One constant on the surface, read by the generic `__index`.**
+		// `UserInputServiceSurface` sets it and `LuauServiceIndex` reads it back
+		// off the same surface, so the install and the lookup cannot name
+		// different keys — which they could while each service wrote its own
+		// metamethod.
 		constexpr const char *INPUT_METHODS_KEY = "engine.userinput.methods";
 
-		// This VM's world.
+		// The pump's input state, or null on a world nobody writes input to.
+		//
+		// **Null is the ordinary case on a server**, not an error: a headless
+		// world ticks the same scripts and finds nothing pressed, so this answers
+		// "nothing happened" rather than raising.
 		//
 		// **`ContextOf` and not `UpvalueContext`, which is the difference between
 		// working everywhere and working only inside a bound closure.**
 		// `UpvalueContext` reads an upvalue of the *currently running* C function,
-		// so it is correct for the methods below and wrong for `PumpInput` — which
-		// the runtime calls directly at the barrier, with no C closure on the
-		// stack at all. That read garbage and turned every heartbeat into a
-		// failure, including on worlds with no input.
+		// and `PumpInput` is called by the runtime directly at the barrier with no
+		// C closure on the stack at all. That read garbage and turned every
+		// heartbeat into a failure, including on worlds with no input.
 		//
-		// `ContextOf` goes through the registry and is right in both places, which
-		// is why `PumpChanges` has always used it.
-		ecs::Store &WorldOf(lua_State *state) {
-			return *ContextOf(state).World;
-		}
-
-		// The input state, or null on a world nobody writes input to.
-		//
-		// **Null is the ordinary case on a server**, not an error: a headless
-		// world ticks the same scripts and finds nothing pressed. Every function
-		// here answers "no" rather than raising, so a script that polls input on
-		// both halves of a game does not have to guard.
+		// The service's own members reach the world through `ScriptCall::World`
+		// instead, since they became neutral — see `InputOf`.
 		const InputState *StateOf(lua_State *state) {
-			return WorldOf(state).Resource<InputState>();
+			return ContextOf(state).World->Resource<InputState>();
 		}
 
 		// --- InputObject ------------------------------------------------------
@@ -70,43 +66,12 @@ namespace engine::script {
 		// no constructor, because an input report is a fact about a frame rather
 		// than a value anybody authors, and Roblox offers none either.
 		//
-		// **Luau only, like the two services that produce it.** Nothing in
-		// `JsBindings.hpp` can build a service with a live property — see the
-		// `SoundService` row in `ServiceCatalogue.cpp` — so JavaScript has no
-		// `UserInputService` to hand one to, and a datatype with no producer is a
-		// declaration nobody can obtain a value of.
-
-		// One input event, as a script sees it.
-		//
-		// Trivially copyable on purpose: it is placement-newed into userdata
-		// memory, exactly as every value type in `Values.cpp` is.
-		struct InputReport {
-			// Where the pointer was, in pixels from the top-left of the window,
-			// with the wheel's notches in Z.
-			//
-			// **Roblox's placement exactly**, including the odd-looking Z: a
-			// wheel notch has nowhere else to go in a `Vector3`, and a script
-			// migrated from a Roblox place reads `input.Position.Z` for it.
-			core::Vector3 Position;
-
-			// How far it moved since the previous frame, in the same space.
-			core::Vector3 Delta;
-
-			// `Begin`, `Change` or `End`, as an `Enum.UserInputState` member.
-			//
-			// **A name rather than an ordinal**, because the member list is
-			// registered in `scene/Part.cpp` and an ordinal here would be a
-			// second statement of its order — the kind that agrees until
-			// somebody inserts a member.
-			core::Name State;
-
-			// The key, or `Unknown` for anything that is not one. Roblox reports
-			// `Enum.KeyCode.Unknown` for a mouse event and so does this.
-			KeyCode Key = KeyCode::Unknown;
-
-			// Where it came from.
-			InputSource Source = InputSource::Keyboard;
-		};
+		// **The report itself is shared and only the wrapper is per language**,
+		// since v0.16 — `Actions.hpp` holds `InputReport`, this file builds the
+		// Luau userdata and `JsInput.cpp` the JavaScript object. That is what a
+		// `ContextActionService` handler is handed as its third argument in
+		// either language, and what `UserInputService`'s five signals now carry
+		// in either as well.
 
 		// The metatable's name, and therefore what `typeof` answers.
 		constexpr const char *INPUT_OBJECT_TYPE = "InputObject";
@@ -143,85 +108,60 @@ namespace engine::script {
 
 			luaL_errorL(state, "InputObject has no member '%s'", std::string(field).c_str());
 		}
+	}
 
-		// Pushes one report as an `InputObject`.
-		void PushInputObject(lua_State *state, const InputReport &report) {
-			void *memory = lua_newuserdatatagged(state, sizeof(InputReport), TAG_INPUT_OBJECT);
-			new (memory) InputReport(report);
-			luaL_getmetatable(state, INPUT_OBJECT_TYPE);
-			lua_setmetatable(state, -2);
-		}
+	void PushInputObject(lua_State *state, const InputReport &report) {
+		// **Not file-local since v0.16**, because `LuauCall.cpp` builds the list
+		// `GetMouseButtonsPressed` answers with and that method is neutral now.
+		// The metatable stays this file's; what crosses is one pusher, exactly as
+		// `PushInstanceValue` does one door along.
+		void *memory = lua_newuserdatatagged(state, sizeof(InputReport), TAG_INPUT_OBJECT);
+		new (memory) InputReport(report);
+		luaL_getmetatable(state, INPUT_OBJECT_TYPE);
+		lua_setmetatable(state, -2);
+	}
 
-		// Installs the `InputObject` metatable.
-		//
+	void OpenInputObject(lua_State *state) {
 		// **Read-only and unreachable**: there is no `__newindex`, so a handler
 		// cannot edit the report it was given and hand it on, and `__metatable`
 		// is set for `Values.cpp`'s reason — a metatable a script can reach is one
 		// it can rewrite, and then every `InputObject` in the world changes
 		// underneath everything holding one.
-		void OpenInputObject(lua_State *state) {
-			luaL_newmetatable(state, INPUT_OBJECT_TYPE);
+		luaL_newmetatable(state, INPUT_OBJECT_TYPE);
 
-			lua_pushcfunction(state, InputObjectIndex, "__index");
-			lua_setfield(state, -2, "__index");
+		lua_pushcfunction(state, InputObjectIndex, "__index");
+		lua_setfield(state, -2, "__index");
 
-			// What `typeof` actually reads. Luau's `typeof` is a fastcall
-			// builtin that returns this field rather than consulting a global —
-			// see `Values.cpp`'s `Install`.
-			lua_pushstring(state, INPUT_OBJECT_TYPE);
-			lua_setfield(state, -2, "__type");
+		// What `typeof` actually reads. Luau's `typeof` is a fastcall builtin
+		// that returns this field rather than consulting a global — see
+		// `Values.cpp`'s `Install`.
+		lua_pushstring(state, INPUT_OBJECT_TYPE);
+		lua_setfield(state, -2, "__type");
 
-			lua_pushstring(state, INPUT_OBJECT_TYPE);
-			lua_setfield(state, -2, "__metatable");
+		lua_pushstring(state, INPUT_OBJECT_TYPE);
+		lua_setfield(state, -2, "__metatable");
 
-			lua_pop(state, 1);
-		}
+		lua_pop(state, 1);
+	}
 
-		// A report for one key edge. Position and delta are zero, as Roblox's are:
-		// a keyboard event has no place on the screen.
-		InputReport KeyReport(KeyCode key, bool began) {
-			InputReport report;
-			report.Key = key;
-			report.Source = InputSource::Keyboard;
-			report.State = core::Name(began ? "Begin" : "End");
-			return report;
-		}
-
-		// A report for one mouse button edge, or for one held button.
-		//
-		// **The delta is left at zero even though the pointer may have moved this
-		// frame**, which is Roblox's shape: motion is reported by its own
-		// `InputChanged`, and putting it on the click as well would have a handler
-		// that sums deltas count the same movement twice.
-		InputReport ButtonReport(const InputState &input, MouseButton button, bool began) {
-			InputReport report;
-			report.Source = static_cast<InputSource>(button);
-			report.State = core::Name(began ? "Begin" : "End");
-			report.Position = core::Vector3{input.MousePosition.X, input.MousePosition.Y, 0.0f};
-			return report;
-		}
-
-		// A report for this frame's pointer motion.
-		InputReport MotionReport(const InputState &input) {
-			InputReport report;
-			report.Source = InputSource::MouseMovement;
-			report.State = core::Name("Change");
-			report.Position = core::Vector3{input.MousePosition.X, input.MousePosition.Y, 0.0f};
-			report.Delta = core::Vector3{input.MouseDelta.X, input.MouseDelta.Y, 0.0f};
-			return report;
-		}
-
-		// A report for this frame's wheel movement.
-		InputReport WheelReport(const InputState &input) {
-			InputReport report;
-			report.Source = InputSource::MouseWheel;
-			report.State = core::Name("Change");
-			report.Position = core::Vector3{input.MousePosition.X, input.MousePosition.Y, input.WheelDelta};
-			report.Delta = core::Vector3{0.0f, 0.0f, input.WheelDelta};
-			return report;
-		}
+	namespace {
 
 		// --- UserInputService -------------------------------------------------
+		//
+		// **Written once since v0.16, which is what a property list bought.**
+		// Every method below is a `ScriptMethod` and every property a
+		// `ServiceProperty`, so both VMs install this service from the one
+		// description in `UserInputServiceSurface` — where Luau built it from six
+		// `lua_CFunction`s and a chain of `if (field == ...)` and JavaScript could
+		// not build it at all. See `ServiceProperty`.
+
+		// This call's input state, or null on a world nobody writes input to.
+		//
+		// The neutral twin of `StateOf` above, which the pump still needs because
+		// it runs with no call in flight.
+		const InputState *InputOf(ScriptCall &call) {
+			return call.World().Resource<InputState>();
+		}
 
 		// `UserInputService:IsKeyDown(Enum.KeyCode.Space)`
 		//
@@ -229,45 +169,41 @@ namespace engine::script {
 		// property with `PropertyType::Enum` gives: `part.AlphaMode = "Clip"` is
 		// what a migrating script already contains, and refusing it here would
 		// make input the one surface that is stricter than the rest.
-		int IsKeyDown(lua_State *state) {
+		void IsKeyDown(ScriptCall &call) {
 			core::Name member;
-			if (!ReadEnumValue(state, 2, core::Name("KeyCode"), member)) {
-				luaL_errorL(state, "IsKeyDown expects an Enum.KeyCode");
+			if (!call.ReadEnum(0, core::Name("KeyCode"), member)) {
+				call.Raise("IsKeyDown expects an Enum.KeyCode");
 			}
 
-			const InputState *input = StateOf(state);
-			lua_pushboolean(state, input != nullptr && input->IsKeyDown(scene::KeyFromName(member.Text())));
-			return 1;
+			const InputState *input = InputOf(call);
+			call.ReturnBoolean(input != nullptr && input->IsKeyDown(scene::KeyFromName(member.Text())));
 		}
 
-		int IsMouseButtonPressed(lua_State *state) {
+		void IsMouseButtonPressed(ScriptCall &call) {
 			core::Name member;
-			if (!ReadEnumValue(state, 2, core::Name("UserInputType"), member)) {
-				luaL_errorL(state, "IsMouseButtonPressed expects an Enum.UserInputType");
+			if (!call.ReadEnum(0, core::Name("UserInputType"), member)) {
+				call.Raise("IsMouseButtonPressed expects an Enum.UserInputType");
 			}
-
-			size_t ordinal = 0;
-			const InputState *input = StateOf(state);
 
 			// **`Enum.UserInputType` names three sources that are not buttons**
 			// since `InputObject` needed to say where an event came from, and
 			// "is `MouseMovement` pressed" is a question with no answer. False
 			// rather than a cast past the end of the button bits, which would
 			// have read whichever bit the arithmetic landed on.
+			size_t ordinal = 0;
 			const bool known = ecs::EnumTable::OrdinalOf(core::Name("UserInputType"), member, ordinal) &&
 							   ordinal < static_cast<size_t>(MouseButton::Count);
 
-			lua_pushboolean(
-				state, input != nullptr && known && input->IsButtonDown(static_cast<MouseButton>(ordinal))
+			const InputState *input = InputOf(call);
+			call.ReturnBoolean(
+				input != nullptr && known && input->IsButtonDown(static_cast<MouseButton>(ordinal))
 			);
-			return 1;
 		}
 
 		// `UserInputService:GetMouseLocation()` — a `Vector2` in pixels.
-		int GetMouseLocation(lua_State *state) {
-			const InputState *input = StateOf(state);
-			*PushVector2(state) = input == nullptr ? core::Vector2{} : input->MousePosition;
-			return 1;
+		void GetMouseLocation(ScriptCall &call) {
+			const InputState *input = InputOf(call);
+			call.ReturnVector2(input == nullptr ? core::Vector2{} : input->MousePosition);
 		}
 
 		// `UserInputService:GetMouseDelta()` — how far it moved this frame.
@@ -275,10 +211,9 @@ namespace engine::script {
 		// **Roblox's spelling, and the value a locked pointer needs.** See
 		// `InputState::MouseDelta`: under `LockCenter` the position does not
 		// change and only this does.
-		int GetMouseDelta(lua_State *state) {
-			const InputState *input = StateOf(state);
-			*PushVector2(state) = input == nullptr ? core::Vector2{} : input->MouseDelta;
-			return 1;
+		void GetMouseDelta(ScriptCall &call) {
+			const InputState *input = InputOf(call);
+			call.ReturnVector2(input == nullptr ? core::Vector2{} : input->MouseDelta);
 		}
 
 		// `UserInputService:GetKeysPressed()` — every key down now.
@@ -286,24 +221,23 @@ namespace engine::script {
 		// **A list of `EnumItem`s rather than of strings**, so what comes out is
 		// what `IsKeyDown` takes. A surface whose getter and setter disagree about
 		// a type is the round trip a property owes and a service owes equally.
-		int GetKeysPressed(lua_State *state) {
-			const InputState *input = StateOf(state);
-
-			lua_newtable(state);
+		void GetKeysPressed(ScriptCall &call) {
+			const InputState *input = InputOf(call);
 			if (input == nullptr) {
-				return 1;
+				call.ReturnEnums(core::Name("KeyCode"), {});
+				return;
 			}
 
-			int written = 0;
+			// In `KeyCode` order, which is the order both pumps walk — so what a
+			// script polls and what it is delivered agree about sequence.
+			std::vector<core::Name> pressed;
 			for (size_t index = 0; index < static_cast<size_t>(KeyCode::Count); index++) {
 				const auto key = static_cast<KeyCode>(index);
-				if (!input->IsKeyDown(key)) {
-					continue;
+				if (input->IsKeyDown(key)) {
+					pressed.push_back(core::Name(scene::Describe(key)));
 				}
-				PushEnumItem(state, core::Name("KeyCode"), core::Name(scene::Describe(key)));
-				lua_rawseti(state, -2, ++written);
 			}
-			return 1;
+			call.ReturnEnums(core::Name("KeyCode"), pressed);
 		}
 
 		// `UserInputService:GetMouseButtonsPressed()` — every button down now.
@@ -315,15 +249,14 @@ namespace engine::script {
 		// not simply `GetKeysPressed` with a different loop — that one answers
 		// with what `IsKeyDown` takes, and this one answers with what
 		// `InputBegan` delivers.
-		int GetMouseButtonsPressed(lua_State *state) {
-			const InputState *input = StateOf(state);
-
-			lua_newtable(state);
+		void GetMouseButtonsPressed(ScriptCall &call) {
+			const InputState *input = InputOf(call);
 			if (input == nullptr) {
-				return 1;
+				call.ReturnInputObjects({});
+				return;
 			}
 
-			int written = 0;
+			std::vector<InputReport> down;
 			for (size_t index = 0; index < static_cast<size_t>(MouseButton::Count); index++) {
 				const auto button = static_cast<MouseButton>(index);
 				if (!input->IsButtonDown(button)) {
@@ -332,118 +265,104 @@ namespace engine::script {
 
 				// `Begin` for a held button, which is what Roblox reports here:
 				// the state of a button that is down is the one it went down in.
-				PushInputObject(state, ButtonReport(*input, button, true));
-				lua_rawseti(state, -2, ++written);
+				down.push_back(ButtonReport(*input, button, true));
 			}
-			return 1;
+			call.ReturnInputObjects(down);
 		}
+
+		// --- the properties ----------------------------------------------------
 
 		// `UserInputService.MouseBehavior`, read and written.
 		//
-		// **The one field here that travels towards the client.** A script sets
+		// **The one member here that travels towards the client.** A script sets
 		// it, the client applies it to the window on the next frame — which is why
 		// `InputState` is the seam in both directions rather than a report.
-		int InputServiceIndex(lua_State *state) {
-			const std::string_view field = luaL_checkstring(state, 2);
-
-			if (field == "MouseBehavior") {
-				const InputState *input = StateOf(state);
-				const auto behaviour = input == nullptr ? MouseBehavior::Default : input->Behaviour;
-				PushEnumItem(
-					state,
-					core::Name("MouseBehavior"),
-					ecs::EnumTable::MemberAt(core::Name("MouseBehavior"), static_cast<size_t>(behaviour))
-				);
-				return 1;
-			}
-
-			if (field == "MouseDeltaSensitivity") {
-				// Read off the camera controller rather than kept twice. Roblox
-				// puts it on `UserInputService` and the value it scales is the
-				// camera's, so one number in one place with two names beats two
-				// numbers that agree until somebody sets one.
-				const auto *controller = WorldOf(state).Resource<scene::CameraController>();
-				lua_pushnumber(state, controller == nullptr ? 1.0 : controller->Sensitivity / 0.0035);
-				return 1;
-			}
-
-			if (field == "KeyboardEnabled" || field == "MouseEnabled") {
-				// True on anything with a window and false headless, which is what
-				// "is there a keyboard" actually asks. A world with no input state
-				// is a world nobody is typing at.
-				lua_pushboolean(state, StateOf(state) != nullptr);
-				return 1;
-			}
-
-			if (field == "GamepadEnabled" || field == "TouchEnabled" || field == "VREnabled" ||
-				field == "AccelerometerEnabled" || field == "GyroscopeEnabled") {
-				// **Present and false, which is better than absent.** Roblox
-				// scripts branch on these — `if UserInputService.TouchEnabled
-				// then` is how a place picks its control scheme — and a missing
-				// property raises where a false one takes the other branch. There
-				// is no gamepad, touch, headset or sensor anywhere in
-				// `input::Translator`, so the answer is a constant and saying so
-				// is the honest version of not having one.
-				lua_pushboolean(state, false);
-				return 1;
-			}
-
-			if (field == "InputBegan" || field == "InputEnded" || field == "InputChanged" ||
-				field == "WindowFocused" || field == "WindowFocusReleased") {
-				// **One signal kind, filtered by name**, exactly as
-				// `GetAttributeChangedSignal` reuses `PropertyChanged`. The five
-				// are distinguished by which name the connection carries, and
-				// `PumpInput` fires the one that matches.
-				PushSignal(state, SignalKind::PropertyChanged, ecs::NULL_ENTITY, core::Name(field));
-				return 1;
-			}
-
-			// The methods, from the shared table.
-			//
-			// **A userdata has no fields**, so `ServiceSurface` stashes the
-			// method table in the registry under this key and this reads it
-			// back. One constant, two readers, so the install and the lookup
-			// cannot name different keys.
-			lua_getfield(state, LUA_REGISTRYINDEX, INPUT_METHODS_KEY);
-			lua_pushvalue(state, 2);
-			lua_rawget(state, -2);
-			if (!lua_isnil(state, -1)) {
-				return 1;
-			}
-
-			luaL_errorL(state, "UserInputService has no member '%s'", std::string(field).c_str());
+		void GetMouseBehavior(ScriptCall &call) {
+			const InputState *input = InputOf(call);
+			const auto behaviour = input == nullptr ? MouseBehavior::Default : input->Behaviour;
+			call.ReturnEnum(
+				core::Name("MouseBehavior"),
+				ecs::EnumTable::MemberAt(core::Name("MouseBehavior"), static_cast<size_t>(behaviour))
+			);
 		}
 
-		int InputServiceNewIndex(lua_State *state) {
-			const std::string_view field = luaL_checkstring(state, 2);
-
-			if (field == "MouseBehavior") {
-				core::Name member;
-				if (!ReadEnumValue(state, 3, core::Name("MouseBehavior"), member)) {
-					luaL_errorL(state, "MouseBehavior expects an Enum.MouseBehavior");
-				}
-
-				size_t ordinal = 0;
-				if (!ecs::EnumTable::OrdinalOf(core::Name("MouseBehavior"), member, ordinal)) {
-					luaL_errorL(state, "unknown MouseBehavior");
-				}
-
-				ecs::Store &store = WorldOf(state);
-				if (auto *input = store.ResourceMutable<InputState>()) {
-					input->Behaviour = static_cast<MouseBehavior>(ordinal);
-				}
-				return 0;
+		void SetMouseBehavior(ScriptCall &call) {
+			core::Name member;
+			if (!call.ReadEnum(0, core::Name("MouseBehavior"), member)) {
+				call.Raise("MouseBehavior expects an Enum.MouseBehavior");
 			}
 
-			if (field == "MouseDeltaSensitivity") {
-				const auto scale = static_cast<float>(luaL_checknumber(state, 3));
-				if (auto *controller = WorldOf(state).ResourceMutable<scene::CameraController>()) {
-					controller->Sensitivity = 0.0035f * std::max(scale, 0.0f);
-				}
-				return 0;
+			size_t ordinal = 0;
+			if (!ecs::EnumTable::OrdinalOf(core::Name("MouseBehavior"), member, ordinal)) {
+				call.Raise("unknown MouseBehavior");
 			}
 
-			luaL_errorL(state, "UserInputService.%s is read-only", std::string(field).c_str());
+			// **Dropped on a world with no input state rather than creating
+			// one**, which is the opposite of `SoundService.Volume` and is right
+			// for the opposite reason: an `InputState` is written every frame by
+			// whoever owns the window, so a resource minted here would be one the
+			// device layer immediately overwrites — where an `AudioState` is only
+			// ever written by a script.
+			if (auto *input = call.World().ResourceMutable<InputState>()) {
+				input->Behaviour = static_cast<MouseBehavior>(ordinal);
+			}
+		}
+
+		// What a `MouseDeltaSensitivity` of one means, in radians per pixel.
+		//
+		// **The same literal `scene::CameraController::Sensitivity` defaults to**,
+		// which is what makes a world nobody has configured answer exactly 1 —
+		// and it is a named constant because the getter and the setter both need
+		// it and a property whose two halves disagree by a digit is a round trip
+		// that does not close.
+		constexpr float RADIANS_PER_PIXEL = 0.0035f;
+
+		// `UserInputService.MouseDeltaSensitivity`, read and written.
+		//
+		// Read off the camera controller rather than kept twice. Roblox puts it on
+		// `UserInputService` and the value it scales is the camera's, so one
+		// number in one place with two names beats two numbers that agree until
+		// somebody sets one.
+		void GetMouseDeltaSensitivity(ScriptCall &call) {
+			const auto *controller = call.World().Resource<scene::CameraController>();
+
+			// **Divided in `float` and widened after**, which is not a style
+			// choice: 0.0035 has no exact binary form, so promoting the stored
+			// `float` to `double` first and dividing by the `double` literal
+			// answers 1.000000030866691 for a controller nobody has touched. In
+			// `float` the two are the same bits and the quotient is exactly one.
+			call.ReturnNumber(
+				controller == nullptr ? 1.0 : static_cast<double>(controller->Sensitivity / RADIANS_PER_PIXEL)
+			);
+		}
+
+		void SetMouseDeltaSensitivity(ScriptCall &call) {
+			const auto scale = static_cast<float>(call.AsNumber(0));
+			if (auto *controller = call.World().ResourceMutable<scene::CameraController>()) {
+				controller->Sensitivity = RADIANS_PER_PIXEL * std::max(scale, 0.0f);
+			}
+		}
+
+		// `UserInputService.KeyboardEnabled` and `.MouseEnabled`.
+		//
+		// True on anything with a window and false headless, which is what "is
+		// there a keyboard" actually asks. A world with no input state is a world
+		// nobody is typing at.
+		void GetInputDevicePresent(ScriptCall &call) {
+			call.ReturnBoolean(InputOf(call) != nullptr);
+		}
+
+		// `GamepadEnabled`, `TouchEnabled`, `VREnabled`, `AccelerometerEnabled`
+		// and `GyroscopeEnabled`.
+		//
+		// **Present and false, which is better than absent.** Roblox scripts
+		// branch on these — `if UserInputService.TouchEnabled then` is how a place
+		// picks its control scheme — and a missing property raises where a false
+		// one takes the other branch. There is no gamepad, touch, headset or
+		// sensor anywhere in `input::Translator`, so the answer is a constant and
+		// saying so is the honest version of not having one.
+		void GetNoSuchDevice(ScriptCall &call) {
+			call.ReturnBoolean(false);
 		}
 
 		// --- ContextActionService ---------------------------------------------
@@ -454,118 +373,105 @@ namespace engine::script {
 		// bound action is a claim on a key with a number attached, and the highest
 		// claim wins.
 		//
-		// The stack lives on the VM rather than on the world, because a bound
-		// action is a Luau function reference: it cannot cross a snapshot, cannot
-		// be replicated, and dies with the runtime that registered it. A world
-		// resource holding one would be a resource that cannot be serialised.
-
-		// The stack, per VM.
+		// **The stack is shared and the callables are not, since v0.16.** What a
+		// claim *is* and which handler a press reaches are ordering rules a
+		// recording depends on, so they live in `ActionStack` and both languages
+		// read them; a Luau handler is a registry ref and a JavaScript one an
+		// index into `JsContext::Callables`, and both cross as a `CallbackRef`
+		// nothing shared may interpret. That is what let this service become the
+		// first input surface JavaScript can reach.
 		//
-		// **On the context and never a `thread_local`**, which the first version
-		// of this got wrong: two VMs on one thread would have shared the vector,
-		// and a registry reference minted against one state would then be
-		// dereferenced against the other. It crashed a MemoryStore test — a suite
-		// with nothing to do with input — because that suite happened to build a
-		// second runtime.
-		std::vector<BoundAction> &ActionsOf(lua_State *state) {
-			// `ContextOf` for `WorldOf`'s reason: `PumpInput` reaches this with no
-			// C closure on the stack.
-			return ContextOf(state).Actions;
-		}
+		// It still lives on the VM rather than on the world, because a bound
+		// action holds a callable: it cannot cross a snapshot, cannot be
+		// replicated, and dies with the runtime that registered it. A world
+		// resource holding one would be a resource that cannot be serialised.
 
 		// `ContextActionService:BindActionAtPriority(name, handler, touchButton, priority, ...keys)`
 		//
 		// The five-argument form is the one that says what it means; the
 		// four-argument `BindAction` below is it with a priority of zero.
-		int BindAtPriority(lua_State *state, int priorityIndex, int firstKey) {
+		//
+		// @param call     The call.
+		// @param priority Where the priority sits, or a negative index for the
+		//        form that has none.
+		// @param firstKey Where the variadic key list starts.
+		void BindAtPriority(ScriptCall &call, int priority, size_t firstKey) {
 			BoundAction action;
-			action.Name = luaL_checkstring(state, 2);
+			action.Name = call.AsString(0);
+			action.Callback = call.RetainCallback(1);
+			action.Priority = priority;
 
-			luaL_checktype(state, 3, LUA_TFUNCTION);
-			lua_pushvalue(state, 3);
-			action.Callback = lua_ref(state, -1);
-			lua_pop(state, 1);
-
-			action.Priority =
-				priorityIndex > 0 ? static_cast<int>(luaL_checkinteger(state, priorityIndex)) : 0;
-
-			for (int index = firstKey; index <= lua_gettop(state); index++) {
+			// **The whole tail rather than up to the first nil**, which is what
+			// `ScriptCall::Arguments` exists for: Roblox's `BindAction` also
+			// takes `Enum.UserInputType` members and this engine binds keys only,
+			// so a value this cannot read is walked past rather than refused.
+			for (size_t index = firstKey; index < call.Arguments(); index++) {
 				core::Name member;
-				if (!ReadEnumValue(state, index, core::Name("KeyCode"), member)) {
+				if (!call.ReadEnum(index, core::Name("KeyCode"), member)) {
 					continue;
 				}
+
 				const KeyCode key = scene::KeyFromName(member.Text());
 				if (key != KeyCode::Unknown) {
 					action.Keys.push_back(static_cast<uint16_t>(key));
 				}
 			}
 
-			std::vector<BoundAction> &actions = ActionsOf(state);
-
-			// **Rebinding a name replaces it rather than stacking a second.**
-			// Roblox's behaviour, and the one that makes a script safe to run
-			// twice: a reload that bound the same action again would otherwise
-			// fire its handler twice per press, forever.
-			const auto existing =
-				std::find_if(actions.begin(), actions.end(), [&action](const BoundAction &bound) {
-					return bound.Name == action.Name;
-				});
-			if (existing != actions.end()) {
-				lua_unref(state, existing->Callback);
-				*existing = std::move(action);
-			} else {
-				actions.push_back(std::move(action));
+			// **The replaced handler is released and not leaked.** Rebinding a
+			// name replaces it rather than stacking a second — Roblox's
+			// behaviour, and the one that makes a script safe to run twice — so
+			// the callable the old row held has to go back to the VM that minted
+			// it.
+			CallbackRef replaced = 0;
+			if (call.Actions().Bind(std::move(action), replaced)) {
+				call.ReleaseCallback(replaced);
 			}
-
-			// **Sorted once here rather than searched per press.** A press walks
-			// the list until something claims the key, so the order has to be the
-			// priority order — and binding is rare where pressing is not.
-			//
-			// **Stable, so two actions at one priority fire in bind order.** That
-			// is the only tie-break that is reproducible; an unstable sort would
-			// make which one wins depend on the allocator.
-			std::stable_sort(
-				actions.begin(), actions.end(), [](const BoundAction &left, const BoundAction &right) {
-					return left.Priority > right.Priority;
-				}
-			);
-			return 0;
 		}
 
-		int BindAction(lua_State *state) {
-			// `(self, name, handler, createTouchButton, ...keys)` — the touch
-			// button is accepted and ignored, because there is no touch surface.
-			// Accepted rather than refused so a Roblox script runs unchanged.
-			return BindAtPriority(state, 0, 5);
+		void BindAction(ScriptCall &call) {
+			// `(name, handler, createTouchButton, ...keys)` — the touch button is
+			// accepted and ignored, because there is no touch surface. Accepted
+			// rather than refused so a Roblox script runs unchanged.
+			BindAtPriority(call, 0, 3);
 		}
 
-		int BindActionAtPriority(lua_State *state) {
-			// `(self, name, handler, createTouchButton, priority, ...keys)`
-			return BindAtPriority(state, 5, 6);
+		void BindActionAtPriority(ScriptCall &call) {
+			// `(name, handler, createTouchButton, priority, ...keys)`
+			BindAtPriority(call, static_cast<int>(call.AsNumber(3)), 4);
 		}
 
-		int UnbindAction(lua_State *state) {
-			const std::string_view name = luaL_checkstring(state, 2);
-			std::vector<BoundAction> &actions = ActionsOf(state);
-
-			const auto found = std::find_if(actions.begin(), actions.end(), [name](const BoundAction &bound) {
-				return bound.Name == name;
-			});
-			if (found != actions.end()) {
-				lua_unref(state, found->Callback);
-				actions.erase(found);
+		void UnbindAction(ScriptCall &call) {
+			CallbackRef released = 0;
+			if (call.Actions().Unbind(call.AsString(0), released)) {
+				call.ReleaseCallback(released);
 			}
-			return 0;
 		}
 
-		int UnbindAllActions(lua_State *state) {
-			std::vector<BoundAction> &actions = ActionsOf(state);
-			for (const BoundAction &action : actions) {
-				lua_unref(state, action.Callback);
+		void UnbindAllActions(ScriptCall &call) {
+			std::vector<CallbackRef> released;
+			call.Actions().UnbindAll(released);
+			for (const CallbackRef callback : released) {
+				call.ReleaseCallback(callback);
 			}
-			actions.clear();
-			return 0;
 		}
+
+		// --- the two that are still Luau's ------------------------------------
+		//
+		// **`GetBoundActionInfo` and `GetAllBoundActionInfo` answer a record
+		// holding a list of `Enum.KeyCode` members, and that is what keeps them
+		// here.** `ScriptCall` can return a `ScriptValue`, which has no tag for an
+		// `EnumItem` — and it must not gain one, because a `ScriptValue` crosses a
+		// world and `Codec.hpp` is a wire format. The alternatives were to invent
+		// a return type for one service's record shape, which `ScriptCall.hpp`
+		// says the interface is not for, or to answer key *names* as strings,
+		// which is a behaviour change to a Roblox-shaped surface made to buy a
+		// diagnostic method nothing polls.
+		//
+		// So they sit in `ServiceSurface::LuauMethods`, where the shape itself
+		// says a JavaScript author does not have them — the same per-method gap
+		// `TeleportService::GetTeleportData` has had since v0.15, now with
+		// somewhere to declare it. Closing it needs a neutral `EnumItem` return,
+		// which is a change to make when a second caller wants one.
 
 		// Pushes one action's info table.
 		//
@@ -611,12 +517,11 @@ namespace engine::script {
 		// `ContextActionService:GetBoundActionInfo(name)` -> table or nil
 		int GetBoundActionInfo(lua_State *state) {
 			const std::string_view name = luaL_checkstring(state, 2);
-			const std::vector<BoundAction> &actions = ActionsOf(state);
+			const ActionStack &stack = ContextOf(state).Actions;
+			const std::span<const BoundAction> actions = stack.Entries();
 
-			const auto found = std::find_if(actions.begin(), actions.end(), [name](const BoundAction &bound) {
-				return bound.Name == name;
-			});
-			if (found == actions.end()) {
+			const BoundAction *found = stack.Find(name);
+			if (found == nullptr) {
 				// **Nil for an unbound name, not an empty table.** Roblox's
 				// answer, and the one `if info then` reads correctly — an empty
 				// table is truthy and would report every name as bound.
@@ -624,7 +529,10 @@ namespace engine::script {
 				return 1;
 			}
 
-			PushActionInfo(state, *found, static_cast<size_t>(found - actions.begin()), actions.size());
+			// **`stackOrder` needs the position and `Find` answers the row**, so
+			// the span is what turns one into the other — a pointer into the
+			// stack's own vector, subtracted from its start.
+			PushActionInfo(state, *found, static_cast<size_t>(found - actions.data()), actions.size());
 			return 1;
 		}
 
@@ -634,7 +542,7 @@ namespace engine::script {
 		// a caller wants: the question this answers is "what has claimed E", and
 		// the name is how anything is unbound afterwards.
 		int GetAllBoundActionInfo(lua_State *state) {
-			const std::vector<BoundAction> &actions = ActionsOf(state);
+			const std::span<const BoundAction> actions = ContextOf(state).Actions.Entries();
 
 			lua_createtable(state, 0, static_cast<int>(actions.size()));
 			for (size_t index = 0; index < actions.size(); index++) {
@@ -700,35 +608,36 @@ namespace engine::script {
 		// **Keys only.** `BoundAction::Keys` holds `scene::KeyCode` ordinals, and
 		// Roblox's `BindAction` also takes `Enum.UserInputType` members — binding a
 		// mouse button would need the vector to say which of the two spaces each
-		// entry is in, which is a change to `Bindings.hpp`'s `BoundAction` rather
+		// entry is in, which is a change to `Actions.hpp`'s `BoundAction` rather
 		// than to this loop.
+		//
+		// **`ActionStack::Claiming` decides, not this function**, which is what
+		// makes `PumpJsInput` the same pump rather than a second one that agrees
+		// today: which action wins is a rule and lives with the stack.
 		void
 		RunBoundActions(lua_State *state, KeyCode key, const InputReport &report, std::string &firstError) {
-			for (const BoundAction &action : ActionsOf(state)) {
-				const auto ordinal = static_cast<uint16_t>(key);
-				if (std::find(action.Keys.begin(), action.Keys.end(), ordinal) == action.Keys.end()) {
-					continue;
-				}
-
-				lua_getref(state, action.Callback);
-				lua_pushstring(state, action.Name.c_str());
-				PushEnumItem(state, core::Name("UserInputState"), report.State);
-
-				// **An `InputObject` where this used to push an `Enum.KeyCode`.**
-				// Roblox's third argument has always been an `InputObject`, the
-				// generated declarations said `Enum_KeyCode`, and a handler copied
-				// from a Roblox place read `input.KeyCode` off an `EnumItem` and
-				// got nil. A behaviour change, and a stated one.
-				PushInputObject(state, report);
-
-				if (lua_pcall(state, 3, 0, 0) != LUA_OK) {
-					if (firstError.empty()) {
-						const char *message = lua_tostring(state, -1);
-						firstError = message != nullptr ? message : "a bound action failed";
-					}
-					lua_pop(state, 1);
-				}
+			const BoundAction *action = ContextOf(state).Actions.Claiming(static_cast<uint16_t>(key));
+			if (action == nullptr) {
 				return;
+			}
+
+			lua_getref(state, action->Callback);
+			lua_pushstring(state, action->Name.c_str());
+			PushEnumItem(state, core::Name("UserInputState"), report.State);
+
+			// **An `InputObject` where this used to push an `Enum.KeyCode`.**
+			// Roblox's third argument has always been an `InputObject`, the
+			// generated declarations said `Enum_KeyCode`, and a handler copied
+			// from a Roblox place read `input.KeyCode` off an `EnumItem` and got
+			// nil. A behaviour change, and a stated one.
+			PushInputObject(state, report);
+
+			if (lua_pcall(state, 3, 0, 0) != LUA_OK) {
+				if (firstError.empty()) {
+					const char *message = lua_tostring(state, -1);
+					firstError = message != nullptr ? message : "a bound action failed";
+				}
+				lua_pop(state, 1);
 			}
 		}
 	}
@@ -814,65 +723,95 @@ namespace engine::script {
 		return firstError;
 	}
 
-	void OpenUserInputService(lua_State *state) {
-		// **This one has properties, so `ServiceSurface` builds it as a userdata
-		// rather than a table** — see `ServiceSurface::Index` for why that is
-		// forced rather than stylistic, and `DEFERRED.md` D00030 for the sharp
-		// edge that survives it: `GETIMPORT` caches a `Global.Field` chain
-		// whether the intermediate is a table or a userdata, so a property is
-		// live only when read through a local. Which is the form a Roblox script
-		// uses anyway, since `game:GetService` is a method call and cannot be an
-		// import:
-		//
-		//     local UIS = game:GetService("UserInputService")
-		//     UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
-		static constexpr ServiceMethod METHODS[] = {
+	const ServiceSurface &UserInputServiceSurface() {
+		static constexpr std::array<ServiceMethod, 6> METHODS{{
 			{"IsKeyDown", IsKeyDown},
 			{"IsMouseButtonPressed", IsMouseButtonPressed},
 			{"GetMouseLocation", GetMouseLocation},
 			{"GetMouseDelta", GetMouseDelta},
 			{"GetKeysPressed", GetKeysPressed},
 			{"GetMouseButtonsPressed", GetMouseButtonsPressed},
-		};
+		}};
 
-		// **The datatype before the service that produces it**, so a metatable is
-		// never looked up before it is registered. Here rather than beside the
-		// other value types in `Values.cpp` because this is the only file that
-		// makes one — an `InputObject` has no constructor and cannot arrive from
-		// anywhere else.
-		OpenInputObject(state);
+		// **Nine properties, two of them writable.** The seven read-only rows
+		// carry a null setter, which both languages turn into a refusal naming
+		// the member rather than into a write that goes nowhere.
+		static constexpr std::array<ServiceProperty, 9> PROPERTIES{{
+			{"MouseBehavior", GetMouseBehavior, SetMouseBehavior},
+			{"MouseDeltaSensitivity", GetMouseDeltaSensitivity, SetMouseDeltaSensitivity},
+			{"KeyboardEnabled", GetInputDevicePresent, nullptr},
+			{"MouseEnabled", GetInputDevicePresent, nullptr},
+			{"GamepadEnabled", GetNoSuchDevice, nullptr},
+			{"TouchEnabled", GetNoSuchDevice, nullptr},
+			{"VREnabled", GetNoSuchDevice, nullptr},
+			{"AccelerometerEnabled", GetNoSuchDevice, nullptr},
+			{"GyroscopeEnabled", GetNoSuchDevice, nullptr},
+		}};
 
-		ServiceSurface surface;
-		surface.Name = "UserInputService";
-		surface.Methods = METHODS;
-		surface.Index = InputServiceIndex;
-		surface.NewIndex = InputServiceNewIndex;
-		surface.Tag = TAG_INPUT_SERVICE;
+		// **One `SignalKind` told apart by name**, exactly as
+		// `GetAttributeChangedSignal` reuses `PropertyChanged` — see
+		// `ServiceSignal::Property`. The subject is `NULL_ENTITY` because these
+		// are the world's edges and not any instance's, and both pumps fire the
+		// row whose name matches.
+		static constexpr std::array<ServiceSignal, 5> SIGNALS{{
+			{"InputBegan", SignalKind::PropertyChanged, "InputBegan"},
+			{"InputEnded", SignalKind::PropertyChanged, "InputEnded"},
+			{"InputChanged", SignalKind::PropertyChanged, "InputChanged"},
+			{"WindowFocused", SignalKind::PropertyChanged, "WindowFocused"},
+			{"WindowFocusReleased", SignalKind::PropertyChanged, "WindowFocusReleased"},
+		}};
 
-		// The same key `InputServiceIndex` reads its method table back from.
-		surface.MethodsKey = INPUT_METHODS_KEY;
+		static const ServiceSurface SURFACE = [] {
+			ServiceSurface surface;
+			surface.Name = "UserInputService";
+			surface.Methods = METHODS;
+			surface.Properties = PROPERTIES;
+			surface.Signals = SIGNALS;
 
-		InstallService(state, surface);
+			// **The properties are what make this a userdata in Luau**, and
+			// `DEFERRED.md` D00030 is the sharp edge that survives it: `GETIMPORT`
+			// caches a `Global.Field` chain whether the intermediate is a table or
+			// a userdata, so a property is live only when read through a local.
+			// Which is the form a Roblox script uses anyway, since
+			// `game:GetService` is a method call and cannot be an import:
+			//
+			//     local UIS = game:GetService("UserInputService")
+			//     UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
+			//
+			// JavaScript needs neither, because an accessor is not an import.
+			surface.Tag = TAG_INPUT_SERVICE;
+			surface.MethodsKey = INPUT_METHODS_KEY;
+			return surface;
+		}();
+		return SURFACE;
 	}
 
-	void OpenContextActionService(lua_State *state) {
+	const ServiceSurface &ContextActionServiceSurface() {
 		// A plain table, because this one is **methods only** — and a method is
 		// exactly the case `GETIMPORT` is correct for: the closure never
 		// changes, so caching it is what the optimisation is for. Only a mutable
-		// *property* is broken by it.
-		static constexpr ServiceMethod METHODS[] = {
+		// *property* is broken by it. That is also why this one could cross to
+		// JavaScript and `UserInputService` above it could not.
+		static constexpr std::array<ServiceMethod, 4> METHODS{{
 			{"BindAction", BindAction},
 			{"BindActionAtPriority", BindActionAtPriority},
 			{"UnbindAction", UnbindAction},
 			{"UnbindAllActions", UnbindAllActions},
+		}};
+
+		// The two that report, which the section above them says why.
+		static constexpr std::array<LuauServiceMethod, 2> REPORTING{{
 			{"GetBoundActionInfo", GetBoundActionInfo},
 			{"GetAllBoundActionInfo", GetAllBoundActionInfo},
-		};
+		}};
 
-		ServiceSurface surface;
-		surface.Name = "ContextActionService";
-		surface.Methods = METHODS;
-
-		InstallService(state, surface);
+		static const ServiceSurface SURFACE = [] {
+			ServiceSurface surface;
+			surface.Name = "ContextActionService";
+			surface.Methods = METHODS;
+			surface.LuauMethods = REPORTING;
+			return surface;
+		}();
+		return SURFACE;
 	}
 }

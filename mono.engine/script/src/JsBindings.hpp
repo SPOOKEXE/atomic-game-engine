@@ -107,6 +107,91 @@ namespace engine::script {
 	// @since v0.16
 	void InstallJsNeutralMethods(JSContext *context, JSValueConst methods);
 
+	// Adds one service's neutral methods to the object standing for it.
+	//
+	// **The JavaScript half of what made five services reachable here.** A
+	// `ServiceSurface` is data, so `ServiceCatalogue.cpp` reads one description
+	// twice — `InstallService` builds the Luau table and this fills in the
+	// JavaScript object — and a method added to that table is a member in both
+	// languages in the same commit.
+	//
+	// @param context The VM.
+	// @param service The object the service is being built on.
+	// @param methods The service's rows.
+	// @since v0.16
+	void
+	InstallJsServiceMethods(JSContext *context, JSValueConst service, std::span<const ServiceMethod> methods);
+
+	// Adds one service's neutral properties to the object standing for it.
+	//
+	// **The JavaScript half of what made the last two reachable here**, and it
+	// is native accessors rather than anything resembling the Luau side.
+	// `JS_DefinePropertyGetSet` runs the getter on every read, so the service
+	// stays a plain object — no userdata, no tag, no registry key. What it needs
+	// in exchange is the property *names* at install time, which is why
+	// `ServiceProperty` is a list and not a catch-all.
+	//
+	// @param context    The VM.
+	// @param service    The object the service is being built on.
+	// @param name       The service's name, for a refusal to quote.
+	// @param properties The service's rows.
+	// @since v0.16
+	void InstallJsServiceProperties(
+		JSContext *context,
+		JSValueConst service,
+		const char *name,
+		std::span<const ServiceProperty> properties
+	);
+
+	// One member of one enum, as an `EnumItem`.
+	//
+	// **Exported because the input pump needs one and is not this file's.** A
+	// bound action's handler is called with `Enum.UserInputState.Begin` as its
+	// second argument, which is Roblox's signature; the alternative was a second
+	// way to build an `EnumItem` in a second translation unit.
+	//
+	// @since v0.16
+	JSValue MakeJsEnumItem(JSContext *context, core::Name enumName, core::Name member);
+
+	// Registers the `InputObject` class a bound action's handler is handed one
+	// of. Before the first service is installed.
+	//
+	// @since v0.16
+	void InstallJsInputObject(JSContext *context);
+
+	// One input report as an `InputObject`.
+	//
+	// The JavaScript twin of `PushInputObject`. Read-only and sealed, for the
+	// Luau half's reason: an input report is a fact about a frame rather than a
+	// document a handler edits and passes on.
+	//
+	// @since v0.16
+	JSValue MakeJsInputObject(JSContext *context, const InputReport &report);
+
+	// Turns this frame's input edges into bound actions and input signals.
+	//
+	// **The twin of `PumpInput`, and it exists because binding an action or a
+	// signal that never fires is worse than not binding one at all.**
+	// `ContextActionService` crossed at v0.16 with no input pump in this
+	// language, so a JavaScript `BindAction` would have taken a handler and
+	// forgotten it; `UserInputService` crossed with the property mechanism, and
+	// its five signals would have been connectable and silent — which is the
+	// state this module names twice as reading like a broken engine.
+	//
+	// **Five things, in `PumpInput`'s order**: the focus edges, key edges, mouse
+	// button edges, pointer motion and the wheel — so a listener sees
+	// `WindowFocusReleased` before the releases losing focus caused, in either
+	// language.
+	//
+	// Called at the same place in the barrier the Luau pump is — before the
+	// changes, so a handler's writes reach their listeners on this beat rather
+	// than the next.
+	//
+	// @param context The VM.
+	// @return An error message when a handler threw, or empty.
+	// @since v0.16
+	std::string PumpJsInput(JSContext *context);
+
 	std::string PumpJsChanges(JSContext *context);
 
 	// Delivers everything the tree recorded since the last barrier.

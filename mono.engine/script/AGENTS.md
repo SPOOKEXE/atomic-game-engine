@@ -97,6 +97,75 @@ Four rules a reviewer should hold to:
   the trampoline catches, because QuickJS reports an error by returning rather
   than by unwinding — and nothing may escape that frame, since the caller is C.
 
+## A service is data too, and all seven crossed on it
+
+The same argument one level up. `ServiceSurface` described a service in
+`lua_CFunction`s, so it could only build a Luau one — and every JavaScript
+service was hand-written, which is how `ContentService`, `CollectionService`,
+`HttpService`, `CrossWorldService` and `ContextActionService` came to be
+unreachable from JavaScript with the catalogue naming the gap and nothing able
+to close it.
+
+`ServiceSurface.hpp` is the answer: `ServiceMethod` carries a `ScriptMethod`, a
+service is a name and four lists with no VM in it, and `ServiceCatalogue.cpp`
+reads one description twice. A service method is an instance method whose
+`Subject()` is `NULL_ENTITY`, so the two adapters gained a constructor apiece
+and nothing else.
+
+**A property is not a method, and closing the last two took a second mechanism
+rather than more of the first.** `UserInputService` and `SoundService` carry live
+values, and the two VMs disagree about which half of that is hard. Luau needs the
+service to be a *userdata* — `luaL_sandbox` enables `safeenv`, so a field read off
+a constant global **table** compiles to a `GETIMPORT` resolved once and a live
+value reads as a frozen one — but could get by with a single `__index` that
+string-compares a field name, and did. JavaScript has native accessors that run
+on every read and no caching problem at all, but registers one **per name**. So
+the catch-all had to become a *list* before either language could stop being the
+only one: `ServiceProperty` is a name and two `ScriptMethod`s, Luau's `__index`
+walks it and JavaScript defines an accessor per row, and the userdata apparatus —
+`Tag`, `MethodsKey` — is unchanged because the trap it defeats has not gone away.
+
+Five rules a reviewer should hold to:
+
+- **`ServiceSurface::LuauMethods` is a debt and reads as one.** A row there is a
+  method JavaScript does not have, which is the honest shape for a service that
+  is part way across — and it is the first place `TeleportService::
+  GetTeleportData` could have been declared rather than described in a comment.
+  `ContextActionService`'s two reporting methods are all that is left in it.
+  Moving a row out of it is what gives the other language that method.
+- **A property list is data and a property *name* must not appear in an
+  adapter.** `LuauServiceIndex` and `InstallJsServiceProperties` walk
+  `ServiceSurface::Properties` and know nothing else; a `if (field == "Volume")`
+  in either would be the second source of truth the whole arrangement exists to
+  prevent, one level up from `Instances.cpp`'s rule about `PropertyType`.
+- **A binding is not a pump, and shipping one without the other is the failure
+  this module names twice.** `CrossWorldService.MessageReceived` needed
+  `PumpJsDeliveries` to learn `BusKind::Channel`; `ContextActionService` needed
+  a JavaScript input pump to exist at all; `UserInputService`'s five signals
+  needed that pump to grow the whole of `PumpInput`'s signal half in the same
+  commit. A service installed in a VM that cannot deliver to it is
+  `InputChanged` again.
+- **`ScriptValue` is a payload on this interface and never a handle.**
+  `ReadValue`/`ReturnValue` carry the tree `HttpService` writes as JSON and
+  `CrossWorldService` puts on a bus — values that already leave a world. It has
+  no tag for an `EnumItem` and must not gain one, which is why
+  `GetBoundActionInfo` is still written twice: its record holds `Enum.KeyCode`
+  members, and a return type invented for one service's shape is what the
+  interface is not for. **`ScriptCall::ReturnEnum` is not a counter-example and
+  the difference is the point**: one member handed back from a method crosses
+  nothing, so each VM builds its own `EnumItem` and no wire format learns about
+  enums. A *record* holding them still has no neutral form.
+- **A return is added when a caller asks and never before.** `ReturnVector2`,
+  `ReturnEnum`, `ReturnEnums` and `ReturnInputObjects` arrived with
+  `UserInputService`'s six methods, each named by exactly one of them. A pure
+  virtual with no caller is a line every adapter has to satisfy the compiler with
+  and nobody has to get right.
+
+**`BreakpointService` stays Luau-only for a reason that is not a binding.**
+`Debugger::Add` refuses a `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` chunk, so a
+JavaScript binding would answer "nothing can be armed" to everything — the
+surface `HttpService`'s absent three are refused for being.
+
 **The nine that moved are the nine JavaScript did not have**: `GetPivot`,
 `PivotTo`, `AddTag`, `RemoveTag`, `HasTag`, `GetAttribute`, `SetAttribute`,
 `GetAttributes` and `GetAttributeChangedSignal`. The other twenty-one stay where
@@ -273,6 +342,14 @@ fired it; mouse buttons produced no signal at all while `InputState` had carried
 their edges since the same version. Both read as a broken engine rather than as
 an unfinished one, which is the trade `v0.5` records for `Heartbeat` and the
 reason `CollectionService` has no `GetInstanceAddedSignal`.
+
+**The five signals are one `SignalKind` told apart by name, in both languages.**
+`ServiceSignal::Property` is what carries the filter, `PumpInput` and
+`PumpJsInput` fire the row that matches, and the four report builders —
+`KeyReport`, `ButtonReport`, `MotionReport`, `WheelReport` — live in `Actions.cpp`
+because two pumps building a report each is two answers to what a frame did. An
+engine where a click carried a position in one language and not the other is one
+nobody could port a handler between.
 
 ## The debugger captures, and `BreakpointService` is the same object
 

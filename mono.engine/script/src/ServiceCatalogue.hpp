@@ -2,15 +2,28 @@
 
 // What services this engine has, said once, for every language that binds them.
 //
-// **The layer between "what a service is" and "how a VM builds one".**
-// `Bindings.hpp`'s `ServiceSurface` is the Luau half — a name, methods, signals
-// and a metatable — and `JsBindings.hpp` has its own. Neither can say the thing
-// both need to agree about: *which services exist*. So each side carried its own
-// list, and the two drifted exactly as two lists do. Luau installs nine surface
-// services; JavaScript installs five. `ContentService`, `UserInputService`,
-// `ContextActionService` and `BreakpointService` are reachable from one language
-// and not the other, nothing in the build says so, and the TypeScript
-// declarations claim two of them anyway.
+// **The layer between "what a service is" and "how a VM builds one".** Each side
+// carried its own list once, and the two drifted exactly as two lists do: Luau
+// installed nine surface services and JavaScript five, `ContentService`,
+// `UserInputService`, `ContextActionService` and `BreakpointService` were
+// reachable from one language and not the other, nothing in the build said so,
+// and the TypeScript declarations claimed two of them anyway.
+//
+// **This header answers *which services exist*; `ServiceSurface.hpp` answers
+// *what is on one*.** The second was VM-shaped until v0.16 and cost the same
+// thing one level down — a service described in `lua_CFunction`s can only be
+// built by Luau — which is why `ContentService`, `CollectionService`,
+// `HttpService`, `CrossWorldService` and `ContextActionService` stayed
+// Luau-only after the catalogue had already named the gap. `UserInputService`
+// and `SoundService` outlasted those five by one mechanism, a live *property*,
+// and crossed when `ServiceProperty` gave one a neutral shape.
+//
+// **Every surface service is now in both languages, and the one row that is not
+// is not a binding gap.** `BreakpointService` arms `lua_callbacks`' `debugstep`
+// and switches Luau into single-step mode; `Debugger::Add` refuses a `.js`,
+// `.mjs`, `.cjs`, `.ts` or `.tsx` chunk outright, so the JavaScript half would
+// answer "nothing can be armed" to everything. A JavaScript debugger is a
+// feature and not a binding — see `DEFERRED.md` D00106.
 //
 // **A catalogue rather than self-registration, and the difference is a linker
 // one.** The obvious shape is a static registrar per service file, each adding

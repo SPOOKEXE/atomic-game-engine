@@ -181,19 +181,33 @@ TEST_CASE("a withheld name is one the VM actually installs", "[script][vocabular
 }
 
 TEST_CASE("the two languages are described apart", "[script][vocabulary]") {
-	// **Not a tidiness check.** `engine.d.ts` currently declares
-	// `UserInputService` and `ContextActionService` for JavaScript because its
-	// prelude was written by mirroring Luau's, and neither global exists in
-	// that VM — a TypeScript file naming one typechecks and then fails. The
-	// walk cannot make that mistake, and this pins the property so that a
-	// future convenience does not reintroduce it.
+	// **Not a tidiness check.** `engine.d.ts` once declared `UserInputService`
+	// and `ContextActionService` for JavaScript because its prelude was written
+	// by mirroring Luau's, and neither global existed in that VM — a TypeScript
+	// file naming one typechecks and then fails. The walk cannot make that
+	// mistake, and this pins the property so that a future convenience does not
+	// reintroduce it.
+	//
+	// **`ContextActionService` left this list at v0.16 and `UserInputService` and
+	// `SoundService` followed it**, which is the honest half of the same check:
+	// each is described once now and both VMs install it, so asserting an absence
+	// here would be asserting a gap that has been closed. The last two went when
+	// `ServiceProperty` gave a live property a neutral shape — a userdata's
+	// `__index` on one side and `JS_DefinePropertyGetSet` on the other, from one
+	// list of names.
+	//
+	// **`require` is what is left, and it is not a service.** Modules are
+	// Luau-only because `OpenRequire` compiles a chunk, and a JavaScript one
+	// would be a second loader rather than a second binding — which is the same
+	// shape as `BreakpointService`, absent here only because a plain runtime
+	// installs no studio service in either VM.
 	Vm luau(Language::Luau);
 	Vm javascript(Language::JavaScript);
 
 	const ScriptSurface luauSurface = luau.Script->Surface();
 	const ScriptSurface javascriptSurface = javascript.Script->Surface();
 
-	for (const std::string_view luauOnly : {"UserInputService", "ContextActionService", "require"}) {
+	for (const std::string_view luauOnly : {"require"}) {
 		INFO(luauOnly);
 		CHECK(HasGlobal(luauSurface, luauOnly));
 		CHECK_FALSE(HasGlobal(javascriptSurface, luauOnly));

@@ -352,6 +352,13 @@ namespace engine::script {
 		OpenGame(State);
 		OpenWorkspace(State, Store);
 
+		// **Before the services, because two of them produce one.**
+		// `UserInputService`'s signals and a bound action's handler are both
+		// handed an `InputObject`, and a metatable registered after the service
+		// that hands one over would be looked up before it exists. The JavaScript
+		// runtime installs its class in the same position and for this reason.
+		OpenInputObject(State);
+
 		// **Every service this language binds, from the catalogue.** They used to
 		// be a hand-written call list here, which is how "which services exist"
 		// came to be two lists — this one and the JavaScript runtime's — that

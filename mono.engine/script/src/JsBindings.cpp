@@ -928,9 +928,10 @@ namespace engine::script {
 
 				// **Which refusal, from the catalogue**, for the reason the Luau
 				// half gives: a service the *other* language binds is a different
-				// failure from one the engine does not have, and this language is
-				// missing four of them — so this is the sentence a JavaScript
-				// author is most likely to see.
+				// failure from one the engine does not have. Every surface service
+				// is in both languages since v0.16, so the narrow sentence is now
+				// `BreakpointService`'s alone — which is a debugger feature this
+				// language does not have rather than a binding nobody wrote.
 				const ServiceDefinition *known = FindService(name);
 				const bool elsewhere =
 					known != nullptr && !Binds(known->Languages, ServiceLanguages::JavaScript);
@@ -1415,6 +1416,16 @@ namespace engine::script {
 		}
 	}
 
+	JSValue MakeJsEnumItem(JSContext *context, core::Name enumName, core::Name member) {
+		// **A wrapper rather than a move, because the class id, the payload and
+		// the finaliser are all this translation unit's.** What is outside is one
+		// caller — the input pump, which hands a bound action's handler
+		// `Enum.UserInputState.Begin` — and a second way to build an `EnumItem`
+		// is exactly the kind of duplicate `ReadEnumValueImpl` already exists to
+		// avoid on the way in.
+		return MakeEnumItem(context, enumName, member);
+	}
+
 	// --- the services, one installer each --------------------------------------
 	//
 	// **One function per service, and that is what `ServiceCatalogue.cpp` needs
@@ -1886,6 +1897,42 @@ namespace engine::script {
 				JS_FreeValue(context, result);
 				JS_FreeValue(context, reply);
 				Release(context, resolver);
+				continue;
+			}
+
+			// **A channel message is delivered to the world rather than to a
+			// topic**, so it goes to one signal with no subject rather than to a
+			// list of subscribers keyed by name. See `SignalKind::
+			// CrossWorldMessage` and `CrossWorldService.cpp`.
+			//
+			// **Absent until v0.16, which is why the service could not be bound
+			// here.** `CrossWorldService` is described once now and both
+			// languages install it; a `MessageReceived` this pump never fired
+			// would have been a signal that exists and is silent, which reads as
+			// a broken engine rather than an unfinished one.
+			if (delivery.Bus == world::BusKind::Channel) {
+				JSValue arguments[2];
+
+				ScriptValue decoded;
+				arguments[0] = Decode(delivery.Payload, decoded) == CodecStatus::Ok
+								   ? FromScriptValue(context, decoded)
+								   : JS_NULL;
+
+				// **The sender's name, second, which is what makes a channel a
+				// channel.** A topic subscriber is told which topic; a channel
+				// receiver is told who to answer, because answering is the point
+				// and the destination already knows it is itself.
+				const std::string_view from = delivery.From.Text();
+				arguments[1] = JS_NewStringLen(context, from.data(), from.size());
+
+				std::string failure =
+					FireJsSignal(context, SignalKind::CrossWorldMessage, ecs::NULL_ENTITY, 2, arguments);
+				if (!failure.empty() && firstError.empty()) {
+					firstError = std::move(failure);
+				}
+
+				JS_FreeValue(context, arguments[0]);
+				JS_FreeValue(context, arguments[1]);
 				continue;
 			}
 

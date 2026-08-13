@@ -193,7 +193,7 @@ namespace engine::script {
 			{"Heartbeat", SignalKind::Heartbeat},
 		};
 
-		static constexpr ServiceMethod METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			{"IsServer", IsServer},
 			{"IsClient", IsClient},
 			{"IsStudio", IsStudio},
@@ -202,7 +202,7 @@ namespace engine::script {
 
 		ServiceSurface surface;
 		surface.Name = "RunService";
-		surface.Methods = METHODS;
+		surface.LuauMethods = METHODS;
 		surface.Signals = SIGNALS;
 
 		InstallService(state, surface);

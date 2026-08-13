@@ -334,6 +334,12 @@ namespace engine::script {
 		note(PumpJsTweens(Context, delta));
 		PumpJsDebris(Context);
 
+		// **Input first, and that ordering is the useful one** — the same place
+		// `LuauRuntime::Heartbeat` puts it, and for its reason: a bound action's
+		// handler writes properties, and those writes should reach their
+		// listeners on *this* barrier rather than the next.
+		note(PumpJsInput(Context));
+
 		note(PumpJsChanges(Context));
 
 		// **After the property changes and before the tasks**, exactly as the

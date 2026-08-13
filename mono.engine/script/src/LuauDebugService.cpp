@@ -304,7 +304,7 @@ namespace engine::script {
 			return;
 		}
 
-		static constexpr ServiceMethod METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			// The high level: a script instance and a line.
 			{"SetBreakpoint", SetBreakpoint},
 			{"RemoveBreakpoint", RemoveBreakpoint},
@@ -323,7 +323,7 @@ namespace engine::script {
 		// every other surface service is the same shape for the same reason.
 		ServiceSurface surface;
 		surface.Name = "BreakpointService";
-		surface.Methods = METHODS;
+		surface.LuauMethods = METHODS;
 
 		InstallService(state, surface);
 	}

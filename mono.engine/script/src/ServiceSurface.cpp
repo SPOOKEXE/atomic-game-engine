@@ -38,16 +38,36 @@ namespace engine::script {
 		// subject — `RunService.Heartbeat` is the world's, not any instance's —
 		// which is what `NULL_ENTITY` means here.
 		for (const ServiceSignal &signal : surface.Signals) {
-			PushSignal(state, signal.Kind, ecs::NULL_ENTITY);
+			// The name filter, for a service whose signals share one kind —
+			// see `ServiceSignal::Property`. An invalid `core::Name` is what a
+			// signal with no filter carries, and `PushSignal`'s default.
+			PushSignal(
+				state,
+				signal.Kind,
+				ecs::NULL_ENTITY,
+				signal.Property == nullptr ? core::Name{} : core::Name(signal.Property)
+			);
 			lua_setfield(state, -2, signal.Name);
 		}
+
+		// **The methods written once, through the neutral trampoline.** This is
+		// the same table `ServiceCatalogue.cpp` hands the JavaScript installer,
+		// so a row here is a member of the service in both languages — see
+		// `ServiceSurface::Methods`.
+		InstallLuauServiceMethods(state, surface.Methods);
 
 		// **The context as upvalue 1, on every method, without exception.** This
 		// is the invariant the five copies each had to remember on their own:
 		// `UpvalueContext` reads index 1 and a method installed with
 		// `lua_pushcfunction` gives it nothing to read — which compiles, links,
 		// runs, and dereferences whatever was there.
-		for (const ServiceMethod &method : surface.Methods) {
+		//
+		// **After the neutral rows, so a name in both lists resolves to the
+		// per-language one.** Nothing is in both today; the order is fixed here
+		// so that a service part way through migrating keeps the behaviour it
+		// had until its neutral row is finished, rather than getting whichever
+		// loop ran last.
+		for (const LuauServiceMethod &method : surface.LuauMethods) {
 			lua_pushlightuserdata(state, &context);
 			lua_pushcclosure(state, method.Function, method.Name, 1);
 			lua_setfield(state, -2, method.Name);
@@ -59,16 +79,17 @@ namespace engine::script {
 		// table set here is the same table `game:GetService(name)` hands back —
 		// never a second one built to look like it, which a script comparing the
 		// two would tell apart immediately.
-		if (surface.Index == nullptr) {
+		if (surface.Properties.empty()) {
 			lua_setglobal(state, surface.Name);
 			return;
 		}
 
 		// **A service with properties is a *userdata*, and the table above
-		// becomes its method table in the registry.** `ServiceSurface::Index`
-		// carries the whole argument: on a table, `safeenv` turns a property
-		// read into a `GETIMPORT` that resolves once and caches, so a live value
-		// reads as a frozen one. A userdata's field access is never an import.
+		// becomes its method table in the registry.**
+		// `ServiceSurface::Properties` carries the whole argument: on a table,
+		// `safeenv` turns a property read into a `GETIMPORT` that resolves once
+		// and caches, so a live value reads as a frozen one. A userdata's field
+		// access is never an import.
 		//
 		// **Refused rather than half-built** when the two fields a userdata
 		// service cannot do without are missing. A tag of zero is `lua_
@@ -90,15 +111,27 @@ namespace engine::script {
 		lua_newuserdatatagged(state, 1, surface.Tag);
 		lua_newtable(state);
 
-		lua_pushlightuserdata(state, &context);
-		lua_pushcclosure(state, surface.Index, "__index", 1);
-		lua_setfield(state, -2, "__index");
-
-		if (surface.NewIndex != nullptr) {
+		// **Upvalue 1 is the context and upvalue 2 is the surface itself**,
+		// which is what turns two generic metamethods into this service's — see
+		// `LuauServiceIndex`. The address is the reason `InstallService`
+		// requires a surface with static storage duration; a local would be
+		// read after it had gone.
+		//
+		// **`__newindex` is installed unconditionally**, unlike the methods,
+		// because a service with only read-only properties still has to refuse a
+		// write *by name*. Luau refuses either way — a userdata with no
+		// `__newindex` raises "attempt to index" — but that message names the
+		// receiver rather than the member, which is the difference between
+		// finding a typo and going to look at the binding.
+		const auto bind = [&](const char *metamethod, LuauFunction function) {
 			lua_pushlightuserdata(state, &context);
-			lua_pushcclosure(state, surface.NewIndex, "__newindex", 1);
-			lua_setfield(state, -2, "__newindex");
-		}
+			lua_pushlightuserdata(state, const_cast<ServiceSurface *>(&surface));
+			lua_pushcclosure(state, function, metamethod, 2);
+			lua_setfield(state, -2, metamethod);
+		};
+
+		bind("__index", LuauServiceIndex);
+		bind("__newindex", LuauServiceNewIndex);
 
 		// **Named, so `getmetatable` hands back a string rather than the table.**
 		// A script that could reach the metatable could replace `__index` and

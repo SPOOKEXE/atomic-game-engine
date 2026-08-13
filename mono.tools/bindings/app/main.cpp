@@ -1879,23 +1879,24 @@ declare task: {
 		out << "\tMessagingService: MessagingService,\n";
 		out << "\tTeleportService: TeleportService,\n";
 		out << "\tContentService: ContentService,\n";
-
-		// **Luau only, and the gap is deliberate.** `LuauRuntime` installs these
-		// two and `JavaScriptRuntime` does not, so a row in the TypeScript half
-		// would be a type for a global that is not there.
 		out << "\tCollectionService: CollectionService,\n";
 		out << "\tHttpService: HttpService,\n";
 		out << "\tCrossWorldService: CrossWorldService,\n";
-		out << "\tSoundService: SoundService,\n";
-
-		// **These two were reachable at run time and absent from this map**,
-		// which made `game:GetService("UserInputService")` — the form the docs
-		// and every test use, and the only form a live property survives, since
-		// a bare global read is a `GETIMPORT` — a typecheck error. The type is
-		// the hand-written one above rather than a class, because these are
-		// globals and not instances in the tree.
-		out << "\tUserInputService: UserInputServiceType,\n";
 		out << "\tContextActionService: ContextActionServiceType,\n";
+
+		// **The two that carry a live property, and the TypeScript map has them
+		// too since v0.16.** They were this paragraph's exception for as long as
+		// `ServiceSurface` could describe a method and not an accessor; the type
+		// is still the hand-written one above rather than a class, because both
+		// are globals and not instances in the tree.
+		//
+		// `UserInputService` is also the row that was reachable at run time and
+		// absent from this map, which made `game:GetService("UserInputService")`
+		// — the form the docs and every test use, and the only form a live
+		// property survives, since a bare global read is a `GETIMPORT` — a
+		// typecheck error.
+		out << "\tSoundService: SoundService,\n";
+		out << "\tUserInputService: UserInputServiceType,\n";
 		out << "\tMemoryStoreService: MemoryStoreService,\n";
 		out << "\tDataStoreService: DataStoreService,\n";
 
@@ -2051,23 +2052,115 @@ declare interface AncestrySignal {
 // own `Attribute`.
 // --- input ------------------------------------------------------------------
 //
-// **`UserInputService`, `ContextActionService`, `SoundService` and `InputObject`
-// are deliberately not declared here, and until v0.16 the first two were.**
-// `ServiceCatalogue.cpp` says which languages bind each service, and all three
-// are Luau's alone — so these declarations promised globals a JavaScript author
-// gets `undefined` from at run time, which is exactly the drift the catalogue was
-// built to end. It is the same failure `ServiceCatalogue.hpp` opens by naming:
-// "the TypeScript declarations claim two of them anyway".
+// **`UserInputService` is declared here at last, and the history is the reason
+// to say so.** `engine.d.ts` once declared it and `ContextActionService` because
+// its prelude was written by mirroring Luau's, and neither global existed in
+// that VM — a TypeScript file naming one typechecked and then failed. That is
+// the failure `ServiceCatalogue.hpp` opens by naming, and the rule that came out
+// of it is that a declaration here is a claim the catalogue has to back.
 //
-// **What closing the gap needs is a JavaScript twin of `ServiceSurface`.** All
-// three carry a live property — `MouseBehavior`, `Volume` — and the Luau half
-// builds a property-bearing service as a *userdata* to defeat `safeenv`'s
-// `GETIMPORT` caching. `JsBindings.hpp` has no such shape: every JavaScript
-// service is a hand-built object, so binding these means either a
-// `JS_DefinePropertyGetSet` pair written out per property per service, or one
-// table-driven installer that both VMs read the way `ServiceCatalogue` is read
-// now. The second is the one worth having, and it is the change that would let
-// these declarations come back.
+// It does now. `ServiceProperty` gave a live property a neutral shape, so both
+// VMs install `UserInputService` and `SoundService` from one description —
+// `MouseBehavior` and `Volume` are accessors here where they are a userdata's
+// `__index` there — and `engine.script.servicecatalogue` asks a running VM
+// whether every row it claims is reachable.
+//
+// **What a JavaScript author still does not get is `GetBoundActionInfo` and
+// `GetAllBoundActionInfo`** — they answer a record holding `Enum.KeyCode`
+// members, which has no neutral return — so they are absent below rather than
+// declared and undefined.
+
+// What a bound action's handler is handed. Roblox's `InputObject`, and the same
+// five fields the Luau half offers over the same report.
+declare interface InputObject {
+	readonly KeyCode: Enum.KeyCode;
+	readonly UserInputType: Enum.UserInputType;
+	readonly UserInputState: Enum.UserInputState;
+
+	// Pixels from the top-left of the window, with the wheel's notches in Z.
+	readonly Position: Vector3;
+	readonly Delta: Vector3;
+}
+
+// What `InputBegan`, `InputEnded` and `InputChanged` call a handler with.
+//
+// Its own type rather than `PropertyChangedSignal`, which passes nothing.
+declare interface InputSignal {
+	Connect(handler: (input: InputObject) => void): RBXScriptConnection;
+	Once(handler: (input: InputObject) => void): RBXScriptConnection;
+}
+
+// The window's focus edges, which Roblox calls with nothing.
+declare interface WindowFocusSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+}
+
+declare interface UserInputService {
+	MouseBehavior: Enum.MouseBehavior;
+	MouseDeltaSensitivity: number;
+	readonly KeyboardEnabled: boolean;
+	readonly MouseEnabled: boolean;
+
+	// **Present and always false.** There is no gamepad, touch surface, headset
+	// or motion sensor anywhere in `engine::input`, and a Roblox place branches
+	// on these to pick a control scheme — a missing property is `undefined` here
+	// where a false one takes the other branch.
+	readonly GamepadEnabled: boolean;
+	readonly TouchEnabled: boolean;
+	readonly VREnabled: boolean;
+	readonly AccelerometerEnabled: boolean;
+	readonly GyroscopeEnabled: boolean;
+
+	readonly InputBegan: InputSignal;
+	readonly InputEnded: InputSignal;
+
+	// Fires for pointer motion and for the wheel, which are the two things this
+	// engine can report changing.
+	readonly InputChanged: InputSignal;
+
+	// Everything reads as released on the frame focus is lost, and
+	// `WindowFocusReleased` is delivered before those releases so a listener can
+	// tell which explains which.
+	readonly WindowFocused: WindowFocusSignal;
+	readonly WindowFocusReleased: WindowFocusSignal;
+
+	IsKeyDown(key: Enum.KeyCode): boolean;
+
+	// False for the three `Enum.UserInputType` members that are not buttons.
+	IsMouseButtonPressed(button: Enum.UserInputType): boolean;
+
+	GetMouseLocation(): Vector2;
+	GetMouseDelta(): Vector2;
+	GetKeysPressed(): Enum.KeyCode[];
+
+	// `InputObject`s and not `EnumItem`s, which is Roblox's shape: the object
+	// carries where the pointer was as well as which button it is.
+	GetMouseButtonsPressed(): InputObject[];
+}
+
+// What a world decides about how it is heard. See the Luau half for the eleven
+// Roblox members that are absent and what each would need first.
+declare interface SoundService {
+	// **Not a Roblox property**, which has a `SoundGroup` instead and this
+	// engine has no such class. Linear, 1 being every sound as authored, and
+	// above 1 is legal for the reason `Sound.Volume` is.
+	Volume: number;
+
+	// **A pair and not two values, which is the one place this surface reads
+	// differently from Luau's.** A method with more than one answer is a Luau
+	// shape; JavaScript has no multiple return, so `ScriptCall` packs the two
+	// into an array and an author destructures it:
+	//
+	//     const [mode, ear] = SoundService.GetListener();
+	GetListener(): [Enum.ListenerType, Instance | null];
+
+	// **`Enum.ListenerType` has two members here and four in Roblox.** The two
+	// missing ones place the ear *and turn it*, and the mixer is posted a
+	// position with no facing, so they are absent from the enum rather than
+	// refused by this method.
+	SetListener(listenerType: Enum.ListenerType, listener?: Instance | null): void;
+}
 
 declare type EngineAttribute =
 	| boolean
@@ -2385,6 +2478,129 @@ declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
 }
 
+// `(message, fromWorldName)`. The sender's name is second because a channel is
+// the one route where answering is the point — the receiver already knows it is
+// itself.
+declare interface CrossWorldSignal {
+	Connect(handler: (message: unknown, fromWorld: string) => void): RBXScriptConnection;
+	Once(handler: (message: unknown, fromWorld: string) => void): RBXScriptConnection;
+}
+
+// The addressed route out of a world, where `MessagingService` is the fan-out.
+// There is deliberately no `GetWorlds`: a world's storage cannot see its
+// siblings, and `Send` answering false for a world that is not running is the
+// honest half of the same question.
+declare interface CrossWorldService {
+	// False when the world is not running or this world is over its bus budget
+	// for the tick.
+	Send(world: string, message: unknown): boolean;
+
+	readonly MessageReceived: CrossWorldSignal;
+}
+
+// What content this world holds, which is the other half of naming an asset.
+// Every list is sorted, so a scene that lays content out arranges itself the
+// same way on every run. See the Luau half for what each answer means.
+declare interface ContentService {
+	GetMeshes(): string[];
+
+	// What there is to name, where `GetMeshes` is what has been named. Setting a
+	// `MeshId` from this list is what fetches that one asset.
+	GetPublishedMeshes(): string[];
+
+	// The sheets a mesh's own submeshes name, in submesh order — not sorted and
+	// not deduplicated, unlike every other list here. An untextured run keeps
+	// its slot as an empty string.
+	GetMeshTextures(mesh: string): string[];
+
+	GetTextures(): string[];
+
+	// Null for a still image and for a texture this world has not been told
+	// about, which are the same answer.
+	GetFlipbook(texture: string): { Side: number; Frames: number; FrameRate: number } | null;
+
+	GetTriangleCount(mesh: string): number;
+}
+
+// What carries a tag, which is the half `Instance.AddTag` cannot answer.
+//
+// No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
+// here would never fire, and one that never fires reads as a broken engine.
+declare interface CollectionService {
+	// False when the instance carries no tags and when this world's thirty-two
+	// tags are all spoken for.
+	AddTag(instance: Instance, tag: string): boolean;
+
+	// The tag's name stays registered afterwards, so `GetAllTags` still lists
+	// one nothing carries.
+	RemoveTag(instance: Instance, tag: string): boolean;
+	HasTag(instance: Instance, tag: string): boolean;
+
+	// Sorted by the order the world was built in, and empty for a tag nothing
+	// has ever added.
+	GetTagged(tag: string): Instance[];
+
+	GetTags(instance: Instance): string[];
+	GetAllTags(): string[];
+}
+
+// JSON, a GUID and a URL escape — and **no `RequestAsync`, `GetAsync` or
+// `PostAsync`**, which are absent on purpose rather than missing. See the Luau
+// half, which carries the whole argument.
+declare interface HttpService {
+	// The same rules `MessagingService` encodes by, because it is the same table
+	// walk. Keys are written in sorted order. Throws for a cycle, for nesting
+	// past sixteen deep, for a NaN or an infinity, and for anything with no JSON
+	// form.
+	JSONEncode(value: unknown): string;
+
+	// `null` becomes `null`. Throws on malformed text, on text after the value,
+	// and on a number a double cannot hold.
+	JSONDecode(text: string): unknown;
+
+	// **Deterministic**, and that is a decision rather than an oversight — two
+	// runs of one world hand out the same sequence, so this is an identifier for
+	// things inside a world and never a token or a secret.
+	//
+	// Braces by default. **`GenerateGUID(0)` differs from Luau's**, because the
+	// argument is read with this language's own truthiness and zero is falsy
+	// here and truthy there.
+	GenerateGUID(wrapInCurlyBraces?: boolean): string;
+
+	// RFC 3986: the unreserved set through unchanged, every other byte as `%XX`.
+	// A space is `%20` and never `+`.
+	UrlEncode(text: string): string;
+}
+
+// A priority stack over the keyboard, which is what this adds over polling: the
+// highest claim on a key wins and the rest never see the press.
+//
+// **`GetBoundActionInfo` and `GetAllBoundActionInfo` are Luau's alone** — they
+// answer a record holding `Enum.KeyCode` members and there is no neutral return
+// for one, so they are absent here rather than declared and undefined.
+declare interface ContextActionService {
+	// The touch-button argument is accepted and ignored: there is no touch
+	// surface, and refusing it would make a script fail on a line describing
+	// something this engine does not have.
+	BindAction(
+		name: string,
+		handler: (name: string, state: Enum.UserInputState, input: InputObject) => void,
+		createTouchButton: boolean,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	BindActionAtPriority(
+		name: string,
+		handler: (name: string, state: Enum.UserInputState, input: InputObject) => void,
+		createTouchButton: boolean,
+		priority: number,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	UnbindAction(name: string): void;
+	UnbindAllActions(): void;
+}
+
 // `tween.Completed`, which takes no arguments. Its own type rather than
 // `GuiSignal` for the reason the Luau half gives: they are structurally
 // identical and one of the two names would be false.
@@ -2438,6 +2654,20 @@ declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
+
+// The seven that stopped being Luau's at v0.16 — five when `ServiceSurface`
+// stopped naming a VM, and the last two when `ServiceProperty` gave a live
+// property a neutral shape. **Every surface service this engine has is now in
+// both languages**, and `BreakpointService` is not one: it is absent outside a
+// studio and refuses a JavaScript chunk outright, which is a debugger feature
+// and not a binding.
+declare const CrossWorldService: CrossWorldService;
+declare const ContentService: ContentService;
+declare const CollectionService: CollectionService;
+declare const HttpService: HttpService;
+declare const ContextActionService: ContextActionService;
+declare const UserInputService: UserInputService;
+declare const SoundService: SoundService;
 
 // The world this script runs on. `game` is the universe above it.
 declare const workspace: Workspace;
@@ -2724,10 +2954,21 @@ declare const task: {
 		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";
 		out << "\t\t(service: \"DataStoreService\"): DataStoreService;\n";
 
-		// The two that step on the tick, which this language binds as well —
-		// unlike the four the Luau map carries alone.
+		// The two that step on the tick, which this language binds as well.
 		out << "\t\t(service: \"TweenService\"): TweenService;\n";
 		out << "\t\t(service: \"Debris\"): Debris;\n";
+
+		// The seven that stopped being Luau's at v0.16. **The last asymmetry
+		// between this list and the Luau map is gone**: `UserInputService` and
+		// `SoundService` are in both, because `ServiceProperty` gave a live
+		// property a shape both VMs can install.
+		out << "\t\t(service: \"CrossWorldService\"): CrossWorldService;\n";
+		out << "\t\t(service: \"ContentService\"): ContentService;\n";
+		out << "\t\t(service: \"CollectionService\"): CollectionService;\n";
+		out << "\t\t(service: \"HttpService\"): HttpService;\n";
+		out << "\t\t(service: \"ContextActionService\"): ContextActionService;\n";
+		out << "\t\t(service: \"UserInputService\"): UserInputService;\n";
+		out << "\t\t(service: \"SoundService\"): SoundService;\n";
 		out << "\t};\n";
 		out << "};\n\n";
 

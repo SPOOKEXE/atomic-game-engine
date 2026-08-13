@@ -58,13 +58,13 @@ namespace engine::script {
 	}
 
 	void OpenDebrisService(lua_State *state) {
-		static constexpr ServiceMethod METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			{"AddItem", AddItem},
 		};
 
 		ServiceSurface surface;
 		surface.Name = "Debris";
-		surface.Methods = METHODS;
+		surface.LuauMethods = METHODS;
 
 		InstallService(state, surface);
 	}

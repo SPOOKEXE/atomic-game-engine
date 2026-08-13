@@ -35,16 +35,100 @@ namespace engine::script {
 
 		// One row: what the service is, and how each language builds it.
 		//
+		// **Three ways to build one, and the third is the one to reach for.** A
+		// `Surface` is a `ServiceSurface` — data, with no VM in it — so both
+		// installers below read the same description and the service exists in
+		// both languages by construction. `Luau` and `JavaScript` are the
+		// per-language installers a service still needs when what it offers is
+		// not a method: a live property, a class of its own, a closure over
+		// something only that translation unit has.
+		//
 		// **A null installer is a language that does not bind this service.** It
 		// is not a hole to be filled in silently — `ServiceLanguages` says the
 		// same fact in a form a refusal message and the binding generator can
-		// read, and the two are checked against each other below so a row cannot
-		// claim a language it has no installer for.
+		// read, and the two are checked against each other by
+		// `engine.script.servicecatalogue` so a row cannot claim a language it
+		// has no installer for.
 		struct Row {
 			ServiceDefinition Definition;
+
+			// The description both languages build from, or null.
+			//
+			// Set on a row and the two below it are ignored: a surface *is* how
+			// each language installs it.
+			const ServiceSurface &(*Surface)();
+
 			void (*Luau)(lua_State *);
 			void (*JavaScript)(JSContext *, JSValueConst);
 		};
+
+		// One row's surface as a JavaScript object.
+		//
+		// **The twin of `InstallService`, and it is here rather than in
+		// `JsSurface.cpp` because this is the file allowed to have met both
+		// VMs.** `ServiceSurface` names `lua_State` in two of its members — a
+		// forward declaration, but a JavaScript translation unit still has no
+		// business reading them — so the function that turns one into a
+		// JavaScript object lives beside the table that owns both halves.
+		//
+		// **Signals first, so a method of the same name wins**, which is the
+		// order `InstallService` fixes for the same reason.
+		//
+		// `ServiceSurface::LuauMethods` is deliberately not installed: those are
+		// the rows a service has not moved across, and building a JavaScript
+		// member for a `lua_CFunction` is not a thing that can be done.
+		void InstallJsService(JSContext *context, JSValueConst global, const ServiceSurface &surface) {
+			if (surface.Name == nullptr) {
+				return;
+			}
+
+			JSValue service = JS_NewObject(context);
+
+			for (const ServiceSignal &signal : surface.Signals) {
+				// No subject: a service signal is the world's, not any
+				// instance's — which is what `NULL_ENTITY` means here. The name
+				// filter is what tells `UserInputService`'s five apart, since
+				// they share one `SignalKind`.
+				JS_SetPropertyStr(
+					context,
+					service,
+					signal.Name,
+					MakeJsSignal(
+						context,
+						signal.Kind,
+						ecs::NULL_ENTITY,
+						signal.Property == nullptr ? core::Name{} : core::Name(signal.Property)
+					)
+				);
+			}
+
+			InstallJsServiceMethods(context, service, surface.Methods);
+
+			// **After the methods, so an accessor wins a name a method also
+			// claims** — the order `InstallService` fixes for the signals, for
+			// the same reason. Nothing is in both lists today.
+			InstallJsServiceProperties(context, service, surface.Name, surface.Properties);
+
+			// **Sealed when it has properties, so a write to a name it does not
+			// have is refused rather than kept.** The Luau twin is a userdata and
+			// a userdata has no fields, so `SoundService.AmbientReverb = 1` raises
+			// there; on an extensible object it would land as a new property and a
+			// script would read its own typo back forever. Chunks run under
+			// `JS_EVAL_FLAG_STRICT`, which is what turns the refused add into a
+			// thrown `TypeError` rather than a silent no-op.
+			//
+			// Only the property-bearing services, because only those have a
+			// userdata on the other side to agree with.
+			if (!surface.Properties.empty()) {
+				JS_PreventExtensions(context, service);
+			}
+
+			// **One object, and this line is why.** `GetService` looks the name
+			// up in the globals, so the object set here is the same one
+			// `game.GetService(name)` hands back rather than a second built to
+			// look like it.
+			JS_SetPropertyStr(context, global, surface.Name, service);
+		}
 
 		// Every service, in install order.
 		//
@@ -56,22 +140,28 @@ namespace engine::script {
 		constexpr std::array<Row, 14> ROWS{{
 			// --- the bus, which is the only route out of a world ---------------
 			{{"MessagingService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 nullptr,
 			 OpenMessagingService,
 			 OpenJsMessagingService},
 
 			// **`GetTeleportData` is Luau-only inside a service both languages
-			// bind**, which this table cannot express and is worth naming here
-			// rather than losing: the mask is per service, and per *method*
-			// parity is the next layer down. See `ServiceCatalogue.hpp`.
+			// bind**, which the language mask cannot express because it is per
+			// service. `ServiceSurface::LuauMethods` is where a service *can*
+			// say that since v0.16 — `ContextActionService` below uses it — and
+			// this row cannot yet, because both halves are still hand-written
+			// installers rather than one surface.
 			{{"TeleportService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 nullptr,
 			 OpenTeleportService,
 			 OpenJsTeleportService},
 
 			{{"MemoryStoreService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 nullptr,
 			 OpenMemoryStoreService,
 			 OpenJsMemoryStoreService},
 
 			{{"DataStoreService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 nullptr,
 			 OpenDataStoreService,
 			 OpenJsDataStoreService},
 
@@ -80,49 +170,76 @@ namespace engine::script {
 			// `world::BusKind::Channel`: a topic has no destination and a
 			// teleport carries a person, so this is the one way a world says
 			// something to one named world.
-			{{"CrossWorldService", ServiceAvailability::Always, ServiceLanguages::Luau},
-			 OpenCrossWorldService,
+			//
+			// **The first service described once**, which is what made it
+			// reachable from JavaScript — its `MessageReceived` needed nothing
+			// new, because a signal has crossed languages since v0.6. What it
+			// needed was `PumpJsDeliveries` learning `BusKind::Channel`.
+			{{"CrossWorldService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 CrossWorldServiceSurface,
+			 nullptr,
 			 nullptr},
 
 			{{"RunService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 nullptr,
 			 OpenRunService,
 			 OpenJsRunService},
 
-			// --- the Luau-only four, stated rather than discovered --------------
+			// --- the two the property mechanism closed --------------------------
 			//
-			// Each of these is a real gap and not a decision. They are declared
-			// with the languages they actually have, so `GetService` can say which
-			// language binds them and the generator can stop declaring a type for
-			// a runtime that has none.
-			{{"UserInputService", ServiceAvailability::Always, ServiceLanguages::Luau},
-			 OpenUserInputService,
+			// **Both carry a live *property*, and that was the last mechanism a
+			// `ServiceSurface` could not describe.** It could describe a method,
+			// so five services crossed at v0.16 and these two did not: Luau binds
+			// a property by making the service a *userdata* to defeat `safeenv`'s
+			// `GETIMPORT` caching, and a `ScriptMethod` is a call where a property
+			// is an accessor.
+			//
+			// `ServiceProperty` is what closed it, and the shape it took is
+			// decided by JavaScript rather than by Luau: a native accessor runs on
+			// every read and needs no userdata at all, but is registered *per
+			// name* — so the catch-all `__index` had to become a list before the
+			// other language could have one. The Luau half walks that same list
+			// now, which also retires a chain of `if (field == ...)`.
+			{{"UserInputService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 UserInputServiceSurface,
+			 nullptr,
 			 nullptr},
 
-			{{"ContextActionService", ServiceAvailability::Always, ServiceLanguages::Luau},
-			 OpenContextActionService,
+			{{"SoundService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 SoundServiceSurface,
+			 nullptr,
 			 nullptr},
 
-			{{"ContentService", ServiceAvailability::Always, ServiceLanguages::Luau},
-			 OpenContentService,
+			// --- the four that stopped being Luau's at v0.16 --------------------
+			//
+			// Each was a real gap and not a decision, and each closed the same
+			// way: the methods became `ScriptMethod` rows and the service became
+			// a `ServiceSurface` both installers read. See `ServiceSurface.hpp`.
+			//
+			// **`ContextActionService` is the one that needed more than a
+			// rewrite.** Its handler is a callable, so `ActionStack` had to
+			// become shared state with the callables left opaque; and a bound
+			// action that never fires is worse than one that cannot be bound, so
+			// this language gained an input pump — `PumpJsInput` — at the same
+			// time.
+			{{"ContextActionService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 ContextActionServiceSurface,
+			 nullptr,
 			 nullptr},
 
-			{{"CollectionService", ServiceAvailability::Always, ServiceLanguages::Luau},
-			 OpenCollectionService,
+			{{"ContentService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 ContentServiceSurface,
+			 nullptr,
 			 nullptr},
 
-			{{"HttpService", ServiceAvailability::Always, ServiceLanguages::Luau}, OpenHttpService, nullptr},
+			{{"CollectionService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 CollectionServiceSurface,
+			 nullptr,
+			 nullptr},
 
-			// **Luau only because it carries a live property**, which is a
-			// stronger reason than the four above it have. `ServiceSurface`
-			// builds a property-bearing service as a *userdata* to defeat
-			// `safeenv`'s `GETIMPORT` caching, and `JsBindings.hpp` has no such
-			// mechanism — every JavaScript service is a hand-built object with
-			// method properties on it. Binding this there means either a
-			// `JS_DefinePropertyGetSet` pair per property or a JavaScript twin of
-			// `ServiceSurface`, and the second is the one worth having, because
-			// `UserInputService` is waiting behind the same gap.
-			{{"SoundService", ServiceAvailability::Always, ServiceLanguages::Luau},
-			 OpenSoundService,
+			{{"HttpService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 HttpServiceSurface,
+			 nullptr,
 			 nullptr},
 
 			// --- the two that step on the tick ---------------------------------
@@ -136,10 +253,12 @@ namespace engine::script {
 			// `PumpTweens` and `PumpDebris` at the barrier, not anything about
 			// where they are installed.
 			{{"TweenService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 nullptr,
 			 OpenTweenService,
 			 OpenJsTweenService},
 
 			{{"Debris", ServiceAvailability::Always, ServiceLanguages::Both},
+			 nullptr,
 			 OpenDebrisService,
 			 OpenJsDebrisService},
 		}};
@@ -152,8 +271,18 @@ namespace engine::script {
 		// reads `LuauContext::Breakpoints` to decide whether to install at all, so
 		// it must run after that pointer is set, and it writes a global, so it
 		// must run before the sandbox freezes the table.
+		//
+		// **`BreakpointService` is Luau's alone because breakpoints are, and
+		// that is a feature gap rather than a binding one.** `Debugger::Add`
+		// refuses a `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` chunk outright — see
+		// `BreakpointsRefused` — so a JavaScript binding would be a service every
+		// method of which reports that nothing can be armed. That is the surface
+		// `HttpService`'s absent three are refused for being: one that looks
+		// decided. Closing it means teaching QuickJS to report a line, which is
+		// `DEFERRED.md` D00106 and not a `ServiceSurface`.
 		constexpr std::array<Row, 1> STUDIO_ROWS{{
 			{{"BreakpointService", ServiceAvailability::Studio, ServiceLanguages::Luau},
+			 nullptr,
 			 OpenBreakpointService,
 			 nullptr},
 		}};
@@ -211,10 +340,13 @@ namespace engine::script {
 
 		for (const Row &row : phase == ServiceAvailability::Always ? std::span<const Row>(ROWS)
 																   : std::span<const Row>(STUDIO_ROWS)) {
-			// A row this language does not bind installs nothing. The refusal
-			// happens where a script asks for it by name, which is the only place
-			// a script can tell the difference.
-			if (row.Luau != nullptr) {
+			// **A surface first, because a surface is how both languages get
+			// it.** A row this language does not bind installs nothing at all;
+			// the refusal happens where a script asks for it by name, which is
+			// the only place a script can tell the difference.
+			if (row.Surface != nullptr) {
+				InstallService(state, row.Surface());
+			} else if (row.Luau != nullptr) {
 				row.Luau(state);
 			}
 		}
@@ -228,7 +360,9 @@ namespace engine::script {
 		// remembered.
 		for (const Row &row : phase == ServiceAvailability::Always ? std::span<const Row>(ROWS)
 																   : std::span<const Row>(STUDIO_ROWS)) {
-			if (row.JavaScript != nullptr) {
+			if (row.Surface != nullptr) {
+				InstallJsService(context, global, row.Surface());
+			} else if (row.JavaScript != nullptr) {
 				row.JavaScript(context, global);
 			}
 		}
