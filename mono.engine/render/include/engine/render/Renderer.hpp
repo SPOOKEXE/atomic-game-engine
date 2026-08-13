@@ -72,13 +72,16 @@ namespace engine::render {
 
 	// A second view, rendered into a texture instead of the swapchain.
 	//
-	// Surface textures are double-buffered; nested reflections are one frame stale.
+	// Surface textures are double-buffered, so what a pane shows the screen is
+	// the frame before. **What a pane shows *another pane* is not**, and stopped
+	// being so in v0.15: the levels below the first are rendered inside the frame
+	// by a recursion, from cameras derived level by level. See `PaneNormal` for
+	// what that needs and why iterating could not supply it.
 	//
 	// **Mirrors and cross-world windows, and since v0.15 nothing else.** A
 	// same-world portal used to be one of these and is a `PortalView` now, for
-	// the reason that type states in full: a surface camera is placed from the
-	// eye, so a chain of them is drawn from the wrong viewpoint rather than
-	// merely from stale textures.
+	// the reason that type states in full: the two derive a sub-camera by
+	// different rules, and only one of them is a reflection.
 	//
 	// @since v0.6
 	struct SurfaceView {
@@ -97,6 +100,53 @@ namespace engine::render {
 
 		// Where the surface camera is, in world space.
 		core::CFrame Frame;
+
+		// The pane this camera projects off, when it is a mirror parented to one.
+		//
+		// **What lets the surface pass descend, and the whole of what it was
+		// missing.** `Frame` and `Projection` are a camera *already placed from
+		// the eye*, so a pane appearing inside another pane's picture was drawn
+		// and sampled from a viewpoint nobody was looking from — the coordinate
+		// leaves the texture's rectangle and `opaque.frag` falls back to the flat
+		// lit pane, which is what "a mirror in a mirror shows a blank slab" was.
+		//
+		// A mirror's camera is a function of the pane and the viewer —
+		// `scene::ReflectCamera` — so a pass holding the *rectangle* can place
+		// that camera for a viewer that is not the eye, which is exactly what the
+		// level below a mirror needs. `PortalView` carries the same four vectors
+		// for the same reason, and neither type reads them off a component,
+		// because measuring a face is `scene::GatherSurfacePanes`' job.
+		//
+		// **A zero `PaneNormal` means "not a pane this pass may descend into"**,
+		// and it is the ordinary case rather than an error: a camera parented to
+		// the world has no face to reflect through, and one showing another
+		// world's instances has no local geometry behind it. Both keep the single
+		// eye-derived image they have always had.
+		//
+		// `Centre ± First ± Second` is the four corners, as everywhere else.
+		//
+		// @since v0.15
+		//@{
+		core::Vector3 PaneCentre;
+		core::Vector3 PaneNormal;
+		core::Vector3 PaneFirst;
+		core::Vector3 PaneSecond;
+		//@}
+
+		// The lens the pane's author gave the camera, which is what a camera
+		// placed for a deeper viewer has to be fitted at.
+		//
+		// **Carried rather than read back out of `Projection`.** The near plane is
+		// recoverable from a projection matrix and the far plane is recoverable
+		// badly, and both are already known where the pane was measured — so a
+		// recursion that recovered them would be deriving, once per level, two
+		// numbers that were handed over for free.
+		//
+		// @since v0.15
+		//@{
+		float PaneNear = 0.1f;
+		float PaneFar = 500.0f;
+		//@}
 
 		// What it renders through, already built.
 		//
@@ -229,20 +279,24 @@ namespace engine::render {
 
 	// One same-world portal, as the recursive pass needs it.
 	//
-	// **Beside `surfaces` and never one of them, because a portal is not a
-	// surface camera.** A `SurfaceView` says where a camera stands, and every
-	// surface camera is placed from the *eye* — so when one surface pass draws
-	// another surface's pane it projects that pane's texture with a matrix taken
-	// from the eye rather than from the camera the pass is rendering from. For a
-	// mirror that error is small; for a portal seen through a portal it is the
-	// whole picture, and no number of bounces removes it, because what is wrong
-	// is the camera and not the texture's age.
+	// **Beside `surfaces` and never one of them, because a hole and a mirror are
+	// not the same map.** Both passes are recursions now and both derive each
+	// level's camera from the level above — that much stopped being a difference
+	// in v0.15, and the machinery for opening a pass and drawing the world into
+	// it is shared between them. What is left is the rule itself, and it is not
+	// close to the same: a mirror reflects the viewer through one plane, and a
+	// hole carries it through `destination · half-turn · source⁻¹` onto a second
+	// pane that may be turned, moved and resized anywhere at all.
 	//
-	// A portal's sub-camera is derived from the camera the recursion is
-	// *currently* at — the warp applied to that camera's own frame, its own
-	// projection skewed onto the mapped pane — so warps compose down the
-	// recursion by construction. `NON-EUCLIDEAN.md`'s Part III is the whole
-	// argument and CodeParade's `Portal.cpp` is the model.
+	// **And what the pane reads back differs with it.** A hole's sub-render is
+	// the screen's own frustum skewed onto the far plane, so its pane samples by
+	// screen position and lines up texel for texel. A mirror's is fitted to its
+	// own rectangle, so its pane samples by projecting its world position through
+	// the matrix that drew the level. Merging the two entries would mean one of
+	// them carrying the other's fields empty.
+	//
+	// `NON-EUCLIDEAN.md`'s Part III is the whole argument for the hole, and
+	// CodeParade's `Portal.cpp` is the model.
 	//
 	// **Same-world only.** A `scene::Portal` naming a `DestinationWorld` is a
 	// window onto a second simulation rather than a hole in one space: it keeps
@@ -311,6 +365,27 @@ namespace engine::render {
 	//
 	// @since v0.15
 	inline constexpr uint32_t MAX_PORTAL_DEPTH = 4;
+
+	// How many levels of mirror-in-mirror a renderer will resolve.
+	//
+	// **A ceiling for the same reason `MAX_PORTAL_DEPTH` is one, and it arrived
+	// with the same change.** While the surface pass resolved a chain by running
+	// itself again, depth cost one extra pass per visible pane per level and an
+	// ambitious number merely wasted time. It is a recursion now — each level
+	// descends into every *other* pane it can see — so the passes go as
+	// `panes × (panes - 1) ^ (depth - 1)` before the per-level visibility test
+	// takes them back down, and a scene that asked for eight would ask the device
+	// for something it cannot finish inside a frame.
+	//
+	// Three rather than four, because a mirror is not a hole: what you see at
+	// the third bounce is a few pixels of a few pixels and the fourth is not
+	// distinguishable from the ambient it fades into, whereas a corridor of
+	// portals is the whole subject of the scene it appears in.
+	//
+	// Anything above this is clamped, with the frame drawn rather than refused.
+	//
+	// @since v0.15
+	inline constexpr uint32_t MAX_SURFACE_DEPTH = 3;
 
 	// How many local lights one frame may carry.
 	//
@@ -795,27 +870,41 @@ namespace engine::render {
 
 		// How many times the surface pass runs per frame.
 		//
-		// **In-frame recursion, and it is a loop rather than a second
-		// renderer.** A surface pass samples the *other* surfaces, and with one
-		// bounce it samples the textures they held last frame — so a portal seen
-		// through a portal resolves one level per frame, and the frame somebody
-		// walks through a hole shows a seam. That is the whole of `D00112`.
+		// **In-frame recursion, and since v0.15 it is a real one.** A surface pass
+		// draws the *other* panes, and with one level it draws them flat: the
+		// only camera it has for them is the one placed from the eye, and that
+		// camera is not the one this picture is being taken from. The coordinate
+		// leaves the texture and `opaque.frag` falls back to the plain lit pane,
+		// which is the blank slab a mirror seen in a mirror used to show.
 		//
-		// Running the pass again makes the previous bounce's output the read
-		// side, so after `n` bounces a chain `n` deep is resolved inside the
-		// frame, deepest first. The ping-pong pair each slot already carries is
-		// what makes it safe: a bounce writes one texture and reads the other,
-		// and the flip between bounces swaps them.
+		// This used to be a count of times to run the pass again, which fixed the
+		// staleness `D00112` was about and could never fix the viewpoint —
+		// iterating refreshes textures and never moves a camera. It is now the
+		// number of levels of a depth-first recursion, each level's camera being
+		// `scene::ReflectCamera` applied to the level above, so reflections
+		// compose. One level is the surface pass itself; the rest are the
+		// recursion's.
 		//
-		// **Linear in visible surfaces**, because each bounce is a scene pass
-		// per surface that is refreshing. Two is the default and is what closes
-		// the case anybody sees; a corridor built out of holes can ask for more,
-		// and a scene that wants the old cheapness can ask for one.
+		// **The meaning of a given number is unchanged**: two has always meant
+		// "two levels of mirror-in-mirror" and still does. What changed is that
+		// the second level is now drawn from where it is actually seen from.
+		//
+		// **Superlinear in visible panes**, which the iterating version was not: a
+		// level descends into every *other* pane it can see, so the passes go as
+		// `panes × (panes - 1) ^ (levels - 1)` before `graph::VisiblePane` takes
+		// them back down. That is why there is a ceiling now — see
+		// `MAX_SURFACE_DEPTH`.
 		//
 		// Floored at one — zero would mean no surface pass at all, which has a
-		// clearer spelling.
+		// clearer spelling — and clamped at `MAX_SURFACE_DEPTH`.
 		//
-		// @param bounces How many times to run it.
+		// **A pane with no rectangle keeps the old behaviour**, because nothing
+		// can reflect a camera through a pane it was never told about: a surface
+		// camera parented to the world, or one showing a second world, still
+		// resolves whatever chain it has by iterating. See
+		// `SurfaceView::PaneNormal`.
+		//
+		// @param bounces How many levels to resolve.
 		// @since v0.15
 		void SetSurfaceBounces(uint32_t bounces);
 

@@ -11,6 +11,11 @@
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Sunlight.hpp>
+
+// `scene::ReflectCamera` and `scene::SurfacePane`: where a mirror's camera goes
+// for a viewer that is not the eye, which is what makes the levels below the
+// first a recursion rather than a repeat.
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Tagging.hpp>
 
 #include <SDL3/SDL_gpu.h>
@@ -1153,12 +1158,72 @@ namespace engine::render {
 			PortalTarget Targets[scene::MAX_SURFACES];
 		};
 
+		// One level of one *mirror's* recursion: the pane's picture as seen from
+		// the camera the level above stands at.
+		//
+		// **A pane-shaped `PortalTarget`, and the two are separate for the reason
+		// their passes are.** A hole's sub-render is the screen's own frustum
+		// skewed, so its target is the screen's size and the pane reads the texel
+		// it is standing on. A mirror's is fitted to its pane, so its target is
+		// the pane's authored size and the pane reads it by projecting its own
+		// world position — which is why this carries a matrix and a portal level
+		// does not.
+		//
+		// **`Sampling` is the whole point of the type.** It is the matrix that
+		// *rendered* this texture, and the level above binds it to project the
+		// pane with. Before the recursion existed the pass had only the matrix
+		// fitted to the eye available to it — so a pane inside another pane's
+		// picture was projected from a viewpoint nobody was looking from, the
+		// coordinate left 0..1, and `opaque.frag` fell back to the flat lit pane.
+		// That flat slab in a mirror's reflection is the defect this exists to
+		// remove.
+		//
+		// **No ping-pong pair and no signature**, for `PortalTarget`'s reasons: a
+		// level is written by the recursion and read exactly once, by the level
+		// above it, after that write has finished. Depth-first order *is* the
+		// ordering, so there is nothing to alternate between and nothing worth
+		// keeping across a frame — the contents are only meaningful for the
+		// camera that produced them, which is this frame's.
+		struct MirrorTarget {
+			SDL_GPUTexture *Colour = nullptr;
+			SDL_GPUTexture *Depth = nullptr;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+
+			// World to this level's camera clip space. What the pane above
+			// projects its own world position through.
+			//
+			// A mirror's map is the identity — a reflection fixes every point of
+			// the plane it reflects through — so this is the camera's
+			// `ViewProjection` and nothing else. `scene::SurfaceLens::Mapping`
+			// carries the general case for the pane path.
+			glm::mat4 Sampling{1.0f};
+
+			// Whether this frame's recursion reached this slot at this level.
+			//
+			// **Cleared at the top of every frame rather than trusted.** A pane
+			// that went off screen, or edge-on, or whose texture could not be
+			// made, leaves a target holding last frame's picture taken from a
+			// camera that no longer exists — and sampling it would slide a
+			// reflection across a pane nothing in the scene is moving, which is
+			// the hardest possible version of this bug to attribute.
+			bool Ready = false;
+		};
+
+		struct MirrorLevel {
+			MirrorTarget Targets[scene::MAX_SURFACES];
+		};
+
 		struct SurfaceBank {
 			SurfaceSlotState Surfaces[scene::MAX_SURFACES];
 
 			// **Grown to the depth actually reached**, so a world with no holes
 			// in it costs one empty vector per viewport and nothing else.
 			std::vector<PortalLevel> Portals;
+
+			// The same, for mirrors. Two pools rather than one, because the two
+			// passes size their targets differently — see `MirrorTarget`.
+			std::vector<MirrorLevel> Mirrors;
 		};
 
 		// **One bank per viewport, and that is what makes a mirror a mirror when
@@ -1231,6 +1296,20 @@ namespace engine::render {
 		//         hole to a flat pane for the frame rather than the frame.
 		PortalTarget *
 		EnsurePortal(size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height);
+
+		// One mirror level's colour and depth, at the pane's own size.
+		//
+		// **The pane's size and not the viewport's**, which is the one line of
+		// difference from `EnsurePortal` and follows from how the two are read.
+		// A hole's picture is sampled by screen position, so it has to be the
+		// screen's shape; a mirror's is sampled by projecting the pane's world
+		// position through the matrix that drew it, so it can be any size at all
+		// and the authored one is what the scene asked for.
+		//
+		// @return `null` when either texture could not be made, which drops that
+		//         level to a flat pane for the frame rather than the frame.
+		MirrorTarget *
+		EnsureMirror(size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height);
 
 		// One opaque white texel, bound wherever a real texture is missing.
 		//
@@ -3142,6 +3221,96 @@ namespace engine::render {
 		return &target;
 	}
 
+	Renderer::Impl::MirrorTarget *Renderer::Impl::EnsureMirror(
+		size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height
+	) {
+		if (index >= scene::MAX_SURFACES || level >= MAX_SURFACE_DEPTH || width == 0 || height == 0) {
+			return nullptr;
+		}
+
+		SurfaceBank &bank = SurfacesAt(viewport);
+		if (bank.Mirrors.size() <= level) {
+			bank.Mirrors.resize(level + 1);
+		}
+
+		MirrorTarget &target = bank.Mirrors[level].Targets[index];
+		if (target.Colour != nullptr && width == target.Width && height == target.Height) {
+			return &target;
+		}
+
+		if (target.Colour != nullptr) {
+			SDL_ReleaseGPUTexture(Device, target.Colour);
+			target.Colour = nullptr;
+		}
+		if (target.Depth != nullptr) {
+			SDL_ReleaseGPUTexture(Device, target.Depth);
+			target.Depth = nullptr;
+		}
+		target.Width = 0;
+		target.Height = 0;
+
+		SDL_GPUTextureCreateInfo colour{};
+		colour.type = SDL_GPU_TEXTURETYPE_2D;
+		colour.format = ColourFormat();
+		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		colour.width = width;
+		colour.height = height;
+		colour.layer_count_or_depth = 1;
+		colour.num_levels = 1;
+		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		target.Colour = SDL_CreateGPUTexture(Device, &colour);
+		if (target.Colour == nullptr) {
+			ENGINE_ERROR(
+				"viewport {} mirror level {} slot {} colour {}x{}: {}",
+				viewport,
+				level,
+				index,
+				width,
+				height,
+				SDL_GetError()
+			);
+			return nullptr;
+		}
+
+		SDL_GPUTextureCreateInfo depth{};
+		depth.type = SDL_GPU_TEXTURETYPE_2D;
+		depth.format = DepthFormat;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.width = width;
+		depth.height = height;
+		depth.layer_count_or_depth = 1;
+		depth.num_levels = 1;
+		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		target.Depth = SDL_CreateGPUTexture(Device, &depth);
+		if (target.Depth == nullptr) {
+			ENGINE_ERROR(
+				"viewport {} mirror level {} slot {} depth {}x{}: {}",
+				viewport,
+				level,
+				index,
+				width,
+				height,
+				SDL_GetError()
+			);
+			SDL_ReleaseGPUTexture(Device, target.Colour);
+			target.Colour = nullptr;
+			return nullptr;
+		}
+
+		// The one sampler every projected image is read through, for
+		// `EnsurePortal`'s reason: a scene of nothing but mirror levels would
+		// otherwise take a null one into `SDL_BindGPUFragmentSamplers`.
+		if (!EnsureSurfaceSampler()) {
+			return nullptr;
+		}
+
+		target.Width = width;
+		target.Height = height;
+		return &target;
+	}
+
 	bool Renderer::Impl::EnsureOverlay(int width, int height) {
 		if (OverlayTexture && width == OverlayWidth && height == OverlayHeight) {
 			return true;
@@ -3451,6 +3620,17 @@ namespace engine::render {
 					}
 				}
 			}
+
+			for (Impl::MirrorLevel &level : bank.Mirrors) {
+				for (Impl::MirrorTarget &target : level.Targets) {
+					if (target.Colour) {
+						SDL_ReleaseGPUTexture(device, target.Colour);
+					}
+					if (target.Depth) {
+						SDL_ReleaseGPUTexture(device, target.Depth);
+					}
+				}
+			}
 		}
 		State->SurfaceBanks.clear();
 		if (State->SurfaceSampler) {
@@ -3568,7 +3748,12 @@ namespace engine::render {
 			// which is a way of saying "no mirrors" that has a much clearer
 			// spelling elsewhere, and is not what somebody dialling this down
 			// means.
-			State->SurfaceBounces = std::max<uint32_t>(bounces, 1u);
+			//
+			// **And now capped as well**, which it did not need to be while this
+			// counted iterations of one pass. It counts levels of a recursion —
+			// see `MAX_SURFACE_DEPTH` for why that turns a large number from
+			// wasteful into unfinishable.
+			State->SurfaceBounces = std::clamp<uint32_t>(bounces, 1u, MAX_SURFACE_DEPTH);
 		}
 	}
 
@@ -4204,6 +4389,51 @@ namespace engine::render {
 			entry.Effect = view.Effect;
 
 			accepted[acceptedCount++] = entry;
+		}
+
+		// **The panes, by slot, for the levels below the first.** A surface
+		// camera arrives here already placed — from the eye — and that is the one
+		// viewpoint a recursion cannot use: a pane appearing inside another pane's
+		// picture is looked at from *that* pane's camera. `scene::ReflectCamera`
+		// will place it for any viewer, and what it needs is the rectangle, which
+		// is what `SurfaceView::PaneNormal` carries.
+		//
+		// **Zero normal means "do not descend", and it is the ordinary case for
+		// two kinds of view.** A camera parented to the world has no face to
+		// reflect through, and a cross-world pane's picture is another simulation
+		// rather than this one's geometry. Both keep the single eye-derived image
+		// they have always had.
+		scene::SurfacePane panes[scene::MAX_SURFACES];
+		bool havePanes[scene::MAX_SURFACES] = {};
+		bool anyPane = false;
+
+		// The authored texture size of each pane, which is what the levels below
+		// the first are rendered at. See the allocation in the recursion for why
+		// they do not take the top level's screen-coverage scaling.
+		uint32_t paneWidth[scene::MAX_SURFACES] = {};
+		uint32_t paneHeight[scene::MAX_SURFACES] = {};
+
+		for (size_t index = 0; index < acceptedCount; index++) {
+			const SurfaceView &view = *accepted[index].View;
+			if (view.PaneNormal.Magnitude() <= 0.0f || view.InstanceCount > 0) {
+				continue;
+			}
+
+			scene::SurfacePane &pane = panes[accepted[index].Index];
+			pane.Centre = view.PaneCentre;
+			pane.Normal = view.PaneNormal;
+			pane.First = view.PaneFirst;
+			pane.Second = view.PaneSecond;
+			pane.Surface = static_cast<int8_t>(accepted[index].Index);
+			pane.TagFilter = view.TagFilter;
+			pane.NearPlane = view.PaneNear;
+			pane.FarPlane = view.PaneFar;
+
+			paneWidth[accepted[index].Index] = view.Width;
+			paneHeight[accepted[index].Index] = view.Height;
+
+			havePanes[accepted[index].Index] = true;
+			anyPane = true;
 		}
 
 		size_t visibleCount = 0;
@@ -5137,6 +5367,402 @@ namespace engine::render {
 			State->Beams.Count.x = static_cast<float>(live);
 		}
 
+		// --- what a scene pass is, wherever it is opened ----------------------
+		//
+		// The three passes below stay separate on purpose — a mirror reflects its
+		// viewer through one plane and a hole carries it onto a second pane, and
+		// the two panes read their pictures back by different lookups, which is
+		// the whole of `PortalView`'s header comment. What was never a difference
+		// between them is how a scene pass is opened and what the world's own
+		// draws look like once it is, and those were written out twice side by
+		// side, so every bug in one was available to the other.
+
+		// The shadow map and the sampler that reads it, or the stand-ins bound
+		// where the real ones do not exist. The pipelines declare both slots
+		// and a draw must bind both — an unbound sampler is undefined behaviour
+		// on several backends where a wrongly bound one is merely ignored.
+		struct ShadowBinding {
+			SDL_GPUTexture *Texture;
+			SDL_GPUSampler *Sampler;
+		};
+
+		// **Asked at each pass rather than resolved once for the frame**, and
+		// that is not a style choice: `State->SurfaceSampler` is made by
+		// whichever pass first needs it, and a world of nothing but holes never
+		// reaches `EnsureSurface`. The portal pass makes it itself for exactly
+		// that case, so a pair resolved before the surface pass would hand the
+		// portal pass the null it goes out of its way to avoid.
+		const auto shadowBinding = [&] {
+			return ShadowBinding{
+				State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture,
+				State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler,
+			};
+		};
+
+		// Opens a scene pass onto a colour/depth pair and primes it with the
+		// state every scene pass shares: the clear, the light set, the beams,
+		// the opaque pipeline and the one buffer pair every mesh lives in.
+		//
+		// **`cycle` is the one thing the callers disagree about.** A surface
+		// slot is written and sampled inside the same frame, so it cycles; a
+		// portal target is written once and sampled once, by the pass above it,
+		// in that order — and asking for a fresh allocation there made the
+		// device hang more often rather than less.
+		//
+		// `viewport` is the rectangle of the target the world fills, or null for
+		// the whole of it: a surface texture is made the size of the pass that
+		// writes it and a portal target is not. The scissor follows the
+		// viewport, because nothing here draws outside the rectangle it set.
+		const auto openScenePass = [&](SDL_GPUTexture *colour,
+									   SDL_GPUTexture *depth,
+									   bool cycle,
+									   const SDL_GPUViewport *viewport) -> SDL_GPURenderPass * {
+			SDL_GPUColorTargetInfo colourInfo{};
+			colourInfo.texture = colour;
+			colourInfo.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+			colourInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+			colourInfo.store_op = SDL_GPU_STOREOP_STORE;
+			colourInfo.cycle = cycle;
+
+			SDL_GPUDepthStencilTargetInfo depthInfo{};
+			depthInfo.texture = depth;
+			depthInfo.clear_depth = 1.0f;
+			depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+			depthInfo.store_op = SDL_GPU_STOREOP_DONT_CARE;
+			depthInfo.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+			depthInfo.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+			depthInfo.cycle = cycle;
+
+			SDL_GPURenderPass *const pass = SDL_BeginGPURenderPass(command, &colourInfo, 1, &depthInfo);
+
+			if (viewport != nullptr) {
+				SDL_SetGPUViewport(pass, viewport);
+
+				const SDL_Rect scissor{
+					static_cast<int>(viewport->x),
+					static_cast<int>(viewport->y),
+					static_cast<int>(viewport->w),
+					static_cast<int>(viewport->h)
+				};
+				SDL_SetGPUScissor(pass, &scissor);
+			}
+
+			// **The light set, pushed once for the whole pass.** Uniform state
+			// on a command buffer persists until it is replaced, so one push
+			// before the draws serves every one of them — which is the whole
+			// reason this is a second buffer rather than fields on the per-draw
+			// `LightingUniforms`.
+			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+
+			// **The beams, beside the lights and for the same reason.** Which
+			// holes carry a shadow is a fact about the frame, so it is pushed
+			// once per pass rather than per draw — and it is pushed even when
+			// there are none, because a stale block from a previous frame would
+			// shadow through a hole that is no longer there.
+			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
+			State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
+
+			const SDL_GPUBufferBinding vertexBindings[] = {
+				{State->Meshes.Vertices(), 0},
+				{State->InstanceBuffer, 0},
+			};
+			SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+
+			const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+			SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+			return pass;
+		};
+
+		// The world minus every pane, drawn into whatever pass is open.
+		//
+		// **`plan.Reflected` is exactly that run** — the opaque head with every
+		// instance that samples a slot taken out of it, and a mirror and a hole
+		// are the same exclusion. The panes are put back by the caller, each
+		// with its own texture: a mirror may not appear in its own reflection
+		// and a portal's pane shows the level below it.
+		const auto drawWorldInto =
+			[&](SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter) {
+				if (sceneReflected > 0) {
+					const ShadowBinding shadow = shadowBinding();
+					result.DrawCalls += State->DrawSlots(
+						command,
+						pass,
+						0,
+						sceneReflected,
+						&plainLighting,
+						shadow.Texture,
+						shadow.Sampler,
+						nullptr,
+						State->SurfaceSampler,
+						filter,
+						result.Triangles
+					);
+				}
+			};
+
+		// **The blended tail, minus the panes in it.** The opaque head already
+		// excludes them; a pane that went transparent moved from the head to the
+		// tail and stopped being excluded, so a faded mirror reflected itself
+		// and a faded hole was drawn as ordinary glass on top of the picture it
+		// was already showing.
+		//
+		// **`panesFollow` binds the transparent pipeline for draws this does not
+		// make.** The surface pass submits its blended mirrors itself, straight
+		// after this and onto the same pipeline, so a tail of nothing but
+		// mirrors still has to have it bound. The portal pass drew its panes
+		// with the opaque head and has nothing left to bind for.
+		const auto drawBlendedInto = [&](SDL_GPURenderPass *pass,
+										 const FrameUniforms &frame,
+										 const LightingUniforms &plainLighting,
+										 uint32_t filter,
+										 bool panesFollow) {
+			const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
+			if (blendedPlain > 0 || (panesFollow && plan.TransparentSurfaces > 0)) {
+				State->BindPipeline(pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent);
+			}
+
+			if (blendedPlain == 0) {
+				return;
+			}
+
+			SDL_PushGPUVertexUniformData(command, 0, &frame, sizeof(FrameUniforms));
+
+			const ShadowBinding shadow = shadowBinding();
+			result.DrawCalls += State->DrawSlots(
+				command,
+				pass,
+				static_cast<uint32_t>(sceneOpaque),
+				blendedPlain,
+				&plainLighting,
+				shadow.Texture,
+				shadow.Sampler,
+				nullptr,
+				State->SurfaceSampler,
+				filter,
+				result.Triangles
+			);
+		};
+
+		// --- the mirror recursion --------------------------------------------
+		//
+		// **What a pane shows a viewer that is not the eye.**
+		//
+		// `scene::AimSurfaceCameras` places every surface camera by reflecting the
+		// world's *active* camera through its pane. That answer is right for the
+		// screen and wrong everywhere else: a pane appearing inside another pane's
+		// picture is being looked at from that pane's camera, several studs and a
+		// reflection away from the eye. Projecting it with the eye's matrix put
+		// the coordinate outside the texture's 0..1 rectangle, and `opaque.frag`
+		// falls back to the plain lit pane there — which is the flat slab a mirror
+		// seen in a mirror used to be, and which reads as culling rather than as a
+		// projection fault.
+		//
+		// **Running the pass again cannot fix it, and that is worth being precise
+		// about.** Iterating refreshes textures; it never moves a camera. Each
+		// bounce redrew the same eye-derived viewpoints with fresher contents, so
+		// the chain got newer and stayed wrong.
+		//
+		// So the levels below the first are a recursion, exactly as a hole's are:
+		// each level's camera is `scene::ReflectCamera` applied to the camera of
+		// the level above, and reflections therefore compose by construction. The
+		// two passes now differ in what a level's camera *is* and in nothing else,
+		// which is why they share `openScenePass`, `drawWorldInto` and
+		// `drawBlendedInto` and keep their own entry points.
+		//
+		// **Depth first, and every level's targets survive until the level above
+		// has drawn all of its panes** — `Impl::MirrorLevel` is indexed by level
+		// and slot for that reason, which is `Impl::PortalLevel`'s reason.
+		//
+		// **One fewer than the bounce count, because the surface pass is the top
+		// level.** `SetSurfaceBounces(2)` has always meant "two levels of
+		// mirror-in-mirror", and it still does: the pane's own texture is one and
+		// the recursion supplies the rest. Zero here is `SetSurfaceBounces(1)` —
+		// no recursion, every inner pane drawn flat — which is exactly what one
+		// bounce drew before and is the honest floor rather than a special case.
+		const uint32_t mirrorLevels = std::min(State->SurfaceBounces, MAX_SURFACE_DEPTH) - 1u;
+
+		// **Cleared for the whole bank before anything descends.** A target holds
+		// last frame's picture from a camera that no longer exists, and a level
+		// that is not reached this frame must read as absent rather than as stale
+		// — see `Impl::MirrorTarget::Ready`.
+		for (Impl::MirrorLevel &level : bank.Mirrors) {
+			for (Impl::MirrorTarget &target : level.Targets) {
+				target.Ready = false;
+			}
+		}
+
+		// One level: fill `bank.Mirrors[level][i]` for every mirror `i` this
+		// camera can see, then leave them for the caller to sample.
+		//
+		// A `std::function` because it calls itself and captures the frame, which
+		// is `fillLevel`'s arrangement below and is paid once per pane per level
+		// beside a whole scene render.
+		//
+		// @param from    The viewer's matrices, for the per-level pane cull.
+		// @param frame   Where the viewer stands, which is what gets reflected.
+		// @param level   Which level of the pool this call fills.
+		// @param skip    The pane this camera is *on*. Nothing sees itself in its
+		//                own reflection, and descending into it would put the pane
+		//                in front of its own camera.
+		std::function<void(const glm::mat4 &, const core::CFrame &, uint32_t, int8_t)> fillMirror;
+
+		fillMirror = [&](const glm::mat4 &from, const core::CFrame &frame, uint32_t level, int8_t skip) {
+			for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+				if (!havePanes[slot] || static_cast<int8_t>(slot) == skip) {
+					continue;
+				}
+
+				const scene::SurfacePane &pane = panes[slot];
+
+				// **Per pane per level, which is what stops the cost being
+				// `panes ^ depth`.** A mirror behind this level's camera costs
+				// nothing, and in a room most of them are. `graph::VisiblePane` is
+				// the portal pass's test unchanged — the question is the same one.
+				if (!graph::VisiblePane(from, pane.Centre, pane.First, pane.Second)) {
+					continue;
+				}
+
+				// **The one statement of what a mirror does to a camera**, applied
+				// to this level's viewer rather than to the eye. `scene::
+				// AimSurfaceCameras` calls the same function for the top level, so
+				// a chain cannot drift from the screen by a sign.
+				//
+				// **No frustum corners handed down.** The clamp they buy is a
+				// sharpness optimisation for a pane the viewer is close to, and
+				// the viewer at these levels is a fitted off-axis camera whose
+				// lens this pass does not carry. Unclamped is the correct image at
+				// a coarser resolution, which is the right trade for a reflection
+				// that is already a reflection of a reflection.
+				const scene::MirrorEye eye = scene::ReflectCamera(pane, frame, {});
+				if (!eye.Renders) {
+					continue;
+				}
+
+				const scene::CameraMatrices matrices =
+					scene::ResolveSurfaceCamera(eye.Frame, scene::SurfaceProjection(eye.Lens, eye.Frame));
+
+				// **Deeper first**, so this level's own draws can sample what the
+				// level below just wrote. The pool is per level, so the targets
+				// filled here survive exactly until this loop has finished with
+				// them.
+				if (level > 0) {
+					fillMirror(matrices.ViewProjection, eye.Frame, level - 1, static_cast<int8_t>(slot));
+				}
+
+				// **The authored size, with no screen-coverage scaling.** A pane's
+				// footprint on screen decides how sharp the *top* level has to be
+				// — `SurfaceScale` — and these are levels inside that one, where a
+				// pane covers a fraction of a fraction. Scaling them by the top
+				// pane's coverage would allocate the deepest, smallest images at
+				// the highest resolution in the frame.
+				Impl::MirrorTarget *target =
+					State->EnsureMirror(targetSlot, level, slot, paneWidth[slot], paneHeight[slot]);
+				if (target == nullptr) {
+					continue;
+				}
+
+				// **Not cycled, unlike a surface slot.** A level is written once
+				// and sampled once, by the pass above it, in that order — see
+				// `Impl::PortalTarget`, where cycling anyway made the device hang
+				// more often rather than less.
+				SDL_GPURenderPass *const pass = openScenePass(target->Colour, target->Depth, false, nullptr);
+
+				const LightingUniforms levelLighting{
+					glm::vec4{State->Sun, 0.0f},
+					State->Ambient,
+					glm::vec4{
+						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
+					},
+				};
+
+				const FrameUniforms levelFrame{
+					matrices.ViewProjection,
+					lightViewProjection,
+					glm::mat4{1.0f},
+				};
+				SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
+
+				drawWorldInto(pass, levelLighting, pane.TagFilter);
+
+				// The other panes, put back one at a time, each sampling the level
+				// below. A pane whose level below was not reached — off screen,
+				// edge-on, or at the bottom of the recursion — draws as its own lit
+				// material, which is what a mirror at the end of a chain looks
+				// like and is deliberately not the portal pass's ambient terminus:
+				// a hole with nothing behind it is a hole, and a mirror with
+				// nothing behind it is a pane of glass.
+				//
+				// **The opaque runs only, exactly as the portal pass does it.** A
+				// pane that went transparent left the opaque head, and
+				// `drawBlendedInto` excludes the panes in the tail — so a *faded*
+				// mirror inside a deep reflection shows as glass rather than as a
+				// reflection. The top level still composites it, which is where
+				// anybody would notice; paying a level of recursion for the second
+				// bounce of a pane somebody has faded is not a trade this makes.
+				const ShadowBinding shadow = shadowBinding();
+
+				for (uint8_t seen = 0; seen < scene::MAX_SURFACES; seen++) {
+					if (seen == slot) {
+						continue;
+					}
+
+					const scene::SurfaceRun &run = plan.Runs[seen];
+					if (run.OpaqueCount == 0) {
+						continue;
+					}
+
+					const Impl::MirrorTarget *below = level > 0 && bank.Mirrors.size() >= level
+														  ? &bank.Mirrors[level - 1].Targets[seen]
+														  : nullptr;
+
+					LightingUniforms paneLighting = levelLighting;
+					SDL_GPUTexture *paneTexture = nullptr;
+
+					if (below != nullptr && below->Ready) {
+						// 1 is the projected-image branch — see `opaque.frag`.
+						paneLighting.Flags.z = 1.0f;
+						paneLighting.Flags.w = 1.0f;
+
+						const FrameUniforms seenFrame{
+							matrices.ViewProjection,
+							lightViewProjection,
+							below->Sampling,
+						};
+						SDL_PushGPUVertexUniformData(command, 0, &seenFrame, sizeof(seenFrame));
+						paneTexture = below->Colour;
+					} else {
+						SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
+					}
+
+					result.DrawCalls += State->DrawSlots(
+						command,
+						pass,
+						run.OpaqueFirst,
+						run.OpaqueCount,
+						&paneLighting,
+						shadow.Texture,
+						shadow.Sampler,
+						paneTexture,
+						State->SurfaceSampler,
+						pane.TagFilter,
+						result.Triangles
+					);
+				}
+
+				drawBlendedInto(pass, levelFrame, levelLighting, pane.TagFilter, false);
+
+				SDL_EndGPURenderPass(pass);
+
+				// **Written after the pass has ended**, which is the invariant the
+				// whole ordering rests on: a level is readable only once the draw
+				// that filled it has been submitted.
+				target->Sampling = matrices.ViewProjection;
+				target->Ready = true;
+				result.SurfacePasses++;
+			}
+		};
+
 		// --- surface pass ----------------------------------------------------
 		//
 		// The same scene range, from each surface camera, into that surface's
@@ -5162,43 +5788,42 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Surface);
 
-			// **The whole pass, run once per bounce, and that is in-frame
-			// recursion.** `D00112`'s remaining half was that a surface samples
-			// the *other* surfaces from the textures they had last frame — so a
-			// portal seen through a portal resolved over frames rather than
-			// within one, and the frame somebody crossed showed a seam.
+			// **The whole pass, run once per bounce, which is how depth used to be
+			// had — and is not how it is had any more where a pane carries its
+			// rectangle.** `D00112`'s remaining half was that a surface samples the
+			// *other* surfaces from the textures they had last frame, so a chain
+			// resolved over frames rather than within one. Iterating fixed that:
+			// bounce zero draws every surface sampling last frame's neighbours, the
+			// flip makes bounce zero's output the read side, and bounce one
+			// therefore samples *this* frame's neighbours.
 			//
-			// The fix does not need a recursive pass, a second renderer, or a
-			// camera per level: it needs this loop to run again. Bounce zero
-			// draws every surface sampling last frame's neighbours; the flip at
-			// the top of bounce one makes bounce zero's output the read side, so
-			// bounce one draws every surface sampling *this frame's*
-			// neighbours. After `n` bounces a chain `n` deep is resolved inside
-			// the frame, deepest first, because that is what iterating to a
-			// fixed point does from the outside in.
+			// **What it never fixed is the viewpoint, and no number of runs
+			// could.** Every bounce redrew the same eye-derived cameras. The
+			// pictures got fresher and stayed taken from where nobody was standing,
+			// which is the flat slab `fillMirror` above exists to remove.
 			//
-			// **The ping-pong is what makes it safe**, and it is already here.
-			// Each bounce writes `Slot` and reads `Slot ^ 1`, and the flip
-			// between bounces swaps which is which — so no pass ever samples a
-			// texture another pass is writing in the same bounce, which is the
-			// exact self-reference the pair was built to make impossible.
+			// So: **one run when the panes carry rectangles**, because the depth is
+			// the recursion's now and running the whole pass again would only
+			// redraw the same answer at the same viewpoints. A view with no
+			// rectangle — a camera parented to the world, or a cross-world pane —
+			// still resolves its chain by iterating, which is what it always did
+			// and is still the best available for it: nothing here can reflect a
+			// camera through a pane it was never told about.
 			//
-			// **A surface skipped on bounce zero stays skipped**, because
-			// `Refresh` is decided once above. A slot that is not refreshing is
-			// not flipped either, so its parity never moves and its neighbours
-			// go on reading the frame it actually holds.
+			// **The ping-pong stays either way.** With the recursion nothing
+			// samples a slot being written, so the pair is not load-bearing for
+			// mirrors — but the screen pass and the iterating path both still read
+			// `Slot ^ 1`, and a surface skipped this frame must keep the matrices
+			// that drew what it holds.
 			//
-			// Costs a full scene pass per visible surface per bounce, which is
-			// what buys the depth — and is why the visibility gate and
-			// `SurfaceCamera::FPS` landed first. One surface gains nothing from
-			// a second bounce, because nothing samples itself.
-			// **`graph::VisibleSurfaces` is given this same number**, above, where
-			// `cullRounds` is computed. The two must not drift: this is how many
-			// levels of surface-seen-in-surface get drawn and that is how many get
-			// marked visible, and a level drawn without being marked is a level
-			// culled — which is what made a mirror's deeper reflections vanish as
-			// the viewer turned.
-			const uint32_t bounces = acceptedCount > 1 ? std::max<uint32_t>(State->SurfaceBounces, 1u) : 1u;
+			// **`graph::VisibleSurfaces` is given `SurfaceBounces` regardless**,
+			// above, where `cullRounds` is computed — and it must be. That decides
+			// how many levels of surface-seen-in-surface are *marked visible*, and
+			// a level the recursion draws without being marked is a level culled,
+			// which is what made a mirror's deeper reflections vanish as the viewer
+			// turned. The two numbers describe the same depth by two routes.
+			const uint32_t bounces =
+				anyPane ? 1u : (acceptedCount > 1 ? std::max<uint32_t>(State->SurfaceBounces, 1u) : 1u);
 
 			for (uint32_t bounce = 0; bounce < bounces; bounce++) {
 
@@ -5245,48 +5870,31 @@ namespace engine::render {
 					const uint32_t surfaceFilter = accepted[index].View->TagFilter;
 					Impl::SurfaceSlotState &state = bank.Surfaces[self];
 
-					SDL_GPUColorTargetInfo surfaceColour{};
-					surfaceColour.texture = state.Texture[state.Slot];
-					surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
-					surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
-					surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
-					surfaceColour.cycle = true;
+					// **The levels below this one, filled from *this* camera and
+					// not from the eye.** That is the whole of the fix: every pane
+					// this pass is about to draw needs a picture taken from where
+					// this camera stands, and `fillMirror` is what takes it.
+					//
+					// **Here rather than once for the frame**, because the pool is
+					// per level and not per level per parent: the targets filled
+					// now are consumed by the draws a few lines down and then
+					// overwritten by the next pane's descent. Hoisting this out of
+					// the loop would give every pane the last one's reflections.
+					if (mirrorLevels > 0 && havePanes[self]) {
+						fillMirror(
+							accepted[index].ViewProjection,
+							accepted[index].View->Frame,
+							mirrorLevels - 1,
+							static_cast<int8_t>(self)
+						);
+					}
 
-					SDL_GPUDepthStencilTargetInfo surfaceDepth{};
-					surfaceDepth.texture = state.Depth;
-					surfaceDepth.clear_depth = 1.0f;
-					surfaceDepth.load_op = SDL_GPU_LOADOP_CLEAR;
-					surfaceDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
-					surfaceDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-					surfaceDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-					surfaceDepth.cycle = true;
-
-					SDL_GPURenderPass *pass =
-						SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
-					// **The light set, pushed once for the whole pass.** Uniform state
-					// on a command buffer persists until it is replaced, so one push
-					// before the draws serves every one of them — which is the whole
-					// reason this is a second buffer rather than fields on the
-					// per-draw `LightingUniforms`.
-					SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
-
-					// **The beams, beside the lights and for the same reason.**
-					// Which holes carry a shadow is a fact about the frame, so it
-					// is pushed once per pass rather than per draw — and it is
-					// pushed even when there are none, because a stale block from
-					// a previous frame would shadow through a hole that is no
-					// longer there.
-					SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
-					State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
-
-					const SDL_GPUBufferBinding vertexBindings[] = {
-						{State->Meshes.Vertices(), 0},
-						{State->InstanceBuffer, 0},
-					};
-					SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
-
-					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					// **Cycled**, because this half of the pair is written here and
+					// read by the screen pass in the same frame — see
+					// `openScenePass` for what the other caller does instead. The
+					// whole target is the pass, so there is no viewport to set.
+					SDL_GPURenderPass *const pass =
+						openScenePass(state.Texture[state.Slot], state.Depth, true, nullptr);
 
 					// **Shadowed, and pointedly not surfaced.** The mirror's own view
 					// gets the shadow map, so what it reflects is lit the way the
@@ -5309,10 +5917,7 @@ namespace engine::render {
 						},
 					};
 
-					SDL_GPUTexture *const fallback =
-						State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
-					SDL_GPUSampler *const shadowSampler =
-						State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
+					const ShadowBinding shadow = shadowBinding();
 
 					// **The samplers are bound per draw now rather than per run**,
 					// because the third one — the colour map — changes with the
@@ -5358,8 +5963,8 @@ namespace engine::render {
 							ownCount + accepted[index].View->InstanceFirst,
 							accepted[index].View->InstanceCount,
 							&surfaceLighting,
-							fallback,
-							shadowSampler,
+							shadow.Texture,
+							shadow.Sampler,
 							surfaceTexture,
 							State->SurfaceSampler,
 							surfaceFilter,
@@ -5374,23 +5979,7 @@ namespace engine::render {
 						continue;
 					}
 
-					// The world, minus every mirror. `plan.Reflected` is the
-					// non-mirror opaque run.
-					if (sceneReflected > 0) {
-						result.DrawCalls += State->DrawSlots(
-							command,
-							pass,
-							0,
-							sceneReflected,
-							&surfaceLighting,
-							fallback,
-							shadowSampler,
-							surfaceTexture,
-							State->SurfaceSampler,
-							surfaceFilter,
-							result.Triangles
-						);
-					}
+					drawWorldInto(pass, surfaceLighting, surfaceFilter);
 
 					// **Every mirror except this one, one draw each.** `self` is
 					// skipped because nothing sees itself in its own reflection —
@@ -5408,6 +5997,16 @@ namespace engine::render {
 					// texture being read — `PreviousViewProjection`, not the one
 					// just resolved — because the image is a frame old and
 					// projecting it with a fresh camera slides it across the pane.
+					//
+					// **And the recursion's level is preferred to the slot's own
+					// texture whenever there is one.** The slot holds the pane as
+					// the *eye* sees it; the level holds it as this camera sees it,
+					// which is the only one of the two that belongs in this
+					// picture. The slot is still the fallback for a pane the
+					// recursion could not reach — off screen from here, edge-on, or
+					// a camera with no rectangle at all — because a stale
+					// reflection of a reflection is a better answer than a blank
+					// one.
 					const auto drawMirrors = [&](bool blended) {
 						for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
 							if (index == self) {
@@ -5421,6 +6020,50 @@ namespace engine::render {
 								continue;
 							}
 
+							const Impl::MirrorTarget *const level =
+								mirrorLevels > 0 && bank.Mirrors.size() >= mirrorLevels
+									? &bank.Mirrors[mirrorLevels - 1].Targets[index]
+									: nullptr;
+
+							if (level != nullptr && level->Ready) {
+								const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
+
+								const FrameUniforms levelFrame{
+									state.ViewProjection,
+									lightViewProjection,
+									level->Sampling,
+								};
+								LightingUniforms levelLighting{
+									glm::vec4{State->Sun, 0.0f},
+									State->Ambient,
+									glm::vec4{
+										haveShadow ? 1.0f : 0.0f,
+										1.0f / static_cast<float>(SHADOW_RESOLUTION),
+										1.0f,
+										shown.ImageOpacity
+									},
+								};
+								levelLighting.Mirror.x = static_cast<float>(shown.Effect);
+
+								SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
+								bindSurface(level->Colour);
+
+								result.DrawCalls += State->DrawSlots(
+									command,
+									pass,
+									first,
+									count,
+									&levelLighting,
+									shadow.Texture,
+									shadow.Sampler,
+									surfaceTexture,
+									State->SurfaceSampler,
+									surfaceFilter,
+									result.Triangles
+								);
+								continue;
+							}
+
 							const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
 							if (!shown.Ready || !claimed[index]) {
 								plainly();
@@ -5430,8 +6073,8 @@ namespace engine::render {
 									first,
 									count,
 									&surfaceLighting,
-									fallback,
-									shadowSampler,
+									shadow.Texture,
+									shadow.Sampler,
 									surfaceTexture,
 									State->SurfaceSampler,
 									surfaceFilter,
@@ -5470,8 +6113,8 @@ namespace engine::render {
 								first,
 								count,
 								&mirrorLighting,
-								fallback,
-								shadowSampler,
+								shadow.Texture,
+								shadow.Sampler,
 								surfaceTexture,
 								State->SurfaceSampler,
 								surfaceFilter,
@@ -5482,33 +6125,10 @@ namespace engine::render {
 
 					drawMirrors(false);
 
-					// **The blended tail *minus* the mirrors in it.** The opaque head
-					// already excludes them for the reason above; a pane that went
-					// transparent moved from the head to the tail and stopped being
-					// excluded, so a faded mirror reflected itself.
-					const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
-					if (blendedPlain > 0 || plan.TransparentSurfaces > 0) {
-						State->BindPipeline(
-							pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent
-						);
-					}
-
-					if (blendedPlain > 0) {
-						plainly();
-						result.DrawCalls += State->DrawSlots(
-							command,
-							pass,
-							static_cast<uint32_t>(sceneOpaque),
-							blendedPlain,
-							&surfaceLighting,
-							fallback,
-							shadowSampler,
-							surfaceTexture,
-							State->SurfaceSampler,
-							surfaceFilter,
-							result.Triangles
-						);
-					}
+					// **`panesFollow` is true here**, because the blended mirrors
+					// below go onto the same pipeline — so a tail of nothing but
+					// mirrors still has to have it bound.
+					drawBlendedInto(pass, worldFrame, surfaceLighting, surfaceFilter, true);
 
 					// And the blended mirrors that are not this one, last of
 					// everything drawn into this texture.
@@ -5553,20 +6173,22 @@ namespace engine::render {
 
 		// --- the portal pass -------------------------------------------------
 		//
-		// **A recursion and not a bounce, and the difference is the viewpoint.**
-		// The surface pass above resolves a chain of *mirrors* by running itself
-		// again, which works because what is stale there is only a texture's age.
-		// It cannot work for a hole: a surface camera is placed from the eye, so
-		// when one surface pass draws another pane it projects that pane's image
-		// with a matrix taken from the eye rather than from the camera the pass is
-		// rendering from. That is the wrong viewpoint, not a stale one, and no
-		// number of bounces touches it.
+		// **The same recursion as `fillMirror`, by a different map.** Both derive
+		// each level's camera from the level above — that is what makes either one
+		// compose, and the mirror pass was an iteration until v0.15 and wrong at
+		// every level past the first for exactly the want of it.
 		//
-		// Here each level's camera is derived from the level above it — the warp
-		// applied to *that* camera's frame, that camera's own projection skewed
-		// onto the mapped pane — so warps compose down the recursion by
-		// construction, exactly as `Portal::Draw` composes `portalCam.worldView *=
-		// warp->delta`. `NON-EUCLIDEAN.md`'s Part III is the whole argument.
+		// Here the derivation is the warp applied to *that* camera's frame, and
+		// that camera's own projection skewed onto the mapped pane — exactly as
+		// `Portal::Draw` composes `portalCam.worldView *= warp->delta`.
+		// `NON-EUCLIDEAN.md`'s Part III is the whole argument.
+		//
+		// **What stays separate is the map and the lookup**, which is why the two
+		// share `openScenePass`, `drawWorldInto` and `drawBlendedInto` and nothing
+		// above them. A hole's sub-render is the screen's own frustum, so its pane
+		// reads the texel it is standing on; a mirror's is fitted to its own
+		// rectangle, so its pane reads by projecting its world position. Neither
+		// lookup is expressible in the other's target.
 		//
 		// **Depth first, and every level's targets survive until the level above
 		// has drawn all of its panes.** That is why the pool is indexed by level
@@ -5595,10 +6217,7 @@ namespace engine::render {
 			// scene with one mirror in it hid that completely.
 			(void)State->EnsureSurfaceSampler();
 
-			SDL_GPUTexture *const portalShadow =
-				State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
-			SDL_GPUSampler *const portalShadowSampler =
-				State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
+			const ShadowBinding shadow = shadowBinding();
 
 			// Where a hole's sub-camera stands, and what it looks through.
 			//
@@ -5666,31 +6285,6 @@ namespace engine::render {
 				};
 			};
 
-			// The world minus every pane, drawn into whatever pass is open.
-			//
-			// **`plan.Reflected` is exactly that run**, and it is the same range
-			// the surface pass submits — the opaque head with every instance that
-			// samples a slot taken out of it. The panes are put back by the caller,
-			// each with its own texture.
-			const auto drawWorldInto =
-				[&](SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter) {
-					if (sceneReflected > 0) {
-						result.DrawCalls += State->DrawSlots(
-							command,
-							pass,
-							0,
-							sceneReflected,
-							&plainLighting,
-							portalShadow,
-							portalShadowSampler,
-							nullptr,
-							State->SurfaceSampler,
-							filter,
-							result.Triangles
-						);
-					}
-				};
-
 			// One level: fill `bank.Portals[level][i]` for every hole `i` this
 			// camera can see, then leave them for the caller to sample.
 			//
@@ -5740,34 +6334,6 @@ namespace engine::render {
 						continue;
 					}
 
-					SDL_GPUColorTargetInfo portalColour{};
-					portalColour.texture = target->Colour;
-					portalColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
-					portalColour.load_op = SDL_GPU_LOADOP_CLEAR;
-					portalColour.store_op = SDL_GPU_STOREOP_STORE;
-
-					// **Not cycled, unlike a surface slot, and it was measured
-					// rather than reasoned.** Cycling hands back a fresh allocation
-					// per write, which is the right answer when two passes in one
-					// frame share a texture — and at one level nothing does: a
-					// target is written once and sampled once, by the pass above it,
-					// in that order. Asking for a fresh allocation anyway made the
-					// device hang more often rather than less. `Impl::PortalDepth`
-					// carries what happens above one level, which is where the same
-					// target *is* written twice.
-					portalColour.cycle = false;
-
-					SDL_GPUDepthStencilTargetInfo portalDepth{};
-					portalDepth.texture = target->Depth;
-					portalDepth.clear_depth = 1.0f;
-					portalDepth.load_op = SDL_GPU_LOADOP_CLEAR;
-					portalDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
-					portalDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-					portalDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-					portalDepth.cycle = false;
-
-					SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &portalColour, 1, &portalDepth);
-
 					// **The same rectangle as the level above draws into.** The
 					// target is the attachment's size, and the world fills the
 					// viewport's corner of it — so a pane in the level above reads
@@ -5781,32 +6347,18 @@ namespace engine::render {
 						0.0f,
 						1.0f
 					};
-					SDL_SetGPUViewport(pass, &portalViewport);
 
-					const SDL_Rect portalScissor{
-						0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)
-					};
-					SDL_SetGPUScissor(pass, &portalScissor);
-
-					SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
-
-					// **The beams, beside the lights and for the same reason.**
-					// Which holes carry a shadow is a fact about the frame, so it
-					// is pushed once per pass rather than per draw — and it is
-					// pushed even when there are none, because a stale block from
-					// a previous frame would shadow through a hole that is no
-					// longer there.
-					SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
-					State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
-
-					const SDL_GPUBufferBinding portalBindings[] = {
-						{State->Meshes.Vertices(), 0},
-						{State->InstanceBuffer, 0},
-					};
-					SDL_BindGPUVertexBuffers(pass, 0, portalBindings, 2);
-
-					const SDL_GPUBufferBinding portalIndices{State->Meshes.Indices(), 0};
-					SDL_BindGPUIndexBuffer(pass, &portalIndices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					// **Not cycled, unlike a surface slot, and it was measured
+					// rather than reasoned.** Cycling hands back a fresh allocation
+					// per write, which is the right answer when two passes in one
+					// frame share a texture — and at one level nothing does: a
+					// target is written once and sampled once, by the pass above it,
+					// in that order. Asking for a fresh allocation anyway made the
+					// device hang more often rather than less. `Impl::PortalDepth`
+					// carries what happens above one level, which is where the same
+					// target *is* written twice.
+					SDL_GPURenderPass *const pass =
+						openScenePass(target->Colour, target->Depth, false, &portalViewport);
 
 					const FrameUniforms subFrameUniforms{
 						sub.Matrices.ViewProjection,
@@ -5881,8 +6433,8 @@ namespace engine::render {
 							run.OpaqueFirst,
 							run.OpaqueCount,
 							&paneLighting,
-							portalShadow,
-							portalShadowSampler,
+							shadow.Texture,
+							shadow.Sampler,
 							paneTexture,
 							State->SurfaceSampler,
 							portal.TagFilter,
@@ -5890,32 +6442,10 @@ namespace engine::render {
 						);
 					}
 
-					// **The blended tail, minus the panes in it.** A pane that
-					// went transparent left the opaque head and would otherwise be
-					// drawn here as ordinary glass on top of the picture it is
-					// already showing — the same exclusion the surface pass makes,
-					// for the same reason.
-					const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
-					if (blendedPlain > 0) {
-						State->BindPipeline(
-							pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent
-						);
-						SDL_PushGPUVertexUniformData(command, 0, &subFrameUniforms, sizeof(subFrameUniforms));
-
-						result.DrawCalls += State->DrawSlots(
-							command,
-							pass,
-							static_cast<uint32_t>(sceneOpaque),
-							blendedPlain,
-							&subLighting,
-							portalShadow,
-							portalShadowSampler,
-							nullptr,
-							State->SurfaceSampler,
-							portal.TagFilter,
-							result.Triangles
-						);
-					}
+					// **`panesFollow` is false here**, because this level's panes
+					// were drawn with the opaque head above — nothing follows that
+					// needs the transparent pipeline bound for it.
+					drawBlendedInto(pass, subFrameUniforms, subLighting, portal.TagFilter, false);
 
 					SDL_EndGPURenderPass(pass);
 					result.PortalPasses++;

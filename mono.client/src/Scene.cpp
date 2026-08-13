@@ -778,7 +778,24 @@ namespace client {
 		views.clear();
 		Ordered().clear();
 
+		// **The panes, measured once for the whole walk.** A mirror's camera is a
+		// function of its pane and whoever is looking at it, so the renderer needs
+		// the rectangle in order to place that camera for a viewer deeper than the
+		// eye — see `render::SurfaceView::PaneNormal`. Measuring a face is
+		// `GatherSurfacePanes`' business and not this file's: `ReachOf` and the
+		// face's two axes were re-derived in three places once, and a marker drawn
+		// on a face the camera was not projecting off is a debugging aid that lies.
+		//
+		// **Only the mirrors are in here.** A linked portal is a warp rather than a
+		// reflection and the gatherer leaves it out, so a hole cannot pick up a
+		// rectangle that would tell the pass to reflect through it.
+		static thread_local std::vector<engine::scene::SurfacePane> panes;
+		(void)engine::scene::GatherSurfacePanes(store, panes);
+
 		store.Each<const engine::scene::SurfaceCamera, const engine::scene::Camera, const Transform>(
+			// `panes` needs no capture: it has static storage duration, for the
+			// reason every other scratch buffer in this file does — a per-frame
+			// allocation in a walk that runs once per world per frame.
 			[&views, &store, portals](
 				Entity entity,
 				const engine::scene::SurfaceCamera &target,
@@ -809,6 +826,32 @@ namespace client {
 				view.Frame = placement.Frame;
 				view.Width = target.Width;
 				view.Height = target.Height;
+
+				// **The rectangle, when this camera is a mirror on a part.** Left
+				// zero otherwise, which is what tells the pass it may not descend
+				// into this pane: a camera parented to the world has no face to
+				// reflect through, and one showing a second world has no local
+				// geometry behind the glass. Both keep the one eye-derived image
+				// they have always had, which is the arrangement that works today.
+				//
+				// **Matched by entity and not by slot.** Two cameras naming one
+				// index is a scene mistake the renderer resolves by keeping the
+				// first, and matching on the number here would hand the survivor
+				// the loser's rectangle — a camera reflecting through a pane it is
+				// not on, which reads as a mirror showing the wrong room.
+				for (const engine::scene::SurfacePane &pane : panes) {
+					if (pane.Camera != entity) {
+						continue;
+					}
+
+					view.PaneCentre = pane.Centre;
+					view.PaneNormal = pane.Normal;
+					view.PaneFirst = pane.First;
+					view.PaneSecond = pane.Second;
+					view.PaneNear = pane.NearPlane;
+					view.PaneFar = pane.FarPlane;
+					break;
+				}
 
 				// **The fitted frustum when there is one, and the plain camera
 				// when there is not.** `AimSurfaceCameras` writes a

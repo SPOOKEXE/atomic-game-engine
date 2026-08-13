@@ -448,6 +448,34 @@ empty, as `RenderedSignature`'s does. A file carrying last run's counts would
 disagree with the content sitting beside it, and a wrong number is worse than a
 zero that says it does not know.
 
+## What a mirror does to a camera is a function, and it must stay one
+
+`ReflectCamera` takes a `SurfacePane` and a viewer and returns where that pane's
+camera stands. **It does not take an `ecs::Store`, and a reviewer should refuse
+the change that gives it one.** A mirror seen inside another mirror is looked at
+from *that* mirror's camera rather than from the eye, so the rule has to compose
+— and it can only compose if it is a function. While it lived inside
+`AimSurfaceCameras`' walk over `ActiveCamera` there was exactly one viewer it
+could ever answer for, which is what drew the inner panes of
+`examples/MirrorDepth.luau` as flat tint.
+
+Three shapes to refuse, and the reason is the same each time:
+
+- **A second derivation of the reflection anywhere.** `AimSurfaceCameras` calls
+  this for its own mirrors and `engine.scene.surfacecameras` asserts the
+  `Transform` and `SurfaceLens` it writes are bit-for-bit what the function
+  returns. That is `SeamMapping`'s argument applied to a reflection: a second
+  statement of one rule is a second chance to disagree about a sign.
+- **A pane gathered by both halves.** `GatherSurfacePanes` skips a linked portal
+  and `GatherPortalSeams` takes it; an unlinked one is a mirror in both, because
+  a hole leading nowhere is a wall. `LinkedPortalOf` is the single test, and two
+  passes disagreeing about which a pane is means one drawn twice or not at all.
+- **A viewer's frustum passed as anything but four corners or none.**
+  `FrustumCorners`' two overloads hand back directions one unit deep — a
+  perspective camera has a field of view and a reflected one has an already
+  fitted off-axis lens, and a level of recursion that fell back to "no corners"
+  drops the clamp exactly where the pane is nearest.
+
 ## An unarrived mesh draws nothing, and no mesh at all draws a cube
 
 `KeepLoaded` is that rule, and the two cases it separates are why it is a

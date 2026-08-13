@@ -29,7 +29,9 @@
 #include <glm/vec4.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <span>
 #include <vector>
 
 TEST_SUITE_ID("engine.scene.surfacecameras")
@@ -411,9 +413,8 @@ TEST_CASE("the frustum covers the pane when the viewer looks away from it", "[sc
 
 	const auto coverageAt = [&](const Vector3 &at, float pitchDegrees, float yawDegrees) {
 		constexpr float TO_RADIANS = 3.14159265f / 180.0f;
-		mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(
-			at, CFrame::Angles(pitchDegrees * TO_RADIANS, yawDegrees * TO_RADIANS, 0.0f).Rotation()
-		);
+		mirror.World.GetMutable<Transform>(mirror.Eye)->Frame =
+			CFrame(at, CFrame::Angles(pitchDegrees * TO_RADIANS, yawDegrees * TO_RADIANS, 0.0f).Rotation());
 		const float degrees = std::abs(pitchDegrees) > std::abs(yawDegrees) ? pitchDegrees : yawDegrees;
 
 		REQUIRE(AimSurfaceCameras(mirror.World) == 1);
@@ -456,17 +457,20 @@ TEST_CASE("the frustum covers the pane when the viewer looks away from it", "[sc
 
 				const glm::vec4 clip = viewProjection * point;
 				if (!(clip.w > 0.0f)) {
-					INFO("at " << degrees << " degrees, pane point " << x << ", " << y
-							   << " is behind the surface camera");
+					INFO(
+						"at " << degrees << " degrees, pane point " << x << ", " << y
+							  << " is behind the surface camera"
+					);
 					covered = false;
 					continue;
 				}
 
-				const bool inside =
-					std::abs(clip.x / clip.w) <= 1.0f && std::abs(clip.y / clip.w) <= 1.0f;
+				const bool inside = std::abs(clip.x / clip.w) <= 1.0f && std::abs(clip.y / clip.w) <= 1.0f;
 				if (!inside) {
-					INFO("at " << degrees << " degrees, pane point " << x << ", " << y
-							   << " is on screen but outside the reflection");
+					INFO(
+						"at " << degrees << " degrees, pane point " << x << ", " << y
+							  << " is on screen but outside the reflection"
+					);
 				}
 				covered = covered && inside;
 			}
@@ -486,8 +490,21 @@ TEST_CASE("the frustum covers the pane when the viewer looks away from it", "[sc
 	// the tilt actually happens from, and it is the one that puts the pane's
 	// corners nearest the camera's own plane.
 	for (const float degrees :
-		 {0.0f, 20.0f, 40.0f, 50.0f, 55.0f, 60.0f, 70.0f, 80.0f, -20.0f, -40.0f, -50.0f, -55.0f,
-		  -60.0f, -70.0f, -80.0f}) {
+		 {0.0f,
+		  20.0f,
+		  40.0f,
+		  50.0f,
+		  55.0f,
+		  60.0f,
+		  70.0f,
+		  80.0f,
+		  -20.0f,
+		  -40.0f,
+		  -50.0f,
+		  -55.0f,
+		  -60.0f,
+		  -70.0f,
+		  -80.0f}) {
 		INFO("viewer yawed " << degrees << " degrees off the pane");
 		CHECK(coverageAt(Vector3{0.0f, 0.0f, STANDOFF}, 0.0f, degrees));
 
@@ -2733,4 +2750,463 @@ TEST_CASE("a body on the map's own axis crosses worlds and not one room", "[scen
 	here.push_back(Window::Row(Vector3{0.0f, 0.0f, -0.2f}, Vector3{0.5f, 1.0f, 0.5f}));
 	CHECK(engine::scene::CutAndCloneSeams(same.World, here) == 0);
 	CHECK(here.size() == 1);
+}
+
+// The rule on its own, away from the world it is normally read out of.
+//
+// **What these cases can say and the ones above cannot**, which is the whole
+// reason `ReflectCamera` exists: `AimSurfaceCameras` places every mirror in the
+// world from the world's *one* active camera, so nothing above can ask what a
+// pane does to a viewer that is not the eye — and a mirror seen inside another
+// mirror is looked at from that mirror's camera rather than from the eye.
+
+namespace {
+	// A pane stated by hand, for the cases that are about the rule rather than
+	// about the tree it was gathered out of.
+	//
+	// Sixteen by nine, on whichever two axes the normal is not on, which is what
+	// `FaceAxes` would have produced for the same face.
+	engine::scene::SurfacePane PaneAt(const Vector3 &centre, const Vector3 &normal) {
+		engine::scene::SurfacePane pane;
+		pane.Centre = centre;
+		pane.Normal = normal;
+		pane.First = std::abs(normal.X) > 0.5f ? Vector3{0.0f, 0.0f, 8.0f} : Vector3{8.0f, 0.0f, 0.0f};
+		pane.Second = std::abs(normal.Y) > 0.5f ? Vector3{0.0f, 0.0f, 4.5f} : Vector3{0.0f, 4.5f, 0.0f};
+		return pane;
+	}
+
+	// Where planar reflection through a plane sends a point, written out here so
+	// the expectations below are not the implementation quoted back at itself.
+	Vector3 MirroredThrough(const Vector3 &centre, const Vector3 &normal, const Vector3 &at) {
+		return at - normal * (2.0f * (at - centre).Dot(normal));
+	}
+}
+
+TEST_CASE("a mirror seen in a mirror is reflected from that mirror's camera", "[scene][surfacecameras]") {
+	// **The defect, as arithmetic rather than as a device artefact.** Two panes
+	// facing each other and an eye between them: pane B appears inside pane A's
+	// reflection, so the camera that draws *that* copy of B has to be B's rule
+	// applied to A's camera — not to the eye. While the rule was reachable only
+	// from inside a walk over `ActiveCamera`, the renderer had one answer
+	// available to it and it was the wrong one, which is `ROADMAP.md` v0.15's
+	// mirror-in-mirror-in-mirror drawing its inner panes as flat tint.
+	//
+	// The two answers are a fixed translation apart, so this is not a tolerance
+	// question: worked through below rather than read off the run.
+	//
+	// A is at the origin facing +Z. B is at z = 10 facing -Z. The eye is at
+	// (1, 2, 4), which is four in front of A and six in front of B.
+	//
+	//   - Through A: 4 in front becomes 4 behind, at (1, 2, -4).
+	//   - Through B, from the eye: 6 in front becomes 6 behind, at (1, 2, 16).
+	//   - Through B, from A's camera at z = -4: that is 14 in front of B, so it
+	//     lands 14 behind, at (1, 2, 24).
+	//
+	// Eight studs apart, and eight is exactly what a reflection predicts of the
+	// gap: the two viewers are 8 apart along B's normal, and a reflection sends
+	// a difference `d` to `d - 2n(n·d)`, which flips that component and leaves
+	// the rest.
+	const engine::scene::SurfacePane paneA = PaneAt(Vector3::Zero, Vector3{0.0f, 0.0f, 1.0f});
+	const engine::scene::SurfacePane paneB = PaneAt(Vector3{0.0f, 0.0f, 10.0f}, Vector3{0.0f, 0.0f, -1.0f});
+
+	const CFrame eye{Vector3{1.0f, 2.0f, 4.0f}};
+
+	const engine::scene::MirrorEye inA = engine::scene::ReflectCamera(paneA, eye, {});
+	REQUIRE(inA.Renders);
+	CHECK_THAT(inA.Frame.Position.Z, Catch::Matchers::WithinAbs(-4.0f, TOLERANCE));
+
+	const engine::scene::MirrorEye composed = engine::scene::ReflectCamera(paneB, inA.Frame, {});
+	const engine::scene::MirrorEye direct = engine::scene::ReflectCamera(paneB, eye, {});
+	REQUIRE(composed.Renders);
+	REQUIRE(direct.Renders);
+
+	// **Different, which is the whole claim.** An implementation that ignored
+	// the viewer and reached for the world's eye would put these in one place,
+	// and the picture would be B drawn from where nobody is looking at it from.
+	CHECK((composed.Frame.Position - direct.Frame.Position).Magnitude() > 1.0f);
+
+	CHECK_THAT(composed.Frame.Position.X, Catch::Matchers::WithinAbs(1.0f, TOLERANCE));
+	CHECK_THAT(composed.Frame.Position.Y, Catch::Matchers::WithinAbs(2.0f, TOLERANCE));
+	CHECK_THAT(composed.Frame.Position.Z, Catch::Matchers::WithinAbs(24.0f, TOLERANCE));
+	CHECK_THAT(direct.Frame.Position.Z, Catch::Matchers::WithinAbs(16.0f, TOLERANCE));
+
+	// And the difference is the translation planar reflection predicts, stated
+	// as the general rule rather than as the one coordinate above — a sign error
+	// in the implementation would still land 8 apart, and would land the pair on
+	// the wrong side of B.
+	const Vector3 between = inA.Frame.Position - eye.Position;
+	const Vector3 predicted = between - paneB.Normal * (2.0f * between.Dot(paneB.Normal));
+	const Vector3 measured = composed.Frame.Position - direct.Frame.Position;
+	CHECK_THAT((measured - predicted).Magnitude(), Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+
+	// **Composing is reflecting twice**, which is what makes a chain of panes a
+	// chain rather than a set of independent guesses.
+	const Vector3 twice = MirroredThrough(
+		paneB.Centre, paneB.Normal, MirroredThrough(paneA.Centre, paneA.Normal, eye.Position)
+	);
+	CHECK_THAT((composed.Frame.Position - twice).Magnitude(), Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+}
+
+TEST_CASE(
+	"the aim pass answers for the eye, which is the answer a recursion cannot use", "[scene][surfacecameras]"
+) {
+	// **The same defect stated against a real world rather than two panes made
+	// up in a test.** `AimSurfaceCameras` places every surface from the world's
+	// one `ActiveCamera`, which is exactly right for what the *screen* shows and
+	// is the wrong camera for a pane appearing inside another pane's picture.
+	// That is not a fault in this pass — there is one screen and it has one eye
+	// — it is why the rule had to become something a recursive pass can ask
+	// about a viewer of its own.
+	Store world{"surfacecameras"};
+	engine::scene::RegisterSceneClasses();
+
+	// Two panes facing each other down Z with the eye between them. A is at the
+	// origin showing its `Back` face, so its normal is +Z; B is ten along
+	// showing `Front`, so its normal is -Z.
+	const auto build = [&](const char *name, const Vector3 &at, NormalId face) {
+		const Entity part =
+			world.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), name);
+		world.Set<Transform>(part, Transform{CFrame(at)});
+		world.Set<Bounds>(part, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+
+		const Entity camera =
+			world.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), name);
+		SurfaceCamera target;
+		target.Face = face;
+		world.Set<SurfaceCamera>(camera, target);
+		world.SetParent(camera, part);
+		return camera;
+	};
+
+	const Entity inA = build("A", Vector3::Zero, NormalId::Back);
+	const Entity inB = build("B", Vector3{0.0f, 0.0f, 10.0f}, NormalId::Front);
+
+	const Entity eye = world.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Camera")), "Eye");
+	world.Set<Transform>(eye, Transform{CFrame(Vector3{1.0f, 2.0f, 4.0f})});
+	world.SetResource(ActiveCamera{eye, 16.0f / 9.0f});
+
+	REQUIRE(AimSurfaceCameras(world) == 2);
+
+	std::vector<engine::scene::SurfacePane> panes;
+	REQUIRE(engine::scene::GatherSurfacePanes(world, panes) == 2);
+
+	const auto paneOf = [&](Entity camera) {
+		for (const engine::scene::SurfacePane &found : panes) {
+			if (found.Camera == camera) {
+				return found;
+			}
+		}
+		FAIL("no pane gathered for the camera");
+		return panes[0];
+	};
+
+	const Transform *eyePlaced = world.Get<Transform>(eye);
+	const Camera *eyeLens = world.Get<Camera>(eye);
+	REQUIRE(eyePlaced != nullptr);
+	REQUIRE(eyeLens != nullptr);
+
+	Vector3 corners[4];
+	const size_t cornerCount =
+		engine::scene::FrustumCorners(eyePlaced->Frame, eyeLens->FieldOfViewRadians, 16.0f / 9.0f, corners);
+	const std::span<const Vector3> screen(corners, cornerCount);
+
+	// **What the pass wrote for B is B reflected from the eye**, bit for bit.
+	const engine::scene::MirrorEye direct =
+		engine::scene::ReflectCamera(paneOf(inB), eyePlaced->Frame, screen);
+	REQUIRE(direct.Renders);
+	CHECK(std::memcmp(&world.Get<Transform>(inB)->Frame, &direct.Frame, sizeof(CFrame)) == 0);
+
+	// **And the copy of B seen inside A needs B reflected from A's own camera**,
+	// which is somewhere else — so a pass that reached for the stored
+	// `Transform` at every depth samples the inner pane with a matrix fitted to
+	// a camera that is not looking at it, the coordinate leaves 0..1, and
+	// `opaque.frag` falls back to the plain lit pane.
+	const engine::scene::MirrorEye first =
+		engine::scene::ReflectCamera(paneOf(inA), eyePlaced->Frame, screen);
+	REQUIRE(first.Renders);
+
+	Vector3 inner[4];
+	const size_t innerCount = engine::scene::FrustumCorners(first.Frame, first.Lens, inner);
+	const engine::scene::MirrorEye composed =
+		engine::scene::ReflectCamera(paneOf(inB), first.Frame, std::span<const Vector3>(inner, innerCount));
+	REQUIRE(composed.Renders);
+
+	// The gap between the two viewers, reflected through B — the same prediction
+	// the panes-only case makes, arrived at from the tree instead.
+	const Vector3 between = first.Frame.Position - eyePlaced->Frame.Position;
+	const engine::scene::SurfacePane far = paneOf(inB);
+	const Vector3 predicted = between - far.Normal * (2.0f * between.Dot(far.Normal));
+	const Vector3 measured = composed.Frame.Position - direct.Frame.Position;
+
+	CHECK(measured.Magnitude() > 1.0f);
+	CHECK_THAT((measured - predicted).Magnitude(), Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+}
+
+TEST_CASE(
+	"a reflected camera stands as far behind the pane as the viewer stands in front",
+	"[scene][surfacecameras]"
+) {
+	// The whole of planar reflection, and the reason the image lines up with the
+	// pane instead of sliding across it as the viewer moves.
+	const engine::scene::SurfacePane pane = PaneAt(Vector3::Zero, Vector3{0.0f, 0.0f, 1.0f});
+
+	const engine::scene::MirrorEye front =
+		engine::scene::ReflectCamera(pane, CFrame(Vector3{3.0f, 1.0f, 7.0f}), {});
+	REQUIRE(front.Renders);
+	CHECK_THAT(front.Frame.Position.X, Catch::Matchers::WithinAbs(3.0f, TOLERANCE));
+	CHECK_THAT(front.Frame.Position.Y, Catch::Matchers::WithinAbs(1.0f, TOLERANCE));
+	CHECK_THAT(front.Frame.Position.Z, Catch::Matchers::WithinAbs(-7.0f, TOLERANCE));
+
+	// **Aimed, not merely placed.** A camera behind the pane with an identity
+	// rotation faces away from it and renders empty space.
+	CHECK_THAT(front.Frame.LookVector().Z, Catch::Matchers::WithinAbs(1.0f, 1e-3f));
+
+	// **And a pane can be looked at from behind, where both answers are right.**
+	// The camera lands on the viewer's side of the glass and looks the other
+	// way, which is the sign `facing` carries.
+	const engine::scene::MirrorEye behind =
+		engine::scene::ReflectCamera(pane, CFrame(Vector3{3.0f, 1.0f, -7.0f}), {});
+	REQUIRE(behind.Renders);
+	CHECK_THAT(behind.Frame.Position.Z, Catch::Matchers::WithinAbs(7.0f, TOLERANCE));
+	CHECK_THAT(behind.Frame.LookVector().Z, Catch::Matchers::WithinAbs(-1.0f, 1e-3f));
+
+	// A mirror in the floor, which is the one direction `LookAt` cannot resolve
+	// against the default up vector — and a NaN rotation spreads into the frame,
+	// the clip plane and every bound derived from them.
+	const engine::scene::SurfacePane floor = PaneAt(Vector3::Zero, Vector3{0.0f, 1.0f, 0.0f});
+	const engine::scene::MirrorEye above =
+		engine::scene::ReflectCamera(floor, CFrame(Vector3{0.0f, 5.0f, 0.0f}), {});
+	REQUIRE(above.Renders);
+	CHECK_THAT(above.Frame.Position.Y, Catch::Matchers::WithinAbs(-5.0f, TOLERANCE));
+	CHECK(std::isfinite(above.Frame.LookVector().Y));
+	CHECK_THAT(above.Frame.LookVector().Y, Catch::Matchers::WithinAbs(1.0f, 1e-3f));
+}
+
+TEST_CASE("a viewer in the edge-on band gets no camera rather than infinities", "[scene][surfacecameras]") {
+	// **`EDGE_ON_MARGIN`, as a property of the rule rather than of the pass.**
+	// At the plane there is no continuous orientation to aim for: the answer
+	// flips with the side, both are right, and no path joins them — so the
+	// honest answer is that a pane covering no pixels has nothing to show.
+	const engine::scene::SurfacePane pane = PaneAt(Vector3::Zero, Vector3{0.0f, 0.0f, 1.0f});
+
+	const engine::scene::MirrorEye level = engine::scene::ReflectCamera(pane, CFrame(Vector3::Zero), {});
+	CHECK_FALSE(level.Renders);
+
+	// Either side of it, and a hair outside it, which is what makes the band a
+	// band rather than a rejection of the plane itself.
+	CHECK_FALSE(engine::scene::ReflectCamera(pane, CFrame(Vector3{0.0f, 0.0f, 0.1f}), {}).Renders);
+	CHECK_FALSE(engine::scene::ReflectCamera(pane, CFrame(Vector3{0.0f, 0.0f, -0.1f}), {}).Renders);
+	CHECK(engine::scene::ReflectCamera(pane, CFrame(Vector3{0.0f, 0.0f, 0.5f}), {}).Renders);
+	CHECK(engine::scene::ReflectCamera(pane, CFrame(Vector3{0.0f, 0.0f, -0.5f}), {}).Renders);
+
+	// **And nothing it hands back is a NaN or an infinity**, which is the half
+	// that matters to a caller that renders anyway: a blank aim travels through
+	// the rest of a pass, and a matrix full of infinities poisons every bound
+	// derived from it.
+	CHECK(std::isfinite(level.Frame.Position.X));
+	CHECK(std::isfinite(level.Frame.Position.Y));
+	CHECK(std::isfinite(level.Frame.Position.Z));
+	CHECK(std::isfinite(level.Lens.Left));
+	CHECK(std::isfinite(level.Lens.Right));
+	CHECK(std::isfinite(level.Lens.Bottom));
+	CHECK(std::isfinite(level.Lens.Top));
+}
+
+TEST_CASE("the fitted lens covers the whole pane it was fitted to", "[scene][surfacecameras]") {
+	// **The property `FitExtents` says the whole feature depends on.** The image
+	// is projected back onto the pane per fragment and `opaque.frag` tests the
+	// projected coordinate against the texture's 0..1 rectangle, falling through
+	// to the plain lit pane outside it — so a frustum that does not cover the
+	// pane draws a hard-edged rectangle of reflection floating on a grey wall.
+	//
+	// Unclamped here, with no viewer frustum handed in, because that is the
+	// condition being asserted: every corner of the pane, at every distance,
+	// however far off to one side the viewer stands. The clamped form is what
+	// `the frustum covers the whole pane` above measures against a real screen.
+	const engine::scene::SurfacePane pane = PaneAt(Vector3::Zero, Vector3{0.0f, 0.0f, 1.0f});
+
+	const auto covers = [&](const Vector3 &from) {
+		const engine::scene::MirrorEye eye = engine::scene::ReflectCamera(pane, CFrame(from), {});
+		REQUIRE(eye.Renders);
+
+		const glm::mat4 viewProjection = engine::scene::ResolveSurfaceCamera(
+											 eye.Frame, engine::scene::SurfaceProjection(eye.Lens, eye.Frame)
+		)
+											 .ViewProjection;
+
+		bool covered = true;
+		for (const float alongFirst : {-1.0f, 1.0f}) {
+			for (const float alongSecond : {-1.0f, 1.0f}) {
+				const Vector3 corner = pane.Centre + pane.First * alongFirst + pane.Second * alongSecond;
+				const glm::vec4 clip = viewProjection * glm::vec4(corner.X, corner.Y, corner.Z, 1.0f);
+				INFO(
+					"viewer " << from.X << ", " << from.Y << ", " << from.Z << " corner " << corner.X << ", "
+							  << corner.Y << " has w " << clip.w
+				);
+
+				// Behind the camera is not covered, and saying so beats a divide
+				// that flips the sign and reports the corner as central.
+				if (!(clip.w > 0.0f)) {
+					covered = false;
+					continue;
+				}
+				covered = covered && std::abs(clip.x / clip.w) <= 1.0f && std::abs(clip.y / clip.w) <= 1.0f;
+			}
+		}
+		return covered;
+	};
+
+	// Across the room, where no constant field of view is wrong yet.
+	CHECK(covers(Vector3{0.0f, 0.0f, 40.0f}));
+
+	// Two studs out, where the pane needs about 150 degrees and the authored 70
+	// covered a third of it.
+	CHECK(covers(Vector3{0.0f, 0.0f, 2.0f}));
+
+	// Close *and* off to one side, which is the case a symmetric frustum has to
+	// widen for rather than lean into — and where aiming at the pane's centre
+	// instead of along its normal puts the nearest corner behind the camera.
+	CHECK(covers(Vector3{7.0f, 4.0f, 1.0f}));
+	CHECK(covers(Vector3{-7.0f, -4.0f, 0.6f}));
+
+	// And from behind the glass, since a pane is looked at from either side.
+	CHECK(covers(Vector3{5.0f, 0.0f, -3.0f}));
+}
+
+TEST_CASE("gathering finds the mirrors and leaves the linked portals alone", "[scene][surfacecameras]") {
+	// **A linked portal is not a mirror, and the split is the point.** Its
+	// camera is a warp rather than a reflection, so a recursion handed both
+	// descriptions of one pane would have two answers for where the camera goes.
+	// An *unlinked* portal is a mirror, by the same rule the aim pass applies: a
+	// hole leading nowhere is a wall.
+	Mirror mirror;
+
+	std::vector<engine::scene::SurfacePane> panes;
+	REQUIRE(engine::scene::GatherSurfacePanes(mirror.World, panes) == 1);
+
+	// The face, measured the way the aim pass measures it: the pane faces -Z with
+	// a half extent of 0.2, so its face is at z = -0.2 rather than at the part's
+	// own centre.
+	CHECK(panes[0].Camera == mirror.Reflection);
+	CHECK(panes[0].Part == mirror.Pane);
+	CHECK_THAT(panes[0].Centre.Z, Catch::Matchers::WithinAbs(-0.2f, TOLERANCE));
+	CHECK_THAT(panes[0].Normal.Z, Catch::Matchers::WithinAbs(-1.0f, TOLERANCE));
+	CHECK_THAT(panes[0].First.Magnitude(), Catch::Matchers::WithinAbs(8.0f, TOLERANCE));
+	CHECK_THAT(panes[0].Second.Magnitude(), Catch::Matchers::WithinAbs(4.5f, TOLERANCE));
+
+	// The author's lens, carried rather than replaced.
+	CHECK_THAT(panes[0].NearPlane, Catch::Matchers::WithinAbs(Camera{}.NearPlane, TOLERANCE));
+	CHECK_THAT(panes[0].FarPlane, Catch::Matchers::WithinAbs(Camera{}.FarPlane, TOLERANCE));
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	CHECK(engine::scene::GatherSurfacePanes(mirror.World, panes) == 0);
+
+	// The other half of the split, so this is a hand-off rather than a pane
+	// nobody claims.
+	std::vector<engine::scene::PortalSeam> seams;
+	CHECK(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+
+	// A destination that was destroyed falls back to a mirror, and the gather has
+	// to agree with the aim pass about that or a recursion would draw a hole
+	// nothing places a camera for.
+	mirror.World.Destroy(far);
+	CHECK(engine::scene::GatherSurfacePanes(mirror.World, panes) == 1);
+}
+
+TEST_CASE("what the aim pass writes is what the rule says", "[scene][surfacecameras]") {
+	// **One statement of what a mirror does to a camera, pinned.** The comments
+	// in `AimSurfaceCameras` argue that a second derivation is a second chance to
+	// disagree — this is that argument as an assertion, and it is what stops the
+	// lift being undone by a well-meaning inline of it later.
+	//
+	// Compared **bitwise**, which is the right comparison rather than a lazy
+	// one: the same inputs through the same code give the same bits, and a
+	// tolerance would be answering a different question. It is the comparison
+	// the pass itself makes before deciding whether to write.
+	// **Close and off to one side, so the eye-corner clamp actually binds.** At
+	// any ordinary distance the fit is already far tighter than the viewer's own
+	// frustum and the intersection changes nothing — which would make the
+	// comparison below pass while saying nothing about the corners at all.
+	Mirror mirror;
+	mirror.World.Set<Transform>(mirror.Eye, Transform{CFrame(Vector3{2.0f, 1.0f, 3.0f})});
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+	std::vector<engine::scene::SurfacePane> panes;
+	REQUIRE(engine::scene::GatherSurfacePanes(mirror.World, panes) == 1);
+
+	const Transform *eyePlaced = mirror.World.Get<Transform>(mirror.Eye);
+	const Camera *eyeLens = mirror.World.Get<Camera>(mirror.Eye);
+	REQUIRE(eyePlaced != nullptr);
+	REQUIRE(eyeLens != nullptr);
+
+	Vector3 corners[4];
+	const size_t cornerCount =
+		engine::scene::FrustumCorners(eyePlaced->Frame, eyeLens->FieldOfViewRadians, 16.0f / 9.0f, corners);
+	REQUIRE(cornerCount == 4);
+
+	const engine::scene::MirrorEye stated = engine::scene::ReflectCamera(
+		panes[0], eyePlaced->Frame, std::span<const Vector3>(corners, cornerCount)
+	);
+	REQUIRE(stated.Renders);
+
+	const Transform *placed = mirror.World.Get<Transform>(mirror.Reflection);
+	const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+	REQUIRE(placed != nullptr);
+	REQUIRE(fitted != nullptr);
+
+	CHECK(std::memcmp(&placed->Frame, &stated.Frame, sizeof(CFrame)) == 0);
+	CHECK(std::memcmp(fitted, &stated.Lens, sizeof(SurfaceLens)) == 0);
+
+	// **And the clamp was actually exercised**, which the bitwise compare cannot
+	// say on its own: an eye frustum passed to one side and dropped on the other
+	// would still match if the fit never bound against it. A pane this close
+	// fills far more than the screen, so the two answers differ.
+	const engine::scene::MirrorEye unclamped = engine::scene::ReflectCamera(panes[0], eyePlaced->Frame, {});
+	REQUIRE(unclamped.Renders);
+	CHECK(std::memcmp(&unclamped.Lens, &stated.Lens, sizeof(SurfaceLens)) != 0);
+}
+
+TEST_CASE(
+	"a fitted lens is a frustum the next level down can be clamped against", "[scene][surfacecameras]"
+) {
+	// **The overload that makes a recursion possible past its first level.** A
+	// reflected camera has no field of view — its extents were fitted to a pane
+	// — so a level that could only take an angle would drop the clamp exactly
+	// where the pane is nearest and the texels scarcest.
+	const engine::scene::SurfacePane pane = PaneAt(Vector3::Zero, Vector3{0.0f, 0.0f, 1.0f});
+	const engine::scene::MirrorEye eye =
+		engine::scene::ReflectCamera(pane, CFrame(Vector3{0.0f, 0.0f, 6.0f}), {});
+	REQUIRE(eye.Renders);
+
+	Vector3 corners[4];
+	REQUIRE(engine::scene::FrustumCorners(eye.Frame, eye.Lens, corners) == 4);
+
+	// **One unit deep, which is the convention the two overloads share.** The
+	// fit divides each direction by its own depth, so a scale disagreement shows
+	// up only against the floor that keeps a corner swinging past the camera's
+	// plane finite — the one place nobody would look.
+	const Vector3 forward = eye.Frame.LookVector();
+	for (const Vector3 &corner : corners) {
+		CHECK_THAT(corner.Dot(forward), Catch::Matchers::WithinAbs(1.0f, TOLERANCE));
+	}
+
+	// And they are the corners of that lens rather than of some other one: each
+	// projects to a corner of the clip box.
+	const glm::mat4 viewProjection =
+		engine::scene::ResolveSurfaceCamera(eye.Frame, engine::scene::SurfaceProjection(eye.Lens, eye.Frame))
+			.ViewProjection;
+
+	for (const Vector3 &corner : corners) {
+		const Vector3 at = eye.Frame.Position + corner;
+		const glm::vec4 clip = viewProjection * glm::vec4(at.X, at.Y, at.Z, 1.0f);
+		REQUIRE(clip.w > 0.0f);
+		CHECK_THAT(std::abs(clip.x / clip.w), Catch::Matchers::WithinAbs(1.0f, 1e-3f));
+		CHECK_THAT(std::abs(clip.y / clip.w), Catch::Matchers::WithinAbs(1.0f, 1e-3f));
+	}
 }

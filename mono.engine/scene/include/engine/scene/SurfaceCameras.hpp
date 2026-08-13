@@ -237,6 +237,231 @@ namespace engine::scene {
 	//         reflection rather than whether there is a mirror.
 	size_t AimSurfaceCameras(ecs::Store &store);
 
+	// One mirror pane, as a rectangle in the world.
+	//
+	// **`PortalSeam`'s twin, and the two are deliberately not one type.** A seam
+	// describes a hole and carries what only a hole has — where the far end is,
+	// how much bigger it is, whether it crosses worlds — and a reflection has
+	// none of that, because its map has no far end at all. What the two share is
+	// the rectangle, and sharing exactly that is what stops a mirror acquiring a
+	// destination field that is always null.
+	//
+	// **Gathered rather than read off a component**, for the reason a seam is: a
+	// pane is a `SurfaceCamera`, plus the part it is parented to, plus the face
+	// named on it — so a pass that wanted one would otherwise walk the tree and
+	// re-derive `ReachOf` and the face's two axes for itself. This file already
+	// paid for that mistake one level down, where a marker drawn on a face the
+	// camera was not projecting off is a debugging aid that lies.
+	//
+	// @since v0.15
+	struct SurfacePane {
+		// The pane's plane: the middle of the face, and the face's own unit
+		// normal.
+		//
+		// **The face's normal, not "the one pointing at the viewer".** Which
+		// side is outward is a question about the viewer, exactly as it is about
+		// the crosser in `PortalSeam` — a pane can be looked at from either side
+		// and both answers are right. `ReflectCamera` takes the side from the
+		// viewer it is handed, which is what lets one pane answer differently at
+		// two levels of a recursion.
+		core::Vector3 Centre;
+		core::Vector3 Normal;
+
+		// The pane's half-axes in the world, so `Centre ± First ± Second` is the
+		// rectangle. Vectors rather than extents, because that is the form the
+		// fit and the clip both want.
+		core::Vector3 First;
+		core::Vector3 Second;
+
+		// The part the face is on, and the surface camera that projects off it.
+		//
+		// **Both ends, because the pairing is written from one number.** The
+		// camera carries the slot it renders into and the part carries the slot
+		// it samples; a pass holding one of them could set only half of that,
+		// and half of it is a camera rendering perfectly into a texture nothing
+		// samples.
+		ecs::Entity Part = ecs::NULL_ENTITY;
+		ecs::Entity Camera = ecs::NULL_ENTITY;
+
+		// Which surface slot the pane samples, from `SurfaceCamera::Surface`.
+		// What lets a caller name one mirror out of several.
+		int8_t Surface = 0;
+
+		// Which tags an instance must carry to appear in this pane, or zero for
+		// all of them, from `SurfaceCamera::TagFilter`.
+		//
+		// **Carried for `PortalSeam::TagFilter`'s reason.** A recursive pass has
+		// no surface camera in its hand at the levels below the first — it has
+		// the pane it is descending into — so a filter authored on the camera
+		// would be silently dropped for exactly the mirrors the recursion is
+		// there to draw.
+		uint32_t TagFilter = 0;
+
+		// The lens the author gave the camera. `ReflectCamera` measures its
+		// extents at `NearPlane` and hands both back untouched.
+		//
+		// **The author's and not the engine's, which is a v0.14 change this must
+		// not quietly undo.** The near plane used to be shoved out to the glass
+		// as a poor man's oblique clip, so a script that set it had it taken back
+		// on the next frame; there is a real clip now and these are read rather
+		// than written.
+		float NearPlane = 0.1f;
+		float FarPlane = 500.0f;
+	};
+
+	// The camera one mirror pane must be rendered from, for one viewer.
+	//
+	// @since v0.15
+	struct MirrorEye {
+		// Where it stands and which way it looks, ready for a `Transform`.
+		core::CFrame Frame;
+
+		// The frustum fitted to the pane, the oblique clip on the pane's own
+		// plane, and the identity map a mirror samples through — ready for a
+		// `SurfaceLens`.
+		SurfaceLens Lens;
+
+		// Whether there is a reflection to draw at all.
+		//
+		// **False when the viewer is inside the edge-on band**, where there is
+		// no continuous orientation to aim for: which way along the normal a
+		// reflected camera looks depends on which side of the plane the viewer
+		// is, both answers are right, and no path joins them — so a viewer
+		// crossing turns the camera half a turn between two frames, which is
+		// what a mirror flashing is. A pane seen edge-on covers no pixels, so
+		// the honest answer is that there is nothing to show.
+		//
+		// Carries the same meaning `AimSurfaceCameras`' own aim does: the frame
+		// and the lens are left at their defaults and a caller that renders
+		// anyway is drawing from a camera nothing placed.
+		bool Renders = false;
+	};
+
+	// The four corner directions of an ordinary perspective camera's frustum, in
+	// world space.
+	//
+	// **What the fit is intersected with, and the whole of a close pane's
+	// sharpness.** A surface has to cover the part of its pane *the viewer can
+	// see*, and up against the glass those are wildly different things: a pane
+	// subtends nearly half a turn from a point on its own surface and a screen
+	// subtends seventy degrees, so fitting the whole pane there spends almost
+	// every texel outside the frame and the image goes blocky exactly when it is
+	// largest.
+	//
+	// **One unit deep, which is a convention the two overloads share and must.**
+	// The fit divides each direction by its own depth along the view axis, so a
+	// corner's length cancels everywhere except against the floor that keeps a
+	// corner swinging past the camera's plane finite — and two overloads
+	// disagreeing about scale would disagree only there, which is the one place
+	// nobody would look.
+	//
+	// **A little wider than the screen exactly needs**, for the same reason the
+	// fit itself is: the edge of a frustum is not a safe place to sample, and a
+	// clamp landing exactly on the screen edge puts the pane's visible boundary
+	// on the texture's boundary.
+	//
+	// @param frame               The viewer's placement.
+	// @param fieldOfViewRadians  Its vertical field of view.
+	// @param aspect              Width over height of what it draws into. Zero
+	//                            or less is taken as square, which is what a
+	//                            minimised window reports.
+	// @param out                 The four directions.
+	// @return How many were written, which is four. A count so a caller can hand
+	//         it straight to `ReflectCamera` as a span, and so a viewer with no
+	//         frustum to speak of is expressible as zero.
+	// @since v0.15
+	size_t FrustumCorners(
+		const core::CFrame &frame, float fieldOfViewRadians, float aspect, core::Vector3 (&out)[4]
+	);
+
+	// The same, for a camera whose frustum is an already-fitted off-axis lens.
+	//
+	// **Which is what every level of a mirror recursion past the first has.** A
+	// reflected camera has no field of view — its extents were fitted to a pane
+	// and possibly skewed — so the perspective overload has nothing to be handed,
+	// and a recursion that fell back to "no corners" would drop the clamp at
+	// precisely the levels where the pane is nearest and the texels scarcest.
+	//
+	// **The lens' own margin is not applied again.** These extents already
+	// carry the widening the fit put on them, and widening a widened frustum
+	// compounds once per level of the recursion.
+	//
+	// @param frame The camera's placement.
+	// @param lens  Its fitted extents, measured at `SurfaceLens::NearPlane`.
+	// @param out   The four directions, one unit deep as above.
+	// @return Four.
+	// @since v0.15
+	size_t FrustumCorners(const core::CFrame &frame, const SurfaceLens &lens, core::Vector3 (&out)[4]);
+
+	// Where a mirror pane's camera stands when the pane is looked at from
+	// `viewer`, and what it sees through.
+	//
+	// **A function of the pane and the viewer and nothing else, which is the
+	// whole point.** A mirror seen *inside* another mirror is looked at from
+	// that mirror's camera rather than from the eye, so the rule has to compose
+	// — and it can only compose if it is a function, rather than a walk over the
+	// world's one active camera. While it was the latter, a pane appearing in
+	// another pane's picture was placed and sampled from the eye at every depth,
+	// which is `ROADMAP.md` v0.15's "mirror-in-mirror-in-mirror draws the inner
+	// panes as flat tint": the coordinate leaves 0..1 and `opaque.frag` falls
+	// back to the plain lit pane.
+	//
+	// **One statement of what a mirror does to a camera**, for the reason
+	// `SeamMapping` is one statement of what a hole does to what goes through
+	// it. `AimSurfaceCameras` calls this for its own mirrors, so a second
+	// derivation cannot drift from it by a sign.
+	//
+	// The four steps are the ones this file's header describes: the viewer is
+	// mirrored through the pane's plane, the camera looks back along the face
+	// normal rather than at the pane's centre, an off-axis frustum is fitted to
+	// the pane's four corners, and the near plane is skewed onto the pane's own
+	// plane.
+	//
+	// @param pane          The rectangle and the lens to fit.
+	// @param viewer        Where the pane is being looked at from. Only its
+	//                      position decides the reflection — a mirror does not
+	//                      care which way the viewer faces — but the whole frame
+	//                      is taken because `viewerCorners` is measured in it
+	//                      and a caller holding one holds the other.
+	// @param viewerCorners The viewer's own frustum, as four world-space
+	//                      directions from `FrustumCorners`. Empty leaves the
+	//                      fit unclamped, which is the right answer for a viewer
+	//                      that has no frustum and the wrong one for a viewer
+	//                      that has one and did not pass it — the image is
+	//                      correct either way and a close pane is drawn at a
+	//                      fraction of the resolution it could be. Anything
+	//                      other than four is treated as none, because a partial
+	//                      frustum is not a frustum.
+	// @return Where to put the camera and what to render it with, or an answer
+	//         with `Renders` false in the edge-on band.
+	// @since v0.15
+	MirrorEye ReflectCamera(
+		const SurfacePane &pane, const core::CFrame &viewer, std::span<const core::Vector3> viewerCorners
+	);
+
+	// Every mirror pane in the world: a `SurfaceCamera` parented to a `BasePart`
+	// whose `Portal` does not name a live destination.
+	//
+	// **A linked portal is not one of these.** Its camera is a warp rather than
+	// a reflection — `SeamMapping` maps the viewer through the pair instead of
+	// mirroring it through one plane — and gathering it here would hand a
+	// recursion two descriptions of the same pane that disagree about where the
+	// camera goes. `GatherPortalSeams` is its half, and an *unlinked* portal is
+	// a mirror by the same rule `AimSurfaceCameras` applies: a hole leading
+	// nowhere is a wall.
+	//
+	// **Walk order, which is archetype order, and deliberately not sorted.**
+	// `SurfacePane::Surface` is what names a pane, and it is stable across a
+	// frame where the position in this list is not. Sorting here would be a
+	// second ordering to keep in step with the one `AimSurfaceCameras` hands the
+	// slots out in.
+	//
+	// @param store The world.
+	// @param panes Cleared, then filled.
+	// @return How many there are. Zero in every scene with no mirror in it.
+	// @since v0.15
+	size_t GatherSurfacePanes(ecs::Store &store, std::vector<SurfacePane> &panes);
+
 	// One portal, as the rectangle a crossing is tested against.
 	//
 	// **One description of a hole, for the three passes that need one.** A body

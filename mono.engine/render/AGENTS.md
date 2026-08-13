@@ -210,14 +210,30 @@ competing ways to describe a frame is worse than either.
   `MAX_SURFACES` slots, each a `Texture[2]`, a depth buffer and the matrices
   that drew them; a slot is allocated the first time an index renders and kept
   until shutdown.
-- **It does give a mirror inside a mirror, one bounce stale, and that changed at
-  v0.8.** The exclusion used to be every surface, so no mirror was ever drawn
-  into a mirror's texture and there was nothing to be one bounce deep. It is per
-  view now — `if (index == self) continue;`, so a pass excludes only the index it
-  is rendering *for* — and every other mirror is drawn from the half of its pair
-  this frame is not writing, which is the previous frame's image. That staleness
-  is what makes the cycle a line: each surface is being rendered for the others,
-  so there is no order in which this frame's could be ready first.
+- **It does give a mirror inside a mirror, and since v0.15 that inner picture is
+  a recursion rather than a stale texture.** The exclusion used to be every
+  surface, so no mirror was ever drawn into a mirror's texture; it is per view
+  now — `if (index == self) continue;`, so a pass excludes only the index it is
+  rendering *for*.
+- **A pane inside another pane's picture must be drawn from a camera derived
+  from that pane's camera, and never from the eye. This is the invariant.**
+  `scene::AimSurfaceCameras` places every surface camera by reflecting the
+  world's *active* camera, which is the right answer for the screen and the wrong
+  one everywhere below it: the coordinate leaves the texture's 0..1 rectangle and
+  `opaque.frag` falls back to the plain lit pane, which looks like the pane being
+  culled and is a projection fault. `fillMirror` descends depth-first, deriving
+  each level with `scene::ReflectCamera` — the same function the aim pass calls,
+  so a chain cannot drift from the screen by a sign — into `MirrorLevel`, a pool
+  indexed by level *and* slot for `PortalLevel`'s reason.
+- **Do not "fix" a depth problem here by running the pass again.** Iterating
+  refreshes textures and never moves a camera; that is exactly what was tried
+  before v0.15, and `--surface-bounces 5` against 2 came out byte-for-byte
+  identical. A number that buys nothing is the shape of this mistake.
+- **A view with no pane rectangle keeps the iterating path, and that is not a
+  leftover.** A surface camera parented to the world has no face to reflect
+  through, and a cross-world pane's picture is a second simulation — nothing can
+  reflect a camera through a pane it was never told about. `SurfaceView::
+  PaneNormal` being zero is how the pass is told.
 - **`Flags.z` is per draw and never per pass.** It means "this draw samples a
   surface texture instead of its own tint". Setting it for the *whole* surface
   pass is what made the floor sample the previous reflection and show the clear
