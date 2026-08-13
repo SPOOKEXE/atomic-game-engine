@@ -52,6 +52,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] ensure portal and surfacecamera rendering re-use code between where needed. but keep entry for either separate.
 - [_] thoroughly implement common services with scripting binds
 - [_] thoroughly implement extra functions like PlayerGui:... with scripting binds
 - [_] thoroughly implement user input system with scripting binds
