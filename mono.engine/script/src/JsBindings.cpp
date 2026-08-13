@@ -926,8 +926,19 @@ namespace engine::script {
 					return MakeJsInstance(context, found);
 				}
 
+				// **Which refusal, from the catalogue**, for the reason the Luau
+				// half gives: a service the *other* language binds is a different
+				// failure from one the engine does not have, and this language is
+				// missing four of them — so this is the sentence a JavaScript
+				// author is most likely to see.
+				const ServiceDefinition *known = FindService(name);
+				const bool elsewhere =
+					known != nullptr && !Binds(known->Languages, ServiceLanguages::JavaScript);
+
 				JSValue error =
-					JS_ThrowTypeError(context, "'%s' is not a service this engine provides", name);
+					elsewhere
+						? JS_ThrowTypeError(context, "'%s' is not bound for JavaScript in this engine", name)
+						: JS_ThrowTypeError(context, "'%s' is not a service this engine provides", name);
 				JS_FreeCString(context, name);
 				return error;
 			}
@@ -952,23 +963,6 @@ namespace engine::script {
 			return MakeColor3(
 				context,
 				core::Color3::FromLinear(static_cast<float>(r), static_cast<float>(g), static_cast<float>(b))
-			);
-		}
-
-		JSValue HeartbeatConnect(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			if (argc < 1 || !JS_IsFunction(context, argv[0])) {
-				return JS_ThrowTypeError(context, "Connect needs a function");
-			}
-
-			// **A real connection, through the shared table.** v0.5 pushed the
-			// function onto a vector and returned nothing, so nothing could be
-			// disconnected; the ordering rules and the handle both come from
-			// `SignalTable` now, which is the same table the Luau side fires.
-			return MakeJsConnection(
-				context,
-				JsOf(context).Signals.Connect(
-					SignalKind::Heartbeat, ecs::NULL_ENTITY, Retain(context, argv[0])
-				)
 			);
 		}
 
@@ -1421,6 +1415,49 @@ namespace engine::script {
 		}
 	}
 
+	// --- the services, one installer each --------------------------------------
+	//
+	// **One function per service, and that is what `ServiceCatalogue.cpp` needs
+	// to name.** These were three anonymous blocks inside `OpenJsBindings` and
+	// two more inside `InstallJsServices`, which is a list of services written as
+	// control flow — unnameable, so the catalogue could not point at them, and
+	// invisible to anything asking what this language actually binds.
+	//
+	// They stay in this file rather than moving beside their Luau twins, because
+	// the handlers they name are in the anonymous namespace above and are this
+	// translation unit's. What the two halves share is the *catalogue*, not a
+	// file.
+
+	void OpenJsMessagingService(JSContext *context, JSValueConst global) {
+		// The Universe's bus, not this world's.
+		JSValue service = JS_NewObject(context);
+		JS_SetPropertyStr(
+			context, service, "PublishAsync", JS_NewCFunction(context, PublishAsync, "PublishAsync", 2)
+		);
+		JS_SetPropertyStr(
+			context, service, "SubscribeAsync", JS_NewCFunction(context, SubscribeAsync, "SubscribeAsync", 2)
+		);
+		JS_SetPropertyStr(context, global, "MessagingService", service);
+	}
+
+	void OpenJsTeleportService(JSContext *context, JSValueConst global) {
+		// The only bus operation that names a world.
+		//
+		// **`GetTeleportData` is missing here and present in Luau**, which is one
+		// of the drifts the catalogue exists to make visible rather than to
+		// excuse. It is the authority's half of the call — what arrived with a
+		// player somebody else sent — and a JavaScript server cannot ask it.
+		JSValue service = JS_NewObject(context);
+		JS_SetPropertyStr(context, service, "Teleport", JS_NewCFunction(context, Teleport, "Teleport", 3));
+		JS_SetPropertyStr(
+			context,
+			service,
+			"GetLocalPlayerTeleportData",
+			JS_NewCFunction(context, GetLocalPlayerTeleportData, "GetLocalPlayerTeleportData", 0)
+		);
+		JS_SetPropertyStr(context, global, "TeleportService", service);
+	}
+
 	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role) {
 		auto *bound = new JsContext();
 		bound->World = &store;
@@ -1588,35 +1625,11 @@ namespace engine::script {
 		// happens otherwise, which is an abort in an unrelated test.
 		world::RegisterMailboxTypes();
 
-		// MessagingService — the Universe's, not this world's.
-		{
-			JSValue service = JS_NewObject(context);
-			JS_SetPropertyStr(
-				context, service, "PublishAsync", JS_NewCFunction(context, PublishAsync, "PublishAsync", 2)
-			);
-			JS_SetPropertyStr(
-				context,
-				service,
-				"SubscribeAsync",
-				JS_NewCFunction(context, SubscribeAsync, "SubscribeAsync", 2)
-			);
-			JS_SetPropertyStr(context, global, "MessagingService", service);
-		}
-
-		// TeleportService — the only bus operation that names a world.
-		{
-			JSValue service = JS_NewObject(context);
-			JS_SetPropertyStr(
-				context, service, "Teleport", JS_NewCFunction(context, Teleport, "Teleport", 3)
-			);
-			JS_SetPropertyStr(
-				context,
-				service,
-				"GetLocalPlayerTeleportData",
-				JS_NewCFunction(context, GetLocalPlayerTeleportData, "GetLocalPlayerTeleportData", 0)
-			);
-			JS_SetPropertyStr(context, global, "TeleportService", service);
-		}
+		// **No services here any more.** They are installed from the catalogue in
+		// `OpenJsSurface`, which is the later of this language's two install
+		// halves — see `ServiceCatalogue.hpp`. `world::RegisterMailboxTypes()`
+		// above stays, because it must run before anything constructs a
+		// `Postbox` and that is earlier than either walk.
 
 		// `nil`, because this is a Roblox-shaped API and a Roblox author writes
 		// `part.Parent = nil`. An alias for `null` rather than a third empty
@@ -1689,22 +1702,6 @@ namespace engine::script {
 			JSValue table = JS_NewObject(context);
 			JS_SetPropertyStr(context, table, "new", JS_NewCFunction(context, InstanceNew, "new", 1));
 			JS_SetPropertyStr(context, global, "Instance", table);
-		}
-
-		// RunService
-		//
-		// `Heartbeat.Connect(fn)` rather than `Heartbeat:Connect(fn)` — the
-		// colon is Lua's, and a JavaScript author writes the dot. Same signal,
-		// same list, spelled the way each language spells a method call.
-		{
-			JSValue heartbeat = JS_NewObject(context);
-			JS_SetPropertyStr(
-				context, heartbeat, "Connect", JS_NewCFunction(context, HeartbeatConnect, "Connect", 1)
-			);
-
-			JSValue service = JS_NewObject(context);
-			JS_SetPropertyStr(context, service, "Heartbeat", heartbeat);
-			JS_SetPropertyStr(context, global, "RunService", service);
 		}
 
 		// workspace — **this world's `Workspace` service**, and until v0.7 it

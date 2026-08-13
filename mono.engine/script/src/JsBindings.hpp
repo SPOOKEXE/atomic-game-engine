@@ -33,6 +33,7 @@
 
 #include "Codec.hpp"
 #include "JsContext.hpp"
+#include "ServiceCatalogue.hpp"
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
@@ -92,6 +93,20 @@ namespace engine::script {
 	// @param context The VM to install into.
 	void InstallJsInstanceMethods(JSContext *context);
 
+	// Adds every neutral instance method to the shared method object.
+	//
+	// **The JavaScript half of `ScriptCall.hpp`.** A method that is written once
+	// is installed by both VMs from one table, which is what makes parity a
+	// property of the build rather than of somebody comparing two files — see
+	// `InstallLuauNeutralMethods` for the drift that motivated it.
+	//
+	// Called by `InstallJsInstanceMethods`, on the object it is building.
+	//
+	// @param context The VM.
+	// @param methods The shared method object every class prototype sits behind.
+	// @since v0.16
+	void InstallJsNeutralMethods(JSContext *context, JSValueConst methods);
+
 	std::string PumpJsChanges(JSContext *context);
 
 	// Delivers everything the tree recorded since the last barrier.
@@ -115,6 +130,21 @@ namespace engine::script {
 
 	// Resolves every task due at the world's current tick.
 	std::string PumpJsTasks(JSContext *context);
+
+	// Advances every tween by one tick and fires what completed, and destroys
+	// everything whose deadline the world has reached.
+	//
+	// **The twins of `PumpTweens` and `PumpDebris`, at the same place in the
+	// barrier**, which is the head of it — see `LuauRuntime::Heartbeat` for the
+	// whole order and why the world's own timed work goes before the pumps that
+	// deliver to scripts. `delta` is the fixed tick delta and never wall time.
+	//@{
+	std::string PumpJsTweens(JSContext *context, float delta);
+
+	// Answers nothing, unlike every other pump: a removal's handler runs from
+	// inside the store, where its failure is logged rather than returned.
+	void PumpJsDebris(JSContext *context);
+	//@}
 
 	// Calls everything connected to one signal.
 	//
@@ -187,13 +217,64 @@ namespace engine::script {
 	// The entity an instance object stands for, or `NULL_ENTITY`.
 	ecs::Entity JsEntityOf(JSContext *context, JSValueConst object);
 
-	// The datatype vocabulary and the bus services, installed on the global.
+	// The datatype vocabulary, installed on the global.
 	//
-	// Their own file for the reason `OpenJsSurface` is separate from
-	// `OpenJsBindings`: these are value types and a wire, reviewed against
-	// `core/types/` and `world::Postbox` rather than against the class table.
+	// Its own file for the reason `OpenJsSurface` is separate from
+	// `OpenJsBindings`: these are value types, reviewed against `core/types/`
+	// rather than against the class table.
 	void InstallJsDatatypes(JSContext *context, JSValueConst global);
-	void InstallJsServices(JSContext *context, JSValueConst global);
+
+	// Every service this language binds, from the catalogue.
+	//
+	// **The list is `ServiceCatalogue.cpp`'s and not this file's**, which is what
+	// makes "which services exist" one fact rather than one per VM. A service
+	// this language has no installer for installs nothing, and `GetService`
+	// refuses it by name saying which language does bind it — see
+	// `ServiceCatalogue.hpp`.
+	//
+	// @param context The VM.
+	// @param global  The global object to hang each service on.
+	// @param phase   Which set to install. This language has no studio services
+	//        today, so the second phase is a walk over an empty selection — kept
+	//        because the *catalogue* has one and a second signature would be a
+	//        second place that fact lives.
+	// @since v0.15
+	void InstallJsServices(JSContext *context, JSValueConst global, ServiceAvailability phase);
+
+	// --- this language's service installers -----------------------------------
+	//
+	// **One per service, named, because `ServiceCatalogue.cpp` has to point at
+	// them.** They were three anonymous blocks in `OpenJsBindings` and two more
+	// inside a single `InstallJsServices` — a list of services written as
+	// control flow, which nothing outside the function could see or enumerate.
+	// That is how this language came to bind five services where Luau binds nine
+	// with nothing in the build to say so.
+	//
+	// **Naming them is also what keeps them.** The catalogue is one translation
+	// unit that references every installer, and a static archive is free to drop
+	// an object file no symbol reaches — see `ServiceCatalogue.hpp`.
+	//
+	// The signature is the same for all of them: the context, and the global
+	// object to hang the service on.
+	//@{
+	void OpenJsMessagingService(JSContext *context, JSValueConst global);
+	void OpenJsTeleportService(JSContext *context, JSValueConst global);
+	void OpenJsRunService(JSContext *context, JSValueConst global);
+	void OpenJsMemoryStoreService(JSContext *context, JSValueConst global);
+	void OpenJsDataStoreService(JSContext *context, JSValueConst global);
+
+	// `TweenService` and `Debris`. The first also installs the `Tween` class its
+	// `Create` hands back, which is why it is one call rather than two.
+	void OpenJsTweenService(JSContext *context, JSValueConst global);
+	void OpenJsDebrisService(JSContext *context, JSValueConst global);
+	//@}
+
+	// One `Tween` object for a tween's entity.
+	//
+	// @param context The VM.
+	// @param tween   The tween's entity, from `TweenTable::Create`.
+	// @since v0.16
+	JSValue MakeJsTween(JSContext *context, ecs::Entity tween);
 
 	// `RaycastParams` and `workspace.Raycast`.
 	//

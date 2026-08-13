@@ -12,6 +12,8 @@ namespace engine::world {
 			return "DataStore";
 		case BusKind::Teleport:
 			return "Teleport";
+		case BusKind::Channel:
+			return "Channel";
 		}
 		return "?";
 	}

@@ -737,3 +737,86 @@ TEST_CASE("the replica flag survives a snapshot", "[world]") {
 		REQUIRE_FALSE(Postbox(store).Set(BusKind::DataStore, "k", Bytes("v")).Expected());
 	});
 }
+
+// --- channels ---------------------------------------------------------------
+
+TEST_CASE("a channel message reaches the world it names and nobody else", "[world]") {
+	// **The addressed route, which this module did not have.** `Publish` is a
+	// topic fan-out with no destination — right for "the boss died", wrong for
+	// "world B, here is the score you asked me for" — and the only other
+	// operation that named a world moved a *person*. So a game saying one thing
+	// to one world had to broadcast it to everybody or send a player carrying
+	// it.
+	Universe universe;
+	const WorldId lobby = universe.Create(Named("channel.lobby"));
+	const WorldId arena = universe.Create(Named("channel.arena"));
+	const WorldId other = universe.Create(Named("channel.other"));
+
+	universe.Enter(lobby, [](Store &store) { Postbox(store).SendTo("channel.arena", Bytes("score:12")); });
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> arrived = Received(universe, arena);
+	REQUIRE(arrived.size() == 1);
+	REQUIRE(arrived[0].Bus == BusKind::Channel);
+	REQUIRE(Text(arrived[0].Payload) == "score:12");
+
+	// **The sender's name, which is what makes it a channel.** A topic
+	// subscriber is told which topic; a channel receiver is told who to answer,
+	// because answering is the point and the destination already knows it is
+	// itself.
+	REQUIRE(arrived[0].From == Name("channel.lobby"));
+	REQUIRE(arrived[0].Key == Name("channel.lobby"));
+
+	// **And nobody else got it**, which is the entire difference from a publish
+	// and the one thing a fan-out cannot promise.
+	CHECK(Received(universe, other).empty());
+}
+
+TEST_CASE("a channel is not a teleport, and a receiver can tell", "[world]") {
+	// **Why this is a fifth `BusKind` rather than a flag on the fourth.** The
+	// two look alike on the wire and mean entirely different things to whoever
+	// receives them: a teleport is a person arriving, and a receiving world
+	// builds a `Player` and a character out of it. `script::AdmitTeleports` runs
+	// on every world whether or not it is running scripts — so a channel message
+	// arriving as a `Teleport` would have it trying to construct a player out of
+	// a chat line.
+	Universe universe;
+	const WorldId from = universe.Create(Named("channel.sender"));
+	const WorldId to = universe.Create(Named("channel.receiver"));
+
+	universe.Enter(from, [](Store &store) {
+		Postbox box(store);
+		box.Teleport("channel.receiver", Bytes("a person"));
+		box.SendTo("channel.receiver", Bytes("a message"));
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> arrived = Received(universe, to);
+	REQUIRE(arrived.size() == 2);
+
+	size_t teleports = 0;
+	size_t channels = 0;
+	for (const Delivery &delivery : arrived) {
+		teleports += delivery.Bus == BusKind::Teleport ? 1u : 0u;
+		channels += delivery.Bus == BusKind::Channel ? 1u : 0u;
+	}
+	CHECK(teleports == 1);
+	CHECK(channels == 1);
+}
+
+TEST_CASE("a channel to a world that is not running is reported", "[world]") {
+	// **Named rather than silent, and that is half the reason this exists beside
+	// `Publish`.** A publish with no subscribers is a quiet afternoon and cannot
+	// be told from a publish nobody wanted; a message addressed to a name
+	// nothing answers to is a sender holding a name that is wrong, and it wants
+	// to know.
+	Universe universe;
+	const WorldId id = universe.Create(Named("channel.alone"));
+
+	universe.Enter(id, [](Store &store) { Postbox(store).SendTo("channel.nowhere", Bytes("x")); });
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> replies = Received(universe, id);
+	REQUIRE(replies.size() == 1);
+	CHECK(replies[0].Status == BusStatus::NoSuchWorld);
+}

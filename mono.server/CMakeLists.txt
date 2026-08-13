@@ -38,6 +38,21 @@ mono_add_library(server
 		# a `DrawInstance` are arithmetic and names, and neither needs a device.
 		Engine::scene
 
+		# L7, `shared`. **A headless server that knows what an interface is, and
+		# it has to.** `StarterGui` is a template whose contents are *copied* into
+		# each player's own `PlayerGui` when they spawn — `gui::ResetPlayerGui` is
+		# the rule and `gui::Layer::ResetOnSpawn` is what decides whether a copy
+		# survives a death. Those copies are world content: they are authored on
+		# the authority and replicate to the one client that owns them, exactly as
+		# a part does.
+		#
+		# **It costs the headless property nothing.** This module depends on
+		# `Engine::core` and `Engine::ecs` and nothing else — it produces a
+		# `DrawList` and a `GuiEvent`, which are data. `mono.engine/ui` is the one
+		# that paints, and this process does not link it. `just
+		# check-server-is-headless` is the standing proof.
+		Engine::gui
+
 		# L10, `shared`. `--game` hosts the same scene file a client loads,
 		# through the same loader. A server that authored it differently would
 		# disagree with its own replicas once per tick, and both sides would

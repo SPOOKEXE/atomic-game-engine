@@ -217,4 +217,70 @@ namespace engine::scene {
 	//
 	// @return The class id.
 	ecs::ClassId PlayerClass();
+
+	// --- who may be shown what ---------------------------------------------
+	//
+	// **`ServiceComponent::Scope` has existed since v0.7 and nothing read it.**
+	// It round-trips through a save file and it is in the properties panel, and
+	// the wire ignored it — so `ServerScriptService` and `ServerStorage`, the two
+	// containers whose entire purpose is that a client must not see them, were
+	// replicated to every client along with everything else. A game's server
+	// scripts and its unreleased content went down the wire.
+	//
+	// **These are predicates and not a filter, and that split is the tier.**
+	// `mono.engine/replication` does not depend on `scene` and must not: the
+	// wire's job is to move components and it has no business knowing what a
+	// service is. `replication::Authority::Interest` is the hook that exists for
+	// exactly this — a host that knows both sides installs a predicate built from
+	// these. So the *rule* lives here, beside the scope it reads, and the
+	// *plumbing* lives in whoever owns a connection.
+
+	// Which service an instance lives under.
+	//
+	// **Walks to the root rather than reading the instance**, because scope is a
+	// containment fact: a `Script` in `ServerScriptService` is server-only
+	// because of where it is, and moving it to `ReplicatedStorage` must change
+	// the answer with nothing else being edited. A flag copied onto every
+	// descendant would be a second place the answer lived, and it would be the
+	// one that went stale on a reparent.
+	//
+	// @param store    The world.
+	// @param instance Anything in the tree.
+	// @return The scope of the service it is under. `Shared` for an instance
+	//         under no service at all, which is the safe answer for an orphan a
+	//         script has created and not yet parented — it is not yet secret,
+	//         and treating it as secret would make a client miss it forever if
+	//         the script then parents it into `Workspace`.
+	// @since v0.15
+	ServiceScope ScopeOfInstance(const ecs::Store &store, ecs::Entity instance);
+
+	// Whether a client may be shown this instance at all.
+	//
+	// **A whitelist by scope rather than a blacklist by name**, which is the
+	// difference between a rule and a list somebody has to remember. A tenth
+	// service added tomorrow is covered the moment it declares a scope; a list of
+	// forbidden names would not have covered it, and the failure would be silent
+	// and in the direction of leaking.
+	//
+	// @param store    The world.
+	// @param instance Anything in the tree.
+	// @return `false` for anything under a `Server`-scoped service.
+	// @since v0.15
+	bool VisibleToClients(const ecs::Store &store, ecs::Entity instance);
+
+	// Which player's own subtree this instance is in, or a null entity.
+	//
+	// **The other half of the whitelist, and it is per client rather than per
+	// world.** A player's `PlayerGui` is that player's — a second client seeing
+	// it would see an interface it cannot interact with, and a script writing
+	// into one player's would be writing into everybody's. Scope cannot express
+	// that, because `Players` is `Shared`: both halves need the *list* of who is
+	// connected, and only the owner needs what is under their own row.
+	//
+	// @param store    The world.
+	// @param instance Anything in the tree.
+	// @return The `Player` this is under, or `ecs::NULL_ENTITY` for anything
+	//         that is not under one — which is almost everything.
+	// @since v0.15
+	ecs::Entity PlayerOwning(const ecs::Store &store, ecs::Entity instance);
 }

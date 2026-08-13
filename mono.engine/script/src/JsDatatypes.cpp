@@ -969,29 +969,39 @@ namespace engine::script {
 		);
 	}
 
-	void InstallJsServices(JSContext *context, JSValueConst global) {
-		{
-			static const JSCFunctionListEntry members[] = {
-				JS_CFUNC_MAGIC_DEF("GetAsync", 1, StoreGet, 0),
-				JS_CFUNC_MAGIC_DEF("SetAsync", 2, StoreSet, 0),
-				JS_CFUNC_MAGIC_DEF("RemoveAsync", 1, StoreRemove, 0),
-				JS_CFUNC_DEF("UpdateAsync", 3, MemoryStoreUpdate),
-			};
-			JSValue service = JS_NewObject(context);
-			JS_SetPropertyFunctionList(context, service, members, 4);
-			JS_PreventExtensions(context, service);
-			JS_SetPropertyStr(context, global, "MemoryStoreService", service);
-		}
-		{
-			static const JSCFunctionListEntry members[] = {
-				JS_CFUNC_MAGIC_DEF("GetAsync", 1, StoreGet, 1),
-				JS_CFUNC_MAGIC_DEF("SetAsync", 2, StoreSet, 1),
-				JS_CFUNC_MAGIC_DEF("RemoveAsync", 1, StoreRemove, 1),
-			};
-			JSValue service = JS_NewObject(context);
-			JS_SetPropertyFunctionList(context, service, members, 3);
-			JS_PreventExtensions(context, service);
-			JS_SetPropertyStr(context, global, "DataStoreService", service);
-		}
+	// **One installer per service, which is what `ServiceCatalogue.cpp` names.**
+	// These were two anonymous blocks inside one `InstallJsServices` — a list of
+	// services written as control flow, which nothing outside could point at.
+	//
+	// The magic argument is which store: 0 is the memory store and 1 is the data
+	// store, and the two share `StoreGet`/`StoreSet`/`StoreRemove` because the
+	// only difference between them is how long an entry lives.
+
+	void OpenJsMemoryStoreService(JSContext *context, JSValueConst global) {
+		static const JSCFunctionListEntry members[] = {
+			JS_CFUNC_MAGIC_DEF("GetAsync", 1, StoreGet, 0),
+			JS_CFUNC_MAGIC_DEF("SetAsync", 2, StoreSet, 0),
+			JS_CFUNC_MAGIC_DEF("RemoveAsync", 1, StoreRemove, 0),
+			JS_CFUNC_DEF("UpdateAsync", 3, MemoryStoreUpdate),
+		};
+		JSValue service = JS_NewObject(context);
+		JS_SetPropertyFunctionList(context, service, members, 4);
+		JS_PreventExtensions(context, service);
+		JS_SetPropertyStr(context, global, "MemoryStoreService", service);
+	}
+
+	void OpenJsDataStoreService(JSContext *context, JSValueConst global) {
+		// **No `UpdateAsync`, and that is the data store's own rule rather than
+		// an omission here**: a compare-and-set needs a version, and the Luau
+		// side declares the same three.
+		static const JSCFunctionListEntry members[] = {
+			JS_CFUNC_MAGIC_DEF("GetAsync", 1, StoreGet, 1),
+			JS_CFUNC_MAGIC_DEF("SetAsync", 2, StoreSet, 1),
+			JS_CFUNC_MAGIC_DEF("RemoveAsync", 1, StoreRemove, 1),
+		};
+		JSValue service = JS_NewObject(context);
+		JS_SetPropertyFunctionList(context, service, members, 3);
+		JS_PreventExtensions(context, service);
+		JS_SetPropertyStr(context, global, "DataStoreService", service);
 	}
 }

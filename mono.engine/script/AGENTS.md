@@ -58,6 +58,70 @@ named anywhere in this module, and none ever should be: a property declared in
 A `if (name == "Size")` here would be the second source of truth the whole
 conversion design exists to prevent.
 
+## A method is data too, and nine of thirty are
+
+A property was neutral from the start and a method was not, and the difference
+cost exactly what two lists cost. `ecs::PropertyDescriptor` is data, so `scene`
+declares a property once and Luau, JavaScript and the properties panel all read
+it. A method was a `lua_CFunction` in `Instances.cpp` and a `JSCFunction` in
+`JsSurface.cpp`, written twice — Luau reached thirty entries and JavaScript
+twenty-one, nothing in the build named the nine that were missing, and the
+TypeScript declarations claimed all nine anyway.
+
+`ScriptCall.hpp` is the answer: a method is a name and a `void(ScriptCall &)`,
+`ScriptMethods.cpp` is the table, and `LuauCall.cpp` and `JsCall.cpp` are the
+only two files that meet a VM on their behalf. **Both runtimes install every
+row**, which is what makes parity a property of the build rather than of
+somebody comparing two files, and `engine.script.scriptcall` runs the same
+script in each and compares the answers.
+
+Four rules a reviewer should hold to:
+
+- **`ScriptValue` is not the currency and merging the two would be the change to
+  refuse.** `ValueTag` has no instance and `CodecStatus::Unsupported` is what a
+  script gets for offering one, because a `ScriptValue` crosses a *world* and
+  rule 3 forbids a handle naming a row in one store from arriving in another. A
+  method call crosses nothing, so `ecs::Entity` is exactly right here and
+  exactly wrong there. This is the same split `HostValue` is on, one door along.
+- **The interface carries what its callers ask for and nothing else.** There is
+  no `ReturnInstance` and no optional-instance reader today, because none of the
+  nine takes or returns one. A pure virtual with no caller is a line every
+  adapter has to satisfy the compiler with and nobody has to get right; adding
+  one when the first method needs it is a change the build refuses to let
+  anybody forget.
+- **A row must not be installed by one VM only.** That is the drift the layer
+  exists to close, and re-opening it is what a hand-written entry beside the
+  table would do.
+- **A reader raises and never answers a failure**, so a method body reads its
+  arguments straight through. On the JavaScript side that costs a thrown type
+  the trampoline catches, because QuickJS reports an error by returning rather
+  than by unwinding — and nothing may escape that frame, since the caller is C.
+
+**The nine that moved are the nine JavaScript did not have**: `GetPivot`,
+`PivotTo`, `AddTag`, `RemoveTag`, `HasTag`, `GetAttribute`, `SetAttribute`,
+`GetAttributes` and `GetAttributeChangedSignal`. The other twenty-one stay where
+they are and migrate one at a time, so the engine works at every step.
+
+**Three of the twenty-one are not a straight lift, and each is a decision rather
+than a chore:**
+
+- **`Destroy` and `ClearAllChildren` release the VM's own callback refs.**
+  `ForgetSubtree` takes a lambda that is `lua_unref` on one side and an index
+  into `JsContext::Callables` on the other, so the interesting half of both
+  methods is per-language by construction. What crosses is an entity and a
+  request to forget it, which wants a `Forget(subtree)` on `ScriptCall` rather
+  than a return.
+- **`GetPropertyChangedSignal` would change JavaScript's behaviour on the way
+  through.** Luau refuses a name that is not a *scriptable* property and
+  JavaScript compares `PropertyDescriptor::Name` and ignores `Scriptable`, so
+  the two already disagree about what a script may watch. Migrating it fixes
+  that, which is a good change and not a silent one.
+- **`SetNetworkOwner` takes an optional instance, and the two refuse differently
+  today.** `CheckInstance` raises for a non-instance where `JsEntityOf` answers
+  a null entity for anything at all, which is why the JavaScript half carries a
+  hand-written guard the Luau half does not need. One reader would settle it,
+  and settling it is a behaviour change to state rather than to slip in.
+
 ## What a script may not do is the design
 
 Opened without **`os`** and without **`debug`**, and both are refusals rather
@@ -170,6 +234,46 @@ reason: two objects for one service is two things to keep in step. Both call
 forms work, and the binding drops the leading `self` only when it is *that
 service's own* table, so `Selection:Set({part})` does not lose its argument.
 
+## A service over a `client` subsystem is a resource on the world
+
+`SoundService` is the case that states the rule and `UserInputService` is the one
+that established it. `engine::audio` is L12 `client` and this module is L9
+`shared`, so a binding here cannot name a mixer, a graph or a node — the tier
+check fails at configure time with the edge named, and it is right to. The seam
+is `scene`: a script writes a resource, and whoever owns the device walks it.
+`scene::InputState` was the first, `scene::AudioState` is the second, and a third
+should look the same rather than inventing a route.
+
+**What the tier decides is scope, not plumbing.** A member needing a *node* the
+audio graph does not have cannot be honestly bound however the seam is shaped, so
+`SoundService.cpp` names the eleven Roblox members it does not have and what each
+would need first — a filter node for reverb, a Doppler node for `DopplerScale`, a
+shape in the emitter for `VolumetricAudio`, and for `PlayLocalSound` something
+that reports a sound has finished. That list is the file's most useful half, and
+it is `HttpService.cpp`'s shape one door along: **an absent member is better than
+one that does nothing**, because a member that exists looks decided.
+
+## An input signal carries an `InputObject`, and until v0.16 it carried three things
+
+`InputBegan` fired with a bare `Enum.KeyCode`, a bound action's handler took one
+as its third argument, and the generated declarations said both passed *nothing*.
+Three answers to one question, none of them Roblox's — so a handler copied from a
+Roblox place read `input.KeyCode` off an `EnumItem`, got nil, and typechecked
+clean against a declaration that agreed with neither.
+
+That is what a datatype nobody built costs, and it is worth naming because the
+same shape is still open one door along: `PumpGuiEvents` passes nothing to a
+`TextButton`'s `InputBegan`, and `Bindings.hpp` says what closing it needs —
+`gui::Router` recording which button produced an event, which is a change in
+`gui` rather than here.
+
+**A signal that exists and never fires is the same failure wearing a different
+hat.** `InputChanged` was reachable and connectable from v0.10 and nothing ever
+fired it; mouse buttons produced no signal at all while `InputState` had carried
+their edges since the same version. Both read as a broken engine rather than as
+an unfinished one, which is the trade `v0.5` records for `Heartbeat` and the
+reason `CollectionService` has no `GetInstanceAddedSignal`.
+
 ## The debugger captures, and `BreakpointService` is the same object
 
 `Debugger.hpp` carries the argument for why a breakpoint records rather than
@@ -211,6 +315,58 @@ take; the refusal names it.
 **A chunk name with no extension is allowed**, because `Runtime::Run(source,
 "probe")` names one that way and it is always Luau — refusing it would refuse
 the form every test and every in-editor evaluation uses.
+
+## Timed work happens at the head of the barrier, and it is not a resume
+
+`TweenService` and `Debris` are the first things in this module that move the
+world *without a script asking on that tick*, so where they sit in
+`LuauRuntime::Heartbeat` is a decision rather than an ordering detail. They run
+immediately after the deliveries and before the input pump, and the three rules
+that follow are the ones a reviewer should hold to:
+
+- **They step on the fixed tick delta and never on a clock.** A tween that
+  advanced by how long the last frame took would put the scene somewhere else on
+  a busy machine, and `just replay-check` would fail a long way from the cause —
+  the same failure `os` is withheld to prevent. A debris deadline is a *tick
+  number*, computed by the same `ceil(seconds / delta)` `task.wait` uses, so
+  half a second is thirty ticks at sixty hertz on every machine.
+- **Both drain in a stated order and neither may become a hash walk.**
+  `TweenTable` is a vector in creation order, so two tweens finishing on one
+  tick fire in the order the scripts made them; `DebrisQueue` sorts on
+  `(DueTick, Sequence)`, so two items with one deadline go in the order they
+  were added. A tween's *goals* are sorted by property name for a third instance
+  of the same rule — `Position` and `CFrame` both write `Transform`, so which
+  lands last is observable.
+- **They go first because everything else in the barrier reacts.** A bound
+  action, a `.Changed`, a tree signal, a resumed task and the beat all see one
+  world in which this tick's motion has already happened; after the beat
+  instead, every script would read a value one tick stale. It also settles what
+  a tween made *during* a barrier does — it first advances on the next one.
+
+**A tween is an entity and is deliberately not an instance.** The entity is
+minted only to be a name that is unique in a world and can be the subject of a
+`SignalTable` entry, which is what makes `Completed` an ordinary
+`RBXScriptSignal` in both languages. It carries no class and no components, so
+nothing saves it, draws it or replicates it — and `ecs::Classes::Register` is
+process-wide, so a registered `Tween` class would have added a row every
+consumer of the class table then has to describe, plus an `Instance.new("Tween")`
+that mints a tween with no target. `Tweens.hpp` carries the whole argument.
+
+**Its `Play` is a per-VM method rather than a neutral one, and that is the one
+place `ScriptCall.hpp` was deliberately not used.** The neutral instance methods
+are installed flat on *every* instance, and `Play` is a name Roblox puts on
+three classes — claiming it there would take it from every part, sound and
+animation in the engine. Three small methods written twice is the cheaper of
+the two, and it is what `RBXScriptConnection` already pays.
+
+**Both queues are capped, and they fail in opposite directions on purpose.**
+`TweenTable` reclaims the oldest *finished* tween and refuses when every record
+is live, because a tween silently dropped is a scene that animates on a small
+world and not on a big one. `DebrisQueue` destroys its oldest item early,
+because `AddItem` is a cleanup call and tidying up sooner is the conservative
+way for one to be wrong. A handle is not a lifetime — nothing here can tell an
+unplayed tween somebody still holds from one nobody does — which is why there is
+a count at all.
 
 ## One runtime, one world
 

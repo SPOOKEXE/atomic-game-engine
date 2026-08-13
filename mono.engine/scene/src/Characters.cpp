@@ -418,6 +418,19 @@ namespace engine::scene {
 		return held->Model;
 	}
 
+	ecs::Entity PlayerOf(const ecs::Store &store, ecs::Entity character) {
+		const Character *body = store.Get<Character>(character);
+		if (body == nullptr || !store.Alive(body->Owner)) {
+			// **The liveness check is the half worth having**, and it is the same
+			// one `CharacterOf` makes for the same reason: a model outliving its
+			// player by a frame is an ordinary state during a disconnect, and
+			// handing back a dead handle would be a script holding something it
+			// can index and cannot use.
+			return ecs::NULL_ENTITY;
+		}
+		return body->Owner;
+	}
+
 	CFrame FindSpawn(const ecs::Store &store) {
 		const ecs::Entity workspace = WorkspaceOf(store);
 		if (workspace == ecs::NULL_ENTITY) {

@@ -9,6 +9,7 @@
 #include <limits>
 #include <string_view>
 #include <unordered_set>
+#include <vector>
 
 namespace engine::gui {
 
@@ -240,5 +241,75 @@ namespace engine::gui {
 			return false;
 		}
 		return Select(store, best);
+	}
+
+	size_t ResetPlayerGui(Store &store, Entity player) {
+		// The player's own container, which `scene::AddPlayer` makes beside
+		// every player. Absent means a host built this player some other way;
+		// there is nowhere to put anything, so nothing is done.
+		const Entity target = store.FindFirstChild(player, PLAYER_GUI);
+		if (target == ecs::NULL_ENTITY) {
+			return 0;
+		}
+
+		// **Step 1 and 2: clear out what this life is not keeping.** Collected
+		// first and destroyed after, because destroying inside a walk of the
+		// children is destroying what the walk is holding.
+		//
+		// **`ResetOnSpawn` is read off `Layer`, and anything with no `Layer` is
+		// left alone.** A collector has one; a `Folder` a script put there does
+		// not, and Roblox does not clear those either — what the field describes
+		// is a *collector's* lifetime.
+		std::vector<Entity> clearing;
+		std::unordered_set<core::Name> surviving;
+
+		store.EachChild(target, [&](Entity existing) {
+			const Layer *layer = store.Get<Layer>(existing);
+			if (layer != nullptr && layer->ResetOnSpawn) {
+				clearing.push_back(existing);
+				return;
+			}
+			surviving.insert(store.InstanceNameOf(existing));
+		});
+
+		for (const Entity going : clearing) {
+			store.DestroyInstance(going);
+		}
+
+		// **Step 3: the template, cloned in.** `StarterGui` is a root like every
+		// other service — see `STARTER_GUI` for why this module spells the name
+		// again rather than linking `scene` for it.
+		const Entity starter = store.FindFirstRoot(STARTER_GUI);
+		if (starter == ecs::NULL_ENTITY) {
+			return 0;
+		}
+
+		// **Collected before cloning, for `clearing`'s reason one block up**:
+		// each clone is parented into the player and the template is a different
+		// subtree, but a walk that mutates the store while the store is walking
+		// itself is the shape that bites eventually rather than immediately.
+		std::vector<Entity> sources;
+		store.EachChild(starter, [&](Entity source) {
+			// **A survivor of the same name is the copy the player already
+			// has.** Cloning beside it would leave them holding two, one of
+			// which nothing updates — and the one a script has a handle to would
+			// be whichever it found first.
+			if (surviving.count(store.InstanceNameOf(source)) == 0) {
+				sources.push_back(source);
+			}
+		});
+
+		size_t cloned = 0;
+		for (const Entity source : sources) {
+			const Entity copy = store.CloneInstance(source);
+			if (copy == ecs::NULL_ENTITY) {
+				continue;
+			}
+
+			store.SetParent(copy, target);
+			cloned++;
+		}
+
+		return cloned;
 	}
 }

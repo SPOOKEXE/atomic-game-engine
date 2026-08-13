@@ -2,6 +2,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -581,6 +582,15 @@ namespace engine::scene {
 		// The camera controller is authored state — a mode, a zoom, a sensitivity
 		// — and crosses for the ordinary reason.
 		ecs::Components::Register<InputState>("scene.InputState");
+
+		// **`AudioState` crosses for `CameraController`'s reason and not
+		// `InputState`'s.** It is authored state — a master gain and where the ear
+		// is — rather than a per-frame report, so a world reopened from a file is
+		// as loud as it was left. The plain object representation is enough: an
+		// `ecs::Entity` is an index and a generation, which is exactly what
+		// `LocalPlayer` writes, and a snapshot that carries the row carries the
+		// instance it names.
+		ecs::Components::Register<AudioState>("scene.AudioState");
 		ecs::Components::Register<CameraController>("scene.CameraController");
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
 		ecs::Components::Register<MeshCatalogue>(

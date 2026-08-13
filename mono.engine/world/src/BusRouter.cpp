@@ -221,6 +221,42 @@ namespace engine::world {
 			Deliver(destination, std::move(arrival));
 			break;
 		}
+
+		case BusKind::Channel: {
+			// **`Teleport`'s routing with nobody attached**, which is the whole
+			// of the difference and is why the two are separate kinds rather
+			// than one with a flag — see `BusKind::Channel`. Everything else
+			// here is deliberately identical: the same directory lookup, the
+			// same refusal for a world that is not there, the same
+			// sender-stamped delivery.
+			if (envelope.Operation != BusOperation::Send) {
+				reply.Status = BusStatus::Unsupported;
+				break;
+			}
+
+			const WorldId destination = directory.Find(envelope.Key);
+			if (!destination.IsValid()) {
+				// **Named rather than silent.** A publish with no subscribers is
+				// a quiet afternoon; a message addressed to a world that is not
+				// running is a sender holding a name nothing answers to, and it
+				// wants to know. `MessagingService` cannot tell the difference
+				// and this can, which is half the reason to have it.
+				reply.Status = BusStatus::NoSuchWorld;
+				break;
+			}
+
+			Delivery arrival;
+			arrival.Bus = BusKind::Channel;
+
+			// **`Key` is who sent it, not what was addressed.** The destination
+			// already knows it is itself; what it cannot know is who to answer,
+			// and a channel is the one route where answering is the point.
+			arrival.Key = sender.Name();
+			arrival.From = sender.Name();
+			arrival.Payload = envelope.Payload;
+			Deliver(destination, std::move(arrival));
+			break;
+		}
 		}
 
 		if (envelope.Reply.Expected()) {

@@ -1143,6 +1143,334 @@ TEST_CASE("a bound action fires on the edge and the priority decides", "[scripti
 	)");
 }
 
+// --- what an input signal actually hands over -------------------------------
+//
+// **The gap this closes was three answers to one question.** `InputBegan` fired
+// with a bare `Enum.KeyCode`, a bound action's handler took one as its third
+// argument, and the generated declarations said both passed *nothing* — so a
+// script copied from a Roblox place read `input.KeyCode` and got nil, and the
+// typechecker agreed with neither the code nor itself. `InputObject` is what all
+// three now agree on.
+
+TEST_CASE("an input signal hands over an InputObject", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	store.SetResource(engine::scene::InputState{});
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local board = Instance.new('Part')
+		board.Name = 'Board'
+		board.Parent = workspace
+		board:SetAttribute('Log', '')
+
+		local UIS = game:GetService('UserInputService')
+		UIS.InputBegan:Connect(function(input)
+			board:SetAttribute('Log', board:GetAttribute('Log')
+				.. typeof(input) .. '/'
+				.. input.KeyCode.Name .. '/'
+				.. input.UserInputType.Name .. '/'
+				.. input.UserInputState.Name .. ';')
+		end)
+	)");
+
+	// The edge is the difference between the two bitsets, which is what a
+	// client's translator produces every frame — so a test drives it the same
+	// way rather than through a second path.
+	auto *input = store.ResourceMutable<engine::scene::InputState>();
+	input->Previous = input->Down;
+	input->Down.Set(engine::scene::KeyCode::Q, true);
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	MustRun(*runtime, R"(
+		local board = workspace:FindFirstChild('Board')
+		assert(
+			board:GetAttribute('Log') == 'InputObject/Q/Keyboard/Begin;',
+			'got ' .. board:GetAttribute('Log')
+		)
+	)");
+
+	// **Read-only, and reachable only through its own metatable.** A handler
+	// that could edit the report it was given and hand it on would be a second
+	// opinion about a frame.
+	MustRun(*runtime, R"(
+		local UIS = game:GetService('UserInputService')
+		local held = UIS:GetMouseButtonsPressed()
+		assert(#held == 0, 'nothing is pressed')
+	)");
+}
+
+TEST_CASE("a mouse button is an input, which it never was before", "[scripting]") {
+	// `InputState` has carried `WasButtonPressed` since v0.10 and nothing in the
+	// script layer ever asked it, so a click was invisible to a script that was
+	// not polling — the one input this engine had that a Roblox place could not
+	// hear.
+	RegisterClasses();
+	Store store("script_test");
+
+	engine::scene::InputState state;
+	state.MousePosition = engine::core::Vector2{12.0f, 34.0f};
+	store.SetResource(state);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local board = Instance.new('Part')
+		board.Name = 'Board'
+		board.Parent = workspace
+		board:SetAttribute('Log', '')
+
+		local UIS = game:GetService('UserInputService')
+		UIS.InputBegan:Connect(function(input)
+			board:SetAttribute('Log', board:GetAttribute('Log')
+				.. input.UserInputType.Name .. '@'
+				.. tostring(input.Position.X) .. ',' .. tostring(input.Position.Y) .. ';')
+		end)
+	)");
+
+	auto *live = store.ResourceMutable<engine::scene::InputState>();
+	live->PreviousButtons = live->Buttons;
+	live->Buttons = 1u << static_cast<uint8_t>(engine::scene::MouseButton::Left);
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	MustRun(*runtime, R"(
+		local board = workspace:FindFirstChild('Board')
+		assert(
+			board:GetAttribute('Log') == 'MouseButton1@12,34;',
+			'got ' .. board:GetAttribute('Log')
+		)
+
+		-- And it is down, as an `InputObject` carrying where the pointer was.
+		local held = game:GetService('UserInputService'):GetMouseButtonsPressed()
+		assert(#held == 1, 'expected one button held')
+		assert(held[1].UserInputType == Enum.UserInputType.MouseButton1, 'wrong button')
+		assert(held[1].Position.X == 12, 'the button forgot where the pointer was')
+
+		-- **False for the three members that are not buttons.** They exist so an
+		-- `InputObject` can say where it came from, and "is MouseMovement
+		-- pressed" is a question with no answer rather than whichever bit the
+		-- arithmetic lands on.
+		local UIS = game:GetService('UserInputService')
+		assert(UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1), 'the left button is down')
+		assert(not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseMovement), 'motion is not a button')
+		assert(not UIS:IsMouseButtonPressed(Enum.UserInputType.Keyboard), 'the keyboard is not a button')
+	)");
+}
+
+TEST_CASE("InputChanged fires, which it had never done", "[scripting]") {
+	// **Reachable, connectable and silent since v0.10.** A signal that never
+	// fires reads as a broken engine rather than as an unfinished one, which is
+	// the trade `v0.5` records for `Heartbeat`.
+	RegisterClasses();
+	Store store("script_test");
+	store.SetResource(engine::scene::InputState{});
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local board = Instance.new('Part')
+		board.Name = 'Board'
+		board.Parent = workspace
+		board:SetAttribute('Log', '')
+
+		game:GetService('UserInputService').InputChanged:Connect(function(input)
+			assert(input.UserInputState == Enum.UserInputState.Change, 'a change that did not say so')
+			board:SetAttribute('Log', board:GetAttribute('Log')
+				.. input.UserInputType.Name .. ':'
+				.. tostring(input.Delta.X) .. ',' .. tostring(input.Delta.Z) .. ';')
+		end)
+	)");
+
+	auto *live = store.ResourceMutable<engine::scene::InputState>();
+	live->MouseDelta = engine::core::Vector2{4.0f, -2.0f};
+	live->WheelDelta = 3.0f;
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	// The wheel's notches land in `Z`, which is Roblox's placement exactly — a
+	// script migrated from a Roblox place reads `input.Position.Z` for them.
+	MustRun(*runtime, R"(
+		local board = workspace:FindFirstChild('Board')
+		assert(
+			board:GetAttribute('Log') == 'MouseMovement:4,0;MouseWheel:0,3;',
+			'got ' .. board:GetAttribute('Log')
+		)
+	)");
+
+	// A still frame posts nothing, which is what makes this an event rather
+	// than a poll.
+	MustRun(*runtime, "workspace:FindFirstChild('Board'):SetAttribute('Log', '')");
+	live = store.ResourceMutable<engine::scene::InputState>();
+	live->MouseDelta = engine::core::Vector2{};
+	live->WheelDelta = 0.0f;
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+	MustRun(*runtime, R"(
+		local board = workspace:FindFirstChild('Board')
+		assert(board:GetAttribute('Log') == '', 'a still frame fired something')
+	)");
+}
+
+TEST_CASE("the window's focus edges reach a script", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	store.SetResource(engine::scene::InputState{});
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local board = Instance.new('Part')
+		board.Name = 'Board'
+		board.Parent = workspace
+		board:SetAttribute('Log', '')
+
+		local UIS = game:GetService('UserInputService')
+		local function note(text)
+			return function()
+				board:SetAttribute('Log', board:GetAttribute('Log') .. text .. ';')
+			end
+		end
+
+		-- **Called with nothing**, which is Roblox's signature: a focus change
+		-- is not an input and has no `InputObject` to describe it.
+		UIS.WindowFocused:Connect(note('gained'))
+		UIS.WindowFocusReleased:Connect(note('lost'))
+	)");
+
+	// Losing focus is also the frame every held key reports released, because
+	// the translator clears `Down` and leaves `Previous` alone. The order is
+	// what this pins: the cause before the effect.
+	auto *live = store.ResourceMutable<engine::scene::InputState>();
+	live->Down.Set(engine::scene::KeyCode::W, true);
+	live->Previous = live->Down;
+	live->PreviousFocused = true;
+	live->Focused = false;
+	live->Down = engine::scene::KeyBits{};
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	live = store.ResourceMutable<engine::scene::InputState>();
+	live->Previous = live->Down;
+	live->PreviousFocused = false;
+	live->Focused = true;
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	MustRun(*runtime, R"(
+		local board = workspace:FindFirstChild('Board')
+		assert(board:GetAttribute('Log') == 'lost;gained;', 'got ' .. board:GetAttribute('Log'))
+	)");
+}
+
+TEST_CASE("the input surface answers honestly about what it does not have", "[scripting]") {
+	// **Present and false beats absent.** A Roblox place branches on these to
+	// pick a control scheme, and a missing property raises where a false one
+	// takes the other branch.
+	RegisterClasses();
+	Store store("script_test");
+	store.SetResource(engine::scene::InputState{});
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local UIS = game:GetService('UserInputService')
+		assert(not UIS.GamepadEnabled, 'this engine has no gamepad')
+		assert(not UIS.TouchEnabled, 'this engine has no touch surface')
+		assert(not UIS.VREnabled, 'this engine has no headset')
+		assert(not UIS.AccelerometerEnabled, 'this engine has no accelerometer')
+		assert(not UIS.GyroscopeEnabled, 'this engine has no gyroscope')
+
+		-- And a world with a window has the two it does have.
+		assert(UIS.KeyboardEnabled and UIS.MouseEnabled, 'a world with input claimed neither')
+	)");
+
+	// A name nothing answers is still a refusal rather than a nil, which is
+	// what keeps a typo from being silent.
+	REQUIRE_FALSE(runtime->Run("return game:GetService('UserInputService').GamepadEnabledd"));
+	CHECK(runtime->LastError().find("has no member") != std::string::npos);
+}
+
+TEST_CASE("a bound action can say what it claimed", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	store.SetResource(engine::scene::InputState{});
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local CAS = game:GetService('ContextActionService')
+		local function nothing() end
+
+		CAS:BindActionAtPriority('door', nothing, false, 1, Enum.KeyCode.E)
+		CAS:BindActionAtPriority('vehicle', nothing, false, 10, Enum.KeyCode.E, Enum.KeyCode.F)
+
+		local vehicle = CAS:GetBoundActionInfo('vehicle')
+		assert(vehicle ~= nil, 'a bound action reported nothing')
+		assert(vehicle.priorityLevel == 10, 'the priority was lost')
+		assert(#vehicle.inputTypes == 2, 'the keys were lost')
+		assert(vehicle.inputTypes[1] == Enum.KeyCode.E, 'the keys came back in another order')
+		assert(not vehicle.createTouchButton, 'there is no touch surface to have made a button on')
+
+		-- **Higher wins, which is Roblox's direction.** The engine's own list is
+		-- sorted highest-priority-first, so reporting our index under Roblox's
+		-- name would be the same word meaning the opposite thing.
+		local door = CAS:GetBoundActionInfo('door')
+		assert(door.stackOrder < vehicle.stackOrder, 'the claim that wins does not have the higher order')
+
+		-- Nil for a name nothing bound, which is what `if info then` reads. An
+		-- empty table is truthy and would report every name as bound.
+		assert(CAS:GetBoundActionInfo('nothing at all') == nil, 'an unbound name reported a table')
+
+		local all = CAS:GetAllBoundActionInfo()
+		assert(all.door ~= nil and all.vehicle ~= nil, 'the map lost a row')
+		assert(all.vehicle.priorityLevel == 10, 'the map and the single lookup disagree')
+
+		CAS:UnbindAllActions()
+		assert(next(CAS:GetAllBoundActionInfo()) == nil, 'unbinding left something behind')
+	)");
+}
+
+TEST_CASE("a bound action's handler is given an InputObject", "[scripting]") {
+	// **Roblox's third argument has always been an `InputObject`** and this
+	// passed an `Enum.KeyCode`, so a handler reading `input.KeyCode` — the form
+	// every Roblox place is written in — got nil.
+	RegisterClasses();
+	Store store("script_test");
+	store.SetResource(engine::scene::InputState{});
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local board = Instance.new('Part')
+		board.Name = 'Board'
+		board.Parent = workspace
+		board:SetAttribute('Log', '')
+
+		game:GetService('ContextActionService'):BindAction('open', function(name, state, input)
+			board:SetAttribute('Log', board:GetAttribute('Log')
+				.. name .. '/' .. state.Name .. '/'
+				.. typeof(input) .. '/' .. input.KeyCode.Name .. ';')
+		end, false, Enum.KeyCode.E)
+	)");
+
+	auto *live = store.ResourceMutable<engine::scene::InputState>();
+	live->Previous = live->Down;
+	live->Down.Set(engine::scene::KeyCode::E, true);
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	MustRun(*runtime, R"(
+		local board = workspace:FindFirstChild('Board')
+		assert(
+			board:GetAttribute('Log') == 'open/Begin/InputObject/E;',
+			'got ' .. board:GetAttribute('Log')
+		)
+	)");
+}
+
 // --- the datatype vocabulary ------------------------------------------------
 
 TEST_CASE("the datatypes arithmetic and read back", "[scripting]") {
@@ -1974,7 +2302,9 @@ TEST_CASE("a script may switch which language an instance runs", "[scripting][in
 
 	// The instance holds a JavaScript program as well, put there by the author.
 	const engine::core::Name javascript("examples/Rings.js");
-	REQUIRE(store.SetProperty(program, engine::core::Name("JavaScriptSource"), &javascript, sizeof(javascript)));
+	REQUIRE(
+		store.SetProperty(program, engine::core::Name("JavaScriptSource"), &javascript, sizeof(javascript))
+	);
 
 	const auto runtime = MakeRuntime(store, Language::Luau);
 	MustRun(*runtime, R"(

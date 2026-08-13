@@ -1622,7 +1622,8 @@
 			"properties": [
 				{"name": "Character", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["scene.PlayerCharacter"], "writes": ["scene.PlayerCharacter"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PlayerGui", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []}
 			]
 		}
 	],
@@ -1639,6 +1640,7 @@
 		{"name": "Font", "members": ["Regular", "Bold", "Italic", "Code"]},
 		{"name": "HorizontalAlignment", "members": ["Left", "Center", "Right"]},
 		{"name": "KeyCode", "members": ["Unknown", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Space", "Return", "Escape", "Backspace", "Tab", "LeftShift", "RightShift", "LeftControl", "RightControl", "LeftAlt", "RightAlt", "Up", "Down", "Left", "Right", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]},
+		{"name": "ListenerType", "members": ["Camera", "ObjectPosition"]},
 		{"name": "MouseBehavior", "members": ["Default", "LockCenter", "LockCurrentPosition"]},
 		{"name": "NormalId", "members": ["Right", "Top", "Back", "Left", "Bottom", "Front"]},
 		{"name": "ParticleEmitterShape", "members": ["Box", "Sphere", "Cylinder", "Disc"]},
@@ -1660,7 +1662,7 @@
 		{"name": "TextXAlignment", "members": ["Left", "Center", "Right"]},
 		{"name": "TextYAlignment", "members": ["Top", "Center", "Bottom"]},
 		{"name": "UserInputState", "members": ["Begin", "Change", "End"]},
-		{"name": "UserInputType", "members": ["MouseButton1", "MouseButton2", "MouseButton3"]},
+		{"name": "UserInputType", "members": ["MouseButton1", "MouseButton2", "MouseButton3", "Keyboard", "MouseMovement", "MouseWheel"]},
 		{"name": "VerticalAlignment", "members": ["Top", "Center", "Bottom"]},
 		{"name": "ZIndexBehavior", "members": ["Global", "Sibling"]}
 	]

@@ -224,4 +224,8 @@ namespace engine::world {
 	Ticket Postbox::Teleport(std::string_view world, std::span<const std::byte> payload) {
 		return Post(BusKind::Teleport, BusOperation::Send, core::Name(world), payload, 0, true);
 	}
+
+	Ticket Postbox::SendTo(std::string_view world, std::span<const std::byte> payload) {
+		return Post(BusKind::Channel, BusOperation::Send, core::Name(world), payload, 0, true);
+	}
 }

@@ -2,6 +2,7 @@
 #include <engine/audio/Sample.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Audio.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -327,4 +328,86 @@ TEST_CASE("clearing a stage releases every voice", "[client][sounds]") {
 	// they stood in for.
 	stage.Clear(mixer);
 	CHECK(stage.Count() == 0);
+}
+
+// --- what a script decided, arriving through `scene::AudioState` -------------
+//
+// **The tier seam, from the acting end.** `engine::audio` is `client` and the
+// script layer is `shared`, so `SoundService` cannot reach a mixer — it writes a
+// resource and this file is what reads it. These cases are the client half of
+// `engine.script.soundservice`.
+
+TEST_CASE("a world's master volume scales every voice", "[client][sounds]") {
+	Store store("sounds_test.master");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+	store.GetMutable<engine::scene::Sound>(sound)->Volume = 0.8f;
+
+	// No resource at all is the ordinary state of a world nobody has told, and
+	// it means "as authored" rather than silence.
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	REQUIRE(stage.Find(sound) != nullptr);
+	CHECK(stage.Find(sound)->Level == 0.8f);
+
+	engine::scene::AudioState settings;
+	settings.MasterVolume = 0.5f;
+	store.SetResource(settings);
+
+	// **The product, because `Level` is what was last posted** and the whole
+	// file's change detection compares against that. A stage that stored the
+	// sound's own volume here would post nothing on the next pass and the world
+	// would stay loud.
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Find(sound)->Level == 0.4f);
+
+	mixer.ApplyPending();
+	const engine::audio::Node *fader = mixer.Graph().Find(stage.Find(sound)->Fader);
+	REQUIRE(fader != nullptr);
+	CHECK(fader->Gain == 0.4f);
+
+	// A negative gain is a phase inversion rather than a quieter sound, and a
+	// script that wrote one meant silence. Clamped here rather than in the
+	// property setter, so the resource keeps what was written.
+	store.ResourceMutable<engine::scene::AudioState>()->MasterVolume = -2.0f;
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Find(sound)->Level == 0.0f);
+}
+
+TEST_CASE("a world may move the ear off the camera", "[client][sounds]") {
+	Store store("sounds_test.listener");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	PartDesc where;
+	where.Frame.Position = Vector3{40.0f, 0.0f, 0.0f};
+	const Entity ear = MakePart(store, where);
+
+	NewSound(store, "audio/track.mp3");
+
+	// The default is the camera's position, which is what the caller passes.
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	mixer.ApplyPending();
+	CHECK(mixer.Graph().Listener().X == 0.0f);
+
+	engine::scene::AudioState settings;
+	settings.Mode = engine::scene::ListenerMode::ObjectPosition;
+	settings.Listener = ear;
+	store.SetResource(settings);
+
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	mixer.ApplyPending();
+	CHECK(mixer.Graph().Listener().X == 40.0f);
+
+	// **A listener that has gone away falls back rather than teleporting the ear
+	// to the origin.** The setting outlives the instance — a script sets it once
+	// and something else destroys the part — and a scene that went quiet with
+	// nothing said would be the harder of the two to explain.
+	store.Destroy(ear);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	mixer.ApplyPending();
+	CHECK(mixer.Graph().Listener().X == 0.0f);
 }

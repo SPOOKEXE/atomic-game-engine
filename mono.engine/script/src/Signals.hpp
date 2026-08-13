@@ -142,6 +142,43 @@ namespace engine::script {
 
 		// `guiObject.MouseMoved` — it moved while over the element.
 		GuiMouseMoved,
+
+		// `CrossWorldService.MessageReceived` — a payload another world in this
+		// universe addressed to this one.
+		//
+		// **No subject, like `Heartbeat` and unlike everything between them.** A
+		// channel message arrives at the world rather than at any instance in it,
+		// so the subject is `NULL_ENTITY` and the service's table carries the
+		// signal as a field.
+		//
+		// **Fired at the deliveries barrier**, which is the first of the four
+		// stages `LuauRuntime::Heartbeat` runs — a message the barrier applied
+		// belongs to the tick that is starting, so a handler sees it before
+		// anything that beat moves.
+		//
+		// @since v0.15
+		CrossWorldMessage,
+
+		// `tween.Completed` — a tween reached the end of its last pass.
+		//
+		// **The subject is the tween's own entity, which is what a tween is.**
+		// `Tweens.hpp` argues that at length; what this list needs from it is
+		// that the subject is not the instance being animated — two tweens
+		// driving one part are two signals, and a subject shared between them
+		// would be one.
+		//
+		// **Fired at the tween barrier rather than inside the step.** A handler
+		// may cancel the tween it was called about or start another, and
+		// `TweenTable::Advance` is mid-walk of the list that names it — the same
+		// argument `Changes.hpp` makes for not firing from inside a write.
+		//
+		// **The handler is called with nothing.** Roblox passes a
+		// `PlaybackState`, this engine has no such enum, and an argument
+		// invented here would have to change the day one arrives — the same
+		// trade `GuiActivated` is on a few lines up.
+		//
+		// @since v0.16
+		TweenCompleted,
 	};
 
 	// Whether a tree change is a player arriving in or leaving the `Players`

@@ -189,7 +189,9 @@ TEST_CASE("a forget arrives even when its tick's delta got there first", "[repli
 	REQUIRE(wire.Join());
 
 	const Entity leaving = all[2];
-	wire.Authority_.SetInterest([leaving](ClientId, Entity entity) { return entity.Id != leaving.Id; });
+	wire.Authority_.SetInterest([leaving](ClientId, Entity entity, const engine::ecs::Store &) {
+		return entity.Id != leaving.Id;
+	});
 
 	// Everything moves on the same tick the entity leaves view, so the tick
 	// carries a delta and a structural message together.
@@ -213,7 +215,9 @@ TEST_CASE("a forget whose datagram is lost still reaches the client", "[replicat
 	wire.Server.Set<Spot>(wire.Server.Create(), Spot{2.0f, 0.0f});
 	REQUIRE(wire.Join());
 
-	wire.Authority_.SetInterest([watched](ClientId, Entity entity) { return entity.Id != watched.Id; });
+	wire.Authority_.SetInterest([watched](ClientId, Entity entity, const engine::ecs::Store &) {
+		return entity.Id != watched.Id;
+	});
 
 	wire.ClientEnd->DropNext(1);
 	wire.Tick();
@@ -670,7 +674,7 @@ TEST_CASE("an entity coming into view brings its components with it", "[replicat
 	wire.Server.Set<Spot>(sometimes, Spot{77.0f, 88.0f});
 
 	bool visible = false;
-	wire.Authority_.SetInterest([sometimes, &visible](ClientId, Entity entity) {
+	wire.Authority_.SetInterest([sometimes, &visible](ClientId, Entity entity, const engine::ecs::Store &) {
 		return entity.Id != sometimes.Id || visible;
 	});
 	REQUIRE(wire.Join());
@@ -770,7 +774,9 @@ TEST_CASE("a world where only structure changes is not a client falling behind",
 
 	// Out of view, which is a structural message and nothing else: the world is
 	// still, so there is no delta on that tick or any tick after it.
-	wire.Authority_.SetInterest([second](ClientId, Entity entity) { return entity.Id != second.Id; });
+	wire.Authority_.SetInterest([second](ClientId, Entity entity, const engine::ecs::Store &) {
+		return entity.Id != second.Id;
+	});
 
 	engine::replication::AuthoritySettings defaults;
 	size_t restarts = 0;

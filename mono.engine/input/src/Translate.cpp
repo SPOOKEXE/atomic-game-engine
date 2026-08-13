@@ -177,6 +177,13 @@ namespace engine::input {
 		// mouse stopped.
 		Current.Previous = Current.Down;
 		Current.PreviousButtons = Current.Buttons;
+
+		// **Focus is rolled with the other two rather than derived where it is
+		// read**, because `UserInputService.WindowFocused` is an edge and an edge
+		// is the difference between two frames. Nothing else in this module needs
+		// it; `scene::InputState::WasFocusGained` is what does.
+		Current.PreviousFocused = Current.Focused;
+
 		Current.MouseDelta = {};
 		Current.WheelDelta = 0.0f;
 	}

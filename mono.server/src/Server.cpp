@@ -9,6 +9,7 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/physics/Query.hpp>
@@ -657,6 +658,20 @@ namespace server {
 				// Ownership of the root goes to this player inside `LoadCharacter`,
 				// which is what makes the client's own movement authoritative and
 				// nobody else's.
+				// **The player's own interface, copied from the world's
+				// template.** `StarterGui` is a template and what a player sees
+				// is their copy — see `gui::ResetPlayerGui`, which also carries
+				// why a `ResetOnSpawn = false` collector survives a death. The
+				// copies are ordinary world content on this authority, so they
+				// replicate to exactly one client: `SetInterest` above hides
+				// what is under a player from everybody else.
+				//
+				// **Before the character, not after.** A `ScreenGui` a script
+				// reaches for from a spawn handler has to exist by the time the
+				// handler runs, and `LoadCharacter` is what a game hangs that
+				// handler on.
+				(void)engine::gui::ResetPlayerGui(store, player);
+
 				const engine::ecs::Entity character = engine::scene::LoadCharacter(store, player);
 				if (character == engine::ecs::NULL_ENTITY) {
 					ENGINE_WARN("server: '{}' has no character — the world has no Workspace", name);
@@ -720,6 +735,65 @@ namespace server {
 			// The world it was handed, not one this looks up: `ApplySubmitted`
 			// runs inside a world the host has already entered.
 			return engine::scene::NetworkOwnerOf(store, entity) == found->second.Instance;
+		});
+
+		// **What a client may be *shown*, which until v0.15 was everything.**
+		// `ServiceComponent::Scope` had said since v0.7 that
+		// `ServerScriptService` and `ServerStorage` are the server's, it
+		// round-tripped through save files, it showed in the properties panel —
+		// and nothing read it, so a game's server scripts and its unreleased
+		// content went down the wire to every client that joined.
+		//
+		// **Two rules, and they are different questions.** Scope is per world: a
+		// server-scoped service is hidden from *every* client and the answer does
+		// not depend on who is asking. Ownership of a player's own subtree is per
+		// client: `Players` is `Shared` because both halves need the list of who
+		// is connected, and what is under one player's row is that player's
+		// alone — a second client shown somebody else's `PlayerGui` gets an
+		// interface it cannot interact with.
+		//
+		// **The rules live in `scene` and the plumbing lives here**, which is the
+		// same split `SetOwnership` makes one block up: `mono.engine/replication`
+		// does not depend on `scene` and must not, because the wire's job is to
+		// move components and it has no business knowing what a service is.
+		Replication->Authority().SetInterest([this](
+												 engine::replication::ClientId client,
+												 engine::ecs::Entity entity,
+												 const engine::ecs::Store &store
+											 ) {
+			if (!engine::scene::VisibleToClients(store, entity)) {
+				return false;
+			}
+
+			// **Almost everything is nobody's**, so this answers first and the
+			// player lookup below is paid only by the few rows under a player.
+			const engine::ecs::Entity owner = engine::scene::PlayerOwning(store, entity);
+			if (owner == engine::ecs::NULL_ENTITY) {
+				return true;
+			}
+
+			// **The `Player` row itself goes to everybody; what is *under* it
+			// does not.** Roblox draws the line in the same place and for the
+			// same reason: `Players:GetPlayers()` is how a game knows who is in
+			// it, and a client shown only its own row would think it was alone.
+			// `server.replication`'s "a client is told which player is theirs"
+			// case is what caught this — the first version of this predicate hid
+			// every player from every other client, which reads as a lobby that
+			// never fills.
+			if (entity == owner) {
+				return true;
+			}
+
+			// **A client this server has forgotten sees nothing under any
+			// player**, rather than everything: the map is the only statement of
+			// who a connection is, and a handle it does not answer for is a
+			// connection that has gone. Failing open here would show a departing
+			// client every player's interface on its way out.
+			const auto found = Players.find(client.Index);
+			if (found == Players.end() || found->second.Generation != client.Generation) {
+				return false;
+			}
+			return owner == found->second.Instance;
 		});
 
 		// A delta is the third reader of the dirty bits, so the components that

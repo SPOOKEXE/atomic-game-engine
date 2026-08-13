@@ -269,3 +269,131 @@ TEST_CASE("an element that is not drawn cannot be selected into", "[gui][service
 	CHECK_FALSE(SelectNext(world.Data, list, SelectionMove::Up));
 	CHECK(world.Selected() == visible);
 }
+
+namespace {
+	// A world with a `StarterGui` root and one player holding a `PlayerGui`.
+	//
+	// **Both built by hand rather than by `scene::InstallServices`**, because
+	// `gui` may not link `scene` — the refusal `STARTER_GUI` exists because of.
+	// What the names have to be is exactly what that constant says, and
+	// `examples/tests/Scene.cpp` is where the two spellings are pinned together.
+	struct SpawnWorld {
+		Store Data;
+		Entity Starter;
+		Entity Player;
+		Entity PlayerGui;
+
+		explicit SpawnWorld(std::string_view name) : Data(name) {
+			RegisterGuiClasses();
+
+			const auto plain = engine::ecs::Classes::Find(engine::core::Name("Instance"));
+			Starter = Data.CreateInstance(plain, std::string(STARTER_GUI));
+
+			Player = Data.CreateInstance(plain, "Somebody");
+			PlayerGui = Data.CreateInstance(plain, std::string(PLAYER_GUI));
+			Data.SetParent(PlayerGui, Player);
+		}
+
+		Entity Collector(Entity parent, const char *name, bool resetOnSpawn) {
+			const Entity made = Data.CreateInstance(GuiClass("ScreenGui"), name);
+			Data.SetParent(made, parent);
+
+			Layer layer;
+			layer.ResetOnSpawn = resetOnSpawn;
+			Data.Set(made, layer);
+			return made;
+		}
+
+		size_t CountIn(Entity parent) const {
+			size_t found = 0;
+			Data.EachChild(parent, [&](Entity) { found++; });
+			return found;
+		}
+
+		Entity FindIn(Entity parent, const char *name) const {
+			return Data.FindFirstChild(parent, name);
+		}
+	};
+}
+
+TEST_CASE("a spawn copies the template into the player's own container", "[gui][services]") {
+	// **`StarterGui` is a template and what a player sees is their copy**, which
+	// this engine did not have at all: `Layout` drew a `ScreenGui` from
+	// `StarterGui` *or* from a `PlayerGui`, so every client drew the same
+	// instances. That works in single player and is wrong the moment there are
+	// two — a script hiding one player's health bar hid everybody's.
+	SpawnWorld world("gui.spawn.copy");
+	world.Collector(world.Starter, "Hud", true);
+	world.Collector(world.Starter, "Menu", true);
+
+	REQUIRE(world.CountIn(world.PlayerGui) == 0);
+	CHECK(ResetPlayerGui(world.Data, world.Player) == 2);
+	CHECK(world.CountIn(world.PlayerGui) == 2);
+	CHECK(world.FindIn(world.PlayerGui, "Hud") != engine::ecs::NULL_ENTITY);
+
+	// **The template is still there**, which is what "cloned rather than moved"
+	// buys: the next player and the next life need it.
+	CHECK(world.CountIn(world.Starter) == 2);
+}
+
+TEST_CASE("a respawn replaces what resets and leaves what does not", "[gui][services]") {
+	// **The whole of what `ResetOnSpawn` is for, and the field had been on
+	// `Layer` since v0.8 with nothing reading it.** A minimap or a settings panel
+	// carrying script state must survive a death; a health bar must not.
+	SpawnWorld world("gui.spawn.reset");
+	world.Collector(world.Starter, "Hud", true);
+	world.Collector(world.Starter, "Minimap", false);
+
+	REQUIRE(ResetPlayerGui(world.Data, world.Player) == 2);
+
+	const Entity firstHud = world.FindIn(world.PlayerGui, "Hud");
+	const Entity firstMap = world.FindIn(world.PlayerGui, "Minimap");
+	REQUIRE(firstHud != engine::ecs::NULL_ENTITY);
+	REQUIRE(firstMap != engine::ecs::NULL_ENTITY);
+
+	// **Only the resetting one is copied again**, because the other survived and
+	// a survivor of the same name is the copy the player already has. Cloning
+	// beside it would leave them holding two, one of which nothing updates.
+	CHECK(ResetPlayerGui(world.Data, world.Player) == 1);
+	CHECK(world.CountIn(world.PlayerGui) == 2);
+
+	// **The identities are the assertion, not the count.** The health bar is a
+	// *different* instance — destroyed and re-cloned, so a script's leftover
+	// state goes with it — and the minimap is the same one, still holding
+	// whatever a script put in it.
+	CHECK(world.FindIn(world.PlayerGui, "Hud") != firstHud);
+	CHECK(world.FindIn(world.PlayerGui, "Minimap") == firstMap);
+}
+
+TEST_CASE("a spawn with nothing to copy is not a failure", "[gui][services]") {
+	// Three honest zeroes: a world with no template, a player with no container,
+	// and a template that is empty. None of them is a mistake a host should have
+	// to guard against before calling.
+	SpawnWorld world("gui.spawn.empty");
+	CHECK(ResetPlayerGui(world.Data, world.Player) == 0);
+
+	const Entity loose =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "NoGui");
+	CHECK(ResetPlayerGui(world.Data, loose) == 0);
+}
+
+TEST_CASE("what is not a collector is copied and never cleared", "[gui][services]") {
+	// **`ResetOnSpawn` describes a *collector's* lifetime**, so anything without
+	// a `Layer` is left where it is. Roblox copies a container's contents rather
+	// than a filtered set, and a rule that filtered would silently drop the one
+	// thing a game had put there.
+	SpawnWorld world("gui.spawn.plain");
+
+	const auto plain = engine::ecs::Classes::Find(engine::core::Name("Instance"));
+	const Entity assets = world.Data.CreateInstance(plain, "Assets");
+	world.Data.SetParent(assets, world.Starter);
+
+	REQUIRE(ResetPlayerGui(world.Data, world.Player) == 1);
+	const Entity copied = world.FindIn(world.PlayerGui, "Assets");
+	REQUIRE(copied != engine::ecs::NULL_ENTITY);
+
+	// Not cleared on the next spawn, and therefore not copied again either —
+	// it survives by the same rule a `ResetOnSpawn = false` collector does.
+	CHECK(ResetPlayerGui(world.Data, world.Player) == 0);
+	CHECK(world.FindIn(world.PlayerGui, "Assets") == copied);
+}

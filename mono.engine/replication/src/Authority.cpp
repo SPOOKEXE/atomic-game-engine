@@ -112,7 +112,7 @@ namespace engine::replication {
 		return Detection[static_cast<size_t>(std::distance(Components.begin(), at))];
 	}
 
-	void Authority::SetInterest(std::function<bool(ClientId, ecs::Entity)> predicate) {
+	void Authority::SetInterest(std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> predicate) {
 		Interest = std::move(predicate);
 	}
 
@@ -744,11 +744,11 @@ namespace engine::replication {
 			}
 
 			Visible.clear();
-			store.EachEntity([this, handle](ecs::Entity entity) {
+			store.EachEntity([this, handle, &store](ecs::Entity entity) {
 				if (!std::binary_search(Bearing.begin(), Bearing.end(), entity.Id)) {
 					return;
 				}
-				if (!Interest || Interest(handle, entity)) {
+				if (!Interest || Interest(handle, entity, store)) {
 					Visible.push_back(entity);
 				}
 			});

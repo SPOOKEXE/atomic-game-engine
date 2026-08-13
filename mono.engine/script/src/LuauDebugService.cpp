@@ -304,10 +304,7 @@ namespace engine::script {
 			return;
 		}
 
-		static const struct {
-			const char *Name;
-			lua_CFunction Function;
-		} METHODS[] = {
+		static constexpr ServiceMethod METHODS[] = {
 			// The high level: a script instance and a line.
 			{"SetBreakpoint", SetBreakpoint},
 			{"RemoveBreakpoint", RemoveBreakpoint},
@@ -321,16 +318,13 @@ namespace engine::script {
 			{"IsArmed", IsArmed},
 		};
 
-		lua_newtable(state);
-		for (const auto &method : METHODS) {
-			lua_pushlightuserdata(state, &context);
-			lua_pushcclosure(state, method.Function, method.Name, 1);
-			lua_setfield(state, -2, method.Name);
-		}
-
 		// A global, which is what makes `game:GetService("BreakpointService")`
 		// find it — that function resolves a service by looking one up, and
-		// `RunService` is the same shape for the same reason.
-		lua_setglobal(state, "BreakpointService");
+		// every other surface service is the same shape for the same reason.
+		ServiceSurface surface;
+		surface.Name = "BreakpointService";
+		surface.Methods = METHODS;
+
+		InstallService(state, surface);
 	}
 }

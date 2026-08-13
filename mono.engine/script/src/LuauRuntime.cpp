@@ -349,12 +349,16 @@ namespace engine::script {
 		OpenEnums(State);
 		OpenSignals(State);
 		OpenInstances(State);
-		OpenRunService(State);
-		OpenInputServices(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);
-		OpenServices(State);
-		OpenContentService(State);
+
+		// **Every service this language binds, from the catalogue.** They used to
+		// be a hand-written call list here, which is how "which services exist"
+		// came to be two lists — this one and the JavaScript runtime's — that
+		// drifted by four services with nothing in the build to say so. See
+		// `ServiceCatalogue.hpp`.
+		InstallLuauServices(State, ServiceAvailability::Always);
+
 		OpenQueries(State);
 
 		// After `OpenInstances`, whose method table this adds the component
@@ -385,10 +389,12 @@ namespace engine::script {
 		BoundsOf(State).Context.Breakpoints = &Breakpoints;
 
 		// **After that assignment and before the sandbox**, and the position is
-		// forced from both sides. The service reads the pointer to decide
-		// whether to install itself at all, so it cannot run earlier; and it
-		// writes a global, so it cannot run once the table is frozen.
-		OpenBreakpointService(State);
+		// forced from both sides. A studio service reads the pointer above to
+		// decide whether to install itself at all, so it cannot run earlier; and
+		// it writes a global, so it cannot run once the table is frozen. That is
+		// the whole reason `ServiceAvailability` has a second value and the
+		// catalogue is walked twice.
+		InstallLuauServices(State, ServiceAvailability::Studio);
 
 		// Freezes the global table and the library tables. After this a script
 		// can read `math.floor` and cannot replace it, so one script cannot
@@ -768,6 +774,35 @@ namespace engine::script {
 				firstError = std::move(message);
 			}
 		};
+
+		{
+			// **The world's own timed work, before anything that reacts to it.**
+			// A tween and a debris deadline are not resumes: nothing asked to be
+			// called, and what they produce is a property write and a removal —
+			// the same things a `Heartbeat` handler produces, arriving from the
+			// clock instead of from a script.
+			//
+			// So they run at the head of the barrier, and everything after them
+			// — a bound action, a `.Changed`, a tree signal, a resumed task, the
+			// beat — sees one world in which this tick's motion has already
+			// happened. After the beat instead, every script would read a value
+			// one tick stale and an expired instance would outlive its deadline
+			// by a tick as far as anything could tell.
+			//
+			// It also settles what a tween made *during* this barrier does: it
+			// first advances on the next one, rather than part way through the
+			// tick it was created in, because every creator runs after this
+			// point.
+			//
+			// **Tweens before debris**, so an instance's last tick of motion
+			// happens before it is taken away. The reverse is defensible and the
+			// point is that it is stated: two queues drained in whichever order
+			// the code happened to be written in is exactly the sort of thing a
+			// recording depends on and nobody wrote down.
+			ENGINE_PROFILE_CAT("script tweens", core::ProfileCategory::Script);
+			note(PumpTweens(State, delta));
+			PumpDebris(State);
+		}
 
 		{
 			// **Input first, and that ordering is the useful one.** A bound

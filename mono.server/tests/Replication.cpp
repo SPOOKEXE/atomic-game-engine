@@ -31,19 +31,19 @@
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Input.hpp>
-#include <engine/scene/Services.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
-#include <numbers>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <numbers>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -776,8 +776,9 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	// instead of the loss rate.
 	float apex = ground;
 	for (int tick = 0; tick < HELD; tick++) {
-		client.Press(tick % 2 == 0 ? std::initializer_list<KeyCode>{KeyCode::Space}
-								   : std::initializer_list<KeyCode>{});
+		client.Press(
+			tick % 2 == 0 ? std::initializer_list<KeyCode>{KeyCode::Space} : std::initializer_list<KeyCode>{}
+		);
 		client.SubmitMove();
 		client.Tick();
 		apex = std::max(apex, client.MyPosition().Y);

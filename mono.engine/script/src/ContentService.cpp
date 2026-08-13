@@ -236,24 +236,19 @@ namespace engine::script {
 	}
 
 	void OpenContentService(lua_State *state) {
-		LuauContext &context = ContextOf(state);
-
-		static const luaL_Reg methods[] = {
+		static constexpr ServiceMethod METHODS[] = {
 			{"GetMeshes", GetMeshes},
 			{"GetPublishedMeshes", GetPublishedMeshes},
 			{"GetMeshTextures", GetMeshTextures},
 			{"GetTextures", GetTextures},
 			{"GetFlipbook", GetFlipbook},
 			{"GetTriangleCount", GetTriangleCount},
-			{nullptr, nullptr},
 		};
 
-		lua_newtable(state);
-		for (const luaL_Reg *method = methods; method->name != nullptr; method++) {
-			lua_pushlightuserdata(state, &context);
-			lua_pushcclosure(state, method->func, method->name, 1);
-			lua_setfield(state, -2, method->name);
-		}
-		lua_setglobal(state, "ContentService");
+		ServiceSurface surface;
+		surface.Name = "ContentService";
+		surface.Methods = METHODS;
+
+		InstallService(state, surface);
 	}
 }

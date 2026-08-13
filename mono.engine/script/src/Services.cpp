@@ -29,6 +29,9 @@ namespace engine::script {
 		// Where the topic-to-callback table lives.
 		constexpr const char *SUBSCRIPTIONS = "engine.messaging.subscriptions";
 
+		// Where the set of tables a codec walk is inside lives.
+		constexpr const char *VISITING = "engine.codec.visiting";
+
 		Store &StoreOfUpvalue(lua_State *state) {
 			return *UpvalueContext(state).World;
 		}
@@ -40,8 +43,14 @@ namespace engine::script {
 		// is the arrangement `Codec.hpp` argues for — a binding that had to
 		// remember to sort would be a second place the determinism guarantee
 		// could be lost.
-
-		bool ToScriptValue(lua_State *state, int index, ScriptValue &out, uint32_t depth, CodecStatus &why);
+		//
+		// **`ReadScriptValue` and `PushScriptValue` are declared in
+		// `Bindings.hpp` and defined below, outside this anonymous namespace.**
+		// They were private to this file while `MessagingService` was the only
+		// caller; `HttpService:JSONEncode` is the second, and a JSON encoder that
+		// walked a table itself would be a second answer to which tables are
+		// arrays, what a cycle is and what a key becomes. What is still private
+		// is everything below — the two helpers those entry points are made of.
 
 		// Whether a table is a dense array. Lua has one table type and two
 		// meanings for it, and the wire needs to know which.
@@ -71,14 +80,47 @@ namespace engine::script {
 			return counted == length;
 		}
 
+		// Pushes the set of tables this walk is inside, creating it on first use.
+		//
+		// **Created here rather than only by `OpenServices`**, because the walk
+		// has a second caller now. `HttpService:JSONEncode` needs the same cycle
+		// check, and an install order that happened to put it before
+		// `OpenServices` would have turned a missing registry key into "attempt
+		// to index nil" from inside a script — a failure a long way from the line
+		// that caused it, and one nothing in the build would catch.
+		void PushVisiting(lua_State *state) {
+			lua_getfield(state, LUA_REGISTRYINDEX, VISITING);
+			if (lua_istable(state, -1)) {
+				return;
+			}
+
+			lua_pop(state, 1);
+			lua_newtable(state);
+			lua_pushvalue(state, -1);
+			lua_setfield(state, LUA_REGISTRYINDEX, VISITING);
+		}
+
 		bool
 		TableToScriptValue(lua_State *state, int index, ScriptValue &out, uint32_t depth, CodecStatus &why) {
+			// **Grow the stack before recursing.** A C function is guaranteed
+			// `LUA_MINSTACK` slots and one level of this walk holds the visiting
+			// table, the key, the value and the stringified key at the same
+			// time — so a table nested five deep already wants more than the VM
+			// promised, and `CODEC_MAX_DEPTH` allows sixteen. `ReadHostValue`
+			// grows for exactly this reason and `script/AGENTS.md` records what
+			// overrunning looked like: an illegal instruction from a script that
+			// merely nested a table.
+			if (lua_checkstack(state, 8) == 0) {
+				why = CodecStatus::TooDeep;
+				return false;
+			}
+
 			// **A cycle is an error, not a hang.** `Codec.hpp` §3's third
 			// requirement, and the check has to be here rather than in the
 			// encoder: by the time a tree exists the cycle has already become
 			// infinite recursion. The registry table keyed on the table's own
 			// pointer is what makes the check cost a hash lookup.
-			lua_getfield(state, LUA_REGISTRYINDEX, "engine.codec.visiting");
+			PushVisiting(state);
 			lua_pushvalue(state, index);
 			lua_rawget(state, -2);
 
@@ -106,12 +148,31 @@ namespace engine::script {
 
 				for (int item = 1; item <= length && ok; item++) {
 					lua_rawgeti(state, index, item);
-					ok = ToScriptValue(state, lua_gettop(state), out.Items[item - 1], depth + 1, why);
+					ok = ReadScriptValue(state, lua_gettop(state), out.Items[item - 1], depth + 1, why);
 					lua_pop(state, 1);
 				}
 			} else {
 				lua_pushnil(state);
 				while (ok && lua_next(state, index) != 0) {
+					// **A key is a string, a number or a boolean, and anything
+					// else is refused.** `luaL_tolstring` will stringify a table
+					// or a function perfectly happily, and what it produces is
+					// the *address* — which differs between two runs of one
+					// script, so a table used as a key put a pointer into a
+					// payload that a recording then has to reproduce. That is
+					// the exact failure `Codec.hpp` §1's sort exists to prevent,
+					// arriving one step earlier than the sort can see it.
+					//
+					// The three that are allowed all stringify from the value
+					// and nothing else: `"a"`, `"1.5"`, `"true"`.
+					const int keyType = lua_type(state, -2);
+					if (keyType != LUA_TSTRING && keyType != LUA_TNUMBER && keyType != LUA_TBOOLEAN) {
+						why = CodecStatus::Unsupported;
+						ok = false;
+						lua_pop(state, 1);
+						continue;
+					}
+
 					// **Keys cross as strings, always.** A numeric key becomes
 					// its decimal text, because the far side may be JavaScript
 					// where every object key already is one — and a format whose
@@ -120,7 +181,7 @@ namespace engine::script {
 					const char *text = luaL_tolstring(state, -2, &length);
 
 					ScriptValue value;
-					ok = ToScriptValue(state, lua_gettop(state) - 1, value, depth + 1, why);
+					ok = ReadScriptValue(state, lua_gettop(state) - 1, value, depth + 1, why);
 					if (ok) {
 						out.Entries.emplace_back(std::string(text, length), std::move(value));
 					}
@@ -135,119 +196,121 @@ namespace engine::script {
 			// Out of the visiting set on the way back up, so a table appearing
 			// twice as a *sibling* is fine — only a table reachable from itself
 			// is a cycle.
-			lua_getfield(state, LUA_REGISTRYINDEX, "engine.codec.visiting");
+			PushVisiting(state);
 			lua_pushvalue(state, index);
 			lua_pushnil(state);
 			lua_rawset(state, -3);
 			lua_pop(state, 1);
 			return ok;
 		}
+	}
 
-		bool ToScriptValue(lua_State *state, int index, ScriptValue &out, uint32_t depth, CodecStatus &why) {
-			if (depth > CODEC_MAX_DEPTH) {
-				why = CodecStatus::TooDeep;
-				return false;
-			}
-
-			if (lua_isnil(state, index)) {
-				out = ScriptValue{ValueTag::Nil};
-				return true;
-			}
-			if (lua_isboolean(state, index)) {
-				out = ScriptValue{lua_toboolean(state, index) != 0 ? ValueTag::True : ValueTag::False};
-				out.Boolean = lua_toboolean(state, index) != 0;
-				return true;
-			}
-			if (lua_isnumber(state, index)) {
-				out = ScriptValue{ValueTag::Number};
-				out.Number = lua_tonumber(state, index);
-				return true;
-			}
-			if (lua_isstring(state, index)) {
-				size_t length = 0;
-				const char *text = lua_tolstring(state, index, &length);
-				out = ScriptValue{ValueTag::String};
-				out.Text.assign(text, length);
-				return true;
-			}
-
-			if (lua_touserdatatagged(state, index, TAG_VECTOR3) != nullptr) {
-				out = ScriptValue{ValueTag::Vector3};
-				out.Vector = CheckVector3(state, index);
-				return true;
-			}
-			if (lua_touserdatatagged(state, index, TAG_COLOR3) != nullptr) {
-				out = ScriptValue{ValueTag::Color3};
-				out.Colour = CheckColor3(state, index);
-				return true;
-			}
-			if (lua_touserdatatagged(state, index, TAG_CFRAME) != nullptr) {
-				out = ScriptValue{ValueTag::CFrame};
-				out.Frame = CheckCFrame(state, index);
-				return true;
-			}
-
-			if (lua_istable(state, index)) {
-				return TableToScriptValue(state, index, out, depth, why);
-			}
-
-			// A function, a thread, or an instance. **An `Entity` is meaningless
-			// outside this world**, so a reference must cross as whatever the
-			// game uses to name things rather than as a handle — rule 3, stated
-			// as a refusal an author can read.
-			why = CodecStatus::Unsupported;
+	bool ReadScriptValue(lua_State *state, int index, ScriptValue &out, uint32_t depth, CodecStatus &why) {
+		if (depth > CODEC_MAX_DEPTH) {
+			why = CodecStatus::TooDeep;
 			return false;
 		}
 
-		void PushScriptValue(lua_State *state, const ScriptValue &value) {
-			switch (value.Tag) {
-			case ValueTag::Nil:
-				lua_pushnil(state);
-				return;
-			case ValueTag::False:
-			case ValueTag::True:
-				lua_pushboolean(state, value.Boolean);
-				return;
-			case ValueTag::Number:
-				lua_pushnumber(state, value.Number);
-				return;
-			case ValueTag::String:
-				lua_pushlstring(state, value.Text.data(), value.Text.size());
-				return;
-			case ValueTag::Array:
-				lua_newtable(state);
-				for (size_t item = 0; item < value.Items.size(); item++) {
-					PushScriptValue(state, value.Items[item]);
-					lua_rawseti(state, -2, static_cast<int>(item) + 1);
-				}
-				return;
-			case ValueTag::Map:
-				lua_newtable(state);
-				for (const auto &entry : value.Entries) {
-					lua_pushlstring(state, entry.first.data(), entry.first.size());
-					PushScriptValue(state, entry.second);
-					lua_rawset(state, -3);
-				}
-				return;
-			case ValueTag::Vector3:
-				*PushVector3(state) = value.Vector;
-				return;
-			case ValueTag::Color3:
-				*PushColor3(state) = value.Colour;
-				return;
-			case ValueTag::CFrame:
-				*PushCFrame(state) = value.Frame;
-				return;
-			}
-			lua_pushnil(state);
+		if (lua_isnil(state, index)) {
+			out = ScriptValue{ValueTag::Nil};
+			return true;
+		}
+		if (lua_isboolean(state, index)) {
+			out = ScriptValue{lua_toboolean(state, index) != 0 ? ValueTag::True : ValueTag::False};
+			out.Boolean = lua_toboolean(state, index) != 0;
+			return true;
+		}
+		if (lua_isnumber(state, index)) {
+			out = ScriptValue{ValueTag::Number};
+			out.Number = lua_tonumber(state, index);
+			return true;
+		}
+		if (lua_isstring(state, index)) {
+			size_t length = 0;
+			const char *text = lua_tolstring(state, index, &length);
+			out = ScriptValue{ValueTag::String};
+			out.Text.assign(text, length);
+			return true;
 		}
 
+		if (lua_touserdatatagged(state, index, TAG_VECTOR3) != nullptr) {
+			out = ScriptValue{ValueTag::Vector3};
+			out.Vector = CheckVector3(state, index);
+			return true;
+		}
+		if (lua_touserdatatagged(state, index, TAG_COLOR3) != nullptr) {
+			out = ScriptValue{ValueTag::Color3};
+			out.Colour = CheckColor3(state, index);
+			return true;
+		}
+		if (lua_touserdatatagged(state, index, TAG_CFRAME) != nullptr) {
+			out = ScriptValue{ValueTag::CFrame};
+			out.Frame = CheckCFrame(state, index);
+			return true;
+		}
+
+		if (lua_istable(state, index)) {
+			return TableToScriptValue(state, index, out, depth, why);
+		}
+
+		// A function, a thread, or an instance. **An `Entity` is meaningless
+		// outside this world**, so a reference must cross as whatever the
+		// game uses to name things rather than as a handle — rule 3, stated
+		// as a refusal an author can read.
+		why = CodecStatus::Unsupported;
+		return false;
+	}
+
+	void PushScriptValue(lua_State *state, const ScriptValue &value) {
+		switch (value.Tag) {
+		case ValueTag::Nil:
+			lua_pushnil(state);
+			return;
+		case ValueTag::False:
+		case ValueTag::True:
+			lua_pushboolean(state, value.Boolean);
+			return;
+		case ValueTag::Number:
+			lua_pushnumber(state, value.Number);
+			return;
+		case ValueTag::String:
+			lua_pushlstring(state, value.Text.data(), value.Text.size());
+			return;
+		case ValueTag::Array:
+			lua_newtable(state);
+			for (size_t item = 0; item < value.Items.size(); item++) {
+				PushScriptValue(state, value.Items[item]);
+				lua_rawseti(state, -2, static_cast<int>(item) + 1);
+			}
+			return;
+		case ValueTag::Map:
+			lua_newtable(state);
+			for (const auto &entry : value.Entries) {
+				lua_pushlstring(state, entry.first.data(), entry.first.size());
+				PushScriptValue(state, entry.second);
+				lua_rawset(state, -3);
+			}
+			return;
+		case ValueTag::Vector3:
+			*PushVector3(state) = value.Vector;
+			return;
+		case ValueTag::Color3:
+			*PushColor3(state) = value.Colour;
+			return;
+		case ValueTag::CFrame:
+			*PushCFrame(state) = value.Frame;
+			return;
+		}
+		lua_pushnil(state);
+	}
+
+	namespace {
 		// Encodes the value at `index`, raising a named error on refusal.
 		std::vector<std::byte> EncodeArgument(lua_State *state, int index) {
 			ScriptValue value;
 			CodecStatus why = CodecStatus::Ok;
 
-			if (!ToScriptValue(state, index, value, 0, why)) {
+			if (!ReadScriptValue(state, index, value, 0, why)) {
 				luaL_errorL(state, "the value cannot cross a world boundary: %s", Describe(why));
 			}
 
@@ -498,7 +561,7 @@ namespace engine::script {
 			if (!lua_isnoneornil(state, dataIndex)) {
 				ScriptValue data;
 				CodecStatus why = CodecStatus::Ok;
-				if (!ToScriptValue(state, dataIndex, data, 0, why)) {
+				if (!ReadScriptValue(state, dataIndex, data, 0, why)) {
 					luaL_errorL(state, "Teleport: the data cannot cross a world boundary: %s", Describe(why));
 				}
 				envelope.Entries.emplace_back("Data", std::move(data));
@@ -509,6 +572,45 @@ namespace engine::script {
 				luaL_errorL(state, "Teleport: the data cannot cross a world boundary: %s", Describe(status));
 			}
 			return bytes;
+		}
+
+		// CrossWorldService:Send(worldName, message)
+		//
+		// **The addressed route out of a world, which `MessagingService` is not
+		// and `TeleportService` only is by accident.** A topic is a fan-out with
+		// no destination — right for "the boss died", wrong for "world B, here is
+		// the score you asked me for" — and the only other operation that names a
+		// world moves a *person*. So a game wanting to say one thing to one world
+		// had to broadcast it to everybody or send a player carrying it.
+		//
+		// **Answers the status rather than raising**, matching `PublishAsync`
+		// beside it: a world that is not running is `NoSuchWorld`, which a caller
+		// can act on. That is also the closest thing to `GetWorlds` this service
+		// has — see its declaration for why the real one needs machinery that
+		// does not exist yet.
+		int CrossWorldSend(lua_State *state) {
+			const char *world = luaL_checkstring(state, 2);
+
+			ScriptValue value;
+			CodecStatus why = CodecStatus::Ok;
+			if (!ReadScriptValue(state, 3, value, 0, why)) {
+				luaL_errorL(state, "Send needs a value it can encode: %s", Describe(why));
+			}
+
+			std::vector<std::byte> bytes;
+			const CodecStatus encoded = Encode(value, bytes);
+			if (encoded != CodecStatus::Ok) {
+				luaL_errorL(state, "Send could not encode the message: %s", Describe(encoded));
+			}
+
+			Postbox box(*UpvalueContext(state).World);
+			const Ticket ticket = box.SendTo(world, bytes);
+
+			// **Over budget is a refusal a script can see**, exactly as it is for
+			// a publish: the bus budget is per world per tick and a loop that
+			// blew it should be told rather than have its messages disappear.
+			lua_pushboolean(state, ticket.Expected());
+			return 1;
 		}
 
 		// TeleportService:Teleport(placeName, player, data?)
@@ -689,19 +791,22 @@ namespace engine::script {
 			store.SetParent(held, player);
 		}
 
-		void
-		InstallService(lua_State *state, LuauContext &context, const char *name, const luaL_Reg *methods) {
-			lua_newtable(state);
-			for (const luaL_Reg *method = methods; method->name != nullptr; method++) {
-				lua_pushlightuserdata(state, &context);
-				lua_pushcclosure(state, method->func, method->name, 1);
-				lua_setfield(state, -2, method->name);
-			}
-			lua_setglobal(state, name);
+		// Four services, one shape.
+		//
+		// **`ServiceSurface` is the shape now**, and this is what is left of the
+		// helper that used to live here: a name and a list, handed over. It was
+		// private to this file, so the four other installers in this module each
+		// wrote the loop out again — which is the argument for the helper being
+		// somewhere every service can reach rather than for it existing at all.
+		void Install(lua_State *state, const char *name, std::span<const ServiceMethod> methods) {
+			ServiceSurface surface;
+			surface.Name = name;
+			surface.Methods = methods;
+			InstallService(state, surface);
 		}
 	}
 
-	void OpenServices(lua_State *state) {
+	void OpenBusSupport(lua_State *state) {
 		// **Before anything constructs a `Postbox`, and this is not a
 		// formality.** A `Postbox` is a view over two resources, and reading
 		// one on a store that never registered them mints them under the
@@ -716,44 +821,69 @@ namespace engine::script {
 		// hash lookup.
 		world::RegisterMailboxTypes();
 
-		LuauContext &context = ContextOf(state);
-
 		lua_newtable(state);
 		lua_setfield(state, LUA_REGISTRYINDEX, SUBSCRIPTIONS);
 
-		// The cycle-detection set, held in the registry rather than as a C++
-		// container because what it keys on is a Lua table's identity.
-		lua_newtable(state);
-		lua_setfield(state, LUA_REGISTRYINDEX, "engine.codec.visiting");
+		// The cycle-detection set is not created here any more. It is held in
+		// the registry rather than as a C++ container because what it keys on is
+		// a Lua table's identity, and `PushVisiting` makes it on first use — so
+		// the walk no longer depends on this function having run first.
+	}
 
-		static const luaL_Reg messaging[] = {
-			{"PublishAsync", PublishAsync}, {"SubscribeAsync", SubscribeAsync}, {nullptr, nullptr}
+	void OpenMessagingService(lua_State *state) {
+		static constexpr ServiceMethod METHODS[] = {
+			{"PublishAsync", PublishAsync},
+			{"SubscribeAsync", SubscribeAsync},
 		};
-		static const luaL_Reg memoryStore[] = {
+		Install(state, "MessagingService", METHODS);
+	}
+
+	void OpenTeleportService(lua_State *state) {
+		static constexpr ServiceMethod METHODS[] = {
+			{"Teleport", Teleport},
+			{"GetLocalPlayerTeleportData", GetLocalPlayerTeleportData},
+			{"GetTeleportData", GetTeleportData},
+		};
+		Install(state, "TeleportService", METHODS);
+	}
+
+	void OpenMemoryStoreService(lua_State *state) {
+		static constexpr ServiceMethod METHODS[] = {
 			{"GetAsync", MemoryStoreGetAsync},
 			{"SetAsync", MemoryStoreSetAsync},
 			{"UpdateAsync", MemoryStoreUpdateAsync},
 			{"RemoveAsync", MemoryStoreRemoveAsync},
-			{nullptr, nullptr}
 		};
-		static const luaL_Reg dataStore[] = {
+		Install(state, "MemoryStoreService", METHODS);
+	}
+
+	void OpenCrossWorldService(lua_State *state) {
+		static constexpr ServiceSignal SIGNALS[] = {
+			{"MessageReceived", SignalKind::CrossWorldMessage},
+		};
+
+		static constexpr ServiceMethod METHODS[] = {
+			{"Send", CrossWorldSend},
+		};
+
+		ServiceSurface surface;
+		surface.Name = "CrossWorldService";
+		surface.Methods = METHODS;
+		surface.Signals = SIGNALS;
+
+		InstallService(state, surface);
+	}
+
+	void OpenDataStoreService(lua_State *state) {
+		// **No `UpdateAsync`, unlike the memory store above.** A compare-and-set
+		// needs a version, and a durable store has none — the JavaScript side
+		// declares the same three for the same reason.
+		static constexpr ServiceMethod METHODS[] = {
 			{"GetAsync", DataStoreGetAsync},
 			{"SetAsync", DataStoreSetAsync},
 			{"RemoveAsync", DataStoreRemoveAsync},
-			{nullptr, nullptr}
 		};
-
-		static const luaL_Reg teleport[] = {
-			{"Teleport", Teleport},
-			{"GetLocalPlayerTeleportData", GetLocalPlayerTeleportData},
-			{"GetTeleportData", GetTeleportData},
-			{nullptr, nullptr}
-		};
-
-		InstallService(state, context, "MessagingService", messaging);
-		InstallService(state, context, "TeleportService", teleport);
-		InstallService(state, context, "MemoryStoreService", memoryStore);
-		InstallService(state, context, "DataStoreService", dataStore);
+		Install(state, "DataStoreService", METHODS);
 	}
 
 	std::string PumpDeliveries(lua_State *state, ecs::Store &store) {
@@ -840,6 +970,32 @@ namespace engine::script {
 			// `script::AdmitTeleports` is a system on every world now, running
 			// whether or not anything is running scripts. See `Runtime.hpp`.
 			if (delivery.Bus == BusKind::Teleport) {
+				continue;
+			}
+
+			// **A channel message is delivered to the world rather than to a
+			// topic**, so it goes to one signal with no subject rather than to a
+			// list of subscribers keyed by name. See `SignalKind::
+			// CrossWorldMessage` and `CrossWorldService`.
+			if (delivery.Bus == BusKind::Channel) {
+				ScriptValue value;
+				if (Decode(delivery.Payload, value) == CodecStatus::Ok) {
+					PushScriptValue(state, value);
+				} else {
+					lua_pushnil(state);
+				}
+
+				// **The sender's name, second, which is what makes a channel a
+				// channel.** A topic subscriber is told which topic; a channel
+				// receiver is told who to answer, because answering is the point
+				// and the destination already knows it is itself.
+				const std::string_view from = delivery.From.Text();
+				lua_pushlstring(state, from.data(), from.size());
+
+				std::string failure = FireSignal(state, SignalKind::CrossWorldMessage, ecs::NULL_ENTITY, 2);
+				if (!failure.empty() && firstError.empty()) {
+					firstError = std::move(failure);
+				}
 				continue;
 			}
 

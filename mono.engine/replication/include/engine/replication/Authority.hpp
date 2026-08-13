@@ -168,8 +168,23 @@ namespace engine::replication {
 
 		// Decides what a client may see.
 		//
-		// @param predicate Called as `predicate(ClientId, ecs::Entity)`.
-		void SetInterest(std::function<bool(ClientId, ecs::Entity)> predicate);
+		// **Handed the world, exactly as `SetOwnership` is, and for the same
+		// reason.** This runs inside a walk of the store `Stream` was given, so a
+		// predicate that had to look a world up would be re-entering the host's
+		// world lock from inside a loop that already holds it. It also would not
+		// know *which* world: a host with several streams each of them, and a
+		// predicate reaching for "the world" would answer about whichever one it
+		// happened to name.
+		//
+		// **No predicate means everything is visible**, which is the opposite of
+		// `SetOwnership`'s default and is right for the opposite reason: that one
+		// gates writes, where forgetting must fail closed, and this one gates
+		// reads of a world a host chose to stream at all. A server that means to
+		// hide its `ServerStorage` says so — see `scene::VisibleToClients`.
+		//
+		// @param predicate Called as `predicate(ClientId, ecs::Entity, const
+		//                  ecs::Store &)`.
+		void SetInterest(std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> predicate);
 
 		// Scores which entities a client is sent first when not all of them
 		// fit.
@@ -523,7 +538,7 @@ namespace engine::replication {
 		void EmitStructure(Client &client, const Structure &structure);
 
 		AuthoritySettings Settings_;
-		std::function<bool(ClientId, ecs::Entity)> Interest;
+		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Interest;
 		std::function<float(ClientId, ecs::Entity)> Priority;
 		std::function<bool(ClientId, const Identify &)> IdentityCheck;
 

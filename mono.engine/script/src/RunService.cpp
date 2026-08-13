@@ -85,6 +85,17 @@ namespace engine::script {
 				return 1;
 			}
 
+			// **Which refusal, from the catalogue.** A name that is *here* but
+			// bound by the other language is a different failure from a name the
+			// engine has never heard of, and saying the same sentence for both
+			// sends an author looking in the wrong place — they check their
+			// spelling when the answer is that the service exists and this VM
+			// does not have it. `ServiceCatalogue.hpp` carries the argument.
+			if (const ServiceDefinition *known = FindService(name);
+				known != nullptr && !Binds(known->Languages, ServiceLanguages::Luau)) {
+				luaL_errorL(state, "'%s' is not bound for Luau in this engine", name);
+			}
+
 			luaL_errorL(state, "'%s' is not a service this engine provides", name);
 		}
 
@@ -173,33 +184,28 @@ namespace engine::script {
 	}
 
 	void OpenRunService(lua_State *state) {
-		LuauContext &context = ContextOf(state);
-
 		// `Heartbeat` is a real signal now rather than a list of its own, so
 		// `:Connect` hands back an `RBXScriptConnection` a script can
 		// `:Disconnect` — which is the thing v0.5 said was worse to fake than to
-		// omit.
-		lua_newtable(state);
-		PushSignal(state, SignalKind::Heartbeat, ecs::NULL_ENTITY);
-		lua_setfield(state, -2, "Heartbeat");
+		// omit. It is a *field* rather than a method, which is why
+		// `ServiceSurface` carries two lists.
+		static constexpr ServiceSignal SIGNALS[] = {
+			{"Heartbeat", SignalKind::Heartbeat},
+		};
 
-		static const struct {
-			const char *Name;
-			lua_CFunction Function;
-		} PREDICATES[] = {
+		static constexpr ServiceMethod METHODS[] = {
 			{"IsServer", IsServer},
 			{"IsClient", IsClient},
 			{"IsStudio", IsStudio},
 			{"IsReplica", IsReplica},
 		};
 
-		for (const auto &entry : PREDICATES) {
-			lua_pushlightuserdata(state, &context);
-			lua_pushcclosure(state, entry.Function, entry.Name, 1);
-			lua_setfield(state, -2, entry.Name);
-		}
+		ServiceSurface surface;
+		surface.Name = "RunService";
+		surface.Methods = METHODS;
+		surface.Signals = SIGNALS;
 
-		lua_setglobal(state, "RunService");
+		InstallService(state, surface);
 	}
 
 	std::string PumpHeartbeat(lua_State *state, float delta) {

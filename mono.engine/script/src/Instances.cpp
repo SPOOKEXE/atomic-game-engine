@@ -2,13 +2,10 @@
 #include "Subtree.hpp"
 
 #include <engine/core/Log.hpp>
-#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Ownership.hpp>
-#include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Tagging.hpp>
 
 #include <algorithm>
 #include <lualib.h>
@@ -138,55 +135,6 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `pvInstance:GetPivot()` and `pvInstance:PivotTo(cframe)`
-		//
-		// **Roblox's pivot pair, and the whole reason it is a pair.** A
-		// `Transform` says where the *centre* of something is; almost nothing an
-		// author places is placed by its centre — a door turns on its hinge, a
-		// lid sits on its rim, a character stands on the ground under its feet.
-		// `PivotOffset` is where the handle is and these two are how it is used.
-		//
-		// **Methods rather than a `Pivot` property**, which is Roblox's shape and
-		// is right for a reason of its own: `GetPivot` is *derived* from two
-		// fields and `PivotTo` writes a third thing entirely, so a read-write
-		// property would look like storage and behave like a computation.
-		//
-		// **Not refused for a non-`PVInstance`**, matching every other method
-		// here: `scene::PivotOf` answers the identity for something with no
-		// placement, which is what a script asking a `Folder` for its pivot
-		// should get rather than an error mid-frame.
-		int InstanceGetPivot(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			*PushCFrame(state) = scene::PivotOf(store, instance);
-			return 1;
-		}
-
-		int InstancePivotTo(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			const core::CFrame &target = CheckCFrame(state, 2);
-
-			// The return is dropped on purpose: Roblox's `PivotTo` returns
-			// nothing, and an instance with no placement to move is the same
-			// "did nothing" a `Folder` would be.
-			(void)scene::PivotTo(store, instance, target);
-			return 0;
-		}
-
-		// `instance:AddTag(name)`, `instance:RemoveTag(name)`, `instance:HasTag(name)`
-		//
-		// **Roblox puts these on `CollectionService` and they are methods here**,
-		// which is the one place this binding departs from that vocabulary
-		// deliberately. A service would need a world to be found through, and
-		// the thing being tagged is already in hand; `scene::AddTag` takes the
-		// store and the entity and there is nothing a service would add but a
-		// lookup.
-		//
-		// `AddTag` answers `false` when the world's tag table is full — see
-		// `TagTable::MAXIMUM` — rather than erroring, because a scene that has
-		// run out of tags is a scene mistake and not a script one, and a script
-		// that wanted to know can read the answer.
 		// `players:GetPlayers()`
 		//
 		// **The `Player` children of the receiver, which on `Players` is the
@@ -210,27 +158,6 @@ namespace engine::script {
 			return 1;
 		}
 
-		int InstanceAddTag(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			lua_pushboolean(state, scene::AddTag(store, instance, Name(luaL_checkstring(state, 2))));
-			return 1;
-		}
-
-		int InstanceRemoveTag(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			lua_pushboolean(state, scene::RemoveTag(store, instance, Name(luaL_checkstring(state, 2))));
-			return 1;
-		}
-
-		int InstanceHasTag(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			lua_pushboolean(state, scene::HasTag(store, instance, Name(luaL_checkstring(state, 2))));
-			return 1;
-		}
-
 		// `instance:SetNetworkOwner(player)` and `instance:GetNetworkOwner()`
 		//
 		// **Roblox's pair, spelled Roblox's way, including the nil.** Passing no
@@ -239,7 +166,8 @@ namespace engine::script {
 		// a player leave will reach for.
 		//
 		// The refusal raises rather than answering `false`, which departs from
-		// `AddTag` above and for the reason that one gives: a full tag table is a
+		// the tag calls in `ScriptMethods.cpp` and for the reason those give: a
+		// full tag table is a
 		// *scene* running out of room, where handing a body to a `Folder` is a
 		// script naming the wrong variable. A silent `false` there is a body
 		// nothing simulates and no line of output.
@@ -869,246 +797,12 @@ namespace engine::script {
 
 	// --- attributes -----------------------------------------------------------
 	//
-	// **The same marshalling as a property and deliberately so.** An attribute
-	// and a property are one question — what can userland hold — asked at run time
-	// and at declaration time, so `PushValue` and `ReadValue` above serve both.
-	// Two marshallers would be two places to add a type to and two to forget.
-	//
-	// What differs is that an attribute has no descriptor, so the *type* has to
-	// come from the Luau value itself on the way in and from the stored value on
-	// the way out.
-
-	namespace {
-		// Turns a Luau value into an attribute, by what it is rather than by what
-		// a descriptor said it should be.
-		//
-		// **Userdata is checked by tag, in the order the vocabulary was added.**
-		// A tag check is exact — `Vector2` and `UDim` are both two floats and only
-		// the tag tells them apart — so the order here is legibility and not
-		// correctness.
-		//
-		// Returns `Opaque` for anything with no attribute form, which is what the
-		// caller turns into a refusal. `nil` is the one exception and is handled
-		// by the caller before this: it means *remove*.
-		ecs::AttributeValue ReadAttribute(lua_State *state, int index) {
-			ecs::AttributeValue value;
-
-			if (lua_isboolean(state, index)) {
-				value.Type = ecs::PropertyType::Bool;
-				value.Bool = lua_toboolean(state, index) != 0;
-				return value;
-			}
-			if (lua_isnumber(state, index)) {
-				// **A double and not an int, even for a whole number.** Luau has
-				// one number type; guessing at an integer here would make
-				// `SetAttribute("n", 1)` read back as an `Int32` and
-				// `SetAttribute("n", 1.5)` as a `Double`, so a script that
-				// incremented an attribute would change its own type halfway.
-				value.Type = ecs::PropertyType::Double;
-				value.Double = lua_tonumber(state, index);
-				return value;
-			}
-			if (lua_isstring(state, index)) {
-				// **`String` and never `Name`.** An attribute's value is something
-				// a game computes — a title, a state, a message — and `core::Name`
-				// is a registry that never releases. `ecs::PropertyType::String`
-				// carries the whole argument, and this is the surface it was added
-				// for.
-				size_t length = 0;
-				const char *text = lua_tolstring(state, index, &length);
-				value.Type = ecs::PropertyType::String;
-				value.String.assign(text, length);
-				return value;
-			}
-
-			if (lua_touserdatatagged(state, index, TAG_VECTOR3) != nullptr) {
-				value.Type = ecs::PropertyType::Vector3;
-				value.Vector3 = CheckVector3(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_COLOR3) != nullptr) {
-				value.Type = ecs::PropertyType::Color3;
-				value.Color3 = CheckColor3(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_CFRAME) != nullptr) {
-				value.Type = ecs::PropertyType::CFrame;
-				value.CFrame = CheckCFrame(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_VECTOR2) != nullptr) {
-				value.Type = ecs::PropertyType::Vector2;
-				value.Vector2 = CheckVector2Value(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_UDIM) != nullptr) {
-				value.Type = ecs::PropertyType::UDim;
-				value.UDim = CheckUDim(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_UDIM2) != nullptr) {
-				value.Type = ecs::PropertyType::UDim2;
-				value.UDim2 = CheckUDim2(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_RECT) != nullptr) {
-				value.Type = ecs::PropertyType::Rect;
-				value.Rect = CheckRect(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_NUMBER_RANGE) != nullptr) {
-				value.Type = ecs::PropertyType::NumberRange;
-				value.NumberRange = CheckNumberRange(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_NUMBER_SEQUENCE) != nullptr) {
-				value.Type = ecs::PropertyType::NumberSequence;
-				value.NumberSequence = CheckNumberSequence(state, index);
-			} else if (lua_touserdatatagged(state, index, TAG_COLOR_SEQUENCE) != nullptr) {
-				value.Type = ecs::PropertyType::ColorSequence;
-				value.ColorSequence = CheckColorSequence(state, index);
-			}
-
-			return value;
-		}
-
-		// Pushes a stored attribute.
-		//
-		// Returns `false` for a type with no Luau form, which cannot happen for a
-		// value this binding stored and can for one a future build wrote — so it
-		// is a refusal rather than an assert.
-		bool PushAttribute(lua_State *state, const ecs::AttributeValue &value) {
-			switch (value.Type) {
-			case ecs::PropertyType::Bool:
-				lua_pushboolean(state, value.Bool);
-				return true;
-			case ecs::PropertyType::Int32:
-				lua_pushinteger(state, value.Int32);
-				return true;
-			case ecs::PropertyType::Int64:
-				lua_pushnumber(state, static_cast<double>(value.Int64));
-				return true;
-			case ecs::PropertyType::Float:
-				lua_pushnumber(state, value.Float);
-				return true;
-			case ecs::PropertyType::Double:
-				lua_pushnumber(state, value.Double);
-				return true;
-			case ecs::PropertyType::Name:
-			case ecs::PropertyType::Enum:
-				lua_pushstring(state, value.Name.Text().data());
-				return true;
-			case ecs::PropertyType::String:
-				lua_pushlstring(state, value.String.data(), value.String.size());
-				return true;
-			case ecs::PropertyType::Vector3:
-				*PushVector3(state) = value.Vector3;
-				return true;
-			case ecs::PropertyType::Color3:
-				*PushColor3(state) = value.Color3;
-				return true;
-			case ecs::PropertyType::CFrame:
-				*PushCFrame(state) = value.CFrame;
-				return true;
-			case ecs::PropertyType::Vector2:
-				*PushVector2(state) = value.Vector2;
-				return true;
-			case ecs::PropertyType::UDim:
-				*PushUDim(state) = value.UDim;
-				return true;
-			case ecs::PropertyType::UDim2:
-				*PushUDim2(state) = value.UDim2;
-				return true;
-			case ecs::PropertyType::Rect:
-				*PushRect(state) = value.Rect;
-				return true;
-			case ecs::PropertyType::NumberRange:
-				*PushNumberRange(state) = value.NumberRange;
-				return true;
-			case ecs::PropertyType::NumberSequence:
-				*PushNumberSequence(state) = value.NumberSequence;
-				return true;
-			case ecs::PropertyType::ColorSequence:
-				*PushColorSequence(state) = value.ColorSequence;
-				return true;
-			case ecs::PropertyType::Reference:
-			case ecs::PropertyType::Opaque:
-				break;
-			}
-			return false;
-		}
-
-		int InstanceGetAttribute(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			const Name name(luaL_checkstring(state, 2));
-
-			ecs::AttributeValue value;
-			if (!ecs::GetAttribute(store, instance, name, value) || !PushAttribute(state, value)) {
-				// **Nil for an attribute nobody set**, which is Roblox's answer
-				// and is the only one a script can act on: an error would make
-				// `if part:GetAttribute("Health") then` a crash rather than a
-				// test.
-				lua_pushnil(state);
-			}
-			return 1;
-		}
-
-		int InstanceSetAttribute(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			const Name name(luaL_checkstring(state, 2));
-
-			ecs::AttributeValue value;
-			if (!lua_isnoneornil(state, 3)) {
-				value = ReadAttribute(state, 3);
-				if (value.Type == ecs::PropertyType::Opaque) {
-					luaL_errorL(
-						state, "SetAttribute: '%s' cannot hold that type", std::string(name.Text()).c_str()
-					);
-				}
-			}
-
-			// An `Opaque` value removes, which is what `nil` fell through to
-			// above. `ecs::SetAttribute` carries the argument for why removal is
-			// not a method of its own.
-			if (!ecs::SetAttribute(store, instance, name, value)) {
-				luaL_errorL(state, "could not set attribute '%s'", std::string(name.Text()).c_str());
-			}
-
-			// **Queued rather than fired**, so an attribute signals on the same
-			// barrier a property does and with the same dedup —
-			// `ChangeQueue::Record` carries the argument. `PumpChanges` is what
-			// turns this into `.Changed` and into whatever
-			// `GetAttributeChangedSignal` connected.
-			UpvalueContext(state).Changes.Record(instance, name);
-			return 0;
-		}
-
-		// `instance:GetAttributes()` — every attribute, as a table.
-		//
-		// Roblox's name and Roblox's shape: a map from name to value rather than
-		// an array, because that is what a caller iterates with `pairs`.
-		int InstanceGetAttributes(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			lua_newtable(state);
-			for (const Name &name : ecs::AttributeNames(store, instance)) {
-				ecs::AttributeValue value;
-				if (!ecs::GetAttribute(store, instance, name, value)) {
-					continue;
-				}
-				if (!PushAttribute(state, value)) {
-					continue;
-				}
-				lua_setfield(state, -2, name.Text().data());
-			}
-			return 1;
-		}
-
-		// `instance:GetAttributeChangedSignal(name)`.
-		int InstanceGetAttributeChangedSignal(lua_State *state) {
-			const Entity instance = CheckInstance(state, 1);
-			const Name name(luaL_checkstring(state, 2));
-
-			// **The property-changed signal, keyed by the attribute's name.**
-			// `SignalKind::PropertyChanged` already filters by a `core::Name`, and
-			// an attribute name and a property name live in the same registry — so
-			// a second signal kind would be a second table to fan out from for a
-			// filter that already exists.
-			//
-			// The cost is that an attribute sharing a name with a property fires
-			// both listeners. That is a collision an author can see and avoid, and
-			// the alternative is a parallel signal path for a case nobody has hit.
-			PushSignal(state, SignalKind::PropertyChanged, instance, name);
-			return 1;
-		}
-	}
+	// **The four attribute methods are `ScriptMethods.cpp`'s now**, and the
+	// marshalling that served them went with them: `LuauCall.cpp` reads a Luau
+	// value into an `ecs::AttributeValue` and pushes one back, which is the same
+	// conversion said in one language rather than the whole method. See
+	// `ScriptCall.hpp` for why a method became data the way a property already
+	// was.
 
 	// --- marshalling, shared with the ECS surface ---------------------------
 	//
@@ -1329,17 +1023,12 @@ namespace engine::script {
 			lua_CFunction Function;
 		} METHODS[] = {
 			{"IsA", InstanceIsA},
-			{"GetPivot", InstanceGetPivot},
-			{"PivotTo", InstancePivotTo},
 			{"KeepWorldAwake", InstanceKeepWorldAwake},
 			{"LetWorldSleep", InstanceLetWorldSleep},
 			{"IsKeepingWorldAwake", InstanceIsKeepingWorldAwake},
 			{"SetNetworkOwner", InstanceSetNetworkOwner},
 			{"GetNetworkOwner", InstanceGetNetworkOwner},
 			{"GetPlayers", InstanceGetPlayers},
-			{"AddTag", InstanceAddTag},
-			{"RemoveTag", InstanceRemoveTag},
-			{"HasTag", InstanceHasTag},
 			{"Destroy", InstanceDestroy},
 			{"Clone", InstanceClone},
 			{"GetChildren", InstanceGetChildren},
@@ -1354,10 +1043,6 @@ namespace engine::script {
 			{"IsDescendantOf", InstanceIsDescendantOf},
 			{"ClearAllChildren", InstanceClearAllChildren},
 			{"GetPropertyChangedSignal", InstanceGetPropertyChangedSignal},
-			{"GetAttribute", InstanceGetAttribute},
-			{"SetAttribute", InstanceSetAttribute},
-			{"GetAttributes", InstanceGetAttributes},
-			{"GetAttributeChangedSignal", InstanceGetAttributeChangedSignal},
 		};
 
 		lua_newtable(state);
@@ -1367,6 +1052,13 @@ namespace engine::script {
 			lua_setfield(state, -2, method.Name);
 		}
 		lua_setfield(state, LUA_REGISTRYINDEX, "engine.instance.methods");
+
+		// **The other half of the table, written once for both languages.** A
+		// neutral method is a row in `ScriptMethods.cpp` and lands here through
+		// one trampoline — see `ScriptCall.hpp`. It goes into the same registry
+		// entry as the rows above, so the editor's vocabulary and `__index` reach
+		// it without either of them learning that a method has two homes.
+		InstallLuauNeutralMethods(state);
 
 		luaL_newmetatable(state, "Instance");
 

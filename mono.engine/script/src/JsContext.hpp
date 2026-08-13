@@ -17,8 +17,10 @@
 // @tier L9 · shared
 
 #include "Changes.hpp"
+#include "Debris.hpp"
 #include "Signals.hpp"
 #include "Tasks.hpp"
+#include "Tweens.hpp"
 
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Runtime.hpp>
@@ -45,6 +47,15 @@ namespace engine::script {
 		SignalTable Signals;
 		ChangeQueue Changes;
 		TaskQueue Tasks;
+
+		// The two queues that step on the fixed tick delta, which are shared for
+		// the reason the three above are: what a tween or a deadline *is* names
+		// no VM, and the order two of them are drained in is a thing a recording
+		// depends on. See `Tweens.hpp` and `Debris.hpp`.
+		//@{
+		TweenTable Tweens;
+		DebrisQueue Debris;
+		//@}
 
 		// The context itself, so a callback holding only this can reach the VM.
 		JSContext *Js = nullptr;
@@ -78,6 +89,12 @@ namespace engine::script {
 		JSClassID SignalClass = 0;
 		JSClassID ConnectionClass = 0;
 		JSClassID RaycastParamsClass = 0;
+
+		// What `TweenService.Create` hands back. A class of its own rather than
+		// an instance object, for the reason `TAG_TWEEN` gives on the Luau side:
+		// the shared instance methods are installed on every instance, and
+		// `Play` is not a name a tween may take from every part in the world.
+		JSClassID TweenClass = 0;
 
 		// **What a `CallbackRef` means on this side.** The Luau binding puts a
 		// registry ref in that integer; this one puts an index into this

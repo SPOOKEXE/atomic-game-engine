@@ -55,6 +55,31 @@ namespace engine::world {
 		// Moving a player and a payload to a named world. The only operation
 		// that names a world, and it carries data rather than an entity.
 		Teleport,
+
+		// A payload sent to a named world, with nobody attached.
+		//
+		// **`Teleport` without the player, and it is a fifth kind rather than a
+		// flag on the fourth.** The two look alike on the wire — both name a
+		// destination and carry bytes — and they mean entirely different things
+		// to whoever receives them: a teleport is a person arriving, and the
+		// receiving world builds a `Player` and a character out of it. A channel
+		// message is a message. Overloading `Teleport` would have meant every
+		// receiver guessing which it had, and the one guess that matters is the
+		// one `AdmitArrival` makes, which would try to construct a player from a
+		// chat line.
+		//
+		// **The other route out of a world is `Messaging`, and it is a different
+		// shape rather than a worse one.** A topic is a fan-out: a publisher does
+		// not know or care who is listening, which is right for "the boss died"
+		// and wrong for "world B, here is the score you asked me for". This
+		// addresses one world by name and delivers to it alone.
+		//
+		// **Appended, because these are wire ordinals** — rule 4. A kind
+		// inserted above this line renumbers `Teleport` for every process that
+		// has not been rebuilt, and a teleport would arrive as something else.
+		//
+		// @since v0.15
+		Channel,
 	};
 
 	// What an operation asks a bus to do.

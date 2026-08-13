@@ -91,6 +91,55 @@ namespace engine::scene {
 			return property;
 		}
 
+		// `Player.PlayerGui`, the container a client's interface lives in.
+		//
+		// **The container has existed since v0.8 and nothing could name it.**
+		// `AddPlayer` creates it beside every player because `gui::Layout` draws
+		// a `ScreenGui` only from `StarterGui` or from a player's `PlayerGui` —
+		// so a script wanting to put an interface up had to find the child by
+		// string and hope the spelling matched the one two modules agree on.
+		// `PLAYER_GUI_NAME` is that spelling, and this is it handed over rather
+		// than retyped.
+		//
+		// **A lookup rather than a stored handle**, and that is the same call
+		// `Character` makes one property down: a stored entity is a second place
+		// the answer lives, and it goes stale the moment somebody reparents or
+		// destroys the container. Finding the child by name is one source of
+		// truth and costs a walk of a player's few children.
+		//
+		// **Read-only.** Roblox does not let a script assign it either, and here
+		// the reason is sharper: `gui` decides whether an interface draws by
+		// walking ancestors and comparing this name, so a script pointing the
+		// property somewhere else would move nothing — the interface would still
+		// draw from the real container and the property would describe a place
+		// it is not.
+		//
+		// @since v0.15
+		PropertyDescriptor PlayerGuiProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("PlayerGui");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(Entity);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+
+			// Reads nothing on the row: the answer is a child, and children are
+			// the tree rather than a component. An empty set rather than null,
+			// so every consumer that walks `Reads` finds a set to walk.
+			property.Reads = &ecs::ComponentSet::Intern({});
+			property.Writes = property.Reads;
+
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				// **Nil rather than a failure for a player who has none**, which
+				// is a player some other host built without going through
+				// `AddPlayer`. `if player.PlayerGui then` is how a script asks,
+				// and it is the same shape `Character` answers with.
+				*static_cast<Entity *>(out) = store.FindFirstChild(instance, PLAYER_GUI_NAME);
+				return true;
+			};
+			return property;
+		}
+
 		// `Player.Character`, and the whole of what a game has to say to make a
 		// body walk.
 		//
@@ -337,6 +386,10 @@ namespace engine::scene {
 			// camera — reads that link rather than being told separately.
 			Classes::Computed(player, CharacterProperty());
 
+			// **Where a client's interface goes**, and the container has been
+			// there since v0.8 with no way to name it. See the descriptor.
+			Classes::Computed(player, PlayerGuiProperty());
+
 			Classes::Computed(service, ScopeProperty());
 
 			const ClassId workspace = Classes::Find(core::Name("Workspace"));
@@ -371,6 +424,61 @@ namespace engine::scene {
 
 	Entity PlayersOf(const Store &store) {
 		return store.FindFirstRoot("Players");
+	}
+
+	ServiceScope ScopeOfInstance(const Store &store, Entity instance) {
+		// **Up to the root, and the *root* is what carries the scope.** A
+		// service is always a root — `InstallServices` parents nine of them to
+		// nothing and `StarterPlayerScripts` to `StarterPlayer` — so walking to
+		// the top and reading there is the same answer as reading the nearest
+		// service on the way, with one lookup instead of one per level.
+		//
+		// **Bounded by the walk itself.** A cycle in the tree is not
+		// representable: `SetParent` refuses one, so every chain ends.
+		Entity at = instance;
+		while (at != NULL_ENTITY) {
+			const Entity above = store.ParentOf(at);
+			if (above == NULL_ENTITY) {
+				break;
+			}
+			at = above;
+		}
+
+		if (at == NULL_ENTITY) {
+			return ServiceScope::Shared;
+		}
+
+		const ServiceComponent *service = store.Get<ServiceComponent>(at);
+
+		// **Shared for a root that is not a service**, which is an orphan a
+		// script made and has not parented yet. See the declaration for why
+		// that is the safe answer rather than the cautious one.
+		return service != nullptr ? service->Scope : ServiceScope::Shared;
+	}
+
+	bool VisibleToClients(const Store &store, Entity instance) {
+		return ScopeOfInstance(store, instance) != ServiceScope::Server;
+	}
+
+	Entity PlayerOwning(const Store &store, Entity instance) {
+		// **Stops at the first `Player` on the way up**, rather than walking to
+		// the root and coming back down. A player's subtree is shallow — a
+		// `PlayerGui` and what a script puts in it — and the answer for
+		// everything else is found by reaching a root that is not a player,
+		// which is the ordinary case and costs the same walk either way.
+		const ClassId player = Classes::Find(core::Name("Player"));
+		if (!player.IsValid()) {
+			return NULL_ENTITY;
+		}
+
+		Entity at = instance;
+		while (at != NULL_ENTITY) {
+			if (store.IsA(at, player)) {
+				return at;
+			}
+			at = store.ParentOf(at);
+		}
+		return NULL_ENTITY;
 	}
 
 	ecs::ClassId PlayerClass() {

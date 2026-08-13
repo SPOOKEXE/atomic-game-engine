@@ -136,6 +136,36 @@ namespace engine::scene {
 		Count,
 	};
 
+	// Where one input came from, which is what `Enum.UserInputType` names.
+	//
+	// **A superset of `MouseButton`, sharing its first three ordinals**, and the
+	// overlap is deliberate rather than a coincidence to be tidied away:
+	// `UserInputService:IsMouseButtonPressed` takes an `Enum.UserInputType` and
+	// casts the ordinal it resolves straight to a `MouseButton`, so the buttons
+	// have to come first and keep their numbers. The `static_assert`s in
+	// `Input.cpp` are what hold that rather than a comment.
+	//
+	// The three that are not buttons exist because an `InputObject` has to be able
+	// to say where an event came from, and `MouseButton1..3` can only describe a
+	// click — a key press, a pointer move and a wheel notch had no spelling at
+	// all. Roblox's `Enum.UserInputType` is longer than this; every member absent
+	// here is one nothing in this engine can produce, which is `KeyCode`'s own
+	// rule about offering completion for a key that never fires.
+	//
+	// @since v0.16
+	enum class InputSource : uint8_t {
+		MouseButton1 = 0,
+		MouseButton2 = 1,
+		MouseButton3 = 2,
+
+		Keyboard = 3,
+		MouseMovement = 4,
+		MouseWheel = 5,
+
+		// Not a source. The count.
+		Count,
+	};
+
 	// How the pointer behaves while the game has focus.
 	//
 	// @since v0.10
@@ -282,23 +312,37 @@ namespace engine::scene {
 		// character walking forever, which is the bug every engine ships once.
 		bool Focused = true;
 
+		// Whether it had focus when the previous frame's input was written.
+		//
+		// **The third `Previous` field, and it is here for the reason the other
+		// two are**: `UserInputService.WindowFocused` and `WindowFocusReleased`
+		// are *edges*, and an edge is the difference between two frames. Deriving
+		// it in whoever pumps the events would put the answer in the client, where
+		// a script cannot reach it, and would make "did we have focus last frame"
+		// a question only one module could ask.
+		//
+		// **Taken out of `Reserved` rather than added to the end**, so `sizeof` is
+		// still 64 and a save written before this reads back unchanged. The bytes
+		// were already being written; they simply had no name.
+		bool PreviousFocused = true;
+
 		// Explicit padding, so the object representation a snapshot writes holds
 		// no uninitialised bytes.
 		//
-		// **Eight and not two, and the difference is the whole point of naming
-		// it.** The members above end at 42 and the type aligns to 8, so two
-		// bytes left six the compiler inserted and nobody declared — written to
-		// a save file by `Column::Write`, which sends `sizeof(T)` bytes and does
-		// not know which of them a member claimed. `Reserved` has to reach the
-		// end or it is not doing the job it is here for; this is the only
-		// component in the module where it did not, and the rest are the reason
-		// the rule is worth keeping.
+		// **It has to reach the end or it is not doing the job it is here for.**
+		// The members above end at 43 and the type aligns to 8, so seven declared
+		// bytes are what stops the compiler inserting seven nobody named — and
+		// those would be written to a save file by `Column::Write`, which sends
+		// `sizeof(T)` bytes and does not know which of them a member claimed.
+		// This is the only component in the module where that was got wrong
+		// once, and the rest are the reason the rule is worth keeping.
 		//
-		// `sizeof` is 64 since `Pressed` joined the two key sets above it — a
-		// save written before that reads its input resource back wrong, which
-		// is a break the pre-release format is allowed and the dropped jump was
-		// not.
-		uint8_t Reserved[8] = {};
+		// **Seven since `PreviousFocused` took one of the eight**, so `sizeof` is
+		// still 64 and no save format moved. It has been 64 since `Pressed`
+		// joined the two key sets above it — a save written before *that* reads
+		// its input resource back wrong, which is a break the pre-release format
+		// is allowed and the dropped jump was not.
+		uint8_t Reserved[7] = {};
 
 		// Whether a key is down now.
 		//
@@ -390,6 +434,26 @@ namespace engine::scene {
 			const uint8_t bit = 1u << static_cast<uint8_t>(button);
 			return (Buttons & bit) == 0 && (PreviousButtons & bit) != 0;
 		}
+
+		// Whether the window took focus since the previous frame.
+		//
+		// @return `true` on the frame it was gained.
+		bool WasFocusGained() const {
+			return Focused && !PreviousFocused;
+		}
+
+		// Whether the window lost focus since the previous frame.
+		//
+		// **The frame this is true on is also the frame every held key reports
+		// released**, because `input::Translator::ReleaseAll` clears `Down` and
+		// leaves `Previous` alone. A listener therefore sees the focus change and
+		// the releases it caused in the same pump, which is what makes the two
+		// consistent rather than merely both present.
+		//
+		// @return `true` on the frame it was lost.
+		bool WasFocusLost() const {
+			return !Focused && PreviousFocused;
+		}
 	};
 
 	// The name a key is known by.
@@ -410,7 +474,20 @@ namespace engine::scene {
 
 	// The name a mouse button is known by.
 	//
+	// **Delegates to `Describe(InputSource)` rather than holding a table of its
+	// own**, because the two would be the same three strings and the pair that
+	// drifts is the pair a script compares against.
+	//
 	// @param button The button.
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(MouseButton button);
+
+	// The name an input source is known by.
+	//
+	// **Round-trips**: these are the members `ecs::EnumTable` registers as
+	// `Enum.UserInputType`, so they are the surface rather than a diagnostic.
+	//
+	// @param source The source.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(InputSource source);
 }

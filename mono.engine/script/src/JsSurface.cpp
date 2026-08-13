@@ -1474,12 +1474,52 @@ namespace engine::script {
 		// whatever script reaches it first.
 		JS_SetPropertyFunctionList(context, methods, entries, static_cast<int>(std::size(entries)));
 
+		// **The other half of the table, written once for both languages.** The
+		// nine methods this list used to be missing — the pivot pair, the three
+		// tag calls and the four attribute calls — are rows in
+		// `ScriptMethods.cpp` now and land here through one trampoline. A row
+		// added there is reachable from both VMs in the same commit, which is
+		// what the drift above cost when it was two hand-written lists. See
+		// `ScriptCall.hpp`.
+		InstallJsNeutralMethods(context, methods);
+
 		// Held in the context so `PrototypeFor` can put every class
 		// prototype behind it, and so it is freed with everything else.
 		bound.Owned.push_back(JS_DupValue(context, methods));
 		JS_SetPropertyStr(context, global, "__instanceMethods", methods);
 
 		JS_FreeValue(context, global);
+	}
+
+	void OpenJsRunService(JSContext *context, JSValueConst global) {
+		// **The whole service in one place, which it was not until v0.15.**
+		// `OpenJsBindings` built a `RunService` carrying a hand-made `Heartbeat`
+		// with its own `Connect`, and this file then reached back in and replaced
+		// that field and added the four predicates — so the service was assembled
+		// across two files, the first version of `Heartbeat` was overwritten
+		// before any script could reach it, and "what does JavaScript's
+		// `RunService` have on it" could not be answered by reading either file.
+		//
+		// It is here rather than beside the other installers because the four
+		// predicates and `MakeJsSignal` are this translation unit's. That is the
+		// same reason the others stay in theirs: what the two languages share is
+		// the *catalogue*, not a file.
+		JSValue service = JS_NewObject(context);
+
+		// `Heartbeat.Connect(fn)` rather than `Heartbeat:Connect(fn)` — the
+		// colon is Lua's, and a JavaScript author writes the dot. The same
+		// signal and the same connection list as Luau's, through `SignalTable`,
+		// spelled the way each language spells a method call.
+		JS_SetPropertyStr(
+			context, service, "Heartbeat", MakeJsSignal(context, SignalKind::Heartbeat, ecs::NULL_ENTITY)
+		);
+
+		JS_SetPropertyStr(context, service, "IsServer", JS_NewCFunction(context, IsServer, "IsServer", 0));
+		JS_SetPropertyStr(context, service, "IsClient", JS_NewCFunction(context, IsClient, "IsClient", 0));
+		JS_SetPropertyStr(context, service, "IsStudio", JS_NewCFunction(context, IsStudio, "IsStudio", 0));
+		JS_SetPropertyStr(context, service, "IsReplica", JS_NewCFunction(context, IsReplica, "IsReplica", 0));
+
+		JS_SetPropertyStr(context, global, "RunService", service);
 	}
 
 	void OpenJsSurface(JSContext *context) {
@@ -1548,34 +1588,20 @@ namespace engine::script {
 		JS_SetPropertyStr(context, global, "typeOf", JS_NewCFunction(context, TypeOf, "typeOf", 1));
 		JS_SetPropertyStr(context, global, "warn", JS_NewCFunction(context, Warn, "warn", 1));
 
-		// --- RunService gains its predicates and a real Heartbeat signal ---
-		{
-			JSValue service = JS_GetPropertyStr(context, global, "RunService");
-			if (JS_IsObject(service)) {
-				JS_SetPropertyStr(
-					context,
-					service,
-					"Heartbeat",
-					MakeJsSignal(context, SignalKind::Heartbeat, ecs::NULL_ENTITY)
-				);
-				JS_SetPropertyStr(
-					context, service, "IsServer", JS_NewCFunction(context, IsServer, "IsServer", 0)
-				);
-				JS_SetPropertyStr(
-					context, service, "IsClient", JS_NewCFunction(context, IsClient, "IsClient", 0)
-				);
-				JS_SetPropertyStr(
-					context, service, "IsStudio", JS_NewCFunction(context, IsStudio, "IsStudio", 0)
-				);
-				JS_SetPropertyStr(
-					context, service, "IsReplica", JS_NewCFunction(context, IsReplica, "IsReplica", 0)
-				);
-			}
-			JS_FreeValue(context, service);
-		}
-
 		InstallJsDatatypes(context, global);
-		InstallJsServices(context, global);
+
+		// **The services, from the catalogue.** `ServiceCatalogue.hpp` carries
+		// the argument: which services exist is one fact and it was two lists,
+		// so Luau bound nine and this language bound five with nothing in the
+		// build to say so.
+		//
+		// **Here rather than in `OpenJsBindings`, because the services this
+		// language binds are spread across both halves** — `RunService` needs
+		// `MakeJsSignal` and the four predicates, which are this file's — and one
+		// walk in the later of the two is one walk. The earlier half now installs
+		// no service at all.
+		InstallJsServices(context, global, ServiceAvailability::Always);
+		InstallJsServices(context, global, ServiceAvailability::Studio);
 
 		// After `InstallJsInstanceMethods`, which `OpenJsBindings` ran — this
 		// adds the component half of the ECS surface to the table it built.

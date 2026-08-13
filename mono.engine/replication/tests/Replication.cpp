@@ -190,9 +190,7 @@ TEST_CASE("a tagged entity stops paying for a row the receiver derives", "[repli
 	// the tier boundary. `Marked` stands in for `scene.CharacterLimb`.
 	Pair pair;
 	pair.Authority_.Replicate(Name("replication_test.Marked"));
-	pair.Authority_.SuppressWhenTagged(
-		Name("replication_test.Spot"), Name("replication_test.Marked")
-	);
+	pair.Authority_.SuppressWhenTagged(Name("replication_test.Spot"), Name("replication_test.Marked"));
 
 	const Entity root = pair.Server.Create();
 	pair.Server.Set<Spot>(root, Spot{1.0f, 0.0f});
@@ -394,7 +392,7 @@ TEST_CASE("a client is only sent what it may see", "[replication]") {
 	for (int index = 0; index < 10; index++) {
 		allowed.push_back(entities[static_cast<size_t>(index)].Id);
 	}
-	pair.Authority_.SetInterest([allowed](ClientId, Entity entity) {
+	pair.Authority_.SetInterest([allowed](ClientId, Entity entity, const Store &) {
 		return std::find(allowed.begin(), allowed.end(), entity.Id) != allowed.end();
 	});
 
@@ -412,7 +410,7 @@ TEST_CASE("losing sight of an entity is a forget, never a destroy", "[replicatio
 	pair.Server.Set<Spot>(pair.Server.Create(), Spot{2.0f, 0.0f});
 
 	bool visible = true;
-	pair.Authority_.SetInterest([&visible, watched](ClientId, Entity entity) {
+	pair.Authority_.SetInterest([&visible, watched](ClientId, Entity entity, const Store &) {
 		return entity != watched || visible;
 	});
 
@@ -447,7 +445,7 @@ TEST_CASE("a forget too big for one datagram is split", "[replication]") {
 	}
 
 	bool visible = true;
-	pair.Authority_.SetInterest([&visible](ClientId, Entity) { return visible; });
+	pair.Authority_.SetInterest([&visible](ClientId, Entity, const Store &) { return visible; });
 
 	REQUIRE(pair.Join(256));
 	REQUIRE(pair.Authority_.StatusOf(pair.Handle).Known == 300);
@@ -1144,7 +1142,8 @@ namespace replication_test {
 	}
 
 	// One part of a tick's delta, carrying a parent for one entity.
-	std::vector<std::byte> ParentPart(uint64_t tick, uint16_t part, bool final_, Entity child, Entity parent) {
+	std::vector<std::byte>
+	ParentPart(uint64_t tick, uint16_t part, bool final_, Entity child, Entity parent) {
 		engine::replication::Delta delta;
 		delta.Tick = tick;
 		delta.Part = part;
@@ -1221,9 +1220,8 @@ TEST_CASE("a spawned entity is not put in the tree until its tick is whole", "[r
 
 	// The last part completes the tick.
 	REQUIRE(
-		pair.Replica_.Receive(
-			pair.Client, replication_test::ParentPart(tick, 1, true, Entity{}, Entity{})
-		) == ApplyStatus::Ok
+		pair.Replica_.Receive(pair.Client, replication_test::ParentPart(tick, 1, true, Entity{}, Entity{})) ==
+		ApplyStatus::Ok
 	);
 
 	// And now it is where the server put it.

@@ -155,10 +155,21 @@ namespace client {
 		// a pass that reposted its whole state would fill it and start dropping
 		// the commands that were real changes.
 		//
+		// **`scene::AudioState` is what a script decides here**, and it is read
+		// rather than pushed for the tier reason the whole file exists for: the
+		// script layer is `shared` and cannot name a mixer, so it writes a
+		// resource and this is what acts on it. Its master gain multiplies each
+		// voice's own `Volume` rather than the output node's, because a client
+		// hosts several worlds and has one output — a number applied there would
+		// have N worlds writing it and the last one of the frame winning.
+		//
 		// @param store     The world to read. Not modified.
 		// @param mixer     Where the commands go.
 		// @param catalogue What a `SoundId` resolves to.
-		// @param listener  Where the ear is, for positional sounds.
+		// @param listener  Where the ear is by default, for positional sounds.
+		//        A world naming a listener instance under
+		//        `scene::ListenerMode::ObjectPosition` overrides this for its own
+		//        pass.
 		// @param sampleRate The device's rate, for scheduling a start.
 		void Sync(
 			engine::ecs::Store &store,

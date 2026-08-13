@@ -104,47 +104,23 @@ declare interface AncestrySignal {
 // own `Attribute`.
 // --- input ------------------------------------------------------------------
 //
-// Hand-written for the Luau half's reason: these are globals, not classes.
-declare interface UserInputServiceType {
-	MouseBehavior: Enum.MouseBehavior;
-	MouseDeltaSensitivity: number;
-	readonly KeyboardEnabled: boolean;
-	readonly MouseEnabled: boolean;
-
-	readonly InputBegan: PropertyChangedSignal;
-	readonly InputEnded: PropertyChangedSignal;
-	readonly InputChanged: PropertyChangedSignal;
-
-	IsKeyDown(key: Enum.KeyCode): boolean;
-	IsMouseButtonPressed(button: Enum.UserInputType): boolean;
-	GetMouseLocation(): Vector2;
-	GetMouseDelta(): Vector2;
-	GetKeysPressed(): Enum.KeyCode[];
-}
-
-declare const UserInputService: UserInputServiceType;
-
-declare interface ContextActionServiceType {
-	BindAction(
-		name: string,
-		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
-		createTouchButton: boolean,
-		...keys: Enum.KeyCode[]
-	): void;
-
-	BindActionAtPriority(
-		name: string,
-		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
-		createTouchButton: boolean,
-		priority: number,
-		...keys: Enum.KeyCode[]
-	): void;
-
-	UnbindAction(name: string): void;
-	UnbindAllActions(): void;
-}
-
-declare const ContextActionService: ContextActionServiceType;
+// **`UserInputService`, `ContextActionService`, `SoundService` and `InputObject`
+// are deliberately not declared here, and until v0.16 the first two were.**
+// `ServiceCatalogue.cpp` says which languages bind each service, and all three
+// are Luau's alone — so these declarations promised globals a JavaScript author
+// gets `undefined` from at run time, which is exactly the drift the catalogue was
+// built to end. It is the same failure `ServiceCatalogue.hpp` opens by naming:
+// "the TypeScript declarations claim two of them anyway".
+//
+// **What closing the gap needs is a JavaScript twin of `ServiceSurface`.** All
+// three carry a live property — `MouseBehavior`, `Volume` — and the Luau half
+// builds a property-bearing service as a *userdata* to defeat `safeenv`'s
+// `GETIMPORT` caching. `JsBindings.hpp` has no such shape: every JavaScript
+// service is a hand-built object, so binding these means either a
+// `JS_DefinePropertyGetSet` pair written out per property per service, or one
+// table-driven installer that both VMs read the way `ServiceCatalogue` is read
+// now. The second is the one worth having, and it is the change that would let
+// these declarations come back.
 
 declare type EngineAttribute =
 	| boolean
@@ -169,8 +145,8 @@ declare interface PropertyChangedSignal {
 
 // The 2D tree's input, in two shapes because the arguments differ. See the Luau
 // half for why the three input signals take none: Roblox hands them an
-// `InputObject`, this engine has no such datatype, and a different one invented
-// now would have to change the day one arrives.
+// `InputObject`, and `gui::GuiEvent` carries nothing one could be built from
+// without inventing the field a handler reads it for.
 declare interface GuiSignal {
 	Connect(handler: () => void): RBXScriptConnection;
 	Once(handler: () => void): RBXScriptConnection;
@@ -220,6 +196,7 @@ declare namespace Enum {
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
+	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
 	interface NormalId extends EnumItem { readonly __enum: "NormalId"; }
 	interface ParticleEmitterShape extends EnumItem { readonly __enum: "ParticleEmitterShape"; }
@@ -374,6 +351,10 @@ declare namespace Enum {
 		readonly F11: KeyCode;
 		readonly F12: KeyCode;
 	};
+	const ListenerType: {
+		readonly Camera: ListenerType;
+		readonly ObjectPosition: ListenerType;
+	};
 	const MouseBehavior: {
 		readonly Default: MouseBehavior;
 		readonly LockCenter: MouseBehavior;
@@ -491,6 +472,9 @@ declare namespace Enum {
 		readonly MouseButton1: UserInputType;
 		readonly MouseButton2: UserInputType;
 		readonly MouseButton3: UserInputType;
+		readonly Keyboard: UserInputType;
+		readonly MouseMovement: UserInputType;
+		readonly MouseWheel: UserInputType;
 	};
 	const VerticalAlignment: {
 		readonly Top: VerticalAlignment;
@@ -709,6 +693,9 @@ declare interface Instance {
 	readonly PlayerAdded: InstanceSignal;
 	readonly PlayerRemoving: InstanceSignal;
 	GetPlayers(): Instance[];
+	Equals(other: Instance): boolean;
+	GetPlayerFromCharacter(character: Instance): Instance | undefined;
+	LoadCharacter(): Instance | undefined;
 	KeepWorldAwake(reason: string): void;
 	LetWorldSleep(): void;
 	IsKeepingWorldAwake(): boolean;
@@ -1281,6 +1268,7 @@ declare interface Players extends Service {
 
 declare interface Player extends Instance {
 	Character: Instance;
+	readonly PlayerGui: Instance;
 }
 
 // --- the bus services ------------------------------------------------------
@@ -1330,6 +1318,50 @@ declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
 }
 
+// `tween.Completed`, which takes no arguments. Its own type rather than
+// `GuiSignal` for the reason the Luau half gives: they are structurally
+// identical and one of the two names would be false.
+declare interface TweenCompletedSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: TweenCompletedSignal): boolean;
+}
+
+// Interpolating a property from wherever it is to wherever it should end up.
+// See the Luau half for what a tween is, what it may drive, and why dropping
+// the handle does not stop one that is playing.
+declare interface Tween {
+	// False when the target instance has been destroyed.
+	Play(): boolean;
+	Pause(): boolean;
+
+	// A stop and not an undo: the properties stay where they are, and
+	// `Completed` does not fire.
+	Cancel(): boolean;
+
+	readonly Completed: TweenCompletedSignal;
+
+	// **Two handles to one tween are not `===`**, because `Create` and every
+	// return build a fresh object — the same reason `Instance.Equals` exists.
+	Equals(other: Tween): boolean;
+}
+
+declare interface TweenService {
+	GetValue(alpha: number, easingStyle: Enum.EasingStyle, easingDirection: Enum.EasingDirection): number;
+
+	// Raises for a property this instance does not have, for one a script may
+	// not assign, and for one whose type has no midpoint — each named.
+	Create(instance: Instance, info: TweenInfo, goals: { [property: string]: unknown }): Tween;
+}
+
+// Destroying something later, without a script left waiting to do it. The
+// lifetime is seconds in and ticks underneath, exactly as `task.wait` is.
+declare interface Debris {
+	// Ten seconds by default. A lifetime of zero destroys on the next beat
+	// rather than inside this call.
+	AddItem(instance: Instance, lifetime?: number): void;
+}
+
 // --- the globals -----------------------------------------------------------
 
 declare const MessagingService: MessagingService;
@@ -1337,6 +1369,8 @@ declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
+declare const TweenService: TweenService;
+declare const Debris: Debris;
 
 // The world this script runs on. `game` is the universe above it.
 declare const workspace: Workspace;
@@ -1405,6 +1439,8 @@ declare const game: {
 		(service: "MessagingService"): MessagingService;
 		(service: "MemoryStoreService"): MemoryStoreService;
 		(service: "DataStoreService"): DataStoreService;
+		(service: "TweenService"): TweenService;
+		(service: "Debris"): Debris;
 	};
 };
 

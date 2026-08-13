@@ -266,6 +266,27 @@ namespace engine::scene {
 	// @return The `Model`, or `ecs::NULL_ENTITY`.
 	ecs::Entity CharacterOf(const ecs::Store &store, ecs::Entity player);
 
+	// The player driving a model, or a null entity.
+	//
+	// **`CharacterOf`'s inverse, and it is a read rather than a search.**
+	// `Character::Owner` already holds the answer — the field exists so a server
+	// admitting a client can find the character it spawned again — so this is one
+	// component read and never a walk over every player asking whose model this
+	// is. A walk would also be wrong the moment two rows disagreed, which is
+	// exactly what a second table beside the store would eventually do.
+	//
+	// **Null for an NPC, and that is the ordinary case rather than a failure.**
+	// Anything that is not a person at a keyboard leaves `Owner` unset, which is
+	// what `ReclaimOrphanedCharacters` reads to decide what never gets collected.
+	// `Players:GetPlayerFromCharacter` returns nil there, which is Roblox's
+	// answer too.
+	//
+	// @param store     The world.
+	// @param character The `Model`.
+	// @return The `Player` instance, or `ecs::NULL_ENTITY`.
+	// @since v0.15
+	ecs::Entity PlayerOf(const ecs::Store &store, ecs::Entity character);
+
 	// Where a character should be put when nobody has said.
 	//
 	// **A part named `SpawnLocation` if the world has one, and the origin

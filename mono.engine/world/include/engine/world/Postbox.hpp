@@ -212,6 +212,36 @@ namespace engine::world {
 		// @return The ticket the reply will carry, or NONE when over budget.
 		Ticket Teleport(std::string_view world, std::span<const std::byte> payload);
 
+		// Sends a payload to a named world, with nobody attached.
+		//
+		// **The addressed route out of a world, which this module did not have.**
+		// `Publish` is a topic fan-out — the sender does not know or care who is
+		// listening, which is right for "the boss died" and wrong for "world B,
+		// here is the score you asked for". `Teleport` is the only other
+		// operation that names a world and it moves a *person*, so a game wanting
+		// to say something to one particular world had to either broadcast it to
+		// everybody or teleport a player carrying it.
+		//
+		// **No entity crosses, exactly as with a teleport**, and for the same
+		// reason: rule 3 says nothing crossing a world boundary is a pointer, and
+		// two worlds must not have to agree on class versions to talk.
+		//
+		// **A world that is not running is `NoSuchWorld` rather than silence.**
+		// A publish with no subscribers is a quiet afternoon; a message addressed
+		// to a name nothing answers to is a mistake the sender wants told about,
+		// and being able to tell the difference is half the reason this exists
+		// beside `Publish`.
+		//
+		// The delivery arrives with `Bus == BusKind::Channel` and `Key` set to
+		// the *sender's* name — a channel is the one route where answering is the
+		// point, and the destination already knows it is itself.
+		//
+		// @param world   The destination world's name.
+		// @param payload The bytes to send.
+		// @return The ticket the reply will carry, or NONE when over budget.
+		// @since v0.15
+		Ticket SendTo(std::string_view world, std::span<const std::byte> payload);
+
 		// Reports whether this world is a replica, and so may not write.
 		//
 		// @return `true` when bus writes are refused.

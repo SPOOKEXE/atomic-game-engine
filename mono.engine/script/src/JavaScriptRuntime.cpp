@@ -327,6 +327,13 @@ namespace engine::script {
 			}
 		};
 
+		// **The world's own timed work first, exactly where the Luau side puts
+		// it** — see `LuauRuntime::Heartbeat`, which carries the whole argument:
+		// a tween and a deadline are not resumes, and everything the rest of the
+		// barrier delivers should see the world they already moved.
+		note(PumpJsTweens(Context, delta));
+		PumpJsDebris(Context);
+
 		note(PumpJsChanges(Context));
 
 		// **After the property changes and before the tasks**, exactly as the

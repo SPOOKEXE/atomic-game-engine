@@ -12,6 +12,7 @@
 TEST_SUITE_ID("engine.scene.input")
 
 using engine::scene::Describe;
+using engine::scene::InputSource;
 using engine::scene::InputState;
 using engine::scene::KeyBits;
 using engine::scene::KeyCode;
@@ -190,4 +191,61 @@ TEST_CASE("every mouse button has a name", "[scene][input]") {
 		REQUIRE(name != nullptr);
 		CHECK(std::string_view(name) != "?");
 	}
+}
+
+TEST_CASE("an input source names every button and the three that are not", "[scene][input]") {
+	// **The overlap is what `IsMouseButtonPressed` casts through.** It resolves
+	// an `Enum.UserInputType` member to an ordinal and hands it to
+	// `IsButtonDown`, so a source inserted ahead of the buttons would make "is
+	// the left button down" answer about the right one — with nothing failing,
+	// because the arithmetic still lands on a valid bit.
+	CHECK(std::string_view(Describe(InputSource::MouseButton1)) == Describe(MouseButton::Left));
+	CHECK(std::string_view(Describe(InputSource::MouseButton2)) == Describe(MouseButton::Right));
+	CHECK(std::string_view(Describe(InputSource::MouseButton3)) == Describe(MouseButton::Middle));
+
+	CHECK(std::string_view(Describe(InputSource::Keyboard)) == "Keyboard");
+	CHECK(std::string_view(Describe(InputSource::MouseMovement)) == "MouseMovement");
+	CHECK(std::string_view(Describe(InputSource::MouseWheel)) == "MouseWheel");
+
+	// Distinct, for the reason the key names are: two sources sharing a name
+	// makes an `InputObject` report one of them and which depends on the table.
+	std::unordered_set<std::string> seen;
+	for (size_t ordinal = 0; ordinal < static_cast<size_t>(InputSource::Count); ordinal++) {
+		CHECK(seen.insert(std::string(Describe(static_cast<InputSource>(ordinal)))).second);
+	}
+}
+
+TEST_CASE("focus is an edge and not a level", "[scene][input]") {
+	// **`WindowFocused` and `WindowFocusReleased` are edges**, so the state has
+	// to remember last frame's focus the way it remembers last frame's keys. A
+	// fresh state has focus and had it, which reports neither edge — otherwise
+	// the first pump of every world would fire a focus event nobody caused.
+	InputState state;
+	CHECK_FALSE(state.WasFocusGained());
+	CHECK_FALSE(state.WasFocusLost());
+
+	// Losing it. The frame this happens on is also the frame every held key
+	// reports released, because the translator clears `Down` and leaves
+	// `Previous` alone — so both are observable from one state.
+	state.Previous = state.Down;
+	state.Down.Set(KeyCode::W, true);
+	state.PreviousFocused = state.Focused;
+	state.Focused = false;
+	state.Previous = state.Down;
+	state.Down = KeyBits{};
+
+	CHECK(state.WasFocusLost());
+	CHECK_FALSE(state.WasFocusGained());
+	CHECK(state.WasKeyReleased(KeyCode::W));
+
+	// Regaining it, one frame later.
+	state.PreviousFocused = state.Focused;
+	state.Focused = true;
+	CHECK(state.WasFocusGained());
+	CHECK_FALSE(state.WasFocusLost());
+
+	// And the frame after, which is a level rather than an edge.
+	state.PreviousFocused = state.Focused;
+	CHECK_FALSE(state.WasFocusGained());
+	CHECK_FALSE(state.WasFocusLost());
 }

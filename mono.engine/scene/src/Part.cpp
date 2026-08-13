@@ -4,6 +4,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/Audio.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -1399,11 +1400,18 @@ namespace engine::scene {
 			}
 			ecs::EnumTable::Register("KeyCode", keys);
 
-			std::array<std::string_view, static_cast<size_t>(MouseButton::Count)> buttons{};
-			for (size_t index = 0; index < buttons.size(); index++) {
-				buttons[index] = Describe(static_cast<MouseButton>(index));
+			// **Every input source and not only the three buttons**, because an
+			// `InputObject` reports where an event came from and `MouseButton1..3`
+			// can only describe a click. Generated from `Describe` for `KeyCode`'s
+			// reason — one declaration, and adding a source means adding it in one
+			// place. The buttons keep ordinals 0 to 2, which
+			// `UserInputService:IsMouseButtonPressed` relies on and `Input.cpp`
+			// holds with a `static_assert`.
+			std::array<std::string_view, static_cast<size_t>(InputSource::Count)> sources{};
+			for (size_t index = 0; index < sources.size(); index++) {
+				sources[index] = Describe(static_cast<InputSource>(index));
 			}
-			ecs::EnumTable::Register("UserInputType", buttons);
+			ecs::EnumTable::Register("UserInputType", sources);
 
 			// **The states a bound action's handler is told about.** Registered
 			// here beside the other input enums rather than in
@@ -1419,6 +1427,19 @@ namespace engine::scene {
 				"MouseBehavior",
 				std::array<std::string_view, 3>{"Default", "LockCenter", "LockCurrentPosition"}
 			);
+
+			// **Where the ear is, and only the two modes the mixer can honour.**
+			// Roblox's `Enum.ListenerType` has four; `CFrame` and `ObjectCFrame`
+			// place the ear *and turn it*, and `client::SoundStage` posts a
+			// position with no facing — so registering either would offer an
+			// author a member that changes nothing. `scene/Audio.hpp` carries the
+			// argument, and this is generated from its `Describe` for the reason
+			// the keys above are.
+			std::array<std::string_view, static_cast<size_t>(ListenerMode::Count)> listeners{};
+			for (size_t index = 0; index < listeners.size(); index++) {
+				listeners[index] = Describe(static_cast<ListenerMode>(index));
+			}
+			ecs::EnumTable::Register("ListenerType", listeners);
 			ecs::EnumTable::Register(
 				"CameraType",
 				std::array<std::string_view, 4>{"Classic", "LockFirstPerson", "ShiftLock", "Scriptable"}
