@@ -1220,7 +1220,7 @@ TEST_CASE("a cross-world pane is handed every row of the world it names", "[clie
 	CHECK(views[0].InstanceFirst == 0);
 }
 
-TEST_CASE("a pane is not drawn into the hole that leads back to it", "[client][presentation]") {
+TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client][presentation]") {
 	// **The rule a mirror has always had about itself, which a cross-world pair
 	// had nowhere to state — and it blanked the feature outright.**
 	//
@@ -1269,6 +1269,13 @@ TEST_CASE("a pane is not drawn into the hole that leads back to it", "[client][p
 			stand.Anchored = true;
 			const Entity beyond = engine::scene::MakePart(store, stand);
 			store.SetParent(beyond, workspace);
+
+			// **Invisible, which is how a stand-in is authored and is the whole
+			// of the second rule below.** It carries a transform and a size
+			// saying where the hole leads and is meant to be seen by nothing.
+			if (auto *look = store.GetMutable<engine::scene::Visual>(beyond)) {
+				look->Transparency = 1.0f;
+			}
 
 			// **An eye, because a surface camera is placed from one.** Without an
 			// `ActiveCamera` the aim pass has no viewer to map and assigns no
@@ -1320,8 +1327,21 @@ TEST_CASE("a pane is not drawn into the hole that leads back to it", "[client][p
 		CHECK(instance.Surface < 0);
 	}
 
+	// **And nothing invisible is in it, which is the other rule and the other
+	// bug.** Every other draw path sends a fully transparent part to the blended
+	// run, where an alpha of nothing contributes nothing. This range has no runs
+	// — it is one plain draw that bypasses the plan — so an invisible row
+	// arrives at the opaque pipeline and draws solid. A cross-world pair has
+	// exactly such a row at exactly the worst place: the stand-in sits at the
+	// pane, which is where the camera is aimed and the size the frustum is
+	// fitted to, so it filled most of the picture with one flat colour.
+	for (const engine::scene::DrawInstance &instance : foreign) {
+		CHECK(instance.Transparency < 1.0f);
+	}
+
 	// And the room is still there — a filter that dropped the far world rather
-	// than its pane would pass the line above and show nothing at all.
-	CHECK(foreign.size() + 1 == Drawn(universe, there));
+	// than its pane and its stand-in would pass both lines above and show
+	// nothing at all. Two rows fewer, and exactly two.
+	CHECK(foreign.size() + 2 == Drawn(universe, there));
 	CHECK(views[0].InstanceCount == static_cast<uint32_t>(foreign.size()));
 }

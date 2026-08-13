@@ -780,6 +780,50 @@ far spawn pad and `(11,13,21)` far sky. `client/tests/Presentation.cpp` pins it
 without a device: exactly one row is dropped, every row that crosses carries
 `Surface < 0`, and the far world's room is still all there.
 
+### The stand-in that drew solid, which is the same rule one step on
+
+**The rule above has a second half, and the second half is invisibility.** A pane
+is not drawn into the hole that leads back to it — and neither is anything the
+author made invisible, because the foreign range is the one draw path in the
+engine where "invisible" is not free.
+
+Everywhere else a fully transparent part *is* drawn: it goes into the blended
+run, where an alpha of nothing contributes nothing. **The foreign range has no
+runs.** `render::SurfaceView` names one span and the surface pass submits it as a
+single plain draw, deliberately bypassing the plan that would have partitioned
+it — that bypass is what lets a portal show a live second world at all. So a row
+authored invisible arrives at the *opaque* pipeline and draws solid.
+
+**And every cross-world portal has exactly such a row in the worst possible
+place.** `Portal::Destination` is a stand-in: a transform and a size saying where
+the hole leads, authored invisible and set at the pane. `ImmersivePortals.luau`
+puts it 0.6 studs behind the block and sets `Transparency = 1`. That is where the
+surface camera is aimed and the size the frustum is fitted to, so it filled most
+of the picture with one flat colour — how much depending on where the viewer
+stood, which is why the report was *"certain angles produce the artifact"* rather
+than "the portal is broken".
+
+**It looked exactly like a bad fit and was not.** Instrumented and ruled out
+first: the fitted extents are symmetric when the viewer is square on, the
+eye-frustum clamp never binds at the distances that fail, and the pane's four
+corners project through `ViewProjection · SurfaceMapping` to `(0.01, 0.99)` at
+every distance tried. Painting `surfaceUv` straight into the pane showed a clean
+gradient over the whole rectangle — so no fragment was falling back for being
+outside the image. The flat region was *in the texture*. Tinting the stand-in
+green turned the flat region green, which is the whole proof.
+
+`client::AttachForeignSurfaces` now leaves an invisible row behind, beside the
+pane it already left behind. `client/tests/Presentation.cpp` pins both in one
+case: every crossing row carries `Surface < 0` and `Transparency < 1`, and the
+far room is short by exactly two.
+
+**A *partly* transparent part in the far world is still drawn opaque**, and that
+is a stated limit rather than an oversight — measured at `Transparency = 0.5`,
+where the slab is as solid as it was at 1. Fixing it means sorting the foreign
+range blended-last and giving `SurfaceView` an opaque count so the pass can make
+two draws with two pipelines. Worth doing when a scene puts glass in a room seen
+through a hole; not worth doing to remove a stand-in that draws nothing.
+
 ### The gray flash, which was a hysteresis one texel wide
 
 **A pane's texture is sized to how much of the screen it covers**, because a

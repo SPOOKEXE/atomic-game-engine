@@ -605,11 +605,38 @@ namespace client {
 				// Selected by **slot** rather than by entity, because a draw
 				// instance carries a surface index and no identity — and the
 				// slots wanted are exactly the ones gathered above.
+				//
+				// **An invisible row is left behind too, and this range is the
+				// only draw path that has to say so.** Everywhere else a fully
+				// transparent part *is* drawn — into the blended run, where an
+				// alpha of nothing contributes nothing. The foreign range has no
+				// runs: `SurfaceView` names one span and the surface pass submits
+				// it as a single plain draw, bypassing the plan that would have
+				// partitioned it. So a part authored invisible arrives at the
+				// **opaque** pipeline and draws solid.
+				//
+				// **And every cross-world portal has exactly such a part in the
+				// worst possible place.** `Portal::Destination` is a stand-in — a
+				// transform and a size saying where the hole leads — authored
+				// invisible and set at the pane, which is where this camera is
+				// aimed and the size the frustum is fitted to. It filled most of
+				// the picture with one flat colour, and how much depended on
+				// where the viewer stood: the report was "certain angles produce
+				// the artifact".
+				//
+				// Dropped here rather than teaching the range about blending,
+				// which is the 80/20: nothing is lost, because there was no
+				// picture in it. **A *partly* transparent part in the far world
+				// is still drawn opaque** — that limit is stated in
+				// `NON-EUCLIDEAN.md` rather than hidden here.
 				if (const auto *list = store.Resource<DrawList>()) {
 					for (const DrawInstance &instance : list->Instances) {
 						if (instance.Surface >= 0 &&
 							std::find(returning.begin(), returning.end(), instance.Surface) !=
 								returning.end()) {
+							continue;
+						}
+						if (instance.Transparency >= 1.0f) {
 							continue;
 						}
 						foreign.push_back(instance);
