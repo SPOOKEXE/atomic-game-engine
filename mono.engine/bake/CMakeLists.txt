@@ -2,8 +2,8 @@
 #
 # The importers and the node pipeline `ROADMAP.md` v0.9 asks for. `assets` is
 # what a baked mesh or texture *is*; this is the only thing in the engine that
-# reads a `.glb`, a `.pmx`, a `.png` or a `.bmp`, and it exists so that nothing
-# else ever has to.
+# reads a `.glb`, a `.pmx`, a `.png`, a `.bmp` or an `.svg`, and it exists so
+# that nothing else ever has to.
 #
 # **Nothing a shipped game links may link this.** `Texture.hpp` states the rule
 # and this module is where it becomes checkable: a parser for a foreign format

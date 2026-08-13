@@ -70,7 +70,7 @@ namespace studio {
 		// is more than one of them and why they are these.
 		constexpr std::string_view SKYGRID_WORLD = "SkyGrid";
 		constexpr std::string_view MIRROR_WORLD = "Mirrors";
-		constexpr std::string_view MESHGRID_WORLD = "Meshes";
+		constexpr std::string_view ASSETS_WORLD = "Assets";
 		constexpr std::string_view SLIDE_WORLD = "Slide";
 		constexpr std::string_view PORTAL_WORLD = "Portals";
 		constexpr std::string_view TUNNELS_WORLD = "Tunnels";
@@ -165,6 +165,16 @@ namespace studio {
 			return "Run";
 		case RunMode::Play:
 			return "Play";
+		}
+		return "?";
+	}
+
+	const char *Describe(EditAuthority authority) {
+		switch (authority) {
+		case EditAuthority::Authoritative:
+			return "server";
+		case EditAuthority::ClientLocal:
+			return "client — local only";
 		}
 		return "?";
 	}
@@ -323,6 +333,17 @@ namespace studio {
 		// Null when headless, which is what puts the renderer in that mode.
 		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
 			return false;
+		}
+
+		// **The first caller `SetSurfaceBounces` has ever had.** It shipped at
+		// v0.15 with a comment calling the knob public and nothing anywhere
+		// setting it, so every scene resolved exactly two levels of
+		// surface-seen-in-surface whatever it was built out of. Left at the
+		// renderer's own default unless an author asked, because each level costs
+		// a full scene pass per visible surface.
+		if (Settings.SurfaceBounces > 0) {
+			Renderer.SetSurfaceBounces(static_cast<uint32_t>(Settings.SurfaceBounces));
+			ENGINE_INFO("surfaces: resolving {} bounce(s) in frame", Settings.SurfaceBounces);
 		}
 
 		// **After the renderer and only with a window**, because the present
@@ -1087,7 +1108,13 @@ namespace studio {
 		// **Accumulated from the frame delta, and handed to the renderer that
 		// draws against it.** `Renderer::SetAnimationTime` carries why the clock
 		// is the caller's: a module holding one has a notion of "now" to drift.
-		AnimationSeconds += frameSeconds;
+		//
+		// **Unless a fixed step was asked for**, in which case the measured delta
+		// is ignored outright rather than blended with. A capture run is compared
+		// against another capture run, and a clock that is *mostly* reproducible
+		// produces a diff nobody can attribute — see `Options::FixedAnimationStep`.
+		AnimationSeconds +=
+			Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
 		Renderer.SetAnimationTime(AnimationSeconds);
 
 		// **The frame graph is only collected while it is being read.**
@@ -1458,6 +1485,35 @@ namespace studio {
 				(void)client::CollectPortalViews(store, Portals);
 				(void)client::CollectSurfaceViews(store, Surfaces, Portals);
 
+				// **The shaders this world's materials name, resolved before
+				// the frame that draws with them.** The same block
+				// `client::Client` runs, and the editor needs it more: this is
+				// where a `ShaderScript` is authored, so an edit that did not
+				// reach a pipeline until the game was launched would make the
+				// property look broken.
+				//
+				// `Refresh` is an integer compare per distinct shader on a
+				// world nobody is editing — see `scene::ShaderSource::Revision`.
+				if (Shaders.Refresh(store) > 0) {
+					for (const engine::core::Name &shader : Shaders.Changed()) {
+						const engine::render::ShaderModule *module = Shaders.Find(shader);
+						if (module == nullptr) {
+							(void)Renderer.DropShader(shader);
+							continue;
+						}
+
+						// A diagnostic and not a fatal, which is
+						// `render/AGENTS.md`'s rule for a shader somebody is
+						// writing. The part goes on drawing with the engine's.
+						if (!module->Error.empty()) {
+							ENGINE_WARN("shader '{}': {}", shader.Text(), module->Error);
+							continue;
+						}
+
+						(void)Renderer.AddShader(shader, module->SpirV);
+					}
+				}
+
 				// TODO(render-pipeline): the world's pipelines were installed here
 				// on first sight of the world, and the chosen key went into the
 				// view below. See `client::InstallWorldPipelines`.
@@ -1563,8 +1619,27 @@ namespace studio {
 		// **After the frame rather than before it**, so the capture is of a
 		// frame that has a scene texture — the first frame has none, because the
 		// viewport panel only learns its size once it has been laid out.
+		//
 		if (!Settings.Capture.empty() && FramesDrawn == CaptureAtFrame()) {
-			Renderer.RequestSceneCapture(Settings.Capture);
+			// **Named by viewport, or the wrong scene is photographed.** With
+			// two panels the request made here is consumed by the *next*
+			// `Render`, which is the other panel — so `--capture-world` moved
+			// `Active` correctly and the picture came out of whichever panel
+			// happened to be next. Finding the panel showing the wanted world
+			// makes the renderer wait for its turn.
+			size_t slot = engine::render::Renderer::ANY_VIEWPORT;
+
+			if (!Settings.CaptureWorld.empty()) {
+				const WorldId wanted = Universe->Find(Name(Settings.CaptureWorld));
+				for (size_t index = 0; index <= Extras.size(); index++) {
+					if (ViewportWorld(index) == wanted) {
+						slot = index;
+						break;
+					}
+				}
+			}
+
+			Renderer.RequestSceneCapture(Settings.Capture, slot);
 		}
 	}
 
@@ -1791,7 +1866,7 @@ namespace studio {
 		// six meshes that are already registered and issues no request at all: a
 		// template that pulled content on open would put back the twenty-nine
 		// second start-up v0.10 spent a version removing.
-		const WorldId meshes = AddWorld(Name(MESHGRID_WORLD));
+		const WorldId assets = AddWorld(Name(ASSETS_WORLD));
 
 		// **A fourth, and it is the one that moves.** The other three are
 		// anchored throughout, which is exactly why nothing in this repository
@@ -1886,10 +1961,17 @@ namespace studio {
 			InstallExampleScript(store, "Mirrors-1-world.luau", "MirrorScene");
 		});
 
-		// The mesh grid lays its own plate and its own camera, so it needs the
+		// The assets world lays its own floor and its own camera, so it needs the
 		// same nothing the other two do.
-		Universe->Enter(meshes, [this](Store &store) {
-			InstallExampleScript(store, "MeshGrid.luau", "MeshGridScene");
+		//
+		// **It was the mesh grid until v0.15.** That scene answered one question
+		// thoroughly — did every *mesh* arrive — and the question a default game
+		// wants answered on open is wider and shallower: of the six kinds this
+		// engine can name, which reach the screen at all. One labelled bay each,
+		// so the frame says which pipeline broke rather than only that one did.
+		// `MeshGrid.luau` is still in `examples/` for the narrow question.
+		Universe->Enter(assets, [this](Store &store) {
+			InstallExampleScript(store, "Assets.luau", "AssetsScene");
 		});
 
 		// The slide lays its own floor and its own ramp, so it needs the same
@@ -1958,7 +2040,7 @@ namespace studio {
 		// unselected tab is a template nobody finds.
 		ExpandWorldTree(grid);
 		ExpandWorldTree(mirrors);
-		ExpandWorldTree(meshes);
+		ExpandWorldTree(assets);
 		ExpandWorldTree(slide);
 		ExpandWorldTree(portals);
 		ExpandWorldTree(tunnels);
@@ -2574,6 +2656,13 @@ namespace studio {
 
 	bool Editor::IsReplicaWorld(WorldId world) const {
 		return RunForReplica(world) != nullptr;
+	}
+
+	EditAuthority Editor::AuthorityOf(WorldId world) const {
+		// **An authored scene that is not running is still `Authoritative`.**
+		// There is no server to disagree with it, and the edit is kept by the
+		// save file, which is the sense of the word an author has.
+		return IsReplicaWorld(world) ? EditAuthority::ClientLocal : EditAuthority::Authoritative;
 	}
 
 	bool Editor::AnyRunning() const {

@@ -181,6 +181,34 @@ own true content hash — the body is hashed and compared against the address it
 was uploaded to. A wrong key is `403`; on an origin with no `--ingest-key` the
 route answers `404`, as though it were not there.
 
+### Letting it be listed *(v0.15)*
+
+An origin serves by name, so nothing about fetching needs it to say what it
+holds. The editor's assets panel wants exactly that, though — a tab per origin
+is not much of a tab if it cannot show the origin's contents — so there is one
+route that enumerates, and it is off until asked for:
+
+```sh
+./.cache/build/dev/cdn/cdn --store ./store --grant-key HEX \
+    --ingest-key letmein --list-contents
+# cdn: enumerating contents at /catalogue, 256 a page, against the ingest key
+```
+
+Then paste the same `letmein` into that row's ingest key in **Preferences →
+Content**, and the row's tab in the assets panel lists what that origin holds.
+
+**Off by default, and it is the default that matters.** An open write route
+costs an operator disk; an open listing hands whoever asks the name of
+everything here, and names that have been scraped cannot be un-scraped. So it is
+one flag, admitted by the key that already exists — `--list-contents` without
+`--ingest-key` refuses to start rather than enumerating for anybody.
+
+`GET /catalogue` answers a page and a `next` cursor to follow;
+`GET /catalogue/<cursor>` is the next one. Without the key it is `403`, and on
+an origin started without the flag it is `404`, as though the route were not
+there — which is why the editor's tab says "switched off there, or an older
+build" rather than claiming to know which.
+
 ---
 
 ## 4. Reaching it from another machine
@@ -206,9 +234,11 @@ keep these in mind:
 - Content is **content-addressed and signed**, so a proxy cannot alter it
   undetected — a modified chunk fails the hash and a modified manifest fails the
   signature. What a proxy *can* see is which assets somebody fetched.
-- The routes are `GET /health`, `GET /manifest`, `GET /bundle/<root>` and
-  `PUT|HEAD /ingest/<hash>`. If uploads are not wanted from outside, do not
-  proxy `/ingest`.
+- The routes are `GET /health`, `GET /manifest`, `GET /bundle/<root>`,
+  `GET /catalogue[/<cursor>]` and `PUT|HEAD /ingest/<hash>`. If uploads are not
+  wanted from outside, do not proxy `/ingest`; if the contents should not be
+  enumerable from outside, do not proxy `/catalogue` — though an origin started
+  without `--list-contents` answers it `404` anyway.
 
 **A cache in front of a cache.** Two flags make a second origin a mirror that
 fills itself on demand:
@@ -239,6 +269,8 @@ grant key, which still gates delivery.
 | `no content store at …` | `--store` points somewhere nothing was published into |
 | `403` on upload | wrong ingest key |
 | `404` on upload | the origin was started without `--ingest-key` |
+| an origin's tab in the assets panel says it does not list | the origin was started without `--list-contents` |
+| that tab says the key was refused | the row's ingest key is not the origin's `--ingest-key` |
 | editor lists a store as empty | it has never been published — `raw/` is not the manifest |
 
 The editor's **Network** panel is the readout for everything above: sources

@@ -106,6 +106,48 @@ test-architecture:
           -DEXPECTED=mono.tools/architecture/expected_graph.json \
           -P mono.tools/architecture/CheckTargetGraph.cmake
 
+# Every first-party object against the header dependencies ninja recorded for it.
+#
+# **The check for a bug that produced a working build and a broken binary.** At
+# v0.15 fifty-seven of four hundred first-party objects had `#deps 0` — no
+# recorded headers at all — so a change to a header rebuilt some translation
+# units and not others, and the result held two different layouts of one struct.
+# `studio::Options` grew a field, `Settings.ControlPort` read as zero instead of
+# minus one in the objects that had not been rebuilt, and the studio died in
+# `control::Server::Start` on a pimpl that was not there.
+#
+# **A full `cmake --build` does not find it and no test can.** Ninja believed
+# everything was current, so the build was silent and green; the suites link
+# whatever the objects say and cannot see that two of them disagree. That is the
+# third category `AGENTS.md` rule 6 refuses to allow — a constraint that lives in
+# nobody's memory — which is why this is a recipe rather than a paragraph.
+#
+# The pattern was files added since the deps log was last rebuilt, so this is
+# worth running after anything arrives through a `CONFIGURE_DEPENDS` glob.
+#
+# Fix what it reports by deleting the named objects and building again: a
+# rebuilt object records its headers, and only a missing record is the fault.
+deps-check: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{build}}
+    missing=0
+    total=0
+    while read -r object; do
+        total=$((total + 1))
+        recorded=$(ninja -t deps "$object" 2>/dev/null | head -1 | grep -oE '#deps [0-9]+' | grep -oE '[0-9]+' || true)
+        if [ "${recorded:-0}" = "0" ]; then
+            missing=$((missing + 1))
+            echo "no recorded headers: $object"
+        fi
+    done < <(find . -name '*.cpp.o' -path '*mono.*')
+    if [ "$missing" -gt 0 ]; then
+        echo "deps-check FAILED — $missing of $total first-party object(s) track no headers."
+        echo "A header change will not reach them, and the binary will mix struct layouts."
+        exit 1
+    fi
+    echo "deps ok — $total first-party object(s) track their headers"
+
 # Regenerate the scripting manifest and the type declarations.
 #
 # The class table is the source; these are its output. Run this after changing a
@@ -313,7 +355,7 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
     @rm -f {{out}} {{meshes}}
     ./{{build}}/studio/studio --headless --frames 12 --run play         {{ if game == "" { "" } else { "--game " + game } }}         --capture {{out}} --width 960 --height 540
     @test -s {{out}} || (echo "FAIL: the headless editor wrote no capture" && exit 1)
-    ./{{build}}/studio/studio --headless --frames 700 --run play         --capture-world Meshes --capture {{meshes}} --width 1280 --height 900
+    ./{{build}}/studio/studio --headless --frames 700 --run play         --capture-world Assets --capture {{meshes}} --width 1280 --height 900
     @test -s {{meshes}} || (echo "FAIL: the headless editor wrote no mesh capture" && exit 1)
     @echo "studio ok — loaded, played and rendered with no display, into {{out}} and {{meshes}}"
 

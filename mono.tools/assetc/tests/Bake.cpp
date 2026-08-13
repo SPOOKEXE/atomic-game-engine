@@ -118,6 +118,16 @@ f 1//1 3//1 2//1
 		REQUIRE(engine::assets::Mesh::Read(reader, mesh));
 		return mesh;
 	}
+
+	engine::assets::TextureData ReadTexture(const fs::path &path) {
+		std::ifstream file(path, std::ios::binary);
+		const std::vector<char> raw((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+		engine::core::ByteReader reader({reinterpret_cast<const std::byte *>(raw.data()), raw.size()});
+		engine::assets::TextureData texture;
+		REQUIRE(engine::assets::Texture::Read(reader, texture));
+		return texture;
+	}
 }
 
 TEST_CASE("a baked name replaces the extension", "[assetc][bake]") {
@@ -213,6 +223,40 @@ TEST_CASE("an oversized texture is shrunk and keeps its aspect", "[assetc][bake]
 	CHECK(report.Assets[0].Failure.empty());
 
 	CHECK(report.Assets[0].Bytes < 70);
+}
+
+TEST_CASE("a baked texture carries its mip chain", "[assetc][bake]") {
+	// **The wiring, which is the half a unit test of `BuildMipChain` cannot
+	// reach.** The node has to sit after the resize — a chain built before one is
+	// dropped again on the way past, and the file that reaches disk has no levels
+	// and nothing saying why.
+	const Scratch scratch("mips");
+	scratch.Write("tex/floor.bmp", BMP);
+
+	Baked(scratch, Settings{});
+	const engine::assets::TextureData whole = ReadTexture(scratch.Out() / "tex/floor.atex");
+	CHECK(whole.LevelCount() == 2);
+	CHECK(whole.IsValid());
+
+	// And past a resize, where the fixture is shrunk to a single pixel and there
+	// is nothing left to halve.
+	Settings shrunk;
+	shrunk.MaximumTexture = 1;
+	Baked(scratch, shrunk);
+	const engine::assets::TextureData small = ReadTexture(scratch.Out() / "tex/floor.atex");
+	CHECK(small.Width == 1);
+	CHECK(small.LevelCount() == 1);
+}
+
+TEST_CASE("a bake can be asked for no chain at all", "[assetc][bake]") {
+	const Scratch scratch("nomips");
+	scratch.Write("tex/floor.bmp", BMP);
+
+	Settings settings;
+	settings.Mipmaps = false;
+	Baked(scratch, settings);
+
+	CHECK(ReadTexture(scratch.Out() / "tex/floor.atex").LevelCount() == 1);
 }
 
 TEST_CASE("a model's texture references become baked asset names", "[assetc][bake]") {
@@ -599,4 +643,63 @@ TEST_CASE("a bake to disk carries no payload", "[assetc][memory]") {
 	// of memory on success — `Baked::Payload` says so and this is what checks it.
 	REQUIRE(report.Assets.front().Payload.empty());
 	REQUIRE(fs::exists(scratch.Out() / "tile.atex"));
+}
+
+TEST_CASE("a drawing bakes to a texture at the cap rather than past it", "[assetc][bake]") {
+	// **The half a unit test of the rasteriser cannot reach**: which node opens
+	// the chain, and what `--max-texture` does to a source that has no size of
+	// its own. The drawing declares 64 and the cap is 16, so the honest answer
+	// is to draw it again at 16 — resampling a 64-pixel rasterisation down would
+	// give edges belonging to the box filter instead of to the shapes.
+	const Scratch scratch("svg");
+	scratch.Write(
+		"icons/leaf.svg",
+		std::string_view(R"(<svg width="64" height="64"><rect width="64" height="64" fill="#00ff00"/></svg>)")
+	);
+
+	CHECK(BakedName("icons/leaf.svg") == "icons/leaf.atex");
+
+	Settings capped;
+	capped.MaximumTexture = 16;
+	const Report report = Baked(scratch, capped);
+
+	REQUIRE(report.Assets.size() == 1);
+	CHECK(report.Assets[0].Failure.empty());
+	CHECK(report.Assets[0].Kind == AssetKind::Texture);
+	CHECK(report.Assets[0].Output == "icons/leaf.atex");
+
+	const engine::assets::TextureData texture = ReadTexture(scratch.Out() / "icons/leaf.atex");
+	CHECK(texture.Width == 16);
+	CHECK(texture.Height == 16);
+
+	// Solid green to the edge, which a downscale of a rasterisation would also
+	// give — the assertion that separates them is that nothing was drawn at 64
+	// at all, and the mip chain below is what says the texture arrived whole.
+	CHECK(static_cast<int>(texture.Pixels[1]) == 255);
+	CHECK(texture.LevelCount() == 5);
+
+	// Uncapped, the drawing keeps the size it declares.
+	const Report whole = Baked(scratch, Settings{});
+	REQUIRE(whole.Assets.size() == 1);
+	CHECK(ReadTexture(scratch.Out() / "icons/leaf.atex").Width == 64);
+}
+
+TEST_CASE("a drawing this cannot draw fails its own row and not the run", "[assetc][bake]") {
+	// The refusal has to survive the whole pipeline as a message naming the
+	// feature: a bake tool's report is where somebody finds out that their icon
+	// used a gradient.
+	const Scratch scratch("svg-refused");
+	scratch.Write("tex/floor.bmp", BMP);
+	scratch.Write(
+		"icons/fancy.svg",
+		std::string_view(R"(<svg width="8" height="8"><text x="0" y="4">hello</text></svg>)")
+	);
+
+	const Report report = Baked(scratch, Settings{});
+	REQUIRE(report.Assets.size() == 2);
+	CHECK(report.Failures == 1);
+
+	const assetc::Baked &icon =
+		report.Assets[0].Source == "icons/fancy.svg" ? report.Assets[0] : report.Assets[1];
+	CHECK(icon.Failure.find("text") != std::string::npos);
 }

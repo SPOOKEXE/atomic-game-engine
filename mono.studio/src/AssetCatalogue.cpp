@@ -129,7 +129,31 @@ namespace studio {
 		return entries;
 	}
 
-	std::vector<CatalogueTab> BuildCatalogue(const ContentSources &sources) {
+	const char *Describe(ListingOutcome outcome) {
+		// **One sentence each, and each of them names what to do about it.** A
+		// tab that cannot list is the ordinary case for an origin — enumeration
+		// is off by default there — so this text is what somebody reads far more
+		// often than they read a list of names.
+		switch (outcome) {
+		case ListingOutcome::Listed:
+			return "";
+		case ListingOutcome::NotAsked:
+			return "not asked yet — Refresh asks this origin what it holds";
+		case ListingOutcome::NoKey:
+			return "no key for this origin here — listing needs the same key an upload uses, on the Content page";
+		case ListingOutcome::Unreachable:
+			return "no answer from this origin — it may be down, or the address may be wrong";
+		case ListingOutcome::NotOffered:
+			return "this origin does not list its contents — enumeration is switched off there, or it is an older build";
+		case ListingOutcome::Refused:
+			return "this origin refused the key — listing uses the same key an upload does";
+		case ListingOutcome::Unreadable:
+			return "this origin answered something this editor could not read";
+		}
+		return "";
+	}
+
+	std::vector<CatalogueTab> BuildCatalogue(const ContentSources &sources, OriginLister *origins) {
 		std::vector<CatalogueTab> tabs;
 
 		// `All` is first and filled last: it is the merge of everything below
@@ -165,14 +189,22 @@ namespace studio {
 					tab.Note = "no manifest here yet — publish into it, or check the path";
 				}
 			} else {
-				// **An origin answers by name and does not enumerate**, which is
-				// a property of the protocol rather than a gap in this panel:
-				// `delivery::AssetClient` fetches a manifest through the whole
-				// priority list and reports which names verified, and no route
-				// asks one origin what it holds. Said here rather than drawn as
-				// an empty table, which would read as an origin holding nothing.
+				// **Asked, and whatever it says is what the tab shows.** Until
+				// v0.15 no route could answer this at all, so the tab said so;
+				// now `cdn::Service` has one and the honest failure cases moved
+				// from "the protocol cannot" to "this origin will not", each of
+				// which is its own sentence. What has not changed is the rule
+				// that produced both: the panel never draws the delivery
+				// client's catalogue here, because those names came from
+				// whichever source answered first and this tab is a claim about
+				// one origin.
 				tab.Origin = CatalogueOrigin::Http;
-				tab.Note = "an HTTP origin serves by name and does not list — the Network panel says what has arrived";
+
+				OriginListing listing = origins ? origins->List(source) : OriginListing{};
+				tab.Entries = std::move(listing.Entries);
+				tab.Note = listing.Outcome == ListingOutcome::Listed && tab.Entries.empty()
+							   ? "this origin answered, and has published nothing"
+							   : Describe(listing.Outcome);
 			}
 
 			tabs.push_back(std::move(tab));

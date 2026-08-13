@@ -894,6 +894,7 @@ end
 
 declare extern type Material extends Instance with
 	MaterialId: string
+	Shader: string
 end
 
 declare extern type Humanoid extends Instance with

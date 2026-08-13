@@ -77,6 +77,14 @@ namespace client {
 			return false;
 		}
 
+		// **The first caller `SetSurfaceBounces` ever had on this side.** See
+		// `Options::SurfaceBounces`: left at the renderer's default unless a run
+		// asked, because each level costs a full scene pass per visible surface.
+		if (Settings.SurfaceBounces > 0) {
+			Renderer.SetSurfaceBounces(static_cast<uint32_t>(Settings.SurfaceBounces));
+			ENGINE_INFO("surfaces: resolving {} bounce(s) in frame", Settings.SurfaceBounces);
+		}
+
 		// **The interface pass, built against the renderer's own device.** A
 		// failure here is not fatal and must not be: a client that refused to
 		// start because a shader or a typeface was missing would be worse than
@@ -1919,6 +1927,48 @@ namespace client {
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &lit, engine::ecs::Scheduler &) {
 			const engine::scene::Sun sun = engine::scene::SunOf(lit);
 			Renderer.SetSun(sun.Direction, sun.Ambient);
+		});
+
+		// **The shaders this world's materials name, resolved before the frame
+		// that draws with them.** Beside the sun and for the same reason: a
+		// script may select one at any time, so this runs every frame — and on a
+		// world nobody is editing it is one walk over the materials and an
+		// integer compare per distinct shader, which is what
+		// `ShaderSource::Revision` exists to make possible.
+		//
+		// **Only for the world being drawn.** A shader is a pipeline, and a
+		// pipeline built for a world nothing is presenting is video memory held
+		// for a frame that is not being rendered.
+		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
+			if (Shaders.Refresh(shaded) == 0) {
+				return;
+			}
+
+			// **Only what moved.** `Changed` is the whole reason a refresh
+			// returns a count rather than a bool: rebuilding every pipeline
+			// every frame is what this loop exists not to do.
+			for (const engine::core::Name &name : Shaders.Changed()) {
+				const engine::render::ShaderModule *module = Shaders.Find(name);
+
+				// Null is a name nothing asks for any more, so whatever was
+				// built for it is released. The instances that named it are
+				// already gone or already name something else.
+				if (module == nullptr) {
+					(void)Renderer.DropShader(name);
+					continue;
+				}
+
+				// **A warning and not a fatal, and the part goes on drawing with
+				// the engine's own shader.** `render/AGENTS.md` is explicit that
+				// a user shader failing is a diagnostic string — the built-in
+				// ones fail the build instead, which is where that belongs.
+				if (!module->Error.empty()) {
+					ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
+					continue;
+				}
+
+				(void)Renderer.AddShader(name, module->SpirV);
+			}
 		});
 
 		// TODO(render-pipeline): this call took a `render::View` per camera.

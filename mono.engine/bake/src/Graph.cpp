@@ -82,6 +82,14 @@ namespace engine::bake {
 		return Append(std::move(node));
 	}
 
+	NodeId Graph::AddRasterize(uint32_t width, uint32_t height) {
+		Node node;
+		node.Kind = NodeKind::Rasterize;
+		node.Width = width;
+		node.Height = height;
+		return Append(std::move(node));
+	}
+
 	NodeId Graph::AddRetime(float fps) {
 		Node node;
 		node.Kind = NodeKind::Retime;
@@ -191,6 +199,20 @@ namespace engine::bake {
 				break;
 			}
 
+			// **The name is asked for exactly one format, and only once the
+			// bytes have said nothing.** An SVG is XML and carries no signature,
+			// so nothing but its name can identify it — and a `<svg` or `<?xml`
+			// prefix sniff would be the same mistake the paragraph above
+			// describes, a claim over text that the next XML-shaped format would
+			// walk into. A signature still wins, so a `.svg` holding a PNG
+			// decoded as one above.
+			if (ImageFormatOfName(input.Source) == ImageFormat::Svg) {
+				failure = "graph: '" + input.Source +
+						  "' is an svg, which states a coordinate system and no pixels — import it with "
+						  "a rasterize node, which carries the size";
+				return false;
+			}
+
 			ModelFormat format = ModelFormatOfName(input.Source);
 			if (format == ModelFormat::Unknown) {
 				format = ModelFormatOfBytes(input.Bytes);
@@ -245,6 +267,31 @@ namespace engine::bake {
 			}
 			SmoothNormals(result.Mesh);
 			break;
+		case NodeKind::Rasterize: {
+			if (input.Kind != PayloadKind::Bytes) {
+				return wrongKind("bytes");
+			}
+
+			// **A format that already has pixels is refused here rather than
+			// handed to an XML parser**, which would fail somewhere inside a
+			// PNG's compressed data with a message about markup. This node is
+			// for the one format with no size of its own.
+			const ImageFormat sniffed = ImageFormatOfBytes(input.Bytes);
+			if (sniffed != ImageFormat::Unknown) {
+				failure = "graph: '" + input.Source + "' is a " + std::string(Describe(sniffed)) +
+						  " and already has a size — import it, and resize it if it is the wrong one";
+				return false;
+			}
+
+			assets::TextureData texture;
+			if (!RasterizeSvg(input.Bytes, node.Width, node.Height, texture, failure)) {
+				return false;
+			}
+			result.Kind = PayloadKind::Texture;
+			result.Texture = std::move(texture);
+			result.Bytes.clear();
+			break;
+		}
 		case NodeKind::Resize: {
 			if (input.Kind != PayloadKind::Texture) {
 				return wrongKind("a texture");
@@ -265,6 +312,20 @@ namespace engine::bake {
 				for (size_t pixel = 3; pixel < result.Texture.Pixels.size(); pixel += 4) {
 					result.Texture.Pixels[pixel] = std::byte{255};
 				}
+			}
+			break;
+		case NodeKind::Mipmap:
+			if (input.Kind != PayloadKind::Texture) {
+				return wrongKind("a texture");
+			}
+			// **Last of the texture nodes, and the graph does not enforce it.**
+			// A resize after this one drops the chain and an opaque pass after it
+			// would leave the levels' alpha as it was, so the order is the
+			// pipeline's to get right — `Bake.cpp` puts it immediately before the
+			// write for that reason.
+			if (!BuildMipChain(result.Texture)) {
+				failure = "graph: '" + input.Source + "' cannot carry a mip chain";
+				return false;
 			}
 			break;
 		case NodeKind::Retime:

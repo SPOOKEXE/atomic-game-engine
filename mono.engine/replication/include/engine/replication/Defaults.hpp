@@ -71,6 +71,20 @@ namespace engine::replication {
 		// Getting one entry wrong is silent in both directions: the wrong
 		// detector sends nothing and reports nothing.
 		ChangeDetection Detection = ChangeDetection::Signature;
+
+		// The component whose presence on an entity takes *this* component's
+		// deltas off the wire for that entity, or empty for none.
+		//
+		// **Here rather than at each host, because there are two hosts.**
+		// `server::Server` and `studio::PlayLink` both build an `Authority` by
+		// walking this table, and a filter applied at one of them is a
+		// difference between playing in the editor and playing for real — which
+		// is the hardest kind of bug to see, because both look correct alone.
+		//
+		// Empty for every row but one. See `Authority::SuppressWhenTagged`.
+		//
+		// @since v0.15
+		std::string_view Suppressor;
 	};
 
 	// Whether a component is deliberately kept off the wire.

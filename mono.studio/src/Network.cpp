@@ -170,6 +170,12 @@ namespace studio {
 		// they are rebuilt with the clients rather than waiting for somebody to
 		// reopen the panel. An origin added on the Content page and no tab for
 		// it reads as the row not having been saved.
+		//
+		// **Rebuilt without asking the origins**, unlike `RefreshStoreContents`.
+		// This runs at start-up and on every save of the Content page, and
+		// `MakeOriginLister` waits for an answer with a ceiling on the wait — a
+		// mistyped address with a key beside it would then be a stall on a path
+		// nobody chose. The tab says it has not been asked, and Refresh asks.
 		AssetTabs = BuildCatalogue(Content);
 
 		// **Built even when delivery is not.** An uploader verifies nothing, so

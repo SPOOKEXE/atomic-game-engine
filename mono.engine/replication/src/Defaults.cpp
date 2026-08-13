@@ -157,10 +157,31 @@ namespace engine::replication {
 					continue;
 				}
 
+				// **A limb's transform is derived on whichever machine draws**, so
+				// sending it every tick spends wire on a row `scene::PoseCharacters`
+				// overwrites the moment it lands: five extra rows per character per
+				// tick, each a ten-byte quantised `CFrame`, against roughly ten
+				// bytes for the root alone.
+				//
+				// `scene.CharacterLimb` is the tag because it already means exactly
+				// this — an entity carrying one *is* an entity whose frame is a
+				// product of its root and its rest offset. Nothing new had to be
+				// declared, which is also why this needed no second consumer to
+				// check the idea against: the second consumer would have wanted the
+				// same tag it already has.
+				//
+				// The offsets still cross, because `scene.CharacterLimb` is itself
+				// replicated and is not what this filters. Only `scene.Transform`
+				// rows for those entities stop, and only as deltas — the baseline a
+				// newly admitted client receives still carries one copy, so its
+				// first frame is right before any derivation has run. `D00115`.
+				const bool derived = name == "scene.Transform";
+
 				found.push_back(
 					ReplicatedComponent{
 						name,
 						WrittenEveryTick(name) ? ChangeDetection::Observed : ChangeDetection::Signature,
+						derived ? std::string_view("scene.CharacterLimb") : std::string_view(),
 					}
 				);
 			}

@@ -1710,6 +1710,14 @@ namespace engine::scene {
 			// site: `material.Material = ...`.
 			ecs::Classes::Property<&MaterialRef::Asset>(materialClass, "MaterialId");
 
+			// **Which shader draws it, and `Shader` rather than `ShaderId`.**
+			// The `...Id` spelling above marks a name a *publisher* owns, which
+			// is what puts the content picker on it — and this name is not one:
+			// it may be a `ShaderScript` sitting in the same world, or a shader
+			// the engine ships and no manifest lists. `scene/Shaders.hpp` is the
+			// resolution order and why it is that way round.
+			ecs::Classes::Property<&MaterialRef::Shader>(materialClass, "Shader");
+
 			// The light's, declared on the base so all three inherit them.
 			//
 			// **`Angle` and `Face` are on `Light` rather than on the two classes

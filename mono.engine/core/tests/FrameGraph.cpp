@@ -431,14 +431,29 @@ TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]")
 
 	// **The loop is timed as well as profiled**, and the assertion below is
 	// against that rather than against a number of milliseconds. A ceiling like
-	// "under 3 ms" is a claim about the machine: four one-millisecond burns take
-	// four milliseconds on an idle box and can take three times that on a loaded
+	// "under 3 ms" is a claim about the machine: burns of a millisecond each
+	// take that long on an idle box and can take three times as long on a loaded
 	// one, so the test failed about one run in six while the code was correct.
-	// The wall clock and the profiler stretch together, so a ratio does not.
+	//
+	// **A ratio was the first fix and it was not enough, for a reason worth
+	// keeping.** The comment here used to say the wall clock and the profiler
+	// stretch together — true only if the stretch is *uniform*, and a scheduler
+	// does not work that way. It preempts one span. With four repeats a single
+	// stall of three milliseconds puts the maximum past sixty percent of a loop
+	// that should have been four, and the case failed under this repository's
+	// own parallel test sweep while the code was right.
+	//
+	// **Sixteen repeats rather than four**, which widens the gap the assertion
+	// is measuring instead of loosening the assertion. A total now reads about
+	// sixteen times a single reading, so one preempted burn among sixteen is
+	// still far below the ceiling — the discrimination gets stronger and the
+	// flake goes, which is the opposite trade from raising the bound.
+	constexpr int REPEATS = 16;
+
 	const auto started = std::chrono::steady_clock::now();
 
 	FrameGraph::BeginFrame();
-	for (int repeat = 0; repeat < 4; repeat++) {
+	for (int repeat = 0; repeat < REPEATS; repeat++) {
 		ENGINE_PROFILE("four-times");
 		BurnMilliseconds(1.0);
 	}
@@ -447,17 +462,18 @@ TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]")
 	const float spent =
 		std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
 
-	// Four opens of about a millisecond each. **A total would read near the
-	// whole loop; a single reading reads near a quarter of it** — and that is
+	// Sixteen opens of about a millisecond each. **A total would read near the
+	// whole loop; a single reading reads near a sixteenth of it** — and that is
 	// the difference the column has to show, so that it compares with the
 	// per-frame figure printed beside it.
 	//
-	// Six tenths, which is nowhere near either answer: a quarter is well under
-	// it and a total is well over, however slow the machine got.
+	// A third, which is nowhere near either answer: a sixteenth is far under it
+	// and a total is far over, and one stalled burn among sixteen cannot cross
+	// it however slow the machine got.
 	const float worst = FrameGraph::RecentMaximum("four-times");
-	INFO("worst " << worst << " ms of " << spent << " ms spent in the loop");
+	INFO("worst " << worst << " ms of " << spent << " ms spent over " << REPEATS << " opens");
 	REQUIRE(worst >= 0.5f);
-	REQUIRE(worst < spent * 0.6f);
+	REQUIRE(worst < spent * 0.33f);
 }
 
 TEST_CASE("a span that stops running decays out of the window", "[framegraph]") {

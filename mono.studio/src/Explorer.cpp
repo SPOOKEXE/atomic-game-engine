@@ -636,8 +636,16 @@ namespace studio {
 
 				ImGui::PushID(static_cast<int>(world.Index));
 
-				const std::string label =
-					std::string(worldName.IsValid() ? Label(worldName) : "?") + "  (world)";
+				// **A replica says so on its own row**, because the tag is the
+				// only thing that distinguishes it. A client view holds the same
+				// instances under the same names as the scene it is a view of,
+				// so an author who scrolled to the wrong one has no other cue —
+				// and an edit made there reaches one client and is overwritten
+				// by the next delta. See `EditAuthority`.
+				const bool clientView = AuthorityOf(world) == EditAuthority::ClientLocal;
+
+				const std::string label = std::string(worldName.IsValid() ? Label(worldName) : "?") +
+										  (clientView ? "  (client view)" : "  (world)");
 
 				const bool open = ImGui::TreeNodeEx("##world", flags, "%s", label.c_str());
 

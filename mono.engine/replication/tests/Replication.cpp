@@ -176,6 +176,60 @@ TEST_CASE("a big world joins over several ticks rather than one", "[replication]
 	REQUIRE(pair.Replica_.SnapshotOutstanding() == 0);
 }
 
+TEST_CASE("a tagged entity stops paying for a row the receiver derives", "[replication]") {
+	// **`D00115`: the filter was per component and a character needed it per
+	// row.** Five of a character's six parts have their frame derived from the
+	// root by `scene::PoseCharacters` on whichever machine draws, so the frames
+	// that crossed for them were overwritten the moment they landed — five
+	// ten-byte quantised `CFrame`s per character per tick against roughly ten
+	// for the root alone.
+	//
+	// Spelled here with the suite's own components rather than with `scene`'s,
+	// because `replication` does not link `scene` and must not: the tag reaches
+	// the authority as a *string*, which is the whole reason this works across
+	// the tier boundary. `Marked` stands in for `scene.CharacterLimb`.
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SuppressWhenTagged(
+		Name("replication_test.Spot"), Name("replication_test.Marked")
+	);
+
+	const Entity root = pair.Server.Create();
+	pair.Server.Set<Spot>(root, Spot{1.0f, 0.0f});
+
+	const Entity limb = pair.Server.Create();
+	pair.Server.Set<Spot>(limb, Spot{2.0f, 0.0f});
+	pair.Server.Set<Marked>(limb, Marked{1});
+
+	REQUIRE(pair.Join());
+
+	// **The baseline carries one copy, and that is deliberate.** A client just
+	// admitted holds the limb where the server last put it, so its first frame
+	// is right before any derivation has run. Only the per-tick repeat stops.
+	REQUIRE(pair.Client.Get<Spot>(limb) != nullptr);
+	CHECK(pair.Client.Get<Spot>(limb)->X == 2.0f);
+
+	// And the tag itself still crosses — it is what carries a limb's rest
+	// offset, and filtering it would be the mistake `D00115` warned against.
+	CHECK(pair.Client.Get<Marked>(limb) != nullptr);
+
+	// Now move both. The untagged row is the control: without it a test that
+	// asserted only the skip would also pass if replication had stopped
+	// entirely.
+	pair.Server.GetMutable<Spot>(root)->X = 11.0f;
+	pair.Server.GetMutable<Spot>(limb)->X = 22.0f;
+
+	for (int beat = 0; beat < 4; beat++) {
+		pair.Tick();
+	}
+
+	INFO("the unsuppressed row is the control and must still arrive");
+	CHECK(pair.Client.Get<Spot>(root)->X == 11.0f);
+
+	INFO("the suppressed row must still hold what the baseline gave it");
+	CHECK(pair.Client.Get<Spot>(limb)->X == 2.0f);
+}
+
 TEST_CASE("an entity with no replicated component is not in the snapshot", "[replication]") {
 	// **A row with nothing in it still says how many entities the world holds.**
 	// Interest filters entities and `Replicate` filters components, and the

@@ -67,25 +67,14 @@ namespace client {
 					const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(entity);
 					const Tags *tags = store.Get<Tags>(entity);
 
-					// Preserve every replicated visual field.
-					drawList->Instances.push_back(
-						DrawInstance{
-							interpolated.value_or(transform.Frame),
-							bounds.HalfExtent,
-							visual.Tint,
-							visual.Mesh,
-							appearance != nullptr ? appearance->ColourMap : Name(),
-							appearance != nullptr ? appearance->NormalMap : Name(),
-							appearance != nullptr ? appearance->RoughnessMap : Name(),
-							appearance != nullptr ? appearance->OcclusionMap : Name(),
-							appearance != nullptr ? appearance->EmissiveMap : Name(),
-							tags != nullptr ? tags->Mask : 0u,
-							visual.Transparency,
-							visual.Surface,
-							visual.CastShadow,
-							appearance != nullptr ? appearance->Mode : AlphaMode::Opaque,
-						}
-					);
+					// Every replicated visual field, through the builder both
+					// collectors share — see `scene::MakeDrawInstance`. The
+					// optional components stay optional here: a replicated row
+					// may arrive without an appearance, which is the difference
+					// from the local collector that made these two drift.
+					drawList->Instances.push_back(engine::scene::MakeDrawInstance(
+						interpolated.value_or(transform.Frame), bounds, visual, appearance, tags
+					));
 				}
 			);
 

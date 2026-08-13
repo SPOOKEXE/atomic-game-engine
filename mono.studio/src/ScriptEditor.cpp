@@ -397,13 +397,22 @@ namespace studio {
 		const auto caret = static_cast<size_t>(std::max(0, tab.Edit.Caret));
 		const CompletionQuery query = ScanBackwards(tab.Text, caret);
 
-		// **Opened on a separator, on two characters, or on being asked.** One
-		// character is every identifier in the file at once, which is a popup
-		// that appears the instant anybody types and covers the line they are
-		// writing. A separator is unambiguous — nobody types `part.` meaning to
-		// stop there.
+		// **Opened on a separator, on one character, or on being asked.** A
+		// separator is unambiguous — nobody types `part.` meaning to stop there.
+		//
+		// **One and not two, which was a deliberate reversal at v0.15.** The
+		// argument for two was that one character offers every identifier in the
+		// file at once and covers the line being written. That is true and it is
+		// not what an author feels: what they feel is a keystroke of lag between
+		// starting a name and the editor admitting it knows any, which reads as
+		// the completion being broken rather than as it being polite. The list
+		// filters down on the very next character anyway, so the cost is one
+		// crowded frame and the benefit is that "as you type" means what it says.
+		//
+		// The escape from a popup that is in the way is Escape, and it already
+		// works — `DrawScriptCompletion` owns that key while the popup is up.
 		const bool worthOpening =
-			asked || ScriptPopupOpen || query.Separator != '\0' || query.Prefix.size() >= 2;
+			asked || ScriptPopupOpen || query.Separator != '\0' || !query.Prefix.empty();
 
 		if (!worthOpening) {
 			ScriptPopupOpen = false;
@@ -436,7 +445,24 @@ namespace studio {
 		// Nothing to say is a closed popup rather than an empty box.
 		ScriptPopupOpen = !ScriptCompletions.empty();
 		ScriptPopupAnchor = static_cast<int>(caret - query.Prefix.size());
-		ScriptPopupChoice = std::clamp(ScriptPopupChoice, 0, static_cast<int>(ScriptCompletions.size()) - 1);
+
+		// **Back to the top whenever the list itself changed, and clamped only
+		// when it did not.** A highlight is a position in a list, so carrying the
+		// *index* across a re-query points it at whatever now happens to sit
+		// there. Typing another letter narrows the offers, so an author who had
+		// arrowed down to the sixth entry and kept typing was left highlighting
+		// the sixth entry of a different list — and Enter inserted it without
+		// anything on screen having looked wrong.
+		//
+		// The clamp is still what a caret move wants: moving along a line
+		// re-queries with the same prefix and the same offers, and resetting
+		// there would fight the arrow keys.
+		if (textChanged || asked) {
+			ScriptPopupChoice = 0;
+		} else {
+			ScriptPopupChoice =
+				std::clamp(ScriptPopupChoice, 0, static_cast<int>(ScriptCompletions.size()) - 1);
+		}
 	}
 
 	void Editor::DrawScriptCompletion(OpenScript &tab, const ImVec2 fieldMin, const unsigned int popupId) {

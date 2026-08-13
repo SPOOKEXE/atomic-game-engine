@@ -83,7 +83,21 @@ namespace engine::replication {
 
 		Components.push_back(component);
 		Detection.push_back(detection);
+		Suppressors.emplace_back();
 		Signatures.emplace_back();
+	}
+
+	void Authority::SuppressWhenTagged(core::Name component, core::Name tag) {
+		// **Only a component already declared can be filtered.** The alternative
+		// is remembering a filter for a name nothing sends, which would apply
+		// silently the day somebody replicated that component for an unrelated
+		// reason — a row going missing with nothing in this file naming it.
+		const auto at = std::find(Components.begin(), Components.end(), component);
+		if (at == Components.end()) {
+			return;
+		}
+
+		Suppressors[static_cast<size_t>(std::distance(Components.begin(), at))] = tag;
 	}
 
 	bool Authority::Replicated(core::Name component) const {
@@ -178,6 +192,18 @@ namespace engine::replication {
 		for (const core::Name name : Components) {
 			if (const ecs::ComponentId id = ecs::Components::Find(name); id.IsValid()) {
 				Resolved.push_back(id);
+			}
+		}
+
+		// **Indexed by slot, so it is filled for every slot including the ones
+		// that resolve to nothing.** `Resolved` above is a compacted list — it
+		// skips a component this process has not registered — and using its
+		// indices for anything slot-shaped is how the wrong component gets
+		// filtered. See `SuppressWhenTagged`.
+		ResolvedSuppressors.assign(Components.size(), ecs::ComponentId{});
+		for (size_t slot = 0; slot < Suppressors.size(); slot++) {
+			if (Suppressors[slot].IsValid()) {
+				ResolvedSuppressors[slot] = ecs::Components::Find(Suppressors[slot]);
 			}
 		}
 
@@ -568,10 +594,27 @@ namespace engine::replication {
 
 			core::ByteWriter values;
 
+			// The tag that takes this component's rows off the wire per entity,
+			// or invalid when this slot has none — which is every slot by
+			// default. Read once rather than per row. See `SuppressWhenTagged`.
+			const ecs::ComponentId suppressor =
+				slot < ResolvedSuppressors.size() ? ResolvedSuppressors[slot] : ecs::ComponentId{};
+
+			// A row the receiver derives for itself. Skipped *after* the
+			// interest check and before `offer`, so a suppressed row costs no
+			// acknowledgement slot either — an outstanding entry for a row that
+			// is never sent is one the recovery pass would chase for ever.
+			const auto derivedThere = [&](const ecs::Entity entity) {
+				return suppressor.IsValid() && store.HasComponent(entity, suppressor);
+			};
+
 			if (Detection[slot] == ChangeDetection::Signature) {
 				for (const uint64_t changed : Signatures[slot].Changed) {
 					const ecs::Entity entity{changed};
 					if (client.Known.find(changed) == client.Known.end()) {
+						continue;
+					}
+					if (derivedThere(entity)) {
 						continue;
 					}
 
@@ -588,6 +631,9 @@ namespace engine::replication {
 					for (size_t row = 0; row < rows; row++) {
 						const ecs::Entity entity = entities[row];
 						if (client.Known.find(entity.Id) == client.Known.end()) {
+							continue;
+						}
+						if (derivedThere(entity)) {
 							continue;
 						}
 

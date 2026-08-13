@@ -541,6 +541,13 @@ namespace server {
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {
 			Replication->Authority().Replicate(engine::core::Name(component.Name), component.Detection);
+
+			// After `Replicate`, which is what declares the slot this names.
+			if (!component.Suppressor.empty()) {
+				Replication->Authority().SuppressWhenTagged(
+					engine::core::Name(component.Name), engine::core::Name(component.Suppressor)
+				);
+			}
 		}
 
 		// **The priority score, and it is the first thing ever to fill this

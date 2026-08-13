@@ -12,6 +12,7 @@
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
@@ -205,6 +206,12 @@ namespace engine::scene {
 			const auto *refs = static_cast<const MaterialRef *>(source);
 			for (size_t index = 0; index < count; index++) {
 				writer.WriteName(refs[index].Asset);
+
+				// Written the day it was added, which is `WriteVisuals`' lesson:
+				// a material whose shader reset on every load would be a part
+				// that came back drawn by the engine's default and nothing in
+				// the file saying why.
+				writer.WriteName(refs[index].Shader);
 			}
 		}
 
@@ -212,6 +219,31 @@ namespace engine::scene {
 			auto *refs = static_cast<MaterialRef *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				refs[index].Asset = reader.ReadName();
+				refs[index].Shader = reader.ReadName();
+			}
+		}
+
+		// **A written pair rather than the generated one**, for `WriteTexts`'
+		// reason: `ShaderSource` holds a `std::string` and is therefore not
+		// trivially copyable, so there is no object representation to write.
+		void WriteShaderSources(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *sources = static_cast<const ShaderSource *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteString(sources[index].Code);
+
+				// **The revision travels with the code.** A library that
+				// restored the text and reset the counter would believe a
+				// reloaded world's shaders were the ones it had already
+				// compiled, and would draw last session's.
+				writer.WriteUInt32(sources[index].Revision);
+			}
+		}
+
+		void ReadShaderSources(core::ByteReader &reader, void *destination, size_t count) {
+			auto *sources = static_cast<ShaderSource *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				sources[index].Code = std::string(reader.ReadString());
+				sources[index].Revision = reader.ReadUInt32();
 			}
 		}
 
@@ -229,6 +261,7 @@ namespace engine::scene {
 				writer.WriteName(appearances[index].OcclusionMap);
 				writer.WriteName(appearances[index].HeightMap);
 				writer.WriteName(appearances[index].EmissiveMap);
+				writer.WriteName(appearances[index].Shader);
 
 				writer.WriteFloat(appearances[index].AlphaCutoff);
 				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Mode));
@@ -279,6 +312,7 @@ namespace engine::scene {
 				appearances[index].OcclusionMap = reader.ReadName();
 				appearances[index].HeightMap = reader.ReadName();
 				appearances[index].EmissiveMap = reader.ReadName();
+				appearances[index].Shader = reader.ReadName();
 				appearances[index].AlphaCutoff = reader.ReadFloat();
 
 				const uint8_t mode = reader.ReadUInt8();
@@ -512,6 +546,11 @@ namespace engine::scene {
 		// because it is a name.
 		ecs::Components::Register<MaterialRef>("scene.MaterialRef", WriteMaterialRefs, ReadMaterialRefs);
 
+		// **What a `ShaderScript` instance holds**, registered beside the
+		// material that names one and at the end for the same reason. A written
+		// pair because it holds a `std::string`, not because it holds a name.
+		ecs::Components::Register<ShaderSource>("scene.ShaderSource", WriteShaderSources, ReadShaderSources);
+
 		// The render gate, at the end for the reason this list opens with.
 		//
 		// **No wire form, and it is not an oversight.** This is a conclusion
@@ -608,12 +647,17 @@ namespace engine::scene {
 		//
 		// **All three cross the wire, and `CharacterLimb` is the one worth
 		// stating.** A client poses its own limbs from the root it interpolated,
-		// so the *offsets* have to arrive once — but the limb transforms that
-		// come with them are overwritten by `PoseCharacters` on the frame they
-		// land. That is wire spent on nothing, and it is the cost of
-		// `replication` filtering by component rather than by entity;
-		// `docs/DEFERRED.md` carries it as an item rather than as a comment
-		// nobody will find.
+		// so the *offsets* have to arrive — and this row is what carries them.
+		//
+		// **It is also the tag that stops the limb transforms following them.**
+		// Those were sent every tick and overwritten by `PoseCharacters` on the
+		// frame they landed, which is what `D00115` filed: `replication` filtered
+		// by component and a limb needed filtering by row. It does now —
+		// `replication::DefaultReplicatedComponents` names this component as the
+		// suppressor for `scene.Transform`, so an entity carrying one stops
+		// paying for a frame the receiver computes. Nothing new had to be
+		// declared, because an entity with a limb row already *means* an entity
+		// whose transform is derived.
 		ecs::Components::Register<Character>("scene.Character");
 		ecs::Components::Register<CharacterLimb>("scene.CharacterLimb");
 		ecs::Components::Register<PlayerCharacter>("scene.PlayerCharacter");
@@ -639,5 +683,14 @@ namespace engine::scene {
 		// a perfectly good file — which is exactly the failure
 		// `game::RegisterGameClasses` exists to prevent for `Part`.
 		(void)ServiceClass();
+
+		// **`ShaderScript` through the same door, for the same reason.** It is
+		// this module's class and it lives in its own file only because the
+		// property that moves its revision does; a caller that had to know to
+		// register it separately would be one that opened a game file naming
+		// one and could not resolve it — and the studio's own insert menu is
+		// built by walking everything registered under `Instance`, so a class
+		// nothing registered is a class nobody can create.
+		(void)ShaderScriptClass();
 	}
 }

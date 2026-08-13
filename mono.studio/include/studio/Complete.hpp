@@ -18,11 +18,28 @@
 // nothing about `f().` on purpose. A real parse would need the language's
 // grammar twice over, and this file covers two languages.
 //
-// **There is no type inference, and the limit is worth stating out loud.** A
-// local declared `local p = Instance.new("Part")` is resolved, because the class
-// is written on the line. A local from `part:FindFirstChild("X")` is not, and
-// after it `p.` offers the union of every scriptable property rather than
-// `BasePart`'s. The union is a longer list, never a wrong one.
+// **There is no type inference. There is assignment following, which is a
+// smaller thing, and the boundary between them is the point.** A local is
+// resolved when the buffer *says* what it holds: `Instance.new("Part")`,
+// `game:GetService("Lighting")` and `FindFirstChildOfClass("Part")` write the
+// class as a literal, `:Clone()` carries its receiver's class because a clone of
+// a `Part` is a `Part`, and `local same = part` is the same local under another
+// name. Only the **last** assignment before the caret counts: a local set from
+// `Instance.new` and then from something unreadable is not a `Part` any more.
+//
+// Everything else answers nothing and falls back to the union of every
+// scriptable property — a longer list, never a wrong one. `FindFirstChild` and
+// `WaitForChild` are the ones worth naming, because following them to their
+// receiver is the obvious next step and it is wrong: a child of a `Model` is not
+// a `Model`, so that narrowing would offer `Model`'s properties for a `Part`.
+//
+// **Which is why every row says whose property it is.** A narrowed row's detail
+// reads `bool on Part` and a union row's reads `bool on some class`: the first
+// claims "this class has this" and the second says "one of these classes has
+// this", and an author who cannot tell those apart is the failure this feature
+// was allowed to have. The marker goes in `Completion::Detail` because that is
+// what the popup already draws, so the distinction survives without the drawing
+// code having to be told about it.
 //
 // Where the names come from is the point, and none of it is written down here:
 // classes, properties and enums are read live from `ecs::Classes` and
@@ -80,8 +97,14 @@ namespace studio {
 		// What replaces the prefix under the caret.
 		std::string Text;
 
-		// The dimmed hint on the right: a property's type, a class's parent,
-		// what a global is. Empty when the name says everything.
+		// The dimmed hint on the right: a property's type and whose it is, a
+		// class's parent, what a global is. Empty when the name says
+		// everything.
+		//
+		// A property's detail names the class it is being claimed for —
+		// `bool on Part` — or says `bool on some class` when the list is the
+		// union, which is the only thing distinguishing a narrowed list from a
+		// broad one on screen.
 		std::string Detail;
 
 		CompletionKind Kind = CompletionKind::Local;

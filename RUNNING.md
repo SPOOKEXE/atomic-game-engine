@@ -2314,6 +2314,36 @@ studio has accumulated from its own frame deltas — no module here reads a wall
 clock — so a stopped run stops animating and two runs of one recording show the
 same frames.
 
+## Vector art — `.svg`
+
+An `.svg` bakes to an ordinary `.atex` like any other image, and nothing
+downstream knows it was ever a drawing:
+
+```lua
+local label = Instance.new("ImageLabel")
+label.Image = "icons/leaf.atex"       -- baked from icons/leaf.svg
+```
+
+**A drawing has no pixels, so somebody has to choose them.** `assetc` uses the
+`width` and `height` the document declares, and `--max-texture` shrinks an
+oversized one by *rasterising it again* at the cap rather than by resampling —
+the sharp answer is still available for a drawing, which is the whole reason the
+size is a parameter of the bake rather than a resize after it. A pipeline built
+by hand names the size on the node:
+
+```cpp
+const NodeId drawn = graph.AddRasterize(256, 256);   // 0, 0 for what it declares
+```
+
+**The subset is small and everything outside it is refused by name.** Shapes,
+paths of M/L/H/V/C/Z, solid `fill` and `stroke` with their opacities, and a
+`transform` of `translate` and `scale`. Text, gradients, filters, masks, `<use>`,
+`style` attributes, rotations and arcs each fail the file with a message naming
+what stopped it — a bake report saying `<text> is not an element this rasterises`
+is something to act on, where an icon that quietly arrived blank is not.
+`mono.engine/bake/src/Svg.cpp` carries the full list and the argument, and a
+`<!DOCTYPE>` or `<!ENTITY>` is refused outright.
+
 ## Picking an asset that has not been published
 
 The content picker has two tabs. **Published** is the manifest: baked forms only,

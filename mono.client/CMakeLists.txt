@@ -33,6 +33,18 @@ mono_add_library(client
 		# that conversion is here rather than in `effects`.
 		Engine::effects
 
+		# L8, `shared`. Named because `client/src/Scene.cpp` includes
+		# `physics/Characters.hpp` and `physics/Query.hpp` and calls
+		# `RegisterCharacterSystems`.
+		#
+		# **It linked before this line existed, which is the problem.** The
+		# symbols arrived transitively through `Engine::examples → Engine::script
+		# → Engine::physics`, so a client built and ran while depending on an
+		# edge nobody had declared — and the day `script` stops needing physics,
+		# the break lands here rather than where the change was made. Both other
+		# repos document having already closed the same hole for themselves.
+		Engine::physics
+
 		# `--connect` makes one of this client's worlds somebody else's
 		# authority. Both are `shared` tier, so neither widens what a client is
 		# allowed to link — the tier rule already permits `shared` here.

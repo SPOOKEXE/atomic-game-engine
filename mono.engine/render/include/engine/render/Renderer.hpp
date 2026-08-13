@@ -941,6 +941,59 @@ namespace engine::render {
 		// @since v0.10
 		bool DropTexture(const core::Name &name);
 
+		// Registers a fragment shader under a name a draw instance can select.
+		//
+		// **The words are already SPIR-V.** Where they came from is the caller's
+		// business and there are two answers: `render::ShaderLibrary` compiled a
+		// `ShaderScript`'s GLSL, or it read a built-in `glslc` produced during
+		// the build. Neither is this class's concern — it builds the pipelines a
+		// `scene::DrawInstance::Shader` naming this resolves to.
+		//
+		// **The module must declare what `opaque.frag` declares**: four fragment
+		// samplers and three uniform buffers, in those slots. A shader object
+		// carries those counts rather than the pipeline doing so, so a module
+		// that declares different ones binds and silently samples nothing — the
+		// same trap the built-in pipeline's own comments record. That interface
+		// is what a `ShaderScript` is written against.
+		//
+		// **Only the fragment stage, deliberately.** The vertex stage owns the
+		// instance layout, which `AGENTS.md` says is private and stays private —
+		// a caller able to replace it would be authoring against a struct nobody
+		// promised to keep.
+		//
+		// **Two pipelines are built, opaque and transparent**, because blend
+		// state is baked into a pipeline. The shadow pass draws through neither:
+		// it writes depth and no colour, so a fragment shader there would cost a
+		// pass over the scene to produce nothing.
+		//
+		// Registering a name twice replaces it, which is what an author editing
+		// a shader does; the frame in flight is waited for before the old
+		// pipeline is released.
+		//
+		// @param name  What a material names it.
+		// @param spirv The module's words. Copied into device objects; not retained.
+		// @return `false` when the module or either pipeline could not be built.
+		//         The error is logged with the shader's name.
+		// @since v0.15
+		bool AddShader(const core::Name &name, std::span<const uint32_t> spirv);
+
+		// Forgets a registered shader and frees its pipelines.
+		//
+		// Instances still naming it fall back to the engine's own shader rather
+		// than vanishing — `MeshTable::Resolve`'s rule, and its reason.
+		//
+		// @param name The name to drop.
+		// @return `false` for a name this renderer does not hold.
+		// @since v0.15
+		bool DropShader(const core::Name &name);
+
+		// Whether a shader is registered under this name.
+		//
+		// @param name The name.
+		// @return `true` when a variant exists for it.
+		// @since v0.15
+		bool HasShader(const core::Name &name) const;
+
 		// Waits for the display and claims this frame's image, before the caller
 		// has read a single event.
 		//
@@ -1204,8 +1257,23 @@ namespace engine::render {
 		// readable. What this answers is "did the scene render", which is the
 		// question a renderer is asked.
 		//
+		// **Which viewport, because a host with two draws them in turn.** The
+		// request is made after one panel's `Render` returns and consumed by the
+		// *next* one, so a caller that asked while panel A was showing got
+		// panel B's picture — and with a scene per panel that is a photograph of
+		// a world nobody named. Naming the slot makes the request wait for that
+		// panel's turn instead of taking whichever came next.
+		//
 		// @param path Where to write a BMP. Empty cancels a pending request.
-		void RequestSceneCapture(std::filesystem::path path);
+		// @param slot Which viewport's scene to photograph, or `ANY_VIEWPORT`
+		//             for whichever draws next — which is the old behaviour and
+		//             is right for a host with one panel.
+		void RequestSceneCapture(std::filesystem::path path, size_t slot = ANY_VIEWPORT);
+
+		// Any viewport will do. See `RequestSceneCapture`.
+		//
+		// @since v0.15
+		static constexpr size_t ANY_VIEWPORT = static_cast<size_t>(-1);
 
 		// The device and swapchain format a `FrameOverlayHook` builds against.
 		//

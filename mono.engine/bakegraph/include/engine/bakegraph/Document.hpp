@@ -91,6 +91,17 @@ namespace engine::bake {
 		// A `Resize` node.
 		AddResize,
 
+		// A `Rasterize` node.
+		//
+		// **Its own operation rather than `AddResize` reused**, though both
+		// carry two integers: they mean different things — one is the size a
+		// picture is resampled to and the other is the size a drawing is first
+		// given — and a document that spelled them the same would bake
+		// differently depending on what was upstream.
+		//
+		// @since v0.14
+		AddRasterize,
+
 		// A `Retime` node.
 		AddRetime,
 

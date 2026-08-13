@@ -137,6 +137,29 @@ namespace studio {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text("in %s", Label(Universe->NameOf(SelectionWorld)));
 			ImGui::PopStyleColor();
+
+			// **Where the edit lands, said before it is made rather than
+			// discovered after.** The panel looks the same for a scene and for a
+			// `Play` run's client view, and a write to the second reaches one
+			// client and is undone by the next delta. Warning-coloured for that
+			// case only: an author editing a scene is doing the ordinary thing
+			// and does not need a badge shouting at them for it.
+			const EditAuthority authority = AuthorityOf(SelectionWorld);
+			if (authority == EditAuthority::ClientLocal) {
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				ImGui::Text("[%s]", Describe(authority));
+				ImGui::PopStyleColor();
+
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						"This is a client's view of a run. An edit here changes that one\n"
+						"client, is never sent, and is overwritten the next time the server\n"
+						"replicates this row. Edit the scene itself to change every client."
+					);
+				}
+			}
+
 			ImGui::Separator();
 
 			// Grouped by declaring class, root first, which reads the way the

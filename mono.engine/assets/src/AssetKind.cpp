@@ -24,7 +24,7 @@ namespace engine::assets {
 		// *inside* an entry is the importer's problem — `bake::ReadModel` is the
 		// one thing that reads a `.glb` — and this table has never claimed
 		// otherwise.
-		constexpr std::array<std::pair<std::string_view, AssetKind>, 37> EXTENSIONS{{
+		constexpr std::array<std::pair<std::string_view, AssetKind>, 39> EXTENSIONS{{
 			{"amesh", AssetKind::Mesh},
 			{"mesh", AssetKind::Mesh},
 			{"glb", AssetKind::Mesh},
@@ -42,6 +42,26 @@ namespace engine::assets {
 			{"ktx2", AssetKind::Texture},
 			{"dds", AssetKind::Texture},
 			{"basis", AssetKind::Texture},
+
+			// **A texture, because that is what one becomes.** `bake` lays a
+			// GIF's frames out as a grid in a single image and records the side,
+			// the count and the rate — see `assets::TextureData::FlipbookSide` —
+			// so everything downstream of the decoder handles it as the one image
+			// it now is. Naming a separate kind here would need a second route
+			// through the client's content pump to arrive at the same table.
+			//
+			// It was in `IsRuntimeReadable`'s source list and missing from this
+			// one, which is the half that decides what a publish records: a `.gif`
+			// went to the CDN as `Unknown` and `client::Client` never looked at
+			// it, so the decoder that already existed could not be reached.
+			{"gif", AssetKind::Texture},
+
+			// **A texture, for the same reason `.gif` is one**: `bake`
+			// rasterises the drawing at a size the pipeline names and what
+			// arrives is an ordinary `.atex`. Nothing downstream knows it was
+			// ever a vector, which is the point — a runtime holds no rasteriser
+			// any more than it holds a PNG decoder.
+			{"svg", AssetKind::Texture},
 
 			{"wav", AssetKind::Audio},
 			{"ogg", AssetKind::Audio},
@@ -119,11 +139,16 @@ namespace engine::assets {
 
 			// Images, all of which bake to `.atex`. `.gif` is here and its
 			// baked form is an ordinary flipbook sheet — `bake/Gif.cpp`.
+			// `.svg` is here and its baked form is the rasterisation `bake`
+			// made at the size the pipeline asked for: a runtime handed the
+			// markup would need an XML parser and a rasteriser to draw an icon,
+			// which is exactly the work a bake does once.
 			"png",
 			"jpg",
 			"jpeg",
 			"bmp",
 			"gif",
+			"svg",
 			"tga",
 
 			// Material descriptions, which bake to `.amat`.

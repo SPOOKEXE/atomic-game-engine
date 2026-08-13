@@ -17,6 +17,7 @@
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Components.hpp>
@@ -77,6 +78,18 @@ namespace client {
 		// -1 runs until the window is closed. A frame budget is what makes the
 		// client usable from a test or a CI job.
 		int64_t MaximumFrames = -1;
+
+		// Levels of surface-seen-in-surface the renderer resolves, or 0 for its
+		// own default of two.
+		//
+		// **`Renderer::SetSurfaceBounces` had no caller anywhere until v0.15**,
+		// so every scene resolved exactly two levels whatever it was built from
+		// — and two is a mirror seen in a mirror and nothing past it. A pane
+		// deeper than that draws as its own tint, because a slot that never
+		// rendered is not `Ready` and the shader falls back rather than showing
+		// a wrong picture. Each level costs a full scene pass per visible
+		// surface, which is why it is asked for rather than assumed.
+		int SurfaceBounces = 0;
 
 		// Open the F3 statistics panel at startup, rather than waiting for
 		// somebody to press F3.
@@ -434,6 +447,14 @@ namespace client {
 
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;
+
+		// **What a `Material.Shader` name resolves to**, and the one thing on
+		// this class that holds a GLSL compiler. One per client rather than one
+		// per world, for the reason `ShaderLibrary` gives: it caches over
+		// process-wide names, and `Refresh` takes whichever world is being
+		// drawn.
+		engine::render::ShaderLibrary Shaders;
+
 		engine::render::OverlayImage Overlay;
 
 		// **What draws a `ScreenGui` in a shipped client.** `mono.client` does

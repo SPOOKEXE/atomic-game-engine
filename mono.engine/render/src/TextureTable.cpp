@@ -32,6 +32,17 @@ namespace engine::render {
 		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
 		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
 
+		// **`max_lod` is the field that turns the chain on**, and leaving it at
+		// its zero-initialised value is the whole of how a mip chain gets built,
+		// uploaded and never sampled: `mipmap_mode` has said LINEAR since v0.8,
+		// and a clamp of zero pins every fetch to level zero regardless. The
+		// bound is past `assets::MipLevelCount`'s largest answer, which is what
+		// "as many levels as the texture has" is spelled as here — SDL takes a
+		// LOD clamp rather than a level count, so a per-texture number would have
+		// to be a per-texture sampler.
+		sampler.min_lod = 0.0f;
+		sampler.max_lod = 32.0f;
+
 		SharedSampler = SDL_CreateGPUSampler(Device, &sampler);
 		if (SharedSampler == nullptr) {
 			ENGINE_ERROR("texture table: sampler: {}", SDL_GetError());
@@ -103,21 +114,39 @@ namespace engine::render {
 
 	SDL_GPUTexture *
 	TextureTable::Upload(const assets::TextureData &image, std::string_view label, size_t &bytes) {
-		// Expand R8 assets so every texture uses the pipeline's RGBA format.
-		std::vector<std::byte> widened;
-		const std::byte *pixels = image.Pixels.data();
-		if (image.Format == assets::TextureFormat::R8) {
-			widened.resize(static_cast<size_t>(image.Width) * image.Height * 4);
-			for (size_t index = 0; index * 4 < widened.size(); index++) {
-				widened[index * 4] = image.Pixels[index];
-				widened[index * 4 + 1] = image.Pixels[index];
-				widened[index * 4 + 2] = image.Pixels[index];
-				widened[index * 4 + 3] = std::byte{255};
-			}
-			pixels = widened.data();
+		const uint32_t levels = image.LevelCount();
+
+		// **Every level staged back to back in one buffer**, so a chain costs one
+		// transfer allocation and one copy pass rather than fifteen of each. The
+		// offset walks it, which is the only reason `SDL_GPUTextureTransferInfo`
+		// carries one. Packed rather than padded to D3D12's 512-byte placement
+		// alignment: SDL's backend inserts a staging copy for a level that lands
+		// unaligned, and paying that on the two or three smallest levels is
+		// cheaper than the padding on every level of every texture.
+		size_t uploadBytes = 0;
+		for (uint32_t level = 0; level < levels; level++) {
+			uploadBytes += static_cast<size_t>(assets::MipExtent(image.Width, level)) *
+						   assets::MipExtent(image.Height, level) * 4;
 		}
 
-		const size_t uploadBytes = static_cast<size_t>(image.Width) * image.Height * 4;
+		// Expand R8 assets so every texture uses the pipeline's RGBA format.
+		std::vector<std::byte> staged(uploadBytes);
+		size_t written = 0;
+		for (uint32_t level = 0; level < levels; level++) {
+			const std::vector<std::byte> &source = level == 0 ? image.Pixels : image.Mips[level - 1];
+			if (image.Format == assets::TextureFormat::R8) {
+				for (size_t index = 0; index < source.size(); index++) {
+					staged[written + index * 4] = source[index];
+					staged[written + index * 4 + 1] = source[index];
+					staged[written + index * 4 + 2] = source[index];
+					staged[written + index * 4 + 3] = std::byte{255};
+				}
+				written += source.size() * 4;
+				continue;
+			}
+			std::memcpy(staged.data() + written, source.data(), source.size());
+			written += source.size();
+		}
 
 		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -126,7 +155,7 @@ namespace engine::render {
 		info.width = image.Width;
 		info.height = image.Height;
 		info.layer_count_or_depth = 1;
-		info.num_levels = 1;
+		info.num_levels = levels;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
 		SDL_GPUTexture *texture = SDL_CreateGPUTexture(Device, &info);
@@ -147,24 +176,34 @@ namespace engine::render {
 		}
 
 		void *mapped = SDL_MapGPUTransferBuffer(Device, transfer, false);
-		std::memcpy(mapped, pixels, uploadBytes);
+		std::memcpy(mapped, staged.data(), uploadBytes);
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
-		SDL_GPUTextureTransferInfo source{};
-		source.transfer_buffer = transfer;
-		source.pixels_per_row = image.Width;
-		source.rows_per_layer = image.Height;
+		size_t offset = 0;
+		for (uint32_t level = 0; level < levels; level++) {
+			const uint32_t width = assets::MipExtent(image.Width, level);
+			const uint32_t height = assets::MipExtent(image.Height, level);
 
-		SDL_GPUTextureRegion region{};
-		region.texture = texture;
-		region.w = image.Width;
-		region.h = image.Height;
-		region.d = 1;
+			SDL_GPUTextureTransferInfo source{};
+			source.transfer_buffer = transfer;
+			source.offset = static_cast<uint32_t>(offset);
+			source.pixels_per_row = width;
+			source.rows_per_layer = height;
 
-		SDL_UploadToGPUTexture(copy, &source, &region, false);
+			SDL_GPUTextureRegion region{};
+			region.texture = texture;
+			region.mip_level = level;
+			region.w = width;
+			region.h = height;
+			region.d = 1;
+
+			SDL_UploadToGPUTexture(copy, &source, &region, false);
+			offset += static_cast<size_t>(width) * height * 4;
+		}
+
 		SDL_EndGPUCopyPass(copy);
 		SDL_SubmitGPUCommandBuffer(command);
 		SDL_ReleaseGPUTransferBuffer(Device, transfer);
@@ -209,7 +248,13 @@ namespace engine::render {
 			return false;
 		}
 
-		const size_t bytes = image.Pixels.size();
+		// The chain counts against the ceiling too — it is a third of a texture's
+		// device memory, and a pre-check that ignored it would let a full table
+		// take an upload it then could not afford.
+		size_t bytes = image.Pixels.size();
+		for (const std::vector<std::byte> &level : image.Mips) {
+			bytes += level.size();
+		}
 		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
 			ENGINE_WARN("texture table: full, refusing {}", name.Text());
 			return false;

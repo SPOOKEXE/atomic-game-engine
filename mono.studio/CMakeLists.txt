@@ -105,6 +105,14 @@ mono_add_library(studio
 		# renderer, and the two would diverge the first time one was optimised.
 		Mono::client
 
+		# L11, `shared`. The HTTP client the assets panel asks an origin's
+		# `/catalogue` with — `src/OriginLister.cpp`. **Named here rather than
+		# taken transitively through `Mono::cdn`**, which is where it was
+		# arriving from: a dependency a file includes is one its build file
+		# should say out loud. It adds nothing to this program's closure, which
+		# already carries `net` under both content clients.
+		Engine::net
+
 		# L12, `shared`. The link team create's edit stream rides — one
 		# waypoint at a time, over `Listener::SendTo` and `Broadcast`. Named
 		# here rather than taken transitively through `Mono::server`, because

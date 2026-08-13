@@ -610,6 +610,43 @@ namespace engine::scene {
 		std::string Value;
 	};
 
+	// The GLSL a `ShaderScript` holds, as the world holds it.
+	//
+	// **Fragment stage only, and the omission is the design.** A vertex shader
+	// has to agree with the renderer's instance layout, and `render/AGENTS.md`
+	// says that layout is private and stays private — so an author who could
+	// supply one would be authoring against a struct nobody promised to keep.
+	// The fragment stage needs only the varyings and the sampler and uniform
+	// slots `opaque.frag` already declares, which are a stated interface.
+	//
+	// **Not device data, which is what makes it legal here at all.** Apply this
+	// module's own test: a headless server can hold this string, save it and
+	// replicate it, exactly as it holds a Luau script's source. What it cannot
+	// do is compile it — that is `render::ShaderLibrary`, at L12.
+	//
+	// @since v0.15
+	struct ShaderSource {
+		// The GLSL, verbatim.
+		//
+		// **Not interned**, for `TextContent::Value`'s reason: a `core::Name`
+		// never releases and shader text is edited, so interning every revision
+		// of it is `D00020`'s leak with a compiler attached.
+		std::string Code;
+
+		// Bumped every time `Code` is written through the `Source` property.
+		//
+		// **This is what makes a recompile a comparison rather than a string
+		// diff.** `render::ShaderCompiler`'s header names "a `ShaderScript`
+		// whose revision changed" as the case a runtime compiler exists for; a
+		// library holding the last revision it compiled can answer "is this
+		// still current" with an integer compare, per script, per frame.
+		//
+		// Zero is a script nobody has written to. It is not a version anybody
+		// saves against — it counts writes in this process and starts again at
+		// whatever a file restores.
+		uint32_t Revision = 0;
+	};
+
 	// What a surface is made of, beyond the flat colour `Visual` carries.
 	//
 	// Roblox's `SurfaceAppearance`, and `ROADMAP.md` v0.9 asks for it "as
@@ -669,6 +706,21 @@ namespace engine::scene {
 		core::Name EmissiveMap = {};
 		//@}
 
+		// Which shader this surface is drawn with, or invalid for the engine's.
+		//
+		// **Derived, exactly as the maps above are.** `ResolveMaterials` writes
+		// it from the `Material` child's `MaterialRef::Shader`, so a part is
+		// authored in one place and the draw-list pass reads one column — the
+		// same arrangement, and the same reason, as `ColourMap`.
+		//
+		// **A name and not a handle**, rule 4: it survives a save file and a
+		// wire, and it may name a `ShaderScript` in this world or a built-in
+		// this engine ships. Which of those it is, is `render::ShaderLibrary`'s
+		// question and not one a headless host can answer.
+		//
+		// @since v0.15
+		core::Name Shader = {};
+
 		// Below this alpha a fragment is discarded rather than blended, when
 		// `Mode` is `Clip`.
 		float AlphaCutoff = 0.5f;
@@ -687,10 +739,11 @@ namespace engine::scene {
 
 	// Which material an instance names.
 	//
-	// **The whole of a `Material` instance's storage**, and it is one field on
-	// purpose: `ROADMAP.md` v0.10 asks for the simplified model — one texture —
-	// with the multi-map form deferred to the pipeline that can read one. A
-	// second field here would be a reference nothing resolves.
+	// **The second field arrived with something that resolves it**, which is the
+	// rule the first one's comment used to state alone: `Asset` was one field on
+	// purpose because "a reference nothing resolves" is half a feature. `Shader`
+	// is here because `render::ShaderLibrary` compiles what it names and
+	// `ResolveMaterials` carries it onto the part in the same pass as the maps.
 	//
 	// **On the `Material` instance and not on the part**, which is what makes
 	// this an object an author adds rather than a property every drawable
@@ -709,6 +762,24 @@ namespace engine::scene {
 		// replaces defaulted to `Plastic`, a value the renderer could not act on,
 		// and a default that means "nothing yet" is the honest one.
 		core::Name Asset;
+
+		// Which shader draws the parts wearing this material, or invalid for
+		// the engine's own.
+		//
+		// **A name and not an entity handle, even though it usually names a
+		// `ShaderScript` in this very world.** Rule 4: a handle is meaningless
+		// in the world a save file is loaded into, and the same name also has to
+		// be able to mean a shader this engine ships and no world contains. One
+		// spelling covers both, and `render::ShaderLibrary` is the one place
+		// that decides which it found.
+		//
+		// **On the material rather than on the part**, which is what makes it a
+		// decision an author makes once for everything wearing it — the reason
+		// `Material` is an instance at all. A part with no `Material` child is
+		// never visited by the resolve pass and draws with the engine's shader.
+		//
+		// @since v0.15
+		core::Name Shader;
 	};
 
 	// Which tags an entity carries, as a bitmask.

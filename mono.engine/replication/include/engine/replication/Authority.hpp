@@ -132,6 +132,40 @@ namespace engine::replication {
 		// @return `true` when it is sent.
 		bool Replicated(core::Name component) const;
 
+		// Stops sending a replicated component's *deltas* for entities carrying
+		// a tag, without taking the component off the wire for everyone else.
+		//
+		// **The filter was per component and needed to be per row.** A character
+		// is six parts and one of them moves: `scene::PoseCharacters` derives the
+		// other five from the root, on whichever machine draws, precisely so they
+		// cannot come apart at speed. Those five transforms crossed every tick
+		// anyway and were overwritten the moment they landed — five ten-byte
+		// quantised `CFrame`s per character per tick, against roughly ten bytes
+		// for the root alone.
+		//
+		// **Named rather than typed, because the tag belongs to a module this one
+		// must not see.** `scene` is L7 and this is L12, so the component that
+		// marks a derived row is declared where the thing producing it lives and
+		// reaches here as a string — which is rule 4, and the same way
+		// `Replicate` already names what it sends.
+		//
+		// **Deltas only, and the baseline still carries one copy.** That is a
+		// property worth having rather than a gap: a client that has just been
+		// admitted holds the limb where the server last put it, so the first
+		// frame is right before any derivation has run. What stops is the
+		// per-tick repeat.
+		//
+		// Not a wire-format change. A delta already carries only the rows that
+		// changed, so a receiver cannot tell an omitted row from an unchanged
+		// one — which is why this could be decided without a second consumer to
+		// check it against, as `D00115` expected to need.
+		//
+		// @param component The replicated component whose rows to filter.
+		// @param tag       The component whose presence suppresses them. An
+		//                  invalid name clears the filter.
+		// @since v0.15
+		void SuppressWhenTagged(core::Name component, core::Name tag);
+
 		// Decides what a client may see.
 		//
 		// @param predicate Called as `predicate(ClientId, ecs::Entity)`.
@@ -499,6 +533,21 @@ namespace engine::replication {
 		std::vector<core::Name> Components;
 
 		std::vector<ChangeDetection> Detection;
+
+		// Per slot, the tag whose presence suppresses that component's deltas for
+		// one entity, or an invalid name for none. See `SuppressWhenTagged`.
+		//
+		// Parallel to `Components` for the same reason `Detection` is: these are
+		// three facts about one slot, and a map keyed by name would be a second
+		// place the slot list could be wrong.
+		std::vector<core::Name> Suppressors;
+
+		// The same list resolved to ids, refilled by `Survey` beside `Resolved`.
+		//
+		// Held rather than looked up in the delta loop because that loop runs per
+		// component per client per tick, and `Components::Find` is a hash of a
+		// string each time.
+		std::vector<ecs::ComponentId> ResolvedSuppressors;
 
 		std::vector<Signature> Signatures;
 

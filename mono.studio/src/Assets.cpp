@@ -893,7 +893,14 @@ namespace studio {
 		// first row points at exactly this folder — so it needs no special case
 		// here, and an editor pointed at somebody else's published tree lists
 		// that one the same way.
-		AssetTabs = BuildCatalogue(Content);
+		//
+		// **This is where an HTTP origin is asked what it holds, and the wait is
+		// why it is only here.** `MakeOriginLister` blocks with a ceiling, and
+		// every caller of this function is somebody having asked — opening the
+		// panel, pressing Refresh, importing, publishing. `RebuildContentClients`
+		// deliberately does not ask, because it runs at start-up.
+		const std::unique_ptr<OriginLister> origins = MakeOriginLister();
+		AssetTabs = BuildCatalogue(Content, origins.get());
 	}
 
 	void Editor::ImportAssetPath(const std::string &given) {

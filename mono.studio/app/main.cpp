@@ -50,6 +50,9 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
+	arguments.Value(
+		"surface-bounces", "N", "Levels of mirror-in-mirror resolved per frame (default 2)"
+	);
 
 	// The control surface. Off unless asked for — see `Options::ControlPort`.
 	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8738)");
@@ -109,6 +112,7 @@ int main(int argc, char **argv) {
 		arguments.Has("mcp-port")
 			? static_cast<int>(arguments.GetInteger("mcp-port", preferences.ControlPort))
 			: -1;
+	options.SurfaceBounces = static_cast<int>(arguments.GetInteger("surface-bounces", 0));
 	options.Headless = arguments.Has("headless");
 	options.Uncapped = arguments.Has("uncapped");
 	// A flag turns a panel on for this run; the file remembers what was left
@@ -170,6 +174,19 @@ int main(int argc, char **argv) {
 	}
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);
+
+		// **A headless capture pins the animation clock, and it is not a flag.**
+		// The only reason to take one is to compare it with another, and a clock
+		// accumulated from the measured frame delta lands frame N on a different
+		// phase every run — two captures of one unchanged world differ by about
+		// an eighth of their bytes, which swamps most changes worth checking.
+		//
+		// Headless only, because a capture taken while somebody is watching is a
+		// screenshot of what they are watching, and pinning the clock there would
+		// make the picture disagree with the window it came from.
+		if (options.Headless) {
+			options.FixedAnimationStep = 1.0 / 60.0;
+		}
 	}
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);

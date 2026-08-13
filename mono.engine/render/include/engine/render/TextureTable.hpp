@@ -321,6 +321,11 @@ namespace engine::render {
 		// a create-transfer-copy-submit sequence is two chances to get the row
 		// pitch wrong and only one of them under test.
 		//
+		// Every level the image carries is uploaded. A texture baked without a
+		// chain gets one level and draws exactly as it did before — **this never
+		// builds levels of its own**, because the box filter that would do it
+		// lives in `Engine::bake`, which nothing a shipped game links may link.
+		//
 		// @param image  The pixels. Assumed valid; callers check.
 		// @param label  What to name in a log line if it fails.
 		// @param bytes  Set to what the upload cost in device memory.

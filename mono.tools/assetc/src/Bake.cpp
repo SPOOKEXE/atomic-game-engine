@@ -73,8 +73,21 @@ namespace assetc {
 			// so a GIF becomes an ordinary texture and every path downstream —
 			// the chunker, the manifest, the renderer's table — handles it with no
 			// knowledge that it animates. `bake/src/Gif.cpp` carries the argument.
+			//
+			// **`.svg` is here and it is the one that has no size of its own**,
+			// which is why it enters the graph through a different node — see
+			// `IsVector` and the pipeline below.
 			return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
-				   extension == ".bmp" || extension == ".gif";
+				   extension == ".bmp" || extension == ".gif" || extension == ".svg";
+		}
+
+		// The images that are drawings rather than pixels.
+		//
+		// One entry today, and a predicate rather than a comparison because the
+		// pipeline asks the question in two places — which node opens the chain,
+		// and how the texture cap is applied.
+		bool IsVector(std::string_view extension) {
+			return extension == ".svg";
 		}
 
 		std::vector<std::byte> ReadFile(const fs::path &path) {
@@ -412,9 +425,19 @@ namespace assetc {
 				continue;
 			}
 
+			const bool vector = image && IsVector(extension);
+
 			engine::bake::Graph graph;
-			const engine::bake::NodeId source = graph.AddSource(relative, bytes);
-			const engine::bake::NodeId import = graph.Add(engine::bake::NodeKind::Import);
+			engine::bake::NodeId source = graph.AddSource(relative, bytes);
+
+			// **A drawing enters through `Rasterize` and everything else through
+			// `Import`.** A zero target asks for the size the document itself
+			// declares, which is the only size an SVG can be said to have —
+			// `assetc` bakes a tree and has no per-file switches, so a caller who
+			// wants a particular one builds the graph rather than walking a
+			// directory.
+			engine::bake::NodeId import =
+				vector ? graph.AddRasterize(0, 0) : graph.Add(engine::bake::NodeKind::Import);
 			graph.Connect(source, import);
 
 			engine::bake::NodeId tail = import;
@@ -444,9 +467,34 @@ namespace assetc {
 					const uint32_t height =
 						std::max<uint32_t>(1, static_cast<uint32_t>(decoded.Height * scale));
 
-					const engine::bake::NodeId resize = graph.AddResize(width, height);
-					graph.Connect(tail, resize);
-					tail = resize;
+					if (vector) {
+						// **Drawn again at the cap rather than box-filtered down
+						// to it**, which is the whole reason the raster size is a
+						// node parameter. Resampling would give edges belonging
+						// to the filter instead of to the shapes, and a drawing
+						// is the one input where the sharp answer is still
+						// available.
+						//
+						// A second graph rather than a mutated one: a node's
+						// parameters are fixed when it is added, and that is what
+						// makes a graph a description of what a bake did.
+						graph = engine::bake::Graph{};
+						source = graph.AddSource(relative, bytes);
+						import = graph.AddRasterize(width, height);
+						graph.Connect(source, import);
+						tail = import;
+
+						if (!graph.Run(graphFailure)) {
+							baked.Failure = graphFailure;
+							report.Failures++;
+							report.Assets.push_back(std::move(baked));
+							continue;
+						}
+					} else {
+						const engine::bake::NodeId resize = graph.AddResize(width, height);
+						graph.Connect(tail, resize);
+						tail = resize;
+					}
 				}
 			}
 
@@ -530,6 +578,16 @@ namespace assetc {
 				const engine::bake::NodeId retime = graph.AddRetime(settings.FlipbookFps);
 				graph.Connect(tail, retime);
 				tail = retime;
+			}
+
+			// **Last of the texture nodes, and the order is load-bearing.** Every
+			// node above changes the pixels the levels are filtered from, and a
+			// resize drops the chain outright — built before one, a texture would
+			// reach disk with no levels and nothing saying why.
+			if (image && settings.Mipmaps) {
+				const engine::bake::NodeId mipmap = graph.Add(engine::bake::NodeKind::Mipmap);
+				graph.Connect(tail, mipmap);
+				tail = mipmap;
 			}
 
 			const engine::bake::NodeId write = graph.AddWrite(baked.Output);

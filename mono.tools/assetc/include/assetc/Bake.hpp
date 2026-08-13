@@ -101,6 +101,20 @@ namespace assetc {
 		std::function<bool(std::string_view model, std::string_view reference, std::string &out)>
 			ResolveTexture;
 
+		// Whether to build every baked texture's mip chain.
+		//
+		// **On by default, because the cost is a third of a texture's bytes and
+		// the alternative is visible from the first frame.** A 2048 sheet drawn
+		// across forty pixels without levels samples one texel in fifty and
+		// shimmers as the camera moves — which reads as a renderer bug rather
+		// than as missing content.
+		//
+		// Off is for a bake whose output is going somewhere that builds its own
+		// levels, and for measuring what the chain costs.
+		//
+		// @since v0.14
+		bool Mipmaps = true;
+
 		// Whether to copy files the baker does not understand.
 		//
 		// The output tree is also the publisher's input.

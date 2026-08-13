@@ -52,6 +52,7 @@
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/ShaderLibrary.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
@@ -249,6 +250,40 @@ namespace studio {
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(RunMode mode);
 
+	// Where an edit made in a world actually lands.
+	//
+	// **There is no separate routing behind this, and that is the design rather
+	// than a gap.** A `Play` run already puts the client in a world of its own —
+	// see `PlayLink::ReplicaWorld` — so "does this edit hit the server or this
+	// client" is answered by which world the explorer is pointed at, for every
+	// client at once and without a second path through the command log. What the
+	// panels owe an author is to *say* which one they are in, because the two
+	// trees look identical and what happens to an edit does not.
+	//
+	// @since v0.15
+	enum class EditAuthority : uint8_t {
+		// An authored scene, or the server half of a run. The edit is the
+		// truth, and replication carries it to every client.
+		Authoritative,
+
+		// A `Play` run's client view. The edit changes this one client, is
+		// never sent, and lives until the authority next mentions that row —
+		// which for anything replicated is the next delta. A change that
+		// appears to stick is one to a property `replication::LocalToTheClient`
+		// keeps off the wire in the first place.
+		ClientLocal,
+	};
+
+	// A stable name for an authority, for a badge and a log line.
+	//
+	// Short enough to sit inline after a class name, because that is the one
+	// place it has to fit: a properties header already spends its width on the
+	// class and the world.
+	//
+	// @param authority The authority.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(EditAuthority authority);
+
 	// Every panel that can be given colours of its own.
 	//
 	// **The titles imgui keys the windows on**, which is also what the layout
@@ -349,6 +384,7 @@ namespace studio {
 		// editor usable from a test or a CI job — and what lets a capture be
 		// taken of a known frame rather than of whenever somebody looked.
 		int64_t MaximumFrames = -1;
+
 
 		// Which mode to start in, rather than Edit.
 		//
@@ -476,6 +512,42 @@ namespace studio {
 		//
 		// @since v0.10
 		std::string CaptureWorld;
+
+		// Seconds to advance the animation clock by per frame, or 0 to measure it.
+		// See `Editor::SampleFrame`.
+		//
+		// **What makes one capture comparable with another, and without it this
+		// program cannot check a rendering change at all.** The clock is
+		// accumulated from the *measured* frame delta, so frame four hundred lands
+		// on a different animation phase every run — and the animated part of a
+		// scene is precisely where a rendering change shows. Two captures of one
+		// unchanged world differed by twelve percent of their bytes, which is
+		// larger than most changes anybody would want to check for.
+		//
+		// **Set for a headless capture and left alone otherwise.** A person watching
+		// wants the clock to follow the wall, because that is what makes a ripple
+		// move at the speed it was authored at. Nobody is watching a headless
+		// capture; it exists to be compared.
+		//
+		// @since v0.15
+		double FixedAnimationStep = 0.0;
+
+		// How many levels of surface-seen-in-surface the renderer resolves, or 0
+		// to leave the renderer's own default of two.
+		//
+		// **`Renderer::SetSurfaceBounces` had no caller at all**, which is how a
+		// knob its own comment calls public stayed welded at two for two
+		// versions. Two resolves a mirror seen in a mirror and nothing deeper, so
+		// a room of facing panes loses every level past the second — the pane
+		// draws as its own tint, because a slot that never rendered is not
+		// `Ready` and the shader falls back rather than showing a wrong picture.
+		//
+		// **Each level costs a full scene pass per visible surface**, which is
+		// why the default is two and why this is a number an author sets for a
+		// scene rather than something the engine raises on their behalf.
+		//
+		// @since v0.15
+		int SurfaceBounces = 0;
 	};
 
 	// One open script tab.
@@ -2656,6 +2728,12 @@ namespace studio {
 		//@{
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;
+
+		// **What a `Material.Shader` name resolves to in the editor.** One per
+		// editor rather than one per viewport, for `ShaderLibrary`'s reason: it
+		// caches over process-wide names, and `Refresh` takes whichever world
+		// the panel being drawn shows.
+		engine::render::ShaderLibrary Shaders;
 		engine::render::OverlayImage Overlay;
 		engine::ui::Interface Interface;
 		engine::core::FrameClock Clock;
@@ -2937,6 +3015,21 @@ namespace studio {
 		// @param world The scene to ask about.
 		// @return `true` when some run owns it as a replica.
 		bool IsReplicaWorld(WorldId world) const;
+
+		// Where an edit made in this world lands.
+		//
+		// **The question the explorer's tag and the properties badge both ask**,
+		// and the reason it is not spelled `IsReplicaWorld` at those two call
+		// sites: a panel wants to know what happens to the author's edit, not
+		// which internal category the world falls into. Those are the same fact
+		// today and the name that survives a second client-local case is this
+		// one.
+		//
+		// @param world The scene to ask about.
+		// @return `ClientLocal` for a run's client view, `Authoritative`
+		//         otherwise — including for a world that does not exist, because
+		//         an edit there fails rather than going somewhere surprising.
+		EditAuthority AuthorityOf(WorldId world) const;
 
 		// The run whose client view this world is, or null.
 		//
@@ -3859,6 +3952,7 @@ namespace studio {
 		// several worlds tick and it is not the end state: drawing them all in
 		// one frame is a change to `Render` to take a list of views.
 		size_t DrawingViewport = 0;
+
 
 		// Where the rotation is up to, over the *open* panels rather than over
 		// all of them.

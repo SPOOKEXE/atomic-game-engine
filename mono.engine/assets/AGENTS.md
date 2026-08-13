@@ -249,6 +249,31 @@ in the file and both read as renderer bugs.
 Adding the field "so the reader does not have to walk the vertices" would be
 buying a pass the reader is already making.
 
+## A texture's mip levels are shaped by rule, never by the file
+
+`TextureData::Mips` holds the levels' bytes and nothing else. Each level's width
+and height come from `MipExtent`, and `IsValid` refuses a level that is not
+exactly that size — which is the mesh bounding box's argument one format over: a
+stored per-level width is a second copy of a fact the base dimensions already
+carry, and it is the copy an attacker gets to choose. A level claiming to be
+larger than it is is a GPU upload reading past the end of a buffer.
+
+The count is bounded by `MipLevelCount` of the dimensions rather than by a
+constant of its own. That bound is tighter and it stays true if
+`MAXIMUM_DIMENSION` ever moves.
+
+**The levels are beside the base, not concatenated with it.** `Pixels` means *the
+image* to a dozen call sites that check it against `Width * Height *
+BytesPerPixel` — `IsValid`, `render::TextureTable::Upload`, `bake::ResizeImage`,
+the opaque pass, the studio thumbnailer. One buffer holding the chain would make
+every one of them read a third too much while still compiling. Do not "flatten"
+it.
+
+**Nothing in this module builds a chain.** The box filter is `bake::ResizeImage`
+at L9, and a texture that arrives with one level is a texture that was baked with
+one. That is why `MakeBuiltin`'s sheets have no levels: `assets` is below the
+filter and may not reach up to it.
+
 ## `Submesh` holds strings where the rest of the engine holds names
 
 `Material` and `Texture` are `std::string` and this is the one place the format

@@ -415,6 +415,77 @@ namespace engine::render {
 		// modern API and cannot be changed by a draw call.
 		SDL_GPUGraphicsPipeline *TransparentPipeline = nullptr;
 
+		// --- shader variants --------------------------------------------------
+		//
+		// **A pipeline per named shader, per family, and no more general than
+		// that.** `scene::MaterialRef::Shader` selects a *fragment* shader —
+		// `scene::ShaderSource` says why only that stage — so a variant is the
+		// opaque and transparent pipelines with one shader object swapped and
+		// everything else identical. The vertex layout, the depth state and the
+		// blend state are the renderer's and stay the renderer's.
+		//
+		// **Two pipelines and not one**, because blend state is baked into a
+		// pipeline: a toon-shaded pane and a toon-shaded wall are two objects on
+		// every modern API, exactly as `OpaquePipeline` and `TransparentPipeline`
+		// already are.
+		//
+		// **The shadow pass has no variant and must not grow one.** It writes
+		// depth and no colour, so a fragment shader that computed a colour would
+		// cost a pass over the whole scene to produce nothing.
+		//
+		// This is a table of *substitutions*, not the beginning of a render
+		// graph. When the node system arrives it is what says which shader a
+		// pass wants, and this table becomes the backend that answers — so do
+		// not grow a second way to describe a frame here in the meantime.
+		struct ShaderVariant {
+			SDL_GPUShader *Fragment = nullptr;
+			SDL_GPUGraphicsPipeline *Opaque = nullptr;
+			SDL_GPUGraphicsPipeline *Transparent = nullptr;
+		};
+
+		// Keyed by `core::Name::Id`, matching `MeshTable::Entries`.
+		std::unordered_map<uint32_t, ShaderVariant> ShaderVariants;
+
+		// The opaque vertex shader, kept rather than released.
+		//
+		// **Every other shader object is released once its pipeline holds it**,
+		// and this one cannot be: a variant is built when a shader arrives,
+		// which is any time after `CreatePipelines` ran, and it needs the same
+		// vertex stage the opaque pipeline was built with. Building a second one
+		// from the file would be two objects for one shader, free to disagree
+		// the day `opaque.vert` changes shape.
+		SDL_GPUShader *OpaqueVertexShader = nullptr;
+
+		// The two descriptors a variant is derived from, kept whole.
+		//
+		// **Members rather than the locals `CreatePipelines` builds**, because a
+		// `SDL_GPUGraphicsPipelineCreateInfo` is a struct of *pointers* into
+		// arrays the caller owns — so keeping the info and letting the arrays go
+		// out of scope is a dangling read at the next `AddShader`. The arrays
+		// live here and the infos point at them.
+		//@{
+		SDL_GPUVertexBufferDescription VariantBuffers[2]{};
+		SDL_GPUVertexAttribute VariantAttributes[9]{};
+		SDL_GPUColorTargetDescription VariantOpaqueTarget{};
+		SDL_GPUColorTargetDescription VariantBlendedTarget{};
+		SDL_GPUGraphicsPipelineCreateInfo VariantOpaqueInfo{};
+		SDL_GPUGraphicsPipelineCreateInfo VariantBlendedInfo{};
+		bool VariantsReady = false;
+		//@}
+
+		// Which family the open pass last bound, so `DrawSlots` knows which
+		// variant a slot's shader means and what to put back afterwards.
+		enum class PipelineFamily : uint8_t {
+			// Anything with no variants: the shadow, overlay, particle and
+			// ribbon passes. A slot's shader is ignored while one is bound.
+			Other,
+			Opaque,
+			Transparent,
+		};
+
+		PipelineFamily ActiveFamily = PipelineFamily::Other;
+		SDL_GPUGraphicsPipeline *ActivePipeline = nullptr;
+
 		// The submission order, rebuilt each frame and kept so it is not
 		// reallocated per frame. See `scene::OrderForDrawing`.
 		std::vector<uint32_t> DrawOrder;
@@ -518,6 +589,14 @@ namespace engine::render {
 		// often than it reads them.
 		std::vector<const MeshEntry *> SlotMesh;
 		std::vector<core::Name> SlotTexture;
+
+		// Which shader each slot asks for, or an invalid name for the engine's.
+		//
+		// **A name per slot rather than a resolved pipeline**, because the run
+		// loop compares consecutive entries far more often than it uses one —
+		// the same reason every array here is parallel rather than a struct. The
+		// lookup happens once per run, where the pipeline is bound.
+		std::vector<core::Name> SlotShader;
 
 		// Each slot's tag mask, for the surface passes that filter by one.
 		std::vector<uint32_t> SlotTags;
@@ -917,6 +996,14 @@ namespace engine::render {
 		// `Renderer::RequestSceneCapture`.
 		std::filesystem::path CapturePath;
 
+		// Which viewport's scene the pending capture wants, or `ANY_VIEWPORT`.
+		//
+		// **A panel per scene means the next `Render` is usually the wrong
+		// one.** See `Renderer::RequestSceneCapture`: the request outlives the
+		// call that made it, and honouring it in whichever call comes next
+		// photographs whatever that panel happens to be showing.
+		size_t CaptureSlot = Renderer::ANY_VIEWPORT;
+
 		bool WriteCapture(SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height) const;
 
 		// --- the shadow map -------------------------------------------------
@@ -1180,6 +1267,39 @@ namespace engine::render {
 		) const;
 
 		bool CreatePipelines();
+
+		// Binds a pipeline and records which family it belongs to.
+		//
+		// **Every opaque and transparent bind goes through this**, because
+		// `DrawSlots` may substitute a variant for a run and has to know what to
+		// put back. A pass that called `SDL_BindGPUGraphicsPipeline` directly
+		// would leave the record saying something false, and the next run would
+		// restore the wrong pipeline — a draw with somebody else's blend state,
+		// which reads as a sorting bug.
+		void BindPipeline(SDL_GPURenderPass *pass, SDL_GPUGraphicsPipeline *pipeline, PipelineFamily family);
+
+		// Builds the two pipelines a named fragment shader draws through.
+		//
+		// Replaces whatever was registered under the name, releasing it first.
+		//
+		// @param name  What a material names it.
+		// @param spirv The module. Must declare the sampler and uniform slots
+		//              `opaque.frag` does — see `Renderer::AddShader`.
+		// @return `false` when the shader or either pipeline could not be built.
+		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv);
+
+		// Releases one variant's shader and pipelines.
+		void DropShaderVariant(const core::Name &name);
+
+		// Releases every variant. Called from `Shutdown`.
+		void ReleaseShaderVariants();
+
+		// The variant a slot's shader means in the family currently bound.
+		//
+		// @return The pipeline, or null for no shader, an unknown one, or a
+		//         family with no variants.
+		SDL_GPUGraphicsPipeline *VariantFor(const core::Name &shader) const;
+
 		// Issues the draws for one contiguous run of instance-buffer slots.
 		//
 		// **The loop v0.9 exists to add.** Every draw used to be one call over
@@ -1449,6 +1569,34 @@ namespace engine::render {
 			ENGINE_ERROR("transparent pipeline: {}", SDL_GetError());
 		}
 
+		// --- what a variant is derived from ---------------------------------
+		//
+		// The two descriptors above, copied whole with their arrays, so a shader
+		// arriving later builds a pipeline that differs from these in exactly
+		// one field. Copied rather than rebuilt: a second description of the
+		// vertex layout is a second thing to keep in step, and the one that
+		// would be missed is this one — it is only read when somebody selects a
+		// custom shader.
+		std::memcpy(VariantBuffers, vertexBuffers, sizeof(VariantBuffers));
+		std::memcpy(VariantAttributes, attributes, sizeof(VariantAttributes));
+		VariantOpaqueTarget = opaqueTarget;
+		VariantBlendedTarget = blendedTarget;
+
+		VariantOpaqueInfo = opaque;
+		VariantOpaqueInfo.vertex_input_state.vertex_buffer_descriptions = VariantBuffers;
+		VariantOpaqueInfo.vertex_input_state.vertex_attributes = VariantAttributes;
+		VariantOpaqueInfo.target_info.color_target_descriptions = &VariantOpaqueTarget;
+
+		VariantBlendedInfo = transparent;
+		VariantBlendedInfo.vertex_input_state.vertex_buffer_descriptions = VariantBuffers;
+		VariantBlendedInfo.vertex_input_state.vertex_attributes = VariantAttributes;
+		VariantBlendedInfo.target_info.color_target_descriptions = &VariantBlendedTarget;
+
+		// The vertex stage is kept rather than released with the others below,
+		// because a variant built after this function has run needs it.
+		OpaqueVertexShader = opaqueVertex;
+		VariantsReady = true;
+
 		// --- particles ------------------------------------------------------
 		//
 		// **No vertex buffer for the quad and no index buffer at all.** The
@@ -1649,8 +1797,8 @@ namespace engine::render {
 		}
 
 		// The pipelines hold what they need; the shader objects do not have to
-		// outlive their creation.
-		SDL_ReleaseGPUShader(Device, opaqueVertex);
+		// outlive their creation. **`opaqueVertex` is the exception and is
+		// released in `Shutdown` instead** — see `OpaqueVertexShader`.
 		SDL_ReleaseGPUShader(Device, opaqueFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
@@ -1665,6 +1813,136 @@ namespace engine::render {
 		// and draws nothing, with the error already in the log above.
 		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && ShadowPipeline != nullptr &&
 			   OverlayPipeline != nullptr;
+	}
+
+	void Renderer::Impl::BindPipeline(
+		SDL_GPURenderPass *pass, SDL_GPUGraphicsPipeline *pipeline, PipelineFamily family
+	) {
+		SDL_BindGPUGraphicsPipeline(pass, pipeline);
+		ActivePipeline = pipeline;
+		ActiveFamily = family;
+	}
+
+	bool Renderer::Impl::AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv) {
+		if (!name.IsValid() || spirv.empty() || !VariantsReady || OpaqueVertexShader == nullptr) {
+			return false;
+		}
+
+		// **The same counts `opaque.frag` declares, and they are the interface.**
+		// A shader object carries its sampler and uniform-buffer counts rather
+		// than the pipeline doing so, so a module declaring different ones binds
+		// and silently reads nothing — the trap `CreatePipelines` already records
+		// for the built-in fragment shader. That is why a `ShaderScript` is a
+		// fragment shader written against `opaque.frag`'s slots and not against
+		// a blank page.
+		SDL_GPUShaderCreateInfo info{};
+		info.code = reinterpret_cast<const Uint8 *>(spirv.data());
+		info.code_size = spirv.size() * sizeof(uint32_t);
+		info.entrypoint = "main";
+		info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+		info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+		info.num_samplers = 4;
+		info.num_uniform_buffers = 3;
+
+		SDL_GPUShader *fragment = SDL_CreateGPUShader(Device, &info);
+		if (fragment == nullptr) {
+			ENGINE_ERROR("shader '{}': {}", name.Text(), SDL_GetError());
+			return false;
+		}
+
+		SDL_GPUGraphicsPipelineCreateInfo opaque = VariantOpaqueInfo;
+		opaque.vertex_shader = OpaqueVertexShader;
+		opaque.fragment_shader = fragment;
+
+		SDL_GPUGraphicsPipelineCreateInfo blended = VariantBlendedInfo;
+		blended.vertex_shader = OpaqueVertexShader;
+		blended.fragment_shader = fragment;
+
+		ShaderVariant variant;
+		variant.Fragment = fragment;
+		variant.Opaque = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
+		variant.Transparent = SDL_CreateGPUGraphicsPipeline(Device, &blended);
+
+		// **Both or neither.** A variant with one pipeline would draw a wall
+		// toon-shaded and the pane in front of it with the engine's shader,
+		// which reads as the material not applying to glass rather than as a
+		// pipeline that failed to build.
+		if (variant.Opaque == nullptr || variant.Transparent == nullptr) {
+			ENGINE_ERROR("shader '{}' pipeline: {}", name.Text(), SDL_GetError());
+			if (variant.Opaque != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, variant.Opaque);
+			}
+			if (variant.Transparent != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, variant.Transparent);
+			}
+			SDL_ReleaseGPUShader(Device, fragment);
+			return false;
+		}
+
+		// Replacing is the ordinary case: an author editing a `ShaderScript`
+		// bumps its revision every keystroke that lands, and the library hands
+		// the new words straight back here.
+		DropShaderVariant(name);
+		ShaderVariants[name.Id()] = variant;
+		return true;
+	}
+
+	void Renderer::Impl::DropShaderVariant(const core::Name &name) {
+		const auto found = ShaderVariants.find(name.Id());
+		if (found == ShaderVariants.end()) {
+			return;
+		}
+
+		// **Ordered after the last frame that could have bound it**, which is
+		// what `WaitForFrame` in `Renderer::DropShader` is for: releasing a
+		// pipeline a command buffer in flight still references is a use after
+		// free inside the driver.
+		SDL_ReleaseGPUGraphicsPipeline(Device, found->second.Opaque);
+		SDL_ReleaseGPUGraphicsPipeline(Device, found->second.Transparent);
+		SDL_ReleaseGPUShader(Device, found->second.Fragment);
+		ShaderVariants.erase(found);
+	}
+
+	void Renderer::Impl::ReleaseShaderVariants() {
+		for (auto &entry : ShaderVariants) {
+			SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.Opaque);
+			SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.Transparent);
+			SDL_ReleaseGPUShader(Device, entry.second.Fragment);
+		}
+		ShaderVariants.clear();
+
+		if (OpaqueVertexShader != nullptr) {
+			SDL_ReleaseGPUShader(Device, OpaqueVertexShader);
+			OpaqueVertexShader = nullptr;
+		}
+		VariantsReady = false;
+	}
+
+	SDL_GPUGraphicsPipeline *Renderer::Impl::VariantFor(const core::Name &shader) const {
+		if (!shader.IsValid() || ShaderVariants.empty()) {
+			return nullptr;
+		}
+
+		// **An unknown name draws with the engine's shader rather than not at
+		// all**, which is `MeshTable::Resolve`'s rule: a shader that has not
+		// arrived is the ordinary state of a world still loading, and a part
+		// that vanished until it did would be a worse symptom than one drawn
+		// plainly. The name being wrong rather than late is reported by
+		// `ShaderLibrary`, where the world can still be asked about it.
+		const auto found = ShaderVariants.find(shader.Id());
+		if (found == ShaderVariants.end()) {
+			return nullptr;
+		}
+
+		switch (ActiveFamily) {
+		case PipelineFamily::Opaque:
+			return found->second.Opaque;
+		case PipelineFamily::Transparent:
+			return found->second.Transparent;
+		case PipelineFamily::Other:
+			break;
+		}
+		return nullptr;
 	}
 
 	uint32_t Renderer::Impl::DrawSlots(
@@ -1685,6 +1963,15 @@ namespace engine::render {
 		}
 
 		uint32_t calls = 0;
+
+		// What the pass bound before this call, so it can be put back.
+		//
+		// **Restored rather than left**, because a caller issues several
+		// `DrawSlots` in one pass and every one of them assumes the pass's own
+		// pipeline is bound. A run that ended on a variant would hand the next
+		// call somebody else's fragment shader.
+		SDL_GPUGraphicsPipeline *const base = ActivePipeline;
+		SDL_GPUGraphicsPipeline *bound = base;
 
 		// One draw for one range of one mesh, over `run` consecutive instances.
 		const auto emit = [&](const MeshRange &range,
@@ -1832,6 +2119,14 @@ namespace engine::render {
 			const MeshEntry *const mesh = SlotMesh[slot];
 			const core::Name texture = SlotTexture[slot];
 
+			// **The shader joins what ends a run, because it is a pipeline.** A
+			// pipeline bind is per draw at best, so two instances drawn through
+			// different fragment shaders cannot share one — the same reason the
+			// seam plane breaks a run, one level up from a uniform. A world
+			// where nothing selects a shader holds one invalid name throughout
+			// and never breaks on it.
+			const core::Name shader = SlotShader[slot];
+
 			// **And the seam plane joins the mesh and the texture in what ends a
 			// run.** It is a per-draw uniform, so two instances cut differently
 			// cannot share a draw; a world with no hole in it holds one value
@@ -1841,10 +2136,20 @@ namespace engine::render {
 
 			uint32_t run = 1;
 			while (slot + run < first + count && SlotMesh[slot + run] == mesh &&
-				   SlotTexture[slot + run] == texture && SlotSeam[slot + run] == seam &&
-				   SlotSeamLight[slot + run] == seamLight &&
+				   SlotTexture[slot + run] == texture && SlotShader[slot + run] == shader &&
+				   SlotSeam[slot + run] == seam && SlotSeamLight[slot + run] == seamLight &&
 				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
 				run++;
+			}
+
+			// **Bound per run and only where it changes.** A scene with no
+			// custom shaders never enters this branch, and one where every part
+			// wears the same one binds twice: once here and once on the way out.
+			SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader);
+			SDL_GPUGraphicsPipeline *const want = wanted != nullptr ? wanted : base;
+			if (want != bound && want != nullptr) {
+				SDL_BindGPUGraphicsPipeline(pass, want);
+				bound = want;
 			}
 
 			if (mesh->Runs.empty()) {
@@ -1867,6 +2172,11 @@ namespace engine::render {
 			}
 
 			slot += run;
+		}
+
+		// Put the pass's own pipeline back — see `base` above.
+		if (bound != base && base != nullptr) {
+			SDL_BindGPUGraphicsPipeline(pass, base);
 		}
 
 		return calls;
@@ -2207,11 +2517,11 @@ namespace engine::render {
 					continue;
 				}
 				if (!additiveBound) {
-					SDL_BindGPUGraphicsPipeline(pass, AdditiveParticlePipeline);
+					BindPipeline(pass, AdditiveParticlePipeline, PipelineFamily::Other);
 					additiveBound = true;
 				}
 			} else if (!blendedBound) {
-				SDL_BindGPUGraphicsPipeline(pass, ParticlePipeline);
+				BindPipeline(pass, ParticlePipeline, PipelineFamily::Other);
 				blendedBound = true;
 			}
 
@@ -2366,11 +2676,11 @@ namespace engine::render {
 						continue;
 					}
 					if (!additiveBound) {
-						SDL_BindGPUGraphicsPipeline(pass, AdditiveRibbonPipeline);
+						BindPipeline(pass, AdditiveRibbonPipeline, PipelineFamily::Other);
 						additiveBound = true;
 					}
 				} else if (!blendedBound) {
-					SDL_BindGPUGraphicsPipeline(pass, RibbonPipeline);
+					BindPipeline(pass, RibbonPipeline, PipelineFamily::Other);
 					blendedBound = true;
 				}
 
@@ -3096,6 +3406,11 @@ namespace engine::render {
 		// per-resource fences for a shutdown path.
 		SDL_WaitForGPUIdle(device);
 
+		// **Before the pipelines they were derived from**, which costs nothing
+		// and reads in the order the objects were built. `SDL_WaitForGPUIdle`
+		// above is what makes releasing any of this safe.
+		State->ReleaseShaderVariants();
+
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
 		}
@@ -3321,6 +3636,44 @@ namespace engine::render {
 		return State->Textures.Drop(name);
 	}
 
+	bool Renderer::AddShader(const core::Name &name, std::span<const uint32_t> spirv) {
+		if (State == nullptr || State->Device == nullptr) {
+			return false;
+		}
+
+		// **Built on the spot rather than at the next frame's barrier**, which
+		// is `AddMesh`'s rule and its reason: a caller has already arranged for
+		// this to be a moment it controls — a content pump or a
+		// `ShaderLibrary::Refresh` — so deferring would add a second
+		// synchronisation point for a caller that already had one.
+		//
+		// **A frame is waited for first, because replacing releases.** An author
+		// editing a `ShaderScript` replaces a pipeline that the frame in flight
+		// may still be drawing through, and releasing that is a use after free
+		// inside the driver rather than an error here.
+		if (State->ShaderVariants.contains(name.Id())) {
+			(void)WaitForFrame();
+		}
+		return State->AddShaderVariant(name, spirv);
+	}
+
+	bool Renderer::DropShader(const core::Name &name) {
+		if (State == nullptr || State->Device == nullptr) {
+			return false;
+		}
+		if (!State->ShaderVariants.contains(name.Id())) {
+			return false;
+		}
+
+		(void)WaitForFrame();
+		State->DropShaderVariant(name);
+		return true;
+	}
+
+	bool Renderer::HasShader(const core::Name &name) const {
+		return State != nullptr && name.IsValid() && State->ShaderVariants.contains(name.Id());
+	}
+
 	bool Renderer::Impl::WriteCapture(SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height) const {
 		void *mapped = SDL_MapGPUTransferBuffer(Device, from, false);
 		if (mapped == nullptr) {
@@ -3376,8 +3729,9 @@ namespace engine::render {
 		return wrote;
 	}
 
-	void Renderer::RequestSceneCapture(std::filesystem::path path) {
+	void Renderer::RequestSceneCapture(std::filesystem::path path, size_t slot) {
 		State->CapturePath = std::move(path);
+		State->CaptureSlot = slot;
 	}
 
 	bool Renderer::IsHeadless() const {
@@ -4036,12 +4390,30 @@ namespace engine::render {
 			// which is what that module is, and a rule this pass held privately
 			// would be a rule no suite could reach — `Renderer::Render` needs a
 			// device and the answer does not.
+			// **`SurfaceBounces` and not a constant.** The pass below runs that
+			// many times and each run resolves one more level of
+			// surface-seen-in-surface, so a level this marks invisible is a level
+			// that is *culled* rather than one frame late. The two numbers were
+			// allowed to disagree when `D00112` made the pass recursive, and the
+			// result was a mirror's deeper reflections vanishing as the viewer
+			// turned — the moment a pane left the frustum, everything it had been
+			// revealing dropped past the single level this used to follow.
+			// **The same expression the pass itself uses**, and it has to stay
+			// the same one: this decides how many levels of
+			// surface-seen-in-surface are marked visible, and the pass decides
+			// how many it draws. A level drawn but not marked is a level culled.
+			// See the `bounces` line in the surface pass below — if that
+			// expression changes, this one changes with it.
+			const uint32_t cullRounds =
+				acceptedCount > 1 ? std::max<uint32_t>(State->SurfaceBounces, 1u) : 1u;
+
 			(void)graph::VisibleSurfaces(
 				instances,
 				cameraMatrix,
 				std::span<const graph::SurfaceEye>(eyes, acceptedCount),
 				std::span<bool>(surfaceVisible, scene::MAX_SURFACES),
-				std::span<float>(surfaceCoverage, scene::MAX_SURFACES)
+				std::span<float>(surfaceCoverage, scene::MAX_SURFACES),
+				cullRounds
 			);
 		}
 
@@ -4159,6 +4531,7 @@ namespace engine::render {
 				const bool due = DueToDraw(state.Drawn, accepted[index].View->FPS, frameSeconds);
 
 				accepted[index].Refresh = surfaceVisible[accepted[index].Index] && changed && due;
+
 				refreshCount += accepted[index].Refresh ? 1u : 0u;
 			}
 		}
@@ -4274,6 +4647,7 @@ namespace engine::render {
 					// buffer offset and the instance it came from is gone.
 					State->SlotMesh.resize(uploadCount);
 					State->SlotTexture.resize(uploadCount);
+					State->SlotShader.resize(uploadCount);
 					State->SlotTags.resize(uploadCount);
 					State->SlotSeam.resize(uploadCount);
 					State->SlotSeamLight.resize(uploadCount);
@@ -4286,6 +4660,7 @@ namespace engine::render {
 						const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
 						State->SlotMesh[slot] = &mesh;
 						State->SlotTexture[slot] = instance.Texture;
+						State->SlotShader[slot] = instance.Shader;
 						State->SlotTags[slot] = instance.TagMask;
 						State->SlotSeam[slot] = glm::vec4{
 							instance.SeamNormal.X,
@@ -4508,7 +4883,7 @@ namespace engine::render {
 			shadowTarget.cycle = true;
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
-			SDL_BindGPUGraphicsPipeline(pass, State->ShadowPipeline);
+			State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
 
 			const SDL_GPUBufferBinding vertexBindings[] = {
 				{State->Meshes.Vertices(), 0},
@@ -4690,7 +5065,7 @@ namespace engine::render {
 				beamTarget.cycle = false;
 
 				SDL_GPURenderPass *beamPass = SDL_BeginGPURenderPass(command, nullptr, 0, &beamTarget);
-				SDL_BindGPUGraphicsPipeline(beamPass, State->ShadowPipeline);
+				State->BindPipeline(beamPass, State->ShadowPipeline, Impl::PipelineFamily::Other);
 
 				const SDL_GPUViewport beamViewport{
 					static_cast<float>(index % 2) * half,
@@ -4817,6 +5192,12 @@ namespace engine::render {
 			// what buys the depth — and is why the visibility gate and
 			// `SurfaceCamera::FPS` landed first. One surface gains nothing from
 			// a second bounce, because nothing samples itself.
+			// **`graph::VisibleSurfaces` is given this same number**, above, where
+			// `cullRounds` is computed. The two must not drift: this is how many
+			// levels of surface-seen-in-surface get drawn and that is how many get
+			// marked visible, and a level drawn without being marked is a level
+			// culled — which is what made a mirror's deeper reflections vanish as
+			// the viewer turned.
 			const uint32_t bounces = acceptedCount > 1 ? std::max<uint32_t>(State->SurfaceBounces, 1u) : 1u;
 
 			for (uint32_t bounce = 0; bounce < bounces; bounce++) {
@@ -4896,7 +5277,7 @@ namespace engine::render {
 					// a previous frame would shadow through a hole that is no
 					// longer there.
 					SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
-					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+					State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
 
 					const SDL_GPUBufferBinding vertexBindings[] = {
 						{State->Meshes.Vertices(), 0},
@@ -5107,7 +5488,9 @@ namespace engine::render {
 					// excluded, so a faded mirror reflected itself.
 					const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
 					if (blendedPlain > 0 || plan.TransparentSurfaces > 0) {
-						SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+						State->BindPipeline(
+							pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent
+						);
 					}
 
 					if (blendedPlain > 0) {
@@ -5414,7 +5797,7 @@ namespace engine::render {
 					// a previous frame would shadow through a hole that is no
 					// longer there.
 					SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
-					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+					State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
 
 					const SDL_GPUBufferBinding portalBindings[] = {
 						{State->Meshes.Vertices(), 0},
@@ -5514,7 +5897,9 @@ namespace engine::render {
 					// for the same reason.
 					const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
 					if (blendedPlain > 0) {
-						SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+						State->BindPipeline(
+							pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent
+						);
 						SDL_PushGPUVertexUniformData(command, 0, &subFrameUniforms, sizeof(subFrameUniforms));
 
 						result.DrawCalls += State->DrawSlots(
@@ -5640,7 +6025,7 @@ namespace engine::render {
 			SDL_SetGPUScissor(pass, &scissor);
 
 			if (haveInstances) {
-				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
 
 				const SDL_GPUBufferBinding vertexBindings[] = {
 					{State->Meshes.Vertices(), 0},
@@ -5917,7 +6302,7 @@ namespace engine::render {
 					// times a target is bound.
 					passes.Enter(Pass::Transparent);
 
-					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+					State->BindPipeline(pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent);
 
 					if (plainTransparent > 0) {
 						result.DrawCalls += State->DrawSlots(
@@ -5998,7 +6383,7 @@ namespace engine::render {
 			// Whoever got here first has cleared it; everything after loads.
 			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
 
-			SDL_BindGPUGraphicsPipeline(pass, State->OverlayPipeline);
+			State->BindPipeline(pass, State->OverlayPipeline, Impl::PipelineFamily::Other);
 
 			const SDL_GPUTextureSamplerBinding binding{
 				State->OverlayTexture,
@@ -6044,7 +6429,14 @@ namespace engine::render {
 		// editor's panels over it. A copy pass, so it cannot be inside one of
 		// the render passes above.
 		SDL_GPUTransferBuffer *capture = nullptr;
-		if (offscreen && !State->CapturePath.empty()) {
+		// **And only this viewport's, when one was named.** A request for a
+		// panel that is not drawing this call is left pending rather than
+		// served with the wrong picture — its turn comes round within as many
+		// frames as there are panels.
+		const bool captureWantsThis =
+			State->CaptureSlot == Renderer::ANY_VIEWPORT || State->CaptureSlot == targetSlot;
+
+		if (offscreen && !State->CapturePath.empty() && captureWantsThis) {
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
 			info.size = sceneWidth * sceneHeight * 4;
@@ -6118,6 +6510,7 @@ namespace engine::render {
 				// Once. A request that repeated would write a file every frame
 				// and stall every one of them.
 				State->CapturePath.clear();
+				State->CaptureSlot = Renderer::ANY_VIEWPORT;
 			} else if (!SDL_SubmitGPUCommandBuffer(command)) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				return result;

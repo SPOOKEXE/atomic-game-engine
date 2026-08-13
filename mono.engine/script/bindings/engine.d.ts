@@ -809,6 +809,7 @@ declare interface Attachment extends Instance {
 
 declare interface Material extends Instance {
 	MaterialId: string;
+	Shader: string;
 }
 
 declare interface Humanoid extends Instance {

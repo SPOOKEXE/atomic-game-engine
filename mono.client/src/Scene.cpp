@@ -319,28 +319,19 @@ namespace client {
 							// A `CFrame` and a half-extent, not a matrix: this is
 							// what the world knows, and `render` is what turns it
 							// into something a GPU binds.
-							out[first + row] = DrawInstance{
+							//
+							// The fields come from `scene::MakeDrawInstance`, which
+							// is the only place that list is written — the
+							// replicated collector fills the same row from a
+							// snapshot. Both components are required columns of
+							// *this* query, so the addresses are always good.
+							out[first + row] = engine::scene::MakeDrawInstance(
 								previous[row].Frame.NLerp(transforms[row].Frame, alpha),
-								bounds[row].HalfExtent,
-								visuals[row].Tint,
-								visuals[row].Mesh,
-								appearances[row].ColourMap,
-								appearances[row].NormalMap,
-								appearances[row].RoughnessMap,
-								appearances[row].OcclusionMap,
-								appearances[row].EmissiveMap,
-								tags[row].Mask,
-
-								// Copied rather than resolved here. Which pass this
-								// instance lands in is the renderer's decision,
-								// because it depends on where the camera is — and
-								// this loop runs once for a world that may be drawn
-								// from several views.
-								visuals[row].Transparency,
-								visuals[row].Surface,
-								visuals[row].CastShadow,
-								appearances[row].Mode,
-							};
+								bounds[row],
+								visuals[row],
+								&appearances[row],
+								&tags[row]
+							);
 						}
 					},
 					DRAW_LIST_GRAIN

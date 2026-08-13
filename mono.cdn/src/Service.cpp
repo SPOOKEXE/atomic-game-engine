@@ -1,4 +1,6 @@
+#include <engine/assets/AssetKind.hpp>
 #include <engine/assets/ContentHash.hpp>
+#include <engine/assets/Manifest.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -97,10 +99,10 @@ namespace cdn {
 				Origin &origin,
 				ChunkStore store,
 				std::unique_ptr<http::Server> listener,
-				IngestSettings ingest
+				const ServiceSettings &settings
 			)
 				: Serving(origin), Store(std::move(store)), Listener(std::move(listener)),
-				  Writes(std::move(ingest)) {
+				  Writes(settings.Ingest), Listing(settings.Catalogue), Enumerates(settings.Lists()) {
 				// Read once at start-up rather than per request. The published
 				// file is the bytes that were signed, so serving it verbatim is
 				// what lets a client verify what the publisher actually signed
@@ -158,6 +160,13 @@ namespace cdn {
 				if (request.Target.starts_with("/bundle/")) {
 					return BundleOf(request);
 				}
+				// Matched exactly or with a cursor, rather than by prefix, so
+				// `/cataloguery` is the unknown route it is rather than a
+				// malformed listing — a `400` there would tell an
+				// unauthenticated caller that something answers near that word.
+				if (request.Target == "/catalogue" || request.Target.starts_with("/catalogue/")) {
+					return CatalogueOf(request);
+				}
 				if (request.Target.starts_with("/ingest/")) {
 					return IngestOf(request);
 				}
@@ -209,6 +218,136 @@ namespace cdn {
 				}
 				++Tally.Dictionaries;
 				return Body(*Codebook, request);
+			}
+
+			// `GET` and `HEAD` at `/catalogue`, and at `/catalogue/<cursor>`.
+			//
+			// **The one route that answers a question the caller could not
+			// already ask.** Every other route is looked up by a value the
+			// caller arrived holding — a bundle root, a content hash, a manifest
+			// a publisher signed — and this one hands over the names, which is
+			// why it is off unless configured and admitted by the key that
+			// already exists. `CatalogueSettings` carries the whole argument.
+			//
+			// **The page is text, one line an asset, and the name is last.** A
+			// name is the one field with no bound on what is inside it —
+			// AGENTS.md rule 4 — so it ends its line, where no separator has to
+			// survive it. The two characters that could still break the format
+			// are the two an entry is dropped for.
+			http::Response CatalogueOf(const http::Request &request) {
+				if (!Enumerates) {
+					// **`404`, as though the route were not there** —
+					// `IngestOf`'s argument on the read side. A `403` would
+					// tell an unauthenticated caller that this origin can
+					// enumerate and only the key is missing, which is exactly
+					// the sentence somebody probing wants to hear.
+					++Tally.CatalogueRefused;
+					return Refuse(http::Status::NotFound);
+				}
+
+				const std::string_view offered = request.Find("x-atomic-ingest").value_or(std::string_view{});
+				if (!SameSecret(offered, Writes.Key)) {
+					++Tally.CatalogueRefused;
+					return Refuse(http::Status::Forbidden);
+				}
+
+				if (request.Verb != http::Method::Get && request.Verb != http::Method::Head) {
+					++Tally.Rejected;
+					return Refuse(http::Status::NotFound);
+				}
+
+				const std::optional<uint64_t> cursor = CatalogueCursor(request.Target);
+				if (!cursor) {
+					++Tally.Rejected;
+					return Refuse(http::Status::BadRequest);
+				}
+
+				const std::shared_ptr<const Publication> current = Serving.Current();
+				if (!current) {
+					// Nothing published is `503` rather than an empty page, for
+					// `ManifestOf`'s reason: an origin that is not ready and an
+					// origin holding nothing are different facts, and a caller
+					// deciding whether to ask again needs them apart.
+					return Refuse(http::Status::ServiceUnavailable);
+				}
+
+				const std::vector<engine::assets::AssetEntry> &assets = current->Contents().Assets();
+				// At least one, because a page size of zero would hand back an
+				// empty page whose cursor never moves — a caller following
+				// `next` would walk it forever.
+				const size_t page = std::max<size_t>(Listing.PageEntries, 1);
+				const size_t first = std::min<size_t>(*cursor, assets.size());
+				const size_t last = std::min<size_t>(first + page, assets.size());
+
+				std::string body;
+				body += "catalogue 1\n";
+				// **The publication's root, on every page.** A publish may swap
+				// underneath somebody walking the cursor, and an offset means
+				// something different afterwards; a reader that keeps this can
+				// tell that happened instead of silently merging two lists.
+				body += "root " + current->Contents().Root().ToHex() + "\n";
+				body += "total " + std::to_string(assets.size()) + "\n";
+				if (last < assets.size()) {
+					body += "next " + std::to_string(last) + "\n";
+				}
+
+				for (size_t index = first; index < last; index++) {
+					const engine::assets::AssetEntry &asset = assets[index];
+					if (asset.Name.find_first_of("\r\n") != std::string::npos) {
+						// A name that would end its own line. Dropped rather
+						// than escaped: an escape is a second spelling of a
+						// name, and rule 4 wants exactly one.
+						continue;
+					}
+					body += "asset ";
+					body += asset.Root.ToHex();
+					body += ' ';
+					body += engine::assets::Describe(asset.Kind);
+					body += ' ';
+					body += std::to_string(asset.TotalBytes);
+					body += ' ';
+					body += asset.Name;
+					body += '\n';
+				}
+
+				++Tally.Catalogues;
+
+				http::Response response;
+				response.Code = http::Status::Ok;
+				response.Set("content-type", "text/plain");
+
+				const std::vector<std::byte> encoded = AsBytes(body);
+				return Body(encoded, request, std::move(response));
+			}
+
+			// The offset a listing page starts at.
+			//
+			// Decimal digits or nothing at all: a cursor is this origin's own
+			// number handed back to it, so anything else is a caller that made
+			// one up rather than a caller that has to be understood.
+			//
+			// @return The offset, or nothing when the target is not one.
+			static std::optional<uint64_t> CatalogueCursor(std::string_view target) {
+				const std::string_view rest = target.substr(std::string_view("/catalogue").size());
+				if (rest.empty()) {
+					return uint64_t{0};
+				}
+
+				// The routing check guarantees the separator, so what is left
+				// is what follows it.
+				const std::string_view digits = rest.substr(1);
+				if (digits.empty() || digits.size() > 18) {
+					return std::nullopt;
+				}
+
+				uint64_t cursor = 0;
+				for (const char value : digits) {
+					if (value < '0' || value > '9') {
+						return std::nullopt;
+					}
+					cursor = cursor * 10 + static_cast<uint64_t>(value - '0');
+				}
+				return cursor;
 			}
 
 			// `PUT` and `HEAD` at `/ingest/<hash>`.
@@ -510,6 +649,13 @@ namespace cdn {
 			ChunkStore Store;
 			std::unique_ptr<http::Server> Listener;
 			IngestSettings Writes;
+			CatalogueSettings Listing;
+
+			// Decided once at start-up rather than per request, because it is a
+			// property of the configuration and re-deriving it on every request
+			// is a second place for the two halves of "on, and keyed" to
+			// disagree.
+			bool Enumerates = false;
 
 			std::optional<std::vector<std::byte>> Published;
 			std::optional<std::vector<std::byte>> Codebook;
@@ -525,6 +671,14 @@ namespace cdn {
 		// half-configured origin, and the safe reading of half-configured is
 		// off.
 		return !Inbox.empty() && !Key.empty();
+	}
+
+	bool ServiceSettings::Lists() const {
+		// **The key is the ingest key and there is no second one.** An operator
+		// who wants an origin that enumerates and takes no uploads sets the key
+		// and leaves `Inbox` empty — `IngestSettings::Accepts` needs both, so
+		// that origin still refuses every write.
+		return Catalogue.Enabled && !Ingest.Key.empty();
 	}
 
 	std::unique_ptr<Service> Serve(Origin &origin, ChunkStore store, const ServiceSettings &settings) {
@@ -565,7 +719,20 @@ namespace cdn {
 			);
 		}
 
+		if (settings.Lists()) {
+			// Said out loud at start-up, because it is the one setting whose
+			// effect an operator cannot see from outside without the key: an
+			// origin that enumerates looks exactly like one that does not until
+			// somebody asks with the right header.
+			ENGINE_INFO(
+				"cdn: enumerating contents at /catalogue, {} a page, against the ingest key",
+				settings.Catalogue.PageEntries
+			);
+		} else if (settings.Catalogue.Enabled) {
+			ENGINE_WARN("cdn: /catalogue is switched on and has no key to admit it — it stays closed");
+		}
+
 		ENGINE_INFO("cdn: serving on {}", listener->Local().Text());
-		return std::make_unique<HttpService>(origin, std::move(store), std::move(listener), settings.Ingest);
+		return std::make_unique<HttpService>(origin, std::move(store), std::move(listener), settings);
 	}
 }

@@ -217,6 +217,29 @@ TEST_CASE("an opaque node fills the alpha channel", "[bake][graph]") {
 	}
 }
 
+TEST_CASE("a mipmap node builds the chain and a mesh cannot have one", "[bake][graph]") {
+	Graph graph;
+	const NodeId source = graph.AddSource("textures/floor.bmp", Bytes(BMP));
+	const NodeId import = graph.Add(NodeKind::Import);
+	const NodeId mipmap = graph.Add(NodeKind::Mipmap);
+
+	REQUIRE(graph.Connect(source, import));
+	REQUIRE(graph.Connect(import, mipmap));
+	REQUIRE(Ran(graph).empty());
+	CHECK(graph.Output(mipmap).Texture.LevelCount() == 2);
+
+	// **A rerun rebuilds rather than appends**, which is what makes a graph a
+	// description: the same nodes over the same source bake the same bytes.
+	REQUIRE(Ran(graph).empty());
+	CHECK(graph.Output(mipmap).Texture.LevelCount() == 2);
+
+	Graph mesh;
+	const NodeId cube = mesh.AddBuiltin("engine.Cube");
+	const NodeId wrong = mesh.Add(NodeKind::Mipmap);
+	REQUIRE(mesh.Connect(cube, wrong));
+	CHECK_FALSE(Ran(mesh).empty());
+}
+
 TEST_CASE("one input fans out to several chains", "[bake][graph]") {
 	// The useful direction, and the reason a node is allowed one input and any
 	// number of consumers: one decode, three sizes.
@@ -347,4 +370,56 @@ TEST_CASE("a source name travels down the chain", "[bake][graph]") {
 	REQUIRE(Ran(graph).empty());
 
 	CHECK(graph.Output(resize).Source == "textures/floor.bmp");
+}
+
+TEST_CASE("a drawing enters through rasterize and never through import", "[bake][graph]") {
+	constexpr std::string_view DRAWING =
+		R"(<svg width="4" height="4"><rect width="4" height="4" fill="#00ff00"/></svg>)";
+	const std::span<const std::byte> markup(
+		reinterpret_cast<const std::byte *>(DRAWING.data()), DRAWING.size()
+	);
+
+	// **The size is the node's, because the file has none.** A `Resize` after an
+	// `Import` cannot stand in for this: there would be nothing to resize until
+	// something had already chosen a rasterisation, and that choice is the one
+	// being made here.
+	Graph graph;
+	const NodeId source = graph.AddSource("icons/leaf.svg", markup);
+	const NodeId rasterize = graph.AddRasterize(16, 16);
+	const NodeId write = graph.AddWrite("icons/leaf");
+
+	REQUIRE(graph.Connect(source, rasterize));
+	REQUIRE(graph.Connect(rasterize, write));
+	REQUIRE(Ran(graph).empty());
+
+	CHECK(graph.Output(rasterize).Kind == PayloadKind::Texture);
+	CHECK(graph.Output(rasterize).Texture.Width == 16);
+	CHECK(graph.Output(rasterize).Texture.Height == 16);
+	REQUIRE(graph.Baked().size() == 1);
+	CHECK(graph.Baked()[0].Kind == AssetKind::Texture);
+
+	// A zero target asks for the size the document declares, which is the only
+	// size an SVG can be said to have.
+	Graph declared;
+	const NodeId bytes = declared.AddSource("icons/leaf.svg", markup);
+	const NodeId intrinsic = declared.AddRasterize(0, 0);
+	REQUIRE(declared.Connect(bytes, intrinsic));
+	REQUIRE(Ran(declared).empty());
+	CHECK(declared.Output(intrinsic).Texture.Width == 4);
+
+	// An `Import` handed the same bytes names the node that would have worked
+	// rather than guessing a size or failing inside an XML parser.
+	Graph imported;
+	const NodeId same = imported.AddSource("icons/leaf.svg", markup);
+	const NodeId import = imported.Add(NodeKind::Import);
+	REQUIRE(imported.Connect(same, import));
+	CHECK(Ran(imported).find("rasterize node") != std::string::npos);
+
+	// And a `Rasterize` handed something that already has pixels says so, rather
+	// than reporting a PNG's compressed data as bad markup.
+	Graph mistaken;
+	const NodeId picture = mistaken.AddSource("textures/floor.bmp", Bytes(BMP));
+	const NodeId wrong = mistaken.AddRasterize(16, 16);
+	REQUIRE(mistaken.Connect(picture, wrong));
+	CHECK(Ran(mistaken).find("already has a size") != std::string::npos);
 }

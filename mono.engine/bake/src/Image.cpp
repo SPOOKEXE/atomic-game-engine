@@ -1,10 +1,13 @@
 #include "Decoders.hpp"
+#include "Extension.hpp"
 
 #include <engine/bake/Image.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
+#include <string>
 
 namespace engine::bake {
 
@@ -49,6 +52,26 @@ namespace engine::bake {
 		return ImageFormat::Unknown;
 	}
 
+	ImageFormat ImageFormatOfName(std::string_view name) {
+		const std::string extension = ExtensionOf(name);
+		if (extension == "png") {
+			return ImageFormat::Png;
+		}
+		if (extension == "bmp") {
+			return ImageFormat::Bmp;
+		}
+		if (extension == "jpg" || extension == "jpeg") {
+			return ImageFormat::Jpeg;
+		}
+		if (extension == "gif") {
+			return ImageFormat::Gif;
+		}
+		if (extension == "svg") {
+			return ImageFormat::Svg;
+		}
+		return ImageFormat::Unknown;
+	}
+
 	std::string_view Describe(ImageFormat format) {
 		switch (format) {
 		case ImageFormat::Png:
@@ -59,6 +82,8 @@ namespace engine::bake {
 			return "jpeg";
 		case ImageFormat::Gif:
 			return "gif";
+		case ImageFormat::Svg:
+			return "svg";
 		case ImageFormat::Unknown:
 			break;
 		}
@@ -75,11 +100,40 @@ namespace engine::bake {
 			return ReadJpeg(bytes, out, failure);
 		case ImageFormat::Gif:
 			return ReadGif(bytes, out, failure);
+		case ImageFormat::Svg:
+			// Unreachable through the sniff above, which has no signature to
+			// find, and here because the day one is added this has to say
+			// something rather than fall through to "not a format this reads".
 		case ImageFormat::Unknown:
 			break;
 		}
 		failure = "image: not a format this reads";
 		return false;
+	}
+
+	bool RasterizeSvg(
+		std::span<const std::byte> bytes,
+		uint32_t width,
+		uint32_t height,
+		assets::TextureData &out,
+		std::string &failure
+	) {
+		// **The caller's target is checked here and the document's own size is
+		// checked in `Svg.cpp`.** They are different numbers from different
+		// people: this one is a pipeline's, and the reason it is refused rather
+		// than clamped is `ResizeImage`'s — a texture silently smaller than what
+		// was asked for is a bake that looks like it worked.
+		if ((width == 0) != (height == 0)) {
+			failure = "svg: a raster target of " + std::to_string(width) + "x" + std::to_string(height) +
+					  " — give both axes, or neither for the size the document declares";
+			return false;
+		}
+		if (width > assets::Texture::MAXIMUM_DIMENSION || height > assets::Texture::MAXIMUM_DIMENSION) {
+			failure = "svg: a raster target past " + std::to_string(assets::Texture::MAXIMUM_DIMENSION) +
+					  " pixels on an axis";
+			return false;
+		}
+		return ReadSvg(bytes, width, height, out, failure);
 	}
 
 	bool ResizeImage(
@@ -162,6 +216,73 @@ namespace engine::bake {
 		}
 
 		out = std::move(resized);
+		return true;
+	}
+
+	uint32_t MipChainLevels(const assets::TextureData &image) {
+		if (!image.IsValid()) {
+			return 0;
+		}
+
+		const uint32_t full = assets::MipLevelCount(image.Width, image.Height);
+		if (!image.IsFlipbook()) {
+			return full;
+		}
+
+		// **A one-cell sheet has no interior boundary to bleed across**, and that
+		// is every still GIF: `Gif.cpp` gives a single frame a 1x1 grid, so
+		// treating it as a grid here would cost every imported still its chain
+		// for a neighbour that does not exist.
+		const uint32_t side = image.FlipbookSide;
+		if (side == 1) {
+			return full;
+		}
+
+		// A grid the sheet's dimensions do not divide evenly has no smaller sheet
+		// holding the same cells, so it gets no chain rather than an approximate
+		// one — `BuildMipChain` carries the argument.
+		if (image.Width % side != 0 || image.Height % side != 0) {
+			return 1;
+		}
+
+		// **The last level whose cells are still an exact halving**, which is the
+		// largest power of two dividing both cell dimensions — and which lands
+		// exactly on the level where a frame is one pixel when the cells are
+		// themselves a power of two. One level further and a destination pixel
+		// spans two frames.
+		const uint32_t cellWidth = image.Width / side;
+		const uint32_t cellHeight = image.Height / side;
+		const uint32_t halvings =
+			static_cast<uint32_t>(std::min(std::countr_zero(cellWidth), std::countr_zero(cellHeight)));
+		return std::min(full, halvings + 1);
+	}
+
+	bool BuildMipChain(assets::TextureData &image) {
+		const uint32_t levels = MipChainLevels(image);
+		if (levels == 0) {
+			return false;
+		}
+
+		// Cleared rather than appended to, so a graph run twice bakes the same
+		// bytes both times.
+		image.Mips.clear();
+		image.Mips.reserve(levels - 1u);
+
+		assets::TextureData previous = image;
+
+		for (uint32_t level = 1; level < levels; level++) {
+			assets::TextureData next;
+			if (!ResizeImage(
+					previous,
+					assets::MipExtent(image.Width, level),
+					assets::MipExtent(image.Height, level),
+					next
+				)) {
+				return false;
+			}
+			image.Mips.push_back(next.Pixels);
+			previous = std::move(next);
+		}
 		return true;
 	}
 }

@@ -36,6 +36,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 
 #include <cstddef>
@@ -99,6 +100,26 @@ namespace engine::scene {
 		core::Name OcclusionMap;
 		core::Name EmissiveMap;
 		//@}
+
+		// Which shader draws this instance, or invalid for the engine's own.
+		//
+		// **A name and not a pipeline handle**, which is the same rule `Mesh`
+		// and `Texture` follow and the same reason: a `server`-tier host writes
+		// this and a device handle means nothing to one. `render` resolves it
+		// against what `ShaderLibrary` compiled, exactly as it resolves a mesh
+		// name against `MeshTable`.
+		//
+		// **Invalid is the ordinary state and costs one compare.** The draw loop
+		// breaks a run wherever this changes, so a world where nothing selects a
+		// shader holds one value throughout and never breaks on it — the rule
+		// `SeamNormal` already established for a per-instance fact expressed as
+		// a per-draw one.
+		//
+		// From `SurfaceAppearance::Shader`, which `ResolveMaterials` wrote from
+		// the `Material` child.
+		//
+		// @since v0.15
+		core::Name Shader;
 
 		// Which tag bits this instance carries, against the world's `TagTable`.
 		//
@@ -212,6 +233,71 @@ namespace engine::scene {
 		// @since v0.15
 		core::Vector3 SeamLight{0.0f, 0.0f, 0.0f};
 	};
+
+	// Fills the fields a collector reads straight off the world's components.
+	//
+	// **The one place that field list is spelled out.** Two collectors publish
+	// this type — `client::CollectInstances` from a world this machine ticks and
+	// `client::CollectReplicated` from one it receives — and each wrote its own
+	// fourteen-member aggregate until v0.15. That is the most expensive shape a
+	// duplicate can take here, because the drift is silent: a member added to the
+	// struct above takes its default in whichever collector nobody remembered to
+	// edit, so a locally hosted world and a replicated one draw differently and
+	// no screenshot says which field went missing. They had already drifted on
+	// which components they treat as optional.
+	//
+	// **What the two genuinely disagree about is deliberately not in here**:
+	// which rows they visit, and where the frame comes from. One gates on the
+	// `Rendered` mark and interpolates `PreviousTransform` to `Transform` by the
+	// frame's alpha; the other gates on `Visual::Visible` and samples a
+	// `replication::SnapshotBuffer`. Folding those in would need a flag argument
+	// per difference, and a builder with a mode is two builders again.
+	//
+	// The seam fields are left at their defaults, because they are written by
+	// `CutAndCloneSeams` after the list is built rather than read off a row.
+	//
+	// @param frame      Where to draw, already interpolated by the caller.
+	// @param bounds     The row's extent.
+	// @param visual     The row's visual component.
+	// @param appearance The row's appearance, or null for the defaults — a
+	//                   replicated row may arrive without one.
+	// @param tags       The row's tags, or null for none.
+	// @return The instance to publish.
+	// @since v0.15
+	inline DrawInstance MakeDrawInstance(
+		const core::CFrame &frame,
+		const Bounds &bounds,
+		const Visual &visual,
+		const SurfaceAppearance *appearance,
+		const Tags *tags
+	) {
+		DrawInstance instance;
+		instance.Frame = frame;
+		instance.HalfExtent = bounds.HalfExtent;
+		instance.Tint = visual.Tint;
+		instance.Mesh = visual.Mesh;
+
+		if (appearance != nullptr) {
+			instance.Texture = appearance->ColourMap;
+			instance.NormalMap = appearance->NormalMap;
+			instance.RoughnessMap = appearance->RoughnessMap;
+			instance.OcclusionMap = appearance->OcclusionMap;
+			instance.EmissiveMap = appearance->EmissiveMap;
+			instance.Shader = appearance->Shader;
+			instance.Alpha = appearance->Mode;
+		}
+
+		instance.TagMask = tags != nullptr ? tags->Mask : 0u;
+
+		// Copied rather than resolved. Which pass an instance lands in is the
+		// renderer's decision, because it depends on where the camera is — and a
+		// collector runs once for a world that may be drawn from several views.
+		instance.Transparency = visual.Transparency;
+		instance.Surface = visual.Surface;
+		instance.CastShadow = visual.CastShadow;
+
+		return instance;
+	}
 
 	// Produces the order a draw list should be submitted in.
 	//

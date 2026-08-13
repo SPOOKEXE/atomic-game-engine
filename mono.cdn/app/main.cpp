@@ -145,6 +145,9 @@ int main(int argc, char **argv) {
 		"ingest-key", "SECRET", "Accept uploads at /ingest from whoever sends this as x-atomic-ingest"
 	);
 	arguments.Value("inbox", "DIR", "Where uploads land (default: the store's raw/ beside --store)");
+	arguments.Flag(
+		"list-contents", "Answer GET /catalogue for whoever holds --ingest-key. Off unless asked for"
+	);
 	arguments.Value("upstream", "NAME=HOST:PORT", "An origin to forward a miss to. Repeatable");
 	arguments.Flag("allow-upstream", "Forward a miss to an upstream. Off unless asked for");
 	arguments.Flag("no-local-first", "Always ask an upstream, even when the content is here — a pure proxy");
@@ -339,6 +342,21 @@ int main(int argc, char **argv) {
 		// none is the failure worth naming here rather than at request time.
 		ENGINE_ERROR("cdn: --inbox needs --ingest-key, or nothing would be accepted");
 		return 2;
+	}
+
+	// **A flag rather than a default, and it is the one flag here whose default
+	// cannot be walked back.** Enumeration hands whoever asks the name of
+	// everything this origin holds, and a name that has been scraped stays
+	// scraped — so an operator says so out loud, and says it with the same
+	// secret that already admits an upload. `cdn::CatalogueSettings` carries the
+	// argument; the refusal for a flag with no key is here for `--inbox`'s
+	// reason.
+	if (arguments.Has("list-contents")) {
+		if (service.Ingest.Key.empty()) {
+			ENGINE_ERROR("cdn: --list-contents needs --ingest-key, or it would enumerate for anybody");
+			return 2;
+		}
+		service.Catalogue.Enabled = true;
 	}
 
 	// Read before the store is handed over, and read once: counting chunks

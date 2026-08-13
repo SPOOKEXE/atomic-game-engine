@@ -152,6 +152,7 @@ TEST_CASE("every operation kind round trips", "[bakegraph]") {
 	document.Record(Bare(NodeKind::Import));
 	document.Record(Bare(NodeKind::Smooth));
 	document.Record(Bare(NodeKind::Opaque));
+	document.Record(Bare(NodeKind::Mipmap));
 	document.Record(Fit(2.5f));
 
 	Operation scale;
@@ -164,6 +165,15 @@ TEST_CASE("every operation kind round trips", "[bakegraph]") {
 	resize.Width = 256;
 	resize.Height = 128;
 	document.Record(std::move(resize));
+
+	// **Two integers like a resize and a separate kind all the same**, because
+	// they are different instructions: one resamples a picture and the other
+	// says how big a drawing is first drawn.
+	Operation rasterize;
+	rasterize.Kind = OperationKind::AddRasterize;
+	rasterize.Width = 64;
+	rasterize.Height = 32;
+	document.Record(std::move(rasterize));
 
 	Operation retime;
 	retime.Kind = OperationKind::AddRetime;
@@ -181,10 +191,12 @@ TEST_CASE("every operation kind round trips", "[bakegraph]") {
 
 	// The awkward float specifically: a third is not representable, so a format
 	// that wrote a rounded decimal would reload a different bake.
-	CHECK(reloaded.Operations()[6].Amount.X == document.Operations()[6].Amount.X);
-	CHECK(reloaded.Operations()[8].Number == 12.5f);
-	CHECK(reloaded.Operations()[7].Width == 256);
-	CHECK(reloaded.Operations()[10].To == 6);
+	CHECK(reloaded.Operations()[7].Amount.X == document.Operations()[7].Amount.X);
+	CHECK(reloaded.Operations()[10].Number == 12.5f);
+	CHECK(reloaded.Operations()[8].Width == 256);
+	CHECK(reloaded.Operations()[9].Kind == OperationKind::AddRasterize);
+	CHECK(reloaded.Operations()[9].Height == 32);
+	CHECK(reloaded.Operations()[12].To == 6);
 }
 
 TEST_CASE("a name holding a newline cannot forge an operation", "[bakegraph]") {
@@ -317,6 +329,7 @@ TEST_CASE("every status and operation kind has a description", "[bakegraph]") {
 		  OperationKind::AddFit,
 		  OperationKind::AddScale,
 		  OperationKind::AddResize,
+		  OperationKind::AddRasterize,
 		  OperationKind::AddRetime,
 		  OperationKind::AddWrite,
 		  OperationKind::Connect}) {

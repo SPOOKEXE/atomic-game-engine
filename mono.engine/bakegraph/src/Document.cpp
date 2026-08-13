@@ -40,6 +40,8 @@ namespace engine::bake {
 				return "smooth";
 			case NodeKind::Opaque:
 				return "opaque";
+			case NodeKind::Mipmap:
+				return "mipmap";
 			default:
 				return "";
 			}
@@ -56,6 +58,10 @@ namespace engine::bake {
 			}
 			if (text == "opaque") {
 				kind = NodeKind::Opaque;
+				return true;
+			}
+			if (text == "mipmap") {
+				kind = NodeKind::Mipmap;
 				return true;
 			}
 			return false;
@@ -208,6 +214,8 @@ namespace engine::bake {
 			return "scale";
 		case OperationKind::AddResize:
 			return "resize";
+		case OperationKind::AddRasterize:
+			return "rasterize";
 		case OperationKind::AddRetime:
 			return "retime";
 		case OperationKind::AddWrite:
@@ -293,6 +301,7 @@ namespace engine::bake {
 				AppendFloat(out, operation.Amount.Z);
 				break;
 			case OperationKind::AddResize:
+			case OperationKind::AddRasterize:
 				out += ' ' + std::to_string(operation.Width) + ' ' + std::to_string(operation.Height);
 				break;
 			case OperationKind::Connect:
@@ -354,8 +363,8 @@ namespace engine::bake {
 				operation.Kind = OperationKind::AddScale;
 				parsed = TakeFloat(line, operation.Amount.X) && TakeFloat(line, operation.Amount.Y) &&
 						 TakeFloat(line, operation.Amount.Z);
-			} else if (word == "resize") {
-				operation.Kind = OperationKind::AddResize;
+			} else if (word == "resize" || word == "rasterize") {
+				operation.Kind = word == "resize" ? OperationKind::AddResize : OperationKind::AddRasterize;
 				parsed = TakeUnsigned(line, operation.Width) && TakeUnsigned(line, operation.Height);
 			} else if (word == "connect") {
 				operation.Kind = OperationKind::Connect;
@@ -384,6 +393,7 @@ namespace engine::bake {
 	}
 
 	bool IsBareNode(NodeKind kind) {
-		return kind == NodeKind::Import || kind == NodeKind::Smooth || kind == NodeKind::Opaque;
+		return kind == NodeKind::Import || kind == NodeKind::Smooth || kind == NodeKind::Opaque ||
+			   kind == NodeKind::Mipmap;
 	}
 }

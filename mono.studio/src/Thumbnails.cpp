@@ -21,7 +21,8 @@
 //
 // ## What is previewable
 //
-// Images. `bake::ReadImage` reads PNG, BMP, JPEG and GIF, and `assets::Texture`
+// Images. `bake::ReadImage` reads PNG, BMP, JPEG and GIF, `bake::RasterizeSvg`
+// draws an `.svg` straight into the thumbnail's square, and `assets::Texture`
 // reads a baked `.atex`.
 //
 // **A mesh gets no *thumbnail*, and that is still true — it gets a live view
@@ -142,6 +143,12 @@ namespace studio {
 			out.Height = THUMBNAIL_SIDE;
 			out.Format = engine::assets::TextureFormat::RGBA8;
 			out.Pixels.assign(static_cast<size_t>(THUMBNAIL_SIDE) * THUMBNAIL_SIDE * 4, std::byte{0});
+
+			// The source's chain describes the source's size. Left in place it
+			// would be levels larger than the thumbnail they claim to be under,
+			// which `IsValid` refuses — and a preview is small enough that a
+			// chain buys nothing anyway.
+			out.Mips.clear();
 
 			const uint32_t left = (THUMBNAIL_SIDE - width) / 2;
 			const uint32_t top = (THUMBNAIL_SIDE - height) / 2;
@@ -302,7 +309,17 @@ namespace studio {
 		engine::core::ByteReader reader(bytes);
 		if (!engine::assets::Texture::Read(reader, decoded)) {
 			std::string ignored;
-			if (!engine::bake::ReadImage(bytes, decoded, ignored)) {
+
+			// **A drawing is rasterised straight into the thumbnail's square**,
+			// rather than at whatever size it declares and then fitted. The
+			// rasteriser already letterboxes a mismatched target — a `viewBox` is
+			// fitted uniformly and centred — so this is the same picture with none
+			// of the resampling, and a 4096-pixel icon costs a 64-pixel canvas.
+			const bool drawing = engine::bake::ImageFormatOfName(name) == engine::bake::ImageFormat::Svg;
+			const bool read =
+				drawing ? engine::bake::RasterizeSvg(bytes, THUMBNAIL_SIDE, THUMBNAIL_SIDE, decoded, ignored)
+						: engine::bake::ReadImage(bytes, decoded, ignored);
+			if (!read) {
 				// Not an image, or not one this reads — a mesh, an archive, a
 				// script. **Silent**: a store holds all three, and warning about
 				// each one every time its row is drawn would bury the log.

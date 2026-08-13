@@ -98,6 +98,22 @@ The renderer is a graph, so the second case is not an edge case: a
 `ShaderScript` whose revision changed, a swapped antialias pass, a permutation
 the demand pass solved for — none of those are known at build time.
 
+**`ShaderLibrary` is the consumer, and it is what closed `D00110` at v0.15.**
+Until then `ShaderCompiler` had no caller and `ShaderScript` was a name in this
+file with no class behind it — the compiler existed for a case nothing could
+reach. `ShaderLibrary::Resolve` is now the one path from a name to a module: a
+`ShaderScript` in the world compiled here, else a built-in `glslc` staged at
+build time, else a diagnostic. The two compilers above meet in that order and
+nowhere else.
+
+**A shader no longer reaches the GPU only through `CreatePipelines`.** That was
+true while the pipeline set was fixed, and it is the sentence `D00110` was
+written around. `DrawSlots` binds a per-name variant per run now, so adding a
+`.frag` to `Engine::resources` is a change in two places: the file, and
+`BuiltInShaderNames`. A file added without the second is a shader nothing can
+select, which is exactly the trap `resources/AGENTS.md` refuses for meshes and
+textures.
+
 **The test that matters is the malformed one.** A compiler that reports success
 unconditionally passes every "valid shader compiles" test ever written. If
 `ShaderCompiler`'s error path is ever reworked, the assertion to keep is that
@@ -330,6 +346,23 @@ from "registered as something": a thumbnail that has not been built and a
 particle run whose sheet has not streamed both want null, and neither wants a
 picture. A caller that wants a picture asks `Default` or `Missing` for one, and
 which of those it asks for is a decision — see the three-way split below.
+
+## The shared sampler's `max_lod` is what turns the mip chain on
+
+`mipmap_mode` has said `LINEAR` since v0.8 and it bought nothing on its own:
+`SDL_GPUSamplerCreateInfo` is zero-initialised, and a `max_lod` of zero clamps
+every fetch to level zero whatever the texture holds. A chain built, serialised
+and uploaded would still have shimmered, with three modules all looking correct.
+
+The clamp is a constant past `assets::MipLevelCount`'s largest answer rather than
+a per-texture number, because SDL takes a LOD range rather than a level count —
+a per-texture bound would mean a sampler per texture, and one sampler is what
+makes a draw call cheap here.
+
+**This module never builds levels.** The filter is `bake::ResizeImage` and
+nothing a shipped game links may link `bake` — `bake/AGENTS.md`. A texture that
+arrives with one level, including the built-ins and the two markers, uploads with
+one and draws as it always did.
 
 ## `DrawSlots` splits consecutive runs and must not sort them
 

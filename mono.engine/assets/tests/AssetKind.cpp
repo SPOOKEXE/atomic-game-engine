@@ -27,6 +27,57 @@ TEST_CASE("an extension names a kind", "[assets]") {
 	CHECK(KindOfName("levels/start.agame") == AssetKind::Data);
 }
 
+TEST_CASE("every source form this baker knows also names a kind", "[assets]") {
+	// **The two tables have to agree, and only one direction of that was
+	// written down.** `IsRuntimeReadable`'s comment guards against a format
+	// reaching the extension table without a source row, which would offer
+	// something as loadable that cannot load. The failure that actually happened
+	// was the other way round: `gif` was a source with no extension row, so
+	// `KindOfName` answered `Unknown`, `cdn::Publisher` recorded that kind into
+	// the manifest, and `client::Client` — which routes on kind — never handed
+	// the bytes to the texture path. The decoder had existed since the flipbook
+	// work and could not be reached from a publish.
+	//
+	// Asserted as a property over the source forms rather than as one more row
+	// in the spot-check above, because a row would have been added by whoever
+	// noticed and this is the shape that catches the *next* one. `svg` joined it
+	// at v0.14, when `bake::RasterizeSvg` landed.
+	constexpr std::string_view SOURCES[] = {
+		"glb",
+		"gltf",
+		"obj",
+		"fbx",
+		"pmx",
+		"png",
+		"jpg",
+		"jpeg",
+		"bmp",
+		"gif",
+		"svg",
+		"tga",
+		"mat",
+		"surface",
+		"frag",
+		"vert",
+		"comp",
+		"glsl",
+	};
+
+	for (const std::string_view source : SOURCES) {
+		const std::string name = "content/thing." + std::string(source);
+
+		INFO("source form ." << source);
+
+		// A source is by definition not runtime-readable: it has to be baked
+		// first. This is the half that was already right.
+		CHECK_FALSE(engine::assets::IsRuntimeReadable(name));
+
+		// And it must still route somewhere, or a publish files it under a kind
+		// nothing asks for.
+		CHECK(KindOfName(name) != AssetKind::Unknown);
+	}
+}
+
 TEST_CASE("the extension is matched case-insensitively", "[assets]") {
 	// A content pipeline sees `.PNG` from an artist's tool often enough that
 	// treating it as a different format would be a support burden with no

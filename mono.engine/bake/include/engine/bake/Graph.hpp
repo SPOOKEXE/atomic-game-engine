@@ -136,6 +136,25 @@ namespace engine::bake {
 		// @return The node, or an invalid id.
 		NodeId AddResize(uint32_t width, uint32_t height);
 
+		// Adds a `Rasterize` node.
+		//
+		// **The size is here rather than in a `Resize` after an `Import`,
+		// because a vector drawing has no size to import at.** Rasterising at
+		// the target and rasterising large then box-filtering down are different
+		// pictures — the second's edges belong to the resampler — so the target
+		// is stated where the drawing is first given pixels.
+		//
+		// Zero on both axes means the size the document itself declares, which
+		// is the only size an SVG can be said to have. One zero and one number
+		// is refused at evaluation: an aspect this file guessed would be a
+		// number nobody wrote.
+		//
+		// @param width  The target width in pixels.
+		// @param height The target height in pixels.
+		// @return The node, or an invalid id.
+		// @since v0.14
+		NodeId AddRasterize(uint32_t width, uint32_t height);
+
 		// Restates an imported flipbook's frame rate.
 		//
 		// **A node rather than a mutation on the way past**, because everything

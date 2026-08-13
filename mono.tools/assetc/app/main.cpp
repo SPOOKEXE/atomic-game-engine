@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
 		"FPS",
 		"Override the frame rate of every imported flipbook (default: 0, keep what the GIF said)"
 	);
+	arguments.Flag("no-mipmaps", "Skip the mip chain, leaving every texture one level");
 	arguments.Flag("no-copy", "Skip files this cannot bake instead of copying them across");
 	arguments.Flag("quiet", "Print the summary only, not a row per asset");
 
@@ -57,6 +58,7 @@ int main(int argc, char **argv) {
 	settings.Input = std::filesystem::path(*input);
 	settings.Output = std::filesystem::path(*output);
 	settings.CopyUnknown = !arguments.Has("no-copy");
+	settings.Mipmaps = !arguments.Has("no-mipmaps");
 
 	settings.ModelSize = static_cast<float>(arguments.GetNumber("model-size", settings.ModelSize));
 	settings.MaximumTexture =

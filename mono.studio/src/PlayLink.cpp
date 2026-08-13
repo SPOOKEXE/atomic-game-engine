@@ -80,6 +80,13 @@ namespace studio {
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {
 			Server.Replicate(Name(component.Name), component.Detection);
+
+			// After `Replicate`, which is what declares the slot this names. The
+			// editor applies the same filter as a real server, or playing in the
+			// editor and playing for real would send different rows.
+			if (!component.Suppressor.empty()) {
+				Server.SuppressWhenTagged(Name(component.Name), Name(component.Suppressor));
+			}
 		}
 
 		Handle = Server.Admit();

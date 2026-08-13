@@ -43,13 +43,51 @@ namespace engine::bake {
 		//
 		// @since v0.10
 		Gif,
+
+		// SVG, rasterised into RGBA8 at a size the caller names.
+		//
+		// **The only format here that is text and the only one with no pixels of
+		// its own**, which is why it is the only one `ReadImage` cannot produce:
+		// an SVG states a coordinate system, so the raster target is a decision
+		// somebody has to take. `Graph`'s `Rasterize` node is where it is taken.
+		//
+		// A deliberately small subset — shapes, solid paint, `translate` and
+		// `scale` — and everything outside it is refused by name rather than
+		// approximated. `bake/src/Svg.cpp` carries the list and the argument.
+		//
+		// @since v0.14
+		Svg,
 	};
 
 	// Identifies a format from the leading bytes.
 	//
+	// **Every format here except `Svg` has a signature**, which is what makes
+	// this the answer to prefer: a file's own bytes cannot be renamed. SVG is
+	// XML and has none, so it is `ImageFormatOfName`'s to identify.
+	//
 	// @param bytes The file, or as much of its front as is available.
 	// @return The format, or `Unknown`.
 	ImageFormat ImageFormatOfBytes(std::span<const std::byte> bytes);
+
+	// Identifies a format from a file's name.
+	//
+	// **This exists for SVG and is spelled for all of them**, the way
+	// `ModelFormatOfName` is. The reason it exists at all is that SVG carries no
+	// signature: it is XML, so the only honest sniff is a `<svg` or `<?xml`
+	// prefix, and a prefix over text claims every text file that starts that way
+	// — the argument `Graph`'s import dispatch already makes about `.gltf` being
+	// JSON. A `<?xml` sniff would take the next XML-shaped format this module
+	// learns to read, whatever it turns out to be, and hand it to the
+	// rasteriser.
+	//
+	// **The bytes are still asked first.** A name is a claim and a signature is
+	// evidence, so this is consulted only where there is no evidence to be had.
+	//
+	// @param name A file name or path. The extension is what is read, and a dot
+	//             inside a directory component is not one.
+	// @return The format, or `Unknown`.
+	// @since v0.14
+	ImageFormat ImageFormatOfName(std::string_view name);
 
 	// A name for a format, for a log line and a command line.
 	//
@@ -59,6 +97,10 @@ namespace engine::bake {
 
 	// Decodes an image into RGBA8 texture data.
 	//
+	// **An SVG is refused here rather than given a default size**, because a
+	// default would be a number this file invented appearing in somebody's
+	// texture. `RasterizeSvg` is the entry that takes one.
+	//
 	// @param bytes   The file.
 	// @param out     Filled on success, left alone on failure.
 	// @param failure Set to why on failure, so a bake tool can name the file
@@ -66,7 +108,44 @@ namespace engine::bake {
 	// @return `false` on anything this cannot read or will not trust.
 	bool ReadImage(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure);
 
+	// Rasterises an SVG into RGBA8 at a size.
+	//
+	// **A vector drawing has no pixels, so the target is a parameter and not a
+	// resize afterwards.** Rasterising at the size wanted and rasterising large
+	// then box-filtering down are different pictures: the second samples a
+	// drawing that was never that sharp, and the edges it produces are the
+	// resampler's rather than the shape's.
+	//
+	// The subset is small and everything outside it is refused by name — see
+	// `ImageFormat::Svg` and `bake/src/Svg.cpp`. The document's own counts are
+	// all bounded before they are used, and a DOCTYPE or entity declaration is
+	// refused outright.
+	//
+	// @param bytes   The document.
+	// @param width   The target width in pixels. Zero, with a zero `height`,
+	//                means the size the document declares — which is the only
+	//                size it can be said to have.
+	// @param height  The target height, under the same rule.
+	// @param out     Filled on success, left alone on failure.
+	// @param failure Set to why on failure, naming what was refused.
+	// @return `false` for a malformed document, an unsupported feature, or a
+	//         target that is zero, mixed with a zero, or past
+	//         `assets::Texture::MAXIMUM_DIMENSION`.
+	// @since v0.14
+	bool RasterizeSvg(
+		std::span<const std::byte> bytes,
+		uint32_t width,
+		uint32_t height,
+		assets::TextureData &out,
+		std::string &failure
+	);
+
 	// Resamples an image with a box filter. Upscaling duplicates source pixels.
+	//
+	// **The mip chain is not carried across**, unlike the flipbook triple: a
+	// level's size is derived from the base dimensions, so keeping the old levels
+	// past a resize would leave level one larger than level zero. Rebuild it with
+	// `BuildMipChain` after the last resize.
 	//
 	// @param source The image to resample.
 	// @param width  The target width. Zero refuses.
@@ -75,4 +154,37 @@ namespace engine::bake {
 	// @return `false` for a zero or over-large target, or an invalid source.
 	bool
 	ResizeImage(const assets::TextureData &source, uint32_t width, uint32_t height, assets::TextureData &out);
+
+	// How many levels a chain over this image may honestly have.
+	//
+	// A still image gets the full `assets::MipLevelCount`. **A flipbook sheet
+	// gets fewer, and that is the whole of the decision** — see `BuildMipChain`.
+	//
+	// @param image The image, chain or no chain.
+	// @return The count, level zero included. Zero for an invalid image, and one
+	//         for an image that can carry no chain at all.
+	// @since v0.14
+	uint32_t MipChainLevels(const assets::TextureData &image);
+
+	// Builds an image's mip chain in place, halving with the box filter.
+	//
+	// Each level is filtered from the one above rather than from the base, which
+	// is what a sampler interpolating between two adjacent levels expects.
+	//
+	// **A flipbook sheet stops early rather than being padded or refused.**
+	// Halving a grid of frames is safe only while every destination pixel still
+	// falls inside one cell; one level past that, a pixel averages two frames and
+	// the sheet shows a ghost of the next frame at distance — which reads as the
+	// flipbook's cell arithmetic being wrong rather than as a chain one level too
+	// long. So the chain ends at the last level whose cells are still an exact
+	// halving, which is the level where each frame is one pixel. Padding the
+	// cells with gutters would change what a flipbook *is* — every consumer
+	// divides the sheet by `FlipbookSide` — and refusing the texture outright
+	// would throw away an image that was perfectly good without a chain.
+	//
+	// @param[in,out] image The image. Any existing chain is replaced, so running
+	//                a pipeline twice produces the same bytes.
+	// @return `false` for an image that is not one.
+	// @since v0.14
+	bool BuildMipChain(assets::TextureData &image);
 }

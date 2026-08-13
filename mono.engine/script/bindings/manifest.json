@@ -257,7 +257,8 @@
 			"properties": [
 				{"name": "MaterialId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]}
 			]
 		},
 		{

@@ -1,9 +1,9 @@
 # bake — module invariants
 
 L9 `shared`. The importers and the node pipeline: the only code in this engine
-that reads a `.glb`, a `.pmx`, an `.obj`, a `.png`, a `.jpg` or a `.bmp`.
-`assets` is what a baked mesh or texture *is*; this is how somebody else's file
-becomes one.
+that reads a `.glb`, a `.pmx`, an `.obj`, a `.png`, a `.jpg`, a `.bmp` or an
+`.svg`. `assets` is what a baked mesh or texture *is*; this is how somebody
+else's file becomes one.
 
 ## Nothing a shipped game links may link this
 
@@ -49,6 +49,27 @@ allocated. Named cases that must not be relaxed:
   `offset +=` per field is exactly the shape that walks off a truncated file.
 - **BMP**: the height is signed and means top-down when negative. Read unsigned
   it is a four-billion-row image.
+- **SVG**: the bomb is XML rather than pixels. A `<!DOCTYPE>` or `<!ENTITY>` is
+  **refused outright rather than bounded** — entity expansion is a kilobyte of
+  markup that unfolds into gigabytes while it is being parsed, an external
+  entity is a file read by a module that opens nothing, and a drawing needs
+  neither. Everything else it states is a count and every one is checked before
+  it is used: the markup's length, the element count, the nesting depth, the
+  path command count, the flattened point count. The raster target is bounded
+  twice because it comes from two places — the caller's is checked against
+  `Texture::MAXIMUM_DIMENSION` in `Image.cpp` and the document's own declared
+  size in `Svg.cpp`, which also holds the area bound the canvas is allocated
+  against.
+
+  **And one bound that is on no stated count at all**, which is the one worth
+  remembering: `MAXIMUM_FILL_WORK`. Four thousand full-canvas rectangles is
+  sixteen thousand points and two billion pixels of compositing, and a
+  ten-thousand-point polygon crossing every scanline is the same cost from the
+  other end — neither is visible to a count of elements or of points. So each
+  fill is charged its bounding box plus its edge-crossings *before* it runs, and
+  a document past the budget is refused without doing the work that refused it.
+  The number is measured against `-O0`, and raising it raises what one hostile
+  file may cost in proportion.
 
 ## What is refused by name, and why it must stay refused
 
@@ -63,6 +84,19 @@ rather than approximated:
   override, which is geometry that is subtly and invisibly wrong.
 - **Arithmetic-coded JPEG, RLE BMP, sub-byte PNG depths** — separate decoders
   wearing a familiar container.
+- **Most of SVG.** The subset drawn is `<svg>`, `<g>`, `<rect>`, `<circle>`,
+  `<ellipse>`, `<line>`, `<polyline>`, `<polygon>` and `<path>` with M, L, H, V,
+  C and Z; solid `fill` and `stroke` with their opacities and `fill-rule`; and a
+  `transform` of `translate` and `scale`. **Everything else is refused by name**
+  — `<text>` needs fonts and shaping, `<image>` and `<use>` need a reference
+  graph, gradients, filters, masks and group `opacity` need an offscreen
+  compositor, `style` and `class` need CSS, `rotate` and `matrix` turn a stroke
+  into an elliptical pen, arcs and quadratics are a different parameterisation,
+  and a unit that is not `px` needs a font, a viewport or a DPI. `<title>`,
+  `<desc>` and `<metadata>` are skipped whole rather than refused, because they
+  carry no marks. Half-drawing any of the rest gives a picture that is
+  recognisably the right icon and wrong, which is the failure the whole of this
+  section is about.
 
 ## The two conversions that are not optional
 
@@ -87,6 +121,64 @@ PNG stores it big-endian. `CRC32::Verify` against the four bytes in the file
 therefore disagrees with itself on every little-endian machine, which is every
 machine this builds on. Both sides are assembled into a `uint32_t` and compared
 as numbers. This cost an afternoon once.
+
+## A flipbook's mip chain stops before its frames bleed
+
+`BuildMipChain` halves a still image all the way to one pixel. **A sheet of
+animation frames stops earlier, and the stopping point is not a tuning knob.**
+Halving a grid is safe only while every destination pixel still falls inside one
+cell; one level past that, a pixel averages two frames and the sheet shows a
+ghost of the next frame at distance. That reads as the flipbook's cell arithmetic
+being wrong rather than as a chain one level too long, which is why it is refused
+rather than approximated — the same rule interlaced PNG and progressive JPEG are
+refused under.
+
+The chain therefore ends at the last level whose cells are still an exact
+halving, which is the largest power of two dividing both cell dimensions and
+which lands on the level where a frame is one pixel. A sheet whose cells are odd,
+or whose dimensions its grid does not divide, gets **no chain at all** rather
+than an approximate one.
+
+The one exception is a 1x1 grid, which gets the full chain: there is no interior
+boundary to bleed across. That case is not a curiosity — `Gif.cpp` gives every
+single-frame GIF a 1x1 grid, so without it every imported still would lose its
+levels to a neighbour that does not exist.
+
+The two alternatives were weighed and both are worse. Padding the cells with
+gutters changes what a flipbook *is* — every consumer divides the sheet by
+`FlipbookSide`, so a gutter is a change to `assets::TextureData`, to
+`render::FlipbookCellAt` and to every UV that samples one. Refusing the texture
+outright throws away an image that was perfectly good without a chain.
+
+## An SVG is identified by its name, and its size is a node's parameter
+
+Two rules, and both are about the same fact: an SVG carries neither a signature
+nor a pixel.
+
+**The name identifies it, because the bytes cannot.** `ImageFormatOfBytes` is
+the preferred answer for every other format and deliberately does not sniff
+`<svg` or `<?xml` — a prefix over text is a claim over every text file that
+starts that way, which is the argument `Graph`'s import dispatch already makes
+about a `.gltf` being JSON. `ImageFormatOfName` is asked only where the bytes
+said nothing, so a `.svg` holding a PNG still decodes as a PNG.
+
+**The raster size is a `Rasterize` node and not a `Resize` after an `Import`.**
+An SVG states a coordinate system, so somebody has to choose the pixels;
+rasterising large and box-filtering down is a different picture, with edges
+belonging to the resampler rather than to the shapes. A zero target means the
+size the document declares, which is the only size it can be said to have, and
+`Import` handed an SVG refuses while naming the node that would have worked.
+`assetc` applies `--max-texture` to a drawing by rasterising it again at the cap
+rather than by adding a resize.
+
+## The `Mipmap` node goes last, and the graph does not enforce it
+
+Every other texture node changes the pixels the levels are filtered from, and
+`ResizeImage` drops the chain outright — so a `Mipmap` before a `Resize` reaches
+disk with no levels and nothing saying why, and one before an `Opaque` leaves the
+levels' alpha as it was. `Graph` cannot check this: a node knows its input and
+not what is downstream of it. Rule 6, so it is written here, and `assetc`'s
+pipeline puts the node immediately before the write.
 
 ## What is not here yet, so nobody adds half of one
 

@@ -842,3 +842,433 @@ TEST_CASE("a resize keeps the flipbook it was given", "[bake]") {
 	CHECK(smaller.FlipbookFrames == 3);
 	CHECK(smaller.FlipbookFrameRate == source.FlipbookFrameRate);
 }
+
+// --- the mip chain, added at v0.14 --------------------------------------------
+//
+// **The chain is built here and never at upload**, because `render` may not link
+// this module — `bake/AGENTS.md`, and the same rule that keeps a PNG reader out
+// of a shipped client. A texture that arrives without a chain is one that was
+// baked without one, and it draws exactly as it did before.
+
+namespace {
+	// A sheet of `side * side` cells, each `cell` pixels square, where every cell
+	// is one flat colour and the colours differ.
+	//
+	// **Flat cells with hard borders between them**, which is what makes bleeding
+	// visible: a level built across a cell boundary averages two colours and lands
+	// somewhere neither cell holds.
+	TextureData Sheet(uint8_t side, uint32_t cell, uint8_t frames) {
+		TextureData sheet;
+		sheet.Width = side * cell;
+		sheet.Height = side * cell;
+		sheet.Format = TextureFormat::RGBA8;
+		sheet.FlipbookSide = side;
+		sheet.FlipbookFrames = frames;
+		sheet.FlipbookFrameRate = 12.0f;
+		sheet.Pixels.resize(static_cast<size_t>(sheet.Width) * sheet.Height * 4);
+
+		for (uint32_t row = 0; row < sheet.Height; row++) {
+			for (uint32_t column = 0; column < sheet.Width; column++) {
+				const uint32_t cellIndex = (row / cell) * side + (column / cell);
+				const size_t offset = (static_cast<size_t>(row) * sheet.Width + column) * 4;
+				sheet.Pixels[offset] = static_cast<std::byte>(cellIndex * 40 + 10);
+				sheet.Pixels[offset + 1] = std::byte{0};
+				sheet.Pixels[offset + 2] = std::byte{0};
+				sheet.Pixels[offset + 3] = std::byte{255};
+			}
+		}
+		return sheet;
+	}
+}
+
+TEST_CASE("a chain halves all the way down and every level is the right size", "[bake][image]") {
+	const TextureData source = Decoded(BMP_BOTTOM_UP);
+
+	TextureData chained = source;
+	REQUIRE(engine::bake::BuildMipChain(chained));
+
+	// 2x2 gives two levels, and the smallest is the mean of the four corners —
+	// the same number `ResizeImage` produces directly, because the chain is that
+	// filter run repeatedly rather than a second one.
+	REQUIRE(chained.LevelCount() == 2);
+	REQUIRE(chained.IsValid());
+	CHECK(chained.Pixels == source.Pixels);
+
+	TextureData direct;
+	REQUIRE(engine::bake::ResizeImage(source, 1, 1, direct));
+	CHECK(chained.Mips[0] == direct.Pixels);
+}
+
+TEST_CASE("a chain is built from the level above, not from the base", "[bake][image]") {
+	// **Successive halving, which is what a sampler interpolating between two
+	// levels expects.** Filtering every level from the base instead would make
+	// each one a different reconstruction of the image, and the seam between two
+	// of them is what a trilinear fetch shows.
+	// **An odd width, which is the only shape that tells the two apart.** Over
+	// power-of-two dimensions both orders average the same source pixels and
+	// agree to the byte; five columns halve to two unequal groups, and the level
+	// below then weights them equally where the base would not.
+	TextureData wide;
+	wide.Width = 5;
+	wide.Height = 1;
+	wide.Format = TextureFormat::R8;
+	wide.Pixels = {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{100}};
+	REQUIRE(engine::bake::BuildMipChain(wide));
+
+	REQUIRE(wide.LevelCount() == 3);
+	REQUIRE(wide.Mips[0].size() == 2);
+	CHECK(static_cast<int>(wide.Mips[0][0]) == 0);
+	CHECK(static_cast<int>(wide.Mips[0][1]) == 33);
+
+	// 16 is (0 + 33) / 2. Filtering the base directly would give 20.
+	REQUIRE(wide.Mips[1].size() == 1);
+	CHECK(static_cast<int>(wide.Mips[1][0]) == 16);
+}
+
+TEST_CASE("a flipbook's chain stops before frames bleed into each other", "[bake][image]") {
+	// **The decision this case exists for.** Halving a grid of frames is only
+	// safe while every destination pixel sits inside one cell, which holds
+	// exactly while the cell size is still an even halving. One level further and
+	// a pixel averages two frames — a ghost of the next frame, at distance, that
+	// looks like the flipbook's cell arithmetic is wrong rather than like the
+	// chain being one level too long.
+	TextureData sheet = Sheet(2, 4, 4);
+	REQUIRE(engine::bake::MipChainLevels(sheet) == 3);
+	REQUIRE(engine::bake::BuildMipChain(sheet));
+	REQUIRE(sheet.LevelCount() == 3);
+
+	// The last level is one pixel a frame, and each is still its own colour
+	// rather than a blend of its neighbours.
+	const std::vector<std::byte> &last = sheet.Mips.back();
+	REQUIRE(last.size() == 2 * 2 * 4);
+	CHECK(static_cast<int>(last[0]) == 10);
+	CHECK(static_cast<int>(last[4]) == 50);
+	CHECK(static_cast<int>(last[8]) == 90);
+	CHECK(static_cast<int>(last[12]) == 130);
+
+	// A still image of the same size runs two levels further, to a single pixel.
+	TextureData still = sheet;
+	still.FlipbookSide = 0;
+	still.FlipbookFrames = 0;
+	still.Mips.clear();
+	CHECK(engine::bake::MipChainLevels(still) == 4);
+
+	// **And so does a one-cell sheet**, which is what every still GIF decodes to
+	// — there is no neighbouring frame for it to bleed into.
+	TextureData single;
+	std::string failure;
+	REQUIRE(engine::bake::ReadImage(TinyGif(), single, failure));
+	REQUIRE(single.FlipbookSide == 1);
+	CHECK(engine::bake::MipChainLevels(single) == engine::assets::MipLevelCount(2, 1));
+}
+
+TEST_CASE("a sheet whose cells cannot be halved gets no chain at all", "[bake][image]") {
+	// **Refusing the chain rather than padding the cells.** A gutter would be a
+	// change to what a flipbook *is* — every sampler divides the sheet by
+	// `FlipbookSide` — so the honest answer for a sheet of odd cells is the
+	// texture it already was.
+	TextureData odd = Sheet(2, 3, 4);
+	CHECK(engine::bake::MipChainLevels(odd) == 1);
+	REQUIRE(engine::bake::BuildMipChain(odd));
+	CHECK(odd.LevelCount() == 1);
+	CHECK(odd.Mips.empty());
+
+	// A grid the dimensions do not divide evenly is the same event: there is no
+	// smaller sheet that still holds the same cells.
+	TextureData ragged = Sheet(2, 4, 4);
+	ragged.FlipbookSide = 3;
+	CHECK(engine::bake::MipChainLevels(ragged) == 1);
+}
+
+TEST_CASE("a resize drops the chain it cannot carry", "[bake][image]") {
+	// A chain describes one image at one size. Carrying the old levels past a
+	// resize would leave level 1 larger than level 0, which `IsValid` refuses and
+	// a GPU would read off the end of.
+	TextureData source = Decoded(BMP_BOTTOM_UP);
+	REQUIRE(engine::bake::BuildMipChain(source));
+	REQUIRE(source.LevelCount() == 2);
+
+	TextureData bigger;
+	REQUIRE(engine::bake::ResizeImage(source, 4, 4, bigger));
+	CHECK(bigger.Mips.empty());
+	CHECK(bigger.IsValid());
+}
+
+TEST_CASE("building a chain twice gives the same chain", "[bake][image]") {
+	// **Rebuilt rather than appended to**, because a graph may be run twice and
+	// a pipeline that added levels each time would produce a different file every
+	// bake.
+	TextureData once = Decoded(PNG_RGB);
+	REQUIRE(engine::bake::BuildMipChain(once));
+
+	TextureData twice = once;
+	REQUIRE(engine::bake::BuildMipChain(twice));
+	CHECK(twice.Mips == once.Mips);
+}
+
+// --- SVG, added at v0.14 ------------------------------------------------------
+//
+// **The subset is the assertion.** A rasteriser for part of a document format is
+// only honest if the part it does not do is refused by name, so half of what is
+// below checks that a refusal happened *and says which feature caused it* — a
+// message naming `<text>` is a file somebody can fix, and a blank icon is a bug
+// report about the renderer.
+
+namespace {
+	std::span<const std::byte> Markup(std::string_view text) {
+		return {reinterpret_cast<const std::byte *>(text.data()), text.size()};
+	}
+
+	TextureData Drawn(std::string_view markup, uint32_t width, uint32_t height) {
+		TextureData image;
+		std::string failure;
+		REQUIRE(engine::bake::RasterizeSvg(Markup(markup), width, height, image, failure));
+		CHECK(failure.empty());
+		REQUIRE(image.IsValid());
+		return image;
+	}
+
+	// The refusal's reason, so a case can assert what it names.
+	std::string Refused(std::string_view markup) {
+		TextureData image;
+		std::string failure;
+		REQUIRE_FALSE(engine::bake::RasterizeSvg(Markup(markup), 8, 8, image, failure));
+		REQUIRE_FALSE(failure.empty());
+
+		// Left alone on failure, which is what lets a caller keep whatever it
+		// had — the rule every other decoder here follows.
+		CHECK(image.Pixels.empty());
+		return failure;
+	}
+
+	bool Mentions(const std::string &failure, std::string_view word) {
+		INFO("failure was: " << failure);
+		return failure.find(word) != std::string::npos;
+	}
+}
+
+TEST_CASE("an svg is identified by its name, because it has no signature", "[bake][image]") {
+	constexpr std::string_view DRAWING = R"(<svg width="4" height="4"/>)";
+
+	// **The one format here the bytes cannot identify.** A `<svg` prefix is a
+	// claim over text rather than a signature, and the byte sniff deliberately
+	// does not make it — a text sniff would take whatever XML-shaped format this
+	// module reads next.
+	CHECK(engine::bake::ImageFormatOfBytes(Markup(DRAWING)) == ImageFormat::Unknown);
+	CHECK(engine::bake::ImageFormatOfName("icons/close.svg") == ImageFormat::Svg);
+	CHECK(engine::bake::ImageFormatOfName("icons/CLOSE.SVG") == ImageFormat::Svg);
+	CHECK(engine::bake::ImageFormatOfName("icons/close.png") == ImageFormat::Png);
+	CHECK(engine::bake::ImageFormatOfName("svg/close") == ImageFormat::Unknown);
+	CHECK(engine::bake::Describe(ImageFormat::Svg) == "svg");
+
+	// And `ReadImage` refuses it rather than inventing a size, which is the
+	// whole reason there is a second entry point.
+	TextureData image;
+	std::string failure;
+	CHECK_FALSE(ReadImage(Markup(DRAWING), image, failure));
+	CHECK_FALSE(failure.empty());
+}
+
+TEST_CASE("an svg rasterises to the pixels it describes", "[bake][image]") {
+	// A rectangle over the top half, and a half-covered row under it. The
+	// half-covered row is the assertion that matters: coverage across a pixel is
+	// exact in x and four-sampled in y, so a shape ending at 1.5 leaves row one
+	// at exactly half alpha rather than on or off.
+	const TextureData image =
+		Drawn(R"(<svg width="4" height="4"><rect width="4" height="1.5" fill="#ff0000"/></svg>)", 0, 0);
+
+	CHECK(image.Width == 4);
+	CHECK(image.Height == 4);
+	CHECK(image.Format == TextureFormat::RGBA8);
+
+	CHECK(At(image, 0, 0) == Pixel{255, 0, 0, 255});
+	CHECK(At(image, 3, 0) == Pixel{255, 0, 0, 255});
+	CHECK(At(image, 0, 1) == Pixel{255, 0, 0, 128});
+	CHECK(At(image, 0, 2) == Pixel{0, 0, 0, 0});
+
+	// **The same drawing at a different size is the same drawing, drawn
+	// again**, which is what makes the raster target a parameter rather than a
+	// resize afterwards: at 8x8 the shape ends on a pixel boundary, so the row
+	// that was half covered at 4x4 is now a full one and there is no soft edge
+	// anywhere. Rasterising at 4x4 and scaling up could not produce that.
+	const TextureData larger =
+		Drawn(R"(<svg width="4" height="4"><rect width="4" height="1.5" fill="#ff0000"/></svg>)", 8, 8);
+	CHECK(larger.Width == 8);
+	CHECK(At(larger, 0, 2) == Pixel{255, 0, 0, 255});
+	CHECK(At(larger, 0, 3) == Pixel{0, 0, 0, 0});
+}
+
+TEST_CASE("the shapes, the paint and the transforms all draw", "[bake][image]") {
+	// A path of M, H, V and Z over the top half. Byte for byte the rectangle
+	// above, which is the point: two spellings of one shape have to rasterise
+	// the same or one of the two parsers is wrong.
+	const TextureData path =
+		Drawn(R"(<svg width="4" height="4"><path d="M0 0 H4 V2 H0 Z" fill="red"/></svg>)", 4, 4);
+	const TextureData rectangle =
+		Drawn(R"(<svg width="4" height="4"><rect width="4" height="2" fill="#F00"/></svg>)", 4, 4);
+	CHECK(path.Pixels == rectangle.Pixels);
+
+	// A stroke is an outline filled once rather than a quad composited per
+	// segment — a two-wide line centred on y=2 covers rows one and two.
+	const TextureData stroked = Drawn(
+		R"(<svg width="4" height="4"><line x1="0" y1="2" x2="4" y2="2" stroke="blue" stroke-width="2"/></svg>)",
+		4,
+		4
+	);
+	CHECK(At(stroked, 1, 0) == Pixel{0, 0, 0, 0});
+	CHECK(At(stroked, 1, 1) == Pixel{0, 0, 255, 255});
+	CHECK(At(stroked, 1, 2) == Pixel{0, 0, 255, 255});
+	CHECK(At(stroked, 1, 3) == Pixel{0, 0, 0, 0});
+
+	// A group's transform composes onto its children, and `fill-opacity` is a
+	// per-shape alpha rather than the group opacity that would need a layer.
+	const TextureData grouped = Drawn(
+		R"svg(<svg width="4" height="4"><g transform="translate(2,0) scale(1,2)" fill="#00ff00">)svg"
+		R"svg(<rect width="2" height="1" fill-opacity="0.5"/></g></svg>)svg",
+		4,
+		4
+	);
+	CHECK(At(grouped, 0, 0) == Pixel{0, 0, 0, 0});
+	CHECK(At(grouped, 2, 0) == Pixel{0, 255, 0, 128});
+	CHECK(At(grouped, 3, 1) == Pixel{0, 255, 0, 128});
+	CHECK(At(grouped, 3, 2) == Pixel{0, 0, 0, 0});
+
+	// A viewBox is fitted uniformly and centred, which is what
+	// `preserveAspectRatio` defaults to. Stretching to fill instead would draw
+	// every mismatched drawing differently from every other renderer.
+	const TextureData fitted =
+		Drawn(R"(<svg viewBox="0 0 2 2"><rect width="2" height="2" fill="white"/></svg>)", 8, 4);
+	CHECK(At(fitted, 0, 0) == Pixel{0, 0, 0, 0});
+	CHECK(At(fitted, 3, 1) == Pixel{255, 255, 255, 255});
+	CHECK(At(fitted, 7, 1) == Pixel{0, 0, 0, 0});
+}
+
+TEST_CASE("an svg's document type declaration is refused outright", "[bake][image]") {
+	// **The billion laughs**, which is what an XML reader has instead of a
+	// decompression bomb: a kilobyte of declarations that expands into gigabytes
+	// while it is being parsed. There is no bound that makes this safe and
+	// nothing a drawing needs it for, so the declaration itself is the refusal.
+	const std::string bomb =
+		R"(<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 ")"
+		R"(&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">]><svg width="8" height="8">)"
+		R"(<text>&lol2;</text></svg>)";
+	CHECK(Mentions(Refused(bomb), "DOCTYPE"));
+	CHECK(Mentions(Refused(bomb), "ENTITY"));
+
+	// An external entity is the same declaration and the same refusal — and it
+	// is a file read, which is the thing this whole module is arranged never to
+	// do.
+	const std::string external =
+		R"(<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg width="8" height="8"/>)";
+	CHECK(Mentions(Refused(external), "DOCTYPE"));
+
+	// A reference to an entity nobody could have declared is refused too, so the
+	// two halves cannot disagree.
+	CHECK(Mentions(
+		Refused(R"(<svg width="8" height="8" fill="&payload;"><rect width="8" height="8"/></svg>)"), "payload"
+	));
+}
+
+TEST_CASE("everything outside the svg subset is refused by name", "[bake][image]") {
+	const auto refusal = [](std::string_view body) {
+		return Refused(R"(<svg width="8" height="8">)" + std::string(body) + "</svg>");
+	};
+
+	// Text needs fonts and shaping; an image or a use needs a reference graph.
+	CHECK(Mentions(refusal("<text x='0' y='4'>hello</text>"), "text"));
+	CHECK(Mentions(refusal("<image href='other.png'/>"), "image"));
+	CHECK(Mentions(refusal("<use href='#thing'/>"), "use"));
+
+	// A paint server is a second renderer, and it is named whichever way it
+	// arrives — as the element that defines it or as the reference that uses it.
+	CHECK(Mentions(refusal("<linearGradient id='g'/>"), "linearGradient"));
+	CHECK(Mentions(refusal("<rect width='8' height='8' fill='url(#g)'/>"), "gradients"));
+
+	// Filters, masks and group opacity all need an offscreen layer.
+	CHECK(Mentions(refusal("<rect width='8' height='8' filter='url(#blur)'/>"), "filter"));
+	CHECK(Mentions(refusal("<rect width='8' height='8' opacity='0.5'/>"), "opacity"));
+	CHECK(Mentions(refusal("<g clip-path='url(#c)'><rect width='8' height='8'/></g>"), "clip-path"));
+
+	// A style attribute is CSS, and reading `fill` from attributes while
+	// ignoring it would draw the wrong colour and say nothing.
+	CHECK(Mentions(refusal("<rect width='8' height='8' style='fill:red'/>"), "style"));
+
+	// The path commands that are not lines or cubics, and the transforms that
+	// are not a translate or a scale.
+	CHECK(Mentions(refusal("<path d='M0 0 A4 4 0 0 1 8 8'/>"), "'A'"));
+	CHECK(Mentions(refusal("<path d='M0 0 Q4 4 8 0'/>"), "'Q'"));
+	CHECK(Mentions(refusal("<g transform='rotate(45)'><rect width='8' height='8'/></g>"), "rotate"));
+	CHECK(Mentions(refusal("<g transform='matrix(1 0 0 1 0 0)'/>"), "matrix"));
+
+	// Rounded corners are elliptical arcs, and a colour this does not know is
+	// named rather than silently drawn black.
+	CHECK(Mentions(refusal("<rect width='8' height='8' rx='2'/>"), "rx"));
+	CHECK(Mentions(refusal("<rect width='8' height='8' fill='rebeccapurple'/>"), "rebeccapurple"));
+
+	// A unit needs a context — a font, a viewport or a DPI — that a rasteriser
+	// working from bytes alone does not have.
+	CHECK(Mentions(refusal("<rect width='2em' height='8'/>"), "em"));
+
+	// And a document that says nothing about its own coordinates cannot be
+	// drawn at all, whatever size is asked for.
+	CHECK(Mentions(
+		Refused(R"(<svg><rect width="8" height="8"/></svg>)"), "neither a width and height nor a viewBox"
+	));
+}
+
+TEST_CASE("every count an svg states is bounded before it is used", "[bake][image]") {
+	// Nesting, which is the cheapest of these to write and the one that would
+	// otherwise be recursion depth.
+	std::string nested = R"(<svg width="8" height="8">)";
+	for (int depth = 0; depth < 64; depth++) {
+		nested += "<g>";
+	}
+	nested += "<rect width='8' height='8'/>";
+	CHECK(Mentions(Refused(nested), "nested"));
+
+	// Element count, which is what stops a megabyte of `<rect/>` from being a
+	// megabyte of work.
+	std::string many = R"(<svg width="8" height="8">)";
+	for (int element = 0; element < 5000; element++) {
+		many += "<rect width='1' height='1'/>";
+	}
+	CHECK(Mentions(Refused(many), "elements"));
+
+	// The raster target, which is the one count that is the caller's rather than
+	// the file's. Both axes or neither: a single axis would mean this file
+	// inventing an aspect ratio nobody wrote.
+	TextureData image;
+	std::string failure;
+	constexpr std::string_view DRAWING = R"(<svg width="8" height="8"/>)";
+
+	CHECK_FALSE(engine::bake::RasterizeSvg(Markup(DRAWING), 64, 0, image, failure));
+	CHECK(Mentions(failure, "both axes"));
+	CHECK_FALSE(
+		engine::bake::RasterizeSvg(
+			Markup(DRAWING), engine::assets::Texture::MAXIMUM_DIMENSION + 1, 64, image, failure
+		)
+	);
+	CHECK(Mentions(failure, "on an axis"));
+	CHECK_FALSE(engine::bake::RasterizeSvg(Markup(DRAWING), 8192, 8192, image, failure));
+	CHECK(Mentions(failure, "pixels"));
+
+	// **The work, which none of the counts above implies.** One polygon is one
+	// element, and ten thousand points is a fraction of the point budget — but
+	// every one of its edges crosses every scanline of a large canvas, which is
+	// eighty million crossings to compute and sort. The fill is therefore
+	// budgeted in its own unit and **charged before it is done**, so this
+	// refusal costs nothing rather than costing the thing it is refusing.
+	std::string zigzag = R"(<svg width="2048" height="2048"><polygon fill="red" points=")";
+	for (int point = 0; point < 10000; point++) {
+		zigzag += std::to_string(point % 2048) + "," + (point % 2 == 0 ? "0 " : "2047 ");
+	}
+	zigzag += R"("/></svg>)";
+
+	CHECK_FALSE(engine::bake::RasterizeSvg(Markup(zigzag), 2048, 2048, image, failure));
+	CHECK(Mentions(failure, "fill work"));
+
+	// A drawing that is only markup still produces an image — an empty canvas
+	// is a real answer, and it is transparent rather than black.
+	const TextureData empty = Drawn(R"(<svg width="2" height="2"><title>nothing</title></svg>)", 0, 0);
+	CHECK(At(empty, 0, 0) == Pixel{0, 0, 0, 0});
+}

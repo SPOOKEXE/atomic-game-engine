@@ -92,10 +92,25 @@ namespace engine::graph {
 	// *inside another mirror* is a real case — two facing panes, a portal seen
 	// through a portal — so the camera frustum alone would freeze it. The second
 	// sweep unions in the panes that are visible from a surface which is itself
-	// on screen. Iterating that to closure would spend the saving this exists
-	// for; one pass means a pane buried two bounces deep lights up a frame
-	// later, which is the same one-frame budget the surface pass already runs
-	// on.
+	// on screen.
+	//
+	// **That sweep runs `rounds` times, and one was wrong from v0.15.** It used
+	// to run exactly once, on the argument that a pane buried two bounces deep
+	// could light up a frame later on the same one-frame budget the surface pass
+	// ran on. `D00112` removed that budget: the surface pass now runs
+	// `Renderer::SetSurfaceBounces` times and resolves a chain that deep *inside*
+	// the frame. So the render went to `n` levels while this went to one, and the
+	// levels past the first were culled rather than merely late.
+	//
+	// **The symptom was a camera angle, which is what made it hard to see.** A
+	// mirror directly on screen reveals what it can see for free. Turn far enough
+	// that it leaves the frustum and everything it was revealing drops a level —
+	// so reflections that were fine at one angle vanish at another, with the
+	// geometry itself untouched.
+	//
+	// A round takes a fresh snapshot rather than marking as it walks, so the
+	// answer still cannot depend on the order surfaces arrive in — that property
+	// is what the snapshot was always for, and it survives being iterated.
 	//
 	// **And how much of the screen each pane covers**, which is what decides how
 	// many texels its image needs. A surface camera is fitted to its pane, so
@@ -119,6 +134,14 @@ namespace engine::graph {
 	//                  long as the highest index in `surfaces`, plus one.
 	// @param coverage  Indexed by slot, cleared then filled with 0..1. Optional;
 	//                  pass an empty span to skip the projection entirely.
+	// @param rounds    How many levels of surface-seen-in-surface to follow.
+	//                  **Pass the renderer's bounce count**: a level the pass
+	//                  will draw and this did not mark is a level that is culled
+	//                  rather than stale. Zero and one both mean "directly on
+	//                  screen, plus one hop", which is the pre-v0.15 behaviour.
+	//                  Stops early once a round grants nothing, so asking for
+	//                  more than the scene has costs one extra sweep of a
+	//                  sixteen-entry array.
 	// @return How many slots came back visible.
 	// @since v0.15
 	size_t VisibleSurfaces(
@@ -126,7 +149,8 @@ namespace engine::graph {
 		const glm::mat4 &camera,
 		std::span<const SurfaceEye> surfaces,
 		std::span<bool> visible,
-		std::span<float> coverage = {}
+		std::span<float> coverage = {},
+		size_t rounds = 1
 	);
 
 	// Whether one rectangle is in front of one camera at all.

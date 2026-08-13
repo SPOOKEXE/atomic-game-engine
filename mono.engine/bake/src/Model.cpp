@@ -1,3 +1,4 @@
+#include "Extension.hpp"
 #include "Importers.hpp"
 
 #include <engine/bake/Model.hpp>
@@ -7,27 +8,6 @@
 #include <string>
 
 namespace engine::bake {
-
-	namespace {
-		// A lowercase copy of a name's extension, or an empty view when it has
-		// none. The same rule `assets::KindOfName` applies, including that a dot
-		// inside a directory component is not an extension.
-		std::string ExtensionOf(std::string_view name) {
-			const size_t dot = name.find_last_of('.');
-			if (dot == std::string_view::npos || dot + 1 >= name.size()) {
-				return {};
-			}
-			if (name.find('/', dot) != std::string_view::npos) {
-				return {};
-			}
-
-			std::string extension(name.substr(dot + 1));
-			std::transform(extension.begin(), extension.end(), extension.begin(), [](char value) {
-				return (value >= 'A' && value <= 'Z') ? static_cast<char>(value - 'A' + 'a') : value;
-			});
-			return extension;
-		}
-	}
 
 	ModelFormat ModelFormatOfBytes(std::span<const std::byte> bytes) {
 		if (bytes.size() >= 4) {

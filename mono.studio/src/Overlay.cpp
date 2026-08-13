@@ -278,25 +278,29 @@ namespace studio {
 				}
 			};
 
-			// **Not while this scene is running.** The grid is authoring
-			// furniture: it says where the origin is and how big a metre is
-			// while you are placing things. During a play test the viewport is
-			// showing the game, and a grid over it is a thing the player would
-			// never see — which makes "does this look right" impossible to
-			// answer from the picture in front of you.
+			// **Not over a client replica.** The grid is authoring furniture:
+			// it says where the origin is and how big a metre is while you are
+			// placing things. A replica panel is the one picture in this editor
+			// that is exactly what a player sees, so editor furniture drawn on
+			// it makes "does this look right" impossible to answer from the
+			// picture in front of you.
+			//
+			// **Running is not the same as being a player's view.** `Server` and
+			// `Play` still simulate a world the author owns and keeps placing
+			// things in, and Roblox's studio keeps its grid through both for the
+			// same reason. The author who wants the clean picture turns
+			// `ShowGrid` off, which is one click and already exists — the mode
+			// does not need to decide it for them.
 			//
 			// Per scene rather than per universe, like everything else about
-			// the transport: with two viewports running two worlds, one of them
-			// may be playing while the other is still being edited, and the one
-			// being edited keeps its grid.
+			// the transport: with two viewports on two worlds, one may be a
+			// replica while the other is authored, and the authored one keeps
+			// its grid.
 			//
-			// **A client view is a play test whatever its mode says.** A replica
-			// carries no run record of its own, so `ModeOf` answers `Edit` for
-			// it and the grid was drawn over the one picture in this editor that
-			// is exactly what a player sees. It is also the panel the argument
-			// above is strongest about.
+			// A replica carries no run record of its own, so `ModeOf` answers
+			// `Edit` for it and mode alone would never exclude it.
 			const WorldId shown = ViewportWorld(index);
-			const bool authoring = ModeOf(shown) == RunMode::Edit && !IsReplicaWorld(shown);
+			const bool authoring = !IsReplicaWorld(shown);
 
 			if (ShowGrid && authoring) {
 				const Vector3 eye = panel.Eye;

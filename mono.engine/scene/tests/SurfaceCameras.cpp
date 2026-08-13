@@ -387,6 +387,121 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 	CHECK((distant->Right - distant->Left) / distant->NearPlane < 0.2f);
 }
 
+TEST_CASE("the frustum covers the pane when the viewer looks away from it", "[scene][surfacecameras]") {
+	// **Every other fit case moves the eye and leaves it pointed at the pane.**
+	// The fixture's viewer has identity rotation, which looks down -Z at a pane
+	// facing -Z, so the pane has sat in the middle of the screen for every
+	// assertion above. What a player does is turn their head, and the eye-corner
+	// clamp — the intersection that buys the close-up sharpness — is a function
+	// of where the screen points and not only of where it is.
+	//
+	// The failure is a *cull* rather than a stretch: `opaque.frag` falls back to
+	// the plain lit pane wherever the projected coordinate leaves 0..1, so a
+	// clamp that bites too hard takes a bite out of the reflection with a hard
+	// edge, and the geometry it dropped is simply not in the picture.
+	//
+	// Swept rather than sampled at one angle, because the interesting number is
+	// *where* it starts and a single case cannot report that.
+	Mirror mirror;
+
+	// Close enough that the pane fills much of the screen at every angle in the
+	// sweep, which is what keeps the assertion from passing vacuously: a pane
+	// entirely off screen has no points to cover.
+	constexpr float STANDOFF = 3.0f;
+
+	const auto coverageAt = [&](const Vector3 &at, float pitchDegrees, float yawDegrees) {
+		constexpr float TO_RADIANS = 3.14159265f / 180.0f;
+		mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(
+			at, CFrame::Angles(pitchDegrees * TO_RADIANS, yawDegrees * TO_RADIANS, 0.0f).Rotation()
+		);
+		const float degrees = std::abs(pitchDegrees) > std::abs(yawDegrees) ? pitchDegrees : yawDegrees;
+
+		REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+		const Transform *placed = mirror.World.Get<Transform>(mirror.Reflection);
+		const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+		REQUIRE(placed != nullptr);
+		REQUIRE(fitted != nullptr);
+
+		const glm::mat4 viewProjection =
+			engine::scene::ResolveSurfaceCamera(
+				placed->Frame, engine::scene::SurfaceProjection(*fitted, placed->Frame)
+			)
+				.ViewProjection;
+
+		const Transform *eyePlaced = mirror.World.Get<Transform>(mirror.Eye);
+		const Camera *eyeLens = mirror.World.Get<Camera>(mirror.Eye);
+		REQUIRE(eyePlaced != nullptr);
+		REQUIRE(eyeLens != nullptr);
+
+		const glm::mat4 screen =
+			engine::scene::ResolveCamera(eyePlaced->Frame, *eyeLens, 16.0f / 9.0f).ViewProjection;
+
+		bool covered = true;
+		size_t onScreenPoints = 0;
+		constexpr int STEPS = 16;
+
+		for (int ix = 0; ix <= STEPS; ix++) {
+			for (int iy = 0; iy <= STEPS; iy++) {
+				const float x = -8.0f + 16.0f * static_cast<float>(ix) / STEPS;
+				const float y = -4.5f + 9.0f * static_cast<float>(iy) / STEPS;
+				const glm::vec4 point(x, y, -0.2f, 1.0f);
+
+				const glm::vec4 onScreen = screen * point;
+				if (!(onScreen.w > 0.0f) || std::abs(onScreen.x / onScreen.w) > 1.0f ||
+					std::abs(onScreen.y / onScreen.w) > 1.0f) {
+					continue;
+				}
+				onScreenPoints++;
+
+				const glm::vec4 clip = viewProjection * point;
+				if (!(clip.w > 0.0f)) {
+					INFO("at " << degrees << " degrees, pane point " << x << ", " << y
+							   << " is behind the surface camera");
+					covered = false;
+					continue;
+				}
+
+				const bool inside =
+					std::abs(clip.x / clip.w) <= 1.0f && std::abs(clip.y / clip.w) <= 1.0f;
+				if (!inside) {
+					INFO("at " << degrees << " degrees, pane point " << x << ", " << y
+							   << " is on screen but outside the reflection");
+				}
+				covered = covered && inside;
+			}
+		}
+
+		INFO("at " << degrees << " degrees, " << onScreenPoints << " pane points were on screen");
+		return covered;
+	};
+
+	// **A body angle rather than a pane angle.** These are degrees the viewer has
+	// turned away from the pane, so zero is the case every test above already
+	// covers and eighty is past where the pane leaves the screen entirely.
+	//
+	// Both signs on both axes, because the clamp's four edges are independent and
+	// a sign error shows on one of them only. Pitch from a raised eye as well as
+	// a level one: a viewer floating above the floor looking down is the position
+	// the tilt actually happens from, and it is the one that puts the pane's
+	// corners nearest the camera's own plane.
+	for (const float degrees :
+		 {0.0f, 20.0f, 40.0f, 50.0f, 55.0f, 60.0f, 70.0f, 80.0f, -20.0f, -40.0f, -50.0f, -55.0f,
+		  -60.0f, -70.0f, -80.0f}) {
+		INFO("viewer yawed " << degrees << " degrees off the pane");
+		CHECK(coverageAt(Vector3{0.0f, 0.0f, STANDOFF}, 0.0f, degrees));
+
+		INFO("viewer pitched " << degrees << " degrees off the pane");
+		CHECK(coverageAt(Vector3{0.0f, 0.0f, STANDOFF}, degrees, 0.0f));
+
+		INFO("viewer floating, pitched " << degrees << " degrees off the pane");
+		CHECK(coverageAt(Vector3{0.0f, 6.0f, STANDOFF}, degrees, 0.0f));
+
+		INFO("viewer floating and off to one side, turned " << degrees << " degrees");
+		CHECK(coverageAt(Vector3{5.0f, 6.0f, STANDOFF}, degrees * 0.5f, degrees));
+	}
+}
+
 TEST_CASE(
 	"the frustum leans instead of widening when the viewer is off to one side", "[scene][surfacecameras]"
 ) {
