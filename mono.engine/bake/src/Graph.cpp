@@ -1,4 +1,5 @@
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/Resample.hpp>
 #include <engine/bake/Graph.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/bake/Model.hpp>
@@ -297,7 +298,7 @@ namespace engine::bake {
 				return wrongKind("a texture");
 			}
 			assets::TextureData resized;
-			if (!ResizeImage(input.Texture, node.Width, node.Height, resized)) {
+			if (!assets::ResizeImage(input.Texture, node.Width, node.Height, resized)) {
 				failure = "graph: '" + input.Source + "' cannot be resized to that size";
 				return false;
 			}
@@ -323,7 +324,7 @@ namespace engine::bake {
 			// would leave the levels' alpha as it was, so the order is the
 			// pipeline's to get right — `Bake.cpp` puts it immediately before the
 			// write for that reason.
-			if (!BuildMipChain(result.Texture)) {
+			if (!assets::BuildMipChain(result.Texture)) {
 				failure = "graph: '" + input.Source + "' cannot carry a mip chain";
 				return false;
 			}

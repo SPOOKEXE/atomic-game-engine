@@ -1,4 +1,5 @@
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/Resample.hpp>
 
 #include <array>
 #include <cmath>
@@ -55,6 +56,16 @@ namespace engine::assets {
 					}
 				}
 			}
+
+			// **The chain is built here rather than left to whoever uploads it.**
+			// A built-in is the one texture that reaches a sampler without passing
+			// through `bake`, so there is no pipeline stage to put a `Mipmap` node
+			// in — and the checker is exactly the sheet an author tiles across a
+			// floor and then looks at from across the map, which is where a single
+			// level shimmers worst. Cannot fail on an image this function just
+			// built, and a failure would leave the sheet without levels rather
+			// than invalid, so the answer is ignored deliberately.
+			BuildMipChain(image);
 			return image;
 		}
 

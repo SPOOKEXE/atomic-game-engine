@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <vector>
 
 TEST_SUITE_ID("engine.render.missingtexture")
 
@@ -134,6 +135,40 @@ TEST_CASE("the marker is not the default material", "[render][missing]") {
 
 	CHECK(missing.Format != fallback.Format);
 	CHECK(missing.Pixels != fallback.Pixels);
+}
+
+TEST_CASE("both compiled-in sheets arrive with a mip chain", "[render][missing]") {
+	// **The sampler has had `max_lod` open since v0.14 and these two had nothing
+	// to fetch.** Both are generated below the importers, so until v0.15 they
+	// uploaded at level zero and shimmered — the filter lived at L9 in `bake`,
+	// which nothing a shipped game links may link. It is `assets::BuildMipChain`
+	// now, one tier below this module, so a texture that is *made* here can carry
+	// a chain the same way a texture that is *baked* does.
+	//
+	// The marker's smallest level is the mean of its two colours for the reason
+	// the checker's is — half the sheet is each, so a chain built by copying
+	// rather than filtering would have the right length and the wrong texel.
+	using engine::assets::MipLevelCount;
+
+	const engine::assets::TextureData &missing = MissingTexture();
+	REQUIRE(missing.IsValid());
+	REQUIRE(missing.LevelCount() == MipLevelCount(missing.Width, missing.Height));
+
+	const Texel purple = At(0, 0);
+	const Texel black = At(MISSING_TEXTURE_CHECK, 0);
+	const std::vector<std::byte> &smallest = missing.Mips.back();
+	REQUIRE(smallest.size() == 4);
+	for (size_t channel = 0; channel < 4; channel++) {
+		CHECK(static_cast<int>(smallest[channel]) == (purple[channel] + black[channel]) / 2);
+	}
+
+	// The default is a photographed tile rather than a pattern, so there is no
+	// arithmetic to predict — the chain's length and `IsValid` are the whole of
+	// what can be said about it here, and `IsValid` is not weak: it refuses any
+	// level that is not exactly the size its position implies.
+	const engine::assets::TextureData &fallback = engine::render::DefaultTexture();
+	REQUIRE(fallback.IsValid());
+	CHECK(fallback.LevelCount() == MipLevelCount(fallback.Width, fallback.Height));
 }
 
 TEST_CASE("the marker is built once", "[render][missing]") {

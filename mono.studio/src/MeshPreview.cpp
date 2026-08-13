@@ -40,8 +40,8 @@
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
+#include <engine/assets/Resample.hpp>
 #include <engine/assets/Texture.hpp>
-#include <engine/bake/Image.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
@@ -258,7 +258,7 @@ namespace studio {
 			const double scale = static_cast<double>(PREVIEW_MATERIAL_SIDE) / longest;
 			const auto width = static_cast<uint32_t>(std::max(1.0, decoded.Width * scale));
 			const auto height = static_cast<uint32_t>(std::max(1.0, decoded.Height * scale));
-			if (!engine::bake::ResizeImage(decoded, width, height, fitted)) {
+			if (!engine::assets::ResizeImage(decoded, width, height, fitted)) {
 				return PreviewState::Unavailable;
 			}
 		} else {

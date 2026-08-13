@@ -16,6 +16,7 @@
 // wrong that a picture of it would not show.
 
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -23,8 +24,10 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <map>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.assets.builtin")
 
@@ -336,6 +339,33 @@ TEST_CASE("the built-in checker is a valid, tiling, two-colour sheet", "[assets]
 	// colour the seam would show as a double-width check.
 	REQUIRE(at(0, 0) != at(sheet.Width - 1, 0));
 	REQUIRE(at(0, 0) != at(0, sheet.Height - 1));
+}
+
+TEST_CASE("the built-in checker arrives with its mip chain", "[assets][builtin]") {
+	// **The sheet an author puts on a wall while deciding where the wall goes is
+	// also the sheet they see tiled across a floor from across the map**, so the
+	// one built-in texture in the engine was the one shimmering worst. It had no
+	// chain until v0.15 because the box filter lived a tier above this module —
+	// `assets/Resample.hpp` carries what moved and why.
+	using engine::assets::BuiltinTexture;
+	using engine::assets::MipLevelCount;
+
+	const engine::assets::TextureData sheet = MakeBuiltin(BuiltinTexture::Checker);
+
+	REQUIRE(sheet.IsValid());
+	REQUIRE(sheet.LevelCount() == MipLevelCount(sheet.Width, sheet.Height));
+
+	// **The smallest level is the mean of the two colours, not one of them.** A
+	// chain of the right length built by copying rather than filtering would pass
+	// the count above and still alias, so the assertion that matters is a number
+	// neither check holds: the checks divide the side, so exactly half the sheet
+	// is each colour and a single texel is their average.
+	const std::vector<std::byte> &smallest = sheet.Mips.back();
+	REQUIRE(smallest.size() == 4);
+	CHECK(static_cast<int>(smallest[0]) == (0xE8 + 0x96) / 2);
+	CHECK(static_cast<int>(smallest[1]) == (0x8A + 0x96) / 2);
+	CHECK(static_cast<int>(smallest[2]) == (0xB0 + 0x9B) / 2);
+	CHECK(static_cast<int>(smallest[3]) == 0xFF);
 }
 
 TEST_CASE("a built-in texture name round-trips and is namespaced", "[assets][builtin]") {

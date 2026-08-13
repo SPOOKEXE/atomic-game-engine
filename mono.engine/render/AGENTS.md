@@ -359,10 +359,15 @@ a per-texture number, because SDL takes a LOD range rather than a level count �
 a per-texture bound would mean a sampler per texture, and one sampler is what
 makes a draw call cheap here.
 
-**This module never builds levels.** The filter is `bake::ResizeImage` and
-nothing a shipped game links may link `bake` — `bake/AGENTS.md`. A texture that
-arrives with one level, including the built-ins and the two markers, uploads with
-one and draws as it always did.
+**This module never builds levels for a texture that arrived from content**, and
+it does build them for the two it compiles in itself. The filter is
+`assets::BuildMipChain` — L8, below this module, so calling it here is an
+ordinary downward edge. It was `bake::ResizeImage` until v0.15, which is why
+`DefaultTexture` and `MissingTexture` shipped with one level for five versions:
+nothing a shipped game links may link `bake`, so the two sheets generated here
+had no filter they were allowed to reach. They now build a chain at first use —
+see their `.cpp` files — and a streamed texture still uploads exactly the levels
+it was baked with.
 
 ## `DrawSlots` splits consecutive runs and must not sort them
 
@@ -387,10 +392,6 @@ was describing what the code assumed rather than what it did.
 
 ## What is not here yet
 
-- **No mipmaps.** A 2048-pixel sheet minified onto forty pixels shimmers.
-  `assets::Texture` is one image and has no place to put the levels, so the fix
-  is a format change that should arrive with sampler work rather than ahead of
-  it.
 - **No filter on the screen pass, and there must not be one.** A surface camera
   filters by tag; the window shows the world. `DrawSlots` takes a filter and
   every screen-pass call site passes zero, deliberately — a filtered window is a

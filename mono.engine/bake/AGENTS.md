@@ -122,33 +122,22 @@ therefore disagrees with itself on every little-endian machine, which is every
 machine this builds on. Both sides are assembled into a `uint32_t` and compared
 as numbers. This cost an afternoon once.
 
-## A flipbook's mip chain stops before its frames bleed
+## The box filter is `assets`', and it left here at v0.15
 
-`BuildMipChain` halves a still image all the way to one pixel. **A sheet of
-animation frames stops earlier, and the stopping point is not a tuning knob.**
-Halving a grid is safe only while every destination pixel still falls inside one
-cell; one level past that, a pixel averages two frames and the sheet shows a
-ghost of the next frame at distance. That reads as the flipbook's cell arithmetic
-being wrong rather than as a chain one level too long, which is why it is refused
-rather than approximated — the same rule interlaced PNG and progressive JPEG are
-refused under.
+`ResizeImage`, `MipChainLevels` and `BuildMipChain` were this module's until
+v0.15 and are now `assets::`, declared in `assets/Resample.hpp`. The move was not
+tidying: `assets` is L8 and cannot see L9, so its own generated textures — the
+built-in checker, and the two sheets `render` compiles in — could not be given a
+chain by a filter sitting up here, and all three shimmered. `assets/AGENTS.md`
+carries the argument and the flipbook stopping rule that goes with it.
 
-The chain therefore ends at the last level whose cells are still an exact
-halving, which is the largest power of two dividing both cell dimensions and
-which lands on the level where a frame is one pixel. A sheet whose cells are odd,
-or whose dimensions its grid does not divide, gets **no chain at all** rather
-than an approximate one.
+Nothing was left behind as a wrapper. `Graph`'s `Resize` and `Mipmap` arms call
+`assets::` directly, and a second box filter in this module is how two textures
+would start disagreeing about what a half-size copy of themselves is.
 
-The one exception is a 1x1 grid, which gets the full chain: there is no interior
-boundary to bleed across. That case is not a curiosity — `Gif.cpp` gives every
-single-frame GIF a 1x1 grid, so without it every imported still would lose its
-levels to a neighbour that does not exist.
-
-The two alternatives were weighed and both are worse. Padding the cells with
-gutters changes what a flipbook *is* — every consumer divides the sheet by
-`FlipbookSide`, so a gutter is a change to `assets::TextureData`, to
-`render::FlipbookCellAt` and to every UV that samples one. Refusing the texture
-outright throws away an image that was perfectly good without a chain.
+What stayed is everything that reads a foreign file: this module still owns
+turning a PNG, a GIF, a glTF or an SVG into an `assets::TextureData`, and
+`assets` still owns what happens to one afterwards.
 
 ## An SVG is identified by its name, and its size is a node's parameter
 
@@ -174,7 +163,7 @@ rather than by adding a resize.
 ## The `Mipmap` node goes last, and the graph does not enforce it
 
 Every other texture node changes the pixels the levels are filtered from, and
-`ResizeImage` drops the chain outright — so a `Mipmap` before a `Resize` reaches
+`assets::ResizeImage` drops the chain outright — so a `Mipmap` before a `Resize` reaches
 disk with no levels and nothing saying why, and one before an `Opaque` leaves the
 levels' alpha as it was. `Graph` cannot check this: a node knows its input and
 not what is downstream of it. Rule 6, so it is written here, and `assetc`'s

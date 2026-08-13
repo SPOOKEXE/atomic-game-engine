@@ -50,6 +50,7 @@
 // than a cliff, and stopping costs nothing.
 
 #include <engine/assets/Mesh.hpp>
+#include <engine/assets/Resample.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/core/Log.hpp>
@@ -132,7 +133,7 @@ namespace studio {
 			const auto height = static_cast<uint32_t>(std::max(1.0, source.Height * scale));
 
 			engine::assets::TextureData fitted;
-			if (!engine::bake::ResizeImage(source, width, height, fitted)) {
+			if (!engine::assets::ResizeImage(source, width, height, fitted)) {
 				return false;
 			}
 

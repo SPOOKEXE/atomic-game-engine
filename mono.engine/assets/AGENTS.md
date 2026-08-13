@@ -264,15 +264,65 @@ constant of its own. That bound is tighter and it stays true if
 
 **The levels are beside the base, not concatenated with it.** `Pixels` means *the
 image* to a dozen call sites that check it against `Width * Height *
-BytesPerPixel` — `IsValid`, `render::TextureTable::Upload`, `bake::ResizeImage`,
-the opaque pass, the studio thumbnailer. One buffer holding the chain would make
+BytesPerPixel` — `IsValid`, `render::TextureTable::Upload`, `ResizeImage`, the
+opaque pass, the studio thumbnailer. One buffer holding the chain would make
 every one of them read a third too much while still compiling. Do not "flatten"
 it.
 
-**Nothing in this module builds a chain.** The box filter is `bake::ResizeImage`
-at L9, and a texture that arrives with one level is a texture that was baked with
-one. That is why `MakeBuiltin`'s sheets have no levels: `assets` is below the
-filter and may not reach up to it.
+## The box filter lives here, and the tier it lives at was the whole bug
+
+`Resample.hpp` — `ResizeImage`, `MipChainLevels`, `BuildMipChain`. It was
+`bake::ResizeImage` at L9 until v0.15, and being one tier up meant this module
+could not use its own filter: `MakeBuiltin`'s checker, `render::DefaultTexture`
+and `render::MissingTexture` are all pixels generated below the importers, so all
+three uploaded at one level and shimmered at distance with three modules looking
+correct. Moving it down fixed all three at once, and it moved rather than being
+copied — a second box filter is how two textures start disagreeing about what a
+half-size copy of themselves is.
+
+**It belongs here on its own merits, not only because this needed it.** Every
+line of it is a weighted average over bytes `Texture.hpp` defines. It reads no
+foreign file, links no vendor and knows nothing about a decoder; `bake` still
+owns everything that turns *somebody else's* file into a `TextureData`, and this
+owns what happens to one afterwards.
+
+## A flipbook's mip chain stops before its frames bleed
+
+`BuildMipChain` halves a still image all the way to one pixel. **A sheet of
+animation frames stops earlier, and the stopping point is not a tuning knob.**
+Halving a grid is safe only while every destination pixel still falls inside one
+cell; one level past that, a pixel averages two frames and the sheet shows a
+ghost of the next frame at distance. That reads as the flipbook's cell arithmetic
+being wrong rather than as a chain one level too long, which is why it is refused
+rather than approximated.
+
+The chain therefore ends at the last level whose cells are still an exact
+halving, which is the largest power of two dividing both cell dimensions and
+which lands on the level where a frame is one pixel. A sheet whose cells are odd,
+or whose dimensions its grid does not divide, gets **no chain at all** rather
+than an approximate one.
+
+The one exception is a 1x1 grid, which gets the full chain: there is no interior
+boundary to bleed across. That case is not a curiosity — `bake/Gif.cpp` gives
+every single-frame GIF a 1x1 grid, so without it every imported still would lose
+its levels to a neighbour that does not exist.
+
+The two alternatives were weighed and both are worse. Padding the cells with
+gutters changes what a flipbook *is* — every consumer divides the sheet by
+`FlipbookSide`, so a gutter is a change to `TextureData`, to
+`render::FlipbookCellAt` and to every UV that samples one. Refusing the texture
+outright throws away an image that was perfectly good without a chain.
+
+## A generated built-in builds its own chain, because nothing else will
+
+`MakeBuiltin(BuiltinTexture)` calls `BuildMipChain` before returning, and so do
+`render::DefaultTexture` and `render::MissingTexture`. These are the only
+textures in the engine that reach a sampler without passing through a bake
+graph, so there is no pipeline stage to put a `Mipmap` node in — the generator is
+the last place that knows the image is finished. A built-in that returned without
+a chain would be the one texture in the engine that still aliased, and the
+checker is exactly the sheet an author tiles across a floor and then looks at
+from across the map.
 
 ## `Submesh` holds strings where the rest of the engine holds names
 
