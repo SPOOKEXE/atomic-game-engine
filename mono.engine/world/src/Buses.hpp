@@ -69,6 +69,87 @@ namespace engine::world {
 	struct ChannelBus {
 		// Channel name id to the worlds that opened it.
 		std::unordered_map<uint32_t, std::unordered_set<uint32_t>> Open;
+
+		// How many channels each world holds, by world index. Absent is zero, so
+		// a world that holds none costs no entry.
+		//
+		// **Counted rather than derived, and the four methods below are the only
+		// things that touch either half.** Deriving it means walking every
+		// channel in the universe per open, which is the cost the cap exists to
+		// bound turned into the cost of enforcing it; keeping it beside the table
+		// is a second copy of one fact, which is rule 2 — so the copy is private
+		// to this struct and nothing outside can move one half without the other.
+		std::unordered_map<uint32_t, uint32_t> Held;
+
+		// How many channels a world holds.
+		//
+		// @param world The world's registry index.
+		uint32_t HeldBy(uint32_t world) const {
+			const auto found = Held.find(world);
+			return found == Held.end() ? 0 : found->second;
+		}
+
+		// Opens `channel` for `world`, unless that would pass `limit`.
+		//
+		// Reopening a channel a world already holds is not refused at the cap: it
+		// is idempotent and changes nothing, and refusing it would make a world's
+		// own repeated open fail once its list was full.
+		//
+		// @param channel The channel name's id.
+		// @param world   The world's registry index.
+		// @param limit   `UniverseSettings::ChannelsPerWorld`.
+		// @return `false` when the world is at the limit and this is a new
+		//         channel for it. Nothing is inserted in that case — an empty
+		//         entry left behind by a refused open would grow the table the
+		//         limit exists to bound.
+		bool OpenFor(uint32_t channel, uint32_t world, uint32_t limit) {
+			const auto listening = Open.find(channel);
+			if (listening != Open.end() && listening->second.contains(world)) {
+				return true;
+			}
+			if (HeldBy(world) >= limit) {
+				return false;
+			}
+
+			Open[channel].insert(world);
+			Held[world]++;
+			return true;
+		}
+
+		// Closes `channel` for `world`. Closing one it does not hold does
+		// nothing.
+		//
+		// @param channel The channel name's id.
+		// @param world   The world's registry index.
+		void CloseFor(uint32_t channel, uint32_t world) {
+			const auto listening = Open.find(channel);
+			if (listening == Open.end() || listening->second.erase(world) == 0) {
+				return;
+			}
+
+			const auto held = Held.find(world);
+			if (held != Held.end() && --held->second == 0) {
+				// Erased rather than left at zero, so a universe that opens and
+				// closes channels all day does not grow one entry per world that
+				// ever held one.
+				Held.erase(held);
+			}
+		}
+
+		// Rebuilds `Held` from `Open`.
+		//
+		// For the snapshot reader, which fills the table directly because the
+		// channels and the topics are the same shape and share one codec. Without
+		// it a restored universe would let every world open the cap again on top
+		// of what it already holds.
+		void Recount() {
+			Held.clear();
+			for (const auto &entry : Open) {
+				for (const uint32_t world : entry.second) {
+					Held[world]++;
+				}
+			}
+		}
 	};
 
 	// Everything the universe's buses hold.

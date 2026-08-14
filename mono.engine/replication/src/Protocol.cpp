@@ -69,6 +69,10 @@ namespace engine::replication {
 			return "identify";
 		case MessageKind::User:
 			return "user";
+		case MessageKind::GroupSignatures:
+			return "group signatures";
+		case MessageKind::Disputed:
+			return "disputed";
 		}
 		return "?";
 	}
@@ -81,6 +85,7 @@ namespace engine::replication {
 
 	void WriteMessage(core::ByteWriter &writer, const SnapshotChunk &chunk) {
 		WriteFront(writer, MessageKind::SnapshotChunk);
+		writer.WriteUInt8(static_cast<uint8_t>(chunk.Stage));
 		writer.WriteUInt64(chunk.Tick);
 		writer.WriteUInt32(chunk.TotalBytes);
 		writer.WriteUInt32(chunk.Offset);
@@ -122,7 +127,7 @@ namespace engine::replication {
 		const uint16_t version = reader.ReadUInt16();
 		const uint8_t kind = reader.ReadUInt8();
 		if (reader.Failed() || version != PROTOCOL_VERSION ||
-			kind > static_cast<uint8_t>(MessageKind::User)) {
+			kind > static_cast<uint8_t>(MessageKind::Disputed)) {
 			return std::nullopt;
 		}
 		return static_cast<MessageKind>(kind);
@@ -131,6 +136,32 @@ namespace engine::replication {
 	void WriteMessage(core::ByteWriter &writer, const User &user) {
 		WriteFront(writer, MessageKind::User);
 		WriteBytes(writer, user.Bytes);
+	}
+
+	void WriteMessage(core::ByteWriter &writer, const GroupSignatures &signatures) {
+		WriteFront(writer, MessageKind::GroupSignatures);
+		writer.WriteUInt64(signatures.Tick);
+
+		writer.WriteUInt32(static_cast<uint32_t>(signatures.Components.size()));
+		for (const core::Name component : signatures.Components) {
+			writer.WriteName(component);
+		}
+
+		writer.WriteUInt32(static_cast<uint32_t>(signatures.Groups.size()));
+		for (const AuditGroup &group : signatures.Groups) {
+			writer.WriteUInt32(group.Group);
+			WriteEntities(writer, group.Entities);
+			writer.WriteRaw(group.Digest.Digest.data(), group.Digest.Digest.size());
+		}
+	}
+
+	void WriteMessage(core::ByteWriter &writer, const Disputed &disputed) {
+		WriteFront(writer, MessageKind::Disputed);
+		writer.WriteUInt64(disputed.Tick);
+		writer.WriteUInt32(static_cast<uint32_t>(disputed.Groups.size()));
+		for (const uint32_t group : disputed.Groups) {
+			writer.WriteUInt32(group);
+		}
 	}
 
 	void WriteMessage(core::ByteWriter &writer, const Applied &applied) {
@@ -144,7 +175,7 @@ namespace engine::replication {
 		}
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::User)) {
+		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::Disputed)) {
 			return false;
 		}
 
@@ -153,6 +184,16 @@ namespace engine::replication {
 
 		switch (read.Kind) {
 		case MessageKind::SnapshotChunk: {
+			// Range-checked here rather than cast blindly, for the reason this
+			// module's `AGENTS.md` gives about `MessageKind`: a value outside
+			// the enum reaches a `-Wswitch`-checked switch that has no arm for
+			// it, and the compiler cannot warn about a number it never saw.
+			const uint8_t stage = reader.ReadUInt8();
+			if (reader.Failed() || stage > static_cast<uint8_t>(SnapshotStage::World)) {
+				return false;
+			}
+			read.Chunk.Stage = static_cast<SnapshotStage>(stage);
+
 			read.Chunk.Tick = reader.ReadUInt64();
 			read.Chunk.TotalBytes = reader.ReadUInt32();
 			read.Chunk.Offset = reader.ReadUInt32();
@@ -229,6 +270,61 @@ namespace engine::replication {
 				return false;
 			}
 			break;
+
+		case MessageKind::GroupSignatures: {
+			read.Signatures.Tick = reader.ReadUInt64();
+
+			const uint32_t components = reader.ReadUInt32();
+			if (reader.Failed() || components > MAXIMUM_ENTRIES) {
+				return false;
+			}
+
+			read.Signatures.Components.reserve(components);
+			for (uint32_t index = 0; index < components; index++) {
+				const core::Name component = reader.ReadName();
+				if (reader.Failed() || !component.IsValid()) {
+					return false;
+				}
+				read.Signatures.Components.push_back(component);
+			}
+
+			const uint32_t groups = reader.ReadUInt32();
+			if (reader.Failed() || groups > MAXIMUM_AUDIT_GROUPS) {
+				return false;
+			}
+
+			read.Signatures.Groups.reserve(groups);
+			for (uint32_t index = 0; index < groups; index++) {
+				AuditGroup group;
+				group.Group = reader.ReadUInt32();
+				if (reader.Failed() || !ReadEntities(reader, group.Entities)) {
+					return false;
+				}
+				if (!reader.ReadRaw(group.Digest.Digest.data(), group.Digest.Digest.size())) {
+					return false;
+				}
+				read.Signatures.Groups.push_back(std::move(group));
+			}
+			break;
+		}
+
+		case MessageKind::Disputed: {
+			read.Disputed.Tick = reader.ReadUInt64();
+
+			const uint32_t groups = reader.ReadUInt32();
+			if (reader.Failed() || groups > MAXIMUM_AUDIT_GROUPS) {
+				return false;
+			}
+
+			read.Disputed.Groups.resize(groups);
+			for (uint32_t index = 0; index < groups; index++) {
+				read.Disputed.Groups[index] = reader.ReadUInt32();
+			}
+			if (reader.Failed()) {
+				return false;
+			}
+			break;
+		}
 		}
 
 		if (reader.Failed()) {

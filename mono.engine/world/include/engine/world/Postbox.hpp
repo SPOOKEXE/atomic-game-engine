@@ -224,10 +224,26 @@ namespace engine::world {
 		// since the channel did not exist when it was addressed. That is
 		// `Subscribe`'s rule, said again because it is the same one.
 		//
+		// **A ticket rather than a boolean, alone among the opens and closes on
+		// this bus, because this is the one of them an authority may refuse.**
+		// `UniverseSettings::ChannelsPerWorld` caps how many channels a world may
+		// hold, and the count lives in the router's table — a world cannot answer
+		// it from its own store without keeping a second copy of that table, and
+		// the copy would drift the first time an open was refused. So the answer
+		// is decided at the barrier and comes back the way every other barrier
+		// verdict does: a `Delivery` on this ticket, `Bus` set to `Channel`, `Key`
+		// to the channel, `Status` to `Ok` or `TooManyChannels`.
+		//
+		// A caller that ignores the reply is not left guessing silently: senders
+		// addressing the channel are refused `NoSuchChannel`. It is the same
+		// answer a channel nobody ever asked for gets, though, so the reply is
+		// the only thing that tells a refused open from a forgotten one.
+		//
 		// @param channel The channel to listen on.
-		// @return `false` when the world is over budget.
+		// @return The ticket the verdict will carry, or NONE when the world is
+		//         over budget or is a replica.
 		// @since v0.17
-		bool OpenChannel(std::string_view channel);
+		Ticket OpenChannel(std::string_view channel);
 
 		// Closes a named channel on this world.
 		//
@@ -235,6 +251,10 @@ namespace engine::world {
 		// already queued for this barrier are not withdrawn: they were accepted
 		// while the channel was open, and unpicking that would make what a world
 		// received depend on what it did later in the same tick.
+		//
+		// Still a boolean where `OpenChannel` is a ticket, because a close cannot
+		// be refused by anybody: a world giving a channel up needs no permission,
+		// and closing one it never opened is a no-op rather than a failure.
 		//
 		// @param channel The channel to stop listening on.
 		// @return `false` when the world is over budget.

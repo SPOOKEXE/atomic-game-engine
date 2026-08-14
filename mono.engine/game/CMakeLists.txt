@@ -41,6 +41,18 @@ mono_add_library(game
 		# need.
 		Engine::script
 
+		# L9, `shared`. The asset pipelines a world carries, as
+		# `bake::PipelineSet` and its text format.
+		#
+		# **`bakegraph` and never `bake`**, which is the entire reason that
+		# module exists. `bake` carries the PNG, JPEG, GIF, BMP, OBJ, glTF and
+		# PMX readers and its own build file says nothing a shipped game links
+		# may link it — so naming it here to parse a *text document* would put
+		# every decoder into `server`, which links this and has no reason to
+		# decode a JPEG. `bakegraph` links `core` and nothing else; the day this
+		# edge wants widening to `bake`, the answer is no. `D00102`.
+		Engine::bakegraph
+
 		# TODO(render-pipeline): kept for the save format's sake, and nothing in
 		# `game` names a `graph::` type today.
 		#

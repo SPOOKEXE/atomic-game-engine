@@ -254,7 +254,8 @@ namespace engine::world {
 		}
 
 		case BusKind::Channel: {
-			auto &open = Backends.Channels.Open;
+			auto &channels = Backends.Channels;
+			auto &open = channels.Open;
 
 			// **Opening a channel is `Subscribe` one bus along**, which is
 			// `BusOperation`'s argument: the act is the same one and the kind is
@@ -262,14 +263,33 @@ namespace engine::world {
 			// list is for — a topic's subscribers are fanned out to, and a
 			// channel's are *checked* before one addressed delivery is made.
 			if (envelope.Operation == BusOperation::Subscribe) {
-				open[key].insert(sender.Id().Index);
+				// **The one refusal on this bus a world earns for itself, and it
+				// is refused *here* because here is the only place that knows.** A
+				// world's own store cannot count its channels without holding a
+				// second copy of the router's table, and the copy would drift the
+				// first time an open was refused. So the authority rations it at
+				// the barrier and the world is told by reply, which is why
+				// `Postbox::OpenChannel` hands back a ticket where `CloseChannel`
+				// beside it hands back a boolean.
+				//
+				// Named in the log as well, because the one caller that cannot
+				// read the reply is a script: `CrossWorldService:OpenChannel`
+				// returns the channel's signal on the spot, so the verdict a
+				// barrier later has nowhere to be returned to.
+				if (!channels.OpenFor(key, sender.Id().Index, settings.ChannelsPerWorld)) {
+					ENGINE_WARN(
+						"world '{}' holds {} channels and asked for '{}'. See "
+						"UniverseSettings::ChannelsPerWorld.",
+						sender.Name().Text(),
+						settings.ChannelsPerWorld,
+						envelope.Key.Text()
+					);
+					reply.Status = BusStatus::TooManyChannels;
+				}
 				break;
 			}
 			if (envelope.Operation == BusOperation::Unsubscribe) {
-				const auto found = open.find(key);
-				if (found != open.end()) {
-					found->second.erase(sender.Id().Index);
-				}
+				channels.CloseFor(key, sender.Id().Index);
 				break;
 			}
 			if (envelope.Operation != BusOperation::Send) {
@@ -813,5 +833,11 @@ namespace engine::world {
 		}
 
 		ReadListeners(reader, Backends.Channels.Open, directory);
+
+		// The codec fills the table directly — the channels and the topics are one
+		// shape and one writer — so the per-world count is rebuilt from what
+		// landed. Without this a restored world could open the cap again on top of
+		// the channels it came back holding.
+		Backends.Channels.Recount();
 	}
 }

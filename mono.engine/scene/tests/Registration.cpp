@@ -53,7 +53,8 @@ namespace registration_test {
 		"scene.Transient",	 "scene.Service",			"scene.LightingService",
 		"scene.Rendered",	 "scene.SurfaceTable",		"scene.ActiveCamera",
 		"scene.WorldBounds", "scene.RenderedSignature", "scene.Portal",
-		"scene.SurfaceLens",
+		"scene.SurfaceLens", "scene.SurfaceBounces",	"scene.Team",
+		"scene.PlayerTeam",	 "scene.SpawnLocation",
 	};
 }
 

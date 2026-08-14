@@ -19,6 +19,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -336,15 +337,16 @@ namespace studio {
 			return false;
 		}
 
-		// **The first caller `SetSurfaceBounces` has ever had.** It shipped at
-		// v0.15 with a comment calling the knob public and nothing anywhere
-		// setting it, so every scene resolved exactly two levels of
-		// surface-seen-in-surface whatever it was built out of. Left at the
-		// renderer's own default unless an author asked, because each level costs
-		// a full scene pass per visible surface.
+		// **Said once here and applied per panel, where the world is entered.**
+		// The depth belongs to the world being shown — `workspace.SurfaceBounces`
+		// — or to the renderer's own measurement of the last frame, so a value
+		// pushed once at startup would be taken back by the first panel that
+		// draws. The log is what this line is for: a run pinning the number has
+		// overridden the scene, and that is worth saying out loud.
 		if (Settings.SurfaceBounces > 0) {
-			Renderer.SetSurfaceBounces(static_cast<uint32_t>(Settings.SurfaceBounces));
-			ENGINE_INFO("surfaces: resolving {} bounce(s) in frame", Settings.SurfaceBounces);
+			ENGINE_INFO(
+				"surfaces: {} bounce(s), overriding whatever the world asks for", Settings.SurfaceBounces
+			);
 		}
 
 		// **After the renderer and only with a window**, because the present
@@ -1487,6 +1489,23 @@ namespace studio {
 				// `render::PortalView`.
 				(void)client::CollectPortalViews(store, Portals);
 				(void)client::CollectSurfaceViews(store, Surfaces, Portals);
+
+				// **How deep this world's mirrors go, pushed with the world that
+				// says it.** The number is `workspace.SurfaceBounces` or the
+				// renderer's own measurement of the last frame, and either way it
+				// is a fact about the scene rather than about the editor — so it
+				// arrives per panel, beside the surface cameras it governs, and
+				// not once at startup where the first world drawn would take it
+				// back.
+				//
+				// **`--surface-bounces` wins where it was given**, because a run
+				// that pins the number is somebody comparing two depths and a
+				// world quietly restoring its own would make the comparison a
+				// lie.
+				const int32_t bounces = Settings.SurfaceBounces > 0
+											? static_cast<int32_t>(Settings.SurfaceBounces)
+											: engine::scene::SurfaceBouncesOf(store);
+				Renderer.SetSurfaceBounces(static_cast<uint32_t>(std::max(bounces, 0)));
 
 				// **The shaders this world's materials name, resolved before
 				// the frame that draws with them.** The same block

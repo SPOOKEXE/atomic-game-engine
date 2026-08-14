@@ -1816,6 +1816,16 @@ declare task: {
 				// typechecked, ran, and silently answered the non-recursive
 				// question.
 				out << "\tfunction FindFirstChild(self, name: string, recursive: boolean?): Instance?\n";
+
+				// **`WaitForChild`'s timeout is not optional, and that is the one
+				// place this surface is deliberately stricter than Roblox's.**
+				// Roblox's `WaitForChild(name)` waits for ever; this engine refuses
+				// that form at run time because a script that never finishes its
+				// tick is work crossing a tick boundary, and `ScriptMethods.cpp`
+				// carries the whole argument. Declaring the argument `number?` would
+				// typecheck the exact call the run time then raises on — which is
+				// the failure the lookups above were fixed for, the other way round.
+				out << "\tfunction WaitForChild(self, name: string, timeout: number): Instance?\n";
 				out << "\tfunction FindFirstChildOfClass(self, className: string): Instance?\n";
 				out << "\tfunction FindFirstChildWhichIsA(self, className: string, recursive: boolean?): "
 					   "Instance?\n";
@@ -3108,6 +3118,16 @@ declare const task: {
 				// second argument. `null` rather than `undefined` because that is
 				// what a JavaScript lookup answers for nothing found.
 				out << "\tFindFirstChild(name: string, recursive?: boolean): Instance | null;\n";
+
+				// **The required timeout of the Luau half, plus the one thing a
+				// JavaScript author has to know: this may or may not be a promise.**
+				// A child that is already there is answered directly and a wait is a
+				// `Promise` the barrier resolves, so `await` is what reads either —
+				// and the union is what says so. A bare `Promise<Instance | null>`
+				// would have typechecked a `.then` that fails on the direct answer,
+				// which is the same class of lie as an optional timeout.
+				out << "\tWaitForChild(name: string, timeout: number): Instance | Promise<Instance | null> | "
+					   "null;\n";
 				out << "\tFindFirstChildOfClass(className: string): Instance | null;\n";
 				out << "\tFindFirstChildWhichIsA(className: string, recursive?: boolean): Instance | null;\n";
 				out << "\tFindFirstAncestor(name: string): Instance | null;\n";

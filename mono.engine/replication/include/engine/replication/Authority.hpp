@@ -5,9 +5,11 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/replication/Audit.hpp>
 #include <engine/replication/Protocol.hpp>
 #include <engine/replication/Submission.hpp>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -88,6 +90,11 @@ namespace engine::replication {
 		// late a value can be is `StarvationTicks + ceil(n/k)`, which is
 		// asserted by a test rather than argued for.
 		uint64_t StarvationTicks = 30;
+
+		// The anti-entropy audit over what a client already holds.
+		//
+		// @since v0.15
+		AuditSettings Audit;
 	};
 
 	// How the authority notices that a component's value moved.
@@ -160,6 +167,12 @@ namespace engine::replication {
 		// one — which is why this could be decided without a second consumer to
 		// check it against, as `D00115` expected to need.
 		//
+		// **A tagged entity is also out of the audit entirely.** The two ends
+		// are meant to disagree about a derived row, and a hash has no
+		// tolerance — see `Audit.hpp`. What that costs is that a character root
+		// is never audited, and it moves every tick, so the audit would have
+		// passed over it anyway.
+		//
 		// @param component The replicated component whose rows to filter.
 		// @param tag       The component whose presence suppresses them. An
 		//                  invalid name clears the filter.
@@ -193,6 +206,35 @@ namespace engine::replication {
 		//        everything the same, which leaves the rotation in sole charge
 		//        and is a plain round robin.
 		void SetPriority(std::function<float(ClientId, ecs::Entity)> score);
+
+		// Decides which entities a joining client is sent *before* the world.
+		//
+		// **`SetPriority` orders a stream and this orders a join, and neither
+		// can do the other's job.** A join is one `ecs::Store::Save` chunked
+		// across ticks in the order the store wrote its archetypes, and a score
+		// does not reach inside a byte cursor — so a client's very first view of
+		// a world was whatever the storage happened to lay down first, whatever
+		// the priority hook said. What this predicate picks out is captured and
+		// finished as its own blob before the world's first chunk is built.
+		//
+		// **Applied as an overlay on the far side, and sent twice.** The blob is
+		// a slice of a world rather than the whole of one, so a receiver may not
+		// sweep what it fails to mention — and the world blob that follows still
+		// carries these entities, because *that* one is the complete picture and
+		// the sweep behind it is what retires a client's stale rows. The
+		// duplication is the price, and it is the size of what a host puts in
+		// front rather than the size of the world.
+		//
+		// **No `ClientId`, unlike every other hook here.** What goes first is a
+		// property of the content — Roblox's `ReplicatedFirst` is a container,
+		// not a per-player decision — and interest has already narrowed the set
+		// this is asked about to what that client may see.
+		//
+		// @param predicate Called as `predicate(ecs::Entity, const ecs::Store
+		//        &)`, once per visible entity per join. Empty means no preface,
+		//        which is one blob and exactly the behaviour that preceded this.
+		// @since v0.15
+		void SetPreface(std::function<bool(ecs::Entity, const ecs::Store &)> predicate);
 
 		// Decides what to do with a client's identity claim.
 		//
@@ -349,7 +391,11 @@ namespace engine::replication {
 			// Whether the join snapshot is still going out.
 			bool Streaming = false;
 
-			// How many bytes of it are left to send.
+			// How many bytes of it are left to send, both blobs together.
+			//
+			// One number rather than two because a caller wants to know whether
+			// this client is still joining; which of the two it is up to is
+			// `SetPreface`'s business and nobody else's.
 			size_t SnapshotRemaining = 0;
 
 			// The last tick this client acknowledged applying in full.
@@ -419,6 +465,43 @@ namespace engine::replication {
 			// `Stalest` is a budget too small for the world, where a flat one
 			// with a high `Refused` is a link problem.
 			uint64_t Stalest = 0;
+
+			// Audits built by the last `Publish`, across every client.
+			//
+			// @since v0.15
+			size_t Audits = 0;
+
+			// Groups a client has said it disagrees with, since this authority
+			// was made.
+			//
+			// **The number that says the delta path let something through.**
+			// A steady zero is the state this engine believes it is in; a
+			// figure that climbs and then stops is divergence found and
+			// repaired, and one that climbs for ever on a quiet link is a
+			// client holding something the server has no record of sending it
+			// — which the repair below cannot reach, and which nothing else
+			// would have reported at all.
+			//
+			// Cumulative rather than per-`Publish`, like `Unowned`.
+			//
+			// @since v0.15
+			size_t Disputed = 0;
+
+			// Answers to an audit this authority refused.
+			//
+			// Every one is a client naming an audit it was not asked for,
+			// answering one twice, or naming a group outside the slice. See
+			// `Receive` for why the limit is enforced here rather than
+			// configured.
+			//
+			// @since v0.15
+			size_t DisputesRefused = 0;
+
+			// Entities re-offered because an audit disagreed, since this
+			// authority was made.
+			//
+			// @since v0.15
+			size_t Repaired = 0;
 		};
 
 		// What the last `Publish` did.
@@ -453,19 +536,63 @@ namespace engine::replication {
 		struct Carried {
 			size_t SnapshotOffset = NOWHERE;
 
+			// Which blob that offset is into. A refusal that rewound the wrong
+			// cursor is the `applied=184 refused=17865` failure with an extra
+			// way to reach it.
+			SnapshotStage Stage = SnapshotStage::World;
+
 			uint32_t First = 0;
 			uint32_t Count = 0;
 
 			bool Values = false;
+
+			// Whether this message was the tick's audit. A refused one leaves
+			// the client with nothing to answer, so the record of what it owes
+			// an answer for has to go with it — otherwise a later `Disputed`
+			// naming that tick would be accepted for an audit that never went.
+			bool Audit = false;
+		};
+
+		// One blob of a join, and how far through it this client is.
+		struct Staged {
+			std::vector<std::byte> Bytes;
+			size_t Sent = 0;
+			uint64_t Tick = 0;
+		};
+
+		static constexpr size_t STAGES = static_cast<size_t>(SnapshotStage::World) + 1;
+
+		// The one audit a client may answer, and what answering it buys.
+		//
+		// **This record *is* the rate limit, and it is held here rather than
+		// asked of the client.** A client claiming everything mismatches is
+		// asking the server to resend the world, so the only thing an answer
+		// can do is name groups out of a slice the server chose, once, for a
+		// tick the server issued. Everything a peer could inflate — how often,
+		// how many, and which — is a number on this side of the wire.
+		struct AuditRecord {
+			// The tick of the audit awaiting an answer, or zero for none.
+			uint64_t Tick = 0;
+
+			// Whether it has been answered. A second answer is refused rather
+			// than merged: two answers to one question is a client repeating
+			// itself or a client pushing.
+			bool Answered = false;
+
+			// The groups that went out, and the entities each of them named.
+			// The repair is scoped to exactly these, so a client cannot widen
+			// it by naming a group with more in it than the server hashed.
+			std::vector<AuditGroup> Groups;
 		};
 
 		struct Client {
 			uint32_t Generation = 0;
 			bool Live = false;
 
-			std::vector<std::byte> Snapshot;
-			size_t Sent = 0;
-			uint64_t SnapshotTick = 0;
+			// Indexed by `SnapshotStage`, and streamed in that order. Two
+			// cursors rather than one because a snapshot's chunking has no other
+			// place ordering could live — see `SetPreface`.
+			std::array<Staged, STAGES> Snapshots;
 
 			std::unordered_set<uint64_t> Known;
 
@@ -494,6 +621,27 @@ namespace engine::replication {
 			std::vector<Carried> Carried_;
 
 			std::vector<Edit> Edits;
+
+			// The audit this client owes an answer to, and the tick the last
+			// one went out on.
+			AuditRecord Audit;
+			uint64_t AuditedAt = 0;
+
+			// Where the next audit picks up, as an entity handle rather than a
+			// position.
+			//
+			// **A handle, because the set it walks is not a list.** Entities
+			// come and go between audits, so a position would skip whatever
+			// happened to be inserted in front of it and re-audit whatever was
+			// removed behind it — the same reason `Delta::Part` is a position
+			// and not an arrival order, one layer up.
+			uint64_t AuditCursor = 0;
+
+			// Entities an accepted answer asked to have re-offered, consumed by
+			// the next `BuildComponents`. The repair is the recovery walk that
+			// already exists — a second path that resent a value would be the
+			// second way to do one job.
+			std::vector<uint64_t> Repairing;
 		};
 
 		// One entity's value for one component, built and waiting for a place
@@ -534,16 +682,38 @@ namespace engine::replication {
 		const Client *Reach(ClientId client) const;
 		void Survey(ecs::Store &store);
 		void Resign(ecs::Store &store);
+
+		// Bytes of a join still owed to a client, across both blobs.
+		static size_t Owed(const Client &client);
+
+		// Saves `entities` and the values a client would decode for them.
+		//
+		// Empty means the world could not be written at all: a `Save` of a store
+		// with nothing in it still writes a header.
+		std::vector<std::byte> Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const;
+
 		void BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick);
+		void StreamSnapshot(Client &client);
 		void BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
 		void Prioritise(ClientId client, uint64_t tick);
 		Placement Pack(Client &client, const Delta &delta, size_t messageLimit);
 		void Record(Client &client, const Placement &placed, uint64_t tick);
 		void EmitStructure(Client &client, const Structure &structure);
 
+		// Builds this tick's audit for one client, if one is due.
+		//
+		// Emitted after the delta and never before it, so the message the byte
+		// budget turns away first is the one whose loss costs nothing.
+		void EmitAudit(const ecs::Store &store, ClientId handle, Client &client, uint64_t tick);
+
+		// Takes a client's answer to an audit, having decided the server agrees
+		// it asked the question.
+		bool Dispute(Client &into, const replication::Disputed &disputed);
+
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Interest;
 		std::function<float(ClientId, ecs::Entity)> Priority;
+		std::function<bool(ecs::Entity, const ecs::Store &)> Preface;
 		std::function<bool(ClientId, const Identify &)> IdentityCheck;
 
 		// Empty refuses everything, which is the safe half of the default. See
@@ -574,11 +744,23 @@ namespace engine::replication {
 		Statistics Stats_;
 
 		std::vector<ecs::Entity> Visible;
+
+		// The subset of `Visible` the preface predicate claimed, refilled per
+		// join rather than per publish because that is the only moment it is
+		// asked.
+		std::vector<ecs::Entity> Preceding;
+
 		std::vector<Candidate> Candidates;
 
 		std::vector<uint64_t> Bearing;
 
 		std::vector<ecs::ComponentId> Resolved;
+
+		// The same list as names, which is what an audit puts on the wire. Kept
+		// beside `Resolved` rather than derived from `Components`, because a
+		// leaf's ordinal is a position in both and only a shared filling pass
+		// keeps them the same positions.
+		std::vector<core::Name> ResolvedNames;
 
 		std::vector<uint32_t> Order;
 
@@ -591,5 +773,16 @@ namespace engine::replication {
 		std::vector<uint64_t> Recovering;
 
 		std::vector<uint64_t> Appearing;
+
+		// One client's known set in handle order, for the audit.
+		//
+		// Sorted rather than walked in place, for `Recovering`'s reason: the
+		// known set is an `unordered_set` and two servers that inserted into it
+		// in different orders would hash the same world into different digests.
+		std::vector<ecs::Entity> Auditing;
+
+		// The subset of `Resolved` one audit's batch actually carries, which is
+		// what its leaf ordinals count in.
+		std::vector<ecs::ComponentId> Auditable;
 	};
 }

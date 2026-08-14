@@ -157,6 +157,17 @@ namespace engine::replication {
 			return Replica_.Joined();
 		}
 
+		// Whether what the server put ahead of the world has arrived.
+		//
+		// True while `Joined` is still false is the window a loading screen
+		// belongs in. See `Replica::Prefaced`.
+		//
+		// @return `true` once the preface has been applied.
+		// @since v0.15
+		bool Prefaced() const {
+			return Replica_.Prefaced();
+		}
+
 		// The last tick applied in full.
 		//
 		// @return The tick, or zero before joining.

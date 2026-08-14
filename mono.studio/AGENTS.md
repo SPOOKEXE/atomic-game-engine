@@ -238,6 +238,34 @@ with none of them changing. It is read-only and nil on a server: a `Script`
 reaching for it gets nothing rather than somebody else's player, which is the one
 thing a shared codebase must not get wrong.
 
+## An `.rbxm` is read in `bake` and only mapped here
+
+The Rojo sync builds Roblox's binary model format as of v0.15, and the split is
+the point: `bake::ReadRobloxModel` turns bytes into a tree of class names, names
+and values, and `RojoSync.cpp` turns that tree into instances. A parser for a
+foreign binary format is the largest attack surface a content pipeline has and
+`bake/AGENTS.md` is where that rule lives; putting one in an editor would put it
+in a shipped program's dependency graph the first time somebody linked the two.
+
+Three decisions are this program's rather than the reader's, and each is the
+kind that is easy to take differently by accident:
+
+- **One instance, named after the file.** The container allows any number at its
+  top level; Rojo's table maps a model file to one. A file with several is
+  refused by name rather than wrapped in a folder nobody wrote.
+- **A class this engine does not have becomes a `Folder` and says so** — the
+  same answer `$className` already gets. Two answers to one question is how a
+  sync starts having a dialect.
+- **A script's `Source` is staged into the world's `SourceCache`.** Roblox keeps
+  the text on the instance and this engine keeps a path, so an import that made
+  only the instance would produce a `Script` that never runs, which looks exactly
+  like a script with a bug in it.
+
+**A property this engine has no declaration for is counted, not listed.** Studio
+writes every property of every class, so the `.meta.json` rule — name the key,
+because an author typed it — would be a hundred lines here saying this engine is
+smaller than Roblox, and would bury the notes that are about the file.
+
 ## The debugger captures, it does not pause
 
 Two reasons, and both outrank the convenience of a stepping debugger:
@@ -314,6 +342,39 @@ that provokes the fault on purpose with imgui's assert switched off, so the
 detector is known to work rather than merely known to pass. **Reach for that
 harness before extracting a free function**: a panel's imgui behaviour is now
 testable, and moving logic out to avoid testing it is no longer the only option.
+
+## The node graph is vendored, and the panel is all that is left here
+
+`studio/NodeGraph.hpp` was this program's own implementation of a design that
+already existed as a standalone library. Two of one thing is the debt
+`AGENTS.md` calls the most expensive kind, and `D00113` closed by taking the
+further-along copy — this one — upstream. `mono.vendor/nodegraph` is the result
+and `src/NodeDemo.cpp` is what stayed: the panel, and nothing else.
+
+The split is worth stating, because the next node editor has to know which side
+it is adding to. **The library owns everything that is true of any node graph** —
+the registry, the model, folding, layout, evaluation, the canvas, the save
+format, and pictures as pixels. **This program owns what only an engine has**: a
+texture for a picture, a theme, an undo stack, a file dialog and a dockable
+window.
+
+Two seams, both in `studio/Editor.hpp` as free functions so that
+`tests/NodeGraph.cpp` can reach them, and both silent when they break:
+
+- **`NodePreviewTexture`** copies a `nodegraph::PreviewImage` into an
+  `assets::TextureData`. It is a `memcpy` because both sides mean red first and
+  the top row first — and the day one of them stops meaning that, the editor
+  keeps drawing thumbnails with their channels swapped.
+- **`ApplyNodeChrome`** hands the library the four values it draws chrome with.
+  Called every frame the panel draws, because the theme and the interface scale
+  are both settings somebody can change while it is open.
+
+**A third implementation is what must not happen**, and it would arrive as a
+file rather than as a decision — the render pipeline as a node editor is still
+to be written, and it could start its own registry and its own canvas without
+anybody noticing until the cycle guard or the hash diverged.
+`just check-one-node-graph` is what stops it: no first-party file may open
+`namespace nodegraph`. Extend the library where it lives.
 
 ## Configuration lives in the person's folder, not beside the binary
 

@@ -310,7 +310,7 @@ luau-lsp:
 # Not `preset=ci` by default, because that makes every warning fatal and the
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
 # strictest configuration this repository has.
-check: format-check build test-all test-architecture bindings-check typecheck determinism replay-check
+check: format-check build test-all test-architecture check-one-node-graph bindings-check typecheck determinism replay-check
     @echo "check ok — format, build, tests, architecture, bindings, typecheck, determinism, replay"
 
 # Run the client. `just run --stats` passes flags straight through.
@@ -511,6 +511,37 @@ check-cdn-is-bare:
     @test ! -d .cache/build/cdn/server \
         || (echo "FAIL: the server was built into a cdn-only preset" && exit 1)
     @echo "cdn contains no graphics stack and nothing else's program"
+
+# There is one node graph in this repository and it is `mono.vendor/nodegraph`.
+#
+# **The rule `D00113` spent two versions carrying.** That entry was open because
+# this design existed twice — the editor's `studio/NodeGraph.hpp` and the
+# template it came from — and the debt was never the second copy's quality. It
+# is that both accumulate callers and the neglected one is the one that goes
+# wrong, in the half nobody tests: the cycle guard, or the hash.
+#
+# A third would arrive as a file rather than as a decision. The render pipeline
+# editor and `Engine::bakegraph`'s pipeline documents are both still to be
+# written, and either could start its own registry and its own canvas without
+# anybody noticing until the first divergence — which is exactly what AGENTS.md
+# rule 6 says to make the build check rather than leave in somebody's memory.
+#
+# Extend the library where it lives. `mono.vendor/nodegraph` is ours, it takes a
+# pull request, and this repository pins whatever commit it lands on.
+check-one-node-graph:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    found=$(grep -rlE 'namespace[[:space:]]+nodegraph[[:space:]]*\{' \
+        --include='*.hpp' --include='*.cpp' \
+        mono.build mono.cdn mono.client mono.engine mono.network mono.server \
+        mono.studio mono.tools mono.unified_server_client || true)
+    if [ -n "$found" ]; then
+        echo "FAIL: a second node graph implementation, in first-party code:"
+        echo "$found" | sed 's/^/  /'
+        echo "The one this repository has is mono.vendor/nodegraph. Extend it there."
+        exit 1
+    fi
+    echo "one node graph, and it is vendored"
 
 # The API reference, from the comments already in the headers.
 #

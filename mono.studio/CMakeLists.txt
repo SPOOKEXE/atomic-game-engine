@@ -96,9 +96,6 @@ mono_add_library(studio
 		# includes is one its build file should say out loud.
 		Engine::gui
 
-		# L10. The node canvases' layout, hit-testing and selection — the half
-		# of both editors that has tests. See `Pipelines.cpp` and D00041.
-
 		# The client's presentation seam: `client::InstallPresentation` and
 		# `client::DrawList`. **Reused rather than reimplemented** — a second
 		# draw-list collector would be a second answer to what a world hands its
@@ -129,6 +126,18 @@ mono_add_library(studio
 	# is a parser for one file extension in an editor, and nothing in a public
 	# header here names a `toml::` type.
 	VENDOR Vendor::tomlplusplus
+
+	# The node graph and its canvas, and the node set the Demo Nodes panel runs.
+	# D00113's answer: this design was implemented twice, here and in the
+	# template it came from, and the second copy is now the only one.
+	#
+	# **`VENDOR_PUBLIC` and not `VENDOR`, which is a widening and is meant.** The
+	# `Editor` *holds* the graph, the canvas and the evaluator by value and hands
+	# a `nodegraph::PreviewImage` to its texture sink, so those types are in
+	# `studio/Editor.hpp` and cannot be hidden without a pimpl over the editor's
+	# whole state. What it widens is small: nothing links `Mono::studio` but its
+	# own program and its own tests.
+	VENDOR_PUBLIC Vendor::nodegraph Vendor::nodegraph_nodes
 	ALLOW_TIER_ESCAPE Mono::server
 )
 

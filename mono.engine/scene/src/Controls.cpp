@@ -389,7 +389,14 @@ namespace engine::scene {
 
 		size_t moved = 0;
 		store.Each<Humanoid>([&](ecs::Entity entity, Humanoid &humanoid) {
-			if (!humanoid.Enabled) {
+			// **Dead is checked beside disabled, because they mean the same thing
+			// to this pass and nothing else.** A disabled humanoid is one a game
+			// took the controls off; a dead one is one the world took them off.
+			// Either way the `Motion` below is left alone, so the body keeps the
+			// momentum it had and gravity does the rest — which is what
+			// "the body stays where it fell" has to mean when nothing here
+			// ragdolls.
+			if (!humanoid.Enabled || IsDead(humanoid)) {
 				return;
 			}
 
@@ -438,6 +445,18 @@ namespace engine::scene {
 		});
 
 		return moved;
+	}
+
+	bool IsDead(const Humanoid &humanoid) {
+		// **"Not alive" rather than "at or below zero", which is the same test
+		// for every number except one.** `TakeDamage` clamps at zero and the
+		// `Health` property clamps at zero, but a component written straight
+		// through `Store::Set` or read out of an older file has been through
+		// neither — so this has to answer for a negative, and it has to answer
+		// for a NaN. Written the other way round a NaN compares false against
+		// everything and the character is immortal, which is the one failure
+		// nothing downstream could explain.
+		return !(humanoid.Health > 0.0f);
 	}
 
 	ecs::ClassId HumanoidClass() {

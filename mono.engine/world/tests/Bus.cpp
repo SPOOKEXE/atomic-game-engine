@@ -754,8 +754,8 @@ TEST_CASE("a channel message reaches the channel it names and nobody else", "[wo
 
 	universe.Enter(arena, [](Store &store) {
 		Postbox box(store);
-		REQUIRE(box.OpenChannel("scores"));
-		REQUIRE(box.OpenChannel("chat"));
+		REQUIRE(box.OpenChannel("scores").Expected());
+		REQUIRE(box.OpenChannel("chat").Expected());
 	});
 	universe.Tick(1.0f / 60.0f);
 
@@ -800,7 +800,7 @@ TEST_CASE("a channel is not a teleport, and a receiver can tell", "[world]") {
 	const WorldId from = universe.Create(Named("channel.sender"));
 	const WorldId to = universe.Create(Named("channel.receiver"));
 
-	universe.Enter(to, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("news")); });
+	universe.Enter(to, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("news").Expected()); });
 	universe.Tick(1.0f / 60.0f);
 
 	universe.Enter(from, [](Store &store) {
@@ -834,8 +834,8 @@ TEST_CASE("every way a channel send can fail is a status the sender reads", "[wo
 	const WorldId listener = universe.Create(Named("channel.listener"));
 	const WorldId broken = universe.Create(Named("channel.broken"));
 
-	universe.Enter(listener, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("open")); });
-	universe.Enter(broken, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("open")); });
+	universe.Enter(listener, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("open").Expected()); });
+	universe.Enter(broken, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("open").Expected()); });
 	universe.Tick(1.0f / 60.0f);
 
 	REQUIRE(universe.SetState(broken, engine::world::WorldState::Faulted) == engine::world::WorldStatus::Ok);
@@ -887,7 +887,7 @@ TEST_CASE("a full destination is Overflow rather than an unbounded queue", "[wor
 	const WorldId sender = universe.Create(Named("channel.flood.sender"));
 	const WorldId victim = universe.Create(Named("channel.flood.victim"));
 
-	universe.Enter(victim, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("firehose")); });
+	universe.Enter(victim, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("firehose").Expected()); });
 	universe.Tick(1.0f / 60.0f);
 
 	universe.Enter(sender, [](Store &store) {
@@ -920,6 +920,124 @@ TEST_CASE("a full destination is Overflow rather than an unbounded queue", "[wor
 	CHECK(after[0].Status == BusStatus::Ok);
 }
 
+TEST_CASE("a world may not hold more channels than the universe allows", "[world]") {
+	// **The bound on the channel *table*, where `ChannelQueueLimit` bounds the
+	// queue.** A channel costs one bus operation to open and one entry in the
+	// router's table for ever after, and `BusBudgetPerTick` bounds the rate rather
+	// than the total — a world opening a distinct channel every tick for an hour
+	// leaves two hundred thousand live entries that every snapshot then carries.
+	UniverseSettings settings;
+	settings.ChannelsPerWorld = 3;
+
+	Universe universe(settings);
+	const WorldId hoarder = universe.Create(Named("channel.cap.hoarder"));
+	const WorldId modest = universe.Create(Named("channel.cap.modest"));
+	const WorldId sender = universe.Create(Named("channel.cap.sender"));
+
+	universe.Enter(hoarder, [](Store &store) {
+		Postbox box(store);
+		for (int index = 0; index < 5; index++) {
+			// Every one is accepted at the *call*: the send budget is a rate and
+			// the cap is a total, so only the barrier can answer this.
+			REQUIRE(box.OpenChannel(("cap.c" + std::to_string(index)).c_str()).Expected());
+		}
+	});
+	universe.Enter(modest, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("cap.c0").Expected()); });
+	universe.Tick(1.0f / 60.0f);
+
+	// **The refusal arrives, which is the whole reason an open grew a reply.** The
+	// world that asked is the only party that can act on it, and the answer is a
+	// status rather than a silence — the same promise every other verdict on this
+	// bus makes.
+	const std::vector<Delivery> verdicts = Received(universe, hoarder);
+	REQUIRE(verdicts.size() == 5);
+	CHECK(verdicts[2].Status == BusStatus::Ok);
+	CHECK(verdicts[3].Status == BusStatus::TooManyChannels);
+	CHECK(verdicts[3].Key == Name("cap.c3"));
+	CHECK(verdicts[4].Status == BusStatus::TooManyChannels);
+
+	// A refused open opened nothing, and a world under the cap is untouched by
+	// its neighbour spending one — the bound is per world and not per universe.
+	universe.Enter(sender, [](Store &store) {
+		Postbox box(store);
+		box.SendTo("channel.cap.hoarder", "cap.c2", Bytes("x"));
+		box.SendTo("channel.cap.hoarder", "cap.c3", Bytes("x"));
+		box.SendTo("channel.cap.modest", "cap.c0", Bytes("x"));
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> sent = Received(universe, sender);
+	REQUIRE(sent.size() == 3);
+	CHECK(sent[0].Status == BusStatus::Ok);
+	CHECK(sent[1].Status == BusStatus::NoSuchChannel);
+	CHECK(sent[2].Status == BusStatus::Ok);
+
+	// **`TooManyChannels` rather than `OverBudget`, and this is the difference.**
+	// A budget is spent per tick and comes back at the next one, so a world told
+	// it is over budget waits and retries. The cap is a total: retrying it a
+	// barrier later answers the same, and the only thing that frees a slot is the
+	// world closing one it holds. Reopening a channel it already holds needs no
+	// slot at all, or a startup that ran its own opens twice would fail the
+	// second time.
+	universe.Enter(hoarder, [](Store &store) {
+		Postbox box(store);
+		REQUIRE(box.OpenChannel("cap.c3").Expected());
+		REQUIRE(box.OpenChannel("cap.c0").Expected());
+		REQUIRE(box.CloseChannel("cap.c1"));
+		REQUIRE(box.OpenChannel("cap.c3").Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> retried = Received(universe, hoarder);
+	REQUIRE(retried.size() == 3);
+	CHECK(retried[0].Status == BusStatus::TooManyChannels);
+	CHECK(retried[1].Status == BusStatus::Ok);
+	CHECK(retried[2].Status == BusStatus::Ok);
+
+	universe.Enter(sender, [](Store &store) {
+		REQUIRE(Postbox(store).SendTo("channel.cap.hoarder", "cap.c3", Bytes("x")).Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> freed = Received(universe, sender);
+	REQUIRE(freed.size() == 1);
+	CHECK(freed[0].Status == BusStatus::Ok);
+}
+
+TEST_CASE("what a world holds is what it comes back holding", "[world]") {
+	// The cap is a count of what is in the router's table, and a snapshot carries
+	// that table — so the count has to be rebuilt from it. Otherwise saving and
+	// loading is how a world gets a second allowance, and the entries it came back
+	// with are the ones nothing will ever close.
+	UniverseSettings settings;
+	settings.ChannelsPerWorld = 2;
+
+	Universe universe(settings);
+	const WorldId holder = universe.Create(Named("channel.cap.saved"));
+	universe.Enter(holder, [](Store &store) {
+		Postbox box(store);
+		REQUIRE(box.OpenChannel("cap.kept.a").Expected());
+		REQUIRE(box.OpenChannel("cap.kept.b").Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	engine::core::ByteWriter writer;
+	REQUIRE(universe.Save(writer));
+
+	Universe restored(settings);
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+
+	const WorldId back = restored.Find(Name("channel.cap.saved"));
+	REQUIRE(back.IsValid());
+	restored.Enter(back, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("cap.kept.c").Expected()); });
+	restored.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> verdicts = Received(restored, back);
+	REQUIRE(verdicts.size() == 1);
+	CHECK(verdicts[0].Status == BusStatus::TooManyChannels);
+}
+
 TEST_CASE("two senders into one receiver arrive in sender-name order", "[world]") {
 	// **The ordering rule, and the sort key it turns on.** Traffic is applied in
 	// `(From.Text(), Sequence)` order — both recorded in the envelope, neither a
@@ -934,7 +1052,7 @@ TEST_CASE("two senders into one receiver arrive in sender-name order", "[world]"
 	// envelopes applied in the opposite order and a replay diverged from its
 	// recording. Under the id, "zulu" — interned first here — arrives first.
 	const auto arrivalsInto = [](WorldId first, WorldId second, Universe &universe, WorldId sink) {
-		universe.Enter(sink, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("race")); });
+		universe.Enter(sink, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("race").Expected()); });
 		universe.Tick(1.0f / 60.0f);
 
 		universe.Enter(first, [](Store &store) {
@@ -986,7 +1104,7 @@ TEST_CASE("an open channel survives a snapshot", "[world]") {
 	const WorldId listener = universe.Create(Named("channel.saved.listener"));
 	universe.Create(Named("channel.saved.sender"));
 
-	universe.Enter(listener, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("kept")); });
+	universe.Enter(listener, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("kept").Expected()); });
 	universe.Tick(1.0f / 60.0f);
 
 	engine::core::ByteWriter writer;

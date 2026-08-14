@@ -121,14 +121,82 @@ needs no predicate change and needs the scoping test extended in both directions
 — `server.replication` asserts a client holds four of its own and none of
 anybody else's.
 
-## Death is the model being destroyed, and the delay is a tick number
+## A spawn is found by class *and* by name, and that is the one exception
 
-There is no health on `Humanoid` — see its header for why it is deliberately
-small — so `UpdateRespawns` measures `Player.RespawnTime` from the tick a player
-was first seen without a character. `D00121` carries what a health model would
-have to decide.
+`scene::FindSpawn` looked for a child called `SpawnLocation` from v0.14 to
+v0.15, which `Characters.hpp` recorded as a deliberate stop: Roblox's class
+carries teams and a forcefield, none of that existed, and a class with a
+footnote is worse than a name. `Teams.hpp` is what lifted it — the class is
+real, it derives from `Part`, and its three fields all have a reader.
 
-Two things about it are load-bearing:
+**The name still resolves, and that is the bridge rather than a leftover.**
+Every scene in `mono.engine/examples` builds its pad with
+`block("SpawnLocation", ...)`, so a plain `Part` wearing the name is read as an
+enabled, neutral spawn — the defaults the class would have given it. Deleting
+that half drops every one of those worlds at the origin, silently.
+
+**This is not the lookup the fixture section refuses.** That rule is about
+*services*: a fixture found by name is one a script can rename out of existence,
+and `InstallServices` mints a second beside it. A spawn pad is content an author
+names on purpose, and `IsSpawn` is one function holding both spellings rather
+than a lookup somebody forgot to convert.
+
+Three more things a reviewer should hold:
+
+- **The first pad in tree order, never a random one.** Roblox draws at random
+  among everything a player may use; a respawn drawn from a random number is a
+  recording that does not replay, which is `UpdateRespawns`' rule about its
+  deadline arriving one function along.
+- **A player's own colour beats a neutral pad, and another team's is never
+  used.** That preference is the whole difference between a team and a coloured
+  label — `docs/DEFERRED.md` D00119 refused `Player.Team` for eight versions on
+  exactly that test.
+- **Colours are compared within a tolerance and never with `==`.**
+  Roblox matches `BrickColor`s, which are enumerated; a `Color3` reaches the
+  comparison through a property setter, a snapshot and a Rojo JSON file that
+  writes floats as text. `SameTeamColour` is the single statement of it.
+
+## `MakePart` takes a class, and it is still the only constructor
+
+`PartDesc::Class` exists so that `SpawnLocation` — a `Part` plus one component —
+goes through the same door every other part does. The alternative was a second
+builder, which is the duplicate this file refuses two sections down, and the two
+disagree the first time `BasePart` gains a member.
+
+**Anything that is not a `BasePart` is refused rather than half-built.**
+`MakePart` writes `Bounds`, `Visual`, `Collider` and `Surface` unconditionally,
+so minting a `Model` through it would produce a model with a part's components
+bolted on and no class saying so.
+
+## Death is `Health` reaching zero, and the delay is a tick number
+
+`Humanoid` carries a `Health` and a `MaxHealth` from v0.15, and that is what
+"dead" means. `UpdateRespawns` measured `Player.RespawnTime` from the tick a
+player was first seen with *no model* until then — Roblox's delay hung off the
+wrong event — so the branch now asks whether the body has health rather than
+whether it exists. A destroyed model is still the second trigger and has to be:
+a teleport, a script tidying up and a host dropping a client all remove a
+character without setting anything to zero first.
+
+Four things a reviewer should refuse:
+
+- **A second answer to "may this machine write health".**
+  `ecs::Store::SetProperty` refuses every property write in a replica and
+  `scene::TakeDamage` refuses on `Store::AdoptOnly`. That is one rule with two
+  doors — the script door and the C++ door — and a `Writable = false` on the
+  descriptor or a flag beside it would be a third statement of it that only
+  covers one caller. It would also stop the *server* script that wants to kill
+  somebody, which is the ordinary way a game does it.
+- **A damage door beside `TakeDamage`.** It is where the replica refusal, the
+  clamp at zero and the once-only death all live, so a second subtracting path
+  is three rules re-decided.
+- **A `Health <= 0` written out rather than `IsDead`.** Spelled `!(Health > 0)`
+  so a NaN is dead; written the obvious way round a NaN is immortal.
+- **Anything that destroys the body at the moment of death.** That is the old
+  rule wearing a new name. The corpse is `LoadCharacter`'s to remove when the
+  deadline arrives, which it has done since v0.14.
+
+Two things about the delay are load-bearing:
 
 - **The deadline is `ceil(seconds / delta)` against the fixed tick delta**, which
   is `DebrisQueue`'s rule. A float accumulated per tick drifts and
@@ -636,3 +704,30 @@ the other three alone would ship a rule that holds in Luau and not in the panel.
 Everything else keeps `DestroyInstance`/`SetParent`, because `PlayLink`
 destroying a player, `Debris` draining its queue and `RojoSync` rebuilding a
 subtree are the engine moving its own furniture and must not be refused.
+
+## The world owns the surface depth, and the frame measures what the world leaves out
+
+`workspace.SurfaceBounces` is how deep a scene resolves surface-in-surface. It is a computed property
+over a `scene::SurfaceBounces` resource — `workspace.CurrentCamera`'s arrangement — so the resource is
+the only storage and there is nothing for a second copy to drift from.
+
+**Zero means measure it, and that is the default.** Each viewport keeps what the frame it just drew
+reached: the deepest level that actually rendered a pane, and whether that level still had one in view
+it was not allowed to descend into. `NextSurfaceBounces` answers `resolved + (blocked ? 1 : 0)`,
+clamped to `render::MAX_SURFACE_DEPTH`. A corridor of facing panes deepens itself one level a frame to
+the ceiling; a room with one mirror costs one level; nobody types a number.
+
+Three things hold it up, and two of them are only obvious once broken:
+
+- **The depth is part of a surface's signature.** A surface whose signature has not moved is not
+  redrawn — so without this the measurement says "one deeper", nothing refreshes, the deeper level is
+  never drawn, and the next frame measures the same shallow answer. `MirrorCorridor.luau` sat at one
+  level for ever. Found by running it.
+- **The probe is written back only where the pass actually ran.** Writing on a skipped frame says
+  "nothing resolved" and throws away what the drawing frames worked out.
+- **"Would one more level render" and not "is a pane visible".** An edge-on pane is visible and draws
+  nothing, so the looser question oscillates.
+
+**The ceiling is the caller's and the count is the world's.** `--surface-bounces N` is an override for
+one run, not a setting; a view with no pane rectangle of its own — a cross-world pane iterates rather
+than descends — keeps `DEFAULT_SURFACE_BOUNCES` because there is nothing there to measure.

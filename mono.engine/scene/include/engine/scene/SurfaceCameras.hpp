@@ -470,6 +470,124 @@ namespace engine::scene {
 	// @since v0.15
 	size_t GatherSurfacePanes(ecs::Store &store, std::vector<SurfacePane> &panes);
 
+	// What a world says when it would rather the frame worked the depth out
+	// for itself.
+	//
+	// **The ordinary answer, and it is not two.** Every scene in the engine
+	// resolved exactly two levels from v0.15 until this, whatever it was built
+	// from: a room with one mirror in it paid for a level that could never show
+	// anything, and the corridor of facing panes mirrors exist for was cut off
+	// one level into the effect. No constant is right for both, and picking one
+	// is not a thing most authors should have to think about — so nobody picks
+	// and the frame measures. `NextSurfaceBounces` is the rule.
+	//
+	// @since v0.15
+	inline constexpr int32_t AUTOMATIC_SURFACE_BOUNCES = 0;
+
+	// How many levels a chain with no pane rectangle iterates instead.
+	//
+	// **What the automatic rule falls back to, because that path has nothing to
+	// measure.** A surface camera parented to the world and a cross-world pane
+	// both resolve their chain by running the whole pass again rather than by
+	// descending — nothing can reflect a camera through a pane it was never told
+	// about — so how deep the chain goes is not a function of anything the frame
+	// can see. Two is what that path has always iterated, kept rather than
+	// re-derived from a measurement that does not exist for it.
+	//
+	// @since v0.15
+	inline constexpr uint32_t DEFAULT_SURFACE_BOUNCES = 2;
+
+	// How deep a chain of mirrors this world resolves.
+	//
+	// **A resource, because the cost is a fact about the scene and not about the
+	// process.** `Renderer::SetSurfaceBounces` and `--surface-bounces` are one
+	// number for every world a session opens, which is the wrong grain for a
+	// decision whose whole content is what the world was built out of: a level
+	// descends into every *other* pane it can see, so the passes go as
+	// `panes × (panes - 1) ^ (levels - 1)` where the old iteration went as
+	// `panes × levels`. That is a cost a scene author is in a position to judge
+	// and a session is not.
+	//
+	// `scene::Gravity` and `Sun` are the same shape and carry the rest of the
+	// argument: authored, one per world, and absent in a world that never had an
+	// opinion.
+	//
+	// **A script reaches it as `workspace.SurfaceBounces`**, which is
+	// `workspace.CurrentCamera`'s arrangement — the resource is the storage and
+	// the property is the only way in, so there is no second place the number
+	// lives.
+	//
+	// @since v0.15
+	struct SurfaceBounces {
+		// Levels of mirror-in-mirror to resolve, or `AUTOMATIC_SURFACE_BOUNCES`.
+		//
+		// **Clamped by whoever draws rather than here**, because the ceiling is
+		// `render::MAX_SURFACE_DEPTH` and this module sits five tiers below the
+		// renderer. A world may state a number the device will not give it, and
+		// the frame is drawn at what it can rather than refused.
+		int32_t Levels = AUTOMATIC_SURFACE_BOUNCES;
+	};
+
+	// The world's authored depth, or `AUTOMATIC_SURFACE_BOUNCES`.
+	//
+	// **A free function rather than the resource at each call site**, for
+	// `SunOf`'s reason: "no resource" and "the automatic default" have to be one
+	// answer, and a caller that forgot the null check would resolve nothing.
+	//
+	// @param store The world.
+	// @return What it asked for, which is zero unless something set it.
+	// @since v0.15
+	int32_t SurfaceBouncesOf(const ecs::Store &store);
+
+	// What one frame's mirror recursion measured about its own depth.
+	//
+	// **A render measurement and never simulation state**, which is the whole of
+	// why it is a plain struct a caller keeps rather than a resource on the
+	// world. Next frame's depth is derived from last frame's, and a fact that
+	// crosses a tick boundary inside the world would be `AGENTS.md` rule 5 with
+	// a picture attached — a recorded run replaying on a machine that culled one
+	// pane differently would diverge. Nothing here reaches an `ecs::Store`.
+	//
+	// @since v0.15
+	struct SurfaceBounceProbe {
+		// The deepest level that actually drew a pane, counting the surface pass
+		// itself as one. Zero for a frame that drew no surface at all.
+		uint32_t Resolved = 0;
+
+		// Whether one more level would have drawn something.
+		//
+		// **Exactly that, and not "a pane was visible at the bottom".** The two
+		// differ for a pane seen edge-on, which is visible and renders nothing —
+		// and reporting it would ask for a level that comes back empty, which
+		// measures as one shallower next frame and one deeper the frame after.
+		// The rule is only free of oscillation because this answers the same
+		// question the next frame's descent will.
+		bool Deeper = false;
+	};
+
+	// How many levels to resolve next frame, given what this one measured.
+	//
+	// **Grows by one and stops, which is what keeps a multiplying cost from
+	// running away.** Adding a level multiplies the passes rather than adding
+	// one, so the automatic depth never asks for a level it has not just watched
+	// something ask for: a frame that resolved `n` and still had somewhere to go
+	// draws `n + 1`, a frame that resolved `n` and had nowhere left draws `n`,
+	// and a frame that reached only `k` of the `n` it was given comes back to
+	// `k`. A corridor of facing panes therefore deepens itself one level a frame
+	// until the ceiling, and a room with one mirror in it settles at one and
+	// stays there.
+	//
+	// **The ceiling is the caller's**, because it is `render::MAX_SURFACE_DEPTH`
+	// and this module may not name it.
+	//
+	// @param measured What the frame just drawn reported.
+	// @param ceiling  The most the renderer will allocate for. Clamped up to one,
+	//                 because zero levels is no surface pass at all and has a
+	//                 clearer spelling.
+	// @return The depth to draw next frame, between one and `ceiling`.
+	// @since v0.15
+	uint32_t NextSurfaceBounces(const SurfaceBounceProbe &measured, uint32_t ceiling);
+
 	// One portal, as the rectangle a crossing is tested against.
 	//
 	// **One description of a hole, for the three passes that need one.** A body

@@ -850,6 +850,17 @@ namespace engine::script {
 			// world rather than two.
 			ENGINE_PROFILE_CAT("script tree", core::ProfileCategory::Script);
 			note(PumpTree(State));
+
+			// **The tree's other listener, and the only one that is a resume.**
+			// A `WaitForChild` wakes on the same arrival the signals above just
+			// delivered, so it belongs inside this step rather than beside it —
+			// and it goes second, because a signal every listener shares is a
+			// worse thing to be one tick late with than one script's own wait.
+			//
+			// Its own span would say almost nothing: the pump does nothing at
+			// all unless something is suspended, which is the ordinary state of
+			// a world.
+			note(PumpChildWaiters(State));
 		}
 		{
 			// **After the tree, because a respawn is both.** A new character is

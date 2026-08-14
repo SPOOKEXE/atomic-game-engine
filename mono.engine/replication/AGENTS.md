@@ -165,6 +165,80 @@ the world every tick whether or not anything happened.
 `EachChangedBatch` yields *runs* rather than rows precisely so that a delta is a
 memcpy per run. A per-entity copy here would undo that.
 
+## The audit is what makes the delta path's optimism safe
+
+`Audit.hpp` hashes groups of replicated state, sends the digests, and takes back
+the groups a client says it disagrees with. It is **not a second way to send
+state** — it sends none. It is the only thing in this module that can notice a
+client quietly holding the wrong value, which is the class of bug v0.15 chased
+one cause at a time: the lost creation, the stranded value, the stale forget, the
+tick that never completed. `D00015(b)`.
+
+**It only ever catches *stale* divergence, and every other decision falls out of
+that.** Anything genuinely moving is already being corrected by ordinary deltas,
+so a mismatch is by definition not urgent — which is why the cadence is slow, the
+slice is small, both messages are unreliable, and the audit is the last thing
+built in a tick so the byte budget turns it away before it turns away anything
+that matters.
+
+**Only what a client has already acknowledged is hashed, and that is what makes
+the comparison exact rather than approximate.** An entity with an entry in
+`Unconfirmed` is one the delta path is still correcting, so the server is simply
+ahead of it; hashing it would report a mismatch every time the budget deferred
+something, on exactly the servers the budget exists for. Three sets are left out
+for three different reasons and none of them is a hedge:
+
+- **Anything unconfirmed**, above.
+- **Anything the client owns.** Under v0.13 ownership the client's copy is the
+  newer one between submissions, so the server is the side that is behind.
+- **Anything carrying a `SuppressWhenTagged` tag.** The far side *derives* that
+  row — the two ends are meant to disagree — and a hash has no tolerance.
+
+**Membership is on the wire, and that is the decision the shape turns on.** The
+audit lists the entities it hashed rather than letting the receiver work them out
+from a group number, which is what lets the sender exclude the three sets above
+without the receiver knowing anything about them. It is also why nothing about
+interest management had to change: the open question in `D00015` was per-client
+against per-cell, and a cell hash is only shareable if a client sees a whole cell
+or none of it. **The resolution is per-client over a rotating slice**, because the
+rotation is what bounds the per-client cost anyway and turning interest
+management from per-entity into per-cell is a larger decision than that entry
+authorises.
+
+**The answer is upstream traffic from a peer, so the limit is the server's.** A
+client claiming everything mismatches is request amplification, and none of what
+bounds it is taken from the message: the tick has to be the audit this server
+issued, the labels have to be groups this server hashed, they have to be strictly
+ascending so one cannot be named twice, and an audit may be answered once. The
+most an answer can therefore buy is the repair of exactly the slice the server
+had already chosen to look at, once every `AuditSettings::EveryTicks`. An audit
+the link refused is struck off by `Unsent` for the same reason — a question that
+was never asked may not be answered.
+
+**Both ends hash the value a replica holds, not the value each of them holds.**
+The authority puts its own value through the same encode-and-decode
+`BeginSnapshot` puts a join through, so the two ends compute one expression over
+one buffer. Assuming the quantiser is idempotent instead would be wrong on the
+real codec: `scene::Transform`'s smallest-three rotation re-encodes differently
+for **1666 of 2 million** uniformly random orientations, because the recovered
+component can come back below one of the three that were sent and the next encode
+drops a different one.
+
+**The repair is the recovery walk, not a resend.** A disputed group puts its
+entities back into `Unconfirmed`, which is the same seeding an entity coming into
+view already gets. A second path that resent values would be the second way to do
+one job. What that does not reach is a client holding an entity the server has no
+record of sending it — the server cannot name what it does not know about — and
+the honest bound on that case is the one this module already has:
+`ResnapshotAfterTicks`, reached because a delta naming a row the client does not
+hold never lets `Applied` move. `Statistics::Disputed` is the number that says
+whether any of this is happening.
+
+**It is off by default and `mono.server` turns it on.** A quiet world sends
+nothing is a property this file states two sections down, and anti-entropy is
+exactly the thing that has to speak on a world at rest. Those cannot both hold,
+so which one a host wants is the host's to say.
+
 ## Time is passed in, never read
 
 The same rule as `net`, for the same two reasons: a wall clock read inside is a
@@ -297,6 +371,44 @@ see the next section.
 
 The buffer is therefore released **one tick after** the cursor reaches the end,
 because `Unsent` is called after `Publish` has returned.
+
+## A join is two blobs, and only the second one ends it
+
+`Authority::SetPreface` names the entities a host wants a client to have before
+the world. They are captured as their own `ecs::Store::Save`, at the same tick
+and from the same walk as the world's, and every byte of that blob is handed to
+the transport before the world's first chunk is built. **Priority could never
+have done this**: `SetPriority` orders the values a running world produces, and a
+join is one save chunked across ticks in the order the store wrote its
+archetypes. That is the whole of D00122.
+
+**The preface merges and the world sweeps.** `Replica` applies a preface with
+`ecs::ApplyMode::Overlay` and the world blob with `Authoritative`, and the world
+blob still carries the preface's entities. Swapping the modes is the failure this
+shape invites: a preface is a slice of a world, so applying it authoritatively
+sweeps everything it does not mention — nothing on a join, and the entire world a
+client already holds on a *re-snapshot*, wiped a moment before being sent again.
+
+**A tick's chunks come from one blob.** Chunks go out in the order `Outgoing`
+was built, but a refusal is per message — so a preface chunk the link turned away
+beside a world chunk it took would be resent behind bytes it was supposed to
+precede. Two blobs never share an outgoing list, which makes the ordering a
+property of the code rather than of the packet budget. It costs one tick at the
+seam of a join that already spans many.
+
+**`Carried::Stage` is the second half of the refused chunk.** The section below
+on refusals is about one cursor; there are two now, and a refusal that rewound
+the wrong one is `applied=184 refused=17865` with a second way to reach it.
+
+**A host that declares no preface is unchanged, and that has to stay true.** An
+empty predicate is an empty blob, no extra tick, and the same single-cursor join
+this module always had.
+
+**The script half is not here and is not a gap.** Roblox also runs
+`ReplicatedFirst`'s scripts before the rest of the tree arrives. `mono.client`
+runs no replicated scripts at all, so an ordering guarantee about script
+execution would be a guarantee about something that does not happen. The first
+client that runs a script out of its replica is what makes that a real question.
 
 ## Structure goes on the reliable channel, and values do not
 
@@ -514,8 +626,9 @@ game re-implementing a signature check, and one of them would get it wrong.
 ## Adding a `MessageKind` breaks one thing silently
 
 The switches are `-Wswitch`-checked and `ReadMessage`'s range comparison is not.
-It reads `kind > static_cast<uint8_t>(MessageKind::Identify)`, and a kind
+It reads `kind > static_cast<uint8_t>(MessageKind::Disputed)`, and a kind
 appended after that one parses as out of range — so every message of it is
 dropped as malformed, on both ends, with the counter saying only "malformed".
 `Identify` did exactly that. Update the comparison in the same commit as the
-enum.
+enum. There are **two** of them, in `ReadMessage` and in `PeekMessageKind`, and
+missing the second drops the message at the router instead of at the parser.

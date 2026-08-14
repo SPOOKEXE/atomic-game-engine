@@ -3210,3 +3210,245 @@ TEST_CASE(
 		CHECK_THAT(std::abs(clip.y / clip.w), Catch::Matchers::WithinAbs(1.0f, 1e-3f));
 	}
 }
+
+namespace {
+	// The renderer's mirror recursion, with the device and the culler taken out.
+	//
+	// **A model rather than a second implementation, and what it calls is the
+	// difference.** Every camera below comes out of `ReflectCamera`, which is
+	// the one statement of what a mirror does to a camera, so this cannot drift
+	// from the pass by a sign — the same argument `AimSurfaceCameras` is checked
+	// against. What is deliberately missing is `graph::VisiblePane`, which lives
+	// a tier above this module: every pane counts as visible here, which is
+	// exactly true of the two scenes these cases are about and is the direction
+	// a cull errs in anyway.
+
+	// `Renderer.cpp`'s `wouldDescend`: whether one more level would draw
+	// anything at all.
+	bool WouldDescend(std::span<const engine::scene::SurfacePane> panes, const CFrame &viewer, int8_t skip) {
+		for (const engine::scene::SurfacePane &pane : panes) {
+			if (pane.Surface == skip) {
+				continue;
+			}
+			if (engine::scene::ReflectCamera(pane, viewer, {}).Renders) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	// `Renderer.cpp`'s `fillMirror`, keeping its inverted level index so the
+	// depth arithmetic being checked is the one the pass runs.
+	void Descend(
+		std::span<const engine::scene::SurfacePane> panes,
+		const CFrame &viewer,
+		int8_t skip,
+		uint32_t level,
+		uint32_t levels,
+		engine::scene::SurfaceBounceProbe &probe
+	) {
+		for (const engine::scene::SurfacePane &pane : panes) {
+			if (pane.Surface == skip) {
+				continue;
+			}
+
+			const engine::scene::MirrorEye eye = engine::scene::ReflectCamera(pane, viewer, {});
+			if (!eye.Renders) {
+				continue;
+			}
+
+			if (level > 0) {
+				Descend(panes, eye.Frame, pane.Surface, level - 1, levels, probe);
+			} else {
+				probe.Deeper = probe.Deeper || WouldDescend(panes, eye.Frame, pane.Surface);
+			}
+
+			probe.Resolved = std::max(probe.Resolved, levels + 1 - level);
+		}
+	}
+
+	// One frame at a stated depth, reporting what it reached.
+	engine::scene::SurfaceBounceProbe
+	DrawFrame(std::span<const engine::scene::SurfacePane> panes, const CFrame &eye, uint32_t bounces) {
+		engine::scene::SurfaceBounceProbe probe;
+		const uint32_t levels = bounces - 1;
+
+		for (const engine::scene::SurfacePane &pane : panes) {
+			const engine::scene::MirrorEye top = engine::scene::ReflectCamera(pane, eye, {});
+			if (!top.Renders) {
+				continue;
+			}
+
+			probe.Resolved = std::max(probe.Resolved, 1u);
+
+			if (levels > 0) {
+				Descend(panes, top.Frame, pane.Surface, levels - 1, levels, probe);
+			} else {
+				probe.Deeper = probe.Deeper || WouldDescend(panes, top.Frame, pane.Surface);
+			}
+		}
+
+		return probe;
+	}
+
+	// One pane, on its own slot.
+	engine::scene::SurfacePane SlotPane(int8_t surface, const Vector3 &centre, const Vector3 &normal) {
+		engine::scene::SurfacePane pane = PaneAt(centre, normal);
+		pane.Surface = surface;
+		return pane;
+	}
+
+	// What `render::MAX_SURFACE_DEPTH` is, spelled here because `render` is five
+	// tiers above this module and a test may not reach it. The ceiling is the
+	// caller's argument for exactly that reason, so what is checked below is
+	// that the rule respects whatever it is handed rather than that it agrees
+	// with one number.
+	constexpr uint32_t CEILING = 3;
+}
+
+TEST_CASE("a measured depth grows by one and stops", "[scene][surfacecameras]") {
+	using engine::scene::NextSurfaceBounces;
+	using engine::scene::SurfaceBounceProbe;
+
+	// A frame that drew no surface at all measures nothing, and the next one has
+	// to be allowed to draw the first level to find out. Zero levels would be no
+	// surface pass, which has a clearer spelling.
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{}, CEILING) == 1);
+
+	// **Resolved and satisfied is a fixed point**, which is the property the
+	// whole rule turns on: a depth that was enough stays exactly where it is
+	// rather than being probed up and down for ever.
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{1, false}, CEILING) == 1);
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{2, false}, CEILING) == 2);
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{3, false}, CEILING) == 3);
+
+	// One deeper when there was somewhere left to go, and never two.
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{1, true}, CEILING) == 2);
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{2, true}, CEILING) == 3);
+
+	// **The ceiling holds, and asking past it is not an error.** Adding a level
+	// multiplies the passes, so the one thing this must never do is answer with
+	// a depth the renderer has no pool for.
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{3, true}, CEILING) == CEILING);
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{9, true}, CEILING) == CEILING);
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{2, true}, 1) == 1);
+
+	// A ceiling of nothing is still a frame that draws its mirrors once. The
+	// caller's number is a ceiling on the recursion, not permission for it.
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{2, true}, 0) == 1);
+
+	// **A frame that reached less than it was given comes back down**, which is
+	// what a viewer turning away from a corridor costs: three levels of pool for
+	// a picture nothing is looking at.
+	CHECK(NextSurfaceBounces(SurfaceBounceProbe{1, false}, CEILING) == 1);
+}
+
+TEST_CASE("one mirror settles at one level and a corridor deepens itself", "[scene][surfacecameras]") {
+	// **The two scenes the automatic depth exists to tell apart**, and they are
+	// `examples/MirrorDepth.luau` and `examples/MirrorCorridor.luau` as
+	// arithmetic. A single number served both until v0.15 and was wrong for
+	// each: two levels bought a room with one mirror in it a pass that could
+	// never show anything, and cut the corridor off one level into the effect.
+	const engine::scene::SurfacePane alone[] = {
+		SlotPane(0, Vector3::Zero, Vector3{0.0f, 0.0f, 1.0f}),
+	};
+
+	const engine::scene::SurfacePane corridor[] = {
+		SlotPane(0, Vector3::Zero, Vector3{0.0f, 0.0f, 1.0f}),
+		SlotPane(1, Vector3{0.0f, 0.0f, 10.0f}, Vector3{0.0f, 0.0f, -1.0f}),
+	};
+
+	const CFrame eye{Vector3{1.0f, 1.0f, 4.0f}};
+
+	// A scene with one pane in it has nothing to descend into, so the first
+	// frame is also the settled one.
+	uint32_t depth = engine::scene::NextSurfaceBounces(engine::scene::SurfaceBounceProbe{}, CEILING);
+	CHECK(depth == 1);
+
+	for (int frame = 0; frame < 6; frame++) {
+		depth = engine::scene::NextSurfaceBounces(DrawFrame(alone, eye, depth), CEILING);
+		INFO("frame " << frame);
+		CHECK(depth == 1);
+	}
+
+	// **The corridor climbs one level a frame and then pins**, which is both
+	// halves of the claim: it gets there without being told, and it stops
+	// without being clamped by luck.
+	depth = 1;
+	for (uint32_t expected = 2; expected <= CEILING; expected++) {
+		depth = engine::scene::NextSurfaceBounces(DrawFrame(corridor, eye, depth), CEILING);
+		INFO("expected " << expected);
+		CHECK(depth == expected);
+	}
+
+	for (int frame = 0; frame < 6; frame++) {
+		depth = engine::scene::NextSurfaceBounces(DrawFrame(corridor, eye, depth), CEILING);
+		INFO("frame " << frame);
+		CHECK(depth == CEILING);
+	}
+
+	// **And it comes back down the frame the second pane stops reflecting**,
+	// which is the half a rule that only ever grew would get wrong: a viewer who
+	// walks out of a corridor would keep paying for it until the world was
+	// reloaded.
+	depth = engine::scene::NextSurfaceBounces(DrawFrame(alone, eye, depth), CEILING);
+	CHECK(depth == 1);
+}
+
+TEST_CASE("a world carries its own mirror depth, and a script sets it", "[scene][surfacecameras]") {
+	// **Per world rather than per process, which is the other half of v0.15's
+	// open item.** How deep a chain of mirrors goes is a fact about what the
+	// scene was built out of — `panes × (panes - 1) ^ (levels - 1)` passes — and
+	// a session-wide knob cannot express it for two worlds at once.
+	Store store("surface_bounces_authored");
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+
+	const Entity workspace = engine::scene::InstallServices(store);
+	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+
+	// A world that has never said anything is automatic, which is what makes
+	// every scene authored before this go on drawing.
+	CHECK(engine::scene::SurfaceBouncesOf(store) == engine::scene::AUTOMATIC_SURFACE_BOUNCES);
+
+	// **The declared type is checked and not only the round-trip**, for
+	// `TagFilter`'s reason: writing raw bytes through `SetProperty` succeeds
+	// whatever the descriptor claims, so a wrongly declared property passes
+	// every test until the first script assigns to it.
+	bool declared = false;
+	for (const engine::ecs::PropertyDescriptor &property : store.PropertiesOf(workspace)) {
+		if (property.Name == engine::core::Name("SurfaceBounces")) {
+			declared = true;
+			CHECK(property.Type == engine::ecs::PropertyType::Int32);
+		}
+	}
+	CHECK(declared);
+
+	int32_t read = -1;
+	REQUIRE(store.GetProperty(workspace, engine::core::Name("SurfaceBounces"), &read, sizeof(read)));
+	CHECK(read == engine::scene::AUTOMATIC_SURFACE_BOUNCES);
+
+	const int32_t three = 3;
+	REQUIRE(store.SetProperty(workspace, engine::core::Name("SurfaceBounces"), &three, sizeof(three)));
+	CHECK(engine::scene::SurfaceBouncesOf(store) == three);
+
+	REQUIRE(store.GetProperty(workspace, engine::core::Name("SurfaceBounces"), &read, sizeof(read)));
+	CHECK(read == three);
+
+	// **A number above the renderer's ceiling is accepted here and clamped
+	// there**, because this module cannot name `render::MAX_SURFACE_DEPTH` and a
+	// world that asks for more than a device will allocate is drawn at what it
+	// can rather than refused.
+	const int32_t ambitious = 64;
+	REQUIRE(store.SetProperty(workspace, engine::core::Name("SurfaceBounces"), &ambitious, sizeof(int32_t)));
+	CHECK(engine::scene::SurfaceBouncesOf(store) == ambitious);
+
+	// **Below zero is the one value refused**, because it cannot be a mistake
+	// about the ceiling — it is a mistake about what the word means.
+	const int32_t backwards = -1;
+	CHECK_FALSE(
+		store.SetProperty(workspace, engine::core::Name("SurfaceBounces"), &backwards, sizeof(int32_t))
+	);
+	CHECK(engine::scene::SurfaceBouncesOf(store) == ambitious);
+}

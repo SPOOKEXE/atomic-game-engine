@@ -96,7 +96,7 @@ named anywhere in this module, and none ever should be: a property declared in
 A `if (name == "Size")` here would be the second source of truth the whole
 conversion design exists to prevent.
 
-## A method is data too, and all forty are
+## A method is data too, and all forty-one are
 
 A property was neutral from the start and a method was not, and the difference
 cost exactly what two lists cost. `ecs::PropertyDescriptor` is data, so `scene`
@@ -242,10 +242,10 @@ is the only row that does.** `Debugger::Add` refuses a `.js`, `.mjs`, `.cjs`,
 armed" to everything — the surface `HttpService`'s absent three are refused for
 being. `DEFERRED.md` D00106 carries what closing it would take.
 
-**The shared half of a service is shared machinery, and there are seven of them
+**The shared half of a service is shared machinery, and there are eight of them
 now.** `SignalTable`, `ChangeQueue`, `TaskQueue`, `ActionStack`,
-`TopicSubscriptions`, `TweenTable` and `DebrisQueue` each hold an ordering a
-recording depends on with the callables left opaque. A service
+`TopicSubscriptions`, `TweenTable`, `DebrisQueue` and `ChildWaiters` each hold an
+ordering a recording depends on with the callables left opaque. A service
 whose per-language halves differ only in where a list lives is a service whose
 list belongs in one of these — `MessagingService` was a Lua registry table on one
 side and an `unordered_map` on the other, and neither half decided anything a
@@ -330,17 +330,59 @@ the desync rule 5 names, arriving through the one mechanism meant to prevent it.
 Memory is a hard ceiling through the allocator, so exhaustion surfaces as an
 ordinary script error rather than as a `bad_alloc` inside the interpreter.
 
-## Nothing yields yet, and a yield is an error
+## A yield is legal only when something is already coming back for it
 
 `v05.md` §5.8 settles what a yield must mean — a script may only resume from
-something the barrier delivers in a deterministic order — and the bus surface a
-script would yield *on* is v0.6. Until then `Run` refuses a suspended thread
-rather than finishing the tick with one, because a script resumed at some later
-point nobody chose is work crossing a tick boundary.
+something the barrier delivers in a deterministic order — and `Run` is where that
+is enforced: it refuses a suspended thread **that nothing has registered a resume
+for**, because a script resumed at some later point nobody chose is work crossing
+a tick boundary. `ThreadIsScheduled` is the whole of the test, so the question is
+not "did it yield" but "will anything come back", and the answer is a lookup
+rather than a judgement.
 
-Do not make this "work" by resuming on the next tick. That is the design
-decision v0.6 has to take deliberately, and a convenient default taken here is
-how it would get taken by accident.
+There are two sources that come back, and each is a table on the context:
+`AwaitedTickets` is a bus reply the barrier applied, and `AwaitedChildren` is a
+`WaitForChild` the tree answered. A third one is a new table, a new pump and an
+argument for why the resume is deterministic — not a convenient default taken
+inside whatever needed it.
+
+## An unbounded wait is refused, and that is a divergence from Roblox
+
+`WaitForChild(name, timeout)` is supported. **`WaitForChild(name)` — Roblox's own
+form, which waits for ever and warns after five seconds — raises**, with a
+message that says why and names the argument to pass.
+
+This is the sharpest place the engine's scheduling argument reaches a script
+author, so it is worth stating as a decision rather than leaving in a header. A
+wait with no end is a script that never finishes its tick, and the whole of rule
+5 is that work does not cross one; the alternatives were to take Roblox's answer
+and its consequences, or to refuse the form and diverge from every place that
+would be ported in. **The refusal is the honest half**: it costs one line in a
+ported script and it is met at the call site, where the two approximations are
+met much later —
+
+- a **default timeout** hands a script that ported cleanly a nil it never checks
+  for, on a tick nobody chose;
+- returning **`FindFirstChild`'s answer immediately** typechecks, works in every
+  scene where the child is already there, and answers nil in exactly the case the
+  method exists for.
+
+That is `HttpService.cpp`'s and `SoundService.cpp`'s rule — an absent member is
+better than one that does nothing — applied to an *argument* rather than to a
+member, and `mono.tools/bindings` carries it into both declaration files by
+declaring the timeout **required**. So a ported script fails `just typecheck`
+before it fails at run time.
+
+**The resume is a second source at the barrier and the first that is not a bus
+reply.** `ChildWaiters` is the shared table — a parent, a name, a deadline in
+*ticks* through the same `TicksFor` `task.wait` and `Debris` use — and
+`PumpChildWaiters` runs immediately after `PumpTree`, so a `ChildAdded` handler
+and a woken script see one world. The match is a `FindFirstChild` against the
+store rather than a filter over `ecs::TreeChange`, and that is deliberate:
+`TakeTreeChanges` is a take, tree changes are only recorded once something calls
+the irreversible `ObserveTree`, and a child *renamed* into the awaited name is an
+arrival to the author and no reparent at all. `ChildWaiters.hpp` carries all
+three.
 
 ## The ECS surface names the storage, and refuses to name it twice
 

@@ -645,10 +645,10 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	REQUIRE(runtime->Run("assert(game.Workspace == workspace)"));
 	REQUIRE(runtime->Run("assert(game:GetService('Workspace') == workspace)"));
 
-	// The part, the Workspace, and the eleven other services `InstallServices`
-	// puts in every world. A phantom row standing for the world is exactly what
-	// there is still none of — `workspace` names something that was already
-	// there.
+	// The part, the Workspace, and the twelve other services `InstallServices`
+	// puts in every world — `Teams` is the one v0.15 added. A phantom row
+	// standing for the world is exactly what there is still none of —
+	// `workspace` names something that was already there.
 	//
 	// The count moves whenever a service is added, and it is written out rather
 	// than derived on purpose: a service arriving without somebody noticing is
@@ -657,7 +657,7 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	store.Each<const engine::ecs::InstanceClass>([&](Entity, const engine::ecs::InstanceClass &) {
 		instances++;
 	});
-	CHECK(instances == 13);
+	CHECK(instances == 14);
 }
 
 // **The rule the render gate rests on**, stated from the script side: an

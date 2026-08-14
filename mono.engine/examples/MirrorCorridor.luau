@@ -22,6 +22,19 @@
 --
 -- The scene is static, so two captures of one build are byte-identical and any
 -- difference between two builds is the change under test.
+--
+-- **Nothing here states a depth, and that is the point of this scene now.** The
+-- renderer measures the frame it just drew — how deep the chain of panes went,
+-- and whether the deepest level still had a pane in view it was not allowed to
+-- descend into — and goes one level deeper next frame when there was. A corridor
+-- says yes at every level, so this scene climbs to `MAX_SURFACE_DEPTH` on its own
+-- within three frames and stays there; a room with one mirror in it says no on
+-- the first frame and costs one level for ever. That is why the capture is taken
+-- at frame 90 rather than at frame 1.
+--
+-- `MirrorDepth.luau` is the other half: a world that states its own number
+-- through `workspace.SurfaceBounces`. Pin one from outside either of them with
+-- `--surface-bounces N`, which is what a comparison between two depths wants.
 
 -- How far apart the two panes stand. Wide enough that each nesting is several
 -- pixels across at 1280x720, which is what makes counting them possible.

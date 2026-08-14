@@ -17,7 +17,7 @@
 --
 --     client --script MirrorDepth.luau --frames 240 --capture out.bmp
 --
--- Compare a run with `Renderer::SetSurfaceBounces(1)` against the default two:
+-- Compare a run with `--surface-bounces 1` against what this scene asks for:
 -- the chain's far end is what changes.
 
 -- Far enough off centre that pane A leaves the frustum. Sixty rather than the
@@ -26,6 +26,22 @@
 local YAW = 60
 
 local SURFACE_SIZE = Vector3.new(512, 512, 0)
+
+-- **The world states its own depth, and a measurement scene is exactly what
+-- should.** Left alone the renderer works the depth out from the frame before,
+-- which means the first frames of a run are drawn at one level, then two — so a
+-- capture taken early is a capture of the ramp rather than of the scene, and two
+-- builds that ramp differently differ for a reason that has nothing to do with
+-- the change under test. Three is the length of A -> B -> C; stating it makes
+-- every frame of every run the same depth.
+--
+-- It measures out at what the automatic rule settles on here, which is the
+-- answer that gives confidence in both: what this buys is that it is the depth
+-- from frame one rather than from frame three.
+--
+-- `MirrorCorridor.luau` deliberately says nothing, so the two scenes cover both
+-- halves. `--surface-bounces N` overrides this from outside.
+workspace.SurfaceBounces = 3
 
 local floor = Instance.new("Part")
 floor.Name = "Floor"

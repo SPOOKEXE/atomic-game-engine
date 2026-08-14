@@ -31,6 +31,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -190,6 +191,10 @@ namespace engine::script {
 
 			TopicSubscriptions &Subscriptions() override {
 				return JsOf(Context).Subscriptions;
+			}
+
+			ChildWaiters &Waiters() override {
+				return JsOf(Context).Waiters;
 			}
 
 			Entity Subject() const override {
@@ -587,20 +592,16 @@ namespace engine::script {
 				// language's own idiom and the whole reason `Await` exists as one
 				// member: `PumpJsDeliveries` resolves it with the same three
 				// values the Luau barrier resumes a coroutine with.
-				JSValue settle[2];
-				JSValue promise = JS_NewPromiseCapability(Context, settle);
-				if (JS_IsException(promise)) {
-					// The exception is already on the context. Raising here would
-					// replace it with a less specific one.
-					throw JsRaised{};
-				}
+				Suspend(JsOf(Context).AwaitedTickets, ticket);
+			}
 
-				// `insert_or_assign` for the Luau half's reason: a chained call
-				// reuses the ticket slot and the stale resolver would leak.
-				JsOf(Context).AwaitedTickets.insert_or_assign(ticket, Retain(Context, settle[0]));
-				JS_FreeValue(Context, settle[0]);
-				JS_FreeValue(Context, settle[1]);
-				Set(promise);
+			void AwaitChild(uint64_t waiter) override {
+				// **The same promise under a different key**, resolved by
+				// `PumpJsChildWaiters` with one instance or `null` — which is
+				// what the Luau half resumes its coroutine with, so a script
+				// reads the same answer in either language and only the syntax
+				// for waiting on it differs.
+				Suspend(JsOf(Context).AwaitedChildren, waiter);
 			}
 
 			[[noreturn]] void Raise(const char *message) override {
@@ -612,6 +613,29 @@ namespace engine::script {
 			}
 
 		  private:
+			// Hands back a promise and keeps its resolver under `key`.
+			//
+			// **`insert_or_assign` rather than `emplace`**, for the Luau half's
+			// reason: a chained call reuses the slot and the stale resolver would
+			// leak.
+			//
+			// @param waiting Which table the resume will look in.
+			// @param key     What that table keys this promise on.
+			void Suspend(std::unordered_map<uint64_t, CallbackRef> &waiting, uint64_t key) {
+				JSValue settle[2];
+				JSValue promise = JS_NewPromiseCapability(Context, settle);
+				if (JS_IsException(promise)) {
+					// The exception is already on the context. Raising here would
+					// replace it with a less specific one.
+					throw JsRaised{};
+				}
+
+				waiting.insert_or_assign(key, Retain(Context, settle[0]));
+				JS_FreeValue(Context, settle[0]);
+				JS_FreeValue(Context, settle[1]);
+				Set(promise);
+			}
+
 			// One action's record as a plain object.
 			//
 			// Roblox's four fields, and the two it does not have are absent from

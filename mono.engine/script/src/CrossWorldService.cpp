@@ -64,10 +64,22 @@ namespace engine::script {
 		// the next barrier, which is `Postbox::OpenChannel`'s rule and the same
 		// one `SubscribeAsync` has: a message sent in the tick the channel opened
 		// is refused, because the channel did not exist when it was addressed.
+		//
+		// **The one refusal this cannot hand back is `TooManyChannels`, and that
+		// is the shape of the member rather than an oversight.** The cap is a
+		// total the barrier holds — `UniverseSettings::ChannelsPerWorld` — so the
+		// verdict arrives a tick later, on the ticket, where every other barrier
+		// verdict arrives. This member returns the signal *now* because a script
+		// writes `OpenChannel('c'):Connect(...)` as one expression, and making it
+		// suspend to collect the verdict would turn it into a promise in
+		// JavaScript and a yield in Luau — a different member, not a stricter one.
+		// A world that hits the cap is named in the log at the barrier and its
+		// senders are told `NoSuchChannel`, which is what a channel that never
+		// opened looks like from outside either way.
 		void OpenChannel(ScriptCall &call) {
 			const std::string channel = call.AsString(0);
 
-			if (!world::Postbox(call.World()).OpenChannel(channel.c_str())) {
+			if (!world::Postbox(call.World()).OpenChannel(channel.c_str()).Expected()) {
 				// Over budget, named rather than silent — `PublishAsync`'s rule.
 				// A channel that quietly failed to open is a receiver that never
 				// hears anything and a sender told `NoSuchChannel` for ever.

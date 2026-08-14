@@ -871,6 +871,63 @@ namespace engine::script {
 		return firstError;
 	}
 
+	std::string PumpChildWaiters(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+		if (context.Waiters.Empty()) {
+			return {};
+		}
+
+		std::vector<ChildWaiters::Resumption> ready;
+		context.Waiters.Advance(*context.World, context.World->Time().Tick, ready);
+
+		std::string firstError;
+		for (const ChildWaiters::Resumption &resumption : ready) {
+			const auto waiting = context.AwaitedChildren.find(resumption.Waiter);
+			if (waiting == context.AwaitedChildren.end()) {
+				continue;
+			}
+
+			lua_State *thread = waiting->second;
+			context.AwaitedChildren.erase(waiting);
+
+			const auto held = context.Threads.find(thread);
+			if (held == context.Threads.end()) {
+				continue;
+			}
+			const CallbackRef reference = held->second;
+			context.Threads.erase(held);
+
+			// One value, and nil for a wait that ran out — which is what Roblox's
+			// timeout form answers and what `if child then` reads.
+			if (resumption.Child == ecs::NULL_ENTITY) {
+				lua_pushnil(thread);
+			} else {
+				PushInstanceValue(thread, resumption.Child);
+			}
+
+			// **A yield here is success rather than failure**, for the reason
+			// `PumpDeliveries` gives: a resumed script may wait again — on
+			// another child, on a bus reply, on `task.wait` — and reading an
+			// error message off a thread that merely suspended is reading
+			// whatever the yield left on its stack. The old reference goes either
+			// way, because whatever it suspended on has registered a fresh one.
+			const int status = lua_resume(thread, nullptr, 1);
+			if (status != LUA_OK && status != LUA_YIELD && firstError.empty()) {
+				const char *message = lua_tostring(thread, -1);
+				firstError = message != nullptr ? message : "a resumed WaitForChild failed";
+
+				if (const char *trace = lua_debugtrace(thread); trace != nullptr) {
+					firstError += "\n";
+					firstError += trace;
+				}
+			}
+
+			lua_unref(state, reference);
+		}
+
+		return firstError;
+	}
+
 	std::string PumpCharacters(lua_State *state) {
 		LuauContext &context = ContextOf(state);
 

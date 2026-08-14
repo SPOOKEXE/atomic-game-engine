@@ -1,5 +1,7 @@
+#include <engine/bakegraph/Document.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Registration.hpp>
@@ -32,6 +34,13 @@ namespace engine::game {
 
 		// A world's settings, as of format 2. See `WriteWorldProperties`.
 		constexpr std::string_view WORLD_PROPERTIES = "WorldProperties";
+
+		// A world's bake pipelines. See `WriteAssetPipelines`.
+		//
+		// **Not `Pipelines`**, which is the render half's element and is still
+		// recognised by the reader below. Two kinds of pipeline under one tag
+		// would make a file's meaning depend on which build wrote it.
+		constexpr std::string_view ASSET_PIPELINES = "AssetPipelines";
 
 		// One instance and its subtree, on its own. See
 		// `WriteInstanceDocument`.
@@ -499,6 +508,76 @@ namespace engine::game {
 		// See `ReadWorldBody` below, which still recognises the element so that
 		// `.agame` files written while the old system existed still load.
 
+		// A world's asset pipelines, as one block of text.
+		//
+		// **Embedded rather than re-encoded as elements**, which is the shape
+		// the render half used and the reason it used it: `bake::PipelineSet`
+		// already has a line-oriented format that round trips and refuses a
+		// malformed line, and restating it as XML would be a second grammar for
+		// one thing — with the interesting failure that the two could disagree
+		// about what a pipeline is while both parsing.
+		//
+		// CDATA for `WriteSources`'s reason: this is meant to be read in the
+		// file, and a document full of `&quot;` is not.
+		//
+		// **A world writes this and an instance document does not**, unlike
+		// `<Sources>`, which travels with the instance that names it. No
+		// instance owns a bake pipeline — it names an asset, and the asset is
+		// already baked — so copying a part into another world has nothing to
+		// carry and must not invent something.
+		//
+		// **No format bump for the new element.** A world with no pipelines
+		// writes no block, so every file this build produces for existing
+		// content is byte-identical to the last one's; and an older build skips
+		// a child it does not recognise, so a file with the block still loads
+		// there minus its pipelines. Moving `FORMAT_VERSION` would turn that
+		// into a refusal and buy nothing — the version is for a change that
+		// makes an old *reading* wrong, which is what `2` was.
+		void WriteAssetPipelines(XmlWriter &writer, const Store &store) {
+			const auto *set = store.Resource<bake::PipelineSet>();
+			if (set == nullptr || set->Count() == 0) {
+				return;
+			}
+
+			writer.Open(ASSET_PIPELINES);
+			writer.Verbatim(bake::Write(*set));
+			writer.Close();
+		}
+
+		// **A document naming a node kind this build does not have loses the
+		// pipelines and keeps the world**, which is the decision `D00102` left
+		// open and is the render half's answer to the same question.
+		//
+		// `bake::Read` refuses an unknown kind as a malformed line — the node
+		// vocabulary is a closed list, so `node bevel` from a newer editor is
+		// indistinguishable from a typo and neither is worth guessing at. The
+		// cost of that refusal is set here: a world whose parts all loaded and
+		// whose pipelines did not is recoverable, because a pipeline is a recipe
+		// for content that is already baked and sitting in the store. Refusing
+		// the document would lose the parts too, which is a worse answer to the
+		// same file, and dropping the offending pipeline while keeping its
+		// neighbours would be this function deciding that half a saved set is a
+		// set — it is not, it is a file from a build somebody should be told to
+		// upgrade from.
+		void ReadAssetPipelines(const XmlElement &element, Store &store) {
+			bake::PipelineSet set;
+			std::string offender;
+
+			const bake::DocumentStatus status = bake::Read(element.Text, set, offender);
+			if (status != bake::DocumentStatus::Ok) {
+				ENGINE_WARN(
+					"world asset pipelines: {} at '{}' — the world loads and bakes nothing",
+					bake::Describe(status),
+					offender
+				);
+				return;
+			}
+
+			if (set.Count() > 0) {
+				store.SetResource(set);
+			}
+		}
+
 		void ReadSources(const XmlDocument &document, const XmlElement &element, Store &store) {
 			script::SourceCache cache;
 
@@ -684,6 +763,25 @@ namespace engine::game {
 
 		script::ScriptClass();
 
+		// **The bake pipelines a world carries, named here rather than by the
+		// module that owns the type.** `bakegraph` links `core` and nothing
+		// else — that is the whole point of it, and `ecs::Components::Register`
+		// is out of its reach, so the alternative to this line is a link edge
+		// that undoes the split. It is the exception `scene`'s registration
+		// rule is stated against rather than a violation of it.
+		//
+		// Registered rather than left to `SetResource`, for the reason every
+		// other line in this function exists: a resource is keyed by a component
+		// id, and one first minted by `SetResource` takes the compiler's
+		// spelling of the type — a world that saves, loads, and quietly has no
+		// pipelines because the two spellings never met.
+		//
+		// No writer or reader: a pipeline set is authored content that travels
+		// in the world document, not state that travels in a replication
+		// snapshot. Registering it with serialisers would claim it belonged on
+		// the wire.
+		ecs::Components::Register<bake::PipelineSet>("bake.PipelineSet");
+
 		// **The render pipelines a world carries.** Registered here rather than
 		// left to a caller for the reason every other line in this function
 		// exists: a resource is keyed by a component id, and one first minted by
@@ -703,6 +801,7 @@ namespace engine::game {
 		RegisterGameClasses();
 
 		WriteSources(writer, store);
+		WriteAssetPipelines(writer, store);
 
 		// TODO(render-pipeline): `WritePipelines(writer, store);` went here.
 
@@ -728,6 +827,11 @@ namespace engine::game {
 
 			if (child->Name == "Sources") {
 				ReadSources(document, *child, store);
+				continue;
+			}
+
+			if (child->Name == ASSET_PIPELINES) {
+				ReadAssetPipelines(*child, store);
 				continue;
 			}
 

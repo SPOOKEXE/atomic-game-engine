@@ -1,5 +1,4 @@
-#include <studio/RojoSync.hpp>
-
+#include <engine/bake/RobloxModel.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -13,18 +12,19 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <studio/RojoSync.hpp>
 #include <toml++/toml.hpp>
 
 namespace studio {
 
 	namespace {
 		using engine::core::Name;
-		using engine::ecs::ClassId;
 		using engine::ecs::Classes;
+		using engine::ecs::ClassId;
 		using engine::ecs::Entity;
 		using engine::ecs::NULL_ENTITY;
-		using engine::ecs::Store;
 		using engine::ecs::PropertyType;
+		using engine::ecs::Store;
 		using nlohmann::json;
 
 		// Whether a name ends with a suffix.
@@ -76,30 +76,29 @@ namespace studio {
 			return found;
 		}
 
-		// What Rojo says a file becomes, for the ones this engine cannot build.
+		// What Rojo says a file becomes, for the one this engine cannot build.
 		//
-		// **Named by what they *would* be rather than skipped as unrecognised**,
+		// **Named by what it *would* be rather than skipped as unrecognised**,
 		// and the difference matters to whoever reads the log: "not a script" is
 		// what you say about a stray `.DS_Store`, and it is the wrong thing to
-		// say about a `.rbxm`, which Rojo maps and this engine has no reader
+		// say about an `.rbxmx`, which Rojo maps and this engine has no reader
 		// for. One is noise in the project and the other is a gap here.
 		//
 		// The list is `rojo.space/docs/v7/sync-details`. `D00104` carries what
-		// closing each of them would take.
+		// closing it would take.
 		const char *UnbuiltKind(const std::filesystem::path &file) {
 			const std::string leaf = file.filename().string();
 
-			// **Two left, and each is a format reader rather than a mapping.**
+			// **One left, and it is a vendor decision before it is a feature.**
 			// Everything else in Rojo's table is built — `BuildMapped` is the
 			// dispatcher — so anything reaching here is a gap with a named cause
 			// rather than an unrecognised file.
 			//
-			// `.toml` was the third and closed at v0.13: it was the one whose
-			// cost was a submodule rather than a decoder, because the mapping is
-			// the `*.json` one and only the parser was missing.
-			if (EndsWith(leaf, ".rbxm")) {
-				return "a binary Roblox model, which needs a reader for that format";
-			}
+			// `.toml` closed at v0.13 and `.rbxm` at v0.15, and the two went
+			// differently on purpose: TOML's cost was a submodule because the
+			// mapping was already the `*.json` one, and `.rbxm`'s was a binary
+			// reader, which is why it lives in `bake` beside the other model
+			// decoders rather than in this file.
 			if (EndsWith(leaf, ".rbxmx")) {
 				return "an XML Roblox model, and nothing here parses XML";
 			}
@@ -173,16 +172,15 @@ namespace studio {
 		bool IsInitFile(const std::filesystem::path &file) {
 			const std::string leaf = file.filename().string();
 			return leaf == "init.luau" || leaf == "init.lua" || leaf == "init.server.luau" ||
-				   leaf == "init.server.lua" || leaf == "init.client.luau" ||
-				   leaf == "init.client.lua";
+				   leaf == "init.server.lua" || leaf == "init.client.luau" || leaf == "init.client.lua";
 		}
 
 		// --- the rest of Rojo's table ----------------------------------------
 		//
 		// `rojo.space/docs/v7/sync-details` maps nine more things than the
-		// scripts above. Six of them are built here; the three that are not each
-		// need a dependency this repository does not vendor, and `D00104` says
-		// which.
+		// scripts above. Eight of them are built — the last of those, `.rbxm`,
+		// through `bake` — and the one that is not needs an XML parser this
+		// repository does not vendor. `D00104` carries what that would take.
 
 		// One JSON value, read as a property of a declared type.
 		//
@@ -196,7 +194,9 @@ namespace studio {
 		// property and nothing at all for a `bool` one — guessing from the value
 		// would make `"Anchored": 1` mean something.
 		bool ReadPropertyJson(
-			const engine::ecs::PropertyDescriptor &property, const json &value, engine::game::PropertyValue &out
+			const engine::ecs::PropertyDescriptor &property,
+			const json &value,
+			engine::game::PropertyValue &out
 		) {
 			out = engine::game::PropertyValue{};
 			out.Type = property.Type;
@@ -287,7 +287,8 @@ namespace studio {
 							   ? position[index].get<float>()
 							   : 0.0f;
 				};
-				out.CFrame = engine::core::CFrame(engine::core::Vector3{axis("X", 0), axis("Y", 1), axis("Z", 2)});
+				out.CFrame =
+					engine::core::CFrame(engine::core::Vector3{axis("X", 0), axis("Y", 1), axis("Z", 2)});
 				return true;
 			}
 
@@ -306,6 +307,23 @@ namespace studio {
 				// which. The rest are shapes nothing has asked for.
 				return false;
 			}
+		}
+
+		// The descriptor an instance's class declares under that spelling.
+		//
+		// **One lookup, because two file formats ask the same question.** A
+		// `.meta.json` patch and an `.rbxm` property are both a name off a file
+		// matched against what the class actually has, and a second copy of this
+		// loop is a second place for the two to start disagreeing about what
+		// counts as a match.
+		const engine::ecs::PropertyDescriptor *
+		PropertyNamed(const Store &store, Entity instance, std::string_view spelling) {
+			for (const engine::ecs::PropertyDescriptor &property : store.PropertiesOf(instance)) {
+				if (property.Spelling == spelling) {
+					return &property;
+				}
+			}
+			return nullptr;
 		}
 
 		// Applies a `{"Name": ..., "Properties": {...}}` patch to one instance.
@@ -330,14 +348,7 @@ namespace studio {
 			}
 
 			for (const auto &entry : properties->items()) {
-				const engine::ecs::PropertyDescriptor *found = nullptr;
-				for (const engine::ecs::PropertyDescriptor &property : store.PropertiesOf(instance)) {
-					if (property.Spelling == entry.key()) {
-						found = &property;
-						break;
-					}
-				}
-
+				const engine::ecs::PropertyDescriptor *found = PropertyNamed(store, instance, entry.key());
 				if (found == nullptr) {
 					report.Notes.push_back(entry.key() + " is not a property here — skipped");
 					continue;
@@ -345,8 +356,10 @@ namespace studio {
 
 				engine::game::PropertyValue value;
 				if (!ReadPropertyJson(*found, entry.value(), value)) {
-					report.Notes.push_back(entry.key() + " could not be read as a " +
-										   engine::ecs::Describe(found->Type) + " — skipped");
+					report.Notes.push_back(
+						entry.key() + " could not be read as a " + engine::ecs::Describe(found->Type) +
+						" — skipped"
+					);
 					continue;
 				}
 
@@ -567,8 +580,7 @@ namespace studio {
 				return;
 			}
 
-			if (const auto found = value.find("$className");
-				found != value.end() && found->is_string()) {
+			if (const auto found = value.find("$className"); found != value.end() && found->is_string()) {
 				out.ClassName = found->get<std::string>();
 			}
 			if (const auto found = value.find("$path"); found != value.end() && found->is_string()) {
@@ -755,6 +767,369 @@ namespace studio {
 			return node;
 		}
 
+		// --- Roblox's binary model -------------------------------------------
+		//
+		// The last row of Rojo's table this engine could not build. The reader is
+		// `bake::ReadRobloxModel`, which lives beside the other model decoders
+		// because a binary format's parser is the largest attack surface a
+		// content pipeline has and `bake/AGENTS.md` is where that is written
+		// down. What is here is only the mapping onto instances.
+
+		// The whole of a file, as bytes.
+		//
+		// **Split from `ReadTextFile` rather than sharing it**, because the two
+		// differ in what the result is for: text goes into a `std::string` a
+		// `StringValue` will hold, and this is a span handed to a parser that
+		// treats every byte in it as hostile.
+		bool ReadBinaryFile(const std::filesystem::path &path, std::vector<std::byte> &out) {
+			std::ifstream in(path, std::ios::binary | std::ios::ate);
+			if (!in) {
+				return false;
+			}
+
+			const std::streampos size = in.tellg();
+			if (size < 0) {
+				return false;
+			}
+			in.seekg(0);
+
+			out.resize(static_cast<size_t>(size));
+			if (out.empty()) {
+				return true;
+			}
+			return static_cast<bool>(in.read(reinterpret_cast<char *>(out.data()), size));
+		}
+
+		// One value out of a `.rbxm` as the property the class declares.
+		//
+		// **Keyed on the declared type and never on what the file stored**, which
+		// is `ReadPropertyJson`'s rule one format along and matters more here: an
+		// `.rbxm` states its own type for every value, and taking that as the
+		// answer would let a file decide what a component holds.
+		//
+		// A number widens or narrows to whatever the property is, because Roblox
+		// and this engine disagree about which of `Transparency` and `ZIndex` is
+		// a float — and that disagreement is not something an author can fix in
+		// their file.
+		bool ReadPropertyRoblox(
+			const engine::ecs::PropertyDescriptor &property,
+			const engine::bake::RobloxValue &value,
+			engine::game::PropertyValue &out
+		) {
+			using Kind = engine::bake::RobloxValueKind;
+
+			out = engine::game::PropertyValue{};
+			out.Type = property.Type;
+
+			switch (property.Type) {
+			case PropertyType::Bool:
+				if (value.Kind != Kind::Bool) {
+					return false;
+				}
+				out.Bool = value.Bool;
+				return true;
+
+			case PropertyType::Int32:
+			case PropertyType::Int64:
+			case PropertyType::Float:
+			case PropertyType::Double: {
+				if (value.Kind != Kind::Integer && value.Kind != Kind::Number) {
+					return false;
+				}
+				const double number =
+					value.Kind == Kind::Integer ? static_cast<double>(value.Integer) : value.Number;
+				out.Int32 = static_cast<int32_t>(number);
+				out.Int64 = static_cast<int64_t>(number);
+				out.Float = static_cast<float>(number);
+				out.Double = number;
+				return true;
+			}
+
+			case PropertyType::String:
+				if (value.Kind != Kind::Text) {
+					return false;
+				}
+				out.String = value.Text;
+				return true;
+
+			case PropertyType::Name:
+			case PropertyType::Enum:
+				// **A `.rbxm` enum never reaches here**, because the reader
+				// refuses one: it is a number naming a member of Roblox's table
+				// and this engine names members by string. What can reach here is
+				// a *string* landing on a property this engine declares as an
+				// enum, and that is checked against `EnumTable` for
+				// `ReadPropertyJson`'s reason.
+				if (value.Kind != Kind::Text) {
+					return false;
+				}
+				out.Name = Name(value.Text);
+				if (property.Type == PropertyType::Enum &&
+					!engine::ecs::EnumTable::Has(property.EnumName, out.Name)) {
+					return false;
+				}
+				return true;
+
+			case PropertyType::Vector3:
+				if (value.Kind != Kind::Vector3) {
+					return false;
+				}
+				out.Vector3 = value.Vector3;
+				return true;
+
+			case PropertyType::Vector2:
+				if (value.Kind != Kind::Vector2) {
+					return false;
+				}
+				out.Vector2 = value.Vector2;
+				return true;
+
+			case PropertyType::Color3:
+				if (value.Kind != Kind::Color3) {
+					return false;
+				}
+				out.Color3 = value.Color3;
+				return true;
+
+			case PropertyType::CFrame:
+				// **The rotation survives, unlike the JSON path's.** A
+				// `.model.json` writes a `CFrame` as twelve numbers and this
+				// module reads only the three of its position; a `.rbxm` states
+				// an orientation the reader has already turned into a
+				// quaternion, so there is nothing left to approximate.
+				if (value.Kind != Kind::CFrame) {
+					return false;
+				}
+				out.CFrame = value.CFrame;
+				return true;
+
+			case PropertyType::UDim:
+				if (value.Kind != Kind::UDim) {
+					return false;
+				}
+				out.UDim = value.UDim;
+				return true;
+
+			case PropertyType::UDim2:
+				if (value.Kind != Kind::UDim2) {
+					return false;
+				}
+				out.UDim2 = value.UDim2;
+				return true;
+
+			case PropertyType::Rect:
+				if (value.Kind != Kind::Rect) {
+					return false;
+				}
+				out.Rect = value.Rect;
+				return true;
+
+			case PropertyType::NumberRange:
+				if (value.Kind != Kind::NumberRange) {
+					return false;
+				}
+				out.NumberRange = value.NumberRange;
+				return true;
+
+			default:
+				// The two sequences and a `Reference`. The reader produces
+				// neither, so this is the arm nothing reaches rather than a
+				// refusal somebody will meet.
+				return false;
+			}
+		}
+
+		// What building one `.rbxm` is accumulating.
+		struct RobloxImport {
+			RojoSyncReport &Report;
+
+			// The keys this file has already staged a program under, so that two
+			// siblings of one name are two programs rather than one shared by
+			// both.
+			//
+			// **Per import rather than per world**, which is what keeps a second
+			// sync of an unchanged file idempotent: the same file lays down the
+			// same keys, and only a collision *inside* one file needs a suffix.
+			std::vector<std::string> Staged;
+
+			// How many properties the file carried that this engine has no
+			// declaration for.
+			//
+			// **Counted rather than reported one by one.** A `.meta.json` is
+			// written by hand, so a key this engine does not have is a typo worth
+			// naming; an `.rbxm` is written by Studio, which stores every property
+			// of every class — a note each would be a hundred lines saying the
+			// engine is smaller than Roblox, and would bury the notes that are
+			// about this file.
+			size_t Absent = 0;
+		};
+
+		// A source key nothing in this import already holds.
+		//
+		// **A suffix only on a collision inside one file**, because Roblox lets
+		// two siblings share a name and this engine's `SourceCache` is keyed on
+		// one string. Suffixing against the whole world instead would give the
+		// same unchanged file a different key on every sync.
+		std::string StagedKey(RobloxImport &import, const std::string &path) {
+			std::string candidate = path;
+			size_t attempt = 1;
+
+			while (std::find(import.Staged.begin(), import.Staged.end(), candidate) != import.Staged.end()) {
+				attempt++;
+				candidate = path + " (" + std::to_string(attempt) + ")";
+			}
+
+			import.Staged.push_back(candidate);
+			return candidate;
+		}
+
+		// Builds one instance out of a `.rbxm`, and everything under it.
+		//
+		// @param name The instance's name. The root's is the file's, which is
+		//        every other row of Rojo's table's rule; a child's is its own.
+		Entity BuildRobloxInstance(
+			Store &store,
+			const engine::bake::RobloxInstance &node,
+			const std::string &name,
+			const std::string &path,
+			RobloxImport &import,
+			int depth
+		) {
+			if (depth > static_cast<int>(engine::bake::MAXIMUM_ROBLOX_DEPTH)) {
+				return NULL_ENTITY;
+			}
+
+			// **A script's program comes out of the file, not out of a path.**
+			// Roblox stores `Source` on the instance and this engine stores a key
+			// into the world's `SourceCache`, so the import stages the text under
+			// a key derived from where the instance sits — which is what makes an
+			// imported Tool's scripts run rather than exist.
+			const bool module = node.ClassName == "ModuleScript";
+			const bool local = node.ClassName == "LocalScript";
+			const bool script = module || local || node.ClassName == "Script";
+
+			const engine::bake::RobloxValue *source = nullptr;
+			if (script) {
+				for (const engine::bake::RobloxProperty &property : node.Properties) {
+					if (property.Name == "Source" &&
+						property.Value.Kind == engine::bake::RobloxValueKind::Text) {
+						source = &property.Value;
+						break;
+					}
+				}
+			}
+
+			Entity instance = NULL_ENTITY;
+			if (script && source != nullptr) {
+				const std::string key = StagedKey(import, path);
+				if (StageProgramSource(store, key, source->Text)) {
+					instance = module ? engine::script::MakeModule(store, key, name)
+									  : engine::script::MakeScript(store, key, name, local);
+					import.Report.Scripts++;
+				}
+			}
+
+			if (instance == NULL_ENTITY) {
+				instance = store.CreateInstance(ClassFor(node.ClassName, import.Report), name);
+			}
+			if (instance == NULL_ENTITY) {
+				return NULL_ENTITY;
+			}
+			import.Report.Instances++;
+
+			for (const engine::bake::RobloxProperty &property : node.Properties) {
+				if (source != nullptr && &property.Value == source) {
+					continue;
+				}
+
+				const engine::ecs::PropertyDescriptor *found = PropertyNamed(store, instance, property.Name);
+				if (found == nullptr) {
+					import.Absent++;
+					continue;
+				}
+
+				engine::game::PropertyValue value;
+				if (!ReadPropertyRoblox(*found, property.Value, value)) {
+					import.Report.Notes.push_back(
+						name + "." + property.Name + " is not a " + engine::ecs::Describe(found->Type) +
+						" here — skipped"
+					);
+					continue;
+				}
+
+				if (!engine::game::WriteProperty(store, instance, *found, value)) {
+					import.Report.Notes.push_back(
+						name + "." + property.Name + " was refused by the world — skipped"
+					);
+				}
+			}
+
+			for (const engine::bake::RobloxInstance &child : node.Children) {
+				const Entity built =
+					BuildRobloxInstance(store, child, child.Name, path + "/" + child.Name, import, depth + 1);
+				if (built != NULL_ENTITY) {
+					store.SetParent(built, instance);
+				}
+			}
+			return instance;
+		}
+
+		// Builds a `*.rbxm` into one instance.
+		//
+		// **One instance, because that is what Rojo's table maps a model file
+		// to.** The container allows any number of roots and a file with several
+		// is refused by name rather than wrapped in a folder somebody would then
+		// have to explain — inventing a level the author did not write is the
+		// kind of quiet wrongness this whole file is against.
+		Entity BuildRobloxModel(
+			Store &store,
+			const std::filesystem::path &file,
+			const std::string &key,
+			const std::string &name,
+			RojoSyncReport &report
+		) {
+			const std::string leaf = file.filename().string();
+
+			std::vector<std::byte> bytes;
+			if (!ReadBinaryFile(file, bytes)) {
+				report.Missing.push_back(file.string());
+				return NULL_ENTITY;
+			}
+
+			engine::bake::RobloxModel model;
+			std::string failure;
+			if (!engine::bake::ReadRobloxModel(bytes, model, failure)) {
+				// **With the reader's own message.** "Is not a valid rbxm" sends
+				// an author back to stare at a binary file; "wrong signature" tells
+				// them they renamed an `.rbxmx`.
+				report.Notes.push_back(leaf + " could not be read (" + failure + ") — skipped");
+				return NULL_ENTITY;
+			}
+
+			for (const std::string &note : model.Notes) {
+				report.Notes.push_back(leaf + ": " + note);
+			}
+
+			if (model.Roots.size() != 1) {
+				report.Notes.push_back(
+					leaf + " holds " + std::to_string(model.Roots.size()) +
+					" instances at its top level, and a model file maps to one — skipped"
+				);
+				return NULL_ENTITY;
+			}
+
+			RobloxImport import{report, {}, 0};
+			const Entity built = BuildRobloxInstance(store, model.Roots[0], name, key, import, 0);
+
+			if (import.Absent > 0) {
+				report.Notes.push_back(
+					leaf + " carries " + std::to_string(import.Absent) +
+					" property value(s) this engine has no property for — skipped"
+				);
+			}
+			return built;
+		}
+
 		// **Declared before the dispatcher and defined after it**, because a
 		// nested project builds a tree that builds directories that may hold
 		// another nested project. The recursion is real and the cycle check in
@@ -778,10 +1153,7 @@ namespace studio {
 		// `Button.model.json` or `Button.txt` built. That is why one lookup
 		// serves every mapping below rather than each having its own.
 		void ApplySidecar(
-			Store &store,
-			const std::filesystem::path &file,
-			Entity instance,
-			RojoSyncReport &report
+			Store &store, const std::filesystem::path &file, Entity instance, RojoSyncReport &report
 		) {
 			if (instance == NULL_ENTITY) {
 				return;
@@ -877,6 +1249,13 @@ namespace studio {
 						report.Scripts++;
 					}
 				}
+			} else if (EndsWith(leaf, ".rbxm")) {
+				// **Named after the file, not after what the file called it.**
+				// Every other row of Rojo's table takes the instance's name from
+				// the path — a `.model.json`, a `.txt`, a script — and a model
+				// file that kept its own would be the one place in a project
+				// where renaming a file did nothing.
+				node = BuildRobloxModel(store, file, keyPrefix + leaf, name, report);
 			} else if (EndsWith(leaf, ".txt")) {
 				node = BuildTextValue(store, file, "StringValue", name, report);
 			} else if (EndsWith(leaf, ".csv")) {
@@ -953,12 +1332,10 @@ namespace studio {
 					const InitFile init = FindInit(entry, report);
 
 					if (init.Present()) {
-						const std::string key =
-							keyPrefix + leaf + "/" + init.File.filename().string();
+						const std::string key = keyPrefix + leaf + "/" + init.File.filename().string();
 						if (StageProgram(store, init.File, key)) {
-							node = init.Module
-									   ? engine::script::MakeModule(store, key, leaf)
-									   : engine::script::MakeScript(store, key, leaf, init.Local);
+							node = init.Module ? engine::script::MakeModule(store, key, leaf)
+											   : engine::script::MakeScript(store, key, leaf, init.Local);
 							report.Scripts++;
 						}
 					}
@@ -1017,13 +1394,9 @@ namespace studio {
 					// says it is* where there is an answer, so a gap here reads
 					// as a gap rather than as an unrecognised file.
 					if (const char *kind_ = UnbuiltKind(entry); kind_ != nullptr) {
-						report.Notes.push_back(
-							entry.filename().string() + " is " + kind_ + " — skipped"
-						);
+						report.Notes.push_back(entry.filename().string() + " is " + kind_ + " — skipped");
 					} else {
-						report.Notes.push_back(
-							entry.filename().string() + " is not a script — skipped"
-						);
+						report.Notes.push_back(entry.filename().string() + " is not a script — skipped");
 					}
 					continue;
 				}
@@ -1300,11 +1673,9 @@ namespace studio {
 	// --- the universe above them -------------------------------------------
 
 	size_t RojoUniverseReport::Synced() const {
-		return static_cast<size_t>(
-			std::count_if(Worlds.begin(), Worlds.end(), [](const RojoWorldSync &world) {
-				return world.Synced;
-			})
-		);
+		return static_cast<size_t>(std::count_if(
+			Worlds.begin(), Worlds.end(), [](const RojoWorldSync &world) { return world.Synced; }
+		));
 	}
 
 	size_t RojoUniverseReport::Failed() const {

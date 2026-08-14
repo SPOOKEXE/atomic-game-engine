@@ -25,6 +25,7 @@
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -98,12 +99,16 @@ namespace client {
 			return false;
 		}
 
-		// **The first caller `SetSurfaceBounces` ever had on this side.** See
-		// `Options::SurfaceBounces`: left at the renderer's default unless a run
-		// asked, because each level costs a full scene pass per visible surface.
+		// **Said once here and applied every frame, beside the sun.** The depth
+		// is the world's now — `workspace.SurfaceBounces`, or the renderer's own
+		// measurement when nothing says — so a value pushed once at startup would
+		// be overwritten by the first world drawn. What this line is for is the
+		// log: a run that pins the number has done something the scene did not
+		// ask for, and that is worth one line rather than a silent override.
 		if (Settings.SurfaceBounces > 0) {
-			Renderer.SetSurfaceBounces(static_cast<uint32_t>(Settings.SurfaceBounces));
-			ENGINE_INFO("surfaces: resolving {} bounce(s) in frame", Settings.SurfaceBounces);
+			ENGINE_INFO(
+				"surfaces: {} bounce(s), overriding whatever the world asks for", Settings.SurfaceBounces
+			);
 		}
 
 		// **The interface pass, built against the renderer's own device.** A
@@ -2197,9 +2202,23 @@ namespace client {
 		// **`SunOf` rather than the resource**, so a world that has never set one
 		// draws with the numbers this engine has always drawn with rather than
 		// with black.
+		// **And how deep its mirrors go, for the sun's reason exactly.** It is a
+		// property of the world being drawn rather than of the process, so it
+		// arrives here rather than at startup: two worlds in one session are two
+		// different scenes, and the corridor of facing panes that wants three
+		// levels is not the room with one mirror in it that wants one.
+		//
+		// **`--surface-bounces` wins where it was given.** A session pinning the
+		// number is somebody measuring or comparing, and a world quietly taking
+		// it back on the next frame is the shape of an afternoon lost.
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &lit, engine::ecs::Scheduler &) {
 			const engine::scene::Sun sun = engine::scene::SunOf(lit);
 			Renderer.SetSun(sun.Direction, sun.Ambient);
+
+			const int32_t bounces = Settings.SurfaceBounces > 0
+										? static_cast<int32_t>(Settings.SurfaceBounces)
+										: engine::scene::SurfaceBouncesOf(lit);
+			Renderer.SetSurfaceBounces(static_cast<uint32_t>(std::max(bounces, 0)));
 		});
 
 		// **The shaders this world's materials name, resolved before the frame

@@ -51,6 +51,18 @@ receiving world opens the channel first. Three rules a reviewer should hold to:
   world may have queued for it in one barrier, and the senders past it are told
   `Overflow`. An unbounded queue between two worlds is a memory leak with extra
   steps; a silently bounded one is a game that works until the day it is busy.
+- **The table is bounded too, and by an authority rather than by the world.**
+  `UniverseSettings::ChannelsPerWorld` caps how many channels one world may
+  *hold*, and an open past it is `TooManyChannels`. The queue bound is a rate and
+  this one is a total: a world opening a distinct channel every tick leaves an
+  entry behind each time, and every entry is live universe state a snapshot
+  carries. It is the router's count and not the world's, which is why
+  `Postbox::OpenChannel` hands back a ticket where `CloseChannel` and the two
+  `Messaging` equivalents hand back a boolean — a world cannot answer a total it
+  does not hold, so the barrier answers and the reply carries it. **Closing an
+  idle channel on the world's behalf is a different feature and is deliberately
+  not here:** a channel that goes away while somebody still holds its signal is
+  a failure the opener never asked for, and this refusal is one it did.
 
 ## Barrier order is the sender's *name*, never its `Name::Id()`
 

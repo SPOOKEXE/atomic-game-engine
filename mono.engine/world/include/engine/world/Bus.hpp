@@ -156,6 +156,11 @@ namespace engine::world {
 	// | The world is `Faulted` and being restored | `WorldNotReady` |
 	// | The destination already holds a barrier's worth | `Overflow` |
 	//
+	// **An open is answered the same way**, and it is the one operation on this
+	// bus that a world asks for *itself*: a world already holding
+	// `UniverseSettings::ChannelsPerWorld` channels is told `TooManyChannels`
+	// rather than being given another one.
+	//
 	// **Delivery is at-most-once and the engine never retries.** A refusal is
 	// reported once and the payload is dropped; a sender that wants the message
 	// to land sends it again, because only the sender knows whether re-sending is
@@ -220,6 +225,20 @@ namespace engine::world {
 		//
 		// @since v0.17
 		WorldNotReady,
+
+		// An open on a world that already holds
+		// `UniverseSettings::ChannelsPerWorld` channels.
+		//
+		// **Not `OverBudget`, which is the nearest and means something else.**
+		// A budget is a *rate* — spent this tick, back next tick — so a world
+		// told it is over budget waits a tick and tries again, and a world that
+		// did that with this refusal would loop for ever. This is a total, and
+		// the only thing that clears it is the world closing a channel it holds.
+		//
+		// **Appended — these are wire ordinals**, rule 4.
+		//
+		// @since v0.17
+		TooManyChannels,
 	};
 
 	// A handle for correlating a reply with the request that asked for it.

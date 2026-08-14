@@ -810,6 +810,7 @@ declare interface Instance {
 	GetChildren(): Instance[];
 	GetDescendants(): Instance[];
 	FindFirstChild(name: string, recursive?: boolean): Instance | null;
+	WaitForChild(name: string, timeout: number): Instance | Promise<Instance | null> | null;
 	FindFirstChildOfClass(className: string): Instance | null;
 	FindFirstChildWhichIsA(className: string, recursive?: boolean): Instance | null;
 	FindFirstAncestor(name: string): Instance | null;
@@ -894,6 +895,12 @@ declare interface BasePart extends PVInstance {
 declare interface Part extends BasePart {
 }
 
+declare interface SpawnLocation extends Part {
+	Enabled: boolean;
+	Neutral: boolean;
+	TeamColor: Color3;
+}
+
 declare interface Model extends PVInstance {
 }
 
@@ -947,8 +954,10 @@ declare interface Material extends Instance {
 declare interface Humanoid extends Instance {
 	Enabled: boolean;
 	readonly Grounded: boolean;
+	Health: number;
 	HipHeight: number;
 	JumpPower: number;
+	MaxHealth: number;
 	MoveDirection: Vector3;
 	WalkSpeed: number;
 }
@@ -1372,6 +1381,7 @@ declare interface Service extends Instance {
 
 declare interface Workspace extends Service {
 	CurrentCamera: Instance;
+	SurfaceBounces: number;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 }
 
@@ -1421,6 +1431,9 @@ declare interface Players extends Service {
 	RespawnTime: number;
 }
 
+declare interface Teams extends Service {
+}
+
 declare interface Player extends Instance {
 	readonly Backpack: Instance;
 	Character: Instance;
@@ -1429,7 +1442,12 @@ declare interface Player extends Instance {
 	readonly PlayerScripts: Instance;
 	RespawnTime: number;
 	readonly StarterGear: Instance;
+	Team: Instance;
 	readonly UserId: number;
+}
+
+declare interface Team extends Instance {
+	TeamColor: Color3;
 }
 
 // --- the bus services ------------------------------------------------------
@@ -1448,6 +1466,7 @@ declare type BusStatus =
 	| "NoSuchChannel"
 	| "Overflow"
 	| "WorldNotReady"
+	| "TooManyChannels"
 	| "Unknown";
 
 declare interface StoreReply {
@@ -1786,6 +1805,7 @@ declare const game: {
 		(service: "StarterPlayerScripts"): StarterPlayerScripts;
 		(service: "StarterCharacterScripts"): StarterCharacterScripts;
 		(service: "Players"): Players;
+		(service: "Teams"): Teams;
 		(service: "RunService"): RunService;
 		(service: "MessagingService"): MessagingService;
 		(service: "MemoryStoreService"): MemoryStoreService;
@@ -1808,6 +1828,7 @@ declare const Instance: {
 		(className: "PVInstance", parent?: Instance): PVInstance;
 		(className: "BasePart", parent?: Instance): BasePart;
 		(className: "Part", parent?: Instance): Part;
+		(className: "SpawnLocation", parent?: Instance): SpawnLocation;
 		(className: "Model", parent?: Instance): Model;
 		(className: "MeshPart", parent?: Instance): MeshPart;
 		(className: "Camera", parent?: Instance): Camera;
@@ -1877,5 +1898,6 @@ declare const Instance: {
 		(className: "UIStroke", parent?: Instance): UIStroke;
 		(className: "UIScale", parent?: Instance): UIScale;
 		(className: "Player", parent?: Instance): Player;
+		(className: "Team", parent?: Instance): Team;
 	};
 };

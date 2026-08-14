@@ -47,6 +47,8 @@ namespace engine::script {
 			return "Overflow";
 		case world::BusStatus::WorldNotReady:
 			return "WorldNotReady";
+		case world::BusStatus::TooManyChannels:
+			return "TooManyChannels";
 		}
 		return "Unknown";
 	}

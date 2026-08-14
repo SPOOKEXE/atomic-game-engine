@@ -197,7 +197,9 @@ TEST_CASE("a script reads the status a channel send answered with", "[scripting]
 		const WorldId sender = universe.Create(Named("script.channel.asker"));
 		const WorldId receiver = universe.Create(Named("script.channel.receiver"));
 
-		universe.Enter(receiver, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("scores")); });
+		universe.Enter(receiver, [](Store &store) {
+			REQUIRE(Postbox(store).OpenChannel("scores").Expected());
+		});
 		universe.Tick(1.0f / 60.0f);
 
 		std::shared_ptr<Runtime> runtime;

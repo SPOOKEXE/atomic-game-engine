@@ -19,6 +19,7 @@
 #include "Actions.hpp"
 #include "Bus.hpp"
 #include "Changes.hpp"
+#include "ChildWaiters.hpp"
 #include "Debris.hpp"
 #include "ScriptCall.hpp"
 #include "Signals.hpp"
@@ -107,6 +108,15 @@ namespace engine::script {
 		DebrisQueue Debris;
 		//@}
 
+		// Every `WaitForChild` this VM has outstanding.
+		//
+		// **The same type the Luau context holds and for the three above's
+		// reason**: a wait's deadline is a tick number and the order two of them
+		// are answered in is a thing a recording depends on, so there is one
+		// implementation and this binding supplies only the resume. See
+		// `ChildWaiters.hpp`.
+		ChildWaiters Waiters;
+
 		// The context itself, so a callback holding only this can reach the VM.
 		JSContext *Js = nullptr;
 
@@ -193,6 +203,14 @@ namespace engine::script {
 		// returns a ticket, the reply lands at a later barrier applied in
 		// sorted order, and this joins the reply to the promise waiting on it.
 		std::unordered_map<uint64_t, CallbackRef> AwaitedTickets;
+
+		// Which promise resolver is waiting on which `ChildWaiters` entry.
+		//
+		// **The second resume source, and a second map rather than a widened
+		// first one** — the Luau twin carries the argument: a ticket and a waiter
+		// id come from two counters that know nothing about each other, and what
+		// each resolves *with* is different.
+		std::unordered_map<uint64_t, CallbackRef> AwaitedChildren;
 
 		// How many ticks a `task.wait` asked for, so its resolution can report
 		// how long it actually waited. Keyed by the resolver's ref.

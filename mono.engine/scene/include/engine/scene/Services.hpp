@@ -131,7 +131,7 @@ namespace engine::scene {
 	// What `Players` holds that no other service does.
 	//
 	// **A component of its own rather than fields on `ServiceComponent`**, for
-	// `LightingServiceComponent`'s reason: twelve services carry that one and
+	// `LightingServiceComponent`'s reason: thirteen services carry that one and
 	// exactly one of them has a respawn delay.
 	//
 	// @since v0.17
@@ -214,7 +214,7 @@ namespace engine::scene {
 		uint64_t DueTick = 0;
 	};
 
-	// Registers `Service` and the twelve classes under it.
+	// Registers `Service` and the thirteen classes under it.
 	//
 	// Idempotent and process-wide, like every other registration here. Calls
 	// `PartClass` first: a service derives from `Instance`, which that
@@ -228,7 +228,7 @@ namespace engine::scene {
 	// **Idempotent, and that is what makes it safe to call on a world that came
 	// out of a file.** A game saved before this existed has no services in it;
 	// a game saved after has all of them. Calling this on either one leaves the
-	// same nine roots, and calling it twice does nothing the second time —
+	// same eleven roots, and calling it twice does nothing the second time —
 	// which is what lets the studio run it after every load without checking
 	// which kind of file it got.
 	//

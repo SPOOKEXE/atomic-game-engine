@@ -1458,6 +1458,21 @@ namespace engine::scene {
 		return panes.size();
 	}
 
+	int32_t SurfaceBouncesOf(const Store &store) {
+		const SurfaceBounces *authored = store.Resource<SurfaceBounces>();
+		return authored == nullptr ? AUTOMATIC_SURFACE_BOUNCES : authored->Levels;
+	}
+
+	uint32_t NextSurfaceBounces(const SurfaceBounceProbe &measured, uint32_t ceiling) {
+		// **Floored at one rather than at zero**, because a frame that drew no
+		// surface at all has measured nothing about mirrors — the ordinary case
+		// in a scene with none — and the next frame has to be allowed to draw
+		// the first level to find out.
+		const uint32_t top = std::max(ceiling, 1u);
+		const uint32_t wanted = measured.Resolved + (measured.Deeper ? 1u : 0u);
+		return std::clamp(wanted, 1u, top);
+	}
+
 	size_t AimSurfaceCameras(Store &store) {
 		ENGINE_PROFILE("aim surface cameras");
 

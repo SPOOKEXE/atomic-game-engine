@@ -171,7 +171,7 @@ namespace engine::world {
 		return issued;
 	}
 
-	// The five fire-and-forget operations check the budget themselves, because
+	// The four fire-and-forget operations check the budget themselves, because
 	// `Post` reports failure by returning no ticket and these never ask for one
 	// — so success and refusal would otherwise look identical.
 
@@ -203,13 +203,14 @@ namespace engine::world {
 	// argument: the act is the same one — a world declaring what it wants
 	// delivered — and the router tells the two apart by the `BusKind` it has to
 	// read anyway.
+	//
+	// **The open asks for a reply where the close does not**, because it is the
+	// one of the two the barrier may refuse: `UniverseSettings::ChannelsPerWorld`
+	// is a total the router holds and a world cannot count from its own store.
+	// Giving a channel up needs nobody's permission.
 
-	bool Postbox::OpenChannel(std::string_view channel) {
-		if (IsReplica() || Remaining() == 0) {
-			return false;
-		}
-		Post(BusKind::Channel, BusOperation::Subscribe, core::Name(channel), {}, 0, false);
-		return true;
+	Ticket Postbox::OpenChannel(std::string_view channel) {
+		return Post(BusKind::Channel, BusOperation::Subscribe, core::Name(channel), {}, 0, true);
 	}
 
 	bool Postbox::CloseChannel(std::string_view channel) {

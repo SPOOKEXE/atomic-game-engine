@@ -11,6 +11,15 @@ namespace engine::replication {
 	net::ChannelKind ChannelFor(MessageKind kind) {
 		switch (kind) {
 		case MessageKind::Delta:
+
+		// **Unreliable, and that is the cadence argument on the wire.** An
+		// audit that is lost costs one rotation of a sweep whose whole premise
+		// is that what it finds is not urgent, and an answer that is lost costs
+		// the same. Putting either on the reliable channel would spend the
+		// window that structural changes depend on, for a message whose
+		// resend is never worth more than the next one.
+		case MessageKind::GroupSignatures:
+		case MessageKind::Disputed:
 			return net::ChannelKind::Unreliable;
 
 		case MessageKind::SnapshotChunk:

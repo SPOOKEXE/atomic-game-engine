@@ -292,6 +292,12 @@ namespace engine::replication {
 
 		Wire.Send(acknowledgement, nowSeconds);
 
+		// After the acknowledgement, because it is the message the server needs
+		// and this is the message it can wait a tick for.
+		if (const std::vector<std::byte> dispute = Replica_.Dispute(); !dispute.empty()) {
+			Wire.Send(dispute, nowSeconds);
+		}
+
 		Prediction_.Reconcile(Replica_.Applied());
 
 		Wire.Flush(nowSeconds);

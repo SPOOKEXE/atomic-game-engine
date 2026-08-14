@@ -104,6 +104,25 @@ strikes nothing and reports nothing.
 one, so the static geometry the old predicate was aiming at is still excluded —
 and `Static` is skipped one layer in, because it is a body that does not move.
 
+## A hit takes health off here, and a client's copy of that number is a copy
+
+`ApplyInputs` recolours what was struck *and* subtracts `SHOT_DAMAGE` when the
+struck part belongs to a character. Both cross as ordinary replicated state —
+`scene.Visual` and `scene.Humanoid` — so every client sees this process's verdict
+rather than the shooter's, which is the same division the whole function opens
+with: a client sends where it aimed and never what it hit.
+
+Two things a reviewer should refuse:
+
+- **A damage figure drawn from a random number.** `SHOT_DAMAGE` is a constant for
+  `scene::FindSpawn`'s reason about picking a pad in tree order: a roll inside a
+  tick is a recording that does not replay, and `just replay-check` reports it a
+  long way from here.
+- **A second subtracting path.** `scene::TakeDamage` is the one door, and its
+  refusal on `Store::AdoptOnly` is what stops a client running this same code
+  against its own replica and deciding who died. Reaching into
+  `scene::Humanoid::Health` directly walks past that.
+
 ## A client's input tick is a claim, and a stale one means the world went quiet
 
 A client stamps its input with the newest tick it has *applied*, and a tick

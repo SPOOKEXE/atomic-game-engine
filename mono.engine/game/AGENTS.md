@@ -56,6 +56,21 @@ instead of vendoring one is that the grammar fits on a page and can be read.
 If something needs a feature this parser does not have, it needs a different
 format — not this file needing a feature.
 
+## Another module's format is embedded, never restated
+
+A block this file carries on behalf of another module goes in as that module's
+own text, in one CDATA section, parsed by that module. `<Sources>` carries
+programs; `<AssetPipelines>` carries `bake::PipelineSet`. Restating one as
+elements would be a second grammar for one thing, and the interesting failure is
+not that it breaks — it is that both parse and disagree about what they read.
+
+**And such a block is refused on its own, not on the document's behalf.** A
+malformed pipeline warns, drops what it carried and lets the world load; a
+malformed instance refuses the file. The line is whether the loss is
+recoverable: a world can be re-authored a recipe, and cannot be re-authored the
+parts. Convention, not checked — a new block has to be written this way on
+purpose.
+
 ## What is not saved yet, said out loud
 
 `scene::SurfaceTable` is world state and is not written. Materials are

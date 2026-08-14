@@ -105,6 +105,41 @@
 			]
 		},
 		{
+			"name": "SpawnLocation",
+			"parent": "Part",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.SpawnLocation", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"properties": [
+				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
+				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
+				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
+				{"name": "AngularDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "CanCollide", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
+				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "CustomPhysicalProperties", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Elasticity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.SpawnLocation"], "writes": ["scene.SpawnLocation"]},
+				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
+				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
+				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Mass", "type": "float", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.Collider", "scene.PhysicsProperties", "scene.RigidBody"], "writes": []},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Neutral", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.SpawnLocation"], "writes": ["scene.SpawnLocation"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
+				{"name": "TeamColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.SpawnLocation"], "writes": ["scene.SpawnLocation"]},
+				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
+			]
+		},
+		{
 			"name": "Model",
 			"parent": "PVInstance",
 			"constructible": true,
@@ -269,8 +304,10 @@
 			"properties": [
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "Grounded", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Humanoid"], "writes": []},
+				{"name": "Health", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "HipHeight", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "JumpPower", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
+				{"name": "MaxHealth", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "MoveDirection", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
@@ -1494,7 +1531,8 @@
 				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "SurfaceBounces", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.SurfaceBounces"], "writes": ["scene.SurfaceBounces"]}
 			]
 		},
 		{
@@ -1643,6 +1681,18 @@
 			]
 		},
 		{
+			"name": "Teams",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
 			"name": "Player",
 			"parent": "Instance",
 			"constructible": true,
@@ -1657,7 +1707,19 @@
 				{"name": "PlayerScripts", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
 				{"name": "RespawnTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PlayerIdentity"], "writes": ["scene.PlayerIdentity"]},
 				{"name": "StarterGear", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
+				{"name": "Team", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["scene.PlayerTeam"], "writes": ["scene.PlayerTeam"]},
 				{"name": "UserId", "type": "int64", "kind": "computed", "bytes": 8, "writable": false, "reads": ["scene.PlayerIdentity"], "writes": []}
+			]
+		},
+		{
+			"name": "Team",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Team"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "TeamColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Team"], "writes": ["scene.Team"]}
 			]
 		}
 	],

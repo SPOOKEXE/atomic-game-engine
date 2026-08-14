@@ -963,6 +963,7 @@ declare extern type Instance with
 	function GetChildren(self): { Instance }
 	function GetDescendants(self): { Instance }
 	function FindFirstChild(self, name: string, recursive: boolean?): Instance?
+	function WaitForChild(self, name: string, timeout: number): Instance?
 	function FindFirstChildOfClass(self, className: string): Instance?
 	function FindFirstChildWhichIsA(self, className: string, recursive: boolean?): Instance?
 	function FindFirstAncestor(self, name: string): Instance?
@@ -1047,6 +1048,12 @@ end
 declare extern type Part extends BasePart with
 end
 
+declare extern type SpawnLocation extends Part with
+	Enabled: boolean
+	Neutral: boolean
+	TeamColor: Color3
+end
+
 declare extern type Model extends PVInstance with
 end
 
@@ -1100,8 +1107,10 @@ end
 declare extern type Humanoid extends Instance with
 	Enabled: boolean
 	read Grounded: boolean
+	Health: number
 	HipHeight: number
 	JumpPower: number
+	MaxHealth: number
 	MoveDirection: Vector3
 	WalkSpeed: number
 end
@@ -1525,6 +1534,7 @@ end
 
 declare extern type Workspace extends Service with
 	CurrentCamera: Instance
+	SurfaceBounces: number
 	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,
 		Position: Vector3,
@@ -1585,6 +1595,9 @@ declare extern type Players extends Service with
 	RespawnTime: number
 end
 
+declare extern type Teams extends Service with
+end
+
 -- One occupant. `LoadCharacter`, `CharacterAdded` and
 -- `CharacterRemoving` are inherited from `Instance` and are about
 -- this one: the first destroys the old body and spawns a new one at
@@ -1600,7 +1613,12 @@ declare extern type Player extends Instance with
 	read PlayerScripts: Instance
 	RespawnTime: number
 	read StarterGear: Instance
+	Team: Instance
 	read UserId: number
+end
+
+declare extern type Team extends Instance with
+	TeamColor: Color3
 end
 
 -- --- the bus services ------------------------------------------------------
@@ -1609,7 +1627,7 @@ end
 -- switch. A status a script branches on cannot be missing here, and a
 -- status appended to `world::BusStatus` fails `just bindings-check` until
 -- these files are regenerated.
-export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchWorld" | "Unsupported" | "NoSuchChannel" | "Overflow" | "WorldNotReady" | "Unknown"
+export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchWorld" | "Unsupported" | "NoSuchChannel" | "Overflow" | "WorldNotReady" | "TooManyChannels" | "Unknown"
 
 declare extern type MessagingService with
 	function PublishAsync(self, topic: string, message: any): (any, BusStatus, number)
@@ -2041,6 +2059,7 @@ type Services = {
 	StarterPlayerScripts: StarterPlayerScripts,
 	StarterCharacterScripts: StarterCharacterScripts,
 	Players: Players,
+	Teams: Teams,
 	RunService: RunService,
 	MessagingService: MessagingService,
 	TeleportService: TeleportService,
@@ -2062,6 +2081,7 @@ type CreatableInstances = {
 	PVInstance: PVInstance,
 	BasePart: BasePart,
 	Part: Part,
+	SpawnLocation: SpawnLocation,
 	Model: Model,
 	MeshPart: MeshPart,
 	Camera: Camera,
@@ -2131,6 +2151,7 @@ type CreatableInstances = {
 	UIStroke: UIStroke,
 	UIScale: UIScale,
 	Player: Player,
+	Team: Team,
 }
 
 type DataModel = {

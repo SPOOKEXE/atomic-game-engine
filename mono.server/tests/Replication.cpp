@@ -23,6 +23,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Shooting.hpp>
@@ -64,6 +65,7 @@ using engine::parallel::Process;
 using engine::replication::Connector;
 using engine::scene::Bounds;
 using engine::scene::Character;
+using engine::scene::Humanoid;
 using engine::scene::Motion;
 using engine::scene::Transform;
 using engine::scene::Visual;
@@ -563,6 +565,101 @@ TEST_CASE("a world too big for one datagram still streams", "[server][replicatio
 	REQUIRE(remote.World.CountMatching<Transform>() == 2000);
 }
 
+TEST_CASE("what ReplicatedFirst holds arrives before the world it covers", "[server][replication]") {
+	// **`D00122`, and it is only observable over a wire.** `ReplicatedFirst`
+	// outranking every distance score orders the *stream*, and a client's first
+	// view of a world is the join — one `ecs::Store::Save` chunked across ticks
+	// in whatever order the store wrote its archetypes, which no score reaches
+	// inside. So a loading screen was ranked first for every tick after the one
+	// it was for.
+	//
+	// **What is asserted is *before* and not *eventually*.** At the moment the
+	// preface lands this replica holds the screen and holds almost nothing else;
+	// a case that only waited for the screen to turn up would pass against the
+	// single-blob join this exists to replace.
+	//
+	// Identified by its size rather than by its name, because a name does not
+	// cross: `ecs.InstanceName` and the class are not in
+	// `DefaultReplicatedComponents`, so what a replica holds of the screen is
+	// its `scene::Bounds` and its frame. Nine studs is nothing else in the
+	// scene.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_replicatedfirst.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local screen = Instance.new(\"Part\")\n"
+			 << "screen.Name = \"LoadingScreen\"\n"
+			 << "screen.Anchored = true\n"
+			 << "screen.Size = Vector3.new(9, 9, 9)\n"
+			 << "screen.Parent = game:GetService(\"ReplicatedFirst\")\n"
+			 // A world whose own snapshot takes tens of ticks. Without that
+			 // there is no window for anything to be first in, and the case
+			 // would be measuring the packet rate.
+			 << "for index = 1, 1500 do\n"
+			 << "\tlocal block = Instance.new(\"Part\")\n"
+			 << "\tblock.Anchored = true\n"
+			 << "\tblock.Position = Vector3.new(index % 40, 1, index // 40)\n"
+			 << "\tblock.Parent = workspace\n"
+			 << "end\n";
+	}
+
+	const auto holdsScreen = [](Store &world) {
+		bool found = false;
+		world.EachEntity([&](Entity entity) {
+			const Bounds *bounds = world.Get<Bounds>(entity);
+			found = found || (bounds != nullptr && bounds->HalfExtent.X == 4.5f);
+		});
+		return found;
+	};
+
+	Remote remote;
+	REQUIRE(remote.Start(0, scene.string()));
+
+	bool prefaced = false;
+	bool joinedThen = true;
+	bool screenThen = false;
+	size_t entitiesThen = 0;
+
+	for (int tick = 0; tick < 1200 && !remote.Link->Joined(); tick++) {
+		remote.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+
+		if (prefaced || !remote.Link->Prefaced()) {
+			continue;
+		}
+
+		prefaced = true;
+		joinedThen = remote.Link->Joined();
+		screenThen = holdsScreen(remote.World);
+		entitiesThen = remote.Entities();
+	}
+
+	REQUIRE(remote.Link->Joined());
+	REQUIRE(prefaced);
+
+	INFO("the preface landed with " << entitiesThen << " entities in the replica");
+	CHECK(screenThen);
+	CHECK_FALSE(joinedThen);
+
+	// The container and what is under it, and none of the fifteen hundred parts
+	// it was meant to be in front of.
+	CHECK(entitiesThen >= 2);
+	CHECK(entitiesThen < 32);
+
+	// And the world blob behind it is still the complete picture, whose
+	// authoritative sweep must leave what the preface put there alone.
+	CHECK(remote.World.CountMatching<Transform>() > 1500);
+	CHECK(holdsScreen(remote.World));
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
+}
+
 TEST_CASE("a connecting client becomes a player in the hosted world", "[server][replication]") {
 	// **The thing that had to exist before ownership could be assigned to
 	// anybody.** `scene::AddPlayer` had no production caller: every world this
@@ -1046,6 +1143,39 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 
 	CHECK(recoloured);
 
+	// **A hit takes health off, and this is the consequence
+	// `docs/retired/DEFERRED.md` D00121 was waiting for.** Its reopen trigger was "anything in the engine
+	// that damages a character", on the reading that a hit test with no
+	// consequence does not need "dead" to mean anything — so the shot landing is
+	// what makes the health model load-bearing rather than decorative, and this
+	// is the assertion that says the two are wired together.
+	const Entity victimHumanoid = [&] {
+		const Character *now = shooter.World.Get<Character>(victimCharacter);
+		return now == nullptr ? engine::ecs::NULL_ENTITY : now->Humanoid;
+	}();
+	REQUIRE(victimHumanoid != engine::ecs::NULL_ENTITY);
+
+	const Humanoid *wounded = shooter.World.Get<Humanoid>(victimHumanoid);
+	REQUIRE(wounded != nullptr);
+	CHECK(wounded->Health < 100.0f);
+
+	// **And the shooter cannot put it back**, which is the authority half and
+	// the one only a real replica can prove: this store was made adopt-only by
+	// `replication::Connector`, so `Store::SetProperty` refuses by name rather
+	// than letting the write stand until the next delta overwrites it. A suite
+	// that only called `SetAdoptOnly` by hand would be asserting its own setup.
+	const engine::ecs::PropertyDescriptor *health = nullptr;
+	for (const auto &property : engine::ecs::Classes::Describe(engine::scene::HumanoidClass()).Properties) {
+		if (property.Name == Name("Health")) {
+			health = &property;
+		}
+	}
+	REQUIRE(health != nullptr);
+
+	const float full = 100.0f;
+	CHECK_FALSE(shooter.World.SetProperty(victimHumanoid, *health, &full, sizeof(full)));
+	CHECK(shooter.World.Get<Humanoid>(victimHumanoid)->Health < 100.0f);
+
 	// **And the victim sees the same verdict**, which is the half a single
 	// client cannot assert. It did not fire, it was not asked, and the colour
 	// reaches it as ordinary replicated `scene.Visual` — so a client that had
@@ -1067,6 +1197,18 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 		}
 	}
 	CHECK(seenByVictim);
+
+	// The same for the health, and on the machine that lost it. A client draws
+	// its own bar off this row, so a `scene.Humanoid` that stopped crossing
+	// would leave every client watching a number that never moves.
+	const Entity ownHumanoid = [&] {
+		const Entity character = engine::scene::CharacterOf(victim.World, victim.Mine);
+		const Character *own = victim.World.Get<Character>(character);
+		return own == nullptr ? engine::ecs::NULL_ENTITY : own->Humanoid;
+	}();
+	REQUIRE(ownHumanoid != engine::ecs::NULL_ENTITY);
+	REQUIRE(victim.World.Get<Humanoid>(ownHumanoid) != nullptr);
+	CHECK(victim.World.Get<Humanoid>(ownHumanoid)->Health < 100.0f);
 
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);

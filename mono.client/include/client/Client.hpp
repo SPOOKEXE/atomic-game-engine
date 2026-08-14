@@ -80,16 +80,20 @@ namespace client {
 		// client usable from a test or a CI job.
 		int64_t MaximumFrames = -1;
 
-		// Levels of surface-seen-in-surface the renderer resolves, or 0 for its
-		// own default of two.
+		// Levels of surface-seen-in-surface to resolve, or 0 to let the world
+		// and the renderer decide.
 		//
-		// **`Renderer::SetSurfaceBounces` had no caller anywhere until v0.15**,
-		// so every scene resolved exactly two levels whatever it was built from
-		// — and two is a mirror seen in a mirror and nothing past it. A pane
-		// deeper than that draws as its own tint, because a slot that never
-		// rendered is not `Ready` and the shader falls back rather than showing
-		// a wrong picture. Each level costs a full scene pass per visible
-		// surface, which is why it is asked for rather than assumed.
+		// **An override and not a setting, which is what changed at v0.15.** The
+		// depth is the world's — `workspace.SurfaceBounces` — and where a world
+		// says nothing the renderer measures the frame it just drew and follows
+		// it. Both are better answers than a session-wide constant, because how
+		// deep a chain of mirrors goes is a fact about the scene.
+		//
+		// What this is still for is measuring: pinning the number is how two
+		// depths are compared on one scene, and the run that did that is what
+		// found the knob had never had a caller at all. Each level multiplies
+		// the passes rather than adding one — `panes × (panes - 1) ^ (levels -
+		// 1)` — so it is a number worth pinning deliberately and not by default.
 		int SurfaceBounces = 0;
 
 		// Open the F3 statistics panel at startup, rather than waiting for

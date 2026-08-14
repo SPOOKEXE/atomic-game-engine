@@ -384,6 +384,12 @@ namespace engine::render {
 	//
 	// Anything above this is clamped, with the frame drawn rather than refused.
 	//
+	// **It is also what the automatic depth is bounded by**, and that is the
+	// half worth stating: `SetSurfaceBounces(0)` lets each viewport measure its
+	// own depth from the frame it just drew, and a corridor of facing panes says
+	// "one deeper" at every level for ever. This is what stops it, and it is why
+	// `scene::NextSurfaceBounces` takes a ceiling rather than knowing one.
+	//
 	// @since v0.15
 	inline constexpr uint32_t MAX_SURFACE_DEPTH = 3;
 
@@ -895,20 +901,41 @@ namespace engine::render {
 		// them back down. That is why there is a ceiling now — see
 		// `MAX_SURFACE_DEPTH`.
 		//
-		// Floored at one — zero would mean no surface pass at all, which has a
-		// clearer spelling — and clamped at `MAX_SURFACE_DEPTH`.
+		// **Zero is `scene::AUTOMATIC_SURFACE_BOUNCES` and is the default.** It
+		// used to mean "no surface pass at all", which nobody ever wanted and
+		// which has a clearer spelling. What it means now is that each viewport
+		// measures the frame it just drew — how deep the chain of panes actually
+		// went, and whether the deepest level still had a pane in view it was not
+		// allowed to descend into — and draws one level deeper next frame when
+		// there was and one shallower when the depth was not being used. So a
+		// corridor of facing panes deepens itself to the ceiling and a room with
+		// one mirror in it costs one level, with nobody having stated anything.
+		// `scene::NextSurfaceBounces` is the rule and is where the argument for
+		// it being free of oscillation lives.
+		//
+		// **A stated number overrides the measurement outright**, and there are
+		// two of them: a world's `workspace.SurfaceBounces`, which is the one a
+		// scene author should reach for, and `--surface-bounces` on the client
+		// and the studio, which is a session overriding the world. Both arrive
+		// here, so this call does not know or care which it got. A stated number
+		// is floored at one and clamped at `MAX_SURFACE_DEPTH`.
 		//
 		// **A pane with no rectangle keeps the old behaviour**, because nothing
 		// can reflect a camera through a pane it was never told about: a surface
 		// camera parented to the world, or one showing a second world, still
-		// resolves whatever chain it has by iterating. See
-		// `SurfaceView::PaneNormal`.
+		// resolves whatever chain it has by iterating —
+		// `scene::DEFAULT_SURFACE_BOUNCES` of them, since there is nothing there
+		// to measure. See `SurfaceView::PaneNormal`.
 		//
-		// @param bounces How many levels to resolve.
+		// @param bounces How many levels to resolve, or zero to measure it.
 		// @since v0.15
 		void SetSurfaceBounces(uint32_t bounces);
 
-		// What it is set to, or zero before the renderer has a device.
+		// What it is set to: zero for automatic, and zero before the renderer has
+		// a device.
+		//
+		// **Not what the last frame resolved**, which is per viewport and lives
+		// in the bank that drew it. This is the setting.
 		//
 		// @since v0.15
 		uint32_t SurfaceBounces() const;

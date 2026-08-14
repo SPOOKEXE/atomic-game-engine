@@ -1,6 +1,177 @@
 
 # DEFERRED
 
+### [x] D00121
+
+**Closed at v0.15: a character dies when `Humanoid.Health` reaches zero, and the
+body stays where it fell until the respawn takes it.** The entry's whole subject
+was that the trigger was missing — `scene::UpdateRespawns` measured
+`Player.RespawnTime` from the tick a player was first seen with no model, which is
+Roblox's delay attached to the wrong event. Both events schedule the same deadline
+now, and the deadline is unchanged: `ceil(seconds / delta)` against the fixed tick,
+so a respawn still lands on the same tick on every machine.
+
+**Its reopen trigger fired in the same commit, which is why it is closed rather
+than extended.** The trigger was "anything in the engine that damages a
+character", and `Server::ApplyInputs` was the hit test with no consequence it
+named. That path subtracts `SHOT_DAMAGE` now — a constant and never a roll, for
+`FindSpawn`'s reason about picking a pad in tree order — so the health model has a
+caller rather than being storage waiting for one.
+
+**Who is allowed to write it: the authority, and it is one rule with two doors
+rather than a new mechanism.** `ecs::Store::SetProperty` has refused every
+property write in a replica since v0.3, which is where this engine already
+answers "who owns a row", so `Humanoid.Health` is an ordinary writable property
+and a client script asking for more is refused by name. `scene::TakeDamage` makes
+the same refusal on `Store::AdoptOnly` for the C++ door, because the machine most
+likely to want to write its own health is the one losing it — and a rule that only
+covered scripts would be a rule a hit-resolution loop walks straight past. A
+second authority flag on the descriptor was refused as the copy that drifts.
+
+**`MaxHealth` has a reader inside the engine, which is the bar D00119 set.**
+`Health` clamps against it and lowering it pulls the health down, so it is not a
+number that exists only to be the denominator of somebody's bar. Both are written
+conversions rather than `ClampedProperty` because each bound is the other field,
+and `ClampedProperty` bakes its bounds in as template arguments so its setter can
+stay captureless.
+
+**What happens at zero goes through the lifetime machinery rather than beside
+it.** `StepCharacters` skips a dead humanoid — it *replaces* horizontal velocity
+every tick, so a corpse it still visited would walk on at `WalkSpeed` for the whole
+delay — and `LoadCharacter` destroys the old body on its way to the new one, which
+it has done since v0.14. Nothing new destroys anything.
+
+**A death happens once without a flag on the row.** `TakeDamage` takes nothing
+from a humanoid that is already dead, so two hits arriving in one tick are one
+death, and `UpdateRespawns` schedules a deadline only for a player not already
+carrying one.
+
+**Two of the things the entry listed as dragged in were decided as absences.**
+There is no `Humanoid.Died`: `scene` is L7 and a signal is L9, so a record here
+would be a fact whose only consumer is a module that would have to be taught about
+it — and `humanoid:GetPropertyChangedSignal("Health")` already delivers the
+transition, once, through machinery that exists. And there is no `ForceField`:
+`TakeDamage` is one door and a forcefield is one branch inside it, but the class
+itself is a spawn-protection feature with a duration, a visual and a
+`SpawnLocation.Duration` beside it, which is a second feature rather than the rest
+of this one.
+
+**`IsDead` is a function rather than `Health <= 0` written out three times.**
+Three passes ask it, and it is spelled `!(Health > 0)` so that a NaN is dead: the
+other way round a NaN compares false against everything and the character is
+immortal, which is the one failure nothing downstream could explain.
+
+### [x] D00113
+
+**Closed at v0.15: there is one node graph, it is `mono.vendor/nodegraph`, and
+the build now refuses a second.** The entry offered two ways out and named the
+obstacle to the first — the template repository had no remote whose commits this
+one could name. It has one, so that is the way it went.
+
+**The direction is the half that was easy to get backwards.** The editor's copy
+was the further-along of the two: folding a selection into a node whose interface
+is derived from how it was wired, frames, a graph-owned template library, an
+async evaluator with a worker pool, previews that belong to a wire rather than to
+a node, a software surface rasteriser, a PNG writer and an inspector registry.
+None of that is engine-specific and all of it went upstream. What stayed is what
+only an engine has: a texture for a picture, a theme, an undo stack and a
+dockable window. Sending the *template's* copy the other way would have been a
+downgrade dressed as a merge.
+
+**Two things had to be lifted out before the library could leave.** The canvas
+and the inspector handlers called `engine::ui::Scaled`, `MutedColour`,
+`AccentColour` and `WarningColour` at twenty-four sites; those became
+`nodegraph::HostChrome()`, a process-wide table of four values, set by
+`studio::ApplyNodeChrome` every frame the panel draws rather than once at
+start-up — the interface scale and the palette are both settings somebody can
+change while the panel is open. And `Graph::Hash` and `PictureKey` shared an
+anonymous-namespace FNV mixer across what became two translation units, so it is
+now a private header rather than a public one: a caller that could reach the
+mixer could mint a key the cache would then honour, which is a stale picture
+nobody can explain.
+
+**The vendor is declared in `MonoVendor.cmake` although it ships a
+CMakeLists**, which is not what the asio and imgui entries there are for.
+Upstream builds its own copy of Dear ImGui, because the common case for a
+template is a checkout with no build system beside it; adding that file here
+would put a second set of every ImGui symbol on the link line and there is no
+option that makes it consume an existing one. It also configures a test binary
+and an SDL3 demo this repository does not want built.
+
+**`VENDOR_PUBLIC` rather than `VENDOR`, and that is the widening this cost.**
+The `Editor` holds the graph, the canvas and the evaluator by value and hands a
+`nodegraph::PreviewImage` to its texture sink, so those types are in
+`studio/Editor.hpp`. Hiding them would take a pimpl over the editor's whole
+state. Nothing links `Mono::studio` but its own program and its own tests, which
+is what makes that defensible rather than merely convenient.
+
+**The suite moved with the code it tests**, which is `AGENTS.md`'s rule and not a
+tidy-up: the cycle guard, the hash, folding, the save format, the async evaluator
+and the canvas are 415 checks in `nodegraph_tests`, ported off Catch2 onto the
+harness that repository already had. `mono.studio/tests/NodeGraph.cpp` is three
+cases now, and every one of them is a seam neither repository can check alone —
+the pixel order between `PreviewImage` and `assets::TextureData`, and the theme
+reaching the library's chrome.
+
+**The third implementation the entry warned about is what the build checks.**
+`just check-one-node-graph` fails if any first-party file opens
+`namespace nodegraph`. The render pipeline editor is still to be written and
+`Engine::bakegraph`'s pipeline documents still have no panel; either could start
+its own registry and its own canvas, and the first divergence would be in the
+half nobody looks at.
+
+### [x] D00102
+
+**Closed at v0.15: a world carries its bake pipelines, and `server` still has no
+JPEG decoder.** The entry was about a dependency and the dependency was settled
+at v0.13 — `Engine::bakegraph` holds the node vocabulary and the document format
+at `shared`, linking `Engine::core` and nothing else, while `bake` keeps every
+importer and the evaluator. What was left was the wiring, and it is small
+precisely because the split was the expensive half.
+
+**What shipped.** `bake::PipelineSet` is the named collection a world holds —
+several pipelines rather than one, for v0.11's "many node trees in one editor" —
+with a set format that is the single-document format under `pipeline "name"`
+lines, so the one is a strict substring of the other and there is one grammar for
+a pipeline. `game` names `Engine::bakegraph`, `WriteWorldBody` emits
+`<AssetPipelines>` beside `<Sources>` as one CDATA block, `ReadWorldBody` reads
+it, and `RegisterGameClasses` registers the resource under `bake.PipelineSet`.
+`expected_graph.json` carries the new edge into `game`, `client`, `server` and
+`unified_server_client`; none of them names `bake`.
+
+**Three details that were decided while doing it rather than before.**
+
+- **The registration is in `game` rather than in the module that owns the type**,
+  which inverts `scene::RegisterSceneComponents`' rule. `bakegraph` links `core`
+  and nothing else, so `ecs::Components::Register` is out of its reach, and the
+  alternative to that line is a link edge that undoes the split. Written down
+  where the call is.
+- **An unknown node kind refuses the pipelines and keeps the world, with a
+  warning** — the render half's answer, and it matches for the render half's
+  reason. The vocabulary is a closed list, so a kind from a newer build is
+  indistinguishable from a typo; a world whose parts loaded and whose recipes did
+  not is recoverable, and refusing the document loses a level over a bake chain
+  somebody can re-author. The whole set goes rather than the readable half.
+- **`FORMAT_VERSION` did not move.** A world with no pipelines writes no element,
+  so existing content is written byte for byte as before, and an older build
+  skips a child it does not recognise. A bump would make a readable file a
+  refusal.
+
+**Names sort by text and not by `core::Name::operator<`**, which orders by the
+interning counter. First-seen order is a property of the process; a save file
+that depended on it would stop being diffable and the round-trip test would stop
+meaning anything. That is rule 4 arriving at a container rather than at a field.
+
+**The correction this entry carried at v0.13 was that the block should wait for a
+panel**, on the grounds that a save-format section with no producer and no
+consumer is a feature that looks present and is not — `Editor::DrawAssetsPipeline`
+went out with the render-pipeline revert and has not come back. It was written
+anyway, because the half carrying the dependency risk is the wiring rather than
+the widget: proved against a live round trip, a panel is later a UI change
+against a format that already works, instead of a format change made beside one.
+The panel itself is still the extended rendering pipeline's, in `ROADMAP.md`,
+behind a prototype project.
+
 ### [x] D00115
 
 **Replication filters by component and not by entity, so a character's limbs pay

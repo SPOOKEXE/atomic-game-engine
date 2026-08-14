@@ -18,11 +18,18 @@
 # acquires a dialect, which is the same argument `assets` makes about the
 # manifest.
 #
-# Both vendors are VENDOR rather than VENDOR_PUBLIC. Crypto++ supplies the
+# All three vendors are VENDOR rather than VENDOR_PUBLIC. Crypto++ supplies the
 # DEFLATE decoder a PNG's pixels are compressed with and the CRC-32 its chunks
-# carry; nlohmann/json parses glTF's JSON chunk. Neither reaches a public header
-# here — what this module hands back is an `assets::MeshData` or an
-# `assets::TextureData` and nothing that says what produced it.
+# carry; nlohmann/json parses glTF's JSON chunk; zstd inflates the chunks of a
+# `.rbxm` that a recent Studio wrote. None reaches a public header here — what
+# this module hands back is an `assets::MeshData`, an `assets::TextureData` or a
+# `RobloxModel`, and nothing that says what produced it.
+#
+# **The `.rbxm` reader inflates two framings and vendors one of them**, which is
+# a line worth having in the file that declares the dependency: an LZ4 block is
+# a hundred lines with no framing, no checksum and no dictionary, and a submodule
+# for it would be larger than the decompressor. A Zstandard frame is entropy
+# coding and a real library, and `delivery` already links this one.
 mono_add_library(bake
 	TIER shared
 	DEPS
@@ -37,4 +44,5 @@ mono_add_library(bake
 	VENDOR
 		Vendor::cryptopp
 		Vendor::json
+		Vendor::zstd
 )

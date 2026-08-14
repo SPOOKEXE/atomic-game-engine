@@ -36,121 +36,6 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
-### [_] D00123
-
-**`Instance:WaitForChild` is the one member of Roblox's tree surface this engine
-does not have, and it is absent because it is a *yield* rather than a lookup.**
-Every other method on that list crossed to `ScriptCall` at v0.18 —
-`FindFirstChild`, the two `WhichIsA` pairs, `GetFullName`, `IsAncestorOf` and the
-rest — and each of them answers from the store on the tick it was called. This
-one does not: it suspends until a child of that name arrives, or until a timeout,
-and both of those are resumes.
-
-**The mechanism exists and is pointed the wrong way.** `ScriptCall::Await`
-suspends a call — a yielded coroutine in Luau, a `Promise` in JavaScript — and
-`AwaitedTickets` is keyed on a `world::Ticket`, because the only thing that has
-ever resumed a script here is a bus reply the barrier applied. A `WaitForChild`
-resumes on a *tree change*, which is a different source: `PumpTree` already walks
-`ecs::TreeChange` at the barrier and would have to check a table of
-`(parent, name)` waiters against every arrival, resume the ones that match, and
-time the rest out on a tick count rather than a clock — `Debris` computes a
-deadline as `ceil(seconds / delta)` and that is the shape this needs.
-
-**What makes it more than plumbing is the timeout's default.** Roblox's
-`WaitForChild(name)` with no timeout waits **forever** and warns after five
-seconds. A script that waits forever is a script that never finishes its tick,
-and `Runtime::Run` refuses a suspended thread rather than carrying one across a
-tick boundary — `script/AGENTS.md` states that as a decision rather than a gap.
-So closing this is not "add a method": it is deciding what an unbounded wait
-means in an engine whose whole scheduling argument is that work does not cross a
-tick, and either taking Roblox's answer and its consequences or refusing the
-no-timeout form and diverging from every script that would be ported in.
-
-**Absent rather than approximated, which is the same call `SoundService.cpp` and
-`HttpService.cpp` each make a list of.** The tempting cheap version — return
-`FindFirstChild`'s answer immediately, warn on a miss — is worse than nothing: it
-typechecks, it works in every scene where the child is already there, and it
-returns nil exactly in the case the method exists for. `examples/MagicTests.luau`
-records the one line it had to change to run here, and it changed it to
-`FindFirstChild` deliberately.
-
-**Reopen trigger: a second resume source at the barrier.** The first thing that
-resumes a script on something other than a bus ticket is the change that makes
-this a table and a filter rather than a mechanism.
-
-### [_] D00122
-
-**`ReplicatedFirst` is first in the delta stream and not in the join snapshot,
-and the second half is where a loading screen actually lives.**
-`scene::InReplicatedFirst` gives that service the reader it never had and
-`mono.server` hangs it on `Authority::SetPriority`, so anything under it outranks
-every distance score for the life of the connection. That is the right rule and
-it covers the wrong moment: a client's *first* view of a world is
-`Authority::BeginSnapshot`, which is one `ecs::Store::Save` chunked across ticks
-in whatever order the store writes its archetypes — and priority does not touch a
-chunk cursor.
-
-**What closing it would take, and why none of it is a small edit.** A snapshot is
-one blob and one cursor, so "these entities first" means either two blobs — a
-`ReplicatedFirst` snapshot completed before the world's begins, with its own
-cursor, its own completion and its own re-snapshot path — or a `Save` that takes
-an ordering predicate, which is a change in `ecs` for one caller's benefit and
-would put a replication policy inside the storage. The first is the honest shape
-and it doubles the join state machine; `replication/AGENTS.md`'s account of the
-refused chunk and `applied=184 refused=17865` is what a second cursor would be
-re-earning.
-
-**Nor is the script half here.** Roblox also runs `ReplicatedFirst`'s scripts
-before the rest of the tree arrives. `mono.client` runs no replicated scripts at
-all today — `Replicated.cpp` presents received state and there is no spawn moment
-for one — so an ordering guarantee about script execution would be a guarantee
-about something that does not happen.
-
-**A second thing now wants the same missing piece, which is worth recording
-because it changes what closing this buys.** `examples/PlayerList.luau` keeps
-every connected client's player list live by writing into each player's own
-`PlayerGui` from the host — that part works on a dedicated server today — and
-its TAB toggle cannot, because holding a key is a fact about a *viewer* and
-there is no script running where the viewer is. So the scene binds TAB where the
-host has a keyboard (a studio Play, a single-player client) and leaves the panel
-shown where it does not, with the branch stated in the file rather than left as
-a silent no-op.
-
-**Reopen trigger: a client that runs scripts out of its replica.** That is the
-first moment the ordering is observable by a game rather than by a packet
-counter, and it is also the moment the two-blob join has a user who can tell
-whether it worked. It is now also the moment a networked client can bind a key
-at all.
-
-### [_] D00121
-
-**A character dies by being destroyed, because `scene::Humanoid` has no health.**
-`scene::UpdateRespawns` measures `Player.RespawnTime` from the tick a player was
-first seen with no character, which is Roblox's *delay* with Roblox's *trigger*
-missing: there the humanoid's `Health` reaches zero, `Died` fires, the body stays
-where it fell for the delay and is then removed and replaced. Here a game
-destroys the model and the clock starts.
-
-**`Humanoid` is deliberately small and that is the constraint rather than an
-oversight.** Its header says so: a capsule, a speed, a jump and whether the
-ground is under it — no state machine, no animator, no ladder, no swim. `Health`
-and `MaxHealth` are two floats and would be the cheapest half; what they drag in
-is the rest of the model — who is allowed to write them, `TakeDamage`, a `Died`
-signal that must fire exactly once, a forcefield, and the question of whether a
-client may write its own health, which is an authority question rather than a
-gameplay one.
-
-**Two things already hold that a health model would have to keep.** The delay is
-a tick number computed once from the fixed delta, so a respawn lands on the same
-tick on every machine; and `CharacterAutoLoads` is read by the join *and* by the
-respawn, so a lobby that spawns its own occupants is one decision rather than
-two.
-
-**Reopen trigger: anything in the engine that damages a character.**
-`examples::Shooting` is the nearest — it is a hit test with no consequence — and
-the moment a hit subtracts something, "dead" needs a definition that is not "the
-model is gone".
-
 ### [_] D00120
 
 **A `Player.Backpack` holds instances and nothing in the engine is a `Tool`.**
@@ -179,61 +64,48 @@ enough for a tool is the first question to ask when somebody wants one.
 
 ### [_] D00119
 
-**`Player.Team` and `Player.CharacterAppearanceId` are absent, and both are
-absent because the thing behind them is.** A `Team` is a `Teams` service, a
-`TeamColor`, a spawn filter on `SpawnLocation`, and a rule about who a
-`TeamCreate`-style permission applies to — none of which exists; and
-`scene::FindSpawn` is a part *named* `SpawnLocation` rather than a class with
-teams and a forcefield on it, which `Characters.hpp` already records as a
-deliberate stop. An appearance id is a content reference to an avatar the engine
+**`Player.CharacterAppearanceId` is absent, and it is absent because the thing
+behind it is.** An appearance id is a content reference to an avatar the engine
 has no notion of: `CharacterDesc` is three colours and six boxes, and there is no
 catalogue, no bundle format and no loader that could resolve a number to a body.
 
 **A property with nothing behind it reads as decided**, which is
-`SoundService.cpp`'s rule and the reason both are named here rather than declared
+`SoundService.cpp`'s rule and the reason it is named here rather than declared
 and left returning zero. The same paragraph in that file lists eleven Roblox
 members it does not have and what each would need first; this is the same
 statement one class along.
 
-**Reopen triggers, and they are separate.** For `Team`: a `SpawnLocation` class,
-because a team whose only effect is a coloured name is a field rather than a
-feature. For `CharacterAppearanceId`: an avatar format — the moment
-`MakeCharacter` can be handed something other than three colours, the id is what
-names it.
+**Reopen trigger: an avatar format** — the moment `MakeCharacter` can be handed
+something other than three colours, the id is what names it.
 
-### [_] D00118
+**`Player.Team` shipped at v0.15 and is no longer part of this entry.** It was
+held back on the stated ground that a team whose only effect is a coloured name
+is a field rather than a feature, and the named reopen trigger was a
+`SpawnLocation` class. That is what was built, in the order the parts depend on
+each other:
 
-**A channel is opened by a world and never by an authority, so nothing rations
-how many a world may hold.** `Postbox::OpenChannel` costs one bus operation and
-one entry in `ChannelBus::Open`, and `BusBudgetPerTick` bounds the *rate* rather
-than the total — a world that opens a distinct channel every tick for an hour has
-two hundred thousand entries in the router's table and every one of them is live
-universe state that a snapshot carries. Nothing in the engine does this today
-because a channel name is written in a script and scripts do not generate them,
-which is exactly the reason a bound would be a guess right now.
+- **`SpawnLocation` is a class**, deriving from `Part`, carrying `TeamColor`,
+  `Neutral` and `Enabled`. `scene::FindSpawn` was a lookup for a part *named*
+  `SpawnLocation` — the deliberate stop `Characters.hpp` recorded — and it now
+  resolves the class **and** the name, because every scene in
+  `mono.engine/examples` builds its pad as a block called `SpawnLocation` and a
+  plain part wearing the name is read as an enabled, neutral spawn.
+  `PartDesc::Class` is what keeps `MakePart` the only constructor for it.
+- **`Teams` is a service and `Team` is an instance in it**, following
+  `InstallServices` and the `ServiceComponent`/`ServiceScope` pattern.
+  `Shared`, for `Players`' reason: a server decides who is on which side and a
+  client asks which side it is on, so both halves need the list.
+  `store.Protect()` covers it like every other fixture.
+- **`Player.Team` decides where you appear.** `LoadCharacter` hands the player
+  to `FindSpawn`, which prefers a pad of that team's colour, falls back to a
+  neutral one, and never uses another team's — the first in tree order rather
+  than a random one, because a respawn drawn from a random number is a recording
+  that does not replay.
 
-**What a bound would have to decide, and why none of it is obvious.** A cap per
-world needs a number, and the honest number depends on whether a channel is a
-subsystem (a handful) or a conversation (one per player, so hundreds). The
-refusal needs a status — `OverBudget` is the nearest and means something else —
-and it has to arrive at `OpenChannel`, which is fire-and-forget today and would
-have to grow a reply to carry one. And a channel with no traffic for N barriers
-could be *closed* instead of refused, which is a different feature with a
-different failure mode: a channel that goes away while somebody is still holding
-its signal is `InputChanged` again.
-
-**The bound that does exist is the one that was actually reachable.**
-`UniverseSettings::ChannelQueueLimit` caps deliveries queued for one world in one
-barrier, and `BusStatus::Overflow` is what the senders past it are told. That is
-the queue between two worlds, which is the thing a single misbehaving sender can
-fill from outside; the channel *table* can only be filled by the receiving world
-itself, which is a world misbehaving in its own storage and has the same shape as
-a script creating instances in a loop.
-
-**Reopen trigger: a game that names channels from data rather than from source.**
-Per-player channels, per-match channels, or anything where the set of names is
-not written down in a script. At that point the cap has a number to be chosen
-against and the refusal has a caller who can act on it.
+What is *still* absent is the `TeamCreate`-style permission rule the original
+entry also named. Nothing in the engine asks who may edit what, so there is
+nothing for it to attach to; it belongs with whatever brings collaborative
+editing permissions rather than here.
 
 ### [_] D00117
 
@@ -276,36 +148,47 @@ it, and "who may ask to be moved where" is a game's policy rather than an
 engine's. A binding that queued the request and left the policy unwritten would
 be an engine deciding it by default.
 
-**Reopen trigger: a game that wants a client to start a teleport.** Every
-teleport this engine has a use for is decided by a server script — a pad, a
-round ending, a matchmaker — and all of those already work.
+**Neither end of that channel has a caller, and that is nearer than the policy
+question.** Checked at v0.15 rather than assumed, because the entry above reads
+as though the only thing missing is a decision:
 
-### [_] D00113
+- **Nothing on a client can ask, because no client runs a script.**
+  `client::BuildReplicatedWorld` installs a draw list, a camera and no VM —
+  `replication/AGENTS.md` says `mono.client` runs no replicated scripts in those
+  words — so `Client::DeliverGuiEvents` finds `RuntimeOf(Rendered)` null on a
+  connected client and a press on a replicated `TextButton` reaches nothing.
+  Single-player runs both roles and has no `Player` at all: `scene::AddPlayer`
+  is called by `mono.server` and by `studio::PlayLink`, and by nothing in
+  `mono.client`. The missing piece is a script running where the viewer is, and
+  it is named in two other places already: `replication/AGENTS.md` calls the
+  script half of a join deliberately absent for exactly this reason, and
+  `examples/PlayerList.luau`'s TAB toggle is held open by it.
+- **No host reads the up direction.** `Listener::OnUserMessage` has no caller
+  outside `mono.studio`'s edit stream and the module's own tests, and
+  `Server::ApplyInputs` decodes a `game::MoveInput`, then an `examples::Shot`,
+  and counts everything else as `Dropped` — so a third message on the input
+  channel arrives as a refusal statistic. A dedicated server also publishes
+  `PrimaryWorld` and only that, so "which world is this client in" is not yet a
+  question one server answers differently for two connections.
 
-**There are two node graph implementations and there should be one.**
-`studio/NodeGraph.hpp` is the editor's, added at v0.14 for the Demo Nodes panel;
-`~/Documents/GitHub/node-graph-template/cpp` is the standalone library the same
-design came from. They are one design in two repositories, which is the debt
-`AGENTS.md` calls the most expensive kind — both will accumulate callers and the
-neglected one is the one that goes wrong.
+**What a client following a teleport looks like is already written down once**,
+in `studio::Editor::FollowTeleports`, and whatever the shipped client eventually
+does has to be that rather than a second copy of it: the destination is
+*searched for by the player's name* rather than carried, because a handle may not
+leave the world that minted it; `PlayLink::Stop` is the teardown and there is not
+a second one; and `PlayLink::Missing` against `LOST_FRAMES` is the answer to the
+frames where the player is in neither world, which is at least one because the
+arrival is admitted at the destination's next barrier. The half both hosts would
+share belongs in `game` beside `ApplyMoveInput`, for that function's stated
+reason.
 
-It is worth carrying **while this is a demo panel and nothing depends on it**.
-The moment something does — and `ROADMAP.md` has two candidates, the render
-pipeline as a node editor and `Engine::bakegraph`'s pipeline documents — the two
-become one, by one of:
-
-- **Vendor the template as a submodule** under `mono.vendor/`, which is how every
-  other outside dependency arrives here. It needs the template repository to have
-  a remote whose commits this repository can name, which today it does not.
-- **Promote the studio's copy to an engine module.** Right if the engine
-  evaluates graphs at runtime rather than only editing them — a bake pipeline
-  does — and it needs a tier, an `expected_graph.json` entry and a decision about
-  where `std::any` payloads sit relative to `Engine::bakegraph`'s own node
-  vocabulary, which already describes nodes without carrying decoders.
-
-**What must not happen is a third one.** A render-pipeline editor that started
-its own registry and its own canvas would make this three, and the first
-divergence would be in the part nobody tests: the cycle guard or the hash.
+**Reopen trigger, restated: a script running in a client's replica.** The
+original trigger was a game that wants a client to start a teleport, and it is
+still true that every teleport this engine has a use for is decided by a server
+script — a pad, a round ending, a matchmaker — and that all of those work. What
+it did not say is that a game wanting the other kind could not have it: until a
+client can run a line of Luau there is nobody to ask and nothing to ask with, and
+the policy seam is the cheapest of the three parts rather than the blocking one.
 
 ### [_] D00109
 
@@ -405,107 +288,6 @@ can therefore be allowed to run ahead on. Until then `Prediction` is a mechanism
 whose design premise this engine does not currently share, and that is a better
 description of it than "unwired".
 
-### [_] D00102
-
-**The dependency decision is settled and done. What is left is that the panel it
-was blocking no longer exists.**
-
-- **The split shipped at v0.13 and stands on its own.** `Engine::bakegraph` is
-  the node vocabulary and the document format at `shared`, linking `Engine::core`
-  and nothing else; `bake` keeps every importer and the evaluator and depends on
-  it. So `Engine::game` *can* now carry a pipeline in a place file without
-  pulling the PNG, JPEG, GIF, BMP, OBJ, glTF and PMX readers into `server`, which
-  is the whole property this entry was about. `expected_graph.json` carries the
-  new edge, and a `bakegraph` suite proves the format is testable with no
-  importer linked.
-- **It was cheaper than this entry assumed and the reason is worth recording.**
-  `GraphDocument` needed only `Graph.hpp` and `core`; `Graph.hpp` needed
-  `assets`, which is what a baked mesh *is* rather than a decoder. Only
-  `Graph.cpp` — the evaluator — reaches an importer at all, and only six files in
-  the repository included either header. `Build` is the one function needing both
-  halves and stayed in `bake`. `IsBareNode` had to become public, because a
-  closed list of parameterless kinds is exactly the thing that must not be
-  copied.
-- **Correction, and it is the same one D00038 needed.** The heading used to read
-  "the Assets Pipeline panel draws an empty document". **There is no panel.**
-  `Editor::DrawAssetsPipeline` is a `TODO(render-pipeline)` marker, as are the
-  `WritePipelines`/`ReadPipelines` pair in `game/src/Game.cpp` and
-  `client::InstallWorldPipelines` — all of it went out with the render-pipeline
-  revert. Checked by grepping for the symbols rather than by remembering.
-- **So the `<AssetPipelines>` block was deliberately not written.** A save-format
-  section with no producer and no consumer is a feature that looks present and is
-  not, which is the trade `D00017` and `D00008` both come down against — and the
-  format break is cheap to take later precisely because the module split is the
-  part that was expensive. When a panel exists, the block is a small change
-  against a dependency graph that already permits it.
-- **What is left is not this entry's any more.** It is the extended rendering
-  pipeline in `ROADMAP.md`, behind a prototype project, and the asset half comes
-  back with it.
-
-**What it looked like before:**
-
-**The Assets Pipeline panel draws an empty document, and the blocker is a
-dependency decision rather than the editor.**
-
-`Editor::DrawAssetsPipeline` lays out a default-constructed `bake::Document`
-every frame and says so on screen. The canvas, the layout and the document
-format all exist and are tested — `bake::GraphDocument` records edits, replays
-them and round trips. What is missing is that **a world does not carry one**.
-
-- **The obvious fix is wrong, and the roadmap says so in writing.** The render
-  half landed by giving `game` a dependency on `graph`, which is cheap: `graph`
-  is arithmetic over names and links no device. `bake` is not that shape — it
-  carries the PNG, JPEG, GIF, BMP, OBJ, GLTF and PMX decoders, so `game`
-  depending on it to parse a *text document* pulls every image and model decoder
-  into the save format, and therefore into `server`, which links `game` and has
-  no reason to decode a JPEG.
-- **Three ways out, and the roadmap ranks them.** (a) Split `bake::Graph`,
-  `Document` and their format out of the decoder library into something `game`
-  can link — "the honest fix and a real refactor". (b) Carry asset pipelines as
-  opaque text the save format never parses, which costs the load-time validation
-  the render half has. (c) Put them on the universe rather than the world, and
-  load them only where `bake` is already linked.
-- **Settled: (a), the module split.** The roadmap called it the honest fix and
-  that is the call. (b) buys speed by giving up the load-time validation the
-  render half has, which would make the two halves of one editor behave
-  differently for no reason a user could see. (c) rests on a premise nobody has
-  established — whether a bake chain shared by four worlds is any one world's
-  property — so it trades a dependency question for an ownership question that
-  is harder.
-
-  **The shape:**
-
-  ```
-  Engine::bakegraph   TIER shared, no decoders
-      Graph.hpp / GraphDocument.hpp / the text format
-
-  Engine::bake    ->  DEPS Engine::bakegraph + the decoders
-  Engine::game    ->  DEPS Engine::bakegraph        <- new, and cheap
-  ```
-
-  `server` links `game` and gets no JPEG decoder, which is the property the
-  whole question was about.
-
-  **What it touches**, in the order it wants doing: the new module and its
-  CMakeLists; `bake` losing those files and gaining the dep; `nodeview` and
-  `mono.studio` following the headers; `game::WriteWorldBody` / `ReadWorldBody`
-  emitting and reading the block, the way the render half emits `<Pipelines>`;
-  and `mono.tools/architecture/expected_graph.json`, which will fail on the new
-  edge until it is told — as it is there to.
-
-  **One thing to decide while doing it, not before:** what a world does when it
-  loads a document naming a node kind this build does not have. The render half
-  refuses the pipeline and keeps the world, with a warning; matching that is
-  probably right and is a one-line argument once the code is in front of
-  somebody.
-- **The panel's own pointer was wrong**, which is how this entry came to exist.
-  It cited `D00039`, which is about the physics module having no caller. Fixed
-  to point here.
-
-**Reopen trigger: none needed — it is v0.11 roadmap work and blocked on a
-decision, not on effort.** The render half of the same line is done, so this is
-the remaining half of "many node trees in one editor".
-
 ### [_] D00106
 
 **JavaScript and TypeScript have no breakpoints, and the obstacle is the VM
@@ -570,72 +352,53 @@ be conspicuous by its absence.
 **Reopen trigger: a vendored QuickJS with a debugger API**, or the first
 TypeScript plugin big enough that its author asks for one.
 
-### [PARTIAL] D00104
+### [_] D00104
 
-**Rojo's file table: seven of the nine are built, and the two left are format
-readers rather than mappings.**
+**`.rbxmx` is the last row of Rojo's file table this engine does not build, and
+it is a vendor decision before it is a feature.** The engine vendors JSON and
+nothing else that reads a markup tree, so an XML model needs a parser
+`mono.vendor` does not carry. The format is also not simply "XML": it is
+`Item`/`Properties` elements with typed children and its own referent table, so
+the markup parser is the smaller half of the job.
 
-**`.toml` closed at v0.13 and it went exactly as this entry predicted.** The
-entry called it "the cheapest by a distance and the only one whose cost is a
-submodule rather than a format reader", and that is what it cost: toml++
-vendored — MIT, header-only, no dependencies — a conversion into `json`, and
-`LuauModuleFor` reused unchanged, because Rojo maps `*.toml` and `*.json` to the
-same `ModuleScript`. Nothing downstream of the parse is new.
+**When it arrives it goes in `bake`, beside `.rbxm`.** That is now a decision
+with a precedent rather than a proposal: `bake::ReadRobloxModel` hands back a
+tree of class names, names and values, and `studio::RojoSync` maps that tree onto
+instances. An XML reader producing the same `RobloxModel` reuses every one of
+those mapping decisions — one instance named after the file, an unknown class
+becoming a `Folder`, a script's `Source` staged into the world's `SourceCache` —
+and nothing in the editor changes.
 
-The one thing the entry did not predict is what a TOML date becomes. There is no
-JSON type and no Luau one, so it arrives as its TOML spelling in a string —
-dropping it would make a key silently vanish and a table of parts would invent an
-interface this engine then owes an author.
+**Reopen trigger: an XML parser in `mono.vendor`,** or a project that carries an
+`.rbxmx` somebody needs. It is named in the sync report by what Rojo says it is,
+so a gap reads as a gap rather than as an unrecognised file, and
+`studio.rojosync` asserts both halves: that it is named and that the rows around
+it are silent.
 
-What follows is the entry as it was, less the `.toml` row.
+**`.rbxm` shipped at v0.15 and is no longer part of this entry.** It was held
+back on the stated ground that a binary container is a format reader rather than
+a mapping, and that it belongs beside the other model decoders rather than in an
+editor. That is where it went, and three things the entry did not predict are
+worth keeping:
 
-`studio::SyncRojoProject` builds `rojo.space/docs/v7/sync-details` except for
-three rows. What it builds now, beyond the scripts it always did:
-
-- **`.meta.json` and `init.meta.json`** — properties patched onto whatever the
-  file of that stem produced, including a script. `game::WriteProperty` does the
-  write and `ReadPropertyJson` accepts both spellings Rojo has used, the bare
-  value and the named-part object. **A class change is the one part not
-  honoured**: a class is the archetype an entity was created in, and `Store`
-  offers no way to move a live row between class trees, so `className` in an
-  `init.meta.json` is reported as a property the instance does not have.
-- **`.model.json`** — the class, its properties and its children, sharing the
-  patch above because Rojo documents one property syntax for both.
-- **`.json`** — a `ModuleScript` whose source is generated rather than parsed at
-  run time. Every key is bracketed, because a JSON key may be anything and
-  `{ foo-bar = 1 }` is a syntax error; numbers go through
-  `game::FormatNumber`, because `std::to_string` is `%f` and writes 1e-8 as
-  "0.000000".
-- **`.txt` and `.csv`** — a `StringValue` and a `LocalizationTable`, both over
-  the new `scene::TextContent` and both under a `ValueBase` so `:IsA` answers
-  the question a script would ask. **A `LocalizationTable` holds its CSV and
-  resolves nothing**: translation lookup is a service with a locale and a
-  fallback chain, and none of that is a file mapping.
-- **`.project.json` under a `$path`** — followed, with a cycle check that is the
-  part which had to exist before the recursion did.
-
-**What is left, and why each is a vendor decision before it is a feature:**
-
-- **`.rbxmx` needs an XML parser and `mono.vendor` has none.** The engine
-  vendors JSON and nothing else that reads a markup tree. Roblox's XML model
-  format is also not simply "XML" — it is `Item`/`Properties` elements with typed
-  children and a referent table, so the parser is the smaller half.
-- ~~**`.toml` needs a TOML parser, and `mono.vendor` has none.** This one is
-  otherwise free: the JSON path already emits the Luau, so a TOML document
-  parsed into the same tree would reuse `LuauModuleFor` unchanged.~~ **Done at
-  v0.13**, and "otherwise free" was accurate.
-- **`.rbxm` is Roblox's binary model** — LZ4-framed chunks, interned strings and
-  a referent table. That is a format reader and it belongs beside the other model
-  decoders in `bake` rather than in an editor, which is also where `.rbxmx`
-  would go once something could parse it.
-
-Each of the three is reported by name and by what Rojo says it is, so a gap
-reads as a gap rather than as an unrecognised file — `studio.rojosync` asserts
-both halves, that the three are named and that the six are silent.
-
-**Reopen trigger: a project that carries one of the two.** Both are format
-readers now that the cheap one is gone, and `.rbxmx` needs an XML parser before
-it needs anything else.
+- **The refusals that matter are refusals of principle, not of effort.** An
+  **enum** in the file is a number naming a member of Roblox's table and an
+  engine that honoured one would be shipping Roblox's numbering or using its own
+  declaration order — the second being exactly what rule 4 forbids. A
+  **referent** is a number naming a row of the file; it becomes the shape of the
+  tree and dies with the parse, so nothing that leaves the reader is numbered.
+- **A partial reader of this format is safe rather than lucky, and the format is
+  why.** A `PROP` chunk holds one property of one class and nothing after it
+  depends on its bytes, so a type the reader does not decode is a chunk skipped
+  whole. That is what lets the supported list grow one row at a time, and it is
+  the fact any later work here should check before assuming a subset is a
+  liability.
+- **`ProtectedString` is the row nobody would think to add.** A script's
+  `Source` is written under a type number of its own carrying identical bytes to
+  a `String`, so a reader written from the type list alone imports every script
+  with no program in it. It was found by reading real files rather than by
+  reasoning about the format, which is the method the `.rbxmx` half should use
+  too.
 
 ### [_] D00103
 
@@ -868,13 +631,17 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **Twelve mutations, twelve killed, one needed a new test.** Measuring the message-fit check against `sizeof` rather than the wire size survived the first sweep: it silently refuses a component that would have fitted, and nothing built a component large in a store and small on a wire.
 - **Not done: the join snapshot is not itself smaller.** It carries the *decoded* value so that snapshot and delta deliver identical bytes, but it is still written by `Store::Save` at full width. Narrowing it means giving `Save` a lossy mode, which is the exact thing this design refuses — and the join is a one-off spread across ticks where the delta is every tick.
 
-**(b) Group signatures — an audit layer, and the most interesting of the three.**
+**(b) Group signatures — an audit layer, and the most interesting of the three. DONE.** Wire version 7, `replication/Audit.hpp`, `MessageKind::GroupSignatures` and `MessageKind::Disputed`.
 
 - The server hashes groups of replicated state and sends the hashes; the client hashes its own copy and reports mismatches; the server sends the true state on a later tick. **Anti-entropy over the replicated world.**
-- **It is complementary to deltas rather than a second way to do one job**, which is the question `docs/CODE_QUALITY.md` asks and the one this has to answer. Deltas are the fast path — what moved. Signatures are the audit — what disagrees. The audit is what makes the delta path's optimism safe, and it would catch **generically** the whole class of bug this version chased one cause at a time: the lost creation, the stranded value, the stale forget, the tick that never completed.
-- **The open question is whose hash it is, and it decides the cost.** A per-client hash cannot be shared, so the work scales with clients times entities. A hash over a **spatial cell** is computed once and shared by every client that can see it — far cheaper — but only holds if a client sees a whole cell or none of it, which turns interest management from per-entity into per-cell. That is a real change and possibly a good one; `spatial::HashGrid` already exists, and `assets::HashTree` is a working Merkle implementation with tagged interiors and the leaf count sealed into the root.
-- **The client's reply is upstream traffic from a peer, and `replication/AGENTS.md` says every field of an inbound message is hostile in both directions.** A client claiming everything mismatches is request amplification. The rate limit is therefore not a tuning knob but part of the security argument, and it has to be **enforced by the server** rather than trusted from the client.
-- The cadence argument is the strongest part of the proposal and should be written into whatever ships: **anything genuinely moving is already corrected by ordinary deltas, so the audit only ever catches *stale* divergence — which by definition is not urgent.** A rotating slice of groups per tick bounds the hashing cost, the wire cost and the repair cost at once, and it is the same rotation the priority work already uses.
+- **It is complementary to deltas rather than a second way to do one job**, which is the question `docs/CODE_QUALITY.md` asks and the one this has to answer. Deltas are the fast path — what moved. Signatures are the audit — what disagrees. The audit is what makes the delta path's optimism safe, and it catches **generically** the whole class of bug this version chased one cause at a time: the lost creation, the stranded value, the stale forget, the tick that never completed.
+- **The open question is answered per-client over a rotating slice, and the reason is that the other answer was not this entry's to give.** A cell hash is shareable only if a client sees a whole cell or none of it, which turns interest management from per-entity into per-cell — a real architectural change, and a larger one than a bandwidth entry authorises. The rotating slice is what bounds the per-client cost anyway: `AuditSettings` is `EntitiesPerGroup` 16, `GroupsPerAudit` 2, `EveryTicks` 8, so one audit is 32 entities in one datagram once every eight ticks and a world twice the size is swept half as often rather than costing twice as much. **The cadence argument was the strongest part of the proposal and it is what shipped.**
+- **Membership is on the wire, and that single decision is what made the rest fall out.** The audit lists the entities it hashed rather than letting the receiver derive them from a group number, which lets the sender leave three sets out without the receiver knowing anything about them: anything still `Unconfirmed` (the delta path is already correcting it, so the server is merely ahead), anything the client *owns* (v0.13 ownership makes the client's copy the newer one), and anything carrying a `SuppressWhenTagged` tag (the far side derives that row, so the two ends are meant to disagree). It also means nothing about interest management, suppression or ownership had to cross.
+- **What is hashed is the value a replica holds, on both ends, and assuming the quantiser is idempotent would have been wrong.** The authority puts its own value through the same encode-and-decode `BeginSnapshot` already puts a join through, so the two ends compute one expression over one buffer. Measured on the real smallest-three rotation: **1666 of 2 million** uniformly random orientations re-encode to different bytes, because the recovered component can come back below one of the three that were sent and the next encode drops a different one. That is a false mismatch reported for ever, every sweep, on one part in twelve hundred. `assets::HashTree` is the hash — tagged interiors, leaf count sealed into the root, which is what makes a *missing* entity a different digest rather than a matching prefix.
+- **The rate limit is enforced by the server and none of it is read off the message**, which is what this entry called part of the security argument rather than a tuning knob. An answer must name the audit this server issued, on the tick it issued it, with labels that are groups this server hashed and strictly ascending so one cannot be named twice — and an audit may be answered once. The most a client claiming everything mismatches can buy is the repair of exactly the slice the server had already chosen to look at. An audit the link refused is struck off by `Unsent`, because a question that was never asked may not be answered.
+- **The repair is the recovery walk and not a resend.** A disputed group puts its entities back into `Unconfirmed`, which is the same seeding an entity coming into view already gets — no second path, no new message, no structural churn. What it cannot reach is a client holding an entity the server has no record of sending; the bound on that is the one this module already had, `ResnapshotAfterTicks`, reached because a delta naming a row the client does not hold never lets `Applied` move. `Statistics::Disputed` says whether any of it is happening.
+- **Off by default, on in `mono.server`, and that is the one thing that could not simply be the default.** `replication/AGENTS.md` says a quiet world sends nothing, and anti-entropy is precisely the thing that must speak on a world at rest — a value stranded on a still world is what no delta would ever report. Both cannot hold, so the host decides. `studio.playlink` and `engine.replication.stream` each pin the quiet-world property and are untouched.
+- **Ten cases, ten mutations, every one red.** The two that matter are a replica deliberately diverged on a still world — corrupt a row on the client, and it comes back — and a client answering with every group label there is, which is refused and counted. The others pin the three exclusions, the round trip, the once-only answer and the refused audit; the mutation that removes the slice-range check does not merely fail, it reads past the recorded slice, which is what that check stands in front of.
 
 **(c) The client simulating physics from the quantised state — last, and only with an invariant amended on purpose.**
 
@@ -885,7 +652,7 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - ~~Needs `physics` on the client for the entities it extrapolates, which today it does not link.~~ **It links it, and has since v0.7. What it does not do is call it**, and the linker is what makes the difference visible. Measured on the `release` preset: `client` carries 51 `engine::physics::` symbols and **8 of `libengine_physics.a`'s 15 members**, arriving through `Engine::script` beneath `Engine::game` and `Engine::examples` rather than because anybody asked for physics. **Which eight is the useful half.** `Shapes`, `ShapeRay`, `ShapeSupport`, `Query`, `ContactPairs`, `FaceManifold`, `PhysicsWorld` and `WorldResource` are in — the *query* half, because a script raycasts. `BroadPhase`, `NarrowPhase`, `IntegrateMotion`, `Solve`, `SyncBroadphase` and `Pipeline` are **out**, dropped because nothing under `mono.client/` calls `RegisterPhysicsSystems`. So (c) costs a caller and a tick order, not a dependency edge — **the same link-line-versus-call-graph distinction `D00004` had to make twice** and conflated for two versions before it did.
 - **v0.13's network ownership is a second way to get a client integrating, and it is deliberately not this one.** An owned body is simulated by its owner *authoritatively* — the client's answer is the one that crosses the wire, and there is nothing arriving for it to be reconciled against. (c) is the opposite arrangement: the server stays right by definition and the client integrates a guess between corrections. **They must not both apply to one entity.** A body extrapolated under (c) that also carries a `scene::NetworkOwner` would be simulated twice with one of the two wrong, and the wrong one is whichever the local machine happens not to own. Whatever ships for (c) states which set it walks, and `NetworkOwner` is the cheap way to say it: extrapolate what nobody owns.
 
-**Sequencing, and it falls out of the above rather than being chosen:** (a) is self-contained, needs no invariant changed, and makes (b) sound. (b) is a design with one open question. (c) needs a rule rewritten and a bound nobody has measured. **Reopen trigger for (a): the first world whose delta does not fit at the current budget** — which the priority work made survivable rather than fatal, so it is now a bandwidth question rather than a correctness one.
+**Sequencing, and it falls out of the above rather than being chosen:** (a) is self-contained, needs no invariant changed, and makes (b) sound. (b) had one open question and it is answered above. (c) is what is left, and it needs a rule rewritten and a bound nobody has measured — `replication/AGENTS.md`'s prediction invariant, amended deliberately or not at all, which is the repository owner's decision and not an implementer's. **Reopen trigger for (a): the first world whose delta does not fit at the current budget** — which the priority work made survivable rather than fatal, so it is now a bandwidth question rather than a correctness one.
 
 ### [_] D00014
 

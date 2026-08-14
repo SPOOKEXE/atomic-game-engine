@@ -75,7 +75,12 @@ namespace engine::replication {
 	ApplyStatus Replica::Apply(ecs::Store &store, const SnapshotChunk &chunk) {
 		ENGINE_PROFILE_CAT("replica.snapshot", core::ProfileCategory::Network);
 
-		if (!Assembling || chunk.Tick != SnapshotTick || Snapshot.size() != chunk.TotalBytes) {
+		// **The stage is part of the buffer's identity, beside the tick.** A join
+		// is two blobs taken at one tick, so two of the same length would
+		// otherwise be assembled into one another — half a preface spliced under
+		// half a world, restored without a complaint from anything.
+		if (!Assembling || chunk.Tick != SnapshotTick || chunk.Stage != Stage ||
+			Snapshot.size() != chunk.TotalBytes) {
 			if (Assembling && chunk.Tick < SnapshotTick) {
 				return ApplyStatus::Stale;
 			}
@@ -84,6 +89,7 @@ namespace engine::replication {
 			Received.assign(chunk.TotalBytes, false);
 			Outstanding = chunk.TotalBytes;
 			SnapshotTick = chunk.Tick;
+			Stage = chunk.Stage;
 			Assembling = true;
 		}
 
@@ -105,8 +111,15 @@ namespace engine::replication {
 			return ApplyStatus::Ok;
 		}
 
+		// **The preface merges and the world sweeps, and swapping them is the
+		// bug.** A preface is a slice of a world, so applying it authoritatively
+		// would destroy everything it does not mention — which on a re-snapshot
+		// is the entire world the client already holds, wiped a moment before
+		// being sent it again.
+		const bool preface = Stage == SnapshotStage::Preface;
+
 		core::ByteReader reader(Snapshot);
-		if (!store.Apply(reader, ecs::ApplyMode::Authoritative)) {
+		if (!store.Apply(reader, preface ? ecs::ApplyMode::Overlay : ecs::ApplyMode::Authoritative)) {
 			// Apply through the store's scratch path to avoid partial state.
 			ENGINE_ERROR("replication: the joining snapshot could not be restored.");
 			Assembling = false;
@@ -119,6 +132,16 @@ namespace engine::replication {
 		Snapshot.clear();
 		Snapshot.shrink_to_fit();
 		Received.clear();
+
+		if (preface) {
+			// **The join is not over and `Applied` does not move.** What has
+			// arrived is the part a loading screen is made of; acknowledging the
+			// tick it was taken at would tell the server this client holds a
+			// world it has been sent a corner of.
+			Prefaced_ = true;
+			Stats_.Prefaces++;
+			return ApplyStatus::Ok;
+		}
 
 		Counting = Parts{};
 
@@ -274,6 +297,49 @@ namespace engine::replication {
 		return ApplyStatus::Ok;
 	}
 
+	ApplyStatus Replica::Check(const ecs::Store &store, const replication::GroupSignatures &signatures) {
+		ENGINE_PROFILE_CAT("replica.audit", core::ProfileCategory::Network);
+
+		if (!Joined_) {
+			Stats_.Stale++;
+			return ApplyStatus::Stale;
+		}
+
+		// **Every name resolved before anything is hashed**, exactly as
+		// `WriteComponents` does and for the same reason: a build that cannot
+		// name one of these would hash a different set of leaves and report a
+		// disagreement about a component rather than about a value. That is a
+		// build mismatch and it says so, rather than becoming an audit that
+		// disputes everything for ever.
+		std::vector<ecs::ComponentId> components;
+		components.reserve(signatures.Components.size());
+		for (const core::Name named : signatures.Components) {
+			const ecs::ComponentId component = ecs::Components::Find(named);
+			if (!component.IsValid()) {
+				ENGINE_ERROR(
+					"replication: an audit names component '{}', which this build has not registered.",
+					named.Text()
+				);
+				return ApplyStatus::UnknownComponent;
+			}
+			components.push_back(component);
+		}
+
+		Disputing_ = replication::Disputed{};
+		Disputing_.Tick = signatures.Tick;
+
+		for (const AuditGroup &group : signatures.Groups) {
+			if (AuditDigest(store, components, group.Entities, AuditSide::Replica) == group.Digest) {
+				continue;
+			}
+			Disputing_.Groups.push_back(group.Group);
+		}
+
+		Stats_.Audits++;
+		Stats_.Mismatched += Disputing_.Groups.size();
+		return ApplyStatus::Ok;
+	}
+
 	ApplyStatus Replica::Receive(ecs::Store &store, std::span<const std::byte> message) {
 		core::ByteReader reader(message);
 
@@ -293,9 +359,13 @@ namespace engine::replication {
 		case MessageKind::Structure:
 			return Apply(store, read.Structure);
 
+		case MessageKind::GroupSignatures:
+			return Check(store, read.Signatures);
+
 		case MessageKind::Input:
 		case MessageKind::Applied:
 		case MessageKind::Identify:
+		case MessageKind::Disputed:
 		// **`User` is refused here rather than ignored.** Its payload is opaque
 		// to this module by design — see `MessageKind::User` — so whoever owns
 		// the link peels one off before this point. One arriving here means the
@@ -317,6 +387,17 @@ namespace engine::replication {
 
 		core::ByteWriter writer;
 		WriteMessage(writer, replication::Applied{Applied_});
+		return {writer.Bytes().begin(), writer.Bytes().end()};
+	}
+
+	std::vector<std::byte> Replica::Dispute() {
+		if (Disputing_.Groups.empty()) {
+			return {};
+		}
+
+		core::ByteWriter writer;
+		WriteMessage(writer, Disputing_);
+		Disputing_ = replication::Disputed{};
 		return {writer.Bytes().begin(), writer.Bytes().end()};
 	}
 }

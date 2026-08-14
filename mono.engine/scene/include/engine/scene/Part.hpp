@@ -57,6 +57,18 @@ namespace engine::scene {
 		// What it looks like, naming a mesh a presentation module resolves.
 		core::Name Mesh;
 
+		// Which `BasePart` class to mint, or an invalid id for a plain `Part`.
+		//
+		// **Here so that `MakePart` stays the only constructor.** A
+		// `SpawnLocation` is a `Part` with one component more, and a caller that
+		// assembled it by hand would be the second definition
+		// `scene/AGENTS.md` refuses — the two disagree the first time
+		// `BasePart` gains a component. Anything that does not derive from
+		// `BasePart` is refused rather than half-built.
+		//
+		// @since v0.15
+		ecs::ClassId Class;
+
 		// What it collides as.
 		ShapeKind Shape = ShapeKind::Box;
 
@@ -199,9 +211,14 @@ namespace engine::scene {
 	// `desc`, so a component added to the class but not named in `PartDesc`
 	// keeps its declared default instead of being silently zeroed.
 	//
+	// `PartDesc::Class` is what keeps that true for the classes that are a part
+	// plus something — `SpawnLocation` is the first — rather than growing a
+	// second builder beside this one.
+	//
 	// @param store The world to create in.
 	// @param desc  What the part is.
 	// @return The new entity, or `ecs::NULL_ENTITY` when the store refused to
-	//         create one — an adopt-only replica does.
+	//         create one — an adopt-only replica does — or when
+	//         `PartDesc::Class` does not derive from `BasePart`.
 	ecs::Entity MakePart(ecs::Store &store, const PartDesc &desc);
 }

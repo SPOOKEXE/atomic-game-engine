@@ -11,7 +11,7 @@
 -- This one is deliberately dull, and that is the point:
 --
 --   * a floor wide enough that walking off it takes a while;
---   * a `SpawnLocation`, which is the name `scene::FindSpawn` looks for;
+--   * a `SpawnLocation`, which is what `scene::FindSpawn` looks for;
 --   * steps, because a jump that clears nothing proves nothing;
 --   * a wall, because a character that walks through geometry looks exactly
 --     like one that does not until it meets some.
@@ -56,10 +56,13 @@ block(
 	GROUND
 )
 
--- **Named `SpawnLocation`, and the name is the contract.** `scene::FindSpawn`
--- looks for exactly this under `Workspace` and puts a character on its top
--- face; a world without one spawns everybody at the origin, which is inside the
--- floor.
+-- **A part still *named* `SpawnLocation`, which v0.15 kept working on purpose.**
+-- `SpawnLocation` is a class now — `Instance.new("SpawnLocation")` gives one
+-- with a `TeamColor`, a `Neutral` flag and an `Enabled` flag — and a plain block
+-- wearing the name is read as an enabled, neutral spawn so that every scene
+-- written before the class keeps spawning people. `scene::FindSpawn` puts a
+-- character on the top face; a world with no spawn at all starts everybody at
+-- the origin, which here is inside the floor.
 block("SpawnLocation", Vector3.new(12, 1, 12), Vector3.new(0, 0.5, 0), PAD)
 
 -- A staircase of four, each one a little under the jump height, so walking up it

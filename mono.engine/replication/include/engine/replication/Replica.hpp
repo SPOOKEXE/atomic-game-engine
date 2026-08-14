@@ -12,6 +12,11 @@
 // reassembly buffer is sized from the total the first chunk declares and
 // refuses anything claiming to run past it.
 //
+// **A join may arrive as two blobs, and only the second one ends it.** A server
+// that declared an `Authority::SetPreface` sends what it wants seen first as its
+// own snapshot, finished before the world's begins; `Prefaced` says that has
+// landed and `Joined` still says the world has.
+//
 // **Reconciliation needs no cross-machine determinism.** The client drifting is
 // expected; correcting the drift is the mechanism. Nothing here may assume the
 // two machines compute the same floats.
@@ -19,6 +24,7 @@
 // @tier L12 · shared
 
 #include <engine/ecs/Store.hpp>
+#include <engine/replication/Audit.hpp>
 #include <engine/replication/Protocol.hpp>
 
 #include <cstdint>
@@ -105,6 +111,24 @@ namespace engine::replication {
 			return Joined_;
 		}
 
+		// Whether what the server put in front of the world has arrived.
+		//
+		// **The window between this and `Joined` is what a loading screen is
+		// for**, and it is the whole point of there being two blobs: the
+		// entities `Authority::SetPreface` claimed are in the store and drawable
+		// while the world they cover is still crossing.
+		//
+		// Stays `true` across a re-snapshot, because it is a fact about what
+		// this replica holds rather than about the join in progress.
+		//
+		// @return `true` once the preface has been applied. Always `false` for a
+		//         server that declared no preface, which is one blob and no
+		//         window.
+		// @since v0.15
+		bool Prefaced() const {
+			return Prefaced_;
+		}
+
 		// How much of the joining snapshot is still missing, in bytes.
 		//
 		// @return The outstanding byte count, zero once joined.
@@ -114,6 +138,21 @@ namespace engine::replication {
 		//
 		// @return The encoded `Applied` message, or empty before the join.
 		std::vector<std::byte> Acknowledge() const;
+
+		// The answer to the last audit, if it found anything.
+		//
+		// **Drained rather than repeated, and the server would refuse a repeat
+		// anyway.** An audit may be answered once — see `Authority::Receive` —
+		// so a replica that kept offering the same answer would be producing
+		// upstream traffic that is by construction thrown away.
+		//
+		// Empty is the normal case and the one to expect: it means the last
+		// audit agreed, or none has arrived.
+		//
+		// @return The encoded `Disputed` message, or empty when there is
+		//         nothing to say.
+		// @since v0.15
+		std::vector<std::byte> Dispute();
 
 		// Entities the server said to forget.
 		//
@@ -136,7 +175,17 @@ namespace engine::replication {
 		struct Statistics {
 			// Snapshots applied. More than one means the server decided this
 			// client had fallen too far behind to catch up with deltas.
+			//
+			// The world blob only. A preface is half a join rather than a
+			// snapshot of anything, and counting it here would make every
+			// re-snapshot look like two.
 			uint64_t Snapshots = 0;
+
+			// Prefaces applied, which is one per join on a server that declares
+			// one and zero on a server that does not.
+			//
+			// @since v0.15
+			uint64_t Prefaces = 0;
 
 			// Deltas applied.
 			uint64_t Deltas = 0;
@@ -181,6 +230,21 @@ namespace engine::replication {
 			// unreliable transport reorders — but a figure that climbs is a
 			// link delivering more late than useful.
 			uint64_t Stale = 0;
+
+			// Audits checked against this replica's own copy.
+			//
+			// @since v0.15
+			uint64_t Audits = 0;
+
+			// Groups an audit found this replica disagreeing about.
+			//
+			// **A steady zero is the state the delta path claims to keep this
+			// replica in**, and anything else is divergence that no ordinary
+			// message would ever have reported — see `Audit.hpp`. It costs one
+			// small message upstream and the server resends the group.
+			//
+			// @since v0.15
+			uint64_t Mismatched = 0;
 		};
 
 		// What this replica has seen.
@@ -194,6 +258,7 @@ namespace engine::replication {
 		ApplyStatus Apply(ecs::Store &store, const SnapshotChunk &chunk);
 		ApplyStatus Apply(ecs::Store &store, const replication::Delta &delta);
 		ApplyStatus Apply(ecs::Store &store, const replication::Structure &structure);
+		ApplyStatus Check(const ecs::Store &store, const replication::GroupSignatures &signatures);
 
 		// Which parts of one tick's delta have arrived.
 		//
@@ -287,9 +352,16 @@ namespace engine::replication {
 		std::vector<bool> Received;
 		size_t Outstanding = 0;
 		uint64_t SnapshotTick = 0;
+
+		// Which of the join's two blobs is in the buffer above. Part of its
+		// identity beside the tick, because both blobs carry the same one.
+		SnapshotStage Stage = SnapshotStage::World;
 		bool Assembling = false;
 
 		std::vector<ecs::Entity> Forgotten_;
+
+		// The answer to the last audit, waiting for `Dispute` to take it.
+		replication::Disputed Disputing_;
 
 		// Entities created and not yet shown. A vector rather than a map: a
 		// tick's spawns are a handful, and this is walked whole or not at all.
@@ -297,6 +369,7 @@ namespace engine::replication {
 		Parts Counting;
 		uint64_t Applied_ = 0;
 		bool Joined_ = false;
+		bool Prefaced_ = false;
 		Statistics Stats_;
 	};
 }

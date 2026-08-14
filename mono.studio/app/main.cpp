@@ -64,7 +64,11 @@ int main(int argc, char **argv) {
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
-	arguments.Value("surface-bounces", "N", "Levels of mirror-in-mirror resolved per frame (default 2)");
+	arguments.Value(
+		"surface-bounces",
+		"N",
+		"Levels of mirror-in-mirror per frame, overriding the world (default: measured)"
+	);
 
 	// The control surface. Off unless asked for — see `Options::ControlPort`.
 	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8738)");

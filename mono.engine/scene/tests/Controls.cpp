@@ -308,6 +308,50 @@ TEST_CASE("a disabled humanoid is not driven", "[scene][controls]") {
 	CHECK(world.Store_.Get<Humanoid>(character)->MoveDirection.Magnitude() == Approx(0.0f));
 }
 
+TEST_CASE("a dead humanoid keeps its momentum and is driven no further", "[scene][controls]") {
+	// **What "the body stays where it fell" has to mean when nothing ragdolls.**
+	// `StepCharacters` *replaces* horizontal velocity every tick, so a corpse it
+	// still visited would walk on at `WalkSpeed` in whatever direction its owner
+	// was last holding — for the whole of `Player.RespawnTime`, in front of
+	// everybody. The gate is on this pass rather than on the intent because this
+	// is the half that reaches a `Motion`.
+	World world;
+	const Entity character = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
+
+	Humanoid humanoid;
+	humanoid.MoveDirection = Vector3{1.0f, 0.0f, 0.0f};
+	humanoid.WalkSpeed = 16.0f;
+	world.Store_.Set(character, humanoid);
+	world.Store_.Set(character, Motion{Vector3{3.0f, -25.0f, 0.0f}, Vector3{}});
+
+	// Alive, so the step drives it — the control against which the next half
+	// means something.
+	REQUIRE(StepCharacters(world.Store_, 1.0f / 60.0f) == 1);
+	CHECK(world.Store_.Get<Motion>(character)->Linear.X == Approx(16.0f));
+
+	world.Store_.GetMutable<Humanoid>(character)->Health = 0.0f;
+	REQUIRE(engine::scene::IsDead(*world.Store_.Get<Humanoid>(character)));
+
+	world.Store_.Set(character, Motion{Vector3{3.0f, -25.0f, 0.0f}, Vector3{}});
+	CHECK(StepCharacters(world.Store_, 1.0f / 60.0f) == 0);
+
+	// Untouched in both axes: the momentum that killed it is kept and gravity
+	// is left to do the rest.
+	CHECK(world.Store_.Get<Motion>(character)->Linear.X == Approx(3.0f));
+	CHECK(world.Store_.Get<Motion>(character)->Linear.Y == Approx(-25.0f));
+
+	// **A negative and a NaN are dead too**, which is the reason `IsDead` is a
+	// function rather than `Health <= 0` written out three times: a component
+	// written straight through `Store::Set` has been through neither clamp, and
+	// written the other way round a NaN compares false against everything and
+	// the character is immortal.
+	world.Store_.GetMutable<Humanoid>(character)->Health = -1.0f;
+	CHECK(engine::scene::IsDead(*world.Store_.Get<Humanoid>(character)));
+	world.Store_.GetMutable<Humanoid>(character)->Health = std::nanf("");
+	CHECK(engine::scene::IsDead(*world.Store_.Get<Humanoid>(character)));
+	CHECK(StepCharacters(world.Store_, 1.0f / 60.0f) == 0);
+}
+
 TEST_CASE("the step replaces horizontal velocity and keeps vertical", "[scene][controls]") {
 	// What makes a character controller a controller rather than a body: adding
 	// a force leaves momentum from the last frame and makes stopping take a

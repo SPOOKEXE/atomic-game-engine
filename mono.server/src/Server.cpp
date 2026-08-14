@@ -72,6 +72,20 @@ namespace server {
 		// The one topic every chattering world uses.
 		constexpr const char *CHATTER_TOPIC = "placeholder.chatter";
 
+		// What one confirmed hit takes off a character.
+		//
+		// **A quarter of a default `Humanoid::MaxHealth`, chosen against that
+		// number rather than tuned.** Four hits to a kill is the smallest figure
+		// that makes a death reachable in a session and still leaves the health
+		// bar saying something on the way there; a game with an opinion sets its
+		// own on the humanoid it spawns.
+		//
+		// **A constant and never a roll.** A damage drawn from a random number is
+		// a recording that does not replay, which is the rule `scene::FindSpawn`
+		// already keeps about picking a pad in tree order — and `just
+		// replay-check` would report it a long way from here.
+		constexpr float SHOT_DAMAGE = 25.0f;
+
 		// This executable, for spawning hosts of itself.
 		//
 		// `Paths::Base()` is the directory the binary sits in, which is where
@@ -522,7 +536,19 @@ namespace server {
 			return false;
 		}
 
-		Replication = std::make_unique<engine::replication::Listener>(*Socket);
+		// **The anti-entropy audit is on for a real server and off by default in
+		// the library**, and the split is deliberate rather than timid. What it
+		// finds is a client quietly disagreeing with the world on a value
+		// nothing is moving — which no delta reports and which, on a game
+		// server, nobody is standing over the logs to notice. The cost is a
+		// small message every eight ticks per client. See `Audit.hpp` for why
+		// the default cannot simply be on: it is the one thing that speaks on a
+		// world at rest, and a caller measuring an idle link has to have said
+		// yes to that.
+		engine::replication::ListenerSettings streaming;
+		streaming.Authority.Audit.Enabled = true;
+
+		Replication = std::make_unique<engine::replication::Listener>(*Socket, streaming);
 
 		if (!Replication->Admitting()) {
 			// The admission challenge is drawn from operating system entropy and
@@ -629,12 +655,13 @@ namespace server {
 				return blocked;
 			};
 
-			// **`ReplicatedFirst` outranks the distance, which is the whole of
-			// what that container is for.** Roblox replicates it ahead of the
-			// rest of the tree so a loading screen is up before the world it
-			// covers arrives; here it was an ordinary root with an ordinary
-			// score, so a screen in it landed somewhere in the middle of the
-			// scene it was meant to hide.
+			// **`ReplicatedFirst` outranks the distance in the *stream*, which
+			// is half of what that container is for.** Roblox replicates it
+			// ahead of the rest of the tree so a loading screen is up before the
+			// world it covers arrives; here it was an ordinary root with an
+			// ordinary score, so a screen in it landed somewhere in the middle
+			// of the scene it was meant to hide. The other half is the join, and
+			// no score reaches that — see `SetPreface` below.
 			//
 			// **Above the falloff's range rather than inside it.**
 			// `DistancePriority` answers zero to one, so any number above one
@@ -659,6 +686,23 @@ namespace server {
 					return first ? REPLICATED_FIRST : score(client, entity);
 				}
 			);
+
+			// **And the same rule where a client actually meets it first, which
+			// is the join and not the stream.** A score orders the values a
+			// running world produces; a join is one `Save` chunked across ticks
+			// in archetype order, and the line above has never touched it — so a
+			// loading screen was ranked first for every tick after the moment it
+			// was needed. `D00122`, and closing it is a second snapshot rather
+			// than a cleverer score.
+			//
+			// **No world entry, unlike the score above.** `SetPreface` is handed
+			// the store it is walking, exactly as `SetInterest` is and for the
+			// same reason: it runs inside the snapshot build, and re-entering
+			// the world from inside a walk of it would be entering it twice.
+			Replication->Authority().SetPreface([](engine::ecs::Entity entity,
+												   const engine::ecs::Store &store) {
+				return engine::scene::InReplicatedFirst(store, entity);
+			});
 		}
 
 		// **A `Player` per connection, which nothing in this engine was
@@ -1043,12 +1087,34 @@ namespace server {
 					continue;
 				}
 
-				// The effect, and it is deliberately the smallest visible one:
-				// the part is recoloured. `scene.Visual` replicates, so every
+				// Two effects, and they answer different questions: the recolour
+				// says *something* was hit and the damage says *somebody* was.
+				// `scene.Visual` and `scene.Humanoid` both replicate, so every
 				// client sees the server's verdict rather than the shooter's.
+				//
+				// **This is the consequence `docs/retired/DEFERRED.md` D00121 was
+				// waiting for.** A hit test with no consequence did not need "dead" to
+				// mean anything; the moment one subtracts something it does, and
+				// `scene::TakeDamage` is the door — including its refusal to run
+				// in a replica, which is why a client running this same code
+				// against its own copy could not kill anybody.
 				Worlds().Enter(PrimaryWorld, [&hit](engine::ecs::Store &store) {
 					if (auto *visual = store.GetMutable<engine::scene::Visual>(hit.Entity)) {
 						visual->Tint = engine::core::Color3{1.0f, 0.2f, 0.1f};
+					}
+
+					// **The rewind history holds parts, and a `Character` sits on
+					// the model above one.** A limb is intangible and never
+					// enters the history, so what can be struck on a person is
+					// the root — whose parent is the model. Anything else struck
+					// is scenery and has no humanoid to lose.
+					const auto *rig = store.Get<engine::scene::Character>(store.ParentOf(hit.Entity));
+					if (rig == nullptr) {
+						return;
+					}
+
+					if (engine::scene::TakeDamage(store, rig->Humanoid, SHOT_DAMAGE)) {
+						ENGINE_INFO("server: a shot killed a character; the respawn clock has started");
 					}
 				});
 				Struck++;

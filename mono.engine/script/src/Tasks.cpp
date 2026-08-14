@@ -9,12 +9,27 @@ namespace engine::script {
 
 	uint64_t TicksFor(const ecs::Store &store, double seconds) {
 		const float delta = store.Time().Delta;
-		if (seconds <= 0.0 || delta <= 0.0f) {
+
+		// **Written as a *failed* `> 0` rather than as `<= 0`, so a NaN lands
+		// here.** Every comparison against NaN is false, so `seconds <= 0.0`
+		// let `task.wait(0/0)` through to a cast of NaN to `uint64_t`, which is
+		// undefined behaviour reachable from a line of script.
+		if (!(seconds > 0.0) || !(delta > 0.0f)) {
 			return 1;
 		}
 
+		// Capped for the other end of the same hole: a `wait` of 1e300 seconds
+		// overflows the cast as surely as a NaN does. The ceiling is a number of
+		// *ticks* nothing will ever reach — about five million years at sixty
+		// hertz — so a script asking for one is answered with "never" rather
+		// than with whatever the conversion happened to produce.
+		constexpr double NEVER = 1e16;
+
 		const double ticks = std::ceil(seconds / static_cast<double>(delta));
-		return ticks < 1.0 ? 1 : static_cast<uint64_t>(ticks);
+		if (ticks < 1.0) {
+			return 1;
+		}
+		return static_cast<uint64_t>(std::min(ticks, NEVER));
 	}
 
 	void TaskQueue::Delay(CallbackRef thread, uint64_t resumeAt) {

@@ -59,6 +59,18 @@ namespace engine::replication {
 			Settings_.ChunkBytes = LARGEST_CHUNK;
 		}
 
+		if (Settings_.Audit.EntitiesPerGroup == 0 || Settings_.Audit.GroupsPerAudit == 0) {
+			Settings_.Audit.Enabled = false;
+		}
+
+		if (Settings_.Audit.EveryTicks == 0) {
+			Settings_.Audit.EveryTicks = 1;
+		}
+
+		if (Settings_.Audit.GroupsPerAudit > MAXIMUM_AUDIT_GROUPS) {
+			Settings_.Audit.GroupsPerAudit = MAXIMUM_AUDIT_GROUPS;
+		}
+
 		if (Settings_.MessagesPerTick > MAXIMUM_PARTS) {
 			ENGINE_WARN(
 				"replication: {} delta messages a tick is more than the {} parts a tick may be split "
@@ -128,6 +140,10 @@ namespace engine::replication {
 		Priority = std::move(score);
 	}
 
+	void Authority::SetPreface(std::function<bool(ecs::Entity, const ecs::Store &)> predicate) {
+		Preface = std::move(predicate);
+	}
+
 	ClientId Authority::Admit() {
 		for (size_t index = 0; index < Clients.size(); index++) {
 			if (Clients[index].Live) {
@@ -188,10 +204,17 @@ namespace engine::replication {
 	}
 
 	void Authority::Survey(ecs::Store &store) {
+		// **`Resolved` and `ResolvedNames` are one list in two spellings, filled
+		// in one pass.** The audit puts an *ordinal* in every leaf and the names
+		// on the wire, so the two ends agree only while both spellings skip the
+		// same unregistered slots — and two loops is two chances for them not
+		// to. See `Audit.hpp`.
 		Resolved.clear();
+		ResolvedNames.clear();
 		for (const core::Name name : Components) {
 			if (const ecs::ComponentId id = ecs::Components::Find(name); id.IsValid()) {
 				Resolved.push_back(id);
+				ResolvedNames.push_back(name);
 			}
 		}
 
@@ -285,10 +308,19 @@ namespace engine::replication {
 		}
 	}
 
-	void Authority::BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick) {
+	size_t Authority::Owed(const Client &client) {
+		size_t owed = 0;
+		for (const Staged &staged : client.Snapshots) {
+			owed += staged.Bytes.size() - staged.Sent;
+		}
+		return owed;
+	}
+
+	std::vector<std::byte>
+	Authority::Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const {
 		ecs::Store scratch("replica");
 
-		for (const ecs::Entity entity : Visible) {
+		for (const ecs::Entity entity : entities) {
 			scratch.CreateAt(entity);
 		}
 
@@ -306,7 +338,7 @@ namespace engine::replication {
 			const bool quantised = descriptor.Wire.Present() && descriptor.Size > 0;
 			decoded.assign(quantised ? descriptor.Size : 0, std::byte{0});
 
-			for (const ecs::Entity entity : Visible) {
+			for (const ecs::Entity entity : entities) {
 				const void *value = store.GetComponent(entity, id);
 				if (value == nullptr) {
 					continue;
@@ -330,15 +362,48 @@ namespace engine::replication {
 
 		core::ByteWriter writer;
 		if (!scratch.Save(writer)) {
-			ENGINE_ERROR("replication: the world cannot be snapshotted, so no client can join it.");
-			client.Snapshot.clear();
-			client.Sent = 0;
-			return;
+			return {};
+		}
+		return {writer.Bytes().begin(), writer.Bytes().end()};
+	}
+
+	void Authority::BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick) {
+		// **Both blobs are taken at one tick, from one world, in one call.** The
+		// alternative — build the world's only once the preface has gone — would
+		// give the two halves of a join two different ticks and a window in
+		// which the world moved between them, which is a client whose first
+		// complete view never existed.
+		Preceding.clear();
+		if (Preface) {
+			for (const ecs::Entity entity : Visible) {
+				if (Preface(entity, store)) {
+					Preceding.push_back(entity);
+				}
+			}
 		}
 
-		client.Snapshot.assign(writer.Bytes().begin(), writer.Bytes().end());
-		client.Sent = 0;
-		client.SnapshotTick = tick;
+		Staged &preface = client.Snapshots[static_cast<size_t>(SnapshotStage::Preface)];
+		Staged &world = client.Snapshots[static_cast<size_t>(SnapshotStage::World)];
+
+		preface = Staged{};
+		world = Staged{};
+
+		world.Bytes = Capture(store, Visible);
+		if (world.Bytes.empty()) {
+			ENGINE_ERROR("replication: the world cannot be snapshotted, so no client can join it.");
+			return;
+		}
+		world.Tick = tick;
+
+		if (!Preceding.empty()) {
+			// A preface that could not be written is dropped rather than
+			// retried: it is the same components out of the same store the world
+			// blob has just been written from, so a failure here is that
+			// failure, and a join that arrives in one blob is better than one
+			// that does not arrive.
+			preface.Bytes = Capture(store, Preceding);
+			preface.Tick = tick;
+		}
 
 		client.Known.clear();
 		for (const ecs::Entity entity : Visible) {
@@ -347,6 +412,49 @@ namespace engine::replication {
 
 		for (std::unordered_map<uint64_t, Outstanding> &unconfirmed : client.Unconfirmed) {
 			unconfirmed.clear();
+		}
+	}
+
+	void Authority::StreamSnapshot(Client &client) {
+		// **One blob per tick, and that is what makes the ordering a rule rather
+		// than a likelihood.** Chunks go out in the order this list is built,
+		// but a refusal is per message — so a preface chunk the link turned away
+		// beside a world chunk it took would be resent *behind* bytes it was
+		// supposed to precede. Two blobs never share an outgoing list, so no
+		// refusal can reorder them, and the whole cost is one tick at the seam
+		// of a join that already spans many.
+		for (size_t stage = 0; stage < STAGES; stage++) {
+			Staged &staged = client.Snapshots[stage];
+			if (staged.Sent >= staged.Bytes.size()) {
+				continue;
+			}
+
+			for (size_t chunk = 0; chunk < Settings_.ChunksPerTick; chunk++) {
+				if (staged.Sent >= staged.Bytes.size()) {
+					break;
+				}
+
+				const size_t take = std::min(Settings_.ChunkBytes, staged.Bytes.size() - staged.Sent);
+
+				SnapshotChunk piece;
+				piece.Stage = static_cast<SnapshotStage>(stage);
+				piece.Tick = staged.Tick;
+				piece.TotalBytes = static_cast<uint32_t>(staged.Bytes.size());
+				piece.Offset = static_cast<uint32_t>(staged.Sent);
+				piece.Bytes.assign(
+					staged.Bytes.begin() + static_cast<ptrdiff_t>(staged.Sent),
+					staged.Bytes.begin() + static_cast<ptrdiff_t>(staged.Sent + take)
+				);
+
+				Carried carried;
+				carried.SnapshotOffset = staged.Sent;
+				carried.Stage = piece.Stage;
+
+				client.Outgoing.push_back(Encode(piece));
+				client.Carried_.push_back(carried);
+				staged.Sent += take;
+			}
+			return;
 		}
 	}
 
@@ -530,6 +638,223 @@ namespace engine::replication {
 		}
 	}
 
+	void Authority::EmitAudit(const ecs::Store &store, ClientId handle, Client &client, uint64_t tick) {
+		if (!Settings_.Audit.Enabled || Resolved.empty() || client.Known.empty()) {
+			return;
+		}
+		if (client.AuditedAt != 0 && tick < client.AuditedAt + Settings_.Audit.EveryTicks) {
+			return;
+		}
+
+		client.AuditedAt = tick;
+
+		Auditing.clear();
+		Auditing.reserve(client.Known.size());
+		for (const uint64_t known : client.Known) {
+			Auditing.push_back(ecs::Entity{known});
+		}
+		std::sort(Auditing.begin(), Auditing.end(), [](ecs::Entity left, ecs::Entity right) {
+			return left.Id < right.Id;
+		});
+
+		// **Only what this client has already acknowledged, and that exclusion
+		// is the whole reason the audit can be exact.** An entity with an
+		// unconfirmed entry is one the delta path is still correcting, so
+		// comparing it would report a disagreement about a value that is on its
+		// way. What is left is state both ends should hold identically, which
+		// is what makes a mismatch mean something rather than mean "late".
+		//
+		// An entity this client *owns* is excluded for the mirror-image reason:
+		// under v0.13 ownership the client's copy is the newer one between
+		// submissions, so the server is the side that is behind.
+		const auto settled = [&client](ecs::Entity entity) {
+			for (const std::unordered_map<uint64_t, Outstanding> &unconfirmed : client.Unconfirmed) {
+				if (unconfirmed.find(entity.Id) != unconfirmed.end()) {
+					return false;
+				}
+			}
+			return true;
+		};
+
+		// **An entity whose rows the receiver derives is left out whole, and
+		// that is why nothing about suppression crosses.** `SuppressWhenTagged`
+		// stops a component's deltas for a tagged row precisely because the far
+		// side recomputes it, so the two ends are *meant* to disagree about it
+		// — and a receiver told to skip it would need the tag replicated to it
+		// and would report every character in the world as a mismatch on the
+		// day somebody forgot. Membership is on the wire, so the cheap answer
+		// is simply not to name the entity.
+		const auto derives = [this, &store](ecs::Entity entity) {
+			for (const ecs::ComponentId tag : ResolvedSuppressors) {
+				if (tag.IsValid() && store.HasComponent(entity, tag)) {
+					return true;
+				}
+			}
+			return false;
+		};
+
+		const size_t wanted =
+			static_cast<size_t>(Settings_.Audit.GroupsPerAudit) * Settings_.Audit.EntitiesPerGroup;
+
+		std::vector<ecs::Entity> batch;
+		batch.reserve(wanted);
+
+		const auto from = std::lower_bound(
+			Auditing.begin(), Auditing.end(), client.AuditCursor, [](ecs::Entity left, uint64_t right) {
+				return left.Id < right;
+			}
+		);
+
+		auto cursor = from;
+		for (; cursor != Auditing.end() && batch.size() < wanted; ++cursor) {
+			if (!store.Alive(*cursor) || !settled(*cursor) || derives(*cursor)) {
+				continue;
+			}
+			if (Ownership && Ownership(handle, *cursor, store)) {
+				continue;
+			}
+			batch.push_back(*cursor);
+		}
+
+		// Wraps rather than stalls at the end of the set, so a sweep that ran
+		// out of world starts the next one immediately instead of waiting a
+		// rotation for the cursor to be reset by something else.
+		client.AuditCursor = cursor == Auditing.end() ? 0 : cursor->Id;
+
+		if (batch.empty()) {
+			return;
+		}
+
+		GroupSignatures signatures;
+		signatures.Tick = tick;
+		Auditable.clear();
+
+		// **Only the components this batch actually touches.** A host
+		// replicating thirty of them would otherwise spend most of the datagram
+		// naming the twenty that contributed nothing, and the ordinal in a leaf
+		// is a position in this list rather than in the host's table.
+		for (size_t slot = 0; slot < Resolved.size(); slot++) {
+			const auto present = [&](ecs::Entity entity) {
+				return store.HasComponent(entity, Resolved[slot]);
+			};
+			if (std::any_of(batch.begin(), batch.end(), present)) {
+				signatures.Components.push_back(ResolvedNames[slot]);
+				Auditable.push_back(Resolved[slot]);
+			}
+		}
+
+		if (signatures.Components.empty()) {
+			return;
+		}
+
+		for (uint32_t group = 0; group < Settings_.Audit.GroupsPerAudit; group++) {
+			const size_t first = static_cast<size_t>(group) * Settings_.Audit.EntitiesPerGroup;
+			if (first >= batch.size()) {
+				break;
+			}
+			const size_t take = std::min<size_t>(Settings_.Audit.EntitiesPerGroup, batch.size() - first);
+
+			AuditGroup entry;
+			entry.Group = group;
+			entry.Entities.assign(
+				batch.begin() + static_cast<ptrdiff_t>(first),
+				batch.begin() + static_cast<ptrdiff_t>(first + take)
+			);
+			entry.Digest = AuditDigest(store, Auditable, entry.Entities, AuditSide::Authority);
+			signatures.Groups.push_back(std::move(entry));
+		}
+
+		// Trimmed against the encoding rather than an estimate of it. An audit
+		// is built once every `EveryTicks` and a message that cannot fit is
+		// refused by the link for ever, which is the failure `ChunkBytes` is
+		// capped for one level up.
+		std::vector<std::byte> encoded = Encode(signatures);
+		while (!signatures.Groups.empty() && encoded.size() > Settings_.ChunkBytes) {
+			signatures.Groups.pop_back();
+			encoded = Encode(signatures);
+		}
+
+		if (signatures.Groups.empty()) {
+			// Switched off rather than retried, because the next attempt would
+			// be the same arithmetic against the same settings — a warning every
+			// `EveryTicks` for the life of the process, saying the same thing.
+			Settings_.Audit.Enabled = false;
+			ENGINE_WARN(
+				"replication: an audit of one group does not fit {} bytes, so the audit is off. "
+				"Lower AuditSettings::EntitiesPerGroup or raise ChunkBytes.",
+				Settings_.ChunkBytes
+			);
+			return;
+		}
+
+		client.Audit = AuditRecord{};
+		client.Audit.Tick = tick;
+		client.Audit.Groups = signatures.Groups;
+
+		Carried carried;
+		carried.Audit = true;
+
+		client.Outgoing.push_back(std::move(encoded));
+		client.Carried_.push_back(carried);
+		Stats_.Audits++;
+	}
+
+	bool Authority::Dispute(Client &into, const replication::Disputed &disputed) {
+		// **The limit is enforced here and nothing about it is taken from the
+		// client**, which is what `docs/DEFERRED.md` D00015 calls part of the
+		// security argument rather than a tuning knob. An answer is only ever
+		// an answer: to the one audit this server issued, once, naming groups
+		// out of the slice this server chose. A client claiming everything
+		// mismatches can therefore ask for exactly the repair the slice it was
+		// asked about would have cost — which the server was already prepared
+		// to pay, and which the cadence bounds to once every `EveryTicks`.
+		if (!Settings_.Audit.Enabled || into.Audit.Tick == 0 || disputed.Tick != into.Audit.Tick) {
+			Stats_.DisputesRefused++;
+			return false;
+		}
+
+		if (into.Audit.Answered) {
+			Stats_.DisputesRefused++;
+			return false;
+		}
+
+		if (disputed.Groups.empty()) {
+			Stats_.DisputesRefused++;
+			return false;
+		}
+
+		// **In the slice, and strictly ascending.** Those two together are what
+		// bound the answer to the question: every label names a group this
+		// server hashed, and no label can be named twice — so the most an
+		// answer can ask for is the repair of exactly the slice the server had
+		// already chosen to look at. A list naming one group a hundred times is
+		// the cheapest way to ask for a hundred repairs, and it is refused
+		// rather than deduplicated, because this module's `AGENTS.md` says a
+		// malformed message is never partly applied. No separate length check:
+		// these two imply one.
+		for (size_t index = 0; index < disputed.Groups.size(); index++) {
+			if (disputed.Groups[index] >= into.Audit.Groups.size()) {
+				Stats_.DisputesRefused++;
+				return false;
+			}
+			if (index > 0 && disputed.Groups[index] <= disputed.Groups[index - 1]) {
+				Stats_.DisputesRefused++;
+				return false;
+			}
+		}
+
+		into.Audit.Answered = true;
+		Stats_.Disputed += disputed.Groups.size();
+
+		for (const uint32_t group : disputed.Groups) {
+			for (const ecs::Entity entity : into.Audit.Groups[group].Entities) {
+				into.Repairing.push_back(entity.Id);
+				Stats_.Repaired++;
+			}
+		}
+		return true;
+	}
+
 	void Authority::BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick) {
 		client.Unconfirmed.resize(Components.size());
 
@@ -543,6 +868,19 @@ namespace engine::replication {
 
 			for (const uint64_t appearing : Appearing) {
 				unconfirmed.emplace(appearing, Outstanding{});
+			}
+
+			// **The repair is the recovery walk, not a second way to resend.**
+			// An audit that disagreed says nothing about *which* value is
+			// wrong, only that something in the group is — so what it does is
+			// put every value of that group back into the unconfirmed set the
+			// walk below already reads. `emplace` leaves an entry that is
+			// already there alone, so a repair cannot restart the clock on
+			// something genuinely in flight.
+			for (const uint64_t repairing : client.Repairing) {
+				if (client.Known.find(repairing) != client.Known.end()) {
+					unconfirmed.emplace(repairing, Outstanding{});
+				}
 			}
 
 			const ecs::ComponentId id = ecs::Components::Find(name);
@@ -719,6 +1057,7 @@ namespace engine::replication {
 		Stats_.Resnapshots = 0;
 		Stats_.Deferred = 0;
 		Stats_.Stalest = 0;
+		Stats_.Audits = 0;
 
 		if (Count() == 0) {
 			return;
@@ -737,10 +1076,14 @@ namespace engine::replication {
 			client.Carried_.clear();
 			client.Edits.clear();
 
-			if (!client.Snapshot.empty() && client.Sent >= client.Snapshot.size()) {
-				client.Snapshot.clear();
-				client.Snapshot.shrink_to_fit();
-				client.Sent = 0;
+			// Released a tick after the cursor reached the end, because `Unsent`
+			// is called after `Publish` has returned and may put it back.
+			for (Staged &staged : client.Snapshots) {
+				if (!staged.Bytes.empty() && staged.Sent >= staged.Bytes.size()) {
+					staged.Bytes.clear();
+					staged.Bytes.shrink_to_fit();
+					staged.Sent = 0;
+				}
 			}
 
 			Visible.clear();
@@ -754,42 +1097,19 @@ namespace engine::replication {
 			});
 			Stats_.Visible += Visible.size();
 
-			const bool adrift = client.Snapshot.empty() && client.Sent == 0 && client.Applied > 0 &&
-								client.Streamed > client.Applied &&
+			const bool adrift = Owed(client) == 0 && client.Applied > 0 && client.Streamed > client.Applied &&
 								tick > client.Applied + Settings_.ResnapshotAfterTicks;
 			if (adrift) {
 				Stats_.Resnapshots++;
 			}
 
-			const bool joining = client.Snapshot.empty() && client.Known.empty() && client.Applied == 0;
+			const bool joining = Owed(client) == 0 && client.Known.empty() && client.Applied == 0;
 			if (joining || adrift) {
 				BeginSnapshot(client, store, tick);
 			}
 
-			if (client.Sent < client.Snapshot.size()) {
-				for (size_t chunk = 0; chunk < Settings_.ChunksPerTick; chunk++) {
-					if (client.Sent >= client.Snapshot.size()) {
-						break;
-					}
-
-					const size_t take = std::min(Settings_.ChunkBytes, client.Snapshot.size() - client.Sent);
-
-					SnapshotChunk piece;
-					piece.Tick = client.SnapshotTick;
-					piece.TotalBytes = static_cast<uint32_t>(client.Snapshot.size());
-					piece.Offset = static_cast<uint32_t>(client.Sent);
-					piece.Bytes.assign(
-						client.Snapshot.begin() + static_cast<ptrdiff_t>(client.Sent),
-						client.Snapshot.begin() + static_cast<ptrdiff_t>(client.Sent + take)
-					);
-
-					Carried carried;
-					carried.SnapshotOffset = client.Sent;
-
-					client.Outgoing.push_back(Encode(piece));
-					client.Carried_.push_back(carried);
-					client.Sent += take;
-				}
+			if (Owed(client) > 0) {
+				StreamSnapshot(client);
 
 				for (const std::vector<std::byte> &message : client.Outgoing) {
 					Stats_.Bytes += message.size();
@@ -859,6 +1179,7 @@ namespace engine::replication {
 			delta.Baseline = client.Applied;
 
 			BuildComponents(store, client, delta, tick);
+			client.Repairing.clear();
 
 			if (!delta.Components.empty()) {
 				Order.resize(Candidates.size());
@@ -879,6 +1200,11 @@ namespace engine::replication {
 
 				Record(client, placed, tick);
 			}
+
+			// Last, so that the byte budget turns this away before it turns
+			// away anything that matters. A lost audit costs one rotation and a
+			// lost delta costs a client its agreement with the world.
+			EmitAudit(store, handle, client, tick);
 
 			for (const std::vector<std::byte> &message : client.Outgoing) {
 				Stats_.Bytes += message.size();
@@ -904,8 +1230,17 @@ namespace engine::replication {
 			found->Streamed = found->StreamedBefore;
 		}
 
+		// A question that was never asked may not be answered. Without this a
+		// client could name the tick of an audit the link turned away and be
+		// believed, which is the one place its answer would not be bounded by
+		// what the server had actually chosen to look at.
+		if (carried.Audit) {
+			found->Audit = AuditRecord{};
+		}
+
 		if (carried.SnapshotOffset != NOWHERE) {
-			found->Sent = std::min(found->Sent, carried.SnapshotOffset);
+			Staged &staged = found->Snapshots[static_cast<size_t>(carried.Stage)];
+			staged.Sent = std::min(staged.Sent, carried.SnapshotOffset);
 		}
 
 		for (uint32_t at = carried.First; at < carried.First + carried.Count; at++) {
@@ -956,6 +1291,17 @@ namespace engine::replication {
 
 		case MessageKind::Delta:
 			return Submit(*found, std::move(read.Delta));
+
+		case MessageKind::Disputed:
+			return Dispute(*found, read.Disputed);
+
+		case MessageKind::GroupSignatures:
+			// A client does not audit a server. The digests say what the
+			// authority believes this client holds, and a client sending them
+			// back up would be a client telling the authority what its own
+			// world is — the same line a snapshot is refused on.
+			Stats_.Refused++;
+			return false;
 
 		case MessageKind::SnapshotChunk:
 		case MessageKind::Structure:
@@ -1084,8 +1430,8 @@ namespace engine::replication {
 		}
 
 		ClientStatus status;
-		status.Streaming = found->Sent < found->Snapshot.size();
-		status.SnapshotRemaining = found->Snapshot.size() - found->Sent;
+		status.SnapshotRemaining = Owed(*found);
+		status.Streaming = status.SnapshotRemaining > 0;
 		status.Applied = found->Applied;
 		status.Known = found->Known.size();
 		return status;

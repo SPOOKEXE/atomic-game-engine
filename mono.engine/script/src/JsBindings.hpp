@@ -221,6 +221,23 @@ namespace engine::script {
 	// @return The first error a handler raised, or empty.
 	std::string PumpJsTree(JSContext *context);
 
+	// The JavaScript half of `PumpChildWaiters`: resolves every `WaitForChild`
+	// whose child has arrived or whose wait has run out.
+	//
+	// **After `PumpJsTree`, exactly as the Luau side orders it** — and for its
+	// reason: a `ChildAdded` handler and a resumed `WaitForChild` are two scripts
+	// told about one arrival, and the signal every listener shares goes first.
+	//
+	// What a waiting script actually continues on is the microtask queue, so the
+	// continuation runs in `DrainJobs` at the end of the beat rather than inside
+	// this call. That is the same one-step-later shape every `await` in this
+	// engine has, and it is the language's rather than the engine's.
+	//
+	// @param context The VM to resolve in.
+	// @return The first error a resumed script raised, or empty.
+	// @since v0.15
+	std::string PumpJsChildWaiters(JSContext *context);
+
 	// The JavaScript half of `PumpCharacters`.
 	//
 	// @param context The VM to deliver into.

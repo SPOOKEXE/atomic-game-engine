@@ -39,6 +39,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -264,15 +265,21 @@ namespace engine::script {
 				return Context.Subscriptions;
 			}
 
+			ChildWaiters &Waiters() override {
+				return Context.Waiters;
+			}
+
 			Entity Subject() const override {
 				return Self;
 			}
 
 			// Whether the method suspended the thread rather than answering.
 			//
-			// **Read by the service trampoline and by nothing else.** `lua_yield`
-			// takes its results from the stack top at the moment the C function
-			// returns, so the yield has to *be* the return — see `Await`.
+			// **Read by both trampolines and by nothing else.** `lua_yield` takes
+			// its results from the stack top at the moment the C function returns,
+			// so the yield has to *be* the return — see `Await`. The service
+			// trampoline has asked since the store services suspended; the
+			// instance one asks because `WaitForChild` does.
 			bool Suspended() const {
 				return Yielded;
 			}
@@ -581,22 +588,16 @@ namespace engine::script {
 			}
 
 			void Await(uint64_t ticket) override {
-				// **The thread is kept alive by a registry ref**, because nothing
-				// else holds a suspended coroutine: the script that started it has
-				// returned into this call and the barrier is what resumes it.
-				lua_pushthread(State);
-				lua_xmove(State, Context.State, 1);
-				const int reference = lua_ref(Context.State, -1);
-				lua_pop(Context.State, 1);
+				Suspend(Context.AwaitedTickets, ticket);
+			}
 
-				// **`insert_or_assign`, not `emplace`.** A resumed script that
-				// calls another store method suspends again on the same thread,
-				// and `emplace` would keep the *old* reference — so the fresh one
-				// would leak and the next reply would resume a thread nothing was
-				// holding.
-				Context.Threads.insert_or_assign(State, reference);
-				Context.AwaitedTickets.insert_or_assign(ticket, State);
-				Yielded = true;
+			void AwaitChild(uint64_t waiter) override {
+				// **The same suspension under a different key, which is the whole
+				// of what a second resume source costs this adapter.** What
+				// differs is only who comes back for the thread —
+				// `PumpChildWaiters` rather than `PumpDeliveries` — and what it
+				// resumes with.
+				Suspend(Context.AwaitedChildren, waiter);
 			}
 
 			[[noreturn]] void Raise(const char *message) override {
@@ -607,6 +608,31 @@ namespace engine::script {
 			}
 
 		  private:
+			// Parks the running thread until something keyed on `key` comes back
+			// for it.
+			//
+			// **The thread is kept alive by a registry ref**, because nothing else
+			// holds a suspended coroutine: the script that started it has returned
+			// into this call and the barrier is what resumes it.
+			//
+			// **`insert_or_assign`, not `emplace`.** A resumed script that
+			// suspends again does so on the same thread, and `emplace` would keep
+			// the *old* reference — so the fresh one would leak and the next
+			// resume would find a thread nothing was holding.
+			//
+			// @param waiting Which table the resume will look in.
+			// @param key     What that table keys this thread on.
+			void Suspend(std::unordered_map<uint64_t, lua_State *> &waiting, uint64_t key) {
+				lua_pushthread(State);
+				lua_xmove(State, Context.State, 1);
+				const int reference = lua_ref(Context.State, -1);
+				lua_pop(Context.State, 1);
+
+				Context.Threads.insert_or_assign(State, reference);
+				waiting.insert_or_assign(key, State);
+				Yielded = true;
+			}
+
 			// One action's record, left on the stack.
 			//
 			// Roblox's four fields, and the two it does not have are absent from
@@ -658,6 +684,15 @@ namespace engine::script {
 
 			LuauCall call(state);
 			NeutralInstanceMethods()[static_cast<size_t>(row)].Function(call);
+
+			// **A yield is the return and cannot be anything else**, which is the
+			// service trampoline's rule arriving here with the first instance
+			// method that suspends. `WaitForChild` is the only caller; every other
+			// row leaves this false, and a method that answered *and* suspended
+			// would be a bug this branch hides rather than one it makes.
+			if (call.Suspended()) {
+				return lua_yield(state, 0);
+			}
 			return call.Results();
 		}
 

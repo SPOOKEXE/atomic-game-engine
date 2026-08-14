@@ -142,9 +142,11 @@ floor.Color = IS_SECOND and Color3.new(0.16, 0.18, 0.22) or Color3.new(0.22, 0.2
 floor.Anchored = true
 floor.Parent = workspace
 
--- **Named `SpawnLocation`, because that is what `scene::FindSpawn` looks for.**
--- A character loaded into a world with none starts at the origin, which here is
--- inside the floor.
+-- **A part still *named* `SpawnLocation`, and that is a supported spelling
+-- rather than an old one.** The class exists from v0.15 and carries the team
+-- fields; a block wearing the name is read as an enabled, neutral spawn, which
+-- is all a world with no teams in it needs. A character loaded into a world with
+-- no spawn at all starts at the origin, which here is inside the floor.
 local spawn = Instance.new("Part")
 spawn.Name = "SpawnLocation"
 spawn.Size = Vector3.new(10, 1, 10)

@@ -536,21 +536,24 @@ namespace engine::render {
 		// drift, and a recorded run could not replay.
 		double AnimationSeconds = 0.0;
 
-		// How many times the surface pass runs per frame.
+		// How many levels of mirror-in-mirror to resolve, or zero to measure it.
 		//
-		// **One bounce is what this pipeline always did**, and it is why a
-		// portal seen through a portal resolved over frames: each surface
-		// sampled the others from the textures they held *last* frame. Two is
-		// the first value that closes `D00112` for the case anybody sees — the
-		// hole you are walking through, showing a hole — and every further
-		// bounce buys one more level of depth for one more scene pass per
-		// visible surface.
+		// **Zero by default, which is `scene::AUTOMATIC_SURFACE_BOUNCES`.** This
+		// was welded at two for two versions and every scene resolved exactly
+		// two levels whatever it was built from — a room with one mirror paying
+		// for a level that could never show anything, and a corridor of facing
+		// panes cut off one level into the effect. No constant is right for
+		// both, and since the levels became a recursion the cost of guessing
+		// high multiplies rather than adds: `panes × (panes - 1) ^ (levels - 1)`
+		// where the old iteration went as `panes × levels`.
 		//
-		// **Two by default rather than CodeParade's four**, because that demo's
-		// portals are the whole scene and ours share a budget with mirrors,
-		// shadows and a world. The cost is linear and the knob is public, so a
-		// scene built around a corridor of holes can ask for more.
-		uint32_t SurfaceBounces = 2;
+		// So the ordinary case is that nobody states one and each viewport's
+		// bank measures what the frame it just drew actually reached — see
+		// `SurfaceBank::Bounces` and `scene::NextSurfaceBounces`. A world that
+		// does state one (`workspace.SurfaceBounces`) or a run that does
+		// (`--surface-bounces`) overrides the measurement outright, because an
+		// author who has typed a number is not asking for a negotiation.
+		uint32_t SurfaceBounces = 0;
 
 		// How many levels the recursive portal pass goes to.
 		//
@@ -1224,6 +1227,17 @@ namespace engine::render {
 			// The same, for mirrors. Two pools rather than one, because the two
 			// passes size their targets differently — see `MirrorTarget`.
 			std::vector<MirrorLevel> Mirrors;
+
+			// What the last frame drawn into this bank reached, which is what an
+			// automatic depth reads.
+			//
+			// **Per viewport and not per renderer, for the reason the textures
+			// are.** The studio's four panels look at one world from four
+			// places, and how deep a corridor telescopes is a fact about where
+			// somebody is standing — one shared number would let the panel with
+			// the deepest view pay for every other panel's frame, and would
+			// oscillate as the panels took turns.
+			scene::SurfaceBounceProbe Bounces;
 		};
 
 		// **One bank per viewport, and that is what makes a mirror a mirror when
@@ -3744,16 +3758,17 @@ namespace engine::render {
 
 	void Renderer::SetSurfaceBounces(uint32_t bounces) {
 		if (State != nullptr) {
-			// Floored at one, because zero would mean no surface pass at all —
-			// which is a way of saying "no mirrors" that has a much clearer
-			// spelling elsewhere, and is not what somebody dialling this down
-			// means.
+			// **Zero is kept rather than floored, and that is the change.** It
+			// used to mean "no surface pass at all", which nobody wanted and
+			// which has a clearer spelling; it is
+			// `scene::AUTOMATIC_SURFACE_BOUNCES` now, and it is the default. A
+			// stated number still floors at one for the original reason.
 			//
-			// **And now capped as well**, which it did not need to be while this
-			// counted iterations of one pass. It counts levels of a recursion —
-			// see `MAX_SURFACE_DEPTH` for why that turns a large number from
+			// **Capped**, which it did not need to be while this counted
+			// iterations of one pass. It counts levels of a recursion — see
+			// `MAX_SURFACE_DEPTH` for why that turns a large number from
 			// wasteful into unfinishable.
-			State->SurfaceBounces = std::clamp<uint32_t>(bounces, 1u, MAX_SURFACE_DEPTH);
+			State->SurfaceBounces = bounces == 0 ? 0u : std::clamp<uint32_t>(bounces, 1u, MAX_SURFACE_DEPTH);
 		}
 	}
 
@@ -4606,6 +4621,36 @@ namespace engine::render {
 		// now, and one buried two bounces deep refreshes a frame later. That is
 		// the same one-frame budget the whole surface pass already runs on, and
 		// iterating to closure here would spend the saving this exists for.
+		// **How deep the mirrors go this frame, decided once and read twice.**
+		// The cull below marks that many levels visible and the pass below draws
+		// that many; a level drawn and not marked is a level culled, which is the
+		// defect the two expressions were allowed to drift into once already. One
+		// name is what stops it happening again.
+		//
+		// **A stated number wins outright and the measurement is the default.** A
+		// world's `workspace.SurfaceBounces` and `--surface-bounces` both arrive
+		// through `SetSurfaceBounces`, so by here the choice is only whether one
+		// was made. Nothing is stated: `SurfaceBank::Bounces` is what the frame
+		// before this one reached, and `scene::NextSurfaceBounces` turns it into
+		// what to draw now.
+		//
+		// **And a frame with no pane rectangle keeps the old constant**, because
+		// the iterating path is not the thing being measured — a cross-world pane
+		// shows a second simulation and a camera parented to the world has no
+		// face, so neither can be descended into and neither reports a depth.
+		const uint32_t surfaceBounces =
+			State->SurfaceBounces > 0 ? std::min(State->SurfaceBounces, MAX_SURFACE_DEPTH)
+									  : (anyPane ? scene::NextSurfaceBounces(bank.Bounces, MAX_SURFACE_DEPTH)
+												 : scene::DEFAULT_SURFACE_BOUNCES);
+
+		// What this frame reaches, which the next one reads back out of the bank.
+		//
+		// **Rebuilt every frame rather than accumulated.** A viewer who turns
+		// away from a corridor has to come back down as fast as they went up, and
+		// a running maximum would hold the deepest thing anybody ever saw for the
+		// rest of the session.
+		scene::SurfaceBounceProbe surfaceDepth;
+
 		bool surfaceVisible[scene::MAX_SURFACES] = {};
 		float surfaceCoverage[scene::MAX_SURFACES] = {};
 		if (acceptedCount > 0) {
@@ -4620,22 +4665,19 @@ namespace engine::render {
 			// which is what that module is, and a rule this pass held privately
 			// would be a rule no suite could reach — `Renderer::Render` needs a
 			// device and the answer does not.
-			// **`SurfaceBounces` and not a constant.** The pass below runs that
-			// many times and each run resolves one more level of
-			// surface-seen-in-surface, so a level this marks invisible is a level
-			// that is *culled* rather than one frame late. The two numbers were
-			// allowed to disagree when `D00112` made the pass recursive, and the
-			// result was a mirror's deeper reflections vanishing as the viewer
-			// turned — the moment a pane left the frustum, everything it had been
-			// revealing dropped past the single level this used to follow.
-			// **The same expression the pass itself uses**, and it has to stay
-			// the same one: this decides how many levels of
-			// surface-seen-in-surface are marked visible, and the pass decides
-			// how many it draws. A level drawn but not marked is a level culled.
-			// See the `bounces` line in the surface pass below — if that
-			// expression changes, this one changes with it.
-			const uint32_t cullRounds =
-				acceptedCount > 1 ? std::max<uint32_t>(State->SurfaceBounces, 1u) : 1u;
+			// **`surfaceBounces` and not a constant.** The pass below resolves
+			// that many levels of surface-seen-in-surface, so a level this marks
+			// invisible is a level that is *culled* rather than one frame late.
+			// The two numbers were allowed to disagree when `D00112` made the
+			// pass recursive, and the result was a mirror's deeper reflections
+			// vanishing as the viewer turned — the moment a pane left the
+			// frustum, everything it had been revealing dropped past the single
+			// level this used to follow.
+			//
+			// **One name rather than the same expression written twice**, which
+			// is what that drift cost and is why the depth is decided above
+			// this block instead of inside it.
+			const uint32_t cullRounds = acceptedCount > 1 ? std::max(surfaceBounces, 1u) : 1u;
 
 			(void)graph::VisibleSurfaces(
 				instances,
@@ -4707,6 +4749,17 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("surface signature", core::ProfileCategory::Render);
 
 			surfaceSignature = scene::SignatureOf(instances);
+
+			// **And how deep the mirrors are being drawn, which is an input to
+			// every one of them.** A surface pass draws the *other* panes, so a
+			// level added or taken away changes what is inside each picture as
+			// surely as moving something does — and without this the automatic
+			// depth could not climb at all in a still scene. It measures one
+			// deeper, nothing else in the frame moves, no surface refreshes, the
+			// deeper level is never drawn, and the next frame measures the same
+			// shallow answer again. Found exactly that way, on
+			// `MirrorCorridor.luau`, which is static on purpose.
+			surfaceSignature = scene::MixSignature(surfaceSignature, surfaceBounces);
 
 			// **And the other worlds, whose whole purpose is to be moving.** A
 			// destination that changed while this world sat still is the case a
@@ -5577,10 +5630,14 @@ namespace engine::render {
 		// **One fewer than the bounce count, because the surface pass is the top
 		// level.** `SetSurfaceBounces(2)` has always meant "two levels of
 		// mirror-in-mirror", and it still does: the pane's own texture is one and
-		// the recursion supplies the rest. Zero here is `SetSurfaceBounces(1)` —
-		// no recursion, every inner pane drawn flat — which is exactly what one
+		// the recursion supplies the rest. Zero here is one bounce — no
+		// recursion, every inner pane drawn flat — which is exactly what one
 		// bounce drew before and is the honest floor rather than a special case.
-		const uint32_t mirrorLevels = std::min(State->SurfaceBounces, MAX_SURFACE_DEPTH) - 1u;
+		//
+		// **The subtraction cannot underflow because every path to
+		// `surfaceBounces` floors at one**, which is why that is stated at each
+		// of them rather than defended again here.
+		const uint32_t mirrorLevels = surfaceBounces - 1u;
 
 		// **Cleared for the whole bank before anything descends.** A target holds
 		// last frame's picture from a camera that no longer exists, and a level
@@ -5591,6 +5648,39 @@ namespace engine::render {
 				target.Ready = false;
 			}
 		}
+
+		// Whether one more level of the recursion would have drawn anything.
+		//
+		// **The whole of the automatic depth's measurement, and it asks the
+		// descent's own two questions rather than an approximation of them.** A
+		// pane in the draw list is not enough — most of them are behind this
+		// level's camera — and a pane in the frustum is not enough either, since
+		// one seen edge-on has no continuous orientation to reflect through and
+		// renders nothing. Answering either of those looser questions would ask
+		// for a level that comes back empty, measure one shallower for it, and
+		// ask again: the depth would sit oscillating between two values for as
+		// long as the viewer stood still.
+		//
+		// Up to sixteen frustum tests and a reflection, once per pane at the
+		// bottom level only, beside a scene render each.
+		const auto wouldDescend = [&](const glm::mat4 &from, const core::CFrame &frame, int8_t skip) {
+			for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+				if (!havePanes[slot] || static_cast<int8_t>(slot) == skip) {
+					continue;
+				}
+
+				const scene::SurfacePane &pane = panes[slot];
+				if (!graph::VisiblePane(from, pane.Centre, pane.First, pane.Second)) {
+					continue;
+				}
+
+				if (scene::ReflectCamera(pane, frame, {}).Renders) {
+					return true;
+				}
+			}
+
+			return false;
+		};
 
 		// One level: fill `bank.Mirrors[level][i]` for every mirror `i` this
 		// camera can see, then leave them for the caller to sample.
@@ -5646,8 +5736,18 @@ namespace engine::render {
 				// level below just wrote. The pool is per level, so the targets
 				// filled here survive exactly until this loop has finished with
 				// them.
+				//
+				// **At the bottom the same question is asked and not acted on**,
+				// which is what tells the next frame whether the budget was the
+				// thing that stopped it. This pane is about to be drawn flat
+				// inside its own picture; whether that is the end of the chain or
+				// the end of the allowance is exactly `wouldDescend`.
 				if (level > 0) {
 					fillMirror(matrices.ViewProjection, eye.Frame, level - 1, static_cast<int8_t>(slot));
+				} else {
+					surfaceDepth.Deeper =
+						surfaceDepth.Deeper ||
+						wouldDescend(matrices.ViewProjection, eye.Frame, static_cast<int8_t>(slot));
 				}
 
 				// **The authored size, with no screen-coverage scaling.** A pane's
@@ -5760,6 +5860,13 @@ namespace engine::render {
 				target->Sampling = matrices.ViewProjection;
 				target->Ready = true;
 				result.SurfacePasses++;
+
+				// **Counted from the eye rather than from the pool.** The pool
+				// index runs the other way — `mirrorLevels - 1` is the level
+				// nearest the screen and zero is the deepest — and what the next
+				// frame's arithmetic needs is a depth, with the surface pass
+				// itself as one.
+				surfaceDepth.Resolved = std::max(surfaceDepth.Resolved, mirrorLevels + 1u - level);
 			}
 		};
 
@@ -5816,14 +5923,13 @@ namespace engine::render {
 			// `Slot ^ 1`, and a surface skipped this frame must keep the matrices
 			// that drew what it holds.
 			//
-			// **`graph::VisibleSurfaces` is given `SurfaceBounces` regardless**,
+			// **`graph::VisibleSurfaces` is given `surfaceBounces` regardless**,
 			// above, where `cullRounds` is computed — and it must be. That decides
 			// how many levels of surface-seen-in-surface are *marked visible*, and
 			// a level the recursion draws without being marked is a level culled,
 			// which is what made a mirror's deeper reflections vanish as the viewer
 			// turned. The two numbers describe the same depth by two routes.
-			const uint32_t bounces =
-				anyPane ? 1u : (acceptedCount > 1 ? std::max<uint32_t>(State->SurfaceBounces, 1u) : 1u);
+			const uint32_t bounces = anyPane ? 1u : (acceptedCount > 1 ? std::max(surfaceBounces, 1u) : 1u);
 
 			for (uint32_t bounce = 0; bounce < bounces; bounce++) {
 
@@ -5880,6 +5986,12 @@ namespace engine::render {
 					// now are consumed by the draws a few lines down and then
 					// overwritten by the next pane's descent. Hoisting this out of
 					// the loop would give every pane the last one's reflections.
+					//
+					// **And with no levels below it, the same question is asked
+					// here instead**, because one bounce is a depth the automatic
+					// rule has to be able to climb out of: a corridor at one level
+					// draws every inner pane flat, and nothing else in the frame
+					// would say that a second level had anything to show.
 					if (mirrorLevels > 0 && havePanes[self]) {
 						fillMirror(
 							accepted[index].ViewProjection,
@@ -5887,6 +5999,12 @@ namespace engine::render {
 							mirrorLevels - 1,
 							static_cast<int8_t>(self)
 						);
+					} else if (havePanes[self]) {
+						surfaceDepth.Deeper = surfaceDepth.Deeper || wouldDescend(
+																		 accepted[index].ViewProjection,
+																		 accepted[index].View->Frame,
+																		 static_cast<int8_t>(self)
+																	 );
 					}
 
 					// **Cycled**, because this half of the pair is written here and
@@ -6168,7 +6286,26 @@ namespace engine::render {
 				// would end up an interval staler than the cap promises.
 				state.Drawn = frameSeconds;
 				result.SurfacePasses++;
+
+				// The surface pass is level one, so a frame that drew any
+				// surface at all has resolved at least that much.
+				surfaceDepth.Resolved = std::max(surfaceDepth.Resolved, 1u);
 			}
+
+			// **Written back only where the pass actually ran**, which is the
+			// half that is easy to get wrong and was. A surface whose signature
+			// has not moved is deliberately not redrawn, so on a still scene most
+			// frames draw no surface at all — and a measurement written on those
+			// frames says "nothing was resolved", which reads back as one level
+			// and throws away a depth the frames that did draw had worked out. A
+			// skipped pass has measured nothing rather than measured zero.
+			//
+			// **A render fact, and it stays one.** Nothing here reaches an
+			// `ecs::Store`: next frame's depth is derived from last frame's
+			// picture, which is exactly the sort of thing `AGENTS.md` rule 5
+			// refuses to let into a tick. A recorded run replays byte-identically
+			// whatever this measured, because the simulation never sees it.
+			bank.Bounces = surfaceDepth;
 		}
 
 		// --- the portal pass -------------------------------------------------

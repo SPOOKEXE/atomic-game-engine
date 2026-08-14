@@ -8,6 +8,8 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Teams.hpp>
 
 #include <algorithm>
 #include <array>
@@ -257,6 +259,50 @@ namespace engine::scene {
 			return property;
 		}
 
+		// `Player.Team`, and the only reason this class exists.
+		//
+		// **Writable, unlike every other reference on a `Player` but
+		// `Character`.** Which side somebody is on is a decision a game script
+		// makes and remakes — a round ends, an autobalance runs — where
+		// `UserId`, `PlayerGui` and the rest are facts about the connection.
+		// `SetPlayerTeam` is the setter rather than a field write because it
+		// refuses anything that is not a live `Team`, which is where that
+		// mistake is cheapest to catch.
+		//
+		// **Computed rather than a field**, for `Character`'s reason one
+		// property up: a `Player` is registered with `PlayerIdentity` alone, so
+		// `PlayerTeam` is added to the row on the first assignment and is absent
+		// before it — which a generated field property has no way to answer nil
+		// for.
+		//
+		// @since v0.15
+		PropertyDescriptor TeamProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Team");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(Entity);
+			property.Kind = PropertyKind::Computed;
+
+			// Names the row the answer comes from, so a `.Changed` listener
+			// fires when somebody swaps sides.
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<PlayerTeam>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				// **Nil rather than a failure for a player on no side**, which
+				// is the state a world starts in and stays in until a game says
+				// otherwise. `if player.Team then` is how a script asks.
+				*static_cast<Entity *>(out) = TeamOf(store, instance);
+				return true;
+			};
+
+			property.Set = [](Store &store, Entity instance, const void *value) -> bool {
+				return SetPlayerTeam(store, instance, *static_cast<const Entity *>(value));
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor ScopeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Scope");
@@ -289,7 +335,7 @@ namespace engine::scene {
 
 		// One service: what to call it, who sees it, and where it sits.
 		//
-		// **A table rather than nine registration calls**, for `input`'s
+		// **A table rather than thirteen registration calls**, for `input`'s
 		// `BINDINGS` reason: the list of services is the thing being described,
 		// and a tenth service should be a line here rather than an edit in
 		// three functions. `InstallServices` walks the same table it was
@@ -308,7 +354,7 @@ namespace engine::scene {
 			std::string_view Parent;
 		};
 
-		constexpr std::array<ServiceDesc, 12> SERVICES{{
+		constexpr std::array<ServiceDesc, 13> SERVICES{{
 			// **Workspace first, and the order matters.** These are created in
 			// this order and the explorer draws roots in creation order, so
 			// this is the order an author sees — Workspace at the top, exactly
@@ -346,6 +392,19 @@ namespace engine::scene {
 			// which of them is itself. A `Client` scope would hide the list
 			// from the authority that maintains it.
 			{"Players", ServiceScope::Shared, {}},
+
+			// **`Shared`, and for exactly `Players`' reason.** A server decides
+			// who is on which side and puts them there; a client asks which
+			// side it is on so it can colour a name and read a scoreboard. A
+			// `Client` scope would hide the list from the authority that
+			// maintains it, and a `Server` one would leave a client unable to
+			// answer `LocalPlayer.Team`.
+			//
+			// **Last, so it is last in the explorer.** These are created in the
+			// order this table lists and the explorer draws roots in creation
+			// order, so appending here is the same rule
+			// `RegisterSceneComponents` keeps one file over.
+			{"Teams", ServiceScope::Shared, {}},
 		}};
 
 		// `workspace.CurrentCamera`: a reference over the `ActiveCamera` resource.
@@ -430,6 +489,62 @@ namespace engine::scene {
 			return property;
 		}
 
+		// `workspace.SurfaceBounces`: how deep a chain of mirrors this world
+		// resolves, over the `SurfaceBounces` resource.
+		//
+		// **On `Workspace` because it is a statement about the scene**, and the
+		// scene is what is in there. The alternative reading — that it is a
+		// quality setting and belongs beside `Lighting`'s — is the one the
+		// command line already had and is exactly what this replaces: a corridor
+		// of facing panes needs a different number from a room with one mirror
+		// in it, and which of those a world *is* is not something a session
+		// picks.
+		//
+		// **The resource is the storage and this is the only way in**, which is
+		// `CurrentCameraProperty`'s design and the reason it takes the same
+		// shape: a component on `Workspace` would be a second place the number
+		// lived, and the two would disagree the first time a host set the
+		// resource directly.
+		//
+		// Zero is `AUTOMATIC_SURFACE_BOUNCES` and is the default, so a world
+		// that never says anything writes nothing into its own file.
+		PropertyDescriptor SurfaceBouncesProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("SurfaceBounces");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+
+			// **The resource's own component id, which `CurrentCamera` could
+			// not name.** A resource is keyed by a component id like anything
+			// else, so a `.Changed` listener on this fires when this number is
+			// written and not when something adjacent is.
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceBounces>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<int32_t *>(out) = SurfaceBouncesOf(store);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				// **A negative is refused rather than clamped**, because it is
+				// the one value that cannot be a mistake about the ceiling: too
+				// large is a world asking for more than the device will
+				// allocate, which is drawn at what it can, and below zero is a
+				// world asking for something the word does not mean.
+				const auto levels = *static_cast<const int32_t *>(value);
+				if (levels < 0) {
+					return false;
+				}
+
+				store.SetResource(SurfaceBounces{levels});
+				return true;
+			};
+
+			return property;
+		}
+
 		ClassId RegisterServiceTree() {
 			// The root of everything, and the components these classes are sets
 			// of, both through `PartClass`. A service derives from `Instance`,
@@ -483,6 +598,13 @@ namespace engine::scene {
 			const std::array playerSet{ecs::Components::Of<PlayerIdentity>()};
 			const ClassId player = Classes::Register("Player", instance, playerSet);
 
+			// **A `Team` is an instance for `Player`'s reason**, one line up: a
+			// game makes as many as it has sides, destroys them when a round
+			// ends, and reaches them through `Teams`. Derived from `Instance` so
+			// the class picker's service exclusion does not hide it.
+			const std::array teamSet{ecs::Components::Of<Team>()};
+			const ClassId team = Classes::Register("Team", instance, teamSet);
+
 			// **The one hook a game needs to make a character walk.** Setting it
 			// is what links a model to a player, and every consumer downstream —
 			// the client's move submission, the host's move application, the
@@ -506,10 +628,24 @@ namespace engine::scene {
 			// changing the rule for everybody.
 			Classes::Property<&PlayerIdentity::RespawnTime>(player, "RespawnTime");
 
+			// **The side, and it is what decides where a respawn puts them.**
+			// `FindSpawn` reads this against every `SpawnLocation` in the
+			// workspace — see `Teams.hpp` — which is what keeps a team from
+			// being a coloured label.
+			Classes::Computed(player, TeamProperty());
+
+			// **`TeamColor` and not `Colour`**, which is the spelling rule this
+			// codebase keeps: a script written against Roblox says
+			// `team.TeamColor`, and a second word for one thing is the debt
+			// `AGENTS.md` calls the most expensive kind. The *field* is British
+			// because it is local code; the *property* is the one that crosses.
+			Classes::Property<&Team::Colour>(team, "TeamColor");
+
 			Classes::Computed(service, ScopeProperty());
 
 			const ClassId workspace = Classes::Find(core::Name("Workspace"));
 			Classes::Computed(workspace, CurrentCameraProperty());
+			Classes::Computed(workspace, SurfaceBouncesProperty());
 
 			const ClassId players = Classes::Find(core::Name("Players"));
 			Classes::Computed(players, LocalPlayerProperty());
@@ -594,7 +730,7 @@ namespace engine::scene {
 
 	ServiceScope ScopeOfInstance(const Store &store, Entity instance) {
 		// **Up to the root, and the *root* is what carries the scope.** A
-		// service is always a root — `InstallServices` parents nine of them to
+		// service is always a root — `InstallServices` parents eleven of them to
 		// nothing and `StarterPlayerScripts` to `StarterPlayer` — so walking to
 		// the top and reading there is the same answer as reading the nearest
 		// service on the way, with one lookup instead of one per level.

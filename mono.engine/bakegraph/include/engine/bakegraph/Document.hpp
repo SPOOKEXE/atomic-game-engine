@@ -35,6 +35,13 @@
 // enters, and a test supplies one backed by a map.
 //
 //
+// ## What a world carries is the set, not the document
+//
+// `PipelineSet` at the bottom of this file is the named collection, and it is
+// what `game`'s `<AssetPipelines>` block holds — one text block in the world
+// document, in this format, embedded rather than restated as XML. One grammar
+// for a pipeline; the save format names it and does not redescribe it.
+//
 // ## Why this is not in `bake`
 //
 // **So that `Engine::game` can read a pipeline out of a save file without
@@ -51,6 +58,7 @@
 // @tier L9 · shared
 
 #include <engine/bakegraph/Nodes.hpp>
+#include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
 
 #include <cstddef>
@@ -292,4 +300,96 @@ namespace engine::bake {
 	// @param offender Set to the offending line's text. Untouched on success.
 	// @return `Ok`, or why not.
 	DocumentStatus Read(std::string_view text, Document &document, std::string &offender);
+
+	// Several named pipelines, which is what one world carries.
+	//
+	// **A world does not have *a* bake pipeline any more than it has *a*
+	// script.** v0.11 asks for many node trees in one editor, so the thing a
+	// save file holds is the collection rather than one document — and a format
+	// that carried one would need a second format the day somebody added a
+	// second chain.
+	//
+	// **Names are sorted by text on the way out.** A set written twice with the
+	// same contents produces byte-identical text whatever order it was built in,
+	// which is what makes a save file diffable and a round-trip test meaningful.
+	// By text and not by `core::Name::operator<`, which orders by the interning
+	// counter — first-seen order is a property of the process rather than of the
+	// document, and rule 4 is about exactly that difference.
+	//
+	// Two parallel vectors searched linearly, for `script::SourceCache`'s
+	// reason: a world holds a handful of pipelines and a `core::Name` compare is
+	// an integer compare, so a map would cost an allocation per world to improve
+	// a lookup nobody has measured.
+	//
+	// @since v0.15
+	class PipelineSet {
+	  public:
+		// Adds a pipeline, or replaces the one of that name.
+		//
+		// **Replaces rather than refuses.** Saving over a pipeline is what
+		// "save" means; a duplicate is only a mistake inside one graph.
+		//
+		// @param name     What it is called. An invalid or empty name is
+		//                 refused, because a pipeline this cannot name is one it
+		//                 cannot write back.
+		// @param document The pipeline. Taken by value; move it in.
+		// @return `false` for an unnamed pipeline.
+		bool Set(core::Name name, Document document);
+
+		// One pipeline.
+		//
+		// @param name Which.
+		// @return The document, or null when there is no such name.
+		const Document *Find(core::Name name) const;
+
+		// Drops one.
+		//
+		// @param name Which.
+		// @return `false` when there was no such name.
+		bool Remove(core::Name name);
+
+		// Every name it holds, sorted by text.
+		//
+		// @return The names. Valid until the next `Set`, `Remove` or `Clear`.
+		std::span<const core::Name> Names() const {
+			return Order;
+		}
+
+		// How many pipelines it holds.
+		size_t Count() const {
+			return Order.size();
+		}
+
+		// Forgets everything.
+		void Clear();
+
+	  private:
+		// Parallel to `Order` and kept in step by every mutator, so `Names` can
+		// hand back a span rather than building one per call.
+		std::vector<core::Name> Order;
+		std::vector<Document> Documents;
+	};
+
+	// Writes a set as text.
+	//
+	// **One `pipeline` line then that pipeline's operations**, repeated under a
+	// single header, so the one-document format is a strict substring of this
+	// one and a reader of either can be understood from the other.
+	//
+	// @param set The pipelines.
+	// @return The text, ending in a newline.
+	std::string Write(const PipelineSet &set);
+
+	// Reads a set back.
+	//
+	// **Operations before the first `pipeline` line are refused**, because a set
+	// is not a document with extra parts — an operation belonging to no named
+	// pipeline is a file somebody hand-edited into a shape this cannot
+	// represent.
+	//
+	// @param text     What `Write` produced.
+	// @param set      Filled in. Cleared first.
+	// @param offender Set to the offending line's text. Untouched on success.
+	// @return `Ok`, or why not.
+	DocumentStatus Read(std::string_view text, PipelineSet &set, std::string &offender);
 }

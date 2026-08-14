@@ -44,6 +44,7 @@
 // Assets Pipeline panels were built on; it is removed. See the member and
 // method markers below.
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
@@ -68,13 +69,16 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
+#include <nodegraph/Editor.hpp>
+#include <nodegraph/Evaluate.hpp>
+#include <nodegraph/Graph.hpp>
+#include <nodegraph/Preview.hpp>
 #include <span>
 #include <string>
 #include <studio/AssetCatalogue.hpp>
 #include <studio/Commands.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
-#include <studio/NodeGraph.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Preview.hpp>
@@ -531,19 +535,20 @@ namespace studio {
 		// @since v0.15
 		double FixedAnimationStep = 0.0;
 
-		// How many levels of surface-seen-in-surface the renderer resolves, or 0
-		// to leave the renderer's own default of two.
+		// How many levels of surface-seen-in-surface to resolve, or 0 to let the
+		// world and the renderer decide.
 		//
-		// **`Renderer::SetSurfaceBounces` had no caller at all**, which is how a
-		// knob its own comment calls public stayed welded at two for two
-		// versions. Two resolves a mirror seen in a mirror and nothing deeper, so
-		// a room of facing panes loses every level past the second — the pane
-		// draws as its own tint, because a slot that never rendered is not
-		// `Ready` and the shader falls back rather than showing a wrong picture.
+		// **An override and not a setting, which is what changed at v0.15.** A
+		// knob its own comment called public stayed welded at two for two
+		// versions, and then had exactly one caller: this. It has the right two
+		// now — the world says how deep its own mirrors go through
+		// `workspace.SurfaceBounces`, and where it says nothing the renderer
+		// measures the frame it just drew.
 		//
-		// **Each level costs a full scene pass per visible surface**, which is
-		// why the default is two and why this is a number an author sets for a
-		// scene rather than something the engine raises on their behalf.
+		// **Each level multiplies the passes rather than adding one**, since the
+		// levels became a recursion: `panes × (panes - 1) ^ (levels - 1)`. So
+		// this is for measuring one depth against another on a scene, which is
+		// what it was added to do, rather than for turning the engine up.
 		//
 		// @since v0.15
 		int SurfaceBounces = 0;
@@ -701,6 +706,37 @@ namespace studio {
 	// The table is O(n·m) and this is a bound on the work, not on the answer —
 	// past it the diff degrades rather than failing, and says so.
 	inline constexpr size_t DIFF_CELL_LIMIT = 4u * 1000u * 1000u;
+
+	// Hands `Vendor::nodegraph` the four values it draws chrome with.
+	//
+	// **The whole of what the library asks this program for.** A canvas paints
+	// its nodes from its own `Style`, but a palette popup, a section heading and
+	// a stage that has not run are the *editor's* text rather than a graph's, and
+	// a library that guessed at those would look like something else docked
+	// beside this one.
+	//
+	// Called every frame the panel draws rather than once at start-up, because
+	// the theme and the interface scale are both settings somebody can change
+	// while the panel is open.
+	//
+	// @since v0.15
+	void ApplyNodeChrome();
+
+	// A node's picture, as the texture the renderer takes.
+	//
+	// **A free function because it is the seam, and a seam is the thing to
+	// test.** `nodegraph::PreviewImage` promises red first and the top row first
+	// at four bytes a pixel, which is exactly `TextureFormat::RGBA8` — and
+	// nothing in either repository would notice the day that stopped being true,
+	// because a wrongly-ordered thumbnail is a picture that still draws.
+	//
+	// @param image What a node produced.
+	// @param out   Filled. Untouched when the picture is not a picture.
+	// @return `false` for an empty or inconsistent image, which is what a
+	//         payload nobody taught the library to draw produces.
+	//
+	// @since v0.15
+	bool NodePreviewTexture(const nodegraph::PreviewImage &image, engine::assets::TextureData &out);
 
 	// The window, the renderer, the interface and the game.
 	//
@@ -2012,12 +2048,12 @@ namespace studio {
 		// The selected node's knobs, as real widgets.
 		//
 		// **The same `WidgetSpec` the canvas paints and hit-tests from**, which
-		// is the third consumer `NodeGraph.hpp` promises: a knob that existed
+		// is the third consumer `nodegraph/Layout.hpp` promises: a knob that existed
 		// here and not on the node, or took a different range, would be two
 		// declarations of one thing.
 		//
 		// @return Whether anything was changed.
-		bool DrawNodeDemoWidgets(nodes::Node &node);
+		bool DrawNodeDemoWidgets(nodegraph::Node &node);
 
 		// Writes one node's picture beside the graph file, as a PNG.
 		//
@@ -2026,7 +2062,7 @@ namespace studio {
 		// link, and a stored-block encoder needs nothing linked at all.
 		//
 		// @return What to say about it, either way.
-		std::string ExportNodeDemoImage(nodes::NodeId node);
+		std::string ExportNodeDemoImage(nodegraph::NodeId node);
 
 		// Snapshot undo over the demo graph.
 		//
@@ -2047,7 +2083,7 @@ namespace studio {
 		// to a result rather than to a node, so two nodes computing one thing
 		// share a texture and an edit makes a new key instead of overwriting a
 		// live one.
-		void *NodeDemoImage(uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make);
+		void *NodeDemoImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
 
 		// The 3-D view's picture, which is one texture rather than a table of
 		// them.
@@ -2059,7 +2095,7 @@ namespace studio {
 		// the one being drawn, and the one it replaced — which is released
 		// between frames, because a texture dropped while a draw list still
 		// names it is a use-after-free on the GPU.
-		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make);
+		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
 
 		// Releases every preview texture. Called when the cache is dropped and
 		// when the graph is replaced — a texture per result would otherwise be a
@@ -4387,10 +4423,10 @@ namespace studio {
 		// containers and nothing else.
 		//@{
 		bool ShowNodeDemo = false;
-		nodes::Graph NodeDemoGraph;
-		nodes::Canvas NodeDemoCanvas;
-		nodes::Evaluator NodeDemoRunner;
-		nodes::RunReport NodeDemoReport;
+		nodegraph::Graph NodeDemoGraph;
+		nodegraph::Canvas NodeDemoCanvas;
+		nodegraph::Evaluator NodeDemoRunner;
+		nodegraph::RunReport NodeDemoReport;
 
 		// The signature the demo last evaluated at, so dragging a node does not
 		// recompute a graph that has not changed.

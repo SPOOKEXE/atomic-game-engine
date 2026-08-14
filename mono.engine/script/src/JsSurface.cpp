@@ -908,6 +908,52 @@ namespace engine::script {
 		return firstError;
 	}
 
+	std::string PumpJsChildWaiters(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		if (bound.Waiters.Empty()) {
+			return {};
+		}
+
+		std::vector<ChildWaiters::Resumption> ready;
+		bound.Waiters.Advance(*bound.World, bound.World->Time().Tick, ready);
+
+		std::string firstError;
+		for (const ChildWaiters::Resumption &resumption : ready) {
+			const auto waiting = bound.AwaitedChildren.find(resumption.Waiter);
+			if (waiting == bound.AwaitedChildren.end()) {
+				continue;
+			}
+
+			const CallbackRef resolver = waiting->second;
+			bound.AwaitedChildren.erase(waiting);
+
+			// **`null` and not `undefined` for a wait that ran out**, which is
+			// what every other lookup on this surface answers with — see
+			// `ReturnInstance`. A promise resolving to `undefined` would read as
+			// one nobody gave a value to.
+			JSValue child =
+				resumption.Child == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, resumption.Child);
+
+			// **Taken off the context whether or not it is reported**, which is
+			// what `ExceptionOf` does: a pending exception left there would
+			// surface in whatever this VM did next, a long way from the resume
+			// that threw.
+			JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &child);
+			if (JS_IsException(result)) {
+				const std::string message = ExceptionOf(context, "a resumed WaitForChild failed");
+				if (firstError.empty()) {
+					firstError = message;
+				}
+			}
+
+			JS_FreeValue(context, result);
+			JS_FreeValue(context, child);
+			Release(context, resolver);
+		}
+
+		return firstError;
+	}
+
 	std::string PumpJsCharacters(JSContext *context) {
 		JsContext &bound = JsOf(context);
 

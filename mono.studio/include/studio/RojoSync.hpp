@@ -29,6 +29,7 @@
 // | `default.project.json` in `D/` | `D` **is** that project, and `D` is not also walked |
 // | `X.txt` | a `StringValue` holding the file |
 // | `X.csv` | a `LocalizationTable` holding the file |
+// | `X.rbxm` | the instance in that binary model, named `X` |
 //
 // `.lua` is accepted everywhere `.luau` is, because Rojo's own table is written
 // in terms of `.lua` and a project may predate the newer extension.
@@ -54,23 +55,51 @@
 // other file — reading only `init.luau` made every `init.server.luau` project a
 // folder plus a stray script called `init`.
 //
+// ## The binary model, and what it does not carry over
+//
+// **`.rbxm` is read by `bake::ReadRobloxModel` and only mapped here**, because a
+// parser for a foreign binary format is the largest attack surface a content
+// pipeline has and `bake` is the module that is allowed to hold one. What this
+// file adds is the three decisions Rojo's table implies and the reader has no
+// business taking:
+//
+// - **One instance, named after the file.** The container allows any number at
+//   its top level and Rojo's table maps a model file to one; a file with several
+//   is refused by name rather than wrapped in a folder nobody wrote. The name
+//   comes from the path, as it does for every other row above — the children
+//   keep their own.
+// - **A class this engine does not have becomes a `Folder` and says so**, which
+//   is the same answer a `$className` already gets. One question, one answer,
+//   whichever format asked it.
+// - **A script's `Source` is staged into the world's `SourceCache`** under a key
+//   naming where the instance sits in the file. Roblox keeps the text on the
+//   instance and this engine keeps a path, so an import that only made the
+//   instance would produce a `Script` that never runs — which looks exactly like
+//   a script with a bug in it.
+//
+// **What a `.rbxm` cannot bring is what the reader refuses**, and `bake`'s
+// `RobloxModel.hpp` carries the list and the argument. The two worth knowing
+// here are that an **enum** is a number naming a member of Roblox's table, which
+// this engine has no copy of, and that a **reference** is a number naming a row
+// of the file, which is not identity anything outside it can resolve. Both are
+// reported by class and property rather than dropped.
+//
+// A property this engine has no declaration for is **counted rather than
+// listed**: Studio writes every property of every class, so a note each would be
+// a hundred lines saying this engine is smaller than Roblox.
+//
 // ## What this does not do
 //
-// **Three rows of Rojo's table are still reported rather than built, and each
-// names a dependency this repository does not vendor:**
+// **One row of Rojo's table is still reported rather than built, and it names a
+// dependency this repository does not vendor:**
 //
-// - **`.rbxm`** is Roblox's binary model — LZ4-framed chunks, interned strings
-//   and a referent table. That is a format reader, and it belongs beside the
-//   other model decoders in `bake` rather than in an editor.
 // - **`.rbxmx`** is the same tree as XML, and **nothing here parses XML**.
 //   `mono.vendor` holds JSON and no XML library, so this is a vendor decision
 //   before it is a feature.
-// - **`.toml`** would be a `ModuleScript` like `.json` is — the emitter already
-//   exists and is shared — and **nothing here parses TOML** either.
 //
-// Each is named in the report by what Rojo says it is, so a gap reads as a gap
-// rather than as an unrecognised file, and `D00104` carries what closing each
-// would take.
+// It is named in the report by what Rojo says it is, so a gap reads as a gap
+// rather than as an unrecognised file, and `D00104` carries what closing it
+// would take. `.toml` closed at v0.13 and `.rbxm` at v0.15.
 //
 // **A `.meta.json` cannot change a class.** A class is the archetype an entity
 // was created in, and `Store` offers no way to move a live row between class

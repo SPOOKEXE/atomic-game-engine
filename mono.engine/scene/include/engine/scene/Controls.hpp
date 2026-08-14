@@ -145,8 +145,15 @@ namespace engine::scene {
 	//
 	// **Deliberately small.** `ROADMAP.md` says "basic character controls" and the
 	// instruction beside it says to spend the time on the particles instead, so
-	// this is a capsule, a speed, a jump and whether the ground is under it —
-	// and not a state machine, an animator, a ladder or a swim.
+	// this is a capsule, a speed, a jump, a life and whether the ground is under
+	// it — and not a state machine, an animator, a ladder or a swim.
+	//
+	// **The life arrived at v0.15 and it is what "dead" means.** Until then a
+	// character died by being destroyed and `UpdateRespawns` measured the delay
+	// from the tick a player was first seen with no body, which is Roblox's
+	// *delay* with Roblox's *trigger* missing. `scene::TakeDamage` and
+	// `scene::IsDead` are the two functions that gap needed;
+	// `Characters.hpp` carries what happens at zero.
 	//
 	// @since v0.10
 	struct Humanoid {
@@ -217,6 +224,23 @@ namespace engine::scene {
 		// tolerance is what turns that into walking.
 		float GroundTolerance = 0.15f;
 
+		// How much life is left. Zero is dead.
+		//
+		// **The authority's number, and a client's is a copy of it.**
+		// `scene.Humanoid` replicates by the ordinary `scene.` prefix rule, so a
+		// client reads this off its own store to draw a bar — and
+		// `ecs::Store::SetProperty` refuses a write in a replica, which is where
+		// this engine already answers "who owns a row" for every property there
+		// is. `scene::TakeDamage` makes the same refusal for the C++ door, so
+		// there is one answer rather than a script rule and a code rule.
+		float Health = 100.0f;
+
+		// The ceiling `Health` is clamped against.
+		//
+		// Roblox's hundred, so a game that sets neither gets a bar that starts
+		// full and a hit that means a readable fraction of it.
+		float MaxHealth = 100.0f;
+
 		// Whether something is under it, as of the last step.
 		bool Grounded = false;
 
@@ -232,8 +256,30 @@ namespace engine::scene {
 		bool Enabled = true;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved = 0;
+		//
+		// **Five bytes rather than one, and that is what the two health floats
+		// paid for.** An `ecs::Entity` aligns to eight, so this object rounds up
+		// to a multiple of eight whatever is in it — and at one byte the round-up
+		// was four *unnamed* bytes on the end, which a snapshot writes and nobody
+		// initialises. Widening the named run to reach the boundary exactly is
+		// how the rest of this module states the same rule, and `just
+		// determinism` is what checks it: two runs of one scene writing
+		// different bytes is what uninitialised padding looks like from outside.
+		uint8_t Reserved[5] = {};
 	};
+
+	// Whether a humanoid has run out of life.
+	//
+	// **One spelling of the comparison, because three passes ask it.**
+	// `StepCharacters` refuses to drive a dead body, `UpdateRespawns` starts the
+	// respawn clock from it and `TakeDamage` uses it to make a death happen once
+	// — and `<= 0` written out three times is three chances for one of them to
+	// become `< 0` and quietly stop agreeing with the other two.
+	//
+	// @param humanoid The row to ask about.
+	// @return `true` when `Health` has reached zero.
+	// @since v0.15
+	bool IsDead(const Humanoid &humanoid);
 
 	// Turns this frame's input into camera angles and a zoom distance.
 	//
@@ -390,6 +436,13 @@ namespace engine::scene {
 	// **In the simulation and against the fixed tick**, because it writes a
 	// `Motion` the physics step integrates. `UpdateCharacterControl` may run in
 	// either phase — it only writes an intent — but this must not.
+	//
+	// **A dead humanoid is skipped, which is what makes a body stay where it
+	// fell.** Roblox leaves the corpse for `Player.RespawnTime` and then replaces
+	// it; the gate is here rather than on the intent because this is the half
+	// that reaches a `Motion` — a dead character keeps whatever momentum killed
+	// it and then falls, instead of walking on with the last direction its owner
+	// pressed.
 	//
 	// **Ground detection is a downward ray and the query is the caller's.** This
 	// module may not link `physics`, so `Grounded` is read rather than computed:

@@ -14,8 +14,10 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/Teams.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
@@ -737,6 +739,34 @@ namespace engine::scene {
 		ecs::Components::Register<CharacterChanges>(
 			"scene.CharacterChanges", WriteCharacterChanges, ReadCharacterChanges
 		);
+
+		// **Registered rather than left to be minted, unlike `Gravity` and
+		// `Sun` beside it.** `workspace.SurfaceBounces` is a declared property,
+		// so the class table names this resource's component id while the tree
+		// is being registered — and a type that reaches `Components::Of` before
+		// an explicit name arrives keeps the compiler's spelling and aborts when
+		// the real one turns up. Appended, for this list's standing reason.
+		ecs::Components::Register<SurfaceBounces>("scene.SurfaceBounces");
+
+		// **The three the team pipeline added, appended for this list's
+		// standing reason**: a component id is registration order, an archetype
+		// is a sorted list of ids, and inserting one anywhere but the end
+		// reorders how every row in the engine is visited.
+		//
+		// All three are the generated form. A `Team` is three floats, a
+		// `SpawnLocation` is three floats and two flags, and a `PlayerTeam` is
+		// an `Entity` — a directory index a snapshot and a replica both restore
+		// exactly, which is the argument `scene.PlayerCharacter` already makes.
+		// No `core::Name` anywhere in them, so there is nothing to hand-write.
+		//
+		// **`scene.SpawnLocation` has to cross, and that is not obvious.** A
+		// spawn pad is authored geometry, so the *part* would replicate anyway;
+		// what this row carries is which side may use it, and a client that ran
+		// `FindSpawn` — the studio does, through `PlayLink` — would put
+		// everybody on the first neutral pad without it.
+		ecs::Components::Register<Team>("scene.Team");
+		ecs::Components::Register<PlayerTeam>("scene.PlayerTeam");
+		ecs::Components::Register<SpawnLocation>("scene.SpawnLocation");
 	}
 
 	void RegisterSceneClasses() {

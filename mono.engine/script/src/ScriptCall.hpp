@@ -75,9 +75,10 @@
 // v0.16. `Forget`, `ReadProperty` and `ConnectOnce` arrived at v0.18 with the
 // last twenty instance methods and the interface a UI author reaches for —
 // `Forget` is what made `Destroy` and `ClearAllChildren` neutral, and the other
-// two are `GuiObject`'s three tween methods. Each one names its caller in its
-// own comment, so a member nothing calls any more is a member with a lie above
-// it.
+// two are `GuiObject`'s three tween methods. `Waiters` and `AwaitChild` arrived
+// with `WaitForChild`, which is the first method here that resumes on something
+// other than a bus reply. Each one names its caller in its own comment, so a
+// member nothing calls any more is a member with a lie above it.
 //
 // ## `ScriptValue` is a *payload* here, and that is not a contradiction
 //
@@ -97,6 +98,7 @@
 #include "Actions.hpp"
 #include "Bus.hpp"
 #include "Changes.hpp"
+#include "ChildWaiters.hpp"
 #include "Codec.hpp"
 #include "Debris.hpp"
 #include "Signals.hpp"
@@ -188,6 +190,16 @@ namespace engine::script {
 
 		// What this VM has queued for destruction, and when.
 		virtual DebrisQueue &Debris() = 0;
+
+		// Who in this VM is suspended on a child arriving, and until when.
+		//
+		// **On the interface for `Debris`' reason and one step further.** A
+		// deadline is a tick number and the order two waiters are answered in is
+		// a thing a recording depends on, so the table is shared; what is *not*
+		// shared is the suspended script itself, which is why `AwaitChild` is a
+		// second member rather than this one handing back a thread. See
+		// `ChildWaiters.hpp`.
+		virtual ChildWaiters &Waiters() = 0;
 
 		// Who is listening to which bus topic in this VM.
 		//
@@ -635,6 +647,27 @@ namespace engine::script {
 		//               The caller refuses an unexpected one itself, because the
 		//               message names the method.
 		virtual void Await(uint64_t ticket) = 0;
+
+		// Suspends the caller until a child arrives or its wait expires, in
+		// whichever way this language suspends.
+		//
+		// **`Await`'s twin over the second resume source, and the split is the
+		// whole reason it is a second member.** That one is keyed on a
+		// `world::Ticket` because a bus reply is what the barrier had ever
+		// resumed a script with; this is keyed on a `ChildWaiters` id, because
+		// what resumes the caller is the tree — and the value it resumes *with*
+		// is an instance, which is exactly the value a bus reply may never carry
+		// (see `ScriptValue` above). One member could not have carried both
+		// without the resume path having to ask which kind it was holding.
+		//
+		// `WaitForChild` is the only caller. It calls this last and returns:
+		// nothing may be pushed after it, because on the Luau side the stack top
+		// is where the yield takes its results from.
+		//
+		// @param waiter What `ChildWaiters::Add` handed back. Never zero — a
+		//               full queue is refused where it is asked for, because the
+		//               message names the method.
+		virtual void AwaitChild(uint64_t waiter) = 0;
 
 		// Refuses the call, in the language's own idiom. Never returns.
 		//

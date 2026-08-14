@@ -22,7 +22,14 @@
     "It is linked for its files rather than its symbols: `mono_add_program` stages",
     "the shaders of every module a program links, so the rows that gained it are",
     "exactly the rows that draw. The server row gained nothing and still stages no",
-    "shaders/ directory."
+    "shaders/ directory.",
+    "",
+    "v0.15 adds `bakegraph` to `game` and therefore to every program that reads a",
+    "game file. A world carries its bake pipelines in its document, and the point",
+    "of the v0.13 split is that this edge is the document format and not the",
+    "importers — the server row gained `bakegraph` and still does not name `bake`,",
+    "which is the property `D00102` was about. That pair of facts is what this row",
+    "is here to keep true."
   ],
   "modules": {
     "assetc": {
@@ -77,6 +84,7 @@
       "links": [
         "assets",
         "audio",
+        "bakegraph",
         "core",
         "delivery",
         "ecs",
@@ -161,6 +169,7 @@
     "game": {
       "tier": "shared",
       "links": [
+        "bakegraph",
         "core",
         "ecs",
         "graph",
@@ -297,6 +306,7 @@
       "tier": "server",
       "links": [
         "assets",
+        "bakegraph",
         "cdn",
         "control",
         "core",
@@ -388,6 +398,7 @@
       "links": [
         "assets",
         "audio",
+        "bakegraph",
         "cdn",
         "client",
         "control",
@@ -442,6 +453,7 @@
       "links": [
         "assets",
         "audio",
+        "bakegraph",
         "cdn",
         "core",
         "delivery",
@@ -470,6 +482,7 @@
       "tier": "server",
       "links": [
         "assets",
+        "bakegraph",
         "cdn",
         "control",
         "core",
@@ -532,6 +545,7 @@
       "links": [
         "assets",
         "audio",
+        "bakegraph",
         "cdn",
         "client",
         "control",

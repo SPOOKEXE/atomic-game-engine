@@ -14,6 +14,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/Teams.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
@@ -1054,6 +1055,100 @@ namespace engine::scene {
 			return property;
 		}
 
+		// How much life is left, clamped into the range the humanoid allows.
+		//
+		// **Written rather than a `ClampedProperty`, because the ceiling is
+		// another field.** `ClampedProperty` bakes its bounds in as template
+		// arguments — that is what keeps its setter captureless — and the bound
+		// here is `MaxHealth`, which a game sets. So the conversion is written,
+		// which is what `PropertyKind::Computed` is for.
+		//
+		// **Writable, and the authority question is not this descriptor's to
+		// answer.** `Store::SetProperty` refuses every write in a replica, so a
+		// client script asking for more health is told so by name; declaring this
+		// read-only instead would also stop the *server* script that wants to kill
+		// somebody, which is the ordinary way a game does it.
+		PropertyDescriptor HealthProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Health");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Humanoid>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Humanoid *humanoid = store.Get<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+				*static_cast<float *>(out) = humanoid->Health;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Humanoid *humanoid = store.GetMutable<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+
+				// Clamped rather than refused, which is `ClampedProperty`'s own
+				// argument: a health bar driven off a falling number overshoots
+				// at the bottom, and refusing the write would leave a character
+				// alive on the frame the game meant to kill them.
+				humanoid->Health = std::clamp(*static_cast<const float *>(value), 0.0f, humanoid->MaxHealth);
+				return true;
+			};
+
+			return property;
+		}
+
+		// The ceiling, which takes the current health down with it.
+		//
+		// **The engine's own reader for `MaxHealth`, and the reason it is not a
+		// plain clamped field.** A property nothing in the engine consults is the
+		// objection `docs/DEFERRED.md` D00119 held a whole class back for — so the
+		// ceiling means something here rather than only in whatever bar a game
+		// draws: `Health` clamps against it, and lowering it below the current
+		// health pulls that down too. Roblox does the same, and the alternative
+		// leaves a humanoid reporting more life than it is allowed to have with
+		// nothing able to say which of the two numbers is wrong.
+		PropertyDescriptor MaxHealthProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("MaxHealth");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Humanoid>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Humanoid *humanoid = store.Get<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+				*static_cast<float *>(out) = humanoid->MaxHealth;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Humanoid *humanoid = store.GetMutable<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+
+				// **A zero ceiling is a dead character rather than a refusal**,
+				// which follows from the clamp below rather than being a second
+				// rule: `MaxHealth = 0` is how Roblox spells "cannot be alive",
+				// and `IsDead` reads the health it produces.
+				humanoid->MaxHealth = std::max(*static_cast<const float *>(value), 0.0f);
+				humanoid->Health = std::min(humanoid->Health, humanoid->MaxHealth);
+				return true;
+			};
+
+			return property;
+		}
+
 		// Read-only mesh metadata; zero means the catalogue has no entry.
 		PropertyDescriptor TrianglesCountProperty() {
 			PropertyDescriptor property;
@@ -1255,6 +1350,26 @@ namespace engine::scene {
 			// `PartDesc::Anchored`'s decision, and putting them in the class
 			// set would land static geometry in the dynamic archetype.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});
+
+			// **A `SpawnLocation` is a `Part` that says who may stand up on
+			// it**, and it is a class at v0.15 because until then it was a
+			// *name*: `scene::FindSpawn` looked for a child called
+			// `SpawnLocation` and `Characters.hpp` recorded that as a deliberate
+			// stop — a class with teams on it would have been a class with a
+			// footnote while teams did not exist. They do now, so the footnote
+			// is paid off and `docs/DEFERRED.md` D00119 closes with it.
+			//
+			// **A part rather than an `Instance` with a `Transform`.** Every
+			// scene in `mono.engine/examples` builds its spawn as a block and
+			// expects to see it and to stand on it, so anything that was not
+			// drawn or collided would be a different thing wearing the name.
+			//
+			// The component is in the class set, which is `SurfaceCamera`'s
+			// argument: `Instance.new("SpawnLocation")` has to make a working
+			// spawn rather than one that becomes a spawn once somebody assigns a
+			// field.
+			const std::array pad{ecs::Components::Of<SpawnLocation>()};
+			const ecs::ClassId spawnLocation = ecs::Classes::Register("SpawnLocation", part, pad);
 
 			// **A `Model` is a `PVInstance` and adds nothing.** It is a
 			// container with a place in the world, which is exactly what
@@ -1670,6 +1785,19 @@ namespace engine::scene {
 			// Mesh metadata belongs to MeshPart, not every BasePart.
 			ecs::Classes::Computed(meshPart, TrianglesCountProperty());
 
+			// The spawn's three, and every one of them has a reader in
+			// `scene::FindSpawn`. That is the bar `docs/DEFERRED.md` D00119 set
+			// for this class existing at all: a property nothing acts on reads
+			// as decided, which is what kept `Player.Team` out of the tree for
+			// eight versions.
+			//
+			// **`TeamColor` is Roblox's spelling and the storage is British**,
+			// which is `Visual::Tint` reaching a script as `Color` — the
+			// vocabulary crosses and the field name does not.
+			ecs::Classes::Property<&SpawnLocation::TeamColour>(spawnLocation, "TeamColor");
+			ecs::Classes::Property<&SpawnLocation::Neutral>(spawnLocation, "Neutral");
+			ecs::Classes::Property<&SpawnLocation::Enabled>(spawnLocation, "Enabled");
+
 			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
@@ -1785,6 +1913,15 @@ namespace engine::scene {
 			ecs::Classes::ClampedProperty<&Humanoid::JumpSpeed, 0.0f, 1000.0f>(humanoidClass, "JumpPower");
 			ecs::Classes::ClampedProperty<&Humanoid::Height, 0.1f, 100.0f>(humanoidClass, "HipHeight");
 			ecs::Classes::Property<&Humanoid::Enabled>(humanoidClass, "Enabled");
+
+			// **The two that decide whether a character is alive**, and both are
+			// written conversions because each is clamped against the other. See
+			// `HealthProperty` for why they are writable at all — the replica
+			// refusal that answers "may a client set its own health" lives in
+			// `Store::SetProperty` and covers every property here, so a second
+			// answer declared on this one would be the copy that drifts.
+			ecs::Classes::Computed(humanoidClass, HealthProperty());
+			ecs::Classes::Computed(humanoidClass, MaxHealthProperty());
 
 			// **Read-only, because it is what the world found rather than what an
 			// author wants.** A script setting `Grounded` would be telling the
@@ -1906,7 +2043,23 @@ namespace engine::scene {
 		// module carried its own copy for the one minting path it owns; that
 		// hole is closed in `ecs`, where every minting path is. A second check
 		// here would be a second place to keep in step with the storage's rule.
-		const ecs::Entity part = store.CreateInstance(PartClass());
+		// **The class is a parameter now, and `MakePart` is still the only
+		// constructor.** A `SpawnLocation` is a `Part` plus one component, so
+		// the alternative was a second builder that assembled the five
+		// components itself — the duplicate `scene/AGENTS.md` refuses, and the
+		// one that disagrees the first time `BasePart` gains a member.
+		//
+		// Anything that is not a `BasePart` is refused rather than half-built:
+		// the writes below add `Bounds`, `Visual`, `Collider` and `Surface`, so
+		// minting a `Model` here would produce a model with a part's components
+		// bolted on and no class saying so.
+		const ecs::ClassId plain = PartClass();
+		const ecs::ClassId klass = desc.Class.IsValid() ? desc.Class : plain;
+		if (!ecs::Classes::IsA(klass, ecs::Classes::Find(core::Name("BasePart")))) {
+			return ecs::NULL_ENTITY;
+		}
+
+		const ecs::Entity part = store.CreateInstance(klass);
 		if (part == ecs::NULL_ENTITY) {
 			return part;
 		}

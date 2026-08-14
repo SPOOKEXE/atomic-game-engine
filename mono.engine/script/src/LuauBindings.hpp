@@ -14,6 +14,7 @@
 #include "Actions.hpp"
 #include "Bus.hpp"
 #include "Changes.hpp"
+#include "ChildWaiters.hpp"
 #include "Codec.hpp"
 #include "Debris.hpp"
 #include "LuauTags.hpp"
@@ -190,6 +191,17 @@ namespace engine::script {
 		// ticket's value, which is per world and monotonic.
 		std::unordered_map<uint64_t, lua_State *> AwaitedTickets;
 
+		// Which thread is suspended on which `ChildWaiters` entry.
+		//
+		// **The second resume source, and it is a second map rather than a
+		// widened first one.** A bus reply is named by a `world::Ticket` that the
+		// world hands out; a `WaitForChild` is named by an id this VM's own table
+		// hands out, and the two counters know nothing about each other — so one
+		// map would be two number spaces sharing a key. What resumes each is
+		// different too: `PumpDeliveries` pushes `(value, status, version)` and
+		// `PumpChildWaiters` pushes one instance or nil.
+		std::unordered_map<uint64_t, lua_State *> AwaitedChildren;
+
 		// How many GUIDs `HttpService:GenerateGUID` has handed out.
 		//
 		// **A counter rather than a clock or an entropy source, and that is what
@@ -210,6 +222,14 @@ namespace engine::script {
 		TweenTable Tweens;
 		DebrisQueue Debris;
 		//@}
+
+		// Every `WaitForChild` this VM has outstanding.
+		//
+		// **Beside the two above and for their reason**: a wait's deadline is a
+		// tick number and the order two of them are answered in is a thing a
+		// recording depends on, so there is one implementation and each binding
+		// supplies only the resume. See `ChildWaiters.hpp`.
+		ChildWaiters Waiters;
 	};
 
 	// Reports whether a thread has a scheduled resume.
@@ -854,6 +874,27 @@ namespace engine::script {
 	// @param state The VM to deliver into.
 	// @return The first error a handler raised, or empty.
 	std::string PumpTree(lua_State *state);
+
+	// Resumes every `WaitForChild` whose child has arrived or whose wait has run
+	// out.
+	//
+	// **The second resume source at the barrier, and the first that is not a bus
+	// reply.** `PumpDeliveries` resumes a thread with what a `Ticket` answered;
+	// this one resumes it with an instance or with nil, which is a value a
+	// delivery may never carry — rule 3 keeps a handle off a bus, and that is
+	// exactly why `WaitForChild` could not be built on the mechanism that
+	// already existed.
+	//
+	// **After `PumpTree` and never before it.** A `ChildAdded` handler and a
+	// resumed `WaitForChild` are two scripts told about one arrival, and the
+	// signal every listener shares goes first; the waiter is one script's own,
+	// and it wakes into a world whose tree signals have already agreed the child
+	// is there.
+	//
+	// @param state The VM to resume in.
+	// @return The first error a resumed script raised, or empty.
+	// @since v0.15
+	std::string PumpChildWaiters(lua_State *state);
 
 	// Fires `Player.CharacterAdded` and `CharacterRemoving` for everything
 	// `scene` recorded since the last barrier.

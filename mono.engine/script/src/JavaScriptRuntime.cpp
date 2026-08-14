@@ -353,6 +353,12 @@ namespace engine::script {
 		// one world rather than two.
 		note(PumpJsTree(Context));
 
+		// **The tree's other listener, second within this step and never before
+		// it** — the same place and the same reason the Luau side puts it: a
+		// `ChildAdded` handler and a resumed `WaitForChild` are two scripts told
+		// about one arrival, and the signal every listener shares goes first.
+		note(PumpJsChildWaiters(Context));
+
 		// After the tree, exactly as the Luau side orders it: a respawn is a
 		// model parented into `Workspace` *and* a link written onto the
 		// `Player`, and a `CharacterAdded` handler should find a world whose

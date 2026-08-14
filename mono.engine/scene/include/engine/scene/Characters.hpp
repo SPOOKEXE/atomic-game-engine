@@ -152,10 +152,12 @@ namespace engine::scene {
 		ecs::Entity Player;
 
 		// The `Model`. **For a removal this may already be destroyed**, and that
-		// is inherent rather than an oversight: a character dies in this engine
-		// by being destroyed, and the record is written where the link is broken
-		// — which is after the destroy in every path but a script's own
-		// `player.Character = nil`. Roblox's guarantee that the handler runs
+		// is inherent rather than an oversight: the record is written where the
+		// *link* is broken, which is after the destroy in every path but a
+		// script's own `player.Character = nil`. Dying is no longer the same
+		// thing as being destroyed — see `UpdateRespawns` — but a respawn still
+		// destroys the body it replaces, so this is unchanged.
+		// Roblox's guarantee that the handler runs
 		// while the body is still there needs a synchronous fire from inside a
 		// store write, which `script/Changes.hpp` refuses for every signal but
 		// `DescendantRemoving`. `docs/DEFERRED.md` D00120 carries what closing it
@@ -199,6 +201,36 @@ namespace engine::scene {
 	// @since v0.17
 	void TakeCharacterChanges(ecs::Store &store, std::vector<CharacterChange> &out);
 
+	// Subtracts life, and is the only door damage comes through.
+	//
+	// **The authority's call, refused in a replica rather than documented as
+	// one.** `LoadCharacter` says it is the authority's and relies on nobody
+	// calling it elsewhere; damage cannot afford that, because the machine most
+	// likely to want to write its own health is the one that loses it.
+	// `ecs::Store::SetProperty` already refuses a property write in a replica —
+	// that is where this engine answers "who owns a row" — and this makes the
+	// same refusal for the C++ door, so a hosted client and a hosted script get
+	// one answer instead of two.
+	//
+	// **It kills once.** A humanoid already at zero takes nothing and reports
+	// `false`, so the second hit of a burst that arrived in the same tick is not
+	// a second death — which is what a `Died` signal would otherwise need a flag
+	// on the row to promise. That is also why the return value is "this call
+	// killed it" rather than the health left: a caller wanting the number reads
+	// it, and a caller wanting the *transition* cannot derive it from a number.
+	//
+	// What happens at zero is `UpdateRespawns`', not this function's: the body
+	// stays where it fell, `StepCharacters` stops driving it, and the respawn
+	// clock starts. Destroying it here would be the old rule — a character dying
+	// by being destroyed — wearing a new name.
+	//
+	// @param store    The world. Must be the authority's.
+	// @param humanoid The `Humanoid` instance, which is the row `Health` is on.
+	// @param amount   How much to take, in health. Zero or less does nothing.
+	// @return `true` when this call is what reduced it to zero.
+	// @since v0.15
+	bool TakeDamage(ecs::Store &store, ecs::Entity humanoid, float amount);
+
 	// Gives back a body to everybody who has lost one and waited long enough.
 	//
 	// **The respawn loop, and the engine had none.** A character was built once
@@ -208,14 +240,16 @@ namespace engine::scene {
 	//
 	// The rule, which is Roblox's:
 	//
-	//   1. A player with a live character is not waiting, so any deadline they
-	//      were carrying is dropped.
-	//   2. A player with none and `Players.CharacterAutoLoads` set gets a
-	//      deadline of `Player.RespawnTime` seconds from the tick they were
-	//      first seen without one.
+	//   1. A player with a live character *whose humanoid still has health* is
+	//      not waiting, so any deadline they were carrying is dropped.
+	//   2. A player whose character is dead or gone, with
+	//      `Players.CharacterAutoLoads` set, gets a deadline of
+	//      `Player.RespawnTime` seconds from the tick they were first seen that
+	//      way.
 	//   3. On that tick they are handed a new character through `LoadCharacter`,
 	//      which is the same door a script's `player:LoadCharacter()` goes
-	//      through and therefore runs the whole spawn pipeline.
+	//      through and therefore runs the whole spawn pipeline — including
+	//      destroying whatever body they were still standing in.
 	//
 	// **A tick number rather than a countdown of seconds**, which is
 	// `DebrisQueue`'s rule: `ceil(seconds / delta)` against the fixed tick delta
@@ -223,11 +257,20 @@ namespace engine::scene {
 	// where a float accumulated per tick would drift and `just replay-check`
 	// would fail a long way from the cause.
 	//
-	// **Death is the character being gone, because this engine has no health
-	// model.** Roblox waits for `Humanoid.Health` to reach zero and removes the
-	// body itself; `scene::Humanoid` is a capsule, a speed and a jump — see its
-	// header — so what a game does here is destroy the model, and the delay is
-	// measured from that. `docs/DEFERRED.md` D00121 carries the gap.
+	// **Death is `Humanoid::Health` reaching zero, and a destroyed model is the
+	// second trigger rather than the only one.** Until v0.15 it was the only one:
+	// the clock started from the tick a player was first seen with no body, which
+	// is Roblox's delay with Roblox's trigger missing. Both now schedule the same
+	// deadline, and both had to, because a game that destroys a character
+	// outright — a teleport, a script tidying up, a host dropping a client — is
+	// not a game that failed to set health to zero first.
+	//
+	// **So the corpse stays for the delay and is then replaced**, which is the
+	// visible half of the change and the whole of what Roblox does: a body at
+	// zero health is left where it fell, `StepCharacters` stops driving it, and
+	// `LoadCharacter` destroys it at the deadline on its way to building the next
+	// one. Nothing had to be added to do the destroying — that function has
+	// removed the old body since v0.14.
 	//
 	// **The interface half is not here and cannot be.** `StarterGui` is copied
 	// into a player's `PlayerGui` on every spawn and `scene` may not link `gui`,
@@ -297,7 +340,10 @@ namespace engine::scene {
 	//         live `Player` or the world has no `Workspace`.
 	ecs::Entity LoadCharacter(ecs::Store &store, ecs::Entity player, const core::CFrame &frame);
 
-	// The same, standing them wherever `FindSpawn` says.
+	// The same, standing them wherever `FindSpawn` says for *them*.
+	//
+	// **The player is handed to `FindSpawn`, so a side decides where they
+	// appear** — see the two-argument overload of that function.
 	//
 	// @param store  The world.
 	// @param player The `Player` instance.
@@ -420,11 +466,13 @@ namespace engine::scene {
 
 	// Where a character should be put when nobody has said.
 	//
-	// **A part named `SpawnLocation` if the world has one, and the origin
-	// otherwise.** Roblox has a `SpawnLocation` class with teams and a forcefield
-	// on it; none of that exists here yet and inventing the class before the
-	// behaviour would be a class with a footnote. A name is what an author can
-	// already express in the explorer.
+	// **The first neutral `SpawnLocation` under `Workspace`, and the origin
+	// otherwise.** This used to say that a spawn was a part *named*
+	// `SpawnLocation` and that inventing the class before teams existed would
+	// have been a class with a footnote. Teams exist — `Teams.hpp` — so the
+	// class does too, and the name still resolves: a plain `Part` wearing it is
+	// read as an enabled, neutral spawn, which is what keeps every scene in
+	// `mono.engine/examples` spawning people with nothing edited.
 	//
 	// The frame returned is *feet* height — the top face of the spawn part, so
 	// a character put there stands on it rather than in it.
@@ -432,6 +480,32 @@ namespace engine::scene {
 	// @param store The world.
 	// @return Where to stand the next character.
 	core::CFrame FindSpawn(const ecs::Store &store);
+
+	// The same, for somebody who may be on a side.
+	//
+	// **A team's own pad beats a neutral one, and another team's is never
+	// used.** A `SpawnLocation` is taken when it is `Enabled` and either its
+	// `TeamColor` matches the player's team or it is `Neutral` — Roblox's rule
+	// — and of everything that qualifies this takes the player's own colour
+	// first. That preference is what turns a team from a coloured name into a
+	// place you appear, which is `docs/DEFERRED.md` D00119's own test of
+	// whether the class was worth adding.
+	//
+	// **The first in tree order rather than a random one**, which is where this
+	// departs from Roblox on purpose: a respawn drawn from a random number is a
+	// recording that does not replay, and `just replay-check` would fail a long
+	// way from here.
+	//
+	// A player on no side — including `ecs::NULL_ENTITY`, which is what the
+	// overload above passes — takes the first neutral pad and never a
+	// team-locked one.
+	//
+	// @param store  The world.
+	// @param player The `Player` about to be spawned, or a null entity for
+	//        nobody in particular.
+	// @return Where to stand them.
+	// @since v0.15
+	core::CFrame FindSpawn(const ecs::Store &store, ecs::Entity player);
 
 	// Points the camera at the local player's own body.
 	//

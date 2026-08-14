@@ -1,9 +1,9 @@
 # bake — module invariants
 
 L9 `shared`. The importers and the node pipeline: the only code in this engine
-that reads a `.glb`, a `.pmx`, an `.obj`, a `.png`, a `.jpg`, a `.bmp` or an
-`.svg`. `assets` is what a baked mesh or texture *is*; this is how somebody
-else's file becomes one.
+that reads a `.glb`, a `.pmx`, an `.obj`, a `.png`, a `.jpg`, a `.bmp`, an
+`.svg` or an `.rbxm`. `assets` is what a baked mesh or texture *is*; this is how
+somebody else's file becomes one.
 
 ## Nothing a shipped game links may link this
 
@@ -49,6 +49,14 @@ allocated. Named cases that must not be relaxed:
   `offset +=` per field is exactly the shape that walks off a truncated file.
 - **BMP**: the height is signed and means top-down when negative. Read unsigned
   it is a four-billion-row image.
+- **`.rbxm`**: every read goes through `Cursor`, PMX's shape for PMX's reason.
+  Three bounds are on numbers rather than on the buffer and are the ones to keep:
+  a chunk's *declared inflated size*, checked before the allocation it causes
+  because LZ4 expands by up to 255 times; the instance count, checked against
+  `MAXIMUM_ROBLOX_INSTANCES` before a referent map is built from it; and the
+  parent table's depth, checked against `MAXIMUM_ROBLOX_DEPTH` — which is also
+  the cycle check, because a chain that has not reached a root within it is
+  either too deep or a loop and both refuse the file.
 - **SVG**: the bomb is XML rather than pixels. A `<!DOCTYPE>` or `<!ENTITY>` is
   **refused outright rather than bounded** — entity expansion is a kilobyte of
   markup that unfolds into gigabytes while it is being parsed, an external
@@ -84,6 +92,28 @@ rather than approximated:
   override, which is geometry that is subtly and invisibly wrong.
 - **Arithmetic-coded JPEG, RLE BMP, sub-byte PNG depths** — separate decoders
   wearing a familiar container.
+- **Most of `.rbxm`'s value types.** The subset read is `String`,
+  `ProtectedString`, `Bool`, `Int32`, `Int64`, `Float32`, `Float64`, `UDim`,
+  `UDim2`, `Vector2`, `Vector3`, `Color3`, `Color3uint8`, `Rect`, `NumberRange`,
+  `CFrame` and `SharedString` — which is every type this engine's own
+  `ecs::PropertyType` can carry without a table it does not have. **Everything
+  else is refused by name**, and two of them are refusals of principle rather
+  than of effort: an **enum** is a number naming a member of Roblox's table, and
+  honouring one means either shipping Roblox's numbering or using this engine's
+  declaration order, which is exactly the id-derived-from-order rule 4 forbids; a
+  **reference** is a number naming a row of the file, and a referent becomes the
+  shape of the tree and nothing else.
+
+  **A refused type costs its property and not its file**, which is a property of
+  the format rather than a kindness: a `PROP` chunk holds one property of one
+  class and nothing after it depends on its bytes, so an unknown type is a chunk
+  skipped whole. That is what makes a partial reader of this format safe rather
+  than lucky, and it is why the list can grow one row at a time.
+
+  **`ProtectedString` is the row nobody would think to add.** It is a separate
+  type number carrying identical bytes to a `String`, and it is what a script's
+  `Source` is written as — so a reader that knows only `String` imports every
+  script in the file with no program in it and reports nothing worth reading.
 - **Most of SVG.** The subset drawn is `<svg>`, `<g>`, `<rect>`, `<circle>`,
   `<ellipse>`, `<line>`, `<polyline>`, `<polygon>` and `<path>` with M, L, H, V,
   C and Z; solid `fill` and `stroke` with their opacities and `fill-rule`; and a
@@ -97,6 +127,33 @@ rather than approximated:
   carry no marks. Half-drawing any of the rest gives a picture that is
   recognisably the right icon and wrong, which is the failure the whole of this
   section is about.
+
+## An `.rbxm` is the one importer here whose output is not a mesh or a picture
+
+Every other reader hands back an `assets::MeshData` or an `assets::TextureData`.
+Roblox's binary model is an *instance tree*, so `ReadRobloxModel` hands back a
+tree of class names, instance names and values, and who turns that into rows in
+a store is the caller's problem — `bake` is L9 and knows nothing about `ecs`.
+
+Two consequences worth stating, because both look like duplication until you
+check the tier:
+
+- **`bake::RobloxValue` is not `game::PropertyValue` and cannot be.** That type
+  is L10 and links `ecs`, `scene` and `world`; an importer naming it would put
+  half the engine underneath a foreign-format parser. So this carries the kinds
+  a `.rbxm` can produce and the caller converts, **keyed on the type its own
+  class table declares** rather than on what the file stored — which is the rule
+  `studio::RojoSync`'s JSON path already follows, one format along.
+- **Nothing that comes back is numbered.** The tree is nested rather than a flat
+  list with indices, so a referent — a number an author's copy of Studio chose —
+  cannot leak out as identity. It becomes the shape of the tree and dies with
+  the parse.
+
+Its own LZ4 block decompressor is the one place this module departs from
+`mono.vendor/AGENTS.md`'s preference for a submodule, and the argument is in
+`RobloxModel.cpp`: an LZ4 block has no framing, no checksum and no dictionary,
+and a submodule for it would be larger than the decompressor. Zstandard is the
+opposite trade and is vendored.
 
 ## The two conversions that are not optional
 
@@ -179,6 +236,9 @@ pipeline puts the node immediately before the write.
   `Submesh::Material` is what the source file called a run and `Submesh::Texture`
   is an asset that exists; when a material format arrives, the second becomes
   what that material references.
+- **No `.rbxm` writer, and no `.rbxl`.** The reader reads; nothing here produces
+  the format. A place file is the same container with more services in it and
+  would read today, but nothing asks for one — Rojo's table maps a *model*.
 - **No animation, no morph targets, no rigid bodies.** PMX carries all three and
   this reads none of them. The index widths are parsed anyway so that the day
   there is a consumer, the cursor already knows how to step over them.

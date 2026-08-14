@@ -6,7 +6,9 @@
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Teams.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -166,6 +168,26 @@ namespace engine::scene {
 		// `MoveDirection` for ever: `UpdateCharacterControl` only writes the
 		// humanoid it is allowed to drive, so once there is no owner there is
 		// nothing left to write a zero.
+		// Whether one instance is somewhere a character may be put.
+		//
+		// **Two answers, and the second is a bridge rather than a fallback.**
+		// `SpawnLocation` is a class from v0.15 and was a *name* before it — the
+		// deliberate stop `Characters.hpp` recorded — so every scene already
+		// written builds its pad as a `Part` called `SpawnLocation` and must
+		// keep working with nothing edited. A part still wearing the name is
+		// read as a spawn with the class's defaults, which are neutral and
+		// enabled.
+		//
+		// **Not the shape `scene/AGENTS.md` refuses.** That rule is about
+		// *fixtures* — a service found by name is one a script can rename out of
+		// existence — and a spawn pad is content an author names on purpose.
+		// Here the name is a documented second door into one class, not a lookup
+		// somebody forgot to convert.
+		bool IsSpawn(const ecs::Store &store, ecs::Entity instance) {
+			static const core::Name legacy("SpawnLocation");
+			return store.IsA(instance, SpawnLocationClass()) || store.InstanceNameOf(instance) == legacy;
+		}
+
 		void StopCharacter(ecs::Store &store, ecs::Entity model) {
 			const Character *rig = model == ecs::NULL_ENTITY ? nullptr : store.Get<Character>(model);
 			if (rig == nullptr) {
@@ -177,6 +199,65 @@ namespace engine::scene {
 				humanoid->JumpRequested = false;
 			}
 		}
+
+		// Whether the body a player is standing in has run out of life.
+		//
+		// **A model with no `Humanoid` row is alive**, which is the only reading
+		// that does not invent a policy: `SetPlayerCharacter` refuses a model
+		// with no humanoid in it, so the case left here is a rig whose humanoid
+		// was destroyed under it — and `LinkPlayerCharacters` releases that
+		// player on the same tick. Calling it dead would respawn somebody the
+		// other pass is about to release anyway, a respawn earlier.
+		bool CharacterIsDead(const ecs::Store &store, ecs::Entity model) {
+			const Character *rig = model == ecs::NULL_ENTITY ? nullptr : store.Get<Character>(model);
+			if (rig == nullptr) {
+				return false;
+			}
+
+			const Humanoid *humanoid = store.Get<Humanoid>(rig->Humanoid);
+			return humanoid != nullptr && IsDead(*humanoid);
+		}
+	}
+
+	bool TakeDamage(ecs::Store &store, ecs::Entity humanoid, float amount) {
+		// **Refused in a replica, and this is the authority decision written
+		// where it can be enforced.** A client holds a copy of every
+		// `scene.Humanoid` in the world, so a client allowed to subtract from one
+		// is a client deciding who died — and the value it wrote would survive
+		// exactly until the next delta, which presents as "my damage works
+		// sometimes" rather than as a refusal. `ecs::Store::SetProperty` makes
+		// the same refusal for the script door and says the same thing; this is
+		// one rule with two doors, not two rules.
+		if (store.AdoptOnly()) {
+			return false;
+		}
+
+		Humanoid *steering = store.GetMutable<Humanoid>(humanoid);
+		if (steering == nullptr) {
+			return false;
+		}
+
+		// **Already dead takes nothing, which is what makes a death happen
+		// once.** Two hits landing in one tick otherwise each read zero as a
+		// fresh death, and anything hanging off the transition — a kill counter,
+		// a `GetPropertyChangedSignal("Health")` handler — would run twice for
+		// one body.
+		if (IsDead(*steering) || !(amount > 0.0f)) {
+			return false;
+		}
+
+		steering->Health = std::max(steering->Health - amount, 0.0f);
+		if (!IsDead(*steering)) {
+			return false;
+		}
+
+		// **The intent goes with the life.** `StepCharacters` already refuses to
+		// drive a dead humanoid, so this changes no motion — what it stops is a
+		// corpse replicating a `MoveDirection` its owner was holding, which is a
+		// body that looks like it is still trying to walk.
+		steering->MoveDirection = Vector3{};
+		steering->JumpRequested = false;
+		return true;
 	}
 
 	ecs::Entity MakeCharacter(ecs::Store &store, const CharacterDesc &desc) {
@@ -317,7 +398,10 @@ namespace engine::scene {
 	}
 
 	ecs::Entity LoadCharacter(ecs::Store &store, ecs::Entity player) {
-		return LoadCharacter(store, player, FindSpawn(store));
+		// **The player is passed, which is what makes a team decide where you
+		// appear.** Without it a side is a coloured label — the exact objection
+		// `docs/DEFERRED.md` D00119 held `Player.Team` back for.
+		return LoadCharacter(store, player, FindSpawn(store, player));
 	}
 
 	bool RemoveCharacter(ecs::Store &store, ecs::Entity player) {
@@ -470,7 +554,14 @@ namespace engine::scene {
 				return;
 			}
 
-			if (CharacterOf(store, player) != ecs::NULL_ENTITY) {
+			// **A live body is not enough any more — it has to be a *living*
+			// one.** This was `CharacterOf(...) != NULL_ENTITY` until v0.15,
+			// which measured the delay from the tick a player was seen with no
+			// model. Roblox measures it from the tick the humanoid reached zero
+			// and leaves the body standing meanwhile, so the corpse has to fall
+			// on the waiting side of this branch or the clock never starts.
+			const ecs::Entity body = CharacterOf(store, player);
+			if (body != ecs::NULL_ENTITY && !CharacterIsDead(store, body)) {
 				if (store.Has<PlayerRespawn>(player)) {
 					clearing.push_back(player);
 				}
@@ -623,12 +714,56 @@ namespace engine::scene {
 	}
 
 	CFrame FindSpawn(const ecs::Store &store) {
+		return FindSpawn(store, ecs::NULL_ENTITY);
+	}
+
+	CFrame FindSpawn(const ecs::Store &store, ecs::Entity player) {
 		const ecs::Entity workspace = WorkspaceOf(store);
 		if (workspace == ecs::NULL_ENTITY) {
 			return {};
 		}
 
-		const ecs::Entity spawn = store.FindFirstChild(workspace, "SpawnLocation", true);
+		const Team *side = store.Get<Team>(TeamOf(store, player));
+
+		// **Two candidates, because a pad the player's own side owns beats one
+		// anybody may use.** Roblox picks at random among everything a player is
+		// allowed on; this picks the first of the best kind, in tree order,
+		// because a spawn point chosen by a random draw is a respawn that does
+		// not replay — the same rule `UpdateRespawns` keeps about its deadline.
+		ecs::Entity own = ecs::NULL_ENTITY;
+		ecs::Entity neutral = ecs::NULL_ENTITY;
+
+		store.EachDescendant(workspace, [&](ecs::Entity candidate) {
+			if (own != ecs::NULL_ENTITY || !IsSpawn(store, candidate)) {
+				return;
+			}
+
+			// **A plain `Part` still named `SpawnLocation` has no row here, and
+			// it is read as an enabled, neutral spawn.** That is the whole of
+			// the bridge: `FindSpawn` was a name lookup until v0.15 and every
+			// scene in `mono.engine/examples` builds its pad with
+			// `block("SpawnLocation", ...)`, so a null row means "the defaults
+			// this class would have had" rather than "not a spawn".
+			const SpawnLocation *pad = store.Get<SpawnLocation>(candidate);
+			if (pad != nullptr && !pad->Enabled) {
+				return;
+			}
+
+			if (side != nullptr && pad != nullptr && SameTeamColour(pad->TeamColour, side->Colour)) {
+				own = candidate;
+				return;
+			}
+
+			// **A neutral pad takes anybody, including somebody on a side**,
+			// which is Roblox's rule: `Neutral` is what a lobby is. A player on
+			// a side whose own pad exists never reaches this, because the branch
+			// above stops the walk.
+			if ((pad == nullptr || pad->Neutral) && neutral == ecs::NULL_ENTITY) {
+				neutral = candidate;
+			}
+		});
+
+		const ecs::Entity spawn = own != ecs::NULL_ENTITY ? own : neutral;
 		if (spawn == ecs::NULL_ENTITY) {
 			return {};
 		}

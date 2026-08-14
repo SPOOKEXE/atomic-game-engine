@@ -127,6 +127,8 @@ namespace engine::world {
 			return "destination queue full";
 		case BusStatus::WorldNotReady:
 			return "world not ready";
+		case BusStatus::TooManyChannels:
+			return "too many channels";
 		}
 		return "?";
 	}

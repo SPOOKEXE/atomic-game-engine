@@ -176,6 +176,151 @@ TEST_CASE("a big world joins over several ticks rather than one", "[replication]
 	REQUIRE(pair.Replica_.SnapshotOutstanding() == 0);
 }
 
+TEST_CASE("what a host puts in front of the world arrives in front of it", "[replication]") {
+	// **`D00122`: a score orders a stream and a join is a byte cursor.** The
+	// entities a host wants seen first were ranked ahead of everything for the
+	// life of the connection and it changed nothing about the one moment that
+	// matters — a client's first view of a world is one `ecs::Store::Save`
+	// chunked across ticks in whatever order the store wrote its archetypes.
+	//
+	// What is asserted is *before* and not *eventually*: at the tick the
+	// preface landed, the client holds it and holds nothing else. A case that
+	// only proved it arrives passes against the code this exists to change.
+	//
+	// Spelled with this suite's own components rather than `scene`'s, because
+	// `replication` does not link `scene` and must not — `Marked` stands in for
+	// "under `ReplicatedFirst`", and the predicate reaching across that boundary
+	// is exactly how the real one does it.
+	AuthoritySettings settings;
+	settings.ChunkBytes = 256;
+	settings.ChunksPerTick = 1;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SetPreface([](Entity entity, const Store &store) {
+		return store.Get<Marked>(entity) != nullptr;
+	});
+
+	const Entity screen = pair.Server.Create();
+	pair.Server.Set<Spot>(screen, Spot{-1.0f, -1.0f});
+	pair.Server.Set<Marked>(screen, Marked{1});
+
+	// A world large enough that its own snapshot takes many ticks at a chunk a
+	// tick. Without that there is no window to be first in.
+	for (int index = 0; index < 400; index++) {
+		pair.Server.Set<Spot>(pair.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	int prefacedAt = -1;
+	bool joinedThen = true;
+	bool screenThen = false;
+	size_t rowsThen = 0;
+
+	for (int tick = 0; tick < 1024 && !pair.Replica_.Joined(); tick++) {
+		pair.Tick();
+		if (prefacedAt >= 0 || !pair.Replica_.Prefaced()) {
+			continue;
+		}
+
+		prefacedAt = tick;
+		joinedThen = pair.Replica_.Joined();
+		screenThen = pair.Client.Get<Spot>(screen) != nullptr;
+		rowsThen = pair.Client.CountMatching<Spot>();
+	}
+
+	REQUIRE(prefacedAt >= 0);
+	INFO("the preface landed on tick " << prefacedAt << " with " << rowsThen << " rows in the replica");
+
+	CHECK(screenThen);
+	CHECK_FALSE(joinedThen);
+
+	// The whole of the claim: one row, and it is the one that was put in front.
+	CHECK(rowsThen == 1);
+
+	// And the world blob that follows is still the complete picture, so its
+	// authoritative sweep must not take the preface's rows back out.
+	REQUIRE(pair.Replica_.Joined());
+	CHECK(pair.Client.CountMatching<Spot>() == 401);
+	CHECK(pair.Client.Get<Marked>(screen) != nullptr);
+	CHECK(pair.Replica_.Stats().Prefaces == 1);
+	CHECK(pair.Replica_.Stats().Snapshots == 1);
+}
+
+TEST_CASE("a host that declares no preface joins in one blob", "[replication]") {
+	// The default has to stay exactly what it was: one snapshot, one cursor, no
+	// window. A preface nobody asked for would be a second blob's worth of
+	// latency on every join in the engine.
+	Pair pair;
+	for (int index = 0; index < 24; index++) {
+		pair.Server.Set<Spot>(pair.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	REQUIRE(pair.Join());
+	CHECK_FALSE(pair.Replica_.Prefaced());
+	CHECK(pair.Replica_.Stats().Prefaces == 0);
+	CHECK(pair.Replica_.Stats().Snapshots == 1);
+}
+
+TEST_CASE("a re-snapshotted client is not emptied by the preface", "[replication]") {
+	// **The failure that swapping the two apply modes would produce, and it is
+	// invisible from the preface alone.** A preface is a slice of a world, so a
+	// receiver applying it authoritatively sweeps everything it does not
+	// mention — which on a join is nothing and on a *re-snapshot* is the entire
+	// world this client already holds.
+	AuthoritySettings settings;
+	settings.ResnapshotAfterTicks = 4;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SetPreface([](Entity entity, const Store &store) {
+		return store.Get<Marked>(entity) != nullptr;
+	});
+
+	const Entity screen = pair.Server.Create();
+	pair.Server.Set<Spot>(screen, Spot{-1.0f, -1.0f});
+	pair.Server.Set<Marked>(screen, Marked{1});
+
+	std::vector<Entity> world;
+	for (int index = 0; index < 12; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		world.push_back(entity);
+	}
+
+	REQUIRE(pair.Join());
+	REQUIRE(pair.Client.CountMatching<Spot>() == 13);
+
+	// Every acknowledgement dropped, which is what "this client cannot be
+	// caught up by deltas" looks like from the server's side.
+	for (int tick = 0; tick < 40 && pair.Replica_.Stats().Snapshots < 2; tick++) {
+		for (const Entity entity : world) {
+			pair.Server.GetMutable<Spot>(entity)->Y += 1.0f;
+		}
+
+		pair.Now++;
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+			pair.Replica_.Receive(pair.Client, message);
+		}
+		pair.Server.ClearChanges();
+
+		// Nothing goes back, so the server sees a client that has stopped
+		// applying and re-snapshots it.
+		CHECK(pair.Client.CountMatching<Spot>() == 13);
+	}
+
+	REQUIRE(pair.Replica_.Stats().Snapshots == 2);
+	REQUIRE(pair.Replica_.Stats().Prefaces == 2);
+	CHECK(pair.Client.CountMatching<Spot>() == 13);
+	CHECK(pair.Client.Get<Marked>(screen) != nullptr);
+}
+
 TEST_CASE("a tagged entity stops paying for a row the receiver derives", "[replication]") {
 	// **`D00115`: the filter was per component and a character needed it per
 	// row.** Five of a character's six parts have their frame derived from the

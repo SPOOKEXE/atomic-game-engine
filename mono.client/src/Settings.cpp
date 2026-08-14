@@ -25,7 +25,7 @@ namespace client {
 				built.Integer(
 					"client.surface-bounces",
 					defaults.SurfaceBounces,
-					"Levels of mirror-in-mirror resolved per frame, or 0 for the renderer's own default"
+					"Levels of mirror-in-mirror per frame, overriding the world, or 0 to let it decide"
 				);
 				built.Integer(
 					"client.max-fps",

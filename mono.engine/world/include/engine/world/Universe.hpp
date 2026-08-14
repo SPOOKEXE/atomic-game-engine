@@ -103,6 +103,36 @@ namespace engine::world {
 		//
 		// @since v0.17
 		uint32_t ChannelQueueLimit = 256;
+
+		// How many channels one world may hold open, before an open is answered
+		// `BusStatus::TooManyChannels`.
+		//
+		// **The bound on the channel *table*, where `ChannelQueueLimit` bounds
+		// the queue.** A channel costs one bus operation to open and one entry in
+		// the router's table for ever after, and `BusBudgetPerTick` bounds the
+		// rate rather than the total: a world opening a distinct channel every
+		// tick for an hour leaves two hundred thousand live entries that every
+		// snapshot then carries. Nothing in the engine does that today because a
+		// channel name is written in a script, and the first game that names
+		// channels from data — one per player, one per match — is the one that
+		// would.
+		//
+		// **256, and it is `ChannelQueueLimit`'s number on purpose rather than by
+		// coincidence.** The honest range is wide: a channel is either a
+		// subsystem, of which a world has a handful, or a conversation, of which
+		// it has one per player. The upper reading is what has to fit, so the cap
+		// is set where a world stops being able to *hear* from what it has
+		// opened — past 256 channels a world could not take one delivery on each
+		// in a single barrier, because 256 is exactly what its inbox accepts.
+		// Below that the two bounds agree; above it, opening another channel buys
+		// a name and no more traffic.
+		//
+		// A setting rather than a constant for `ChannelQueueLimit`'s reason: the
+		// number is defensible and not derivable, so the deployment that finds it
+		// wrong should be able to say so without a rebuild.
+		//
+		// @since v0.17
+		uint32_t ChannelsPerWorld = 256;
 	};
 
 	// One delivery for a world that lives in another process.

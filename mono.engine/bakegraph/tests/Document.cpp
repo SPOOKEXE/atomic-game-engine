@@ -6,9 +6,13 @@
 // split had not happened.
 //
 // The property the format work hangs on is that `Read(Write(d))` is `d`, so it
-// is asserted against every operation kind rather than a representative one.
+// is asserted against every operation kind rather than a representative one —
+// and, since v0.15, against the named set a world document carries, where the
+// second property is that the bytes do not depend on the order an editor
+// happened to add things in.
 
 #include <engine/bakegraph/Document.hpp>
+#include <engine/core/Name.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -26,8 +30,10 @@ using engine::bake::DocumentStatus;
 using engine::bake::NodeKind;
 using engine::bake::Operation;
 using engine::bake::OperationKind;
+using engine::bake::PipelineSet;
 using engine::bake::Read;
 using engine::bake::Write;
+using engine::core::Name;
 using engine::core::Vector3;
 
 namespace {
@@ -335,4 +341,103 @@ TEST_CASE("every status and operation kind has a description", "[bakegraph]") {
 		  OperationKind::Connect}) {
 		CHECK(std::string(Describe(kind)) != "unknown");
 	}
+}
+
+// --- the set a world carries -------------------------------------------------
+
+TEST_CASE("a set round trips and orders its names by text", "[bakegraph]") {
+	// **Built out of order on purpose.** The order is the property: a set
+	// written twice with the same contents has to produce the same bytes
+	// whatever order an editor added things in, or a save file stops being
+	// diffable and a round-trip test stops meaning anything.
+	PipelineSet set;
+	REQUIRE(set.Set(Name("zebra"), Simple()));
+	REQUIRE(set.Set(Name("alpha"), Simple()));
+
+	REQUIRE(set.Count() == 2);
+	CHECK(set.Names()[0] == Name("alpha"));
+	CHECK(set.Names()[1] == Name("zebra"));
+
+	PipelineSet reloaded;
+	std::string offender;
+	REQUIRE(Read(Write(set), reloaded, offender) == DocumentStatus::Ok);
+	REQUIRE(reloaded.Count() == 2);
+	CHECK(Write(reloaded) == Write(set));
+
+	const Document *alpha = reloaded.Find(Name("alpha"));
+	REQUIRE(alpha != nullptr);
+	CHECK(Write(*alpha) == Write(Simple()));
+
+	// **The one-document format is a strict substring of this one**, which is
+	// what "one grammar for a pipeline" means in bytes rather than in prose.
+	const std::string operations = Write(Simple()).substr(std::string("bakegraph 1\n").size());
+	CHECK(Write(set).find(operations) != std::string::npos);
+}
+
+TEST_CASE("setting a name twice replaces rather than appends", "[bakegraph]") {
+	// Saving over a pipeline is what "save" means; a duplicate is only a
+	// mistake inside one graph.
+	PipelineSet set;
+	REQUIRE(set.Set(Name("main"), Simple()));
+	REQUIRE(set.Set(Name("main"), Document()));
+
+	REQUIRE(set.Count() == 1);
+	REQUIRE(set.Find(Name("main")) != nullptr);
+	CHECK(set.Find(Name("main"))->Count() == 0);
+
+	CHECK(set.Remove(Name("main")));
+	CHECK_FALSE(set.Remove(Name("main")));
+	CHECK(set.Find(Name("main")) == nullptr);
+	CHECK(set.Count() == 0);
+}
+
+TEST_CASE("an unnamed pipeline is refused, in memory and in text", "[bakegraph]") {
+	// A pipeline this cannot name is a pipeline it cannot write back.
+	PipelineSet set;
+	CHECK_FALSE(set.Set(Name(""), Simple()));
+	CHECK(set.Count() == 0);
+
+	std::string offender;
+	CHECK(Read("bakegraph 1\npipeline \"\"\n", set, offender) == DocumentStatus::Malformed);
+	CHECK(offender == "pipeline \"\"");
+}
+
+TEST_CASE("a pipeline naming a node kind this build lacks is refused", "[bakegraph]") {
+	// **The load-time validation the split was taken to keep.** A newer editor's
+	// `bevel` is indistinguishable from a typo — the vocabulary is a closed list
+	// — so the text is refused here and the caller decides what that costs. For
+	// a world document it costs the pipelines and not the world; see
+	// `game::ReadAssetPipelines`.
+	PipelineSet set;
+	std::string offender;
+
+	CHECK(
+		Read("bakegraph 1\npipeline \"main\"\nbuiltin \"engine.Cube\"\nnode bevel\n", set, offender) ==
+		DocumentStatus::Malformed
+	);
+	CHECK(offender == "node bevel");
+}
+
+TEST_CASE("operations before the first pipeline line are refused", "[bakegraph]") {
+	// A set is not a document with extra parts. An operation belonging to no
+	// named pipeline is a file somebody hand-edited into a shape this cannot
+	// represent, and accepting it would silently drop those operations on the
+	// next save.
+	PipelineSet set;
+	std::string offender;
+
+	CHECK(Read("bakegraph 1\nbuiltin \"engine.Cube\"\n", set, offender) == DocumentStatus::Malformed);
+	CHECK(offender == "builtin \"engine.Cube\"");
+
+	CHECK(Read("pipeline \"main\"\n", set, offender) == DocumentStatus::Malformed);
+	CHECK(Read("bakegraph 1\n", set, offender) == DocumentStatus::Ok);
+	CHECK(set.Count() == 0);
+}
+
+TEST_CASE("an empty set writes a header and nothing else", "[bakegraph]") {
+	// **What a world with no pipelines must cost, and it is zero.** `game` skips
+	// the element entirely for an empty set, so this is only the format's half
+	// of that promise.
+	const PipelineSet set;
+	CHECK(Write(set) == "bakegraph 1\n");
 }

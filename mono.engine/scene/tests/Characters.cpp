@@ -10,6 +10,7 @@
 // The rest is the multiplayer case that has no other check: two players in one
 // world, and a keyboard that must reach exactly one of them.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Characters.hpp>
@@ -59,6 +60,7 @@ using engine::scene::PlayerCharacter;
 using engine::scene::PoseCharacters;
 using engine::scene::RemoveCharacter;
 using engine::scene::SetPlayerCharacter;
+using engine::scene::TakeDamage;
 using engine::scene::Transform;
 using engine::scene::UpdateCharacterControl;
 
@@ -622,6 +624,230 @@ TEST_CASE("a respawn waits exactly RespawnTime and then repeats", "[scene][chara
 	store.DestroyInstance(secondBody);
 	CHECK(advance(240) == 0);
 	CHECK(CharacterOf(store, player) == NULL_ENTITY);
+}
+
+TEST_CASE("a character dies at zero, waits where it fell, and is replaced", "[scene][characters]") {
+	// **`docs/retired/DEFERRED.md` D00121's whole subject.** Until v0.15 a character
+	// died by being *destroyed* and the respawn clock started from the tick a
+	// player was first seen with no model — Roblox's delay with Roblox's trigger
+	// missing. This is the trigger: health reaches zero, the body stays where it
+	// fell for `Player.RespawnTime`, and only then is it removed and replaced.
+	World world;
+	Store &store = world.Store_;
+
+	auto *settings =
+		store.GetMutable<engine::scene::PlayersServiceComponent>(engine::scene::PlayersOf(store));
+	REQUIRE(settings != nullptr);
+	settings->RespawnTime = 0.5f;
+
+	const Entity player = AddPlayer(store, "Victim");
+	const Entity body = LoadCharacter(store, player);
+	REQUIRE(body != NULL_ENTITY);
+
+	const Entity humanoid = store.Get<Character>(body)->Humanoid;
+	REQUIRE(store.Get<Humanoid>(humanoid)->Health == Approx(100.0f));
+
+	std::vector<Entity> spawned;
+	const auto advance = [&](size_t ticks) {
+		size_t made = 0;
+		for (size_t index = 0; index < ticks; index++) {
+			store.AdvanceTick(1.0f / 60.0f);
+			(void)LinkPlayerCharacters(store);
+			made += engine::scene::UpdateRespawns(store, spawned);
+		}
+		return made;
+	};
+
+	// **Three hits report nothing and the fourth reports the death.** The return
+	// is "this call killed it" rather than the health left, because that is the
+	// fact a caller cannot derive from a number it reads afterwards.
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(50.0f));
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	REQUIRE(TakeDamage(store, humanoid, 25.0f));
+
+	// **And the fifth kills nobody**, which is what makes a death happen once
+	// without a flag on the row: two hits landing in one tick would otherwise
+	// each read zero as a fresh death.
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(0.0f));
+
+	// Nothing is destroyed by dying. The body is still the player's, and a
+	// version that removed it here would be the old rule wearing a new name.
+	CHECK(store.Alive(body));
+	CHECK(CharacterOf(store, player) == body);
+
+	// **Thirty ticks of half a second is not yet half a second**, for the reason
+	// the respawn case above gives: the deadline is `ceil(seconds / delta)` from
+	// the tick the wait was noticed on, so the thirty-first is the one.
+	CHECK(advance(30) == 0);
+	CHECK(store.Alive(body));
+	CHECK(CharacterOf(store, player) == body);
+
+	REQUIRE(advance(1) == 1);
+	const Entity replacement = CharacterOf(store, player);
+	REQUIRE(replacement != NULL_ENTITY);
+	CHECK(replacement != body);
+	CHECK_FALSE(store.Alive(body));
+
+	// A new body is a whole one, which is `MakeCharacter`'s default rather than
+	// anything the respawn had to remember.
+	const Entity fresh = store.Get<Character>(replacement)->Humanoid;
+	CHECK(store.Get<Humanoid>(fresh)->Health == Approx(100.0f));
+
+	// **And a living player is still never waiting.** The branch that decides
+	// this now asks whether the body has health rather than whether it exists,
+	// so a version that got the polarity wrong would respawn everybody for ever
+	// — and this is what would catch it.
+	CHECK(advance(120) == 0);
+	CHECK(CharacterOf(store, player) == replacement);
+}
+
+TEST_CASE("a replica may not take health off anybody", "[scene][characters]") {
+	// **The authority decision, and it is one rule with two doors.**
+	// `ecs::Store::SetProperty` already refuses every property write in a
+	// replica — that is where this engine answers "who owns a row" — and
+	// `TakeDamage` makes the same refusal for the C++ door. A client holds a
+	// copy of every `scene.Humanoid` in the world, so a client allowed to
+	// subtract from one is a client deciding who died.
+	World world;
+	Store &store = world.Store_;
+
+	const Entity player = AddPlayer(store, "Owned");
+	const Entity body = LoadCharacter(store, player);
+	REQUIRE(body != NULL_ENTITY);
+	const Entity humanoid = store.Get<Character>(body)->Humanoid;
+
+	const engine::ecs::PropertyDescriptor *health = nullptr;
+	for (const auto &property : engine::ecs::Classes::Describe(engine::scene::HumanoidClass()).Properties) {
+		if (property.Name == engine::core::Name("Health")) {
+			health = &property;
+		}
+	}
+
+	// **Writable, deliberately.** Declaring it read-only would have stopped the
+	// *server* script that wants to kill somebody, which is the ordinary way a
+	// game does it — the question is who is asking, not whether the value has a
+	// meaningful assignment.
+	REQUIRE(health != nullptr);
+	REQUIRE(health->Writable);
+
+	store.SetAdoptOnly(true);
+
+	// **Lethal, so the *return* is an assertion too.** A replica allowed to run
+	// this would report the kill as well as taking the health, and a case that
+	// only ever asked for a scratch would pass on the return value whether the
+	// refusal was there or not.
+	CHECK_FALSE(TakeDamage(store, humanoid, 1000.0f));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(100.0f));
+
+	const float wanted = 1000.0f;
+	CHECK_FALSE(store.SetProperty(humanoid, *health, &wanted, sizeof(float)));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(100.0f));
+
+	// The same two calls against the authority, so the refusal above is about
+	// the world and not about the arguments.
+	store.SetAdoptOnly(false);
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(75.0f));
+	CHECK(store.SetProperty(humanoid, *health, &wanted, sizeof(float)));
+}
+
+TEST_CASE("health and its ceiling are clamped against each other", "[scene][characters]") {
+	// **What gives `MaxHealth` a reader inside the engine.** A property nothing
+	// here consults is the objection D00119 held a whole class back for, so the
+	// ceiling means something rather than only decorating whatever bar a game
+	// draws: `Health` clamps against it, and lowering it pulls the health down.
+	World world;
+	Store &store = world.Store_;
+
+	const Entity model = MakeCharacter(store, CharacterDesc{});
+	const Entity humanoid = store.Get<Character>(model)->Humanoid;
+
+	const auto property = [&](std::string_view name) {
+		const engine::ecs::PropertyDescriptor *found = nullptr;
+		for (const auto &candidate :
+			 engine::ecs::Classes::Describe(engine::scene::HumanoidClass()).Properties) {
+			if (candidate.Name == engine::core::Name(name)) {
+				found = &candidate;
+			}
+		}
+		return found;
+	};
+
+	const engine::ecs::PropertyDescriptor *health = property("Health");
+	const engine::ecs::PropertyDescriptor *ceiling = property("MaxHealth");
+	REQUIRE(health != nullptr);
+	REQUIRE(ceiling != nullptr);
+
+	// Clamped rather than refused, which is `ClampedProperty`'s own argument: a
+	// bar driven off a falling number overshoots at both ends, and a refusal
+	// would leave a character alive on the frame a game meant to kill them.
+	float wanted = 5000.0f;
+	CHECK(health->Set(store, humanoid, &wanted));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(100.0f));
+
+	wanted = -5.0f;
+	CHECK(health->Set(store, humanoid, &wanted));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(0.0f));
+	CHECK(engine::scene::IsDead(*store.Get<Humanoid>(humanoid)));
+
+	wanted = 250.0f;
+	CHECK(ceiling->Set(store, humanoid, &wanted));
+	wanted = 250.0f;
+	CHECK(health->Set(store, humanoid, &wanted));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(250.0f));
+
+	// **The ceiling takes the health down with it**, which is Roblox's rule and
+	// the only one that leaves the two numbers able to agree: without it a
+	// humanoid reports more life than it is allowed to have and nothing can say
+	// which of the two is wrong.
+	wanted = 40.0f;
+	CHECK(ceiling->Set(store, humanoid, &wanted));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(40.0f));
+
+	float read = 0.0f;
+	CHECK(ceiling->Get(store, humanoid, &read));
+	CHECK(read == Approx(40.0f));
+
+	// A ceiling of zero is a thing that cannot be alive, and it falls out of the
+	// clamp rather than being a second rule.
+	wanted = 0.0f;
+	CHECK(ceiling->Set(store, humanoid, &wanted));
+	CHECK(engine::scene::IsDead(*store.Get<Humanoid>(humanoid)));
+}
+
+TEST_CASE("a wounded character comes back wounded from a file", "[scene][characters]") {
+	// **Health is on `scene.Humanoid`, which is registered with the generated
+	// serialiser** — so this is not a check that somebody wrote a field into a
+	// hand-written pair. It is a check that the two floats went into the object
+	// representation rather than off the end of it: a world saved mid-fight and
+	// reopened at full health would be a save format that quietly discards the
+	// fact the whole entry is about.
+	World world;
+	Store &store = world.Store_;
+
+	const Entity player = AddPlayer(store, "Wounded");
+	const Entity body = LoadCharacter(store, player);
+	REQUIRE(body != NULL_ENTITY);
+	const Entity humanoid = store.Get<Character>(body)->Humanoid;
+
+	REQUIRE_FALSE(TakeDamage(store, humanoid, 30.0f));
+	store.GetMutable<Humanoid>(humanoid)->MaxHealth = 120.0f;
+
+	engine::core::ByteWriter writer;
+	REQUIRE(store.Save(writer));
+
+	Store restored("characters-test.restored");
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+
+	const Humanoid *back = restored.Get<Humanoid>(humanoid);
+	REQUIRE(back != nullptr);
+	CHECK(back->Health == Approx(70.0f));
+	CHECK(back->MaxHealth == Approx(120.0f));
+	CHECK_FALSE(engine::scene::IsDead(*back));
 }
 
 TEST_CASE("a character arriving and leaving is recorded once, in order", "[scene][characters]") {

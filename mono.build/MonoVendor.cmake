@@ -252,6 +252,53 @@ if(MONO_BUILD_CLIENT)
 	# imgui_demo.cpp is deliberately absent. It is a third of the library by
 	# size, it is a showcase rather than a dependency, and adding it later is
 	# one line if somebody wants the demo window while building an inspector.
+
+	# --- nodegraph ------------------------------------------------------------
+	# A typed node graph and an ImGui canvas over it. Ours, developed in this
+	# repository as `studio/NodeGraph.hpp` and moved out by D00113 so that the
+	# render pipeline editor and `Engine::bakegraph`'s pipeline documents extend
+	# one library instead of starting a third.
+	#
+	# **Declared here although upstream ships a CMakeLists, which is the unusual
+	# call.** That file builds its own `nodegraph_imgui` out of whatever ImGui it
+	# finds, because the common case for a template is a checkout with no build
+	# system in it. Adding it here would put a second copy of every ImGui symbol
+	# on the link line of anything that linked both — a duplicate-symbol error
+	# rather than a slow build — and there is no option that makes it consume an
+	# existing one. It also configures a test binary and an SDL3 demo, neither of
+	# which this repository wants built.
+	#
+	# Two targets, because upstream keeps the same seam: the library knows no
+	# node types, and the set it ships is a demo a host opts into.
+	add_library(vendor_nodegraph STATIC EXCLUDE_FROM_ALL
+		"${MONO_VENDOR}/nodegraph/cpp/src/Types.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Registry.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Graph.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Layout.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Evaluate.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Serialize.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Preview.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Inspect.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Editor.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Inspectors.cpp"
+	)
+	add_library(Vendor::nodegraph ALIAS vendor_nodegraph)
+
+	# SYSTEM for imgui's reason above: the `ci` preset builds first-party code
+	# with -Werror and a vendored header must never be able to fail it.
+	target_include_directories(vendor_nodegraph SYSTEM PUBLIC
+		"${MONO_VENDOR}/nodegraph/cpp/include")
+	target_link_libraries(vendor_nodegraph PUBLIC vendor_imgui)
+	target_compile_features(vendor_nodegraph PUBLIC cxx_std_20)
+
+	# The demo node set — terrain fields, a colouriser and two slow async nodes.
+	# Separate because it is content rather than library: what links it is
+	# `mono.studio`'s Demo Nodes panel, and a node editor with its own vocabulary
+	# links `Vendor::nodegraph` and none of this.
+	add_library(vendor_nodegraph_nodes STATIC EXCLUDE_FROM_ALL
+		"${MONO_VENDOR}/nodegraph/cpp/demo/Nodes.cpp")
+	add_library(Vendor::nodegraph_nodes ALIAS vendor_nodegraph_nodes)
+	target_link_libraries(vendor_nodegraph_nodes PUBLIC vendor_nodegraph)
 endif()
 
 # --- Catch2 -----------------------------------------------------------------

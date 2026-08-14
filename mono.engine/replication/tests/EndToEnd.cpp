@@ -70,6 +70,66 @@ TEST_CASE("a snapshot chunk the link refuses is sent again", "[replication]") {
 	REQUIRE(wire.Client.CountMatching<Spot>() == 200);
 }
 
+TEST_CASE("a refused chunk rewinds its own cursor and not the other one", "[replication]") {
+	// **`D00122`'s second cursor, re-earning the lesson the first one taught.**
+	// A refused snapshot chunk is a permanent hole unless the sender is told,
+	// because the cursor moves when the chunk is *built* — `applied=184
+	// refused=17865`, which read like a protocol error and was a cursor. With a
+	// join in two blobs there are two of them, and a refusal that rewound the
+	// wrong one would leave the same hole with a second way to reach it.
+	//
+	// The link is deliberately too small for the tick, so the refusals are real
+	// rather than arranged.
+	engine::replication::SessionSettings session;
+	session.Link.PacketsPerTick = 4;
+
+	engine::replication::AuthoritySettings authority;
+	authority.ChunkBytes = 256;
+	authority.ChunksPerTick = 8;
+
+	Wire wire(session, authority);
+
+	// A preface of two hundred rows, which is many chunks at 256 bytes — a
+	// preface that fits inside one tick's packet budget could not have a
+	// refusal land inside it at all.
+	std::vector<Entity> front;
+	for (int index = 0; index < 200; index++) {
+		const Entity entity = wire.Server.Create();
+		wire.Server.Set<Spot>(entity, Spot{static_cast<float>(index), -1.0f});
+		front.push_back(entity);
+	}
+	for (int index = 0; index < 200; index++) {
+		wire.Server.Set<Spot>(wire.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	wire.Authority_.SetPreface([](Entity entity, const Store &store) {
+		const Spot *spot = store.Get<Spot>(entity);
+		return spot != nullptr && spot->Y < 0.0f;
+	});
+
+	size_t rowsWhenPrefaced = 0;
+	bool prefaced = false;
+	for (int tick = 0; tick < 1024 && !wire.Replica_.Joined(); tick++) {
+		wire.Tick();
+		if (!prefaced && wire.Replica_.Prefaced()) {
+			prefaced = true;
+			rowsWhenPrefaced = wire.Client.CountMatching<Spot>();
+		}
+	}
+
+	REQUIRE(wire.Replica_.Joined());
+	REQUIRE(wire.ServerSide->Link().Stats().SendsOverBudget > 0);
+
+	// Whole, and whole exactly once: a rewind of the wrong cursor shows up as a
+	// blob assembled twice or as one that never completes.
+	CHECK(wire.Replica_.Stats().Prefaces == 1);
+	CHECK(rowsWhenPrefaced == front.size());
+	CHECK(wire.Client.CountMatching<Spot>() == 400);
+	for (const Entity entity : front) {
+		REQUIRE(wire.Client.Get<Spot>(entity) != nullptr);
+	}
+}
+
 TEST_CASE("the listener's own send loop hands refusals back", "[replication]") {
 	engine::replication::ListenerSettings serving;
 	serving.Session.Link.PacketsPerTick = 4;

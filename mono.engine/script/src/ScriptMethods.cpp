@@ -31,6 +31,14 @@
 //     asking, and asking them in that order is what makes one body correct in
 //     both.
 //
+// **`WaitForChild` is the thirty-seventh and the only one that suspends.**
+// Every other row answers from the store on the tick it was called; this one
+// registers in `ChildWaiters` and hands the script back at the barrier, either
+// with the child that arrived or with nothing once its deadline has passed. What
+// that cost the interface is two members — a table accessor and `AwaitChild` —
+// and what it cost the *surface* is Roblox's no-timeout form, which is refused
+// here rather than approximated. The method's own comment carries that decision.
+//
 // **Nothing in this file names a VM, and that is the point.** A method reads its
 // arguments through `ScriptCall`, calls the same `scene::` and `ecs::` functions
 // a C++ system would, and answers through one `Return`. Whether the argument was
@@ -45,6 +53,7 @@
 
 #include "ScriptCall.hpp"
 #include "Subtree.hpp"
+#include "Tasks.hpp"
 
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -494,6 +503,72 @@ namespace engine::script {
 			);
 		}
 
+		// `instance:WaitForChild(name, timeout)`
+		//
+		// **The timeout is required, and Roblox's no-timeout form raises rather
+		// than waiting for ever.** That is a deliberate divergence from every
+		// script that would be ported in, and it is the only honest one
+		// available: Roblox's `WaitForChild(name)` waits until the child
+		// arrives — warning after five seconds and otherwise never giving up —
+		// and a script that waits for ever is a script that never finishes its
+		// tick. `Runtime::Run` refuses a suspended thread that nothing will
+		// resume, `script/AGENTS.md` records that as a decision rather than a
+		// gap, and rule 5 is the whole of the argument: work inside a tick may
+		// be parallel, work across ticks may not. A wait with no end is work
+		// across an unbounded number of them.
+		//
+		// **Refused at the call site rather than approximated**, which is
+		// `HttpService.cpp`'s and `SoundService.cpp`'s rule applied to an
+		// *argument* instead of a member. The two approximations both look
+		// reasonable and are worse than a refusal: a silent default timeout
+		// gives a script that ported cleanly a nil it never checks for, and a
+		// version that returned `FindFirstChild`'s answer immediately
+		// typechecks, works in every scene where the child is already there, and
+		// answers nil in exactly the case the method exists for.
+		//
+		// So an author porting a place gets an error naming the fix, once, on
+		// the line that needs it — and `mono.tools/bindings` declares the second
+		// argument as required, so the Luau and TypeScript halves both refuse it
+		// before the script ever runs.
+		void WaitForChild(ScriptCall &call) {
+			ecs::Store &store = call.World();
+			const std::string name = call.AsString(0);
+
+			// **Roblox's own first step, and it is not the cheap version of this
+			// method.** A child that is already there is answered on the tick it
+			// was asked for; only a miss suspends, which is the half a lookup
+			// cannot do.
+			if (const Entity found = store.FindFirstChild(call.Subject(), name); found != ecs::NULL_ENTITY) {
+				call.ReturnInstance(found);
+				return;
+			}
+
+			if (call.IsNil(1)) {
+				call.Raise(
+					"WaitForChild needs a timeout in seconds, because this engine has no "
+					"unbounded wait: work does not cross a tick here, so pass "
+					"WaitForChild(name, seconds) and handle a nil answer"
+				);
+			}
+
+			// **A deadline in ticks, through the same `TicksFor` `task.wait` and
+			// `Debris:AddItem` use.** Seconds is what an author means and what
+			// Roblox takes; ticks is what a deadline has to be, or the same
+			// script gives up after a different amount of simulation on a busy
+			// machine than on an idle one.
+			const uint64_t waiter = call.Waiters().Add(
+				call.Subject(), name, store.Time().Tick + TicksFor(store, call.AsNumber(1))
+			);
+
+			if (waiter == 0) {
+				// Refused rather than evicting somebody else's wait — see
+				// `ChildWaiters::Add`, which carries the direction and why.
+				call.Raise("too many instances are waiting for a child at once");
+			}
+
+			call.AwaitChild(waiter);
+		}
+
 		// `instance:FindFirstChildOfClass(className)`
 		void FindFirstChildOfClass(ScriptCall &call) {
 			call.ReturnInstance(call.World().FindFirstChildOfClass(call.Subject(), ClassArgument(call, 0)));
@@ -649,7 +724,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 36> METHODS{{
+		constexpr std::array<InstanceMethod, 37> METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 
@@ -677,6 +752,7 @@ namespace engine::script {
 			{"GetChildren", GetChildren},
 			{"GetDescendants", GetDescendants},
 			{"FindFirstChild", FindFirstChild},
+			{"WaitForChild", WaitForChild},
 			{"FindFirstChildOfClass", FindFirstChildOfClass},
 			{"FindFirstChildWhichIsA", FindFirstChildWhichIsA},
 			{"FindFirstAncestor", FindFirstAncestor},
