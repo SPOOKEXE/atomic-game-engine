@@ -354,11 +354,11 @@ all is ordinary. A program launched with `--config prod.cfg` that silently ran
 on defaults is the deployment failure this whole layer exists to prevent.
 
 **A repeated key appends and a source that outranks it replaces.** Three origins
-in a file are three lines and all three are meant; one `--flag
-client.content-sources=...` on the command line replaces all three, rather than
-being appended to a list the person running it cannot see. `--flag
-client.content-sources=` with nothing after it is how a command line says
-"none". Nothing is split on a separator, so a path may contain anything.
+in a file are three lines and all three are meant; one `--flag` on the command
+line replaces all three, rather than being appended to a list the person running
+it cannot see. A `--flag client.content-sources=` with nothing after it is how a
+command line says "none". Nothing is split on a separator, so a path may contain
+anything.
 
 ## Turning content formats off
 

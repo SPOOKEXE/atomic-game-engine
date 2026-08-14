@@ -36,7 +36,7 @@
 
 namespace client {
 
-	// Declares `client.*`.
+	// Declares the client's own settings.
 	//
 	// @return `false` when a name collided, which is a bug in a table.
 	bool DeclareFlags();

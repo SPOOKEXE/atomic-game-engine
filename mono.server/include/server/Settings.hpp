@@ -28,7 +28,7 @@
 
 namespace server {
 
-	// Declares `server.*`.
+	// Declares the server's own settings.
 	//
 	// @return `false` when a name collided, which is a bug in a table.
 	bool DeclareFlags();

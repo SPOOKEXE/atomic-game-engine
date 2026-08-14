@@ -23,10 +23,10 @@
 
 namespace cdn {
 
-	// Declares `cdn.*`.
+	// Declares the origin's own settings.
 	//
-	// **Not `cdn.publish.*`**, which is `assets::DeclareContentFlags`'s and is
-	// declared beside this by whoever publishes.
+	// **Not the publish gates**, which are `assets::DeclareContentFlags`'s and
+	// are declared beside this by whoever publishes.
 	//
 	// @return `false` when a name collided, which is a bug in a table.
 	bool DeclareFlags();
