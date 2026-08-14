@@ -354,3 +354,48 @@ the ancestor of `tests/Builtin.cpp`.
 generator returning a radius-one sphere would make every part twice the size it
 says it is — and the mistake would read as a physics bug, because the collider
 would still be right.
+
+## There is one extension table, and it answers three questions
+
+`ContentForm.cpp` holds it. A name's extension decides the **form** (the format
+— `Png`, `Gif`, `Svg`, `Mp4`), the **kind** (`AssetKind`, the routing label
+several forms share) and whether it is a **source** a baker still has to
+convert.
+
+Those were two lists until v0.15 — an `EXTENSIONS` table for routing and a
+separate `SOURCES` list beside it, with a comment on the second saying it was
+the one that must not go stale. Adding a format meant editing both and nothing
+noticed when somebody edited one. It is three columns now, `KindOfName` is
+`KindOfForm(FormOfName(name))` and `IsRuntimeReadable` is a single negation, so
+a row is the whole edit.
+
+**Do not add a second table.** Anything that wants to know what an extension
+means asks here, and anything derived from the set of forms — the content flags
+are — is generated from `AllForms` rather than listed again.
+
+## A content policy is consulted at the door, before anything decodes
+
+`ContentPolicy` says which forms a deployment will handle, and the rule the
+build cannot check is that **every place which decodes, copies or publishes
+content by name consults it first**. There are four today: `assetc`'s dispatch,
+`cdn::Publisher`'s classification, `client::Client::RequestAsset` and the
+studio's picker.
+
+Consulting it *late* passes every obvious test and fails the point of it. The
+`cdn` suite asserts the chunk store is **smaller** after a refused publish
+rather than only that the manifest is shorter, because a gate applied after the
+chunker would satisfy the second and not the first — and the whole reason to
+refuse an SVG is that the rasteriser is never reached.
+
+**A refusal is named, counted and never silent.** `PublishReport::Refused` and
+`assetc::Report::Refused` are separate from the failure counts, because a
+refusal is not a failure and a caller treating any failure as a broken run must
+not be broken by a deployment deciding it does not want GIFs.
+
+**Everything is allowed by default and `Unknown` always is.** An origin moves
+bytes it does not interpret, so a policy that refused what it cannot name would
+refuse the next format before it was added; `content.unknown` is the one flag
+that closes the list. A program that never declared the flags gets everything,
+which is what this engine did before they existed — a dead flag handle reads
+`false`, and defaulting to refusal there would make a tool that forgot to
+register a table produce an empty bake with no explanation.

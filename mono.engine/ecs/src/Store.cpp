@@ -171,6 +171,44 @@ namespace engine::ecs {
 		return State->AdoptOnly;
 	}
 
+	void Store::Protect(Entity instance) {
+		RequireOwningThread("Protect");
+
+		if (instance != NULL_ENTITY) {
+			State->Protected.insert(instance.Id);
+		}
+	}
+
+	bool Store::Protected(Entity instance) const {
+		return State->Protected.find(instance.Id) != State->Protected.end();
+	}
+
+	bool Store::DestroyAuthored(Entity instance) {
+		if (Protected(instance)) {
+			// **Named rather than silent**, because a `Destroy()` that does
+			// nothing and says nothing is a script that carries on believing it
+			// worked. The instance's own name is what the author wrote.
+			ENGINE_WARN(
+				"'{}' is a fixture of this world and may not be destroyed", InstanceNameOf(instance).Text()
+			);
+			return false;
+		}
+
+		DestroyInstance(instance);
+		return true;
+	}
+
+	bool Store::SetParentAuthored(Entity instance, Entity parent) {
+		if (Protected(instance)) {
+			ENGINE_WARN(
+				"'{}' is a fixture of this world and may not be reparented", InstanceNameOf(instance).Text()
+			);
+			return false;
+		}
+
+		return SetParent(instance, parent);
+	}
+
 	Entity Store::MintNamed(std::string_view name, bool predicted) {
 		if (name.empty()) {
 			return predicted ? CreatePredicted() : Create();

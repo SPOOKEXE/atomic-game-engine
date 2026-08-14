@@ -1,5 +1,8 @@
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Config.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 
 #include <assetc/Bake.hpp>
@@ -13,9 +16,16 @@
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("assetc");
 
+	// **Only the handle verb.** `assetc` decodes and writes; publishing is
+	// `cdn`'s, and a baker carrying `cdn.publish.*` would be offering settings
+	// nothing here reads.
+	engine::core::Config::DeclareEngineFlags();
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
+
 	engine::core::Arguments arguments(
 		"assetc", "Bake a directory of source art into one a content origin can publish."
 	);
+	engine::core::Config::DeclareOptions(arguments);
 	arguments.Value("input", "DIR", "The directory of source art to bake");
 	arguments.Value("output", "DIR", "Where the baked tree goes");
 	arguments.Value(
@@ -45,7 +55,23 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
+	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
+	if (!configured.Ok) {
+		std::fprintf(stderr, "%s\n", configured.Error.c_str());
+		return 2;
+	}
+	if (engine::core::Config::ListingWanted(arguments)) {
+		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
+		return 0;
+	}
+
+	// **Constructed after the settings are frozen**, because `Settings::Content`
+	// defaults from the process policy and a `Settings` built before `Apply`
+	// would carry the answer from halfway through startup.
 	assetc::Settings settings;
+	if (const std::string refused = settings.Content.RefusedText(); !refused.empty()) {
+		ENGINE_INFO("assetc: not baking — {}", refused);
+	}
 
 	const auto input = arguments.Get("input");
 	const auto output = arguments.Get("output");

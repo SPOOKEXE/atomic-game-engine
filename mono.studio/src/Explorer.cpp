@@ -17,8 +17,8 @@
 namespace studio {
 
 	using engine::core::Name;
-	using engine::ecs::ClassId;
 	using engine::ecs::Classes;
+	using engine::ecs::ClassId;
 	using engine::ecs::NULL_ENTITY;
 	using engine::ecs::Store;
 
@@ -274,8 +274,7 @@ namespace studio {
 	}
 
 	void Editor::SelectRange(
-		WorldId world, const HierarchyView &view, engine::ecs::Entity anchor,
-		engine::ecs::Entity to, bool add
+		WorldId world, const HierarchyView &view, engine::ecs::Entity anchor, engine::ecs::Entity to, bool add
 	) {
 		// **The range itself is `RowsBetween`, which is a free function over the
 		// compiled tree and is tested as one.** What is left here is the part
@@ -354,10 +353,9 @@ namespace studio {
 					ImGui::Indent(static_cast<float>(row.Depth) * step);
 				}
 
-				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
-										   ImGuiTreeNodeFlags_SpanAvailWidth |
-										   ImGuiTreeNodeFlags_OpenOnDoubleClick |
-										   ImGuiTreeNodeFlags_NoTreePushOnOpen;
+				ImGuiTreeNodeFlags flags =
+					ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
+					ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 				if (!row.HasChildren) {
 					flags |= ImGuiTreeNodeFlags_Leaf;
 				}
@@ -390,8 +388,7 @@ namespace studio {
 				const bool hovered = ImGui::IsItemHovered();
 
 				if (toggled) {
-					const auto found =
-						std::find(tree.Open.begin(), tree.Open.end(), row.Instance);
+					const auto found = std::find(tree.Open.begin(), tree.Open.end(), row.Instance);
 					if (found != tree.Open.end()) {
 						tree.Open.erase(found);
 					} else {
@@ -435,8 +432,7 @@ namespace studio {
 
 					// Dragging a row that is part of the selection drags the
 					// selection, which is what the highlight already promised.
-					if (world == SelectionWorld && IsSelected(row.Instance) &&
-						Selection.size() > 1) {
+					if (world == SelectionWorld && IsSelected(row.Instance) && Selection.size() > 1) {
 						ImGui::Text("%zu instances", Selection.size());
 					} else {
 						ImGui::TextUnformatted(row.Text);
@@ -627,8 +623,7 @@ namespace studio {
 				// The same consume-once request `DrawTreeNode` honours for an
 				// instance, in its own set because a world index and an entity
 				// id are different key spaces. See `ExpandedWorlds`.
-				if (const auto found =
-						std::find(ExpandedWorlds.begin(), ExpandedWorlds.end(), world.Index);
+				if (const auto found = std::find(ExpandedWorlds.begin(), ExpandedWorlds.end(), world.Index);
 					found != ExpandedWorlds.end()) {
 					ImGui::SetNextItemOpen(true);
 					ExpandedWorlds.erase(found);
@@ -704,8 +699,8 @@ namespace studio {
 					if (ImGui::MenuItem("Export World...")) {
 						Active = world;
 						AskingExport = true;
-						PathBuffer = std::string(Label(worldName)) +
-									 std::string(engine::game::WORLD_EXTENSION);
+						PathBuffer =
+							std::string(Label(worldName)) + std::string(engine::game::WORLD_EXTENSION);
 					}
 					if (ImGui::MenuItem("Remove World", nullptr, false, Universe->Count() > 1)) {
 						PendingRemoveWorld = world;
@@ -743,8 +738,8 @@ namespace studio {
 							DrawInstanceRows(store, tree);
 
 							if (ImGui::BeginPopupContextWindow(
-									"##world-blank", ImGuiPopupFlags_MouseButtonRight |
-														 ImGuiPopupFlags_NoOpenOverItems
+									"##world-blank",
+									ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems
 								)) {
 								DrawInstanceActions(store, world, NULL_ENTITY);
 								ImGui::EndPopup();
@@ -809,8 +804,7 @@ namespace studio {
 		});
 
 		if (document.empty()) {
-			Say("that instance could not be written out, so it was not moved",
-				engine::core::LogLevel::Error);
+			Say("that instance could not be written out, so it was not moved", engine::core::LogLevel::Error);
 			return false;
 		}
 
@@ -820,8 +814,8 @@ namespace studio {
 			// A parent that died between the drop and here leaves the subtree
 			// at the world's root, which is where a drop onto a world row puts
 			// it anyway.
-			const engine::ecs::Entity into = parent != NULL_ENTITY && store.Alive(parent) ? parent
-																						 : NULL_ENTITY;
+			const engine::ecs::Entity into =
+				parent != NULL_ENTITY && store.Alive(parent) ? parent : NULL_ENTITY;
 			rebuilt = engine::game::ReadInstanceDocument(store, document, into, error);
 		});
 
@@ -865,7 +859,9 @@ namespace studio {
 				// alive in a world nothing can reach them from, and the parent
 				// keeps naming a freed handle as a child. A move that leaves
 				// the source world holding both is not a move.
-				store.DestroyInstance(instance);
+				// Authored: the Delete key is a person asking, and a fixture
+				// refuses it exactly as a script's `Destroy()` does.
+				(void)store.DestroyAuthored(instance);
 			}
 		});
 
@@ -880,8 +876,8 @@ namespace studio {
 		RevealSelection = true;
 
 		MarkModified();
-		Say("moved '" + std::string(Label(moved)) + "' to '" +
-			std::string(Label(Universe->NameOf(target))) + "'");
+		Say("moved '" + std::string(Label(moved)) + "' to '" + std::string(Label(Universe->NameOf(target))) +
+			"'");
 		return true;
 	}
 
@@ -950,7 +946,7 @@ namespace studio {
 					// cycle in the tree is a hang in every walk of it rather
 					// than a wrong answer — and this reports the refusal
 					// instead of leaving a drag that silently did nothing.
-					if (store.SetParent(instance, parent)) {
+					if (store.SetParentAuthored(instance, parent)) {
 						applied.push_back(Applied{instance, was, std::move(named)});
 					} else {
 						refused++;
@@ -963,9 +959,7 @@ namespace studio {
 			// whose undo restores the parent it never left.
 			if (Commands != nullptr) {
 				for (const Applied &entry : applied) {
-					Commands->RecordReparent(
-						world, entry.Instance, entry.Was, parent, "Move " + entry.Named
-					);
+					Commands->RecordReparent(world, entry.Instance, entry.Was, parent, "Move " + entry.Named);
 				}
 			}
 
@@ -1020,12 +1014,7 @@ namespace studio {
 			if (renamed) {
 				if (Commands != nullptr) {
 					Commands->RecordProperty(
-						rename.World,
-						rename.Instance,
-						Name("Name"),
-						before,
-						after,
-						"Rename to " + rename.To
+						rename.World, rename.Instance, Name("Name"), before, after, "Rename to " + rename.To
 					);
 				}
 				MarkModified();

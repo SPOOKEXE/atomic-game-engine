@@ -17,7 +17,7 @@ namespace engine::render {
 		// The shaders this engine ships.
 		//
 		// **Two, and adding a third is a decision rather than a file drop.**
-		// `docs/DEFERRED.md` D00110 names the trap this list exists to close:
+		// `docs/retired/DEFERRED.md` D00110 names the trap this list exists to close:
 		// six fragments in `resources/shaders/` would compile, stage, pass every
 		// test and be loaded by nothing. A name here is what loads one, so the
 		// list and the directory are added to in one change or neither.

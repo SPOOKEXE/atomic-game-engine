@@ -359,6 +359,44 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
     @test -s {{meshes}} || (echo "FAIL: the headless editor wrote no mesh capture" && exit 1)
     @echo "studio ok — loaded, played and rendered with no display, into {{out}} and {{meshes}}"
 
+# Press a button in a shipped client, with no display, and read the answer back.
+#
+# **The check `docs/DEFERRED.md` D00125 asked for, and the bug it names is why.**
+# At v0.15 the shipped client did not route interface input at all — the router
+# was constructed, read and never `Update`d, so a `TextButton` in a game never
+# lit and its `Activated` never fired, while the same tree worked in the editor
+# because the studio drives a router of its own. A button that does nothing in
+# the shipped build and works in the editor is the worst version of that bug,
+# because it is invisible to whoever is authoring.
+#
+# Closing it needed two things the client did not have: `--headless`, so the run
+# needs no display, and `--click NAME`, so something can press. The press is
+# synthesised into `input::Translator` as an ordinary SDL event and travels the
+# path a real click travels — same translator, same `scene::InputState`, same
+# `gui::Router`, same `Runtime::DeliverGuiEvents`. A click that took a shortcut
+# past any of those would be a check of the shortcut.
+#
+# **It found a second one on its first run.** `examples::LoadScene` kept the only
+# reference to the VM it created, so `RuntimeOf` answered null for a `--script`
+# world and every gui event the router produced was delivered nowhere. The
+# router was right, the events were right, and the last hop was missing.
+#
+# Not part of `just check`: it needs a GPU, for `studio-smoke`'s reason.
+client-smoke: (build "client")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scene="{{build}}/assets/examples/Interface.luau"
+    test -f "$scene" || { echo "FAIL: no staged scene at $scene"; exit 1; }
+    log=$(mktemp)
+    trap 'rm -f "$log"' EXIT
+    ./{{build}}/client/client --headless --frames 60 --width 960 --height 540 \
+        --script "$scene" --click Swatch3 > "$log" 2>&1
+    grep -q "click: pressed 'Swatch3'" "$log" \
+        || { echo "FAIL: the client never found or pressed the button"; tail -20 "$log"; exit 1; }
+    grep -q "interface: swatch 3 activated" "$log" \
+        || { echo "FAIL: the button was pressed and its Activated never reached the script"; tail -20 "$log"; exit 1; }
+    echo "client ok — pressed a button with no display and the script heard it"
+
 # Drag the editor's window and check it is still alive afterwards.
 #
 # **The one bug class a headless run cannot reach.** The viewport shows last
@@ -528,25 +566,53 @@ mono_sources := "mono.engine mono.client mono.server mono.unified_server_client 
 #
 # So: search the versioned names too, and check the version rather than trusting
 # whatever answers to the bare name.
+#
+# **The major is pinned, and "21 or newer" was the bug.** Two majors do not agree
+# on the same file — include grouping and the wrapping of a long call are both
+# places they differ — so a rule that accepted a range made the formatting a
+# property of the machine. A box carrying an unversioned 21 *and* a versioned 23
+# formatted with 21 because the bare name was tried first; a box with only 23
+# formatted with 23; and the diff between them landed on files nobody had
+# touched, which is what everybody was reverting by hand.
+#
+# One number, in one place, and an escape for somebody who knowingly wants
+# another: `CLANG_FORMAT=clang-format-23 just format`. A deliberate override is a
+# decision taken out loud, where "whatever answered first" is nobody's decision
+# at all.
+clang_format_major := "21"
+
 find-clang-format := '''
-    cf=""
-    for candidate in clang-format clang-format-23 clang-format-22 clang-format-21; do
-        command -v "$candidate" > /dev/null || continue
-        major=$("$candidate" --version | sed -nE 's/.*version ([0-9]+)\..*/\1/p')
-        if [ -n "$major" ] && [ "$major" -ge 21 ]; then cf="$candidate"; break; fi
-    done
+    cf="${CLANG_FORMAT:-}"
+    if [ -n "$cf" ]; then
+        command -v "$cf" > /dev/null || { echo "CLANG_FORMAT=$cf is not on PATH." >&2; exit 1; }
+    else
+        for candidate in clang-format-$CLANG_FORMAT_MAJOR clang-format; do
+            command -v "$candidate" > /dev/null || continue
+            major=$("$candidate" --version | sed -nE 's/.*version ([0-9]+)\..*/\1/p')
+            if [ "$major" = "$CLANG_FORMAT_MAJOR" ]; then cf="$candidate"; break; fi
+        done
+    fi
     if [ -z "$cf" ]; then
-        echo "no clang-format 21 or newer on PATH (.clang-format needs 21)." >&2
-        echo "  install:  sudo apt install clang-format-21     # apt.llvm.org" >&2
+        echo "no clang-format $CLANG_FORMAT_MAJOR on PATH (.clang-format is written for it)." >&2
+        echo "  install:  sudo apt install clang-format-$CLANG_FORMAT_MAJOR     # apt.llvm.org" >&2
         echo "  link it:  sudo update-alternatives --install /usr/bin/clang-format \\" >&2
-        echo "                clang-format /usr/bin/clang-format-21 100" >&2
+        echo "                clang-format /usr/bin/clang-format-$CLANG_FORMAT_MAJOR 100" >&2
+        echo "  or, deliberately:  CLANG_FORMAT=clang-format-NN just <recipe>" >&2
         exit 1
+    fi
+    cf_major=$("$cf" --version | sed -nE 's/.*version ([0-9]+)\..*/\1/p')
+    if [ "$cf_major" != "$CLANG_FORMAT_MAJOR" ]; then
+        echo "warning: formatting with clang-format $cf_major, not the pinned $CLANG_FORMAT_MAJOR." >&2
+        echo "         expect files you did not touch to reflow." >&2
     fi
 '''
 
 format:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Exported rather than interpolated into `find-clang-format`: a `'''...'''`
+    # is a raw string and Just substitutes once, into a recipe body.
+    export CLANG_FORMAT_MAJOR={{clang_format_major}}
     {{find-clang-format}}
     # Parenthesised: without it the -o binds loosely and the file set depends
     # on which find you have.
@@ -560,16 +626,17 @@ format:
 # run is worse than no check at all: CI goes green having verified nothing, and
 # everyone downstream reads that green as "formatting is fine".
 #
-# **It names the tool it used, and that is a diagnostic rather than a
-# constraint.** `.clang-format` pins no version and `find-clang-format` takes
-# whichever candidate answers first, so two machines with different majors
-# reformat the same file differently — which is what a run that reflows files
-# nobody touched actually is. `docs/DEFERRED.md` D00126 carries why pinning a
-# major is a toolchain decision rather than a patch; until then, a reflow
-# surprise at least arrives with the version that caused it.
+# **It names the tool it used, and the major is pinned so that name is the same
+# everywhere.** `.clang-format` carries no version field — the tool has none to
+# read — so `clang_format_major` above is where the number lives, and
+# `find-clang-format` refuses anything else rather than taking whichever
+# candidate answered first. That is what turns "two machines reformat the same
+# file differently" from a thing to work around into a thing that cannot
+# happen. `CLANG_FORMAT=` overrides it deliberately and warns when it does.
 format-check:
     #!/usr/bin/env bash
     set -euo pipefail
+    export CLANG_FORMAT_MAJOR={{clang_format_major}}
     {{find-clang-format}}
     echo "format-check with $cf $("$cf" --version | sed -nE 's/.*version ([0-9.]+).*/\1/p')" >&2
     find {{mono_sources}} \( -name '*.cpp' -o -name '*.hpp' \) -print0 \

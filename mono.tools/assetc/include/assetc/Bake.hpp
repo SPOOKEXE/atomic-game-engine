@@ -4,6 +4,7 @@
 // copied by default, and baked names replace source extensions deterministically.
 
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -138,6 +139,26 @@ namespace assetc {
 		//
 		// @since v0.10
 		std::string Only;
+
+		// Which content forms this run will touch at all.
+		//
+		// **The decoder door, and it is the earliest one there is.** A refused
+		// source is not decoded, not copied and not written, so a deployment
+		// that has turned SVG off never runs the rasteriser — which is what
+		// makes the flag a statement about a parser rather than about a
+		// picture.
+		//
+		// **Defaulted from the process's own settings rather than to "allow
+		// everything"**, so the callers who bake — `assetc`, `contentimport`
+		// and the studio's two raw-asset paths — are gated by one line here
+		// rather than by three they each have to remember. A caller wanting a
+		// different one assigns it; a program that never declared the flags
+		// gets everything, which is what `ContentPolicy::FromFlags` guarantees
+		// and what this engine did before they existed.
+		//
+		// @since v0.15
+		engine::assets::ContentPolicy Content =
+			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle);
 	};
 
 	// What one source file became.
@@ -209,6 +230,18 @@ namespace assetc {
 		//
 		// @since v0.10
 		size_t DanglingTextures = 0;
+
+		// How many sources `Settings::Content` refused.
+		//
+		// **Counted apart from `Failures`, because a refusal is not one.** A
+		// caller that treats any failure as a broken bake must not be broken by
+		// a deployment deciding it does not want GIFs — but a run that silently
+		// produced fewer assets than its input holds is exactly the mystery the
+		// whole settings layer exists to end, so the number is reported and each
+		// refused source keeps a row saying why.
+		//
+		// @since v0.15
+		size_t Refused = 0;
 	};
 
 	// The baked name for a source path.

@@ -25,10 +25,12 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -237,6 +239,80 @@ namespace server_replication_test {
 				input->Down.Set(key, true);
 			}
 			input->LatchPresses();
+		}
+
+		// Puts a camera in the replica at `from`, looking along `direction`.
+		//
+		// **A predicted entity, exactly as `client::AimReplicaViewer` mints
+		// one.** A replica may not allocate an authoritative index — the
+		// authority allocates from the same range and `Apply` would be right to
+		// merge the two — and a camera nobody else can see is precisely what the
+		// reserved high range is for. Building it by hand here rather than
+		// calling that function keeps this suite out of `mono.client`.
+		void AimFrom(const engine::core::Vector3 &from, const engine::core::Vector3 &direction) {
+			auto *active = World.ResourceMutable<engine::scene::ActiveCamera>();
+			if (active == nullptr || !World.Alive(active->Entity)) {
+				engine::scene::ActiveCamera live;
+				live.Entity = World.CreatePredicted("ReplicaViewer");
+				World.SetResource(live);
+				active = World.ResourceMutable<engine::scene::ActiveCamera>();
+			}
+
+			World.Set(
+				active->Entity, engine::scene::Transform{engine::core::CFrame::LookAt(from, from + direction)}
+			);
+		}
+
+		// Presses and releases the left mouse button, latching the edge.
+		//
+		// **The edge and not the hold**, which is the whole reason
+		// `InputState::PressedButtons` exists: frames outnumber ticks, so a
+		// click that began and ended between two of them lands on a frame no
+		// tick ever looks at. `LatchPresses` is what a writer owes, exactly as
+		// it does for a key.
+		void Click() {
+			auto *input = World.ResourceMutable<engine::scene::InputState>();
+			if (input == nullptr) {
+				World.SetResource(engine::scene::InputState{});
+				input = World.ResourceMutable<engine::scene::InputState>();
+			}
+
+			input->Focused = true;
+			input->PreviousButtons = input->Buttons;
+			input->Buttons =
+				static_cast<uint8_t>(1u << static_cast<uint8_t>(engine::scene::MouseButton::Left));
+			input->LatchPresses();
+			input->PreviousButtons = input->Buttons;
+			input->Buttons = 0;
+		}
+
+		// `Client::SubmitMove`'s shot half, and deliberately not a paraphrase.
+		//
+		// The same guard, the same `ReadAimIntent`, the same codec, the same
+		// channel — because the point of the assertion is that a *client* can
+		// fire, and a hand-built `examples::Shot` would step straight over the
+		// arithmetic that turns a camera into a ray.
+		bool SubmitAim() {
+			if (Mine == engine::ecs::NULL_ENTITY ||
+				engine::scene::CharacterOf(World, Mine) == engine::ecs::NULL_ENTITY) {
+				return false;
+			}
+
+			const engine::scene::AimIntent aim = engine::scene::ReadAimIntent(World);
+			if (!aim.Aimed || !aim.Fired) {
+				return false;
+			}
+
+			engine::examples::Shot shot;
+			shot.Aim = aim.Ray;
+			shot.Range = engine::examples::MAXIMUM_SHOT_RANGE;
+			if (!Link->Submit(Link->Applied(), engine::examples::EncodeShot(shot), Now)) {
+				return false;
+			}
+			if (auto *input = World.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+				input->ConsumeButtonTaps();
+			}
+			return true;
 		}
 
 		// Where the camera is pointing, which is what W is measured against.
@@ -853,6 +929,144 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 	// "the first one to ask wins".
 	CHECK(children(second.World, second.Mine) == 4);
 	CHECK(children(second.World, first.Mine) == 0);
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
+}
+
+TEST_CASE("a client's click is a shot the server resolves and everybody sees", "[server][replication]") {
+	// **The other half of `D00109`, and the half that had never had a caller.**
+	// `Server::ApplyInputs` decodes an `examples::Shot`, rewinds the client's
+	// view with `Rewind::TickSeenBy`, hit-tests against the recorded history and
+	// recolours what was struck — a complete server-authoritative feature whose
+	// `examples::EncodeShot` was reachable from nothing in the tree. That entry
+	// calls it two finished halves connected to nothing; this is the wire
+	// between them.
+	//
+	// **Two clients, because one would prove less than it looks.** A client
+	// shooting a prop would exercise the same code and would leave the
+	// interesting property untested: the verdict is the *server's*, and what
+	// makes that visible is a second client learning about a hit it did not
+	// witness and did not decide. The shooter never says what it struck.
+	//
+	// **The target is a character and not a prop, and that is not a preference.**
+	// `Server::ServeClients` records the rewind history over `Transform` *and*
+	// `Motion`, deliberately, so that static geometry does not fill the ring
+	// with rows whose answer is the same at every tick — a scripted anchored
+	// part is therefore invisible to the hit test, and an unanchored one that
+	// has come to rest is too. What moves in this engine is a character.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_shot.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local floor = Instance.new(\"Part\")\n"
+			 << "floor.Name = \"SpawnLocation\"\n"
+			 << "floor.Size = Vector3.new(400, 4, 400)\n"
+			 << "floor.Position = Vector3.new(0, -2, 0)\n"
+			 << "floor.Anchored = true\n"
+			 << "floor.Parent = workspace\n";
+	}
+
+	Remote shooter;
+	REQUIRE(shooter.Start(0, scene.string()));
+	REQUIRE(shooter.Join(400));
+
+	Remote victim;
+	REQUIRE(victim.Connect(shooter.Port));
+	REQUIRE(victim.Join(400));
+
+	for (int tick = 0; tick < 200; tick++) {
+		shooter.Tick();
+		victim.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+	}
+
+	REQUIRE(shooter.Mine != engine::ecs::NULL_ENTITY);
+	REQUIRE(victim.Mine != engine::ecs::NULL_ENTITY);
+
+	// **The shooter walks away first**, so that its own body is nowhere near the
+	// ray. Both characters spawn at the same `SpawnLocation`, and the shooter's
+	// root is in the rewind history exactly as the victim's is — a shot fired
+	// from where they are standing could strike the shooter and the assertion
+	// below would never know the difference.
+	shooter.LookAlong(0.0f);
+	shooter.Hold({engine::scene::KeyCode::W}, 120, &victim);
+
+	// The victim's body, as the shooter's replica holds it. Found through the
+	// join notice rather than by position, because a `Player` is what a client
+	// is told about and the character hangs off it.
+	const Entity victimCharacter = engine::scene::CharacterOf(shooter.World, victim.Mine);
+	REQUIRE(victimCharacter != engine::ecs::NULL_ENTITY);
+
+	const Character *rig = shooter.World.Get<Character>(victimCharacter);
+	REQUIRE(rig != nullptr);
+	const Entity victimRoot = rig->Root;
+	REQUIRE(shooter.World.Get<Visual>(victimRoot) != nullptr);
+
+	const engine::core::Color3 before = shooter.World.Get<Visual>(victimRoot)->Tint;
+
+	bool recoloured = false;
+	for (int attempt = 0; attempt < 200 && !recoloured; attempt++) {
+		// Re-read every attempt: the victim is a body on a floor and drifts a
+		// little, and a ray aimed once at where it used to be is a test that
+		// depends on it not having settled.
+		const Transform *placement = shooter.World.Get<Transform>(victimRoot);
+		if (placement == nullptr) {
+			break;
+		}
+
+		const engine::core::Vector3 at = placement->Frame.Position;
+		const engine::core::Vector3 eye = at + engine::core::Vector3{20.0f, 0.0f, 0.0f};
+		shooter.AimFrom(eye, (at - eye).Unit());
+
+		// Fired repeatedly, because the input channel is unreliable by design:
+		// `net/AGENTS.md` makes structure reliable and values not, so one lost
+		// datagram is one click that never happened. A player clicking again is
+		// what this models.
+		shooter.Click();
+		shooter.SubmitAim();
+		shooter.Tick();
+		victim.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+
+		if (const Visual *visual = shooter.World.Get<Visual>(victimRoot); visual != nullptr) {
+			// **The green channel, not the red.** A character's root is
+			// already white, so "the red went up" cannot distinguish the
+			// server's `{1, 0.2, 0.1}` from where it started — the first
+			// version of this case asserted exactly that and passed nothing
+			// while the server was striking every shot.
+			recoloured = visual->Tint.G < before.G - 0.3f && visual->Tint.R > 0.9f;
+		}
+	}
+
+	CHECK(recoloured);
+
+	// **And the victim sees the same verdict**, which is the half a single
+	// client cannot assert. It did not fire, it was not asked, and the colour
+	// reaches it as ordinary replicated `scene.Visual` — so a client that had
+	// decided its own hits would be a client nothing downstream could
+	// second-guess.
+	const Entity ownRoot = [&] {
+		const Entity character = engine::scene::CharacterOf(victim.World, victim.Mine);
+		const Character *own = victim.World.Get<Character>(character);
+		return own == nullptr ? engine::ecs::NULL_ENTITY : own->Root;
+	}();
+	REQUIRE(ownRoot != engine::ecs::NULL_ENTITY);
+
+	bool seenByVictim = false;
+	for (int tick = 0; tick < 200 && !seenByVictim; tick++) {
+		victim.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		if (const Visual *visual = victim.World.Get<Visual>(ownRoot); visual != nullptr) {
+			seenByVictim = visual->Tint.G < before.G - 0.3f && visual->Tint.R > 0.9f;
+		}
+	}
+	CHECK(seenByVictim);
 
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);

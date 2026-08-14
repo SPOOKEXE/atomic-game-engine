@@ -5,7 +5,7 @@
 // **This is the consumer `ShaderCompiler` was written for.** That header exists
 // because a `ShaderScript`'s revision can change while the engine runs, and
 // until this file nothing in the engine ever asked it to compile anything —
-// `docs/DEFERRED.md` D00110 is the entry that records the gap, and the order it
+// `docs/retired/DEFERRED.md` D00110 is the entry that records the gap, and the order it
 // insists on: the thing that names a shader has to exist before the shaders do,
 // or a library of defaults is a directory nothing loads.
 //

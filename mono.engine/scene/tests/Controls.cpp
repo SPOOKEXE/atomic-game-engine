@@ -376,3 +376,97 @@ TEST_CASE("a jump pressed between two ticks is latched, not lost", "[scene][cont
 	UpdateCharacterControl(world.Store_);
 	CHECK(world.Store_.Get<Humanoid>(character)->JumpRequested);
 }
+
+TEST_CASE("an aim is the live camera's ray and the click is a latched edge", "[scene][controls][aim]") {
+	// **What a client sends and never what it hit.** `Server::ApplyInputs`
+	// states that division and this is the half that produces the ray: a client
+	// says where it was looking, the host decides what that struck.
+	World world;
+
+	// No camera, no aim — and `Aimed` is separate from `Fired` because the two
+	// fail differently. "No live camera" is a bug; "the player did not click" is
+	// a Tuesday.
+	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Aimed);
+
+	const Entity camera = world.Store_.CreateInstance(engine::scene::CameraClass(), "Camera");
+	world.Store_.Set(
+		camera, Transform{CFrame::LookAt(Vector3{0.0f, 5.0f, 10.0f}, Vector3{0.0f, 5.0f, 0.0f})}
+	);
+
+	ActiveCamera live;
+	live.Entity = camera;
+	world.Store_.SetResource(live);
+
+	const engine::scene::AimIntent aimed = engine::scene::ReadAimIntent(world.Store_);
+	REQUIRE(aimed.Aimed);
+	CHECK_FALSE(aimed.Fired);
+
+	// The ray starts at the eye and points where the eye points. **A unit
+	// direction, and not by luck**: `examples::DecodeShot` refuses anything more
+	// than a thousandth off one, so a `LookVector` that stopped being normalised
+	// would make every shot a refused payload rather than a wrong one.
+	CHECK(aimed.Ray.Origin.Z == Approx(10.0f));
+	CHECK(aimed.Ray.Direction.Z == Approx(-1.0f));
+	CHECK(aimed.Ray.Direction.Magnitude() == Approx(1.0f));
+
+	// **The camera's own frame and not the controller's angles**, which is what
+	// makes a `Scriptable` camera aim where the cutscene points rather than
+	// wherever the player last left the mouse.
+	world.Camera().Angles.Y = std::numbers::pi_v<float>;
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Ray.Direction.Z == Approx(-1.0f));
+
+	// A click that begins and ends between two ticks. **The whole point of the
+	// latch**: `WasButtonPressed` is a frame-shaped question and this is read on
+	// a tick, so the press has to survive the release.
+	world.Input().PreviousButtons = 0;
+	world.Input().Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
+	world.Input().LatchPresses();
+	world.Input().PreviousButtons = world.Input().Buttons;
+	world.Input().Buttons = 0;
+
+	CHECK_FALSE(world.Input().WasButtonPressed(MouseButton::Left));
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
+
+	// **Read twice is fired twice until a tick consumes it**, and consuming is
+	// the caller's — exactly as it is for a jump. One click must not become two
+	// shots when a host catching up runs two ticks between two frames.
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
+	world.Input().ConsumeButtonTaps();
+	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Fired);
+
+	// An unfocused window fires nothing. Alt-tabbing away mid-click must not
+	// shoot, which is the same belt `ReadMoveIntent` wears.
+	// `PreviousButtons` cleared first, because `LatchPresses` records an *edge*
+	// and the button was left down by the case above — a latch against a button
+	// that was already held records nothing, which is the rule working.
+	world.Input().PreviousButtons = 0;
+	world.Input().Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
+	world.Input().LatchPresses();
+	world.Input().Focused = false;
+	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Fired);
+	world.Input().Focused = true;
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
+}
+
+TEST_CASE("the button latch keeps InputState the size a save file expects", "[scene][controls][aim]") {
+	// **`PressedButtons` came out of `Reserved`, not off the end.** A field
+	// appended would grow the object and rewrite the layout `Column::Write`
+	// sends — `SIZE_IS_PINNED` in `Input.cpp` is the check, and this is the
+	// statement of why it matters that a *reader* can find.
+	CHECK(sizeof(InputState) == 56);
+
+	// And `ConsumeTaps` is still the whole question, so the one caller that
+	// asks it whole is not a caller that clears half.
+	InputState input;
+	input.Focused = true;
+	input.Down.Set(KeyCode::Space, true);
+	input.Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
+	input.LatchPresses();
+
+	REQUIRE(input.WasKeyTapped(KeyCode::Space));
+	REQUIRE(input.WasButtonTapped(MouseButton::Left));
+
+	input.ConsumeTaps();
+	CHECK_FALSE(input.WasKeyTapped(KeyCode::Space));
+	CHECK_FALSE(input.WasButtonTapped(MouseButton::Left));
+}

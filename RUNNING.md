@@ -293,6 +293,99 @@ program accepts.
 
 ---
 
+# Settings *(v0.15)*
+
+Every program takes the same three, on top of its own options:
+
+```sh
+./client --config atomic.cfg          # a settings file
+./client --flag client.width=1600     # one setting, above everything else
+./client --flags                      # print every setting and where it came from, then exit
+
+ATOMIC_CONFIG=atomic.cfg ./server     # the file, from the environment
+ATOMIC_CLIENT_WIDTH=1600 ./client     # one setting, from the environment
+```
+
+**What wins is decided by where a value came from, not by what ran first:**
+
+    built-in default  <  config file  <  environment  <  command line
+
+so a config file cannot overwrite what somebody typed, whichever order the
+program happens to read them in. `--flags` prints the source beside each value,
+which is the answer to "why is this not what I set".
+
+## The file
+
+Sectioned `key = value`, where the section is the setting's prefix. `#` and `;`
+start a comment; `"` keeps a value that contains one.
+
+```ini
+# atomic.cfg
+[engine]
+log-level = trace
+jobs.workers = 8
+
+[server]
+tick-rate = 30
+listen = true
+listen-port = 9099
+idle-sleep = never
+
+[client]
+# A setting that is genuinely several repeats its key, and order is kept.
+content-sources = dir:/srv/atomic/processed
+content-sources = 10.0.0.4:9080
+
+[content]
+gif = false      # this process will not decode a GIF
+svg = false      # nor rasterise an SVG
+
+[cdn.publish]
+mp4 = false      # and an origin will not publish one
+```
+
+**A key naming no setting this program has is an error**, not a shrug — the same
+position `--help` takes for an unknown option, and for the same reason: a typo
+that is silently ignored fails at the behaviour rather than at the file. Run
+`--flags` to see what a program actually has.
+
+**A file named with `--config` and missing is an error too**, where no file at
+all is ordinary. A program launched with `--config prod.cfg` that silently ran
+on defaults is the deployment failure this whole layer exists to prevent.
+
+**A repeated key appends and a source that outranks it replaces.** Three origins
+in a file are three lines and all three are meant; one `--flag
+client.content-sources=...` on the command line replaces all three, rather than
+being appended to a list the person running it cannot see. `--flag
+client.content-sources=` with nothing after it is how a command line says
+"none". Nothing is split on a separator, so a path may contain anything.
+
+## Turning content formats off
+
+Two settings per format, and they are two because they are different verbs:
+
+| Setting | Means |
+|---|---|
+| `content.<form>` | this process will not decode, route or hand it over |
+| `cdn.publish.<form>` | this form does not enter a publication |
+
+`<form>` is the extension — `gif`, `svg`, `mp4`, `png`, `glb`, `spv` — plus
+`unknown`, which is every extension this build has no row for. Turning
+`content.unknown` off closes the list to what the engine understands.
+
+```sh
+./cdn --publish art/ --store cdn/ --signing-key HEX --flag cdn.publish.svg=false
+./client --flag content.mp4=false
+```
+
+An origin refuses at **publish** time and nowhere else, and that is a fact about
+an origin rather than an omission: after a publish there are only hashes, and a
+hash cannot be walked back to a name. A refused file is never chunked, never
+stored and never in the manifest — `cdn` says how many it refused, and `assetc`
+keeps a row per source saying which form it was.
+
+---
+
 # The editor *(v0.7)*
 
 ```sh
@@ -666,6 +759,7 @@ example, so seeing one is a command rather than a path to look up:
 | `run-meshes` | imported meshes and textures. Wants `--cdn` |
 | `run-mesh-grid` | bakes and publishes art, then draws it |
 | `run-local-server` | one server and several clients, all on this machine |
+| `run-local-server` + `SCENE=PlayerList.luau` | the same, with a live player list in every client |
 
 ### Somebody to be *(v0.14)*
 
@@ -690,6 +784,30 @@ the bandwidth budget back, and adds the thing neither of them had — more than
 one player. `--net` is on by default in the script because the F4 panel is where
 this demo is read from: two characters that do not move have three explanations,
 and the panel separates them.
+
+### Who is in the game *(v0.15)*
+
+```sh
+SCENE=PlayerList.luau scripts/demos/run-local-server.sh 4
+```
+
+**The same four clients, and a panel in each naming all four.** A name appears
+when a client starts and vanishes when one is closed, and each client's own row
+is tinted — with everybody called `Player1` through `Player4` there is otherwise
+nothing on screen saying which of them you are.
+
+**The rows are written into each player's own `PlayerGui` and not into
+`StarterGui`.** A `StarterGui` is a template that is cloned when a character
+spawns, so a row added after somebody joined never reaches the copy they are
+looking at; a `PlayerGui` is live *and* private on the wire, and it is the only
+place both are true. Watching one client's panel while another closes is the
+demonstration.
+
+**TAB holds the panel open where there is a keyboard, and there is not one on a
+dedicated server** — so in this arrangement the panels stay shown. Press Play in
+the studio, or run `./client --script PlayerList.luau`, to see the toggle
+itself. Holding a key is a fact about a *viewer* and closing that gap needs a
+script running in the replica, which `docs/DEFERRED.md` `D00122` carries.
 
 **The same arrangement without a second program is the studio.** Press Play and
 the editor hosts both halves in its own viewports: a server view and a client
@@ -877,7 +995,7 @@ through the same product the picture goes through, and `scene::OpenPortals`
 takes the pane's collider out of the solver's way so a walker reaches it at all.
 Press Play in the studio on `run-portals`' scene, or host it with
 `scripts/demos/run-local-server.sh`; the standalone client has no character and
-walks the lap on rails instead. What is left of `docs/DEFERRED.md` D00112 is the
+walks the lap on rails instead. What is left of `docs/retired/DEFERRED.md` D00112 is the
 seam on the frame you cross, which needs the portal chain rendered inside the
 frame, deepest first.
 

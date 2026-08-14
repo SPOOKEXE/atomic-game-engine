@@ -23,6 +23,8 @@
 // resolution an interactive panel is read at.
 
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/ContentForm.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
@@ -530,29 +532,29 @@ namespace studio {
 		std::vector<engine::core::Name> waiting;
 
 		EachOpenWorld([&waiting](engine::ecs::Store &store) {
-			store.Each<const engine::scene::Visual>([&waiting, &store](
-														engine::ecs::Entity, const engine::scene::Visual &visual
-													) {
-				if (!visual.Mesh.IsValid()) {
-					return;
-				}
+			store.Each<const engine::scene::Visual>(
+				[&waiting, &store](engine::ecs::Entity, const engine::scene::Visual &visual) {
+					if (!visual.Mesh.IsValid()) {
+						return;
+					}
 
-				// **Two reasons a mesh is pending, and the second is not the
-				// first.** A part that has never been fitted needs the shape; a
-				// world whose catalogue has never heard of the mesh needs the
-				// facts. They come apart when a world is loaded from a file —
-				// `Visual::Fitted` is saved with the part, so a reopened place
-				// is fully fitted and knows no triangle counts at all.
-				const bool unfitted = visual.Fitted != visual.Mesh;
-				const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
-				if (!unfitted && !unknown) {
-					return;
-				}
+					// **Two reasons a mesh is pending, and the second is not the
+					// first.** A part that has never been fitted needs the shape; a
+					// world whose catalogue has never heard of the mesh needs the
+					// facts. They come apart when a world is loaded from a file —
+					// `Visual::Fitted` is saved with the part, so a reopened place
+					// is fully fitted and knows no triangle counts at all.
+					const bool unfitted = visual.Fitted != visual.Mesh;
+					const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
+					if (!unfitted && !unknown) {
+						return;
+					}
 
-				if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
-					waiting.push_back(visual.Mesh);
+					if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
+						waiting.push_back(visual.Mesh);
+					}
 				}
-			});
+			);
 		});
 
 		for (const engine::core::Name &mesh : waiting) {
@@ -684,6 +686,18 @@ namespace studio {
 		if (!ContentClient || !asset.IsValid() || !ContentAsked.insert(asset.Id()).second) {
 			return false;
 		}
+
+		// **The same door the shipped client has**, and it is here rather than
+		// only there because a rule that holds in a game binary and not in the
+		// editor is one an author meets for the first time after shipping.
+		if (const engine::assets::ContentForm form = engine::assets::FormOfName(asset.Text());
+			!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle).Allows(form)) {
+			ContentStatus = "not asking for " + std::string(asset.Text()) + " — " +
+							engine::assets::Describe(form) + " content is turned off";
+			ENGINE_INFO("content: {}", ContentStatus);
+			return false;
+		}
+
 		ContentIssued.push_back(ContentClient->Request(asset.Text()));
 
 		// **Marked before the answer, which is the whole point.** Until this

@@ -17,6 +17,7 @@
 // @tier L7 · shared
 
 #include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -324,6 +325,54 @@ namespace engine::scene {
 	// @return The intent. Zero direction and no jump when the window is not
 	//         focused or the world has no `InputState`.
 	MoveIntent ReadMoveIntent(const ecs::Store &store);
+
+	// What the player is aiming at, and whether they asked to act on it.
+	//
+	// @since v0.15
+	struct AimIntent {
+		// Where the eye is and which way it is pointing, in world space.
+		core::Ray Ray;
+
+		// Whether the primary button went down since a tick last consumed the
+		// edges.
+		//
+		// **A tap and not a hold**, which is `MoveIntent::Jump`'s distinction
+		// and matters more here: a hold would fire once per tick for as long as
+		// the button is down, and a client cannot be trusted with the rate.
+		bool Fired = false;
+
+		// Whether there was a camera to aim from at all.
+		//
+		// **Separate from `Fired`, because they fail differently.** A world with
+		// no live camera and a player who did not click both produce "no shot",
+		// and only one of them is a bug.
+		bool Aimed = false;
+	};
+
+	// Reads the live camera and the pointer into an aim, and applies it to
+	// nothing.
+	//
+	// **Here rather than in `mono.client`, for `ReadMoveIntent`'s reason.** A
+	// client sends where it aimed and never what it hit — `Server::ApplyInputs`
+	// states that division — so the arithmetic that turns a camera into a ray
+	// has to be reachable without the thing that acts on it. The studio's
+	// `PlayLink` needs the same ray with no socket in the middle, and two
+	// copies of "which way is the player looking" is the shape that drifts and
+	// drifts first in the editor.
+	//
+	// **The ray is the camera's and not the character's.** A shot starts at the
+	// eye because that is what the player aimed with; a game that wants it to
+	// start at a muzzle offsets it, and it is the *direction* that must not be
+	// re-derived.
+	//
+	// Const, because it writes nothing at all. The consuming of the tap is the
+	// caller's, through `InputState::ConsumeTaps`, exactly as it is for a jump.
+	//
+	// @param store The world.
+	// @return The aim. `Aimed` is false when there is no live camera or no
+	//         `InputState`, and `Fired` is false whenever the window is not
+	//         focused.
+	AimIntent ReadAimIntent(const ecs::Store &store);
 
 	// Turns this frame's input into a `Humanoid::MoveDirection`.
 	//

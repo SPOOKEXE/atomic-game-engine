@@ -296,6 +296,25 @@ namespace engine::scene {
 		// Which were down last frame.
 		uint8_t PreviousButtons = 0;
 
+		// Which buttons have gone down since a tick last consumed the edges.
+		//
+		// **`Pressed`, one field along, and it was missing for exactly as long
+		// as a mouse button had nothing acting on it.** The frame/tick argument
+		// above `Pressed` is about a *key*, and it is about a key only because
+		// jump was the first thing a simulation acted on: frames outnumber
+		// ticks, so a click that began and ended between two ticks happened on
+		// a frame no tick ever looked at, and roughly two clicks in three are
+		// lost. Nothing noticed because nothing in this engine fired a shot
+		// until v0.15 — `examples::EncodeShot` had no caller anywhere in the
+		// tree.
+		//
+		// **Taken out of `Reserved` rather than added to the end**, so `sizeof`
+		// is still 56 and no save format moved. The byte was already being
+		// written; it simply had no name.
+		//
+		// @since v0.15
+		uint8_t PressedButtons = 0;
+
 		// How the pointer should behave.
 		//
 		// **Written by a script and read by the client**, which is one of the two
@@ -371,13 +390,14 @@ namespace engine::scene {
 		// This is the only component in the module where that was got wrong
 		// once, and the rest are the reason the rule is worth keeping.
 		//
-		// **Four since `MouseIconEnabled` and the two source fields took three of
-		// the seven**, so `sizeof` has not moved and no save format has either.
-		// That is the whole reason a padding member is declared rather than left
-		// to the compiler: a field added at the *end* would grow the object and
-		// rewrite the layout `Column::Write` sends, where a field taken out of
-		// here costs nothing. `SIZE_IS_PINNED` in `Input.cpp` is what checks it.
-		uint8_t Reserved[4] = {};
+		// **Three since `MouseIconEnabled`, the two source fields and
+		// `PressedButtons` took four of the seven**, so `sizeof` has not moved
+		// and no save format has either. That is the whole reason a padding
+		// member is declared rather than left to the compiler: a field added at
+		// the *end* would grow the object and rewrite the layout
+		// `Column::Write` sends, where a field taken out of here costs nothing.
+		// `SIZE_IS_PINNED` in `Input.cpp` is what checks it.
+		uint8_t Reserved[3] = {};
 
 		// Whether a key is down now.
 		//
@@ -413,6 +433,13 @@ namespace engine::scene {
 			for (size_t word = 0; word < sizeof(Down.Words) / sizeof(Down.Words[0]); word++) {
 				Pressed.Words[word] |= Down.Words[word] & ~Previous.Words[word];
 			}
+
+			// **The buttons in the same call, because they are the same
+			// mistake.** Two calls would be two things a writer has to remember
+			// and one of them would be forgotten the first time somebody added a
+			// second input path — which is precisely how `PlayLink::PendingJump`
+			// and the client's own latch came to exist side by side.
+			PressedButtons |= static_cast<uint8_t>(Buttons & ~PreviousButtons);
 		}
 
 		// Whether a key went down since a tick last consumed the edges.
@@ -441,7 +468,48 @@ namespace engine::scene {
 		// would mean the second never sees a tap the first cleared, which is the
 		// dropped jump again with an extra step.
 		void ConsumeTaps() {
+			ConsumeKeyTaps();
+			ConsumeButtonTaps();
+		}
+
+		// Forgets the latched key edges alone.
+		//
+		// **Two halves under one name, because a client sends two messages and
+		// either can fail on its own.** `Client::SubmitMove` puts the jump in a
+		// `game::MoveInput` and the click in an `examples::Shot`, and clears
+		// each latch only once *that* message is on the wire — a shot refused by
+		// the send budget while the move went through would otherwise forget a
+		// click nobody was told about. `ConsumeTaps` is still the whole
+		// question, for the one caller that asks it whole.
+		//
+		// @since v0.15
+		void ConsumeKeyTaps() {
 			Pressed = KeyBits{};
+		}
+
+		// Forgets the latched button edges alone.
+		//
+		// @since v0.15
+		void ConsumeButtonTaps() {
+			PressedButtons = 0;
+		}
+
+		// Whether a mouse button went down since a tick last consumed the edges.
+		//
+		// **What a simulation should ask instead of `WasButtonPressed`**, for
+		// the reason `WasKeyTapped` gives one field up: a click that began and
+		// ended between two ticks is invisible to the frame-shaped question.
+		//
+		// The latch alone, deliberately, exactly as `WasKeyTapped` is — a host
+		// catching up runs several ticks between two writes, and folding the
+		// live frame edge in here would let the second read the same click the
+		// first had just consumed. One click, two shots.
+		//
+		// @param button The button.
+		// @return `true` when it was pressed since the last `ConsumeTaps`.
+		// @since v0.15
+		bool WasButtonTapped(MouseButton button) const {
+			return (PressedButtons & (1u << static_cast<uint8_t>(button))) != 0;
 		}
 
 		// Whether a mouse button is down now.

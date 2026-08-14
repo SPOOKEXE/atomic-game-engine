@@ -14,8 +14,11 @@
 //
 // @tier shared
 
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Config.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 
 #include <array>
@@ -210,9 +213,17 @@ namespace {
 }
 
 int main(int argc, char **argv) {
+	// **Both verbs, because this tool bakes and publishes.** It is the one
+	// place `assetc`'s decoder door and `cdn`'s publish door are crossed in one
+	// program, so a deployment turning a form off here turns it off for both.
+	engine::core::Config::DeclareEngineFlags();
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
+
 	engine::core::Arguments arguments(
 		"contentimport", "Brings files and folders into the local content store."
 	);
+	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Value("root", "PATH", "The store. Defaults to ~/Documents/atomic-game-engine/cdn");
 	arguments.Flag("publish", "Publish raw/ into processed/ once the imports are done");
@@ -225,6 +236,16 @@ int main(int argc, char **argv) {
 	}
 	if (parsed.HelpRequested) {
 		std::printf("%s", arguments.Help().c_str());
+		return 0;
+	}
+
+	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
+	if (!configured.Ok) {
+		std::fprintf(stderr, "%s\n", configured.Error.c_str());
+		return 2;
+	}
+	if (engine::core::Config::ListingWanted(arguments)) {
+		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
 		return 0;
 	}
 

@@ -353,6 +353,24 @@ namespace server {
 		// @param client The client.
 		void ForgetClientViewpoint(engine::replication::ClientId client);
 
+		// Points every client's viewpoint at its own character.
+		//
+		// **The caller `SetClientViewpoint` waited three versions for.** That
+		// hook and `DistancePriority` have both existed since v0.4, and the
+		// reason nothing filled them in was written into the comment beside
+		// them: there was no per-client avatar, so the placeholder world was
+		// cubes and nobody was in it. There is one now — `scene::AddPlayer` per
+		// connection, with a character — so the honest answer stopped being
+		// "score everything the same".
+		//
+		// Called once a tick from `ServeClients`, before the delta is built.
+		// A client between a join and a spawn is *forgotten* rather than left
+		// at its last position, because a round robin is a better answer than a
+		// stale one.
+		//
+		// @since v0.15
+		void UpdateClientViewpoints();
+
 		// Declared so the content attachment can stay an incomplete type in
 		// this header. `mono.server` links `Mono::cdn`, and a server's public
 		// header pulling the origin's in behind it would put a content-delivery

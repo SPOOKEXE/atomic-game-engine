@@ -32,6 +32,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace engine::ecs {
@@ -335,6 +336,16 @@ namespace engine::ecs {
 
 		// So a refusal is reported once rather than once per attempt.
 		bool WarnedAboutMinting = false;
+
+		// Instances an author may not destroy or reparent. See
+		// `Store::Protect`.
+		//
+		// **Keyed on the whole handle rather than the index**, so a protected
+		// entity that is destroyed by the engine and whose slot is reused does
+		// not leave the next occupant protected. A set rather than a column:
+		// there are nine of these in a world and a column would put a byte on
+		// every archetype that holds one.
+		std::unordered_set<uint64_t> Protected;
 
 		// Component types whose writes are recorded, and the coarse counter a
 		// batch write still moves.

@@ -1,5 +1,6 @@
 // Covers baked-name consistency, filesystem handling and partial failures.
 
+#include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
@@ -19,6 +20,7 @@
 #include <vector>
 
 TEST_SUITE_ID("tools.assetc.bake")
+TEST_DEPENDS("engine.assets.contentpolicy")
 
 using assetc::BakedName;
 using assetc::Report;
@@ -702,4 +704,44 @@ TEST_CASE("a drawing this cannot draw fails its own row and not the run", "[asse
 	const assetc::Baked &icon =
 		report.Assets[0].Source == "icons/fancy.svg" ? report.Assets[0] : report.Assets[1];
 	CHECK(icon.Failure.find("text") != std::string::npos);
+}
+
+TEST_CASE("a refused form is not decoded, not copied and says why", "[assetc][content]") {
+	// **The refusal has to land before the dispatch on extension**, because the
+	// point of turning a form off is that its parser is never reached — an SVG
+	// this deployment does not want must not go through the rasteriser first
+	// and be discarded after. The evidence is that nothing was written for it,
+	// including under `CopyUnknown`, which is the branch a late gate would miss.
+	Scratch scratch("refused");
+	scratch.Write("art/tile.bmp", std::span(BMP.data(), BMP.size()));
+	scratch.Write("art/logo.svg", R"(<svg width="8" height="8"><rect width="8" height="8"/></svg>)");
+	scratch.Write("clips/intro.mp4", "not really an mp4");
+
+	Settings settings;
+	settings.Content.Allow(engine::assets::ContentForm::Svg, false);
+	settings.Content.Allow(engine::assets::ContentForm::Mp4, false);
+
+	const Report report = Baked(scratch, settings);
+	CHECK(report.Refused == 2);
+
+	// **Counted apart from `Failures`**, so a caller treating any failure as a
+	// broken bake is not broken by a deployment deciding it does not want SVGs.
+	CHECK(report.Failures == 0);
+
+	CHECK(fs::exists(scratch.Out() / "art/tile.atex"));
+	CHECK_FALSE(fs::exists(scratch.Out() / "art/logo.atex"));
+	CHECK_FALSE(fs::exists(scratch.Out() / "clips/intro.mp4"));
+
+	// And each refused source keeps a row saying which form it was, because
+	// "fewer assets than the input holds" with nothing to explain it is the
+	// mystery the whole settings layer exists to end.
+	size_t named = 0;
+	for (const assetc::Baked &row : report.Assets) {
+		if (row.Failure.find("refused") == std::string::npos) {
+			continue;
+		}
+		named++;
+		CHECK((row.Failure.find("svg") != std::string::npos || row.Failure.find("mp4") != std::string::npos));
+	}
+	CHECK(named == 2);
 }

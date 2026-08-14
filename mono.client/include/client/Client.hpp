@@ -2,6 +2,7 @@
 
 // Client-owned window, renderer, event loop and frame state.
 
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/audio/Device.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/delivery/Client.hpp>
@@ -235,6 +236,56 @@ namespace client {
 		//
 		// Optional server identity pin; encryption alone does not authenticate it.
 		std::string ServerKey;
+
+		// Run with no window at all.
+		//
+		// **What makes a shipped client drivable by something that is not a
+		// person**. The studio has had `--headless` since v0.7 and is therefore
+		// checkable by `just studio-smoke`, while the *client* — the binary a
+		// game actually ships — could only be checked by somebody looking at it
+		// until v0.15. That is the worst place for a gap to be, because the bugs
+		// it hides are the ones that work in the editor and not in the game.
+		// `just client-smoke` is what this makes possible.
+		//
+		// The renderer already had the mode: `Renderer::Initialise` takes a null
+		// window and puts itself into it, which is how the editor works. What
+		// this adds is a client that does not create one, and the handful of
+		// window calls guarded so that a run without one does not reach them.
+		//
+		// **Needs `--frames`**, because a headless run has no window to close
+		// and would otherwise never stop.
+		//
+		// @since v0.15
+		bool Headless = false;
+
+		// Click the interface element with this name, once, mid-run.
+		//
+		// **A diagnostic beside `--capture`, and it exists for one reason:
+		// nothing could press a button in a shipped client.**
+		// `Client::InterfaceRouter` was constructed, read and never `Update`d
+		// until v0.15, so a `TextButton` in a game never lit and its `Activated`
+		// never fired while the same tree worked in the editor. The fix was one
+		// line, and no check anywhere could have said it was missing. On this
+		// flag's own first run it found a second: `examples::LoadScene` kept the
+		// only reference to the VM it created, so every gui event a `--script`
+		// world produced was delivered nowhere.
+		//
+		// **By name and not by coordinates**, because a coordinate is a second
+		// statement of where the layout put something and would go stale the
+		// first time a padding changed. `gui::Resolved` is the one answer to
+		// where an element is — `gui/AGENTS.md` refuses a second — so this asks
+		// it and presses the middle of what it says.
+		//
+		// The press is synthesised into `input::Translator` as an ordinary SDL
+		// event, so it travels the path a real click travels: the same
+		// translator, the same `scene::InputState`, the same `gui::Router`, the
+		// same `Runtime::DeliverGuiEvents`. A click that took a shortcut past any
+		// of those would be a check of the shortcut.
+		//
+		// Empty presses nothing, which is every run that is not a smoke test.
+		//
+		// @since v0.15
+		std::string ClickElement;
 
 		// Where to write a BMP of the scene, or empty for none.
 		//
@@ -471,6 +522,24 @@ namespace client {
 		// Whether the interface pass has been given its image resolver. Set
 		// once; see the call site for why it is not done at start-up.
 		bool InterfaceImagesReady = false;
+
+		// Synthesises the `--click` press, once the interface has been laid out.
+		//
+		// **After a compile rather than at a frame number**, because a name can
+		// only be resolved once something has resolved it: `gui::Resolved` is
+		// written by the layout pass, so the earliest frame this can work on is
+		// the first one that produced a draw list.
+		//
+		// @param store The drawn world, already laid out.
+		void PressNamedElement(engine::ecs::Store &store);
+
+		// How many frames the synthetic press has left to run.
+		//
+		// **Three states in one counter**: not started, pressed and waiting to
+		// release, done. A press and a release on one frame is a click no
+		// `gui::Router` can see — it holds the press across frames on purpose,
+		// because that is what a press *is*.
+		int ClickFrames = -1;
 
 		// How long this session has been drawing, in seconds.
 		//

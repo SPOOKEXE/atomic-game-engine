@@ -1,5 +1,6 @@
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/ChunkStore.hpp>
+#include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/testing/Suite.hpp>
@@ -19,6 +20,7 @@ TEST_SUITE_ID("cdn.publisher")
 TEST_DEPENDS("engine.assets.chunkstore")
 TEST_DEPENDS("engine.assets.manifest")
 TEST_DEPENDS("cdn.grouper")
+TEST_DEPENDS("engine.assets.contentpolicy")
 
 using engine::assets::AssetKind;
 using engine::assets::ChunkStore;
@@ -332,4 +334,60 @@ TEST_CASE("a published bundle reassembles from the store", "[cdn][publisher]") {
 		REQUIRE(payload.has_value());
 		CHECK(payload->size() == bundle.TotalBytes);
 	}
+}
+
+TEST_CASE("a refused form never becomes a chunk, a name or a manifest row", "[cdn][publisher][content]") {
+	// **The gate is before the chunker, and that is what is being asserted.** A
+	// filter applied after — at serve time, say — would be looking at a hash
+	// that has already been stored, and `cdn/Publisher.hpp`'s first paragraph
+	// says a hash cannot be walked back to a name. So the only honest place is
+	// the one moment the name is real, and the evidence is that the store is
+	// smaller rather than that the manifest is shorter.
+	Workspace workspace;
+	workspace.Add("textures/grass.png", "PNG grass pixels");
+	workspace.AddLarge("art/logo.svg", 'v');
+	workspace.AddLarge("clips/intro.mp4", 'm');
+
+	cdn::PublishSettings settings;
+	settings.Content.Allow(engine::assets::ContentForm::Svg, false);
+	settings.Content.Allow(engine::assets::ContentForm::Mp4, false);
+
+	const SigningKey key = Key();
+	const auto report = cdn::Publish(workspace.Content(), workspace.Store(), key, settings);
+	REQUIRE(report.has_value());
+	CHECK(report->Assets == 1);
+	CHECK(report->Refused == 2);
+
+	auto store = ChunkStore::Open(workspace.Store(), false);
+	REQUIRE(store.has_value());
+	SignatureBytes signature;
+	const auto manifest = store->ReadManifest(signature);
+	REQUIRE(manifest.has_value());
+
+	CHECK(manifest->Find("textures/grass.png") != nullptr);
+	CHECK(manifest->Find("art/logo.svg") == nullptr);
+	CHECK(manifest->Find("clips/intro.mp4") == nullptr);
+
+	// Six hundred kilobytes of refused content, and the store holds a sentence.
+	// A gate that ran after the chunker would pass every assertion above this
+	// one and fail this.
+	CHECK(store->Bytes() < 100u * 1024u);
+}
+
+TEST_CASE(
+	"refusing the unnamed form closes a publish to what this build knows", "[cdn][publisher][content]"
+) {
+	Workspace workspace;
+	workspace.Add("textures/grass.png", "PNG grass pixels");
+	workspace.Add("notes/README", "no extension at all");
+	workspace.Add("data/table.xyzzy", "an extension nothing has a row for");
+
+	cdn::PublishSettings settings;
+	settings.Content.Allow(engine::assets::ContentForm::Unknown, false);
+
+	const SigningKey key = Key();
+	const auto report = cdn::Publish(workspace.Content(), workspace.Store(), key, settings);
+	REQUIRE(report.has_value());
+	CHECK(report->Assets == 1);
+	CHECK(report->Refused == 2);
 }

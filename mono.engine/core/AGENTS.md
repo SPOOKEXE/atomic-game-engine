@@ -116,3 +116,41 @@ already given out, and the corruption would appear far from the change.
 
 No `Vector3` method may allocate, log, or reach a global. They are used by tools
 with no engine around them.
+
+## The flag layer is frozen before the loop starts, and that is rule 5
+
+`core::Flags` holds process-wide settings and `core::Config` is the only thing
+that reads a file, an environment or an `argv` into it. The split is the point:
+a program adds a source without the store learning a fourth format.
+
+**`Flags::Freeze` is not tidiness.** A value that can move between two ticks is
+a value two machines can disagree about, and the disagreement arrives as a
+desync a long way from the flag that caused it. Every program calls it once its
+options are applied; a `Set` after it is refused and named in the log. Reads
+after the freeze take no lock, which is what makes a flag safe in a hot path —
+and reads *before* it are only safe on the thread doing the startup.
+
+**Precedence is a property of the source and never of the call order.**
+`Default < ConfigFile < Environment < CommandLine`, compared as an enum, so a
+program may apply its sources in whichever order suits it and a file still
+cannot overwrite what somebody typed. A `Set` that loses answers `Outranked`,
+which is not a failure — it is the rule working, and it is reported so that "my
+config file does nothing" is not a mystery.
+
+**A flag is declared by a table a module hands over, never by a self-registering
+static.** A static in a translation unit nothing else references is dropped by
+the linker out of a static archive, and a flag that silently does not exist is
+worse than one that is missing: the program runs, reads the built-in default and
+reports nothing. `script::ServiceCatalogue` made this argument first.
+
+**A key naming no declared flag is an error**, exactly as an undeclared option is
+to `core::Arguments`, and for the same reason: a typo that is silently ignored
+fails at the behaviour, days later, somewhere unrelated. That makes "declare
+every table before applying any source" a real ordering constraint, and it is
+one the build does not check — a program that declares late refuses its own
+settings, loudly, at startup.
+
+**A default that is derived belongs in a `FlagTableBuilder`.** A program's
+built-in values live in its own `Options` struct and a content form's flag name
+is built from the extension table; a `static constexpr` array of literals cannot
+express either without writing the fact down twice, which is rule 2.

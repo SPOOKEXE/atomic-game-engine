@@ -275,7 +275,12 @@ namespace engine::ecs {
 		};
 
 		parent.Set = [](Store &store, Entity subject, const void *value) -> bool {
-			return store.SetParent(subject, *static_cast<const Entity *>(value));
+			// **Authored, and this is the fourth of the four doors.** `.Parent`
+			// is one lambda serving both VMs and the properties panel alike, so
+			// enforcing the rule at the other three and not here would ship
+			// something that holds in Luau and not in the panel — which reads as
+			// a bug in the panel rather than as a rule.
+			return store.SetParentAuthored(subject, *static_cast<const Entity *>(value));
 		};
 
 		Classes::Computed(instance, parent);

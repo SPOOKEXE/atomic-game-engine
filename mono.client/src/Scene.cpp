@@ -1395,7 +1395,13 @@ namespace client {
 		constexpr uint32_t DEFAULT_PARTICLE_POOL = 524288;
 	}
 
-	bool BuildScriptedWorld(Store &store, Scheduler &scheduler, const std::string &path, uint32_t reserve) {
+	bool BuildScriptedWorld(
+		Store &store,
+		Scheduler &scheduler,
+		const std::string &path,
+		uint32_t reserve,
+		std::shared_ptr<engine::script::Runtime> *runtime
+	) {
 		// Before anything mints an automatic id for `DrawList`. See
 		// `RegisterClientComponents`: `Components::Of<T>` caches its answer per
 		// type per process, so an explicit registration that arrives second
@@ -1414,7 +1420,7 @@ namespace client {
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
 		std::string error;
-		if (!engine::examples::LoadScene(store, scheduler, path, error)) {
+		if (!engine::examples::LoadScene(store, scheduler, path, error, runtime)) {
 			ENGINE_ERROR("script '{}' failed:\n{}", path, error);
 			return false;
 		}

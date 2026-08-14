@@ -861,6 +861,22 @@ namespace engine::scene {
 			if (ServiceComponent *component = store.GetMutable<ServiceComponent>(existing);
 				component != nullptr) {
 				component->Scope = desc.Scope;
+
+				// **`Fixture` finally refuses something.** The field has said
+				// since v0.7 that an author may not delete or reparent a
+				// service, and nothing read it — a script could `Destroy()`
+				// `Lighting` and the editor could delete it with the Delete key,
+				// which is rule 6 in its plainest form. `Store::Protect` is the
+				// seam and this is its only filler.
+				//
+				// **Here rather than at creation**, so a world read out of a
+				// game file is protected too: the loop above finds those rather
+				// than making them, and protection that only applied to freshly
+				// minted services would hold in a new game and not in a saved
+				// one — which is the worst half to be missing.
+				if (component->Fixture) {
+					store.Protect(existing);
+				}
 			}
 
 			if (desc.Name == "Workspace") {

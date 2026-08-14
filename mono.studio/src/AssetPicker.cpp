@@ -22,15 +22,16 @@
 
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <cdn/LocalStore.hpp>
+#include <filesystem>
 #include <imgui.h>
 #include <string>
 #include <string_view>
-#include <filesystem>
 #include <studio/AssetRow.hpp>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
@@ -100,8 +101,7 @@ namespace studio {
 		return AssetKind::Unknown;
 	}
 
-	engine::game::PropertyValue
-	ChosenContentValue(engine::ecs::PropertyType type, std::string_view chosen) {
+	engine::game::PropertyValue ChosenContentValue(engine::ecs::PropertyType type, std::string_view chosen) {
 		engine::game::PropertyValue value;
 		value.Type = type;
 		value.Name = chosen.empty() ? engine::core::Name{} : engine::core::Name(chosen);
@@ -195,6 +195,15 @@ namespace studio {
 			// extension table are told apart; a second opinion here would be a
 			// picker that disagreed with the loader about what works.
 			if (!engine::assets::IsRuntimeReadable(entry.Name)) {
+				continue;
+			}
+
+			// **Nor a form this deployment turned off**, for the same reason one
+			// step out: `RequestContentAsset` will refuse to fetch it, so
+			// offering it is offering a choice that leaves the part looking
+			// exactly as it did.
+			if (!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)
+					 .AllowsName(entry.Name)) {
 				continue;
 			}
 			int score = 0;
@@ -293,14 +302,11 @@ namespace studio {
 			clipper.Begin(static_cast<int>(shown.size()), side + ImGui::GetStyle().ItemSpacing.y);
 
 			while (clipper.Step()) {
-			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-				const cdn::PublishedEntry &entry = *shown[static_cast<size_t>(row)].Entry;
-				ImGui::PushID(entry.Name.c_str());
+				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+					const cdn::PublishedEntry &entry = *shown[static_cast<size_t>(row)].Entry;
+					ImGui::PushID(entry.Name.c_str());
 
-				const RowAction action = DrawAssetRow(
-					entry.Name == chosen,
-					side,
-					[&](ImVec2 corner) {
+					const RowAction action = DrawAssetRow(entry.Name == chosen, side, [&](ImVec2 corner) {
 						PaintPreview(corner.x, corner.y, side, entry.Name, entry.Kind);
 
 						// Centred against the picture rather than sitting on its
@@ -312,23 +318,22 @@ namespace studio {
 							ImGui::GetColorU32(ImGuiCol_Text),
 							entry.Name.c_str()
 						);
+					});
+
+					if (action != RowAction::None) {
+						chosen = entry.Name;
+						confirmed = action == RowAction::Confirmed;
 					}
-				);
 
-				if (action != RowAction::None) {
-					chosen = entry.Name;
-					confirmed = action == RowAction::Confirmed;
+					// **The big preview, on the row rather than as a tooltip.** A
+					// picker is exactly where somebody needs to see the thing before
+					// choosing it, and 48 pixels is not enough to recognise art.
+					// Reads `IsItemHovered()`, which is still the row's — see
+					// `DrawAssetRow`.
+					HoverPreview(entry.Name, entry.Kind);
+
+					ImGui::PopID();
 				}
-
-				// **The big preview, on the row rather than as a tooltip.** A
-				// picker is exactly where somebody needs to see the thing before
-				// choosing it, and 48 pixels is not enough to recognise art.
-				// Reads `IsItemHovered()`, which is still the row's — see
-				// `DrawAssetRow`.
-				HoverPreview(entry.Name, entry.Kind);
-
-				ImGui::PopID();
-			}
 			}
 		}
 		ImGui::EndChild();
@@ -410,37 +415,37 @@ namespace studio {
 		clipper.Begin(static_cast<int>(shown.size()), side + ImGui::GetStyle().ItemSpacing.y);
 
 		while (clipper.Step()) {
-		for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-			const cdn::RawEntry &entry = *shown[static_cast<size_t>(row)];
+			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+				const cdn::RawEntry &entry = *shown[static_cast<size_t>(row)];
 
-			const std::string relative = RawRelativePath(entry);
-			ImGui::PushID(relative.c_str());
+				const std::string relative = RawRelativePath(entry);
+				ImGui::PushID(relative.c_str());
 
-			const RowAction action = DrawAssetRow(false, side, [&](ImVec2 corner) {
-				PaintPreview(corner.x, corner.y, side, relative, kind);
+				const RowAction action = DrawAssetRow(false, side, [&](ImVec2 corner) {
+					PaintPreview(corner.x, corner.y, side, relative, kind);
 
-				const float baseline = corner.y + (side - ImGui::GetTextLineHeight()) * 0.5f;
-				ImGui::GetWindowDrawList()->AddText(
-					ImVec2(corner.x + side + spacing, baseline),
-					ImGui::GetColorU32(ImGuiCol_Text),
-					entry.Original.c_str()
-				);
-			});
+					const float baseline = corner.y + (side - ImGui::GetTextLineHeight()) * 0.5f;
+					ImGui::GetWindowDrawList()->AddText(
+						ImVec2(corner.x + side + spacing, baseline),
+						ImGui::GetColorU32(ImGuiCol_Text),
+						entry.Original.c_str()
+					);
+				});
 
-			if (action != RowAction::None) {
-				// **Baked here and not on confirm**, so the name written into
-				// the property is one that exists — a picker that handed back a
-				// raw name would put a `.png` on a `ColorMap`, which is the
-				// exact thing this store spent four versions doing.
-				if (std::string baked; BakeRawAsset(relative, baked)) {
-					chosen = baked;
-					confirmed = action == RowAction::Confirmed;
+				if (action != RowAction::None) {
+					// **Baked here and not on confirm**, so the name written into
+					// the property is one that exists — a picker that handed back a
+					// raw name would put a `.png` on a `ColorMap`, which is the
+					// exact thing this store spent four versions doing.
+					if (std::string baked; BakeRawAsset(relative, baked)) {
+						chosen = baked;
+						confirmed = action == RowAction::Confirmed;
+					}
 				}
-			}
 
-			HoverPreview(relative, kind);
-			ImGui::PopID();
-		}
+				HoverPreview(relative, kind);
+				ImGui::PopID();
+			}
 		}
 
 		if (shown.empty()) {
@@ -488,11 +493,13 @@ namespace studio {
 		PickerBuiltins.clear();
 		PickerBuiltins.reserve(EngineAssets().size());
 		for (const CatalogueEntry &entry : EngineAssets()) {
-			PickerBuiltins.push_back(cdn::PublishedEntry{
-				.Name = entry.Name,
-				.Kind = entry.Kind,
-				.Root = entry.Root,
-			});
+			PickerBuiltins.push_back(
+				cdn::PublishedEntry{
+					.Name = entry.Name,
+					.Kind = entry.Kind,
+					.Root = entry.Root,
+				}
+			);
 		}
 	}
 }

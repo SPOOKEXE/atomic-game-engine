@@ -341,6 +341,20 @@ namespace assetc {
 				continue;
 			}
 
+			// **Before the extension is dispatched on, so nothing decodes.** The
+			// point of a content flag is that the parser is never reached: an
+			// SVG refused here does not go through the rasteriser, and the
+			// hostile-file cost charge in `bake/src/Svg.cpp` is a second line of
+			// defence rather than the only one.
+			const engine::assets::ContentForm form = engine::assets::FormOfName(relative);
+			if (!settings.Content.Allows(form)) {
+				baked.Failure =
+					std::string("refused: ") + engine::assets::Describe(form) + " content is turned off";
+				report.Refused++;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
+
 			const std::string extension = ExtensionOf(relative);
 			const bool model = IsModel(extension);
 			const bool image = IsImage(extension);

@@ -8,6 +8,7 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/parallel/Settings.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -415,7 +416,10 @@ namespace studio {
 		Sink = std::make_shared<PanelSink>();
 		engine::core::Log::Logger().sinks().push_back(Sink);
 
-		engine::parallel::Jobs::Start(engine::parallel::WorkersPerHost(1));
+		// The configured count wins, and zero means work it out — see
+		// `parallel::ConfiguredWorkers`.
+		const unsigned configured = engine::parallel::ConfiguredWorkers();
+		engine::parallel::Jobs::Start(configured != 0 ? configured : engine::parallel::WorkersPerHost(1));
 
 		// **Every class a game file can name, registered before one is read.**
 		// A loader that depended on somebody else having registered `Part`
@@ -1113,8 +1117,7 @@ namespace studio {
 		// is ignored outright rather than blended with. A capture run is compared
 		// against another capture run, and a clock that is *mostly* reproducible
 		// produces a diff nobody can attribute — see `Options::FixedAnimationStep`.
-		AnimationSeconds +=
-			Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
+		AnimationSeconds += Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
 		Renderer.SetAnimationTime(AnimationSeconds);
 
 		// **The frame graph is only collected while it is being read.**
@@ -2551,7 +2554,8 @@ namespace studio {
 							"Delete " + std::string(Label(store.InstanceNameOf(instance)))
 						);
 					}
-					store.DestroyInstance(instance);
+					// Authored, as the explorer's own delete is.
+					(void)store.DestroyAuthored(instance);
 				}
 			}
 		});

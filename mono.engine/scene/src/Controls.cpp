@@ -271,6 +271,37 @@ namespace engine::scene {
 		return intent;
 	}
 
+	AimIntent ReadAimIntent(const ecs::Store &store) {
+		AimIntent intent;
+
+		const auto *input = store.Resource<InputState>();
+		const auto *active = store.Resource<ActiveCamera>();
+		if (input == nullptr || active == nullptr || active->Entity == ecs::NULL_ENTITY) {
+			return intent;
+		}
+
+		// **The camera's own `Transform` and not the controller's angles.** The
+		// two agree after `PlaceCamera` has run and disagree before it — and a
+		// `Scriptable` camera has no angles at all, so deriving the ray from
+		// yaw and pitch would aim a cutscene's shot wherever the player last
+		// left the mouse.
+		const auto *placement = store.Get<Transform>(active->Entity);
+		if (placement == nullptr) {
+			return intent;
+		}
+
+		intent.Ray = core::Ray(placement->Frame.Position, placement->Frame.LookVector());
+		intent.Aimed = true;
+
+		// **`WasButtonTapped` and not `WasButtonPressed`**, for the reason the
+		// jump above gives: this is read on a tick and the other question is
+		// about a frame, so a click between two ticks would be lost about two
+		// times in three. That latch did not exist until there was something to
+		// act on it.
+		intent.Fired = input->Focused && input->WasButtonTapped(MouseButton::Left);
+		return intent;
+	}
+
 	size_t UpdateCharacterControl(ecs::Store &store) {
 		if (store.Resource<InputState>() == nullptr) {
 			return 0;

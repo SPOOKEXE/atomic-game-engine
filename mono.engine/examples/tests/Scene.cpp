@@ -18,6 +18,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
@@ -1085,4 +1086,82 @@ TEST_CASE("the magic scene fires spells that crater terrain", "[examples][scene]
 
 	// Every lane compiled; skipped lanes would leave an empty arena.
 	CHECK(CountNamed(store, "Muzzle") == 5);
+}
+
+TEST_CASE("the player list names everybody in the world", "[examples][scene][players]") {
+	// **The first scene that reads `Players` at all**, and the assertion is that
+	// it reads it *per player*. The panel is built into each player's own
+	// `PlayerGui` rather than into `StarterGui`, because a `StarterGui` is a
+	// template that `gui::ResetPlayerGui` clones at spawn — a list built there
+	// is correct for exactly one instant per player and stale for ever after.
+	//
+	// This is what a GPU is not needed for: whether the *rows exist* and say the
+	// right names is a question about the world, and whether they are painted
+	// is the one `AGENTS.md` refuses to answer with a mock renderer.
+	const StagedAssets assets;
+
+	Store store("playerlist");
+	Scheduler systems;
+
+	// **Players before the script runs**, which is the arrangement a hosted
+	// world is actually in: `Server::OnAdmitted` adds a player when a client is
+	// admitted, and a scene loaded afterwards has to find whoever is already
+	// there rather than waiting for a `PlayerAdded` that has already fired.
+	engine::scene::RegisterSceneComponents();
+	engine::scene::InstallServices(store);
+
+	const Entity first = engine::scene::AddPlayer(store, "Player1");
+	const Entity second = engine::scene::AddPlayer(store, "Player2");
+	REQUIRE(first != engine::ecs::NULL_ENTITY);
+	REQUIRE(second != engine::ecs::NULL_ENTITY);
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("PlayerList.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// A few ticks, because the panel is finished on the `Heartbeat` that
+	// notices a player with no panel — see the scene's last paragraph for why
+	// the signal alone is not enough.
+	for (int tick = 0; tick < 4; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	// One panel per player, in that player's own container — not two in one, and
+	// not one shared.
+	for (const Entity player : {first, second}) {
+		INFO(store.InstanceNameOf(player).Text());
+
+		const Entity container = store.FindFirstChild(player, "PlayerGui");
+		REQUIRE(container != engine::ecs::NULL_ENTITY);
+
+		const Entity screen = store.FindFirstChild(container, "PlayerList");
+		REQUIRE(screen != engine::ecs::NULL_ENTITY);
+
+		const Entity card = store.FindFirstChild(screen, "Card");
+		REQUIRE(card != engine::ecs::NULL_ENTITY);
+
+		const Entity rows = store.FindFirstChild(card, "Rows");
+		REQUIRE(rows != engine::ecs::NULL_ENTITY);
+
+		// Two players, two rows. **Counted under this player's own panel**,
+		// which is what makes the count mean "everybody" rather than "somebody"
+		// — a global count of rows named `Row1` would be two whether the second
+		// panel held one row or none.
+		size_t named = 0;
+		store.EachChild(rows, [&](Entity row) {
+			const Entity label = store.FindFirstChild(row, "Name");
+			if (label == engine::ecs::NULL_ENTITY) {
+				return;
+			}
+			const auto *text = store.Get<engine::gui::Label>(label);
+			if (text == nullptr) {
+				return;
+			}
+			if (text->Text == "Player1" || text->Text == "Player2") {
+				named++;
+			}
+		});
+		CHECK(named == 2);
+	}
 }

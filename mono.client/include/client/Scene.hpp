@@ -268,16 +268,26 @@ namespace client {
 	// is the client's half and only that: a camera to look through and a draw
 	// list to fill. A server calls the same loader and adds neither.
 	//
+	// **The runtime comes back**, because the client has to be able to reach the
+	// VM of the world it is drawing: `Runtime::DeliverGuiEvents` is how a
+	// `TextButton`'s `Activated` gets from `gui::Router` to a script, and until
+	// v0.15 this loader kept the only reference. A shipped client running a
+	// `--script` scene therefore routed its interface input, produced the
+	// events, and had nowhere to deliver them — every button in every scripted
+	// scene was silent in the one program a game ships.
+	//
 	// @param store     The world to build into.
 	// @param scheduler The systems to install.
 	// @param path      The `.luau` file to run.
 	// @param reserve   How much draw-list capacity to reserve up front.
+	// @param runtime   Set to the VM that ran the scene, when not null.
 	// @return `false` when the script could not be read, compiled or run.
 	bool BuildScriptedWorld(
 		engine::ecs::Store &store,
 		engine::ecs::Scheduler &scheduler,
 		const std::string &path,
-		uint32_t reserve
+		uint32_t reserve,
+		std::shared_ptr<engine::script::Runtime> *runtime = nullptr
 	);
 
 	// The client's half of a world, installed onto one somebody else built.

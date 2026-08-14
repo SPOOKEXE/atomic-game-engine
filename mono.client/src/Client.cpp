@@ -1,3 +1,4 @@
+#include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/audio/Wav.hpp>
@@ -6,12 +7,15 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/effects/Ribbon.hpp>
+#include <engine/examples/Shooting.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/parallel/Settings.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
@@ -49,6 +53,16 @@ namespace client {
 	bool Client::Initialise(const Options &options) {
 		Settings = options;
 
+		// **Said at startup rather than at the first refusal**, so "my texture
+		// never arrives" and "this client was told not to fetch GIFs" are one
+		// line apart in the same log. `main` has already applied and frozen the
+		// settings, so this is the complete answer.
+		if (const std::string refused =
+				engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle).RefusedText();
+			!refused.empty()) {
+			ENGINE_INFO("content: turned off — {}", refused);
+		}
+
 		// Before anything reads a file. Changing it later would leave whatever
 		// had already loaded pointing at the old tree.
 		if (!Settings.AssetsDirectory.empty()) {
@@ -65,14 +79,21 @@ namespace client {
 			return false;
 		}
 
-		Window = SDL_CreateWindow(
-			"atomic", Settings.Width, Settings.Height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
-		);
-		if (!Window) {
-			ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
-			return false;
+		if (!Settings.Headless) {
+			Window = SDL_CreateWindow(
+				"atomic",
+				Settings.Width,
+				Settings.Height,
+				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+			);
+			if (!Window) {
+				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
+				return false;
+			}
 		}
 
+		// Null when headless, which is what puts the renderer in that mode — the
+		// same call the editor makes, for the same reason.
 		if (!Renderer.Initialise(Window)) {
 			return false;
 		}
@@ -97,11 +118,17 @@ namespace client {
 			}
 		}
 
-		if (Settings.Uncapped && !Renderer.SetVerticalSync(false)) {
+		// **Only with a window**, because a present mode belongs to a swapchain
+		// and a headless run has none.
+		if (Settings.Uncapped && Window != nullptr && !Renderer.SetVerticalSync(false)) {
 			ENGINE_WARN("--uncapped had no effect; frames stay paced by the display");
 		}
 
-		engine::parallel::Jobs::Start(engine::parallel::WorkersPerHost(1));
+		// **The configured count wins, and zero means work it out.** A machine
+		// running a client beside something else is the case that wants to say
+		// so, and `WorkersPerHost(1)` cannot know about the something else.
+		const unsigned configured = engine::parallel::ConfiguredWorkers();
+		engine::parallel::Jobs::Start(configured != 0 ? configured : engine::parallel::WorkersPerHost(1));
 
 		ENGINE_INFO("simulation at {:.0f} Hz, rendering unlocked from it", Settings.TickRate);
 
@@ -206,17 +233,31 @@ namespace client {
 											  : Settings.ScriptPath;
 
 			bool scripted = true;
+			std::shared_ptr<engine::script::Runtime> runtime;
 			Universe_->Enter(
 				id,
-				[this, &scripted, &scenePath](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				[this, &scripted, &scenePath, &runtime](
+					engine::ecs::Store &store, engine::ecs::Scheduler &systems
+				) {
 					// Do not present a partially built world.
-					scripted = BuildScriptedWorld(store, systems, scenePath, Settings.Entities);
+					scripted = BuildScriptedWorld(store, systems, scenePath, Settings.Entities, &runtime);
 				}
 			);
 
 			if (!scripted) {
 				ENGINE_ERROR("the scene script failed, so there is nothing to render");
 				return false;
+			}
+
+			// **Recorded against the world, which is what `DeliverGuiEvents`
+			// needs and what this path never did.** The scheduler holds the last
+			// reference and drops it with the world — that is still true and is
+			// still the lifetime — but nothing could *name* the VM, so a
+			// `TextButton` in a `--script` scene fired nothing in a shipped
+			// client while the same tree worked in the editor. The `--game` path
+			// has filled this vector since v0.7; the demo path had not.
+			if (runtime != nullptr) {
+				Runtimes.emplace_back(id, std::move(runtime));
 			}
 
 			// Size once so publishing does not allocate per frame.
@@ -592,9 +633,18 @@ namespace client {
 		// offering both would hand a scene names it can set, fetch and then fail
 		// to draw — a part on the fallback cube with a perfectly good string
 		// behind it.
+		//
+		// **And forms this deployment turned off, for the same reason one step
+		// further out.** A name a scene can set and this process will refuse to
+		// fetch is the same untextured part with a perfectly good string behind
+		// it, arrived at by a different route.
+		const engine::assets::ContentPolicy &allowed =
+			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle);
+
 		std::vector<engine::core::Name> meshes;
 		for (const engine::assets::AssetEntry *entry : catalogue->OfKind(engine::assets::AssetKind::Mesh)) {
-			if (entry != nullptr && engine::assets::IsRuntimeReadable(entry->Name)) {
+			if (entry != nullptr && engine::assets::IsRuntimeReadable(entry->Name) &&
+				allowed.AllowsName(entry->Name)) {
 				meshes.emplace_back(entry->Name);
 			}
 		}
@@ -644,6 +694,22 @@ namespace client {
 			return;
 		}
 
+		// **Refused before the request and not on arrival, so the bytes never
+		// cross.** A form this deployment has turned off is one nothing here
+		// will decode, and fetching it anyway would spend the link on something
+		// destined for a `continue`. Logged once — the insert above is what
+		// makes it once — because a name that silently never arrives is exactly
+		// the failure the settings layer exists to make legible.
+		if (const engine::assets::ContentForm form = engine::assets::FormOfName(texture.Text());
+			!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle).Allows(form)) {
+			ENGINE_INFO(
+				"content: not asking for {} — {} content is turned off",
+				texture.Text(),
+				engine::assets::Describe(form)
+			);
+			return;
+		}
+
 		// **Queued rather than appended, because this is called from inside the
 		// walk over `ContentPending`.** A mesh names its own sheets and a
 		// material names its colour map, and both are read while draining that
@@ -658,6 +724,80 @@ namespace client {
 		// untextured parts becoming textured instead of a purple shimmer across
 		// every imported model. See `render::ChooseTexture`.
 		Renderer.ExpectTexture(texture);
+	}
+
+	void Client::PressNamedElement(engine::ecs::Store &store) {
+		if (ClickFrames == 0) {
+			// Done. Nothing further is synthesised, so a run may carry on and a
+			// person may still use the mouse.
+			return;
+		}
+
+		if (ClickFrames > 0) {
+			// **The release, two frames after the press.** `gui::Router` turns a
+			// press into an `Activated` on the *release* over the same element,
+			// which is what a button is — so a synthetic click that never let go
+			// would light the button and never fire it.
+			if (--ClickFrames == 0) {
+				SDL_Event released{};
+				released.type = SDL_EVENT_MOUSE_BUTTON_UP;
+				released.button.button = SDL_BUTTON_LEFT;
+				released.button.down = false;
+				released.button.x = Input.State().MousePosition.X;
+				released.button.y = Input.State().MousePosition.Y;
+				Input.HandleEvent(released);
+			}
+			return;
+		}
+
+		// **`gui::Resolved` and not a coordinate somebody wrote down.** The
+		// layout pass is what decides where an element is, and asking anything
+		// else would be a second answer that goes stale the first time a padding
+		// moves.
+		const engine::core::Name wanted(Settings.ClickElement);
+		engine::core::Vector2 centre;
+		bool found = false;
+
+		store.Each<const engine::gui::Resolved>([&](engine::ecs::Entity element,
+													const engine::gui::Resolved &resolved) {
+			if (found || store.InstanceNameOf(element) != wanted) {
+				return;
+			}
+			if (resolved.AbsoluteSize.X <= 0.0f || resolved.AbsoluteSize.Y <= 0.0f) {
+				// Laid out to nothing. Pressing its centre would press
+				// whatever is behind it and report a success that is not one.
+				return;
+			}
+			centre = engine::core::Vector2{
+				resolved.AbsolutePosition.X + resolved.AbsoluteSize.X * 0.5f,
+				resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y * 0.5f,
+			};
+			found = true;
+		});
+
+		if (!found) {
+			return;
+		}
+
+		// Moved and then pressed, as a real pointer is: the router admits a
+		// press on the element it is already over, so a press with no motion
+		// before it is a press at wherever the pointer happened to be.
+		SDL_Event moved{};
+		moved.type = SDL_EVENT_MOUSE_MOTION;
+		moved.motion.x = centre.X;
+		moved.motion.y = centre.Y;
+		Input.HandleEvent(moved);
+
+		SDL_Event pressed{};
+		pressed.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		pressed.button.button = SDL_BUTTON_LEFT;
+		pressed.button.down = true;
+		pressed.button.x = centre.X;
+		pressed.button.y = centre.Y;
+		Input.HandleEvent(pressed);
+
+		ENGINE_INFO("click: pressed '{}' at {}, {}", Settings.ClickElement, centre.X, centre.Y);
+		ClickFrames = 2;
 	}
 
 	void Client::PumpSounds() {
@@ -1101,10 +1241,19 @@ namespace client {
 		const engine::scene::MouseBehavior wanted = state->Behaviour;
 		const bool wantedIcon = state->MouseIconEnabled;
 		const engine::scene::KeyBits taps = state->Pressed;
+
+		// **The button latch survives for the key latch's reason**, and it was
+		// the half that did not exist until something fired a shot: the
+		// translator builds a state from the frame it just read, so a click
+		// latched two frames ago and not yet consumed by a tick is in the
+		// resource and nowhere else.
+		const uint8_t buttonTaps = state->PressedButtons;
+
 		*state = Input.State();
 		state->Behaviour = wanted;
 		state->MouseIconEnabled = wantedIcon;
 		state->Pressed = taps;
+		state->PressedButtons = buttonTaps;
 		PointerMode = wanted;
 		PointerIconEnabled = wantedIcon;
 
@@ -1122,9 +1271,10 @@ namespace client {
 		}
 
 		engine::game::MoveInput move;
+		engine::scene::AimIntent aim;
 		uint64_t tick = 0;
 
-		Universe_->Enter(Replicated, [this, &move, &tick](engine::ecs::Store &store) {
+		Universe_->Enter(Replicated, [this, &move, &aim, &tick](engine::ecs::Store &store) {
 			// **Only once there is a body**, because until the join notice
 			// arrives and the character replicates there is nothing for a move
 			// to mean — and a host that received one would look up a player,
@@ -1142,11 +1292,52 @@ namespace client {
 			const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
 			move.Direction = intent.Direction;
 			move.Jump = intent.Jump;
+
+			// **Read in the same scope as the move, from the same tick.** Two
+			// entries would sample the camera on one tick and the keys on
+			// another, so a shot fired while turning would be aimed a tick
+			// behind where the player was looking — which on a fast flick is
+			// several degrees and reads as the server cheating.
+			aim = engine::scene::ReadAimIntent(store);
+
 			tick = store.Time().Tick;
 		});
 
 		if (tick == 0) {
 			return;
+		}
+
+		// **The aim, and never the result.** `Server::ApplyInputs` states the
+		// division and this is the half that had no caller: `examples::
+		// EncodeShot` existed with a complete server-side rewind and hit test
+		// behind it, and nothing in the tree had ever sent one — `D00109`
+		// records that as two finished halves connected to nothing.
+		//
+		// Sent before the move because the two share a channel and a shot is
+		// the one a dropped tick cannot be re-derived from: a move repeats every
+		// tick by design, and a click happens once.
+		if (aim.Aimed && aim.Fired) {
+			engine::examples::Shot shot;
+			shot.Aim = aim.Ray;
+
+			// **The engine's ceiling and not a game's choice.** A client picks
+			// its own range on the wire and `DecodeShot` refuses anything past
+			// `MAXIMUM_SHOT_RANGE`, so sending the ceiling is sending the most
+			// an honest client is allowed to — a game with a shorter weapon
+			// shortens it here and the host still bounds it.
+			shot.Range = engine::examples::MAXIMUM_SHOT_RANGE;
+
+			if (Connection->Submit(tick, engine::examples::EncodeShot(shot), nowSeconds)) {
+				// **Cleared once the click is actually on the wire**, and
+				// separately from the jump below: a shot refused by the send
+				// budget while the move went through would otherwise forget a
+				// click nobody was ever told about.
+				Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
+					if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+						input->ConsumeButtonTaps();
+					}
+				});
+			}
 		}
 
 		// **Sent every tick, including the still ones.** A client that only
@@ -1160,7 +1351,7 @@ namespace client {
 			// latch exists to prevent.
 			Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
 				if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
-					input->ConsumeTaps();
+					input->ConsumeKeyTaps();
 				}
 			});
 		}
@@ -1692,9 +1883,15 @@ namespace client {
 			TicksAtWindowStart = ticksNow;
 		}
 
-		int pixelWidth = 0;
-		int pixelHeight = 0;
-		SDL_GetWindowSizeInPixels(Window, &pixelWidth, &pixelHeight);
+		// **The requested size when there is no window to ask.** A headless run
+		// still lays the panels out and still renders into an offscreen target
+		// of this size, so the numbers have to come from somewhere — and
+		// `--width`/`--height` is what a caller asked for.
+		int pixelWidth = Settings.Width;
+		int pixelHeight = Settings.Height;
+		if (Window != nullptr) {
+			SDL_GetWindowSizeInPixels(Window, &pixelWidth, &pixelHeight);
+		}
 
 		{
 			ENGINE_PROFILE_CAT("debug panels", engine::core::ProfileCategory::Render);
@@ -1903,6 +2100,17 @@ namespace client {
 				// which is what this flag is for.
 				pointer.Inside = Input.State().Focused;
 
+				// **Before the router reads the pointer, so the press is this
+				// frame's.** Synthesising after would put the click one frame
+				// behind the hover that admits it, which is the one-frame loop
+				// `Router::Hovered` already warns about arriving from the other
+				// direction.
+				if (!Settings.ClickElement.empty() && !InterfaceList.Commands().Commands.empty()) {
+					PressNamedElement(store);
+					pointer.Position = Input.State().MousePosition;
+					pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
+				}
+
 				interfaceEvents = InterfaceRouter.Update(store, InterfaceList.Commands(), pointer);
 			});
 
@@ -2073,7 +2281,12 @@ namespace client {
 		FrameGraph::EndFrame();
 		ENGINE_PROFILE_FRAME();
 
-		if (LastFrame.Presented) {
+		// **Presented, or simply drawn when there is nowhere to present.** A
+		// headless renderer never presents by design, so counting presents alone
+		// would leave `--frames` unreachable and a run that nobody is watching
+		// would never end — which is the one failure mode a build server cannot
+		// recover from. The editor makes the same allowance for the same reason.
+		if (LastFrame.Presented || Settings.Headless) {
 			FramesDrawn++;
 		}
 

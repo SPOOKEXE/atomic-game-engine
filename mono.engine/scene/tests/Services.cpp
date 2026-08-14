@@ -474,3 +474,78 @@ TEST_CASE("every player container is that player's alone", "[scene][services]") 
 	CHECK(engine::scene::PlayerOwning(store, mine) == mine);
 	CHECK(engine::scene::PlayerOwning(store, theirs) == theirs);
 }
+
+TEST_CASE("an author may not destroy or reparent a fixture", "[scene][services][fixture]") {
+	// **`ServiceComponent::Fixture` refused nothing until v0.15.** The field
+	// carried the sentence — a world with no `Workspace` is not a world an
+	// author meant to build, and deleting one turns every `game:GetService` in
+	// the place into a runtime error a long way from the delete that caused it —
+	// and a script could still `Destroy()` `Lighting`, and the editor could
+	// still delete it with the Delete key. That is rule 6 in its plainest form:
+	// the constraint was documentation.
+	services_test::Ready();
+
+	Store store("fixtures");
+	const Entity workspace = InstallServices(store);
+	REQUIRE(workspace != NULL_ENTITY);
+
+	const Entity lighting = store.FindFirstRoot("Lighting");
+	REQUIRE(lighting != NULL_ENTITY);
+
+	CHECK(store.Protected(workspace));
+	CHECK(store.Protected(lighting));
+
+	// The authored doors refuse and change nothing.
+	CHECK_FALSE(store.DestroyAuthored(lighting));
+	CHECK(store.Alive(lighting));
+
+	CHECK_FALSE(store.SetParentAuthored(lighting, workspace));
+	CHECK(store.ParentOf(lighting) == NULL_ENTITY);
+
+	// **And the engine's own move still goes through**, which is the half a
+	// blanket guard would have broken: `studio::PlayLink` destroying a player,
+	// `Debris` draining its queue and `RojoSync` rebuilding a subtree are all
+	// this call, and every one of them is the engine moving its own furniture.
+	store.DestroyInstance(lighting);
+	CHECK_FALSE(store.Alive(lighting));
+}
+
+TEST_CASE("anything an author made is theirs to remove", "[scene][services][fixture]") {
+	// The other direction, and the one that says the guard is narrow: a part is
+	// not a fixture and nothing about this may make it feel like one.
+	services_test::Ready();
+
+	Store store("fixtures.ordinary");
+	const Entity workspace = InstallServices(store);
+	REQUIRE(workspace != NULL_ENTITY);
+
+	const Entity part = store.CreateInstance(engine::scene::PartClass(), "Block");
+	REQUIRE(part != NULL_ENTITY);
+	REQUIRE(store.SetParentAuthored(part, workspace));
+
+	CHECK_FALSE(store.Protected(part));
+	CHECK(store.SetParentAuthored(part, NULL_ENTITY));
+	CHECK(store.DestroyAuthored(part));
+	CHECK_FALSE(store.Alive(part));
+}
+
+TEST_CASE("a world read out of a file is protected too", "[scene][services][fixture]") {
+	// **The half that would have been missing, and the worst one to miss.** The
+	// install loop *finds* a saved world's services rather than making them, so
+	// protection applied only where an instance was minted would hold in a new
+	// game and not in a saved one — and a rule that silently does not apply is
+	// the failure this guard is about wearing a different hat.
+	services_test::Ready();
+
+	Store store("fixtures.reopened");
+	REQUIRE(InstallServices(store) != NULL_ENTITY);
+
+	const Entity lighting = store.FindFirstRoot("Lighting");
+	REQUIRE(lighting != NULL_ENTITY);
+
+	// A second install is what a reopened world gets: everything is found, not
+	// created. Nothing new is protected and everything still is.
+	REQUIRE(InstallServices(store) != NULL_ENTITY);
+	CHECK(store.Protected(lighting));
+	CHECK_FALSE(store.DestroyAuthored(lighting));
+}

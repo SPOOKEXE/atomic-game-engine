@@ -414,7 +414,22 @@ namespace engine::script {
 			// it watched: the ref is never given up, so the closure and
 			// everything it captured stay alive for the rest of the world's life.
 			call.Forget(instance);
-			call.World().DestroyInstance(instance);
+
+			// **Authored, so a fixture refuses.** A script destroying
+			// `Lighting` turns every `game:GetService` in the place into a
+			// runtime error a long way from the delete that caused it, and
+			// `scene::ServiceComponent::Fixture` has said so since v0.7 with
+			// nothing reading it.
+			if (!call.World().DestroyAuthored(instance)) {
+				// **The connections are already given up and that is correct.**
+				// `Forget` releases what a script had attached to this instance,
+				// and a refused destroy leaves the instance rather than the
+				// handlers — which is the same state a script would be in after
+				// disconnecting them itself. Re-attaching them would mean the
+				// signal table remembering what it had, which is a second
+				// record of something the VM owns.
+				return;
+			}
 		}
 
 		// `instance:ClearAllChildren()`

@@ -1,5 +1,6 @@
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/ChunkStore.hpp>
+#include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -160,6 +161,19 @@ namespace cdn {
 			}
 
 			const std::string name = ContentName(contentDirectory, file);
+
+			// **Before the chunker, which is what makes this the gate rather
+			// than a filter.** A refused form is not cut, not hashed, not
+			// written into the store and not named in the manifest — so nothing
+			// downstream has to know the decision was taken.
+			const engine::assets::ContentForm form = engine::assets::FormOfName(name);
+			if (!settings.Content.Allows(form)) {
+				ENGINE_INFO(
+					"cdn: refused {} — {} content is turned off", name, engine::assets::Describe(form)
+				);
+				++report.Refused;
+				continue;
+			}
 
 			std::vector<ChunkEntry> chunks;
 			for (const ChunkSpan &span : chunker.Split(*bytes)) {

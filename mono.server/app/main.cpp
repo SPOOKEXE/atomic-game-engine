@@ -1,14 +1,19 @@
 // Thin argument-parsing entry point over the server library.
 
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Config.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/parallel/Settings.hpp>
 #include <engine/world/Lifecycle.hpp>
 
 #include <csignal>
 #include <cstdio>
 #include <server/Server.hpp>
+#include <server/Settings.hpp>
 
 namespace {
 	server::Server *Running = nullptr;
@@ -26,7 +31,20 @@ namespace {
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("server");
 
+	// Declared before anything is parsed or read — see the client's `main` for
+	// why the order matters.
+	engine::core::Config::DeclareEngineFlags();
+	engine::parallel::DeclareFlags();
+
+	// **Both verbs, because a server is the one program that does both.** It
+	// fetches nothing itself, but `--content-store` attaches an origin that
+	// publishes, and `Authority` hands content names to clients that decode.
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
+	server::DeclareFlags();
+
 	engine::core::Arguments arguments("server", "atomic — hosts a game.");
+	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("unpaced", "Tick back to back instead of pacing to the tick rate");
 	arguments.Flag("graph", "Collect the frame graph (for a Tracy capture)");
@@ -92,17 +110,32 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	// Set before startup so every dispatch uses the measured serial path.
-	if (arguments.Has("force-serial-compute")) {
-		engine::parallel::SetForceSerialCompute(true);
-		ENGINE_INFO("serial compute forced: every dispatch runs on its caller's thread");
-	}
-
+	// **`--verbose` before the settings, so it reaches the settings' own
+	// complaints**, and kept beside `engine.log-level` because every recipe in
+	// this repository passes it.
 	if (arguments.Has("verbose")) {
 		engine::core::Log::SetLevel(engine::core::LogLevel::Trace);
 	}
+	if (arguments.Has("force-serial-compute")) {
+		engine::core::Flags::Set("engine.serial-compute", "true", engine::core::FlagSource::CommandLine);
+	}
 
-	server::Options options;
+	const engine::core::ConfigReport settings = engine::core::Config::Apply(arguments);
+	if (!settings.Ok) {
+		std::fprintf(stderr, "%s\n", settings.Error.c_str());
+		return 2;
+	}
+	if (engine::core::Config::ListingWanted(arguments)) {
+		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
+		return 0;
+	}
+
+	// Set before startup so every dispatch uses the measured serial path.
+	engine::parallel::ApplyFlags();
+
+	// The settings first, the command line over the top — see the client's
+	// `main` for the precedence this expresses.
+	server::Options options = server::OptionsFromFlags();
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
 	options.MaximumTicks = arguments.GetInteger("ticks", -1);
@@ -135,20 +168,26 @@ int main(int argc, char **argv) {
 			}
 		}
 	}
-	options.Unpaced = arguments.Has("unpaced");
+	// **`||` rather than `=` for every bare flag.** An absent `--unpaced` is
+	// silence and not "off", so assigning would let a command line with no such
+	// flag on it overrule a config file that asked for one.
+	options.Unpaced = options.Unpaced || arguments.Has("unpaced");
 
 	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare
 	// `GetInteger` with a fallback would open the port on every run, because a
 	// fallback is returned when the flag is absent. This way `--mcp-port` alone
-	// takes this program's number and no flag at all leaves it shut.
-	options.ControlPort =
-		arguments.Has("mcp-port") ? static_cast<int>(arguments.GetInteger("mcp-port", 8734)) : -1;
-	options.Chatter = arguments.Has("chatter");
+	// takes this program's number, and no flag at all leaves whatever
+	// `server.control-port` said — which is minus one unless a deployment
+	// deliberately opened it.
+	if (arguments.Has("mcp-port")) {
+		options.ControlPort = static_cast<int>(arguments.GetInteger("mcp-port", 8734));
+	}
+	options.Chatter = options.Chatter || arguments.Has("chatter");
 
 	if (auto store = arguments.Get("content-store")) {
 		options.ContentStore = std::filesystem::path(*store);
 	}
-	options.ContentPort = static_cast<uint16_t>(arguments.GetInteger("content-port", 0));
+	options.ContentPort = static_cast<uint16_t>(arguments.GetInteger("content-port", options.ContentPort));
 	if (auto key = arguments.Get("content-grant-key")) {
 		options.ContentGrantKey = std::string(*key);
 	}
@@ -202,7 +241,7 @@ int main(int argc, char **argv) {
 		options.Listening = true;
 	}
 
-	options.Advertise = arguments.Has("advertise");
+	options.Advertise = options.Advertise || arguments.Has("advertise");
 	if (auto name = arguments.Get("session-name")) {
 		options.SessionName = std::string(*name);
 	}

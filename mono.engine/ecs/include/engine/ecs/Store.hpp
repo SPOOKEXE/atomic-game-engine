@@ -812,8 +812,28 @@ namespace engine::ecs {
 		//
 		// Deferred when called from inside Each.
 		//
+		// **This is the engine moving its own furniture and is never refused.**
+		// `studio::PlayLink` destroying a player, `Debris` draining its queue,
+		// `RojoSync` rebuilding a subtree and `Editor::EnsureViewerCamera`
+		// destroying a camera are all this call, and a guard here would refuse
+		// every one of them. What an *author* asks for goes through
+		// `DestroyAuthored`.
+		//
 		// @param instance The root of the subtree to destroy.
 		void DestroyInstance(Entity instance);
+
+		// Destroys an instance on behalf of whoever is authoring the world.
+		//
+		// **The same call with the protection applied**, and the split is the
+		// whole design. "An author" is a question only the caller can answer:
+		// a script's `Destroy()`, the editor's Delete key and the properties
+		// panel are authored, and every move the engine makes on its own behalf
+		// is not. A flag on the store would have to be set and unset around each
+		// of those, which is a second thing to forget.
+		//
+		// @param instance The root of the subtree to destroy.
+		// @return `false` when `Protected` refuses it, having destroyed nothing.
+		bool DestroyAuthored(Entity instance);
 
 		// The class an entity was created as.
 		//
@@ -942,6 +962,44 @@ namespace engine::ecs {
 		// @param parent   The new parent, or NULL_ENTITY to detach.
 		// @return `false` when the move was refused.
 		bool SetParent(Entity instance, Entity parent);
+
+		// Reparents an instance on behalf of whoever is authoring the world.
+		//
+		// `DestroyAuthored`'s twin, for `DestroyAuthored`'s reason.
+		//
+		// @param instance The instance to move.
+		// @param parent   The new parent, or NULL_ENTITY to detach.
+		// @return `false` when the move was refused.
+		bool SetParentAuthored(Entity instance, Entity parent);
+
+		// Refuses an author's `Destroy` and `.Parent` on this instance.
+		//
+		// **A set of entities rather than a flag on a component, because the
+		// fact lives above `ecs` and this is L2.** `scene::ServiceComponent::
+		// Fixture` is what decides — a world with no `Workspace` is not a world
+		// an author meant to build, and deleting one turns every
+		// `game:GetService` in the place into a runtime error a long way from
+		// the delete that caused it — and `scene` is L7. A mirrored flag on an
+		// `ecs` row would be the second copy of one fact rule 2 exists to
+		// refuse, so the store holds identity and nothing else.
+		//
+		// **Filled by `scene::InstallServices` and by nothing else**, which is
+		// what keeps it from being configuration somebody forgets. That function
+		// is the one door a service arrives through, it is idempotent, and it
+		// runs on a world loaded from a file as well as on a fresh one — so a
+		// world that has services has this, by construction rather than by
+		// somebody remembering. `SetAdoptOnly` is the shape *not* to copy: it is
+		// set by exactly one caller and nothing checks that it was.
+		//
+		// @param instance The instance an author may not remove.
+		void Protect(Entity instance);
+
+		// Whether an author's `Destroy` or `.Parent` is refused on this
+		// instance.
+		//
+		// @param instance The instance to ask about.
+		// @return `true` when it is protected.
+		bool Protected(Entity instance) const;
 
 		// The parent of an instance.
 		//

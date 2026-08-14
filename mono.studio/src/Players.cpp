@@ -155,6 +155,17 @@ namespace studio {
 				input->LastSource = engine::scene::InputSource::MouseButton2;
 			}
 
+			// **The left button as well, as of v0.15**, because a played world
+			// is a game and `scene::ReadAimIntent` reads this to decide whether
+			// the player fired. Forwarding only the right one made a studio Play
+			// a place where aiming worked and shooting silently did not — which
+			// is the class of divergence `just client-smoke` exists to catch, one
+			// input along.
+			if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+				input->Buttons |= static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
+				input->LastSource = engine::scene::InputSource::MouseButton1;
+			}
+
 			input->WheelDelta = io.MouseWheel;
 			if (io.MouseWheel != 0.0f) {
 				input->LastSource = engine::scene::InputSource::MouseWheel;

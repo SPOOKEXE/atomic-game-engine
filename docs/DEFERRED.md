@@ -36,118 +36,6 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
-### [_] D00126
-
-**`just format` and `just format-check` do not pin a clang-format major, and the
-tool that answers is whichever the machine happens to have.** `find-clang-format`
-in the `Justfile` walks `clang-format`, `clang-format-23`, `clang-format-22`,
-`clang-format-21` and takes the first whose major is 21 or newer — so a machine
-carrying both an unversioned 21 and a versioned 23 formats with 21, and a machine
-with only 23 formats with 23. `.clang-format` names no version, and two majors do
-not agree on the same file: include grouping and the wrapping of a long call are
-both places where 21 and 23 differ.
-
-**Investigated because it was reported as a per-file problem and is not.** Ten
-files in `mono.cdn`, `mono.client/app`, `physics`, `replication`, `graph`,
-`scene/tests/Visibility.cpp`, `script/src/ScriptInstances.cpp` and
-`SourceCache.cpp` were said to reflow under `just format` while nothing in the
-change had touched them, and every agent had been reverting them by hand to keep
-the diff behavioural. On this machine they do not: `clang-format --dry-run
---Werror` over all 1,088 first-party sources names exactly the files a change
-actually edited, and `just format-check` is clean before and after this one. So
-there is nothing wrong with those ten files — what differs is the tool, and the
-recipe cannot say which one it used.
-
-**Not closed here because the fix is a decision about the toolchain rather than a
-patch.** Pinning means either requiring one major (which breaks a contributor who
-has the next one, and the `Justfile`'s own comment records how much pain the
-*previous* version bump caused) or checking the version into `.clang-format` via
-`# Requires: clang-format-21`, which the tool does not read. `just format` now
-prints the tool and version it used, which is enough to identify the cause the
-next time a reflow surprises somebody — but a printed version is a diagnostic and
-not a constraint, which is `AGENTS.md` rule 6's own distinction and the reason
-this is filed rather than claimed.
-
-**Reopen trigger: a second reflow report naming files the reporter did not
-touch.** With the version now printed, that report carries its own diagnosis.
-
-### [_] D00125
-
-**`mono.client` has no suite that drives a render loop, so the client's *wiring*
-of gui input has no automated test — only its behaviour does.** At v0.18 the
-shipped client never routed interface input at all: `Client::InterfaceRouter` was
-constructed, read for `Hovered` and `Pressed`, and never `Update`d, so a
-`TextButton` in a game never lit and its `Activated` never fired while the same
-tree worked in the editor, which drives a router of its own. That is fixed, and
-`engine.script.guisurface` now covers the *behaviour* end to end — it stands a
-world up, lays it out, compiles the draw list, drives a real `gui::Router` with a
-pointer, hands the events to `Runtime::DeliverGuiEvents` and asserts every signal
-fired, in both languages.
-
-**What has no test is that `Client` calls any of it.** Those lines live inside
-the present path, between `InterfaceList.Rebuild` and `Interface.Submit`, and
-that function cannot exist without an `SDL_Window` and a GPU device. `AGENTS.md`
-names this case: a header needing a GPU has no unit suite, and a mock renderer
-added to close the gap on paper is refused. A seam extracted for the test would
-not close it either — the bug was that a call was missing, and a test of the
-extracted function passes just as happily when nothing calls it.
-
-**The reachable version is a recipe and not a suite, and it needs a flag the
-client does not have.** `just studio-smoke` is the shape: `--headless --frames N`
-renders into an offscreen target and writes an image, which is why the editor is
-checkable by something that is not a person. The client has no `--headless`, and
-adding one is a real change to its startup — the window, the swapchain and the
-input translator are all built assuming one exists. It would also stay outside
-`just check` for `studio-smoke`'s reason: it needs a GPU, and a build container
-with none would fail a check about the client for a reason that is not about the
-client.
-
-**Reopen trigger: `client --headless --frames N --capture`.** The moment the
-client can render without a display, a `just client-smoke` that presses a button
-in a scripted scene and reads the answer back is a short recipe rather than a
-subsystem.
-
-### [_] D00124
-
-**`scene::ServiceComponent::Fixture` says an author may not delete or reparent a
-service, and nothing refuses either.** The field has carried that sentence since
-v0.7 with the argument beside it — a world with no `Workspace` is not a world an
-author meant to build, and deleting one turns every `game:GetService` in the
-place into a runtime error a long way from the delete that caused it — and a
-script can still call `Destroy()` on `Lighting` and the editor can still delete it
-with the Delete key. Rule 6 in its plainest form: the constraint is documentation.
-
-**Why it is not a guard in the obvious place.** The two operations are
-`ecs::Store::DestroyInstance` and `ecs::Store::SetParent`, both L2; the fact is
-`scene::ServiceComponent`, L7. Rule 1 forbids the edge, and a mirrored flag on
-the `ecs` row would be the second copy of one fact rule 2 exists to refuse.
-
-**Why guarding each author's door is worse than it sounds.** "An author" is a
-question only the caller can answer, and the callers are not interchangeable:
-`studio::PlayLink` destroying a player, `Debris` draining its queue, `RojoSync`
-rebuilding a subtree and `Editor::EnsureViewerCamera` destroying a camera are the
-engine moving its own furniture and must not be refused, while a script's
-`Destroy()`, a script's `.Parent =`, the editor's Delete key and the properties
-panel's `Parent` field are the four that must. Three of those four are reachable
-— `ScriptMethods.cpp`'s `Destroy`, `Editor.cpp`'s delete loop and `Explorer.cpp`'s
-drag. The fourth is not: `.Parent` is a *computed property* registered in
-`ecs/src/Instances.cpp`, whose setter is one lambda serving both VMs and the
-properties panel alike. Enforcing three of four ships a rule that holds in Luau
-and not in the panel, which reads as a bug in the panel rather than as a rule.
-
-**What closing it takes.** A policy seam in `ecs` that `scene` configures — a set
-of component ids the store refuses to unparent or destroy, plus an "authored"
-distinction on the two calls so the engine's own moves still go through. That is
-a change to the storage API with a caller in every module, and it has its own
-trap: a seam configured per world is a seam somebody forgets to configure on the
-next world, and a rule that silently does not apply is the failure this entry is
-about wearing a different hat. `ecs::Store::SetAdoptOnly` is the shape to copy and
-also the warning — it is set by exactly one caller and nothing checks that it was.
-
-**Reopen trigger: the second field like this one.** `Fixture` is alone today; a
-second "an author may not" flag makes the seam pay for itself rather than being
-built for one bit.
-
 ### [_] D00123
 
 **`Instance:WaitForChild` is the one member of Roblox's tree surface this engine
@@ -218,10 +106,21 @@ all today — `Replicated.cpp` presents received state and there is no spawn mom
 for one — so an ordering guarantee about script execution would be a guarantee
 about something that does not happen.
 
+**A second thing now wants the same missing piece, which is worth recording
+because it changes what closing this buys.** `examples/PlayerList.luau` keeps
+every connected client's player list live by writing into each player's own
+`PlayerGui` from the host — that part works on a dedicated server today — and
+its TAB toggle cannot, because holding a key is a fact about a *viewer* and
+there is no script running where the viewer is. So the scene binds TAB where the
+host has a keyboard (a studio Play, a single-player client) and leaves the panel
+shown where it does not, with the branch stated in the file rather than left as
+a silent no-op.
+
 **Reopen trigger: a client that runs scripts out of its replica.** That is the
 first moment the ordering is observable by a game rather than by a packet
 counter, and it is also the moment the two-blob join has a user who can tell
-whether it worked.
+whether it worked. It is now also the moment a networked client can bind a key
+at all.
 
 ### [_] D00121
 
@@ -381,117 +280,6 @@ be an engine deciding it by default.
 teleport this engine has a use for is decided by a server script — a pad, a
 round ending, a matchmaker — and all of those already work.
 
-### [x] D00115
-
-**Replication filters by component and not by entity, so a character's limbs pay
-wire for transforms that are overwritten the moment they land.** A character is
-six parts and one of them moves: `scene::PoseCharacters` derives the other five
-from the root, on whichever machine draws, precisely so that they cannot come
-apart at speed. The offsets have to cross once. The *transforms* do not, and they
-cross every tick anyway, because `replication::Authority::Replicate` names
-`scene.Transform` for the whole world rather than for a set of rows.
-
-**Measured shape rather than a measured number.** Five extra rows per character
-per tick, each a ten-byte quantised `CFrame` — so about fifty bytes a character a
-tick before framing, against roughly ten for the root alone. At thirty ticks and
-twenty players that is on the order of thirty kilobytes a second of state the
-receiver discards on arrival. Real, and not urgent: `replication::DistancePriority`
-already bounds what a tick sends, so the cost lands as *other* rows arriving later
-rather than as bandwidth nobody budgeted.
-
-**Why it is not fixed by moving the limbs off `scene.`** They are `Part`
-instances and authored content — they are in the save file, the explorer and the
-properties panel — and a component prefix is how a module says what is shared.
-Renaming to dodge the filter would make a character's parts a different kind of
-thing from every other part.
-
-**What it wants is a per-entity opt-out on the authority**, which is a change to
-`Authority` rather than to `scene`: something like a `NotReplicated` tag the
-delta pass skips rows for. That is a wire-format-adjacent decision and worth
-making once, with a second consumer to check it against — a rag-doll, a particle
-proxy, anything else derived on the receiver.
-
-**Reopen trigger: a second thing derived on the receiver that also crosses, or a
-bandwidth measurement that names limbs.**
-
-**Closed at v0.15, and two of this entry's own assumptions were wrong.**
-
-The first was that it needed a wire-format decision. It does not. A delta already
-carries only the rows that changed, so a receiver cannot tell an omitted row from
-an unchanged one — the filter is entirely on the sender and nothing about the
-format moves. `Authority::SuppressWhenTagged(component, tag)` skips a slot's
-delta rows for entities bearing `tag`, at the same point the interest check
-already rejects a row, and before `offer` so a suppressed row consumes no
-acknowledgement slot either.
-
-The second was that it needed a new `NotReplicated` tag and a second consumer to
-check that tag's shape against. It needed neither, because **the tag already
-existed**: an entity carrying `scene.CharacterLimb` *is* an entity whose frame is
-a product of its root and its rest offset, which is precisely the condition the
-filter wants. A second thing derived on the receiver — a rag-doll, a particle
-proxy — will want its own already-existing marker named the same way rather than
-a shared opt-out invented ahead of it.
-
-The tag reaches the authority as a **string**, which is what lets this cross the
-tier boundary: `replication` is L12 and `scene` is L7, and `replication` neither
-links it nor may. That is rule 4 doing the job it exists for, and the same way
-`Replicate` has always named what it sends.
-
-**Deltas only. The baseline still carries one copy**, and that is a property
-rather than a gap: a newly admitted client holds the limb where the server last
-put it, so its first frame is right before any derivation has run.
-
-**Wired in the defaults table rather than at each host.** `server::Server` and
-`studio::PlayLink` both build an authority by walking
-`DefaultReplicatedComponents`, so the pairing lives on `ReplicatedComponent`
-beside `Detection` — a filter applied at one of them would be a difference
-between playing in the editor and playing for real, which is the hardest kind of
-bug to see because both look correct alone.
-
-### [x] D00114
-
-**Closed at v0.15 by following assignments inside the buffer, and by making a
-list say which kind it is.** The other option this entry offered — linking
-`Luau.LanguageServer` — was refused on the grounds the entry itself gives: it
-buys one of the two languages the feature was asked for, and it puts
-`Luau::Frontend` behind a studio header. What follows is what was built and,
-more usefully, what was deliberately not.
-
-**What resolves is what the buffer writes down.** `Instance.new("Part")`,
-`game:GetService("Lighting")` and the `OfClass`/`WhichIsA` pair carry the class
-as a string literal, so reading one is reading rather than inferring. `:Clone()`
-carries its receiver's class, because a clone of a `Part` is a `Part` whatever
-else the file does. `local same = part` is one local under another name and is
-followed. Only the **last** assignment before the caret counts: a local set from
-`Instance.new` and then from something unreadable has stopped being a `Part`,
-and keeping the older answer would be exactly the failure below.
-
-**What is refused is `FindFirstChild` and `WaitForChild`.** Resolving them to
-their receiver was the cheap version this entry described, and it is wrong: a
-child of a `Model` is not a `Model`, so it would offer `Model`'s properties for
-a `Part`. Those fall back to the union, and so does every other shape the reader
-does not recognise — `.Parent`, a chain, a call with a call inside it, an
-initializer spanning two lines.
-
-**A guess presented as a fact was the thing to avoid, so neither list is now
-presented without saying which it is.** A narrowed row's detail reads `bool on
-Part`; a union row's reads `bool on some class`. The first claims "this class
-has this" and the second says "one of these classes has this", which is the
-distinction the entry said an author had no way to make. It lives in
-`Completion::Detail` because that is the field the popup already draws, so it
-arrives without the drawing code being told about it — and it labels the
-**union** as well as the narrow, because a marker only on the narrowed rows is
-one nobody can read who has never seen the other kind.
-
-**Both languages, one rule.** Nothing followed here is Luau's: the two accessors
-are read the same way, a trailing `;` is trimmed, and no declaration keyword is
-looked at. `CompletionSources::Language` still decides methods against
-properties and which keywords are offered, and nothing there changed.
-
-The cases are in `mono.studio/tests/Complete.cpp`, including the two that must
-**not** narrow: `FindFirstChild` on a `Model`, and a later assignment nobody can
-read undoing an earlier one that could.
-
 ### [_] D00113
 
 **There are two node graph implementations and there should be one.**
@@ -519,244 +307,6 @@ become one, by one of:
 its own registry and its own canvas would make this three, and the first
 divergence would be in the part nobody tests: the cycle guard or the hash.
 
-### [x] D00112
-
-**Portals can be walked through; the frame you cross on still shows the wrong
-side.** `NON-EUCLIDEAN.md` filed six rows of work at v0.14 and this entry
-carried the last two. Traversal closed at v0.14; the seam did not.
-
-**Traversal, which this entry said was blocked and now is not.** It was waiting
-on a body to move — the character controller was `ROADMAP.md` v0.15 and arrived
-early. `scene::CrossPortals` is the whole of it: the crossing is the segment
-between `PreviousTransform` and `Transform`, tested for a change of side through
-the pane's plane inside the pane's rectangle, and a body that crosses is
-multiplied by `destination · half-turn · source⁻¹` — the *same* product
-`AimSurfaceCameras` puts the camera through. The velocity is mapped by it too,
-without which the body arrives aimed the way it was aimed in the frame it left
-and walks out sideways.
-
-**Two decisions inside it worth not relitigating.** The transform is derived
-rather than read off `SurfaceLens::Mapping`, because that component is
-presentation — fitted to the local eye, kept off the wire by
-`replication::LocalToTheClient` — and a dedicated server never aims a surface at
-all, so a traversal that read it would work in the editor and not on a server.
-And a pane is crossed from **either** side, mapping through the crosser's own
-face frame, for the same reason `AimSurfaceCameras` picks a side per *viewer*: a
-hole is not a one-way door and both answers are right.
-
-**The seam is what is left, and it is a rendering decision rather than a
-feature.** A surface's texture is last frame's, which is what breaks the
-dependency cycle between a surface and the scene it shows. On a mirror that is
-invisible; on a hole somebody walks through, at 60 fps, on the frame they cross,
-it is a visible seam. Removing it means rendering the portal chain inside the
-frame, deepest first — the one property the surface pass trades away for being
-cheap, and a change that belongs with the render-graph work `ROADMAP.md` files
-behind a prototype project.
-
-**Closed at v0.15, and the last row was much smaller than this entry says.**
-The seam was that a surface samples the *other* surfaces from the textures they
-held last frame. Removing it does not need a recursive pass with its own budget —
-it needs the existing pass to run again: each bounce makes the previous one's
-output the read side, and after `n` bounces a chain `n` deep is resolved inside
-the frame, deepest first. The ping-pong pair each slot already carried is what
-makes it safe. `Renderer::SetSurfaceBounces`, two by default, and `NON-EUCLIDEAN.md`
-is the reading of CodeParade's demo that the work came out of.
-
-**Part of what looked like the seam was not the seam, and is gone.** v0.15 found
-that `EDGE_ON_MARGIN` — a mirror's fix for a camera that flips 180 degrees as a
-viewer crosses its plane — was being applied to holes as well, so a portal drew
-*nothing at all* within 0.3 studs of its own plane. That band is exactly where
-somebody walking through spends the crossing. A linked portal has no
-discontinuity to blank: the frame the viewer's side flips is the frame the
-viewer is carried through the pane, and the two cancel. What is left of this
-entry is the one-frame staleness above and nothing else. `NON-EUCLIDEAN.md` is the
-reading of CodeParade's demo that turned it up.
-
-**Two smaller things worth knowing before building on this.** Sixteen surfaces
-per world, shared with mirrors, which is a reasonable limit for this kind of
-level and not for a world dotted with holes. And physics has no per-region
-filter, so two rooms genuinely occupying the same coordinates would share one
-broadphase — `SurfaceCamera::TagFilter` already covers the rendering half.
-Placing the regions apart and letting the portals lie avoids both, and is what
-the demo does.
-
-**What must not happen is a second renderer.** Anything beginning with a portal
-pass of its own would be a copy of the surface pass under a different name, and
-the two would drift on the first lighting change.
-
-### [x] D00111
-
-**An HTTP origin has no route that says what it holds.** v0.14 gave the assets
-panel a tab per content source; a `Directory` source is listed by reading the
-manifest in its `processed/` folder, and an `Http` one shows its address and a
-sentence saying it serves by name. That sentence is true of the protocol rather
-than of the panel: `delivery::AssetClient` fetches a manifest through the whole
-priority list and reports what verified, and nothing asks *one* origin what it
-has.
-
-Two ways to close it, and the choice is the work:
-
-- **A client per source.** `MakeAssetClient` over a one-entry `DeliverySettings`
-  would answer honestly with no new protocol, at the cost of a client per tab
-  with its own lifetime, its own pump and its own failure to report. Pumping
-  those only while a tab is open is a state machine the panel does not have
-  today.
-- **A listing route on `cdn::Service`.** Cheaper to consume and a wider origin:
-  anything an origin will enumerate is something an unauthenticated caller can
-  enumerate, so it needs the ingest key's argument made again for reads.
-
-**Closed at v0.15 with the listing route, and the key argument was made again
-rather than reasoned around.**
-
-`GET /catalogue` and `GET /catalogue/<cursor>` answer a page of the published
-manifest — `asset <root> <kind> <bytes> <name>` a line, with the name last
-because it is the only field with no bound on what is inside it. The cursor is a
-decimal offset into the manifest's own name order, and every page carries the
-publication root so a reader can tell a publish that swapped underneath it from a
-list that changed. Paged because a manifest has no bound and a route that
-serialised all of one would make a request's cost a property of somebody else's
-content.
-
-**It is off by default and admitted by `IngestSettings::Key`, which is the whole
-of the security decision.** `ServiceSettings::Lists()` is "switched on, and a key
-to admit it" — `IngestSettings::Accepts`'s both-or-neither rule applied to the
-read side — so a half-configured origin reads as off. Disabled answers `404` as
-though the route were not compiled in, for `IngestOf`'s reason: a `403` would
-tell an unauthenticated caller that this build enumerates and only the key is
-missing. There is deliberately no second secret and no second header; a key with
-no `Inbox` is a read-only origin that enumerates, which is the useful shape.
-`cdn --list-contents` refuses to start without `--ingest-key`.
-
-**The panel says which kind of "cannot", and never guesses.** `studio::
-OriginLister` is the seam: `ListingOutcome` has an entry for each of not asked,
-no key here, unreachable, not offered, refused and unreadable, and `Describe`
-gives each its own sentence. Entries are dropped with a failure — a half-listed
-tab under a "could not list" note is the same confident wrongness as drawing the
-live client's catalogue there.
-
-Three assumptions worth writing down, because a reader will hit them:
-
-- **`GET /manifest` was already open and already enumerates.** Anybody who can
-  reach an origin can fetch the signed manifest and read every name out of it, so
-  this route gates the *convenient* enumeration rather than closing a hole that
-  was shut. It is still worth the flag — a text listing behind a key is a much
-  smaller invitation than a parser nobody has to write — but "off by default"
-  here does not mean an origin's names are secret. Making them secret is a
-  separate decision about `/manifest`, and it is not this entry's.
-- **The lister blocks, with a ceiling.** `MakeOriginLister` waits
-  `MaximumPolls × PollMicroseconds` per page — a second by default — on the
-  thread that called it. That is why `RefreshStoreContents` asks (panel opened,
-  Refresh, import, publish: all somebody having asked) and `RebuildContentClients`
-  deliberately does not, since it runs at start-up and on every Content-page save.
-  The tab says "not asked yet" until a refresh. Growing a per-tab pump is exactly
-  the state machine the rejected alternative wanted.
-- **Enumeration is not authorisation.** A name in this listing is not fetchable
-  by the caller: `/bundle/<root>` still needs a grant from the server, and the
-  editor's own key is an operator secret rather than a player's. The listing says
-  what an origin holds, not what anybody may have.
-
-**What must not happen is the panel guessing.** Drawing the live client's
-catalogue under a named origin's tab would attribute every name to whichever
-origin the tab happened to be, and the first time two origins disagreed the
-panel would be confidently wrong about where content came from.
-
-### [x] D00110
-
-**A library of default shaders needs a consumer, and there is not one.** v0.14
-moved every built-in shader into `Engine::resources`, which is the half of that
-roadmap item with a home to move to. The other half — "a variety of default
-shaders" — would be GLSL that nothing loads: a shader reaches the GPU here only
-by being named in `Renderer::Impl::CreatePipelines` or `InterfacePass`, and both
-name a fixed set that matches the files one for one.
-
-The two things that would give a variety somewhere to plug in are both filed
-already and both above this in the stack:
-
-- **`ShaderScript`.** Named in `render/ShaderCompiler.hpp` and in
-  `render/AGENTS.md` as the reason a *runtime* compiler exists, and declared
-  nowhere — there is no class, no property and no path from a world to a
-  compile. Until there is, an author cannot select a shader by name at all.
-- **The render graph as a node system**, which `ROADMAP.md` files under v0.??.
-  That is where a pass gets to say which shader it wants, and where a permutation
-  stops being a file somebody adds by hand.
-
-**Adding the files first is the trap worth naming.** Six unlit/toon/water
-fragments in `resources/shaders/` would compile, stage, pass every test and be
-loaded by nothing — and each would then be a thing a later pipeline design has
-to either adopt or explain. `resources/AGENTS.md` says the same rule for meshes
-and textures: a default that can be generated should not be a file, and a
-default nothing consumes should not exist yet.
-
-**Closed at v0.15 by building the consumer first and the library second, which
-is the order this entry insisted on and is the only part of it that survived
-unchanged.** Two shaders were added — `unlit.frag` and `toon.frag` — and neither
-is reachable except by name, because the name is what loads them.
-
-**`ShaderScript` exists now**, and it is what the rest hangs off:
-`scene::ShaderSource` holds GLSL and a revision, `Instance.new("ShaderScript")`
-resolves, the explorer offers it and the properties panel edits its `Source`.
-The revision moves on write and only on write — `scene::SetShaderSource` is the
-one writer — which is what turns "has this changed" into an integer compare
-rather than a hash of every shader in the world every frame.
-
-**Fragment stage only, and that was not a simplification made to save work.** A
-vertex shader has to agree with `GpuInstance`, which `render/AGENTS.md` says is
-private and stays private, so an author able to supply one would be authoring
-against a struct nobody promised to keep. The fragment stage's interface —
-`opaque.frag`'s four samplers and three uniform buffers — is stated instead.
-
-**The selection is `Material.Shader`**, a name on `MaterialRef`, carried onto the
-part's `SurfaceAppearance` by `ResolveMaterials` in the same pass and by the same
-argument as the texture maps, then onto `DrawInstance::Shader` and into the
-renderer's slot arrays. Every hop of that chain already existed for `ColourMap`;
-what is new is one more field at each.
-
-**`render::ShaderLibrary` is the route, and its resolution order is the reason
-the two default files are not the trap this entry named.** One name resolves
-three ways: a `ShaderScript` in the world, compiled here and now; failing that a
-built-in `glslc` produced during the build; failing that a diagnostic saying so.
-`BuiltInShaderNames` is the list, so a `.frag` added to `resources/shaders/` and
-not added to that list is a file nothing can name — which is a review question
-rather than a thing somebody notices a release later.
-
-**Two shaders and not six.** One proves a name resolves; two prove the
-*selection* does, because a scene with an unlit sign and a toon character binds
-two pipelines in one frame. A third would prove nothing further, and a
-permutation added by hand is what the render graph exists to stop.
-
-**Three things this entry asserted were wrong, and one of them mattered.**
-
-- `Renderer::AddShader` did **not** already take SPIR-V bytes. It did not exist;
-  the only occurrences of the name were the two comments that referred to it,
-  including the `TODO(render-pipeline)` marker in `mono.studio/src/Network.cpp`.
-  It exists now — it builds a fragment shader object and the opaque and
-  transparent pipelines a variant is drawn through.
-- "A shader reaches the GPU only by being named in `CreatePipelines` or
-  `InterfacePass`" was true and is no longer the whole story: `DrawSlots` binds a
-  variant per run, breaking a run where the shader name changes exactly as it
-  already broke where the mesh or the seam plane did. A world where nothing
-  selects a shader holds one invalid name throughout and pays one compare.
-- The entry treated "the render graph as a node system" as a prerequisite. It is
-  not one for *selection* — a name on a draw instance and a table of
-  substitutions is enough. It remains the prerequisite for a **permutation**,
-  which is a different thing and is still filed.
-
-**What is deliberately not here, so the next person does not go looking.**
-
-- **No variant for the shadow pass.** It writes depth and no colour, so a
-  fragment shader there would cost a pass over the whole scene to produce
-  nothing. `PipelineFamily::Other` is what says so in code.
-- **No compute or vertex `ShaderScript`**, per the stage argument above.
-- **Published shader *assets* still do not reach the renderer.** The
-  `TODO(render-pipeline)` in `mono.studio/src/Network.cpp` is unchanged: what
-  `AssetKind::Shader` delivers is a module a *node* would name, and which node
-  is the graph's question. `AddShader` is now the call it would make.
-- **No test of the pipeline itself**, because there is no device in a test.
-  `render/AGENTS.md` is explicit about that, so what is covered is everything
-  short of it: the class, the property, the resolve, the name resolution and the
-  compiler — `mono.engine/scene/tests/Shaders.cpp` and
-  `mono.engine/render/tests/ShaderLibrary.cpp`.
-
 ### [_] D00109
 
 **Filed as `D00108` and renumbered, because that number was already taken.**
@@ -767,11 +317,11 @@ was picked by reading the front of the live file, which is exactly the half of
 the register that does not contain the used numbers. `ROADMAP.md`'s ownership
 entry cited the wrong one for a version and now cites this.
 
-**`replication::Prediction` still has no caller, and ownership was not the one
-it was waiting for.** The plan that produced v0.13's ownership work assumed the
-two would meet — build the upward state path, and prediction gets its consumer
-on the way past. They do not meet, and the reason is worth writing down because
-it looks like they should.
+**`replication::Prediction` holds inputs as of v0.15 and still has nothing that
+replays them, and ownership was not the caller it was waiting for.** The plan
+that produced v0.13's ownership work assumed the two would meet — build the
+upward state path, and prediction gets its consumer on the way past. They do not
+meet, and the reason is worth writing down because it looks like they should.
 
 `Prediction.hpp` says what it is for in its first line: "the local player and
 nothing else. Everything else is interpolated authoritative state." An entity a
@@ -781,23 +331,46 @@ against, because the client is the authority for it. So ownership does not give
 prediction a caller; it describes a third category that prediction deliberately
 does not cover, which is exactly Roblox's arrangement.
 
-**What is actually unwired is larger than prediction**, and finding it is the
-useful part of this entry:
+**What is actually unwired is larger than prediction**, and finding it was the
+useful part of this entry. **Two of the three bullets closed at v0.15 and the
+third turned out to be a different thing**, so they are kept with what actually
+happened written against each rather than deleted:
 
-- **Nothing calls `Connector::Submit`.** No client in this repository has ever
-  sent an input. The only reference is `replication/tests/Admission.cpp`
-  asserting that submitting *before admission* is refused.
-- **So `Prediction` never holds anything.** `Connector::Poll` calls
-  `Reconcile(Replica_.Applied())` every tick, faithfully, against an empty
-  buffer.
-- **And the server's whole input path has no sender.** `Server::ApplyInputs`
-  decodes an `examples::Shot`, rewinds the client's view with
-  `Rewind::TickSeenBy`, hit-tests against the recorded history and recolours
-  what was struck — a complete, careful, server-authoritative feature whose
-  `examples::EncodeShot` has no caller anywhere in the tree.
+- ~~**Nothing calls `Connector::Submit`.**~~ **Closed.** `client::Client::
+  SubmitMove` sends a `game::MoveInput` every tick and an `examples::Shot` on a
+  click. No client in this repository had ever sent an input; two now do, from
+  one function.
+- ~~**So `Prediction` never holds anything.**~~ **Closed, and by construction
+  rather than by a second change.** `Connector::Submit` records into
+  `Prediction_` on the way past, so the buffer fills the moment anything
+  submits, and `Reconcile(Replica_.Applied())` is finally running against
+  something.
+- ~~**And the server's whole input path has no sender.**~~ **Closed.**
+  `examples::EncodeShot` has a caller. `mono.server/tests/Replication.cpp`
+  stands two clients on a real socket, fires from the first, and asserts the
+  colour arrives at the second — the shooter never says what it struck.
 
-That is `D00039`'s shape again: two halves, each finished, connected to nothing,
-and neither of them looking unfinished from its own side.
+**What closing them found is the part worth keeping.** Three defects, none of
+them in the code being connected, and every one invisible from either side:
+
+- **`scene::InputState::LatchPresses` latched keys and not buttons**, so a click
+  that began and ended between two ticks was lost about two times in three. The
+  frame/tick argument was written out in full above `InputState::Pressed` and
+  applied to one of the two input devices, because jump was the only thing a
+  simulation had ever acted on.
+- **The rewind history walked `Transform` *and* `Motion`**, and `physics` takes
+  a row's `Motion` away when it puts the body to sleep. A player standing still
+  was therefore unhittable, and it presented as an ordinary miss. It walks
+  `RigidBody` now, which is the question that was meant.
+- **A client's input tick goes stale in a quiet world.** A tick reaches a client
+  only when something changed, so in a still scene its idea of the server's
+  clock stops while the server's does not, and the rewind targeted a tick that
+  had fallen out of the ring. Resolved at the present now, with the argument in
+  `Server::ApplyInputs`.
+
+**What is left is one call, and it is the one this entry was named for.**
+Nothing reads `Connector::Unconfirmed()`. The buffer fills, it is acknowledged
+and drained, and no caller ever replays what is in it.
 
 **Replay is the caller's job and that is correct rather than missing.**
 `Prediction::Pending()` hands back what to replay and `Connector` does not
@@ -807,16 +380,30 @@ apply them. What that means is that the first consumer writes the whole third
 step of the loop, and a consumer that forgets it gets the rubber-band the header
 warns about with nothing reporting why.
 
-**The natural consumer is the character controller**, which is `ROADMAP.md`
-v0.14's "character controller + humanoid + character states". A local player
-walking is precisely the case prediction is for, and a shot is precisely the
-case `ApplyInputs` is for. Building either one before there is a character to
-control would be inventing a client to exercise a server, which is how the
-harness in D00018 came to disagree with the thing it was checking.
+**The trigger fired at v0.15 and only half of what this entry predicted
+followed, which is the correction worth recording.** It said the input encoding
+and prediction's caller would arrive together with the first client that
+controls something. The client arrived; the encoding arrived; prediction's
+caller did not — and the reason is a decision taken deliberately one module
+along rather than an oversight here.
 
-**Reopen trigger: the first client that controls something.** Whichever lands
-first — a character or the shooting demo's other half — brings the input
-encoding, and prediction's caller comes with it.
+**`game/Play.hpp` is why, and it says so in its own second paragraph.** A client
+sends the *intent* and never the result: "the alternative was for a client to
+simulate its own character and submit the resulting `Transform` … it puts a
+physics step on both ends, makes every disagreement a reconciliation problem,
+and hands a client the ability to state where its body is." A client that does
+not simulate its own character has nothing to reconcile — it has latency, which
+is a different thing and is not what `Prediction` reduces. So the consumer this
+entry is waiting for is not "a character controller"; it is **a client that
+simulates its own character locally**, which is a design this engine has
+considered and refused for the local player's movement.
+
+**Reopen trigger, restated: a client that runs a simulation step of its own.**
+Not a character controller — there is one, and it did not need this. What would
+is something whose latency is intolerable at the tick rate and which the client
+can therefore be allowed to run ahead on. Until then `Prediction` is a mechanism
+whose design premise this engine does not currently share, and that is a better
+description of it than "unwired".
 
 ### [_] D00102
 

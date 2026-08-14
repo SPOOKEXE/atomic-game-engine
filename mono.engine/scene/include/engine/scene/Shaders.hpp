@@ -6,7 +6,7 @@
 // not exist.** That header names "a `ShaderScript` whose revision changed" as
 // the reason a *runtime* compiler ships at all, and `render/AGENTS.md` repeats
 // it — and until this file there was no class, no property and no path from a
-// world to a compile. `docs/DEFERRED.md` D00110 is the entry that says so, and
+// world to a compile. `docs/retired/DEFERRED.md` D00110 is the entry that says so, and
 // it also says why the shaders came second: a shader reaches the GPU only by
 // being named, so the thing that names one has to exist first.
 //

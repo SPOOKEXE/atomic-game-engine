@@ -22,9 +22,12 @@
 // programs, exactly as `CDNSettings` is one type rather than three.
 
 #include <engine/assets/ChunkStore.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Config.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/delivery/Source.hpp>
@@ -33,6 +36,7 @@
 #include <cdn/Origin.hpp>
 #include <cdn/Publisher.hpp>
 #include <cdn/Service.hpp>
+#include <cdn/Settings.hpp>
 #include <cdn/Stream.hpp>
 #include <cdn/Terminal.hpp>
 #include <chrono>
@@ -129,7 +133,17 @@ namespace {
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("cdn");
 
+	// Declared before anything is parsed or read — see the client's `main`.
+	engine::core::Config::DeclareEngineFlags();
+
+	// **Only the publish verb.** An origin moves bytes it does not interpret,
+	// so `content.*` — which is about decoding — would be a set of settings
+	// with nothing here to read them.
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
+	cdn::DeclareFlags();
+
 	engine::core::Arguments arguments("cdn", "atomic — serves a game's content.");
+	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("verbose", "Log at trace level");
 	arguments.Value(
@@ -181,10 +195,26 @@ int main(int argc, char **argv) {
 		engine::core::Log::SetLevel(engine::core::LogLevel::Trace);
 	}
 
+	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
+	if (!configured.Ok) {
+		std::fprintf(stderr, "%s\n", configured.Error.c_str());
+		return 2;
+	}
+	if (engine::core::Config::ListingWanted(arguments)) {
+		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
+		return 0;
+	}
+
 	// Beside the binary by default, because the staged cdn/ directory is
 	// runnable as it stands and the self-hosted case is a directory that ships
 	// with it. The working directory is whoever launched the process.
+	//
+	// The settings first, the command line over the top — see the client's
+	// `main` for the precedence this expresses.
 	std::filesystem::path storePath = engine::core::Paths::Assets();
+	if (const std::string_view fromSettings = engine::core::Flag("cdn.store").Text(); !fromSettings.empty()) {
+		storePath = std::filesystem::path(fromSettings);
+	}
 	if (auto chosen = arguments.Get("store")) {
 		storePath = std::filesystem::path(*chosen);
 	}
@@ -204,7 +234,16 @@ int main(int argc, char **argv) {
 			return 2;
 		}
 
-		const auto report = cdn::Publish(std::filesystem::path(*content), storePath, *key);
+		// **The publish policy is read here and reported**, because a publish
+		// that quietly left a form out is a client fetching a name that is not
+		// in the manifest — and the first anyone hears of that is a missing
+		// texture on somebody else's machine.
+		cdn::PublishSettings publishing;
+		if (const std::string refused = publishing.Content.RefusedText(); !refused.empty()) {
+			ENGINE_INFO("cdn: not publishing — {}", refused);
+		}
+
+		const auto report = cdn::Publish(std::filesystem::path(*content), storePath, *key, publishing);
 		if (!report) {
 			return 1;
 		}
@@ -220,6 +259,9 @@ int main(int argc, char **argv) {
 		ENGINE_INFO("cdn: publisher key {}", key->Public().ToHex());
 		if (!report->DictionaryTrained) {
 			ENGINE_INFO("cdn: no dictionary — groups will be compressed without one");
+		}
+		if (report->Refused > 0) {
+			ENGINE_INFO("cdn: {} files were refused by the content settings", report->Refused);
 		}
 		if (report->Oversized > 0) {
 			// Said rather than hidden: a bound quietly broken reads as a bound
@@ -249,8 +291,13 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	const auto grantSecret = arguments.Get("grant-key");
-	if (!grantSecret) {
+	// The setting, then the command line over the top — and the refusal below
+	// is unchanged, because a grant key is required either way.
+	std::string grantText(engine::core::Flag("cdn.grant-key").Text());
+	if (const auto typedKey = arguments.Get("grant-key"); typedKey.has_value()) {
+		grantText = std::string(*typedKey);
+	}
+	if (grantText.empty()) {
 		ENGINE_ERROR("cdn: --grant-key is required — it is the secret shared with the server");
 		ENGINE_ERROR(
 			"cdn: an origin that admitted everyone would be deciding who may have what, "
@@ -258,7 +305,7 @@ int main(int argc, char **argv) {
 		);
 		return 2;
 	}
-	auto grantKey = KeyFromHex(*grantSecret);
+	auto grantKey = KeyFromHex(grantText);
 	if (!grantKey) {
 		ENGINE_ERROR(
 			"cdn: --grant-key must be {} lowercase hex characters", engine::assets::GrantKey::BYTES * 2
@@ -266,28 +313,46 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 
-	cdn::CDNSettings settings;
-	settings.LocalFirst = !arguments.Has("no-local-first");
-	settings.AllowUpstream = arguments.Has("allow-upstream");
-	settings.CacheUpstream = !arguments.Has("no-cache-upstream");
+	// The settings first, the command line over the top. The three below are
+	// bare flags whose *sense* is inverted — `--no-local-first` turns something
+	// off — so each is an override rather than an assignment: an absent
+	// `--no-local-first` is silence and must not overrule a config file.
+	cdn::CDNSettings settings = cdn::OriginFromFlags();
+	if (arguments.Has("no-local-first")) {
+		settings.LocalFirst = false;
+	}
+	if (arguments.Has("allow-upstream")) {
+		settings.AllowUpstream = true;
+	}
+	if (arguments.Has("no-cache-upstream")) {
+		settings.CacheUpstream = false;
+	}
 	if (auto level = arguments.Get("compression-level")) {
 		settings.CompressionLevel = std::atoi(std::string(*level).c_str());
 	}
 	if (auto capacity = arguments.Get("cache-bytes")) {
 		settings.CacheCapacityBytes = std::strtoull(std::string(*capacity).c_str(), nullptr, 10);
 	}
+	// **Prepended, so a named upstream outranks a configured one**, which is the
+	// same rule the client's `--cdn` follows: the list is order-of-attempt, and
+	// what somebody typed goes first.
+	std::vector<cdn::UpstreamOrigin> namedUpstreams;
 	for (const std::string_view upstream : arguments.GetAll("upstream")) {
 		const size_t equals = upstream.find('=');
 		if (equals == std::string::npos) {
 			ENGINE_ERROR("cdn: --upstream wants NAME=HOST:PORT, got '{}'", std::string(upstream));
 			return 2;
 		}
-		settings.Upstreams.push_back(
+		namedUpstreams.push_back(
 			cdn::UpstreamOrigin{
 				.Name = std::string(upstream.substr(0, equals)),
 				.Endpoint = std::string(upstream.substr(equals + 1)),
 			}
 		);
+	}
+	if (!namedUpstreams.empty()) {
+		namedUpstreams.insert(namedUpstreams.end(), settings.Upstreams.begin(), settings.Upstreams.end());
+		settings.Upstreams = std::move(namedUpstreams);
 	}
 	if (!settings.IsValid()) {
 		// Forwarding with no upstreams reads as "this will forward" and behaves
@@ -307,8 +372,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	cdn::ServiceSettings service;
-	service.Port = engine::delivery::DEFAULT_ORIGIN_PORT;
+	cdn::ServiceSettings service = cdn::ServiceFromFlags();
 	if (auto port = arguments.Get("port")) {
 		service.Port = static_cast<uint16_t>(std::atoi(std::string(*port).c_str()));
 	}
@@ -325,7 +389,8 @@ int main(int argc, char **argv) {
 	// anywhere that would take them.
 	if (auto key = arguments.Get("ingest-key"); key.has_value() && !key->empty()) {
 		service.Ingest.Key = std::string(*key);
-
+	}
+	if (!service.Ingest.Key.empty()) {
 		// **A store called `processed/` is a local store, and its inbox is the
 		// `raw/` beside it** — which is where `PublishLocal` reads from, so an
 		// upload lands somewhere a publish will find it. Anywhere else the
@@ -351,11 +416,11 @@ int main(int argc, char **argv) {
 	// argument; the refusal for a flag with no key is here for `--inbox`'s
 	// reason.
 	if (arguments.Has("list-contents")) {
-		if (service.Ingest.Key.empty()) {
-			ENGINE_ERROR("cdn: --list-contents needs --ingest-key, or it would enumerate for anybody");
-			return 2;
-		}
 		service.Catalogue.Enabled = true;
+	}
+	if (service.Catalogue.Enabled && service.Ingest.Key.empty()) {
+		ENGINE_ERROR("cdn: listing contents needs an ingest key, or it would enumerate for anybody");
+		return 2;
 	}
 
 	// Read before the store is handed over, and read once: counting chunks

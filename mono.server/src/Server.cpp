@@ -12,6 +12,7 @@
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/parallel/Settings.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Priority.hpp>
@@ -248,7 +249,12 @@ namespace server {
 		const unsigned processes =
 			Settings.Processes > 0 ? Settings.Processes : 1u + static_cast<unsigned>(PlannedHosts());
 
-		engine::parallel::Jobs::Start(engine::parallel::WorkersPerHost(processes));
+		// The configured count wins, and zero means work it out from how many
+		// processes are sharing the machine — see `parallel::ConfiguredWorkers`.
+		const unsigned configured = engine::parallel::ConfiguredWorkers();
+		engine::parallel::Jobs::Start(
+			configured != 0 ? configured : engine::parallel::WorkersPerHost(processes)
+		);
 
 		// Register names before any snapshot or world is built.
 		RegisterPlaceholderComponents();
@@ -571,13 +577,18 @@ namespace server {
 				return PositionOf(entity, out);
 			};
 
-			// **Where a client is looking from, and this server does not know
-			// yet.** There is no per-client avatar here — the placeholder world
-			// is cubes and nobody is in it — so a host tells the authority where
-			// each client is through `SetClientViewpoint`, and a client nothing
-			// has placed scores everything the same. That is the round robin
-			// this replaces, kept as the honest answer rather than pretending
-			// every client is at the origin.
+			// **Where a client is looking from, which this server now knows.**
+			// It did not until v0.15: the comment here said the placeholder
+			// world was cubes with nobody in it, and it was right — nothing
+			// called `SetClientViewpoint`, so `DistancePriority` fell back to
+			// the round robin it was written to replace, on every connection,
+			// for three versions. `UpdateClientViewpoints` points each client at
+			// its own character once a tick.
+			//
+			// A client nothing has placed still scores everything the same, and
+			// that is still the honest answer rather than pretending every
+			// client is at the origin: between a join and a spawn there is
+			// genuinely nowhere it is standing.
 			score.Viewpoint = [this](engine::replication::ClientId client, engine::core::Vector3 &out) {
 				return ViewpointOf(client, out);
 			};
@@ -755,6 +766,14 @@ namespace server {
 
 			const engine::ecs::Entity player = found->second.Instance;
 			Players.erase(found);
+
+			// **And where they were standing, which is a second map keyed on
+			// the same slot.** A slot is reused the moment somebody else joins,
+			// and `Viewpoint::Generation` is what stops the new client
+			// inheriting it — but an entry left behind is one the next client on
+			// this slot sorts by until its own first tick lands, which is a
+			// world ordered by where a stranger stood.
+			ForgetClientViewpoint(client);
 
 			Worlds().Enter(PrimaryWorld, [player](engine::ecs::Store &store) {
 				store.DestroyInstance(player);
@@ -968,12 +987,44 @@ namespace server {
 				// **Rewound to what that client was looking at**, which is its
 				// input's tick less the interpolation delay it renders behind
 				// and the half round trip the snapshot took to reach it.
-				const double seen = Rewind::TickSeenBy(
+				double seen = Rewind::TickSeenBy(
 					input.Tick,
 					engine::replication::InterpolationSettings{}.DelayTicks,
 					latency,
 					Settings.TickRate
 				);
+
+				// **A tick outside the window is resolved against the present,
+				// and the case that forces it is a client standing still.** A
+				// client stamps its input with the newest tick it has applied,
+				// and a tick only reaches it when something *changed* — so in a
+				// quiet world its idea of the server's clock stops advancing
+				// while the server's does not. Left alone, `Each` is asked for a
+				// tick that fell out of the ring, answers nothing, and every
+				// shot in a still scene misses with no error anywhere.
+				//
+				// **The present rather than the oldest frame held**, which is
+				// the answer that follows from *why* a tick goes stale: it goes
+				// stale because nothing has been changing, and a world that has
+				// not changed looks the same now as it did then. Falling back to
+				// the oldest frame would rewind half a second for a client that
+				// is not behind at all.
+				//
+				// **And it cannot be gamed**, which is the other half of
+				// choosing this direction. Rewinding is the favourable answer
+				// for a laggy shooter, so a client that wanted more of it would
+				// claim an older tick — and claiming one this server no longer
+				// remembers buys the *least* favourable resolution there is,
+				// not the most. A tick inside the window is honoured exactly as
+				// before; `RewindSettings::HistoryTicks` is the bound, and that
+				// header already calls the depth a fairness decision.
+				if (History.Depth() == 0) {
+					continue;
+				}
+				if (seen < static_cast<double>(History.Oldest()) ||
+					seen > static_cast<double>(History.Newest())) {
+					seen = static_cast<double>(History.Newest());
+				}
 
 				// The candidates are the *history's*, not the world's, and that
 				// is the whole reason a hit test uses one: an entity destroyed
@@ -1003,6 +1054,49 @@ namespace server {
 				Struck++;
 			}
 		}
+	}
+
+	void Server::UpdateClientViewpoints() {
+		if (Players.empty()) {
+			return;
+		}
+
+		// **One world entry for every client rather than one each.** Entering a
+		// world takes it — `PositionOf` pays that cost per candidate and says
+		// so — and this runs every tick for every connection, where the walk
+		// inside is a component read per player.
+		Worlds().Enter(PrimaryWorld, [this](engine::ecs::Store &store) {
+			for (const auto &[slot, occupant] : Players) {
+				// **The character's root and not the `Player` instance.** A
+				// player is a row in a service and has no position at all; what
+				// a client is looking *from* is the body it was given, which is
+				// what `scene::CharacterOf` answers and what moves.
+				const engine::ecs::Entity character = engine::scene::CharacterOf(store, occupant.Instance);
+				if (character == engine::ecs::NULL_ENTITY) {
+					// Between a join and a spawn, and between a death and a
+					// respawn. A client with no entry scores everything the
+					// same, which is the round robin and the honest answer —
+					// rather than sorting its world by wherever its corpse fell.
+					ForgetClientViewpoint(engine::replication::ClientId{slot, occupant.Generation});
+					continue;
+				}
+
+				const auto *placement = store.Get<engine::scene::Transform>(character);
+				if (placement == nullptr) {
+					continue;
+				}
+
+				// **The root's origin and not the eye.** Where a client's
+				// *camera* is depends on its zoom and its pitch, and neither
+				// crosses the wire — `CameraController` is a resource on
+				// whichever host is looking. The body is what the server knows,
+				// it is within a couple of metres of the eye in every camera
+				// mode, and the score it feeds is a falloff over tens of metres.
+				SetClientViewpoint(
+					engine::replication::ClientId{slot, occupant.Generation}, placement->Frame.Position
+				);
+			}
+		});
 	}
 
 	void Server::SetClientViewpoint(engine::replication::ClientId client, const engine::core::Vector3 &at) {
@@ -1293,6 +1387,13 @@ namespace server {
 		// before this tick's delta is built against it.
 		Replication->Poll(nowSeconds);
 
+		// **Where everybody is, before the delta is built against it.** The
+		// score sorts a client's world by distance from its viewpoint, so a
+		// viewpoint refreshed *after* the publish would order every tick by
+		// where that client stood on the previous one — invisible while a
+		// player stands still and exactly wrong while they run.
+		UpdateClientViewpoints();
+
 		Worlds().Enter(PrimaryWorld, [this, nowSeconds](engine::ecs::Store &store) {
 			// **What the clients that own something said, applied before this
 			// tick is published.** Applying after would publish a delta built
@@ -1310,17 +1411,40 @@ namespace server {
 			// two different moments is how a hit test starts disagreeing with
 			// what was actually sent.
 			//
-			// Only where something *moved*: a `Motion` is what makes a
-			// placement worth remembering, and recording the static geometry
-			// would fill the history with rows whose answer is the same at
-			// every tick.
+			// Only where something *can* move, which keeps the static geometry
+			// out of a ring whose rows would all carry the same answer.
+			//
+			// **`RigidBody` and not `Motion`, and the difference is a bug that
+			// made a standing player unhittable.** This walked `Motion` until
+			// v0.15, on the reading that a `Motion` is what makes a placement
+			// worth remembering — and `physics` takes a row's `Motion` *away*
+			// when it puts the body to sleep, deliberately, so that the solver's
+			// query never visits a resting row. `physics/AGENTS.md` carries that
+			// decision and `physics/tests/Solver.cpp` states it in one line.
+			//
+			// So the history held whatever happened to be awake. A player
+			// standing still is asleep within a second or so, which meant they
+			// could not be shot — and nothing reported it, because a hit test
+			// against an empty candidate list is an ordinary miss.
+			//
+			// `RigidBody` is the question actually being asked: an anchored part
+			// never gets one at all — `PartDesc::Anchored` decides whether to
+			// attach one — so this excludes the static geometry the old
+			// predicate was aiming at, and excludes nothing else. `Static` is
+			// skipped for the same reason one layer in: it is a body that does
+			// not move.
 			if (History.Begin(store.Time().Tick)) {
-				store.Each<const engine::scene::Transform, const engine::scene::Motion>(
+				store.Each<const engine::scene::Transform, const engine::scene::RigidBody>(
 					[this](
 						engine::ecs::Entity entity,
 						const engine::scene::Transform &placement,
-						const engine::scene::Motion &
-					) { History.Record(entity, placement.Frame.Position); }
+						const engine::scene::RigidBody &body
+					) {
+						if (body.Kind == engine::scene::BodyKind::Static) {
+							return;
+						}
+						History.Record(entity, placement.Frame.Position);
+					}
 				);
 			}
 
@@ -1763,6 +1887,20 @@ namespace server {
 			summary.SlowestTickMilliseconds,
 			summary.Overruns
 		);
+
+		// **Two counters that nothing read until now.** `Struck` and `Dropped`
+		// have been incremented since v0.9 and printed nowhere, which made them
+		// exactly the kind of number this file's own comment warns about: the
+		// reason they are two rather than one is that a payload which did not
+		// decode is a client running a different game or probing, and burying
+		// that in a hit count is how an unusual number stops being noticed.
+		// Neither could be noticed at all while neither was reported.
+		//
+		// Said only when something happened, so a run with no clients in it
+		// does not print a line of zeroes.
+		if (Struck > 0 || Dropped > 0) {
+			ENGINE_INFO("server: {} shot(s) struck, {} input(s) did not decode", Struck, Dropped);
+		}
 
 		return summary;
 	}

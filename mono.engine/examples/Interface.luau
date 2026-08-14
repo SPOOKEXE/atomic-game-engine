@@ -192,6 +192,18 @@ for index, colour in SWATCHES do
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 6)
 	corner.Parent = swatch
+
+	-- **A swatch says it was clicked and changes nothing.** The panel above
+	-- explains why this scene does not animate — the compiled list is kept until
+	-- its signature moves, and a scene that rebuilt every frame would prove
+	-- nothing about the cache — so recolouring on a click would undo that. A log
+	-- line is the whole of the response, and it is the line `just client-smoke`
+	-- reads back: an `Activated` that fires in the editor and not in a shipped
+	-- client is the bug `just client-smoke` exists to catch, and until v0.15
+	-- nothing anywhere could press a button in one.
+	swatch.Activated:Connect(function()
+		print("interface: swatch " .. tostring(index) .. " activated")
+	end)
 end
 
 -- --- the clipped strip -------------------------------------------------------

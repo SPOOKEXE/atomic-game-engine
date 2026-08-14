@@ -2,6 +2,12 @@
 
 // Closed asset-kind list carried by the manifest. Kind is selected at publish
 // time and is a routing label, not an interpretation of the payload.
+//
+// **The table that decides it lives in `ContentForm.hpp`**, which is the finer
+// answer to the same question: a form is the format and a kind is the
+// subsystem, several forms map to one kind, and both used to be derived from
+// two lists that had to agree.
+//
 // @tier L8 · shared
 
 #include <cstdint>

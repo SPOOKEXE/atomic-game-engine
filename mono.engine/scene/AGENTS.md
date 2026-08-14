@@ -577,3 +577,62 @@ the residency test stays a direct call in the hottest pass of the frame; the
 caller owns the output buffer and it is cleared rather than rebuilt, like every
 other buffer on that path.
 
+
+## A latch is owed for every device, not for the one somebody needed
+
+`InputState` carries `Pressed` for keys and `PressedButtons` for mouse buttons,
+and both exist for the same reason: frames outnumber ticks, so an edge that
+began and ended between two ticks happened on a frame no tick ever looked at.
+`LatchPresses` records both and a *writer* owes that call once per frame;
+`ConsumeTaps` clears both and a *reader* owes it once per tick.
+
+The button half was missing for five versions, and nothing noticed because
+nothing in the engine acted on a click. It arrived the moment `ReadAimIntent`
+did. **A third device gets its own latch in the same call** — two calls would be
+two things a writer has to remember, and one of them is forgotten the first time
+somebody adds a second input path, which is exactly how `PlayLink::PendingJump`
+and the client's own private latch came to exist side by side.
+
+**A new field comes out of `Reserved` or it is a save-format change.** A member
+appended to the end grows the object and rewrites the layout `Column::Write`
+sends, silently. `SIZE_IS_PINNED` in `Input.cpp` is what refuses it.
+
+## `ReadMoveIntent` and `ReadAimIntent` are read by two hosts, so they live here
+
+A client sends *intent* and never result — `game/Play.hpp` carries the whole
+argument — and the studio applies the same intent from a `PlayLink` with no
+socket in the middle. Both functions are `const` and write nothing at all, so
+the arithmetic that turns W into "away from the camera", and a camera into a
+ray, is reachable without the thing that acts on it. A copy of either in
+`mono.client` is a copy that drifts, and drifts first in the editor.
+
+**An aim is the live camera's `Transform` and not the controller's angles.** The
+two agree after `PlaceCamera` has run and disagree before it, and a `Scriptable`
+camera has no angles at all — so deriving the ray from yaw and pitch would aim a
+cutscene's shot wherever the player last left the mouse.
+
+## A fixture is protected by `InstallServices` and by nothing else
+
+`ServiceComponent::Fixture` says an author may not delete or reparent a service,
+and until v0.15 nothing read it — a script could `Destroy()` `Lighting` and the
+editor could delete it with the Delete key.
+
+`ecs::Store::Protect` is the seam and **`InstallServices` is its only filler**.
+That is what keeps it from being configuration somebody forgets: it is the one
+door a service arrives through, it is idempotent, and it runs on a world loaded
+from a file as well as on a fresh one — so a world that has services has this
+by construction. `Store::SetAdoptOnly` is the shape *not* to copy; it is set by
+exactly one caller and nothing checks that it was.
+
+**The store holds identity and nothing else.** `Fixture` is `scene` at L7 and
+the store is L2, so a mirrored flag on an `ecs` row would be the second copy of
+one fact rule 2 refuses. `Protect` takes an entity; what made it protected stays
+here.
+
+**The four authored doors are the whole enforcement**: a script's `Destroy()`,
+the editor's Delete key, the explorer's drag and the `.Parent` setter — the last
+of which is one lambda serving both VMs and the properties panel, so enforcing
+the other three alone would ship a rule that holds in Luau and not in the panel.
+Everything else keeps `DestroyInstance`/`SetParent`, because `PlayLink`
+destroying a player, `Debris` draining its queue and `RojoSync` rebuilding a
+subtree are the engine moving its own furniture and must not be refused.

@@ -40,6 +40,7 @@
 
 #include <engine/assets/Chunker.hpp>
 #include <engine/assets/ContentHash.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Signature.hpp>
 
 #include <cdn/Grouper.hpp>
@@ -70,6 +71,24 @@ namespace cdn {
 
 		// The largest dictionary to produce.
 		size_t DictionaryBytes = 110 * 1024;
+
+		// Which content forms may enter the publication.
+		//
+		// **The origin's only honest gate, and the reason there is no
+		// serve-time one.** Step 2 above is where a name is real; after it
+		// there are only hashes, and a hash cannot be walked back to an
+		// extension. So a form refused here never becomes a chunk, never
+		// appears in the manifest and is never served — where a serve-time
+		// check would be looking at a hash that has already been decided.
+		//
+		// **Defaulted from the process's own settings**, so an origin is gated
+		// by one line here rather than by every caller of `Publish` remembering
+		// to fill it. A program that never declared the flags gets everything,
+		// which is what this engine did before they existed.
+		//
+		// @since v0.15
+		engine::assets::ContentPolicy Content =
+			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Publish);
 	};
 
 	// What a publish produced.
@@ -102,6 +121,15 @@ namespace cdn {
 
 		// Whether a dictionary was trained. False is ordinary on small content.
 		bool DictionaryTrained = false;
+
+		// Files `PublishSettings::Content` refused.
+		//
+		// **Reported for `Oversized`'s reason**: a publish that quietly produced
+		// fewer assets than the directory holds is a client fetching a name that
+		// is not there, and the first anyone hears of it is a missing texture.
+		//
+		// @since v0.15
+		size_t Refused = 0;
 
 		// The signed manifest root.
 		engine::assets::ContentHash Root;

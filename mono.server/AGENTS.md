@@ -86,3 +86,36 @@ not code that grows inside `mono.server/`.
 This directory holds the program's own attachments: the main, the tick loop,
 world placement and the drain path. Anything reusable belongs under
 `mono.engine/`.
+
+## The rewind history records what can move, not what is moving
+
+`ServeClients` walks `Transform` and `RigidBody` to fill
+`replication::Rewind`, and the predicate is load-bearing. It walked `Motion`
+until v0.15, on the reading that a `Motion` is what makes a placement worth
+remembering — and `physics` *takes a row's `Motion` away* when it puts the body
+to sleep, so that the solver's query never visits a resting row.
+
+The history therefore held whatever happened to be awake. A player standing
+still is asleep within a second, which meant they could not be shot, and it
+presented as an ordinary miss: a hit test against an empty candidate list
+strikes nothing and reports nothing.
+
+`RigidBody` is the question actually being asked — an anchored part never gets
+one, so the static geometry the old predicate was aiming at is still excluded —
+and `Static` is skipped one layer in, because it is a body that does not move.
+
+## A client's input tick is a claim, and a stale one means the world went quiet
+
+A client stamps its input with the newest tick it has *applied*, and a tick
+reaches it only when something changed. In a still scene its idea of the
+server's clock stops advancing while the server's does not, so `Rewind::
+TickSeenBy` can name a tick that has fallen out of the ring — and `Rewind::Each`
+answers nothing, which is a miss with no error anywhere.
+
+`ApplyInputs` resolves an out-of-window tick **at the present** rather than at
+the oldest frame held. That follows from why it goes stale: a world that has not
+been changing looks the same now as it did then. It also cannot be gamed —
+rewinding is the favourable answer for a laggy shooter, so claiming a tick this
+server no longer remembers buys the least favourable resolution there is, not
+the most. A tick inside the window is honoured exactly as before, and
+`RewindSettings::HistoryTicks` remains the fairness bound.

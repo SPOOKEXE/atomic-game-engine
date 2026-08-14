@@ -143,7 +143,13 @@ namespace engine::examples {
 		scheduler.Add("spin", Phase::Simulation, ApplySpin);
 	}
 
-	bool LoadScene(Store &store, Scheduler &scheduler, const std::string &path, std::string &error) {
+	bool LoadScene(
+		Store &store,
+		Scheduler &scheduler,
+		const std::string &path,
+		std::string &error,
+		std::shared_ptr<script::Runtime> *out
+	) {
 		// The class trees a script names, and this module's own components for
 		// the C++ path. A script builds out of `Part`; nothing it touches is
 		// registered here.
@@ -290,6 +296,12 @@ namespace engine::examples {
 				ENGINE_ERROR("heartbeat: {}", runtime->LastError());
 			}
 		});
+
+		// **Handed back only on success**, so a caller cannot be given a VM for
+		// a world this function has just emptied.
+		if (out != nullptr) {
+			*out = runtime;
+		}
 
 		ENGINE_INFO("scene '{}': {} entities, reaching {:.1f}", path, built, extent);
 		return true;

@@ -1,15 +1,21 @@
 // Thin argument-parsing entry point over the client library.
 
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Config.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/parallel/Settings.hpp>
 #include <engine/render/DebugPanels.hpp>
 
 #include <cctype>
 #include <cdn/LocalStore.hpp>
 #include <client/Client.hpp>
+#include <client/Settings.hpp>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -35,12 +41,22 @@ namespace {
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("client");
 
+	// **Declared before anything is parsed or read**, because a config key that
+	// names a flag no registrar declared is an error and a program that
+	// declared its tables late would refuse its own settings.
+	engine::core::Config::DeclareEngineFlags();
+	engine::parallel::DeclareFlags();
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
+	client::DeclareFlags();
+
 	engine::core::Arguments arguments("client", "atomic — runs a game.");
+	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("stats", "Open the F3 statistics panel at startup");
 	arguments.Flag("net", "Open the F4 network panel at startup (needs --connect)");
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
+	arguments.Flag("headless", "Run with no window (needs --frames)");
 	arguments.Value("max-fps", "N", "Hold this frame rate. Needs --uncapped; 0 is no limit");
 	arguments.Flag("verbose", "Log at trace level");
 	arguments.Flag(
@@ -85,6 +101,11 @@ int main(int argc, char **argv) {
 	arguments.Value("publisher-key", "HEX", "64 hex characters — the key whose manifests this client trusts");
 	arguments.Value("sound", "PATH", "Play this .wav or .mp3 on a loop — proves audio runs in-game");
 	arguments.Value(
+		"click",
+		"NAME",
+		"Press the interface element with this name once, mid-run. A diagnostic; see Options::ClickElement"
+	);
+	arguments.Value(
 		"capture",
 		"PATH",
 		"Write a BMP of the scene near the end of the run. Needs --frames; renders offscreen"
@@ -100,17 +121,35 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	// Set before startup so every dispatch uses the measured serial path.
-	if (arguments.Has("force-serial-compute")) {
-		engine::parallel::SetForceSerialCompute(true);
-		ENGINE_INFO("serial compute forced: every dispatch runs on its caller's thread");
-	}
-
+	// **`--verbose` before the settings, so it reaches the settings' own
+	// complaints.** It is the one option that has to act before anything can be
+	// read, and it is deliberately kept beside `engine.log-level` rather than
+	// replaced by it: every recipe in this repository passes it.
 	if (arguments.Has("verbose")) {
 		engine::core::Log::SetLevel(engine::core::LogLevel::Trace);
 	}
+	if (arguments.Has("force-serial-compute")) {
+		engine::core::Flags::Set("engine.serial-compute", "true", engine::core::FlagSource::CommandLine);
+	}
 
-	client::Options options;
+	const engine::core::ConfigReport settings = engine::core::Config::Apply(arguments);
+	if (!settings.Ok) {
+		std::fprintf(stderr, "%s\n", settings.Error.c_str());
+		return 2;
+	}
+	if (engine::core::Config::ListingWanted(arguments)) {
+		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
+		return 0;
+	}
+
+	// Set before startup so every dispatch uses the measured serial path.
+	engine::parallel::ApplyFlags();
+
+	// **The settings first, the command line over the top.** Every `Get*` below
+	// takes what the flags produced as its fallback, so the precedence a person
+	// expects — built-in, config file, environment, then what they typed —
+	// falls out of one rule rather than being re-derived per option.
+	client::Options options = client::OptionsFromFlags();
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
 	options.Height = static_cast<int>(arguments.GetInteger("height", options.Height));
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
@@ -118,11 +157,26 @@ int main(int argc, char **argv) {
 	options.ViewSpacing = static_cast<float>(arguments.GetNumber("view-spacing", options.ViewSpacing));
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
-	options.SurfaceBounces = static_cast<int>(arguments.GetInteger("surface-bounces", 0));
-	options.ShowStatistics = arguments.Has("stats");
-	options.ShowNetwork = arguments.Has("net");
-	options.ShowFrameGraph = arguments.Has("graph");
-	options.Uncapped = arguments.Has("uncapped");
+	options.SurfaceBounces =
+		static_cast<int>(arguments.GetInteger("surface-bounces", options.SurfaceBounces));
+
+	// **`|=` rather than `=`, because these four are bare flags.** An absent
+	// `--stats` is silence and not "off", so assigning would make a command line
+	// with no panel flags on it overrule a config file that asked for one.
+	options.ShowStatistics = options.ShowStatistics || arguments.Has("stats");
+	options.ShowNetwork = options.ShowNetwork || arguments.Has("net");
+	options.ShowFrameGraph = options.ShowFrameGraph || arguments.Has("graph");
+	options.Uncapped = options.Uncapped || arguments.Has("uncapped");
+	options.Headless = arguments.Has("headless");
+
+	// **Refused rather than run**, because a headless client has no window to
+	// close: without a frame budget it would render forever with nothing on
+	// screen to say so, on a machine somebody has probably walked away from.
+	// The studio's `--headless` carries the same requirement.
+	if (options.Headless && options.MaximumFrames < 0) {
+		std::fprintf(stderr, "--headless needs --frames N: there is no window to close.\n");
+		return 2;
+	}
 	options.MaximumFrameRate =
 		static_cast<uint32_t>(arguments.GetInteger("max-fps", options.MaximumFrameRate));
 	options.ProfileSeconds = arguments.GetNumber("profile-seconds", 0.0);
@@ -151,7 +205,7 @@ int main(int argc, char **argv) {
 	if (auto server = arguments.Get("connect")) {
 		options.ConnectAddress = std::string(*server);
 	}
-	options.Browse = arguments.Has("browse");
+	options.Browse = options.Browse || arguments.Has("browse");
 	options.BrowseSeconds = arguments.GetNumber("browse-seconds", options.BrowseSeconds);
 	if (auto name = arguments.Get("session-name")) {
 		options.SessionName = std::string(*name);
@@ -169,8 +223,14 @@ int main(int argc, char **argv) {
 		options.ServerKey = std::string(*key);
 	}
 
-	for (const std::string_view source : arguments.GetAll("cdn")) {
-		options.ContentSources.emplace_back(source);
+	// **Prepended, so a named origin outranks a configured one.** The list is
+	// priority order and the first that answers wins, so what somebody typed has
+	// to sit in front of what their config file already held — which is the same
+	// precedence every other setting here follows, expressed as position.
+	if (const std::vector<std::string_view> named = arguments.GetAll("cdn"); !named.empty()) {
+		std::vector<std::string> sources(named.begin(), named.end());
+		sources.insert(sources.end(), options.ContentSources.begin(), options.ContentSources.end());
+		options.ContentSources = std::move(sources);
 	}
 
 	// **The local store, when nobody named an origin.** `ROADMAP.md` v0.10 asks
@@ -194,6 +254,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto cache = arguments.Get("content-cache")) {
 		options.ContentCache = std::filesystem::path(*cache);
+	}
+	if (auto element = arguments.Get("click")) {
+		options.ClickElement = std::string(*element);
 	}
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);
