@@ -1408,6 +1408,13 @@ namespace engine::ecs {
 		// @param component The component.
 		void MarkChangedRaw(Entity entity, ComponentId component);
 
+		// Records that every entity carrying `T` has just been written.
+		//
+		// **The whole column, and it is the expensive one.** A replica joining
+		// wants every row of a component regardless of what moved, which is what
+		// this is for; anything that knows which rows it touched wants
+		// `MarkChanged` instead, because marking the column makes the next delta
+		// carry all of it.
 		template <class T> void MarkAllChanged() {
 			RequireOwningThread("MarkAllChanged");
 			MarkAllChangedRaw(Components::Of<T>());

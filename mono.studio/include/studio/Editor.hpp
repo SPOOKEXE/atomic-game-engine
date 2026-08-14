@@ -2303,7 +2303,12 @@ namespace studio {
 		//
 		// @since v0.13
 		struct RegisteredMesh {
+			// How many triangles the mesh decoded to, for the assets panel's
+			// row and for `TrianglesOf`.
 			uint32_t Triangles = 0;
+
+			// The textures its submeshes named, so the editor can ask for them
+			// without decoding the mesh a second time.
 			std::vector<engine::core::Name> Sheets;
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
@@ -4337,6 +4342,12 @@ namespace studio {
 		// a plugin's step budget or see its globals — the same reason plugins
 		// get one each.
 		LoadedPlugin CommandHost;
+
+		// Which scene `CommandHost` is bound to.
+		//
+		// A runtime belongs to one store, so this is what the rebuild above
+		// compares against: when the active scene stops matching it, the VM is
+		// made again for the new one.
 		engine::world::WorldId CommandWorld;
 
 		// This editor's presence among the others, and the edits between them.
@@ -4355,9 +4366,11 @@ namespace studio {
 		// Character buffers rather than strings, because that is the imgui this
 		// repository vendors — there is no `imgui_stdlib` on the link line and
 		// adding one for three fields would widen what the editor pulls in.
+		//@{
 		char TeamNameField[64] = {};
 		char TeamKeyField[80] = {};
 		char TeamPointField[64] = {};
+		//@}
 
 		// The plugins panel. See `DrawPlugins`.
 		bool ShowPlugins = false;

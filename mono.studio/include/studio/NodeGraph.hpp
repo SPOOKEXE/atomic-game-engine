@@ -89,10 +89,13 @@ namespace studio::nodes {
 	// A colour, 0..1 per channel. Not an ImGui type, so the model layer stays
 	// free of the toolkit.
 	struct Colour {
+		// The channels, 0..1. Straight values, not premultiplied.
+		//@{
 		float R = 1.0f;
 		float G = 1.0f;
 		float B = 1.0f;
 		float A = 1.0f;
+		//@}
 
 		// 0xRRGGBB, alpha 1.
 		static Colour Hex(uint32_t rgb);
@@ -112,6 +115,9 @@ namespace studio::nodes {
 		// `assets::TextureData` takes.
 		std::vector<uint8_t> Rgba;
 
+		// Whether the buffer matches the side it claims.
+		//
+		// @return `true` when there is a picture to draw.
 		bool Valid() const {
 			return Side > 0 && Rgba.size() == static_cast<size_t>(Side) * Side * 4;
 		}
@@ -124,16 +130,32 @@ namespace studio::nodes {
 	// as elevation would put the lighting into the geometry. This is the
 	// unshaded numbers.
 	struct Surface {
+		// Samples a side. Square, like the picture it came from.
 		uint32_t Side = 0;
 
 		// `Side * Side`, row major, top row first. Expected in 0..1; anything
 		// else still draws, just taller.
 		std::vector<float> Heights;
 
+		// Whether the buffer matches the side it claims.
+		//
+		// **Two samples a side at minimum**, because one height is a point and
+		// the renderer interpolates between neighbours.
+		//
+		// @return `true` when there is a surface to draw.
 		bool Valid() const {
 			return Side > 1 && Heights.size() == static_cast<size_t>(Side) * Side;
 		}
 
+		// One sample, with the edges clamped.
+		//
+		// **Clamped rather than wrapped**, because a surface is a patch and not
+		// a tile: wrapping would join the far edge to the near one and put a
+		// cliff across anything that is not seamless.
+		//
+		// @param x Column, clamped to the last.
+		// @param y Row, clamped to the last.
+		// @return The height there.
 		float At(uint32_t x, uint32_t y) const {
 			const uint32_t cx = x < Side ? x : Side - 1;
 			const uint32_t cy = y < Side ? y : Side - 1;
@@ -148,8 +170,15 @@ namespace studio::nodes {
 		// registration order would connect different things the moment two
 		// registrations swapped.
 		std::string Id;
+
+		// What a person reads on a port and in the palette.
 		std::string Label;
+
+		// The colour its ports and links are drawn in, so a wire's kind is
+		// legible without reading anything.
 		Colour Tint;
+
+		// One sentence for the tooltip. Empty is allowed and shows nothing.
 		std::string Description;
 
 		// Turns a payload carried on a wire of this type into a picture.
@@ -182,7 +211,16 @@ namespace studio::nodes {
 	// Every registered data type.
 	class DataTypes {
 	  public:
+		// Adds a type, or replaces the one already under its id.
+		//
+		// @param type The type to register.
 		static void Register(const DataType &type);
+
+		// The type under an id.
+		//
+		// @param id The id to look up.
+		// @return The type, or null when nothing registered it — which is what
+		//         a document naming a type this build does not have produces.
 		static const DataType *Find(const std::string &id);
 
 		// Identical ids, or either side being the wildcard.
@@ -191,6 +229,10 @@ namespace studio::nodes {
 		// decision taken where nobody can see it, and "the drop went red" only
 		// means something while the rule is a plain yes or no.
 		static bool CanConnect(const std::string &from, const std::string &to);
+
+		// Every registered type, in registration order.
+		//
+		// @return The types. Valid until the next `Register`.
 		static const std::vector<DataType> &All();
 	};
 
@@ -200,12 +242,29 @@ namespace studio::nodes {
 	// One value a node carries. A tagged struct rather than a variant, so that
 	// saving it is a switch rather than a visitor.
 	struct Value {
+		// Which of the four below carries the value. The tag, and the only
+		// field that is always meaningful.
 		WidgetKind Kind = WidgetKind::Number;
+
+		// The number, for `Slider` and `Number` — and the chosen index for
+		// `Select`, which is why a choice saves as its position and its options
+		// are saved beside it.
 		double Number = 0.0;
+
+		// The state, for `Toggle`.
 		bool Flag = false;
+
+		// The string, for `Text`.
 		std::string Text;
+
+		// The colour, for `Colour`.
 		nodes::Colour Tint;
 
+		// Whether both carry the same value.
+		//
+		// **Compares only the field `Kind` names**, so two values that differ in
+		// a field neither is using are equal — which is what makes this usable
+		// as the "did this knob move" test the undo log needs.
 		bool operator==(const Value &other) const;
 	};
 
@@ -217,19 +276,38 @@ namespace studio::nodes {
 	struct WidgetSpec {
 		// Stable key. Saved, so it is a name and never an index.
 		std::string Key;
+
+		// What a person reads beside the knob.
 		std::string Label;
+
+		// Which knob to draw, and therefore which field of `Value` it writes.
 		WidgetKind Kind = WidgetKind::Slider;
+
+		// The range a `Slider` spans. Ignored by every other kind.
+		//@{
 		double Minimum = 0.0;
 		double Maximum = 1.0;
+		//@}
+
+		// How far one drag notch moves a `Slider` or a `Number`.
 		double Step = 0.01;
+
+		// Decimal places shown. Display only — the value keeps its precision.
 		int Precision = 2;
+
+		// The choices a `Select` offers, in order. `Value::Number` indexes this.
 		std::vector<std::string> Options;
+
+		// What a freshly placed node starts with.
 		Value Default;
 	};
 
 	// A port's declaration.
 	struct PortSpec {
+		// What a person reads on the port, and the key a link names it by.
 		std::string Name;
+
+		// Which `DataType::Id` may be connected here, or `ANY_TYPE`.
 		std::string Type;
 	};
 
@@ -247,7 +325,11 @@ namespace studio::nodes {
 
 	// What an evaluation sees: the node's knobs, and whatever its inputs made.
 	struct Inputs {
+		// The node's own knobs, borrowed from it. Null is a node with none.
 		const std::unordered_map<std::string, Value> *Widgets = nullptr;
+
+		// Whatever the upstream nodes produced, by input port name. A port with
+		// nothing connected is absent rather than empty.
 		std::unordered_map<std::string, std::any> Ports;
 
 		// Says how far along an async evaluation is.
@@ -276,7 +358,20 @@ namespace studio::nodes {
 			return Stopping != nullptr && Stopping->load(std::memory_order_relaxed);
 		}
 
+		// One of this node's knobs.
+		//
+		// @param key The knob's `WidgetSpec::Key`.
+		// @return Its value, or a default-constructed one when there is no such
+		//         knob — which is what a document naming a knob this build's
+		//         node type no longer declares produces.
 		Value Widget(const std::string &key) const;
+
+		// One of this node's knobs as a number.
+		//
+		// `Widget(key).Number`, which is what almost every evaluation wants.
+		//
+		// @param key The knob's `WidgetSpec::Key`.
+		// @return Its number, or zero when there is no such knob.
 		double Real(const std::string &key) const;
 
 		// A port's payload as `T`, or `fallback` when it is absent or is
@@ -303,14 +398,33 @@ namespace studio::nodes {
 	// palette, the painter, the hit test, the evaluator and the save format all
 	// read this table.
 	struct NodeType {
+		// What a document names this type by. A string for rule 4's reason: it
+		// crosses a save file, so it cannot be a registration ordinal.
 		std::string Id;
+
+		// What a person reads in the palette and on the node's header.
 		std::string Title;
+
+		// Which palette section it appears under.
 		std::string Category;
+
+		// The header's colour, so a category is legible at a glance.
 		Colour Accent;
+
+		// A second line under the title, or empty for none.
 		std::string Subtitle;
+
+		// The ports on each side, top to bottom in this order.
+		//@{
 		std::vector<PortSpec> Inputs;
 		std::vector<PortSpec> Outputs;
+		//@}
+
+		// The knobs on the body, in this order.
 		std::vector<WidgetSpec> Widgets;
+
+		// How wide a placed node is, in canvas units. The height follows from
+		// the ports and knobs above.
 		float Width = 180.0f;
 
 		// What it computes, or nothing for a node that is only somewhere a wire
@@ -384,9 +498,26 @@ namespace studio::nodes {
 	// Every registered node type.
 	class NodeTypes {
 	  public:
+		// Adds a type, or replaces the one already under its id.
+		//
+		// @param type The type to register.
 		static void Register(const NodeType &type);
+
+		// The type under an id.
+		//
+		// @param id The id to look up.
+		// @return The type, or null — which is what a document naming a type
+		//         this build does not have produces.
 		static const NodeType *Find(const std::string &id);
+
+		// Every registered type, in registration order.
+		//
+		// @return The types. Valid until the next `Register`.
 		static const std::vector<NodeType> &All();
+
+		// The distinct `NodeType::Category` values, for the palette's sections.
+		//
+		// @return The categories, each once.
 		static std::vector<std::string> Categories();
 
 		// Types with an input that would take this type id.
@@ -395,7 +526,11 @@ namespace studio::nodes {
 
 	// --- the model ------------------------------------------------------------
 
+	// What a node is called inside one graph. Minted by `Graph`, saved, and
+	// remapped by `Absorb` when one graph is copied into another.
 	using NodeId = uint32_t;
+
+	// The absent node. Zero, so a default-constructed id is already it.
 	inline constexpr NodeId NO_NODE = 0;
 
 	// One port a compressed node shows, and the inner port it stands for.
@@ -406,11 +541,22 @@ namespace studio::nodes {
 	// actually ends. That is what keeps the evaluator, the cycle guard, the
 	// content hash and the save format entirely unaware that compression exists.
 	struct Proxy {
+		// What the compressed node shows this port as.
 		std::string Name;
+
+		// The `DataType::Id` it carries, copied from the inner port so a link
+		// can be checked without walking inside.
 		std::string Type;
+
+		// Which side it sits on. Outputs are the default because a compressed
+		// subtree is usually consumed rather than fed.
 		bool Input = false;
+
+		// The node inside that really owns this port, and its port there.
+		//@{
 		NodeId Inner = NO_NODE;
 		std::string InnerPort;
+		//@}
 	};
 
 	// One knob a compressed node lifted out of a node inside it.
@@ -421,9 +567,16 @@ namespace studio::nodes {
 		// `<inner id>/<inner key>`. Unique by construction, and stable across a
 		// save because the inner id is.
 		std::string Key;
+
+		// What a person reads beside the lifted knob.
 		std::string Label;
+
+		// The node inside that really owns this knob, and its key there. A
+		// write goes straight to them.
+		//@{
 		NodeId Inner = NO_NODE;
 		std::string InnerKey;
+		//@}
 
 		// The inner declaration, re-keyed and re-labelled.
 		//
@@ -441,18 +594,25 @@ namespace studio::nodes {
 
 	// One placed node.
 	struct Node {
+		// Its name inside this graph. Minted on `Add` and never reused.
 		NodeId Id = NO_NODE;
 
 		// A type nobody registered is kept and drawn as broken rather than
 		// dropped: a graph saved with something's node type has to survive being
 		// opened without it.
 		std::string Type;
+
+		// Where it sits on the canvas, top-left, in canvas units.
+		//@{
 		float X = 0.0f;
 		float Y = 0.0f;
+		//@}
 
 		// By `WidgetSpec::Key`. A missing key reads as the type's default, so a
 		// type that grows a widget does not invalidate every saved graph.
 		std::unordered_map<std::string, Value> Widgets;
+
+		// What a person renamed it to, or empty to show the type's title.
 		std::string Label;
 
 		// Whether it is drawn as a header and its ports, with the body hidden.
@@ -478,6 +638,9 @@ namespace studio::nodes {
 		std::vector<nodes::Promotion> Promoted;
 		//@}
 
+		// Whether this node stands for a subtree rather than being one node.
+		//
+		// @return `true` when it has a derived interface.
 		bool Compressed() const {
 			return !Proxies.empty() || !Promoted.empty();
 		}
@@ -485,13 +648,24 @@ namespace studio::nodes {
 
 	// One connection. Ports are named for the same reason a type id is a string.
 	struct Link {
+		// Where it starts: a node and one of its output ports.
+		//@{
 		NodeId From = NO_NODE;
 		std::string FromPort;
+		//@}
+
+		// Where it ends: a node and one of its input ports. An input takes one
+		// link, so this pair is unique across a graph.
+		//@{
 		NodeId To = NO_NODE;
 		std::string ToPort;
+		//@}
 	};
 
+	// What a frame is called inside one graph.
 	using GroupId = uint32_t;
+
+	// The absent group. Zero, for `NO_NODE`'s reason.
 	inline constexpr GroupId NO_GROUP = 0;
 
 	// A frame around some nodes, which drags them together.
@@ -502,9 +676,18 @@ namespace studio::nodes {
 	// update it. The canvas computes the frame from the members every time it
 	// draws, which cannot be stale.
 	struct Group {
+		// Its name inside this graph.
 		GroupId Id = NO_GROUP;
+
+		// What a person reads on the frame's header.
 		std::string Title;
+
+		// The frame's colour.
 		Colour Tint;
+
+		// The nodes it drags. The frame is computed from these every draw, and
+		// a member that has been removed from the graph is skipped rather than
+		// keeping the frame open around nothing.
 		std::vector<NodeId> Members;
 	};
 
@@ -517,10 +700,34 @@ namespace studio::nodes {
 	// A graph of nodes and links.
 	class Graph {
 	  public:
+		// Places a node of a registered type.
+		//
+		// @param type The type's id.
+		// @param x    Where to put it, top-left, in canvas units.
+		// @param y    The same, vertically.
+		// @return Its new id, or `NO_NODE` when nothing registered that type.
 		NodeId Add(const std::string &type, float x, float y);
+
+		// Removes a node and every link touching it.
+		//
+		// @param id The node.
+		// @return `false` when there is no such node.
 		bool Remove(NodeId id);
+
+		// Whether a node is still here.
+		//
+		// @param id The node.
+		// @return `true` when it is.
 		bool Alive(NodeId id) const;
 
+		// One node.
+		//
+		// **Valid until the next `Add` or `Remove`**, because the nodes live in
+		// a vector: a caller holding one across an edit is holding whatever
+		// moved into that slot.
+		//
+		// @param id The node.
+		// @return It, or null when there is no such node.
 		//@{
 		Node *Find(NodeId id);
 		const Node *Find(NodeId id) const;
@@ -536,8 +743,22 @@ namespace studio::nodes {
 		LinkResult
 		CanConnect(NodeId from, const std::string &fromPort, NodeId to, const std::string &toPort) const;
 
+		// Removes whatever link ends on an input port.
+		//
+		// **By the destination, because that is what is unique.** An input takes
+		// one link, so naming the far end identifies it; naming the source would
+		// not, since one output feeds many.
+		//
+		// @param to     The node the link ends on.
+		// @param toPort Its input port.
+		// @return `false` when nothing was connected there.
 		bool Disconnect(NodeId to, const std::string &toPort);
 
+		// Everything in the graph, in no particular order.
+		//
+		// **Handed out whole rather than iterated**, because the canvas draws
+		// every node every frame and a callback per node would be a call per
+		// node per frame for nothing.
 		//@{
 		const std::vector<Node> &Nodes() const {
 			return Stored;
@@ -550,6 +771,11 @@ namespace studio::nodes {
 		}
 		//@}
 
+		// Whatever link ends on an input port.
+		//
+		// @param node The node the link ends on.
+		// @param port Its input port.
+		// @return The link, or null when nothing is connected there.
 		const Link *LinkInto(NodeId node, const std::string &port) const;
 
 		// Every link touching a node, either end.
@@ -565,13 +791,22 @@ namespace studio::nodes {
 		// Removes the frame, and the nodes in it when `withNodes`.
 		bool Ungroup(GroupId group, bool withNodes = false);
 
+		// Every frame, in no particular order.
+		//@{
 		const std::vector<nodes::Group> &Groups() const {
 			return Frames;
 		}
 		std::vector<nodes::Group> &Groups() {
 			return Frames;
 		}
+		//@}
 
+		// One frame.
+		//
+		// Valid until the next `Group` or `Ungroup`, for `Find`'s reason.
+		//
+		// @param group The frame.
+		// @return It, or null when there is no such frame.
 		//@{
 		nodes::Group *FindGroup(GroupId group);
 		const nodes::Group *FindGroup(GroupId group) const;
@@ -642,6 +877,8 @@ namespace studio::nodes {
 		// a saved graph unopenable anywhere else; a document that carries its own
 		// types is one file that is the whole thing.
 		struct Template {
+			// What a person picks it out of the library by. Unique — remembering
+			// one under a name already there replaces it.
 			std::string Name;
 
 			// What `SaveSubtree` produced. Held as text and not as a `Graph`,
@@ -650,12 +887,20 @@ namespace studio::nodes {
 			std::string Document;
 		};
 
+		// Every folded node this graph carries.
+		//
+		// @return The library. Valid until the next `Remember` or `Forget`.
 		const std::vector<Template> &Templates() const {
 			return Library;
 		}
 
 		// Adds one, replacing any of the same name.
 		void Remember(std::string name, std::string document);
+
+		// Drops one by name.
+		//
+		// @param name The template to forget.
+		// @return `false` when there is no such template.
 		bool Forget(const std::string &name);
 
 		// Nodes in dependency order — every node after everything it reads.
@@ -675,6 +920,11 @@ namespace studio::nodes {
 		// The whole graph's topology and parameters.
 		uint64_t Signature() const;
 
+		// Empties the graph: nodes, links, frames and library.
+		//
+		// **The id counters go back to one as well**, because a cleared graph is
+		// a new document rather than the same one continued — and a save written
+		// from it should read the same as one written from a fresh `Graph`.
 		void Clear();
 
 	  private:
@@ -692,55 +942,109 @@ namespace studio::nodes {
 
 	// The sizes everything is built from, in graph space.
 	struct Metrics {
+		// The title bar's height.
 		float HeaderHeight = 26.0f;
+
+		// One port's row.
 		float RowHeight = 20.0f;
+
+		// One knob's row, which is taller than a port's because a knob is
+		// dragged and a port is only hit.
 		float WidgetHeight = 22.0f;
+
+		// The margin inside a node's border.
 		float Padding = 8.0f;
+
+		// A port circle's radius, and therefore half its hit target.
 		float PortRadius = 5.0f;
+
+		// The corner radius of a node's box.
 		float Rounding = 6.0f;
+
+		// Point size for a title and a port name.
 		float LabelSize = 13.0f;
+
+		// Point size for a subtitle and a value readout.
 		float SmallSize = 11.0f;
 	};
 
 	// A port, placed relative to its node's top-left corner.
 	struct PlacedPort {
+		// The port's name, as its declaration spells it.
 		std::string Name;
+
+		// Its `DataType::Id`, copied so a hit test can colour it without
+		// looking the declaration up again.
 		std::string Type;
+
+		// Which side it is on.
 		bool Input = false;
+
+		// The circle's centre, relative to the node's top-left.
+		//@{
 		float X = 0.0f;
 		float Y = 0.0f;
+		//@}
 	};
 
 	// A widget, placed. The rectangle is the row it may be dragged in.
 	struct PlacedWidget {
+		// Which knob this is, by `WidgetSpec::Key`.
 		std::string Key;
+
+		// Its position in the declaration, so a caller that has the type in
+		// hand can reach the spec without a lookup by key.
 		size_t Index = 0;
+
+		// The row's top-left, relative to the node's.
+		//@{
 		float X = 0.0f;
 		float Y = 0.0f;
+		//@}
+
+		// The row's extent.
+		//@{
 		float Width = 0.0f;
 		float Height = 0.0f;
+		//@}
 	};
 
 	// One node's geometry, and the one answer to "where is that slider".
 	struct NodeLayout {
+		// The node's box, in canvas units. The width is its type's; the height
+		// is whatever the rows below added up to.
+		//@{
 		float Width = 0.0f;
 		float Height = 0.0f;
+		//@}
+
+		// Every port, placed. Inputs and outputs together — `PlacedPort::Input`
+		// is what separates them, so one loop draws both.
 		std::vector<PlacedPort> Ports;
+
+		// Every knob, placed, in declaration order.
 		std::vector<PlacedWidget> Widgets;
+
+		// Where the knobs start, so a collapsed node can clip below it without
+		// re-deriving the header and port block.
 		float WidgetsTop = 0.0f;
 
 		// The thumbnail's square, for a type that has a `Preview`. Zero-sided
 		// when it has none, which is what a node carrying a number gets: an
 		// empty slot would be a picture that never arrives.
+		//@{
 		float PreviewTop = 0.0f;
 		float PreviewSide = 0.0f;
+		//@}
 
 		// The row a progress bar goes in while the node is working. Always
 		// present on an async type, so a node does not change height when it
 		// starts — a graph that reflowed as it ran would be one nobody could
 		// click in.
+		//@{
 		float ProgressTop = 0.0f;
 		float ProgressHeight = 0.0f;
+		//@}
 	};
 
 	// The interface a node actually has.
@@ -831,8 +1135,15 @@ namespace studio::nodes {
 
 	// What one run did.
 	struct RunReport {
+		// Nodes whose evaluation actually ran.
 		size_t Evaluated = 0;
+
+		// Nodes whose hash matched, so the previous result stood.
 		size_t Cached = 0;
+
+		// Nodes with no evaluation at all — a comment, or a type this build
+		// does not have. They will never produce anything, which is what
+		// separates them from `Waiting`.
 		size_t Skipped = 0;
 
 		// Async nodes handed to a worker by this run.
@@ -857,6 +1168,7 @@ namespace studio::nodes {
 
 	// One node's live state.
 	struct NodeStatus {
+		// What it is doing, which is what decides how the canvas tints it.
 		NodeState State = NodeState::Idle;
 
 		// 0 to 1, from the node's own reporting.
@@ -891,6 +1203,15 @@ namespace studio::nodes {
 		Evaluator(const Evaluator &) = delete;
 		Evaluator &operator=(const Evaluator &) = delete;
 
+		// Evaluates whatever is out of date, once.
+		//
+		// **One pass and it returns**, which is what makes this callable from a
+		// frame. Sync nodes are computed inline; async ones are dispatched and
+		// collected by a later call, so a graph that is still working reports
+		// `Running` rather than blocking.
+		//
+		// @param graph The graph to bring up to date. Not modified.
+		// @return What this pass did.
 		RunReport Run(const Graph &graph);
 
 		// Runs until nothing is left working.
@@ -922,6 +1243,12 @@ namespace studio::nodes {
 		// result is kept — it is keyed by a hash that is still correct.
 		void Forget();
 
+		// How many results are cached.
+		//
+		// For a test and for a panel that wants to say what the cache is
+		// costing; nothing about evaluation reads it.
+		//
+		// @return The count.
 		size_t Held() const {
 			return Results.size();
 		}
@@ -995,18 +1322,44 @@ namespace studio::nodes {
 
 	// What the canvas looks like. ImGui's 0xAABBGGRR packing.
 	struct Style {
+		// Behind everything.
 		uint32_t Background = 0xFF0A0A0A;
+
+		// The two grid rulings, fine inside coarse.
+		//@{
 		uint32_t GridFine = 0xFF1A1A1A;
 		uint32_t GridCoarse = 0xFF262626;
+		//@}
+
+		// A node's box, its outline, and the outline once it is selected.
+		//@{
 		uint32_t NodeBody = 0xFF1E1E1E;
 		uint32_t NodeBorder = 0xFF3A3A3A;
 		uint32_t NodeSelected = 0xFF4CA6FF;
+		//@}
+
+		// Ordinary text, and the dimmer sort a subtitle or a readout uses.
+		//@{
 		uint32_t Text = 0xFFE6E6E6;
 		uint32_t Muted = 0xFF8A8A8A;
+		//@}
+
+		// A knob's trough, and the part of it that is filled.
+		//@{
 		uint32_t Widget = 0xFF2B2B2B;
 		uint32_t WidgetFill = 0xFF4A6FA5;
+		//@}
+
+		// What a link that would be refused is drawn in while it is dragged —
+		// the "the drop went red" `DataTypes::CanConnect` is deliberately plain
+		// enough to justify.
 		uint32_t Refused = 0xFF4444EE;
+
+		// The rubber-band rectangle. Deliberately translucent, so what is under
+		// it stays readable while it is drawn.
 		uint32_t Marquee = 0x224CA6FF;
+
+		// The geometry everything is laid out from.
 		Metrics Sizes;
 	};
 
@@ -1055,11 +1408,34 @@ namespace studio::nodes {
 			Watching = evaluator;
 		}
 
+		// What is selected, in the order it was picked.
+		//
+		// @return The nodes. Empty when a frame is selected instead — see
+		//         `SelectedGroup`, which is the other half of the answer.
 		const std::vector<NodeId> &Selection() const {
 			return Chosen;
 		}
+
+		// Replaces the selection.
+		//
+		// **Replaces rather than adds**, because that is what a plain click
+		// means; the canvas builds a multiple selection itself from a drag or a
+		// modifier and hands the whole set to the second form.
+		//
+		// @param node The node to select alone.
 		void Select(NodeId node);
+
+		// Replaces the selection with a set.
+		//
+		// @param nodes The nodes, in the order they should be remembered.
 		void Select(std::vector<NodeId> nodes);
+
+		// Selects every node at the current depth.
+		//
+		// **The current depth and not the document**, so Select All inside a
+		// compressed node takes what is in it rather than everything.
+		//
+		// @param graph The graph being shown.
 		void SelectAll(const Graph &graph);
 
 		// The frame the selection is, when it is a frame rather than nodes.
@@ -1074,9 +1450,19 @@ namespace studio::nodes {
 		// panel does when somebody clicks a row.
 		void Centre(const Graph &graph, NodeId node);
 
+		// The current scale, 1 being canvas units to screen pixels.
+		//
+		// @return The zoom.
 		float Zoom() const {
 			return Scale;
 		}
+
+		// Sets the scale, about the middle of the view.
+		//
+		// Clamped to a usable range: past a point the nodes are unreadable and
+		// past the other the grid is a solid colour.
+		//
+		// @param zoom The wanted scale.
 		void SetZoom(float zoom);
 
 		// --- what the toolbar and the keys drive ------------------------------
@@ -1122,6 +1508,17 @@ namespace studio::nodes {
 			return Depth;
 		}
 
+		// Descends into a compressed node.
+		//
+		// **Changes which nodes are drawn and nothing about the graph.** Depth
+		// is `Node::Owner`, so entering is a filter on the view rather than a
+		// different document — which is what keeps the evaluator and the save
+		// format unaware that compression exists.
+		//
+		// Does nothing for a node that is not compressed.
+		//
+		// @param graph The graph being shown.
+		// @param node  The compressed node to look inside.
 		void Enter(const Graph &graph, NodeId node);
 
 		// Back out one level, or to a given depth. `Ascend(0)` is the root.
@@ -1130,6 +1527,12 @@ namespace studio::nodes {
 		void Ascend(const Graph &graph, size_t depth);
 		//@}
 
+		// The colours and sizes this canvas draws with.
+		//
+		// **Public and by value**, so a host that wants a second canvas looking
+		// different changes its copy rather than a global — two node panels in
+		// one editor is the case, and a shared style would make the second one
+		// restyle the first.
 		Style Look;
 
 		// Where the host is told about the things a canvas may not decide.
@@ -1297,9 +1700,19 @@ namespace studio::nodes {
 	// what it is *given* is the model plus a way to make a texture, which is
 	// what lets this declaration live beside the rest of the library.
 	struct Inspection {
+		// The node being inspected, and its type. Both borrowed, and both null
+		// only if a handler is called with nothing selected.
+		//@{
 		const nodes::Node *Node = nullptr;
 		const nodes::NodeType *Type = nullptr;
+		//@}
+
+		// The graph it is in, so a handler can follow a link to see what feeds
+		// it.
 		const nodes::Graph *Graph = nullptr;
+
+		// What has been computed, so a handler can show the node's actual
+		// result rather than only its settings.
 		const nodes::Evaluator *Runner = nullptr;
 
 		// Where a picture comes from, on the same terms as `Canvas::Images`.
@@ -1328,7 +1741,17 @@ namespace studio::nodes {
 	// a type that wants its own says so by name.
 	class Inspectors {
 	  public:
+		// Adds a handler, or replaces the one already under its id.
+		//
+		// @param id   What `NodeType::Inspector` names it by.
+		// @param draw The handler.
 		static void Register(const std::string &id, InspectorFn draw);
+
+		// The handler under an id.
+		//
+		// @param id The id to look up.
+		// @return It, or null when nothing registered that id — which is what a
+		//         node type naming a handler this build does not have produces.
 		static const InspectorFn *Find(const std::string &id);
 
 		// Which handler a node gets: what its type asked for, and otherwise one

@@ -207,8 +207,10 @@ namespace engine::scene {
 		// about is a poor price for a plane that lives on one row.
 		//
 		// @since v0.15
+		//@{
 		core::Vector3 SeamNormal{0.0f, 0.0f, 0.0f};
 		float SeamOffset = 0.0f;
+		//@}
 
 		// Which way the sun comes from *for this half*, or zero for the world's.
 		//

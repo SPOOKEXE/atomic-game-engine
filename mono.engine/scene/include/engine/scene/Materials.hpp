@@ -102,11 +102,23 @@ namespace engine::scene {
 	// makes fatal. `core::Name` already defaults to invalid, so this changes no
 	// value — it says so where the compiler can see it.
 	struct MaterialMaps {
+		// The albedo, and the one a material usually has on its own.
 		core::Name Colour = {};
+
+		// Tangent-space normals, as the baker writes them.
 		core::Name Normal = {};
+
+		// Per-texel roughness. Absent leaves the material's own scalar.
 		core::Name Roughness = {};
+
+		// Baked ambient occlusion, multiplied into the ambient term.
 		core::Name Occlusion = {};
+
+		// Height, for whatever the pipeline does with it. Written by the baker
+		// and carried here because a material names it; nothing samples it yet.
 		core::Name Height = {};
+
+		// What the surface emits on its own, independent of any light.
 		core::Name Emissive = {};
 
 		// Whether this names anything at all.

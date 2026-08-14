@@ -75,6 +75,8 @@ namespace engine::script {
 		// The name as a script spells it.
 		std::string Name;
 
+		// What sort of thing it is, which is what the completion popup shows as
+		// an icon and sorts by before the score.
 		NameKind Kind = NameKind::Value;
 
 		// The members a dot after this name could reach, empty when there are

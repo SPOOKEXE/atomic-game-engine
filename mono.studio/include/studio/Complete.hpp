@@ -108,6 +108,10 @@ namespace studio {
 		// broad one on screen.
 		std::string Detail;
 
+		// Which list this row came out of — a class, a property, an enum, a
+		// keyword, a global or a local. The popup groups by it, so a row whose
+		// kind is wrong is a row filed under the wrong heading rather than a
+		// missing one.
 		CompletionKind Kind = CompletionKind::Local;
 
 		// From `FuzzyMatch`, so the popup ranks the way the explorer, the
@@ -161,6 +165,11 @@ namespace studio {
 	//
 	// @since v0.14
 	struct CompletionSources {
+		// Which language's keywords and globals to offer.
+		//
+		// **The script's own, not the editor's.** A `.luau` and a `.js` in one
+		// game are completed against different vocabularies, and
+		// `CodeSourceContainerSelector` is what decides which this is.
 		engine::script::Language Language = engine::script::Language::Luau;
 
 		// The globals and instance members of a VM of that language, or null

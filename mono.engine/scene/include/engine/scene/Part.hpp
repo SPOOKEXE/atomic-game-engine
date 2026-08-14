@@ -148,6 +148,16 @@ namespace engine::scene {
 	// @since v0.14
 	float MassOf(const Collider &collider, const RigidBody &body, const PhysicsProperties *properties);
 
+	// Registers the whole scene class tree, once per process.
+	//
+	// **The one caller of the registration, which is what makes every accessor
+	// beside it safe to cache.** `PartClass` and its siblings hold a static id
+	// each; those statics call this one rather than racing a registration of
+	// their own, and a class id is fixed for the life of the process once it
+	// exists.
+	//
+	// Idempotent, and cheap after the first call. Anything that names a class
+	// before a store has been furnished — a loader, a test — calls this first.
 	void EnsureClassTree();
 
 	// The `Part` class id, registering the whole tree on first call.

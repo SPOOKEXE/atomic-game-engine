@@ -261,8 +261,10 @@ namespace engine::physics {
 		// per body per direction per sweep, which at sixteen sweeps is
 		// ninety-six evaluations of three constants and was the largest single
 		// cost in the solve.
+		//@{
 		core::Vector3 FirstAngular;
 		core::Vector3 SecondAngular;
+		//@}
 
 		// Each body's lever arm crossed into `Direction`.
 		//
@@ -272,8 +274,10 @@ namespace engine::physics {
 		// sweep uses: `(w x lever) . Direction` becomes `w . Torque`, so probing
 		// the contact is two dot products instead of two cross products, three
 		// times per row per sweep.
+		//@{
 		core::Vector3 FirstTorque;
 		core::Vector3 SecondTorque;
+		//@}
 
 		// The mass the pair presents along `Direction` at this point. It is the
 		// reciprocal of what the two responses above already add up to, so all
@@ -344,8 +348,10 @@ namespace engine::physics {
 
 		// Slots in `Along`. The normal first, so the friction pair is the two
 		// after it and both can be walked with one loop.
+		//@{
 		static constexpr size_t NORMAL = 0;
 		static constexpr size_t TANGENT = 1;
+		//@}
 	};
 
 	// How long one body has been still, and whether it has been put to sleep.

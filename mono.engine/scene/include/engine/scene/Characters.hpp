@@ -178,6 +178,12 @@ namespace engine::scene {
 	//
 	// @since v0.17
 	struct CharacterChanges {
+		// What has happened since the last drain, oldest first.
+		//
+		// **Order is the point of the vector.** Two players respawning on one
+		// tick are reported in the order the tick produced them, which is a fact
+		// a recording reproduces — a set or a map would make it whatever the
+		// hash happened to be.
 		std::vector<CharacterChange> Pending;
 	};
 

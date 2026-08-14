@@ -320,6 +320,12 @@ namespace engine::scene {
 		ecs::Entity Owner = ecs::NULL_ENTITY;
 	};
 
+	// What a part collides as, which is not what it draws as.
+	//
+	// **Separate from `Visual` deliberately.** A part's picture and its shape
+	// are different questions — an invisible wall is a collider with no visual
+	// and a decoration is a visual with no collider — and folding them into one
+	// row would make every part pay for both.
 	struct Collider {
 		// The shape's dimensions, in metres, read according to `Shape`: box
 		// half-extents on each axis, sphere radius in X, cylinder radius in X

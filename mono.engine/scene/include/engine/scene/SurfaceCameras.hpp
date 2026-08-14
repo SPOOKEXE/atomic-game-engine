@@ -264,14 +264,18 @@ namespace engine::scene {
 		// and both answers are right. `ReflectCamera` takes the side from the
 		// viewer it is handed, which is what lets one pane answer differently at
 		// two levels of a recursion.
+		//@{
 		core::Vector3 Centre;
 		core::Vector3 Normal;
+		//@}
 
 		// The pane's half-axes in the world, so `Centre ± First ± Second` is the
 		// rectangle. Vectors rather than extents, because that is the form the
 		// fit and the clip both want.
+		//@{
 		core::Vector3 First;
 		core::Vector3 Second;
+		//@}
 
 		// The part the face is on, and the surface camera that projects off it.
 		//
@@ -280,8 +284,10 @@ namespace engine::scene {
 		// it samples; a pass holding one of them could set only half of that,
 		// and half of it is a camera rendering perfectly into a texture nothing
 		// samples.
+		//@{
 		ecs::Entity Part = ecs::NULL_ENTITY;
 		ecs::Entity Camera = ecs::NULL_ENTITY;
+		//@}
 
 		// Which surface slot the pane samples, from `SurfaceCamera::Surface`.
 		// What lets a caller name one mirror out of several.
@@ -305,8 +311,10 @@ namespace engine::scene {
 		// as a poor man's oblique clip, so a script that set it had it taken back
 		// on the next frame; there is a real clip now and these are read rather
 		// than written.
+		//@{
 		float NearPlane = 0.1f;
 		float FarPlane = 500.0f;
+		//@}
 	};
 
 	// The camera one mirror pane must be rendered from, for one viewer.
@@ -480,14 +488,18 @@ namespace engine::scene {
 		// a question about the *crosser*, exactly as it is a question about the
 		// viewer in `AimSurfaceCameras` — a pane can be walked into from either
 		// side and both answers are right. `SeamMapping` takes the side.
+		//@{
 		core::Vector3 Centre;
 		core::Vector3 Normal;
+		//@}
 
 		// The pane's half-axes in the world, so `Centre ± First ± Second` is the
 		// rectangle. Vectors rather than extents because that is what the inside
 		// test wants.
+		//@{
 		core::Vector3 First;
 		core::Vector3 Second;
+		//@}
 
 		// The far pane's face frame, looking out of itself. The half of the
 		// mapping that does not depend on who is crossing.
@@ -499,8 +511,10 @@ namespace engine::scene {
 		// plane by definition, so cloning it through itself is a portal inside a
 		// portal — which recurses in the picture and, worse, gives the solver a
 		// second copy of the very surface it is deciding a crossing against.
+		//@{
 		ecs::Entity Pane = ecs::NULL_ENTITY;
 		ecs::Entity Far = ecs::NULL_ENTITY;
+		//@}
 
 		// How much bigger the far pane is than this one.
 		//
@@ -797,12 +811,16 @@ namespace engine::scene {
 	struct SeamCut {
 		// The plane the *original* keeps, which is the front of the pane it is
 		// standing in: `dot(p, NearNormal) >= NearOffset`.
+		//@{
 		core::Vector3 NearNormal;
 		float NearOffset = 0.0f;
+		//@}
 
 		// The plane the *copy* keeps, which is the front of the far pane.
+		//@{
 		core::Vector3 FarNormal;
 		float FarOffset = 0.0f;
+		//@}
 
 		// Whether the body fits through the hole's own footprint.
 		//
