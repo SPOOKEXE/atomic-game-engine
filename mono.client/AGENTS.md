@@ -98,15 +98,31 @@ rather than from a stream. Both are stated in that file, beside the code.
 ## A replicated world is presented, never simulated
 
 `--connect` adds a world the server owns, beside the demo rather than instead of
-it. It is drawn: `BuildReplicatedWorld` installs a `DrawList` and one `PreRender`
-system, the client presents it like any other world, and the compositor places
+it. It is drawn: `BuildReplicatedWorld` installs a `DrawList` and the `PreRender`
+systems, the client presents it like any other world, and the compositor places
 it beside the demo.
 
-Three things about it are deliberate and each hides a real failure:
+Four things about it are deliberate and each hides a real failure:
 
-- **Only a `PreRender` system.** Everything in that world arrived. A simulation
-  system there would be this process disagreeing with the authority once per
-  tick, and the disagreement grows rather than corrects.
+- **Nothing there advances the world.** Everything in it arrived. A simulation
+  system would be this process disagreeing with the authority once per tick, and
+  the disagreement grows rather than corrects. **Running a script is not
+  advancing the world**, which is why the VM below is not an exception to this:
+  every write a script could make into a row is refused by `ecs::Store`.
+- **Nor is dead-reckoning a body that the buffer has run out of ticks for**, and
+  `CollectReplicated` is where the second exception that is not one lives.
+  `SnapshotBuffer::DeadReckonSeconds` says how long the clock has been unable to
+  interpolate; this file decides who gets that time spent on them — a row with a
+  `scene::Motion` and no `scene::NetworkOwner`, because the first is a function
+  the authority already sent and the second says somebody else already simulates
+  it. The result is a pose in a `DrawInstance` and nothing else, which is why
+  this advances no world: no system runs, no phase is added, no component is
+  written, and `physics::Advanced` is the whole of what is called.
+  `replication/AGENTS.md` carries the amended invariant and `D00015(c)` is the
+  decision. **Bounded twice** — by `InterpolationSettings::ExtrapolateSeconds`
+  in time, and by `RECKON_HALF_EXTENTS` of the body's own size in distance,
+  because nothing here runs a broad phase to ask what it is about to pass
+  through.
 - **It is interpolated, and not by a `PreviousTransform`.** The demo
   interpolates between `PreviousTransform` and `Transform` because it owns both
   ends of its own tick. A replica owns neither, so the two states worth
@@ -140,6 +156,47 @@ Three things about it are deliberate and each hides a real failure:
 Its view channel is tracked at the join rather than at connect, because a
 channel allocates its slots once and the only size this process has is what
 actually arrived.
+
+## A replica runs the client's own scripts, and only those
+
+`BuildReplicatedWorld` opens a VM through `game::StartWorldScripts` with
+`script::HostRole::OfClient`. Four rules, and none of them is checked by the
+build:
+
+- **Which scripts run is a class rule and a container rule.** The class half is
+  Roblox's and `script::ScriptsIn` has always had it: a `Script` is the
+  server's. The container half is `script::ClientScriptsIn` and is what a
+  *replica* needs on top — a `LocalScript` runs when it is under this viewer's
+  own `Player` or under `ReplicatedFirst`, so somebody else's player and the
+  `StarterPlayerScripts` template are excluded by where they are. A single-player
+  host is deliberately not filtered that way; it owns the world it is in.
+- **The scripts arrive after the VM.** Every other host starts a world's scripts
+  in one pass over a world it has already built. This one is empty when its
+  runtime opens, so `replica-scripts` asks each tick what has arrived and
+  `Runtime::RunNewScripts` starts each instance exactly once.
+- **The refusals are `ecs::Store`'s and this directory adds none.** A client
+  script cannot write a property — `Store::SetProperty` refuses in an adopt-only
+  store — and cannot mint an instance, and both refusals reach the author as a
+  raised error rather than a silent no-op. What it may write is what is not a
+  row the authority owns: an attribute, a world resource, and the client-only
+  surfaces the engine hands it.
+- **The store is adopt-only before the VM opens.** `Client::BeginConnecting`
+  says so rather than leaving it to the first `Connector::Poll`, because opening
+  a VM and installing `GuiService` both ask the store whether minting is legal,
+  and an authoritative index taken in that window is one the server is also
+  handing out.
+
+## The interface belongs to the world the player is standing in
+
+`Client::InterfaceWorld` answers the replica once the join has completed and the
+drawn world otherwise, and everything in `Client::Draw`'s interface block —
+layout, compile, the router, `gui::Type`, `DeliverGuiEvents` — uses it.
+
+A connected client draws its local scene *and* the server's, and a person's
+`PlayerGui` is a subtree of their own `Player`, which is a row in the replica.
+Compiling the drawn world and delivering the press there is what made every
+button in a replicated world silent: the router picked the right element,
+produced the right event, and handed it to a VM that was not the button's.
 
 ## Simulation and rendering tick separately
 

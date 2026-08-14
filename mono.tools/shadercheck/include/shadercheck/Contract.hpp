@@ -25,9 +25,23 @@
 
 #include <shadercheck/Spirv.hpp>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace shadercheck {
+
+	// The entry point `render::Renderer::LoadShader` and `render::InterfacePass`
+	// pass to `SDL_CreateGPUShader` for a SPIR-V module.
+	inline constexpr std::string_view SPIRV_ENTRY_POINT = "main";
+
+	// The same entry point after translation, and the reason these two sit on
+	// adjacent lines.
+	//
+	// **MSL reserves `main`, so SPIRV-Cross emits `main0`.** The name a caller
+	// hands SDL therefore depends on the format the device took, which is one
+	// fact with two spellings — kept here together so that whoever changes
+	// either finds the other, rather than finding a black window.
+	inline constexpr std::string_view MSL_ENTRY_POINT = "main0";
 
 	// One thing wrong with one module, phrased for somebody reading a build log.
 	struct Finding {

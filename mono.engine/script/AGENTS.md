@@ -714,3 +714,38 @@ The `Store` is an upvalue on every bound function rather than a global, so two
 runtimes over two worlds cannot reach each other's storage. A file-static would
 have made that mistake available, and it is the sort that works until the second
 world exists.
+
+## A client's replica runs scripts, and the store is what refuses them
+
+`ClientScriptsIn` is this module's answer to "which of a world's scripts may a
+client run when it does not own the world". Three rules a reviewer should hold
+to:
+
+- **It is a second selection, not an argument on the first.** `ScriptsIn`
+  answers Roblox's class rule — a `Script` is the server's, a `LocalScript` is a
+  client's — and that is the whole answer for a host that owns its world. A
+  replica needs the container rule as well: a `LocalScript` runs when it is under
+  the local player's own subtree or under `ReplicatedFirst`. Folding that into
+  `ScriptsIn` would stop a `LocalScript` an author parked in `Workspace` from
+  running in single player, which is a change to how every existing scene loads
+  for the sake of a rule about somebody else's world.
+- **No refusal is written here, and none should be.** A client script cannot
+  write a property and cannot mint an instance, and both are `ecs::Store`'s
+  refusals through `AdoptOnly` — `SetProperty` and `MayMintAuthoritative`. What
+  this module owes is that the refusal *reaches the author*:
+  `InstanceNewIndex` raises with a message naming the world as a replica, because
+  a script author cannot tell a write that was rejected from one that was applied
+  and then overwritten by the next delta.
+- **A replica is never asked to furnish itself.** `OpenWorkspace` and its
+  JavaScript twin call `scene::InstallServices` only when the store may mint;
+  otherwise they resolve whatever the authority has already sent. Asking anyway
+  worked — the mint is refused and the fallback finds the arrived `Workspace` —
+  and logged "refusing CreateInstance" at error level on every join, which reads
+  as a fault and is the ordinary state of a world that owns nothing.
+
+`Runtime::RunNewScripts` is the other half. `RunWorldScripts` is a host saying
+"start this game" and starts everything it finds, every time it is called; a
+replica fills from the wire, so what it has to ask each tick is what arrived.
+The record of what has already started is the runtime's own — two VMs over one
+world would each answer it separately — which is why it is a member rather than
+a tag on the row.

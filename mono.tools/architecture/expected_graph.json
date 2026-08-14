@@ -36,7 +36,17 @@
     "stream a specification defines and it needs neither the engine nor a shader",
     "compiler — which is why it is `shared` and unconditional where `contentimport`",
     "is client-gated. No other row changed: nothing links it, and the tool's own",
-    "executable links `core` for `Arguments` the way `linecount` does."
+    "executable links `core` for `Arguments` the way `linecount` does.",
+    "",
+    "v0.15 adds `msl` — SPIR-V to Metal Shading Language, and the only module here",
+    "that links nothing first-party at all. That is the row worth reading twice: it",
+    "is `client` because SPIRV-Cross is configured only for a client preset, and it",
+    "is a module rather than code inside `render` because there are two callers at",
+    "two times. `mono.tools/shadercross` translates the built-in shaders during the",
+    "build and `render` translates a `ShaderScript` while the engine runs, and one",
+    "implementation is what stops those two from putting a texture on different",
+    "Metal indices. The rows that gained it are exactly the rows that already had",
+    "`render`; the server row gained nothing and still links no shader tooling."
   ],
   "modules": {
     "assetc": {
@@ -101,6 +111,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -224,6 +235,11 @@
         "core"
       ]
     },
+    "msl": {
+      "tier": "client",
+      "links": [],
+      "requires": "MONO_BUILD_CLIENT"
+    },
     "net": {
       "tier": "shared",
       "links": [
@@ -262,6 +278,7 @@
         "effects",
         "graph",
         "gui",
+        "msl",
         "parallel",
         "resources",
         "scene",
@@ -365,6 +382,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -396,6 +414,7 @@
         "effects",
         "graph",
         "gui",
+        "msl",
         "parallel",
         "render",
         "resources",
@@ -422,6 +441,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -475,6 +495,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -535,6 +556,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -569,6 +591,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",

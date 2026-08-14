@@ -128,34 +128,36 @@ if(MONO_BUILD_CLIENT)
 			DOC "GLSL to SPIR-V compiler, from shaderc")
 	endif()
 
-	# **A macOS client is stopped at the configure rather than at the first
-	# frame.** SDL's Metal backend accepts MSL or a metallib and never SPIR-V,
-	# and SPIR-V is the only thing this build produces — so without this a macOS
-	# client configures, compiles, links, stages, starts, and dies inside
-	# `SDL_CreateGPUDevice`, having been knowable before the first object
-	# compiled.
+	# **A macOS client was stopped here and at v0.15 is warned instead.** The
+	# refusal was right while this build produced SPIR-V and nothing else: SDL's
+	# Metal backend takes MSL or a metallib and never SPIR-V, so a client
+	# configured, compiled, linked, staged, started and died inside
+	# `SDL_CreateGPUDevice`, having been knowable before the first object.
 	#
-	# `docs/DEFERRED.md` D00001 carries what closing this needs, and the short
-	# version is that it is needed in two places rather than one: here, for the
-	# shaders `mono.engine/render` and `mono.engine/resources` ship, and inside
-	# the shipped client, because `render::ShaderCompiler` compiles
-	# runtime-authored GLSL to SPIR-V while the engine runs. A build-time step
-	# alone would leave every `ShaderScript` broken on the platform.
+	# What changed is that the translation runs. `mono.tools/shadercross` writes
+	# an `.msl` beside every `.spv` the build compiles, `Engine::msl` does the
+	# same for a `ShaderScript` inside the running client, `just shader-check`
+	# reads every emitted module back against the SPIR-V it came from, and the
+	# format handed to SDL is asked of the device rather than written down.
 	#
-	# `just shader-check` is the half of that entry a Linux machine can hold up:
-	# it proves the SPIR-V carries the descriptor sets and bindings every
-	# translation derives from. Delete this block when the translation lands.
-	# Do not add an option that skips it — a client that starts and cannot draw
-	# is worse than one that says why it will not build.
+	# **A warning that can fire is worth more than a refusal that cannot.**
+	# `docs/DEFERRED.md` D00001's reopen trigger is somebody configuring a client
+	# on Darwin, and a `FATAL_ERROR` there yields no information — the first
+	# person to try is now the only source of the answers that are left, so this
+	# asks them for the right ones instead of turning them away.
 	if(APPLE)
-		message(FATAL_ERROR
-			"A client cannot be built for macOS yet: the build produces SPIR-V and "
-			"SDL's Metal backend takes MSL or a metallib.\n"
-			"  Nothing here cross-compiles to MSL, and `render::ShaderCompiler` "
-			"would need to as well, at runtime.\n"
-			"  docs/DEFERRED.md D00001 has the whole of what is missing.\n"
-			"  --preset server and --preset cdn own no shaders and are what to reach "
-			"for here; neither has been run on macOS by anybody, so say what happens.")
+		message(WARNING
+			"No client has ever been built or run on macOS. This configures, and "
+			"beyond that nothing is known.\n"
+			"  Every shader is translated to MSL during the build and checked by "
+			"`just shader-check` — but no Metal compiler and no Metal device has "
+			"seen one, because neither exists on the machines this was written on.\n"
+			"  If it fails, the three guesses in the order they were made: the "
+			"argument-buffer default against what SDL's Metal backend binds; the "
+			"depth range, which is the classic difference and is silent; and a "
+			"ShaderScript, which goes through the runtime translator nothing on "
+			"Linux can exercise end to end.\n"
+			"  docs/DEFERRED.md D00001 is the entry. Say what happened, either way.")
 	endif()
 endif()
 include(MonoLibrary)

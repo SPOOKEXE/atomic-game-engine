@@ -91,6 +91,42 @@ TEST_CASE("a velocity moves a transform by the fixed tick", "[physics][integrate
 	CHECK(position.Z == Approx(-6.0f * TICK));
 }
 
+TEST_CASE("the system and the free function are one implementation", "[physics][integrate]") {
+	// **The claim `Advanced` is published on.** A replica placing a body the
+	// authority has stopped describing calls the free function; a tick calls the
+	// system; and a client integrating different arithmetic from the server is a
+	// disagreement that only ever surfaces as drift. So the two are asserted to
+	// agree bit for bit rather than approximately — they are the same code, and
+	// the day they are not this is what says so.
+	Store store = MakeStore("integrate.shared");
+	const Vector3 linear{3.0f, -1.5f, 0.25f};
+	const Vector3 angular{0.4f, -2.0f, 1.25f};
+
+	const CFrame start =
+		CFrame(Vector3{1.0f, 2.0f, 3.0f}, engine::core::CFrame::Angles(0.3f, 0.9f, -0.2f).Rotation());
+	const Entity entity = Moving(store, start.Position, linear, angular);
+	store.GetMutable<Transform>(entity)->Frame = start;
+
+	store.AdvanceTick(TICK);
+	IntegrateMotion(store);
+
+	const CFrame &stepped = store.Get<Transform>(entity)->Frame;
+	const CFrame direct = engine::physics::Advanced(start, linear, angular, TICK);
+
+	CHECK(stepped.Position.X == direct.Position.X);
+	CHECK(stepped.Position.Y == direct.Position.Y);
+	CHECK(stepped.Position.Z == direct.Position.Z);
+	CHECK(stepped.QuaternionX == direct.QuaternionX);
+	CHECK(stepped.QuaternionY == direct.QuaternionY);
+	CHECK(stepped.QuaternionZ == direct.QuaternionZ);
+	CHECK(stepped.QuaternionW == direct.QuaternionW);
+
+	// And it moved at all, or the equality above would hold with both halves
+	// doing nothing.
+	CHECK(direct.Position.X == Approx(start.Position.X + linear.X * TICK));
+	CHECK(QuaternionLength(direct) == Approx(1.0f));
+}
+
 TEST_CASE("integration never loads a mass", "[physics][integrate]") {
 	// The whole reason `Motion` and `RigidBody` are separate components. A
 	// platform, a projectile and a demo cube all move and none of them has a

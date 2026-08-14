@@ -83,7 +83,9 @@ void main() { outColour = vec4(1.0); }
 		// resolution can be exercised without a build having run.
 		void Write(const char *file, uint32_t first) const {
 			const std::vector<uint32_t> words{first, 0x00010000u, 0u, 1u};
-			std::ofstream out(engine::resources::Shader(file), std::ios::binary);
+			std::ofstream out(
+				engine::resources::Shader(file, engine::resources::ShaderForm::SpirV), std::ios::binary
+			);
 			out.write(reinterpret_cast<const char *>(words.data()), 16);
 		}
 	};

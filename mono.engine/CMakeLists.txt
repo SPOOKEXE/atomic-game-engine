@@ -40,6 +40,7 @@ if(MONO_BUILD_CLIENT)
 	add_subdirectory(audio)   # L12 mixer graph, spatialisation [client]
 	add_subdirectory(input)   # L12 devices, action mapping  [client]
 	add_subdirectory(resources) # L11 the engine's built-in GLSL [client]
+	add_subdirectory(msl)     # L11 SPIR-V to Metal Shading Language [client]
 	add_subdirectory(render)  # L12 RHI, render nodes        [client]
 	add_subdirectory(ui)      # L12 the editor's toolkit     [client]
 endif()

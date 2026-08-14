@@ -138,6 +138,32 @@ namespace engine::scene {
 	inline constexpr float WIRE_ANGULAR_ERROR_RADIANS_PER_SECOND =
 		WIRE_ANGULAR_HALF_EXTENT_RADIANS_PER_SECOND / static_cast<float>(WIRE_STEPS) * 0.5f;
 
+	// How long a position integrated from a decoded velocity stays better than
+	// the decoded position it started from, in seconds.
+	//
+	// **A quarter of a second, and it is the ratio of the two extents above
+	// rather than a number somebody picked.** Interpolating between two decoded
+	// poses keeps the error inside `WIRE_POSITION_ERROR_METRES` whatever the
+	// elapsed time. *Integrating* does not: the position error is the one it
+	// started with plus `WIRE_LINEAR_ERROR_METRES_PER_SECOND` times the seconds
+	// since, so it grows linearly and the bound is a function of time rather
+	// than of the grid. The two are equal when
+	//
+	//     t = WIRE_POSITION_ERROR_METRES / WIRE_LINEAR_ERROR_METRES_PER_SECOND
+	//
+	// and both errors are half a step of their own grid, so the step counts
+	// cancel and what is left is 64 m over 256 m/s. Per axis and on a 3D
+	// distance alike, for the same reason.
+	//
+	// Past it the guess is worse-conditioned than the last thing the authority
+	// actually said, which is where `replication::InterpolationSettings::
+	// ExtrapolateSeconds` stops guessing and lets the world hold.
+	// `engine.scene.wire` measures the growth rather than trusting this
+	// paragraph, and `client.replicated` pins the two constants against each
+	// other because `replication` may not see this header.
+	inline constexpr float WIRE_DEAD_RECKON_SECONDS =
+		WIRE_POSITION_HALF_EXTENT_METRES / WIRE_LINEAR_HALF_EXTENT_METRES_PER_SECOND;
+
 	// Bytes one `Transform` occupies on the wire, against twenty-eight in the
 	// store: three sixteen-bit axes and one packed rotation.
 	inline constexpr uint32_t WIRE_TRANSFORM_BYTES = 10;

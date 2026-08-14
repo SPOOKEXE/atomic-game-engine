@@ -12,6 +12,14 @@
 // vector of words, which is the whole reason to have one — `render`'s public
 // surface must not make every consumer acquire a compiler API.
 //
+// **SPIR-V is the intermediate and not always the end.** SDL's Metal backend
+// takes Metal Shading Language and never SPIR-V, so on that device the words
+// this produces go through `engine::msl::Translate` before
+// `SDL_CreateGPUShader` sees them — the same function the build runs over the
+// built-in shaders. That step is a module of its own rather than a second half
+// bolted on here, because a build tool needs it too and must not link a
+// renderer to get it.
+//
 // @tier L12 · client
 
 #include <cstdint>

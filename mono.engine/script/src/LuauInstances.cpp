@@ -1067,13 +1067,16 @@ namespace engine::script {
 		//
 		// It hands back the `Workspace` because that is what callers want next,
 		// which is exactly this call site.
-		Entity workspace = scene::InstallServices(store);
+		// **A replica is not asked, because asking is what logs.** Its fixtures
+		// arrive from the authority, and `Store::MayMintAuthoritative` reports a
+		// refused mint at error level once per store — so a client that opened a
+		// VM over its replica said "refusing CreateInstance" on every join, which
+		// reads as a fault and is the ordinary state of a world that owns
+		// nothing. Whatever the authority has already sent is what this resolves
+		// to, and a null one is a world whose first snapshot has not landed:
+		// `workspace` then finds no children rather than crashing.
+		Entity workspace = store.AdoptOnly() ? scene::WorkspaceOf(store) : scene::InstallServices(store);
 		if (workspace == ecs::NULL_ENTITY) {
-			// A replica may not mint entities, so the fixtures arrive from the
-			// authority instead of from here. Whatever it has already sent is
-			// what this resolves to — and a null one is a world whose first
-			// snapshot has not landed, which reads back as a `workspace` that
-			// finds no children rather than as a crash.
 			workspace = scene::WorkspaceOf(store);
 		}
 

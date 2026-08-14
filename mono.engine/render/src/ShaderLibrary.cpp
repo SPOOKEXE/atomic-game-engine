@@ -153,7 +153,14 @@ namespace engine::render {
 			ShaderModule module;
 			if (IsBuiltInShader(name.Text())) {
 				module.BuiltIn = true;
-				module.SpirV = ReadWords(resources::Shader(std::string(name.Text()) + ".frag"), module.Error);
+				// SPIR-V, whatever the device takes. This library's output is
+				// the intermediate the renderer then translates if it has to, so
+				// a built-in and a `ShaderScript` reach `AddShaderVariant` as the
+				// same kind of thing.
+				module.SpirV = ReadWords(
+					resources::Shader(std::string(name.Text()) + ".frag", resources::ShaderForm::SpirV),
+					module.Error
+				);
 			} else {
 				// **Said out loud rather than passed over.** A misspelled shader
 				// and a part deliberately left on the engine's default look

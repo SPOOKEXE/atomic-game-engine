@@ -1507,9 +1507,10 @@ namespace engine::script {
 		// two answers to "what is in the scene", and the renderer listened to
 		// neither.
 		{
-			// Idempotent, and here so that a world always has one. See the Luau
-			// `OpenWorkspace`, which does the same for the same reason.
-			Entity workspace = scene::InstallServices(store);
+			// Idempotent, and here so that a world always has one. A replica is
+			// not asked at all — see the Luau `OpenWorkspace`, which does the
+			// same for the same reason.
+			Entity workspace = store.AdoptOnly() ? scene::WorkspaceOf(store) : scene::InstallServices(store);
 			if (workspace == ecs::NULL_ENTITY) {
 				workspace = scene::WorkspaceOf(store);
 			}

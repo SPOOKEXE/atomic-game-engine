@@ -1,6 +1,5 @@
 #include <engine/core/Arguments.hpp>
-
-#include <spirv_msl.hpp>
+#include <engine/msl/Translate.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -9,9 +8,9 @@
 #include <string>
 #include <vector>
 
-// One `.spv` in, one `.msl` out. Every decision here is a SPIRV-Cross option and
-// every one of them is a decision about what SDL's Metal backend binds, so the
-// comments are about SDL rather than about the translator.
+// One `.spv` in, one `.msl` out. The translation itself is `Engine::msl`,
+// because `render` needs the same one while the engine runs; what is here is
+// which file to read and where to put the result.
 
 namespace {
 
@@ -96,44 +95,17 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	std::string source;
-	try {
-		spirv_cross::CompilerMSL compiler(std::move(words));
-
-		spirv_cross::CompilerMSL::Options options = compiler.get_msl_options();
-
-		// **Discrete bindings rather than an argument buffer, which is the
-		// default and is deliberate anyway.** SDL's Metal backend binds each
-		// texture, sampler and buffer to its own index — `SDL_CreateGPUShader`
-		// documents the order — so a shader that expected its resources packed
-		// into one argument buffer would find nothing bound at all.
-		options.argument_buffers = false;
-
-		// MSL 2.0, which is macOS 10.13 and iOS 11. Chosen rather than derived:
-		// it is the floor SDL's Metal backend itself requires, and asking for
-		// less would refuse constructs SPIRV-Cross emits for perfectly ordinary
-		// SPIR-V while asking for more would refuse the hardware SDL supports.
-		options.msl_version = spirv_cross::CompilerMSL::Options::make_msl_version(2, 0);
-
-		// One emitter for both Apple platforms. `platform` decides a handful of
-		// availability spellings and iOS is the narrower of the two, so an iOS
-		// build would need this switched rather than the file re-translated —
-		// recorded here because nothing in this repository builds for iOS yet.
-		options.platform = spirv_cross::CompilerMSL::Options::macOS;
-
-		compiler.set_msl_options(options);
-		source = compiler.compile();
-	} catch (const spirv_cross::CompilerError &failure) {
-		// **The one place a translation failure is allowed to be a sentence.**
-		// A built-in shader that cannot be translated is a build failure, the
-		// same way a built-in that cannot be compiled is — the runtime half in
+	const engine::msl::Translation translation = engine::msl::Translate(words);
+	if (translation.Failed) {
+		// **A built-in that cannot be translated fails the build**, the same way
+		// one that cannot be compiled does. The runtime half in
 		// `render::ShaderCompiler` is where a failure becomes a diagnostic
-		// somebody reads instead.
-		std::cerr << "shadercross: " << inputs[0] << ": " << failure.what() << "\n";
+		// somebody reads instead of a build that stops.
+		std::cerr << "shadercross: " << inputs[0] << ": " << translation.Error << "\n";
 		return 1;
 	}
 
-	if (!WriteText(fs::path(*output), source, error)) {
+	if (!WriteText(fs::path(*output), translation.Source, error)) {
 		std::cerr << "shadercross: " << error << "\n";
 		return 1;
 	}

@@ -28,6 +28,7 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
 | [Catch2](https://github.com/catchorg/Catch2) | BSL-1.0 | the test framework | no — tests only |
 | [shaderc](https://github.com/google/shaderc) | Apache-2.0 | `glslc` at build time, `libshaderc` at runtime | yes, once a caller exists — see below |
+| [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) | Apache-2.0 | SPIR-V to MSL, from v0.15: `mono.tools/shadercross` at build time, `Engine::msl` at runtime | client only, once a caller exists — see below |
 | [Dear ImGui](https://github.com/ocornut/imgui) | MIT | editor and tooling UI | studio only |
 | [asio](https://github.com/chriskohlhoff/asio) | BSL-1.0 | networking, when `net` exists | yes, once linked |
 | [Crypto++](https://github.com/weidai11/cryptopp) | BSL-1.0 (files public domain) | X25519, HKDF-SHA256, ChaCha20-Poly1305 and HMAC-SHA256 in `net`; Ed25519 and HMAC-SHA256 in `assets`; PNG CRC/DEFLATE in `bake`; deterministic hashing and the test runner's cache | yes, where linked |
@@ -78,7 +79,28 @@ contains the `yes` rows and not the others:
   it drags in regardless — a program calling only SHA-256 still links 36 of
   Crypto++'s 173 members. So "we only use one function from it" is never on its
   own a reason to leave a notice out. Run the `nm` check.
-- **SDL3, shaderc and Dear ImGui are client-side.** A headless server links
+- **SPIRV-Cross is shaderc's other end, and it is both build-time and
+  runtime for the same reason.** `glslc` produces SPIR-V and SDL's Metal
+  backend takes MSL or a `metallib` and never SPIR-V, so something has to
+  stand between them. `mono.tools/shadercross` does it for the built-in
+  shaders during the build and produces no object code in any binary;
+  `Engine::msl` does it for a `ShaderScript`, which does not exist until
+  somebody writes one, and that copy is linked into `render`.
+
+  **It reaches a shipped client on the same condition shaderc does**, and by
+  the same mechanism: `Renderer::AddShaderVariant` calls it only when the
+  device asked for MSL, so the objects are on the link line and whether they
+  survive dead-stripping is a question for `nm` against a real release build
+  rather than for this file. Re-run the check in
+  `docs/retired/CPP_LINKER.md` after a bump rather than copying this
+  sentence forward.
+
+  Apache-2.0, the same licence as shaderc and SPIRV-Tools, so it adds a row
+  and no new obligation. Only three of its eight libraries are built — the
+  parser, the GLSL emitter and the MSL emitter. The HLSL, C++, JSON
+  reflection, C API and CLI targets are switched off in
+  `mono.build/MonoVendor.cmake`, so no binary can contain them.
+- **SDL3, shaderc, SPIRV-Cross and Dear ImGui are client-side.** A headless server links
   none of them, and the `server` preset does not even configure them — only the
   presentation modules own GLSL, so nothing server-tier needs a compiler for
   it.

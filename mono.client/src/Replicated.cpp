@@ -3,6 +3,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/physics/Integrate.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -12,6 +13,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
 
+#include <algorithm>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <cstring>
@@ -44,6 +46,60 @@ namespace client {
 			(void)engine::scene::AimSurfaceCameras(store);
 		}
 
+		// How far a dead-reckoned body may be carried past where the authority
+		// last put it, as a multiple of its own smallest half-extent.
+		//
+		// **The second bound, and it is the one that stands in for collision.**
+		// Nothing here runs a broad phase, a narrow phase or a solver: a replica
+		// holds whichever colliders interest management let it see, so a swept
+		// stop would be right about the geometry that arrived and confidently
+		// wrong about the geometry that did not — and building the index to ask
+		// with is a per-tick pass over the whole replicated world, which is the
+		// simulation `mono.client/AGENTS.md` says this process does not run.
+		//
+		// So the guess is bounded instead of tested. At one half-extent the
+		// worst an unrun contact can cost is a body overlapping something it was
+		// already touching, which is what a contact looks like anyway and what
+		// the correction absorbs. Unbounded it is a crate two metres inside a
+		// wall, which is the case `D00015(c)` says is worse than not guessing at
+		// all.
+		//
+		// The smallest half-extent rather than the largest, because passing
+		// *through* something is a question about a body's thinnest dimension.
+		// Rotation is not bounded: a body spinning in place leaves nowhere.
+		constexpr float RECKON_HALF_EXTENTS = 1.0f;
+
+		// Where a body nobody owns would be `seconds` after the pose the
+		// authority last described, or that pose unchanged.
+		//
+		// **Extrapolate what nobody owns.** A `scene::NetworkOwner` says some
+		// machine already simulates this body authoritatively, so there is
+		// nothing arriving for a guess to be reconciled against and guessing
+		// as well would simulate it twice with one of the two wrong. A body
+		// with no `scene::Motion` carries no function to evaluate, and holding
+		// is D00010's answer for exactly that case.
+		CFrame DeadReckon(
+			const Store &store, Entity entity, const CFrame &frame, const Bounds &bounds, double seconds
+		) {
+			const auto *motion = store.Get<engine::scene::Motion>(entity);
+			if (motion == nullptr || store.Has<engine::scene::NetworkOwner>(entity)) {
+				return frame;
+			}
+
+			float travelSeconds = static_cast<float>(seconds);
+			const float reachMetres =
+				RECKON_HALF_EXTENTS *
+				std::min({bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z});
+			const float speed = motion->Linear.Magnitude();
+			if (speed * travelSeconds > reachMetres) {
+				// Only reached with a positive speed, so there is no zero to
+				// divide by.
+				travelSeconds = reachMetres / speed;
+			}
+
+			return engine::physics::Advanced(frame, motion->Linear, motion->Angular, travelSeconds);
+		}
+
 		void CollectReplicated(Store &store) {
 			auto *drawList = store.ResourceMutable<DrawList>();
 			auto *buffer = store.ResourceMutable<SnapshotBuffer>();
@@ -54,6 +110,12 @@ namespace client {
 			// Advance with the world's frame delta so stalls remain testable.
 			buffer->Advance(store.Time().FrameDelta);
 
+			// Zero unless the buffer has run out of ticks to interpolate
+			// between, so the branch below costs a comparison on every ordinary
+			// frame and the component lookups happen only while the link is
+			// actually failing to deliver.
+			const double reckonSeconds = buffer->DeadReckonSeconds();
+
 			// Entity joins are required here; retain draw-list capacity.
 			drawList->Instances.clear();
 			drawList->Instances.reserve(store.CountMatching<Transform, Bounds, Visual>());
@@ -61,14 +123,23 @@ namespace client {
 			// The authority owns ancestry filtering; the replica only honors `Visible`.
 			// Optional appearance and tag components must not be query requirements.
 			store.Each<const Transform, const Bounds, const Visual>(
-				[drawList, buffer, &store](
+				[drawList, buffer, &store, reckonSeconds](
 					Entity entity, const Transform &transform, const Bounds &bounds, const Visual &visual
 				) {
 					if (!visual.Visible) {
 						return;
 					}
 
-					const std::optional<CFrame> interpolated = buffer->Sample(entity);
+					std::optional<CFrame> interpolated = buffer->Sample(entity);
+
+					// **Only a pose the buffer produced is guessed forward.**
+					// Falling back to the live row already means this client has
+					// no history for the entity — a row that arrived this frame,
+					// or the predicted range — and neither is something to
+					// extrapolate.
+					if (reckonSeconds > 0.0 && interpolated.has_value()) {
+						interpolated = DeadReckon(store, entity, *interpolated, bounds, reckonSeconds);
+					}
 
 					const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(entity);
 					const Tags *tags = store.Get<Tags>(entity);
@@ -100,6 +171,10 @@ namespace client {
 
 			engine::core::Metrics::Count("replica.behind.ticks", buffer->Behind());
 			engine::core::Metrics::Count("replica.stalls", static_cast<double>(buffer->Stats().Stalls));
+
+			// Against `replica.stalls`, this says how much of a stall was
+			// covered by a guess rather than by a freeze.
+			engine::core::Metrics::Count("replica.reckon.seconds", reckonSeconds);
 
 			engine::core::Metrics::Count("replica.tickrate", buffer->MeasuredTickRate());
 		}

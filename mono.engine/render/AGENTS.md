@@ -119,6 +119,43 @@ unconditionally passes every "valid shader compiles" test ever written. If
 `ShaderCompiler`'s error path is ever reworked, the assertion to keep is that
 invalid input produces a *non-empty* error.
 
+## The shader format comes from the device, and nothing here names one
+
+`SDL_CreateGPUDevice` used to be asked for `SDL_GPU_SHADERFORMAT_SPIRV` and
+three `SDL_GPUShaderCreateInfo::format` lines used to repeat it. That is a
+literal describing what the build happened to produce on the machine it was
+written on, and SDL's Metal backend takes MSL or a `metallib` and never SPIR-V —
+so on macOS the first of those returned null before a shader was opened and the
+other three would have been wrong afterwards.
+
+`src/ShaderBinary.hpp` is the one place that answers it now, and it answers
+three things at once because they move together: the format enumerator, which
+of the two staged files to open, and the entry point name. **MSL reserves
+`main`, so a translated module's entry point is `main0`** — a caller that opened
+the right file and asked for the wrong name gets a per-shader failure that names
+the shader and not the reason.
+
+**Preferring SPIR-V where a device offers both is deliberate**, and MoltenVK is
+why it is not hypothetical: a Vulkan device on Apple hardware takes SPIR-V, and
+that is the path this repository has actually run.
+
+## Translating is `Engine::msl`, and it is not a second compiler here
+
+`Engine::msl` turns SPIR-V into MSL. `render` calls it from
+`AddShaderVariant` — a `ShaderScript` does not exist at build time, so a device
+that takes MSL gets nothing at all unless the engine can translate one while it
+runs — and `mono.tools/shadercross` calls the same function over the built-in
+shaders during the build.
+
+**Do not move that code in here.** Two callers at two times is the whole reason
+it is a module: a build tool must not link a renderer to get it, and two
+implementations would disagree about which texture is `[[texture(0)]]` the first
+time somebody edited one. That disagreement is invisible on Linux and is a
+surface sampling somebody else's map on a Mac.
+
+A translation failure is a diagnostic and a refused variant, not a fatal — the
+same split as the two compilers above, for the same reason.
+
 ## No shaderc type in a public header either
 
 `ShaderCompiler.hpp` takes a string and returns a `vector<uint32_t>`. That is

@@ -2139,17 +2139,34 @@ for, at the stage the filename claims; every resource carrying an explicit
 names for its stage; bindings contiguous within a set; and no SPIR-V capability
 outside an allowlist of what MSL can express.
 
+It also reads the translation back. The build writes an `.msl` beside every
+`.spv` — `mono.tools/shadercross` runs `Engine::msl` over each one — and this
+holds each translation to the module it came from: one entry point, named
+`main0` because MSL reserves `main`, qualified for the right stage; the file
+structurally well-formed; and every `[[texture]]`, `[[buffer]]` and
+`[[sampler]]` index the one SDL's documented order derives. A `.spv` with no
+`.msl` beside it is a failure rather than a skip.
+
 Directly, and without `--quiet`, for the per-shader table — including the
-`[[texture(n)]]` or `[[buffer(n)]]` each resource would land on once translated:
+`[[texture(n)]]` or `[[buffer(n)]]` each resource lands on:
 
 ```sh
 ./.cache/build/dev/tools/shadercheck .cache/build/dev/shaderstage
 ```
 
-**It translates nothing and says nothing about a Metal device.** What it is for
-is the half of `docs/DEFERRED.md` D00001 that a machine with no Mac can answer:
-MSL, DXIL and DXBC all derive their bindings from those descriptor sets, so
-wrong sets make every translation wrong, and the sets are readable here. A
+One shader by hand, if you want to read what a translation looks like:
+
+```sh
+./.cache/build/dev/tools/shadercross \
+    .cache/build/dev/shaderstage/resources/opaque.frag.spv -o /tmp/opaque.frag.msl
+```
+
+**It says nothing about a Metal device.** There is no Metal compiler here, so
+"the MSL is valid" means balanced, prefaced and bound where SDL will look — a
+type error inside a function body passes. What it is for is the half of
+`docs/DEFERRED.md` D00001 that a machine with no Mac can answer, and that half
+is now larger than it was: MSL, DXIL and DXBC all derive their bindings from
+those descriptor sets, and the MSL derived from them is on disk to be read. A
 `server` or `cdn` preset compiles no shader and the recipe says it skipped
 rather than passing quietly.
 

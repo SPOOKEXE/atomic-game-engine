@@ -808,7 +808,7 @@ namespace engine::replication {
 
 	bool Authority::Dispute(Client &into, const replication::Disputed &disputed) {
 		// **The limit is enforced here and nothing about it is taken from the
-		// client**, which is what `docs/DEFERRED.md` D00015 calls part of the
+		// client**, which is what `docs/retired/DEFERRED.md` D00015 calls part of the
 		// security argument rather than a tuning knob. An answer is only ever
 		// an answer: to the one audit this server issued, once, naming groups
 		// out of the slice this server chose. A client claiming everything

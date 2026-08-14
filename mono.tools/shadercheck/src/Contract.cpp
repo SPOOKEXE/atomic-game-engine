@@ -10,16 +10,6 @@ namespace shadercheck {
 
 	namespace {
 
-		// The entry point name `render::Renderer::LoadShader` and
-		// `render::InterfacePass` both pass to `SDL_CreateGPUShader`.
-		//
-		// **This is the one line in this file that a Mac changes.** MSL reserves
-		// `main`, so SPIRV-Cross emits `main0` and the string handed to SDL has
-		// to follow. Checking it here does not fix that — it makes the two ends
-		// visibly one fact instead of two, so that whoever adds the MSL path
-		// finds this line rather than a black window.
-		constexpr std::string_view ENTRY_POINT = "main";
-
 		// Capabilities that survive translation to MSL.
 		//
 		// **An allowlist rather than a denylist, and that is the whole design.**
@@ -142,10 +132,10 @@ namespace shadercheck {
 			);
 			return findings;
 		}
-		if (module.EntryPointName != ENTRY_POINT) {
+		if (module.EntryPointName != SPIRV_ENTRY_POINT) {
 			report(
 				"entry point is '" + module.EntryPointName + "'; the renderer asks for '" +
-				std::string(ENTRY_POINT) + "'"
+				std::string(SPIRV_ENTRY_POINT) + "' on this format"
 			);
 		}
 		if (module.EntryStage == Stage::Unsupported) {

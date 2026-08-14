@@ -1,3 +1,5 @@
+#include "ShaderBinary.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/resources/Shaders.hpp>
@@ -12,8 +14,8 @@
 namespace engine::render {
 
 	namespace {
-		std::vector<uint8_t> ReadShader(std::string_view name) {
-			const auto path = resources::Shader(name);
+		std::vector<uint8_t> ReadShader(std::string_view name, resources::ShaderForm form) {
+			const auto path = resources::Shader(name, form);
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
 			if (!file) {
 				ENGINE_ERROR("interface pass: shader not found: {}", path.string());
@@ -36,7 +38,14 @@ namespace engine::render {
 			uint32_t samplers,
 			uint32_t uniforms
 		) {
-			const std::vector<uint8_t> code = ReadShader(name);
+			// Asked of the device rather than assumed, the same way
+			// `Renderer::LoadShader` asks. This pass creates its shaders from a
+			// device somebody else made, so it has nowhere to carry the answer
+			// and asks each time — twice per initialisation, against a string
+			// compare inside SDL.
+			const ShaderBinary binary = ShaderBinaryFor(device);
+
+			const std::vector<uint8_t> code = ReadShader(name, binary.Form);
 			if (code.empty()) {
 				return nullptr;
 			}
@@ -44,8 +53,8 @@ namespace engine::render {
 			SDL_GPUShaderCreateInfo info{};
 			info.code = code.data();
 			info.code_size = code.size();
-			info.entrypoint = "main";
-			info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+			info.entrypoint = binary.EntryPoint;
+			info.format = binary.Format;
 			info.stage = stage;
 			info.num_samplers = samplers;
 			info.num_uniform_buffers = uniforms;

@@ -180,6 +180,132 @@ TEST_CASE("nothing is extrapolated when the buffer runs dry", "[replication][int
 	REQUIRE(resumed < 8.5);
 }
 
+TEST_CASE("a dry buffer measures the guess it does not itself make", "[replication][interpolation]") {
+	// **The `D00015(c)` half, and the case above is the half it does not
+	// touch.** The clock still stops, `Sample` still holds the last pose the
+	// authority described, and this class still extrapolates nothing — what it
+	// gained is a number saying how much time it could not spend, for a caller
+	// that has a velocity to spend it with.
+	SnapshotBuffer buffer(Steady());
+	for (uint64_t tick = 1; tick <= 8; tick++) {
+		buffer.Record(tick, MOVER, At(static_cast<double>(tick)));
+		for (int frame = 0; frame < FRAMES_PER_TICK; frame++) {
+			buffer.Advance(FRAME_SECONDS);
+		}
+	}
+
+	// A healthy link has nothing to guess about: the clock runs a delay behind
+	// the newest sample, so there is always something to interpolate toward.
+	REQUIRE(buffer.DeadReckonSeconds() == 0.0);
+	REQUIRE(buffer.Stats().Extrapolated == 0);
+
+	// Nothing more arrives for a second.
+	double previousReckon = 0.0;
+	for (int frame = 0; frame < 240; frame++) {
+		buffer.Advance(FRAME_SECONDS);
+
+		// Never backwards, and never past the horizon.
+		REQUIRE(buffer.DeadReckonSeconds() >= previousReckon);
+		REQUIRE(buffer.DeadReckonSeconds() <= buffer.Settings().ExtrapolateSeconds);
+		previousReckon = buffer.DeadReckonSeconds();
+
+		// And D00010's answer, unchanged: this class never hands back a pose
+		// past the last one the server actually described.
+		REQUIRE(buffer.Sample(MOVER).value().Position.X <= 8.0 + 1e-4);
+	}
+
+	// **Saturated, and the horizon is what stopped it rather than the run
+	// ending.** A second of silence is four times the quarter-second the guess
+	// is worth.
+	REQUIRE(buffer.DeadReckonSeconds() == Approx(buffer.Settings().ExtrapolateSeconds));
+	REQUIRE(buffer.Sample(MOVER).value().Position.X == Approx(8.0).margin(1e-4));
+	REQUIRE(buffer.Stats().Extrapolated > 0);
+	REQUIRE(buffer.Stats().Stalls >= buffer.Stats().Extrapolated);
+}
+
+TEST_CASE("the guess is given back rather than dropped", "[replication][interpolation]") {
+	// **The correction decision, stated as a rate.** The offset a caller adds is
+	// a function of this number, so easing it to zero *is* the blend — and it is
+	// eased at half real time, which is slow enough that a corrected body still
+	// moves forward while it is being taken back.
+	SnapshotBuffer buffer(Steady());
+	for (uint64_t tick = 1; tick <= 8; tick++) {
+		buffer.Record(tick, MOVER, At(static_cast<double>(tick)));
+		for (int frame = 0; frame < FRAMES_PER_TICK; frame++) {
+			buffer.Advance(FRAME_SECONDS);
+		}
+	}
+
+	for (int frame = 0; frame < 240; frame++) {
+		buffer.Advance(FRAME_SECONDS);
+	}
+	const double saturated = buffer.DeadReckonSeconds();
+	REQUIRE(saturated > 0.0);
+
+	// The stream returns. One frame does not undo a quarter of a second.
+	buffer.Record(9, MOVER, At(9.0));
+	buffer.Advance(FRAME_SECONDS);
+	REQUIRE(buffer.DeadReckonSeconds() > saturated * 0.9);
+
+	// Given back at `UnwindFraction` of real time, so a horizon's worth takes
+	// twice the horizon to unwind.
+	int frames = 1;
+	double previous = buffer.DeadReckonSeconds();
+	while (buffer.DeadReckonSeconds() > 0.0 && frames < 2000) {
+		buffer.Record(9 + static_cast<uint64_t>(frames) / FRAMES_PER_TICK, MOVER, At(9.0));
+		buffer.Advance(FRAME_SECONDS);
+		REQUIRE(buffer.DeadReckonSeconds() <= previous);
+		REQUIRE(buffer.DeadReckonSeconds() >= 0.0);
+		previous = buffer.DeadReckonSeconds();
+		frames++;
+	}
+
+	const double unwoundSeconds = static_cast<double>(frames) * FRAME_SECONDS;
+	REQUIRE(
+		unwoundSeconds == Approx(saturated / buffer.Settings().UnwindFraction).margin(4.0 * FRAME_SECONDS)
+	);
+}
+
+TEST_CASE("dead reckoning switched off is D00010 unchanged", "[replication][interpolation]") {
+	// **The control, and the reason the horizon is a setting rather than a
+	// constant.** A host that wants the v0.5 behaviour asks for zero and gets a
+	// buffer that measures nothing, offers nothing, and stalls exactly as it
+	// always did.
+	InterpolationSettings settings = Steady();
+	settings.ExtrapolateSeconds = 0.0;
+	SnapshotBuffer buffer(settings);
+
+	for (uint64_t tick = 1; tick <= 8; tick++) {
+		buffer.Record(tick, MOVER, At(static_cast<double>(tick)));
+		for (int frame = 0; frame < FRAMES_PER_TICK; frame++) {
+			buffer.Advance(FRAME_SECONDS);
+		}
+	}
+
+	for (int frame = 0; frame < 240; frame++) {
+		buffer.Advance(FRAME_SECONDS);
+		REQUIRE(buffer.DeadReckonSeconds() == 0.0);
+	}
+
+	REQUIRE(buffer.Stats().Stalls > 0);
+	REQUIRE(buffer.Stats().Extrapolated == 0);
+	REQUIRE(buffer.Sample(MOVER).value().Position.X == Approx(8.0).margin(1e-4));
+}
+
+TEST_CASE("clearing drops the guess with everything else", "[replication][interpolation]") {
+	// A rejoin: the ticks held describe a world that no longer exists, and so
+	// does anything derived from how long ago the last of them arrived.
+	SnapshotBuffer buffer(Steady());
+	buffer.Record(1, MOVER, At(1.0));
+	for (int frame = 0; frame < 120; frame++) {
+		buffer.Advance(FRAME_SECONDS);
+	}
+	REQUIRE(buffer.DeadReckonSeconds() > 0.0);
+
+	buffer.Clear();
+	REQUIRE(buffer.DeadReckonSeconds() == 0.0);
+}
+
 TEST_CASE("a gap larger than the delay holds and then closes it smoothly", "[replication][interpolation]") {
 	// A stall is not a failure to have a policy. The world holds the last pose
 	// it was actually told about, and when the stream returns it walks the gap

@@ -35,6 +35,16 @@ mono_add_library(render
 		# creation on a machine where a full build had not happened to run first.
 		Engine::resources
 
+		# SPIR-V to MSL, for the half a build step cannot do.
+		#
+		# **A module rather than a function in here, because there are two
+		# callers.** `mono.tools/shadercross` translates the built-in shaders
+		# during the build and this translates a `ShaderScript` while the engine
+		# runs; one implementation is what stops the two from disagreeing about
+		# which texture is `[[texture(0)]]`, which on macOS is a surface sampling
+		# somebody else's map and on Linux is nothing at all.
+		Engine::msl
+
 	# Keep GPU and shader compiler types private to implementation files.
 	VENDOR SDL3::SDL3 shaderc
 

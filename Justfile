@@ -193,9 +193,18 @@ deps-check: build
 # capability outside an allowlist of what MSL can express — `double` being the
 # one that compiles happily for Vulkan and cannot be translated at all.
 #
-# **It translates nothing and proves nothing about a Metal device.** Deliberately:
-# a check that asserted something this machine cannot observe would be the same
-# untested claim D00001 already records, arriving a second time.
+# **Since v0.15 it also reads the translation back.** The build writes an `.msl`
+# beside every `.spv`, and this holds each one to the module it came from: one
+# entry point, named `main0` because MSL reserves `main`, qualified for the right
+# stage, and every `[[texture]]`, `[[buffer]]` and `[[sampler]]` index the one
+# SDL's documented order derives. That last check is not decoration — SPIRV-Cross
+# left to itself numbered `opaque.frag`'s textures in id order and put the last
+# one in the descriptor set at `[[texture(0)]]`.
+#
+# **It still proves nothing about a Metal device.** There is no Metal compiler
+# here, so "valid MSL" means balanced, prefaced and bound where SDL will look,
+# and no more. A check that asserted something this machine cannot observe would
+# be the same untested claim D00001 already records, arriving a second time.
 #
 # `--quiet` here because `just check` runs it. Drop it — `shadercheck
 # .cache/build/dev/shaderstage` — for the per-shader table, including the

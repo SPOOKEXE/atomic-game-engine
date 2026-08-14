@@ -29,6 +29,16 @@
 // world would be this process disagreeing with the authority once per tick,
 // which is the bug replication exists to avoid.
 //
+// **Nor is dead-reckoning a body the buffer has run out of ticks for.** When
+// nothing has arrived to interpolate toward, a row carrying a `scene::Motion`
+// and no `scene::NetworkOwner` is drawn where that velocity says it would be —
+// bounded in time by `replication::InterpolationSettings::ExtrapolateSeconds`
+// and in distance by the body's own size, through `physics::Advanced` and into
+// a `DrawInstance`. No system runs, no phase is added and no component is
+// written, which is why it advances no world. `replication/AGENTS.md` carries
+// the invariant this was amended out of and the reasons it distinguishes a body
+// from a player.
+//
 // ## What a script running here may write, and what refuses the rest
 //
 // **The mechanism is `ecs::Store`'s and this file adds none.** A replica's rows

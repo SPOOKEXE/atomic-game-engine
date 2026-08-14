@@ -1,3 +1,4 @@
+#include "ShaderBinary.hpp"
 #include "SurfaceScale.hpp"
 
 #include <engine/core/Log.hpp>
@@ -1355,6 +1356,10 @@ namespace engine::render {
 
 		std::string Backend;
 
+		// What this device takes, asked once at initialisation. Every shader
+		// created below reads it rather than naming a format of its own.
+		ShaderBinary Binary;
+
 		SDL_GPUShader *LoadShader(
 			std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
 		) const;
@@ -1480,7 +1485,11 @@ namespace engine::render {
 		// Staged under the owning module's name, so that two modules cannot
 		// collide on a common file name like fullscreen.vert. The built-in GLSL
 		// is `Engine::resources`, which is what that name is.
-		const auto path = resources::Shader(name);
+		//
+		// The form comes from the device: the build stages a `.spv` and a `.msl`
+		// for every shader, and which of them SDL will accept is what
+		// `SDL_GetGPUShaderFormats` answered.
+		const auto path = resources::Shader(name, Binary.Form);
 
 		const auto code = ReadFile(path);
 		if (code.empty()) {
@@ -1491,8 +1500,8 @@ namespace engine::render {
 		SDL_GPUShaderCreateInfo info{};
 		info.code = code.data();
 		info.code_size = code.size();
-		info.entrypoint = "main";
-		info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+		info.entrypoint = Binary.EntryPoint;
+		info.format = Binary.Format;
 		info.stage = stage;
 		info.num_samplers = samplers;
 		info.num_uniform_buffers = uniformBuffers;
@@ -1928,11 +1937,36 @@ namespace engine::render {
 		// for the built-in fragment shader. That is why a `ShaderScript` is a
 		// fragment shader written against `opaque.frag`'s slots and not against
 		// a blank page.
+		// **The runtime half of the translation, and it is the half a build step
+		// cannot do.** A `ShaderScript` does not exist when the shaders are
+		// compiled, so a device that takes MSL gets nothing at all unless the
+		// engine can translate one while it runs. Same function as
+		// `mono.tools/shadercross` calls, so a script and a built-in land on the
+		// same Metal indices.
+		//
+		// A failure is a log line and a refused variant rather than a fatal, for
+		// the reason `ShaderLibrary` gives about a compile failure: the part
+		// keeps the engine's own shader and the world keeps running.
+		const bool toMsl = Binary.Form == resources::ShaderForm::Msl;
+
+		std::string translated;
+		if (toMsl) {
+			msl::Translation result = msl::Translate(spirv);
+			if (result.Failed) {
+				ENGINE_ERROR("shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
+				return false;
+			}
+			translated = std::move(result.Source);
+		}
+
 		SDL_GPUShaderCreateInfo info{};
-		info.code = reinterpret_cast<const Uint8 *>(spirv.data());
-		info.code_size = spirv.size() * sizeof(uint32_t);
-		info.entrypoint = "main";
-		info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+		// Metal's backend reads the source with `initWithBytes:length:`, so the
+		// length is the text and not the text plus its terminator.
+		info.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())
+						  : reinterpret_cast<const Uint8 *>(spirv.data());
+		info.code_size = toMsl ? translated.size() : spirv.size() * sizeof(uint32_t);
+		info.entrypoint = Binary.EntryPoint;
+		info.format = Binary.Format;
 		info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
 		info.num_samplers = 4;
 		info.num_uniform_buffers = 3;
@@ -3468,15 +3502,22 @@ namespace engine::render {
 		// right at v0.7.
 		State->Window = window;
 
-		// SPIR-V only. Metal needs the cross-compile step the module's
-		// CMakeLists does on Apple targets; D3D12 needs DXIL, which is not
-		// built yet. Asking for formats we cannot supply would find a device
-		// and then fail at pipeline creation, which is a worse error.
-		State->Device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
+		// **Every format the build produces, which is now two.** `glslc`
+		// compiles the built-in GLSL to SPIR-V and `mono.tools/shadercross`
+		// translates each module to MSL beside it, so a Metal device has
+		// something to be given. D3D12 needs DXIL, which is still not built —
+		// asking for a format we cannot supply would find a device and then fail
+		// at pipeline creation, which is a worse error than being refused here.
+		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, false, nullptr);
 		if (!State->Device) {
 			ENGINE_ERROR("SDL_CreateGPUDevice: {}", SDL_GetError());
 			return false;
 		}
+
+		// Asked once, here, rather than assumed at each of the three places a
+		// shader is created. `docs/DEFERRED.md` D00001's guess at what would
+		// break first on a Mac was this line naming SPIR-V and nothing else.
+		State->Binary = ShaderBinaryFor(State->Device);
 
 		if (window != nullptr && !SDL_ClaimWindowForGPUDevice(State->Device, window)) {
 			ENGINE_ERROR("SDL_ClaimWindowForGPUDevice: {}", SDL_GetError());

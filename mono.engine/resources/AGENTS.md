@@ -38,6 +38,25 @@ put it away from the code that has to agree with it. If that declaration moves
 or changes shape, the regex in `CMakeLists.txt` moves in the same commit — it is
 a `FATAL_ERROR`, so the build says so.
 
+## Every shader is staged twice, and the caller says which it wants
+
+`glslc` writes `opaque.frag.spv` and `mono.tools/shadercross` writes
+`opaque.frag.msl` beside it, from the same build. SDL's Vulkan backend takes one
+and its Metal backend takes the other, and which one a client opens is a
+property of the *device* rather than of the platform or of the build —
+`SDL_GetGPUShaderFormats` is what answers it, and `render/src/ShaderBinary.hpp`
+is where it is asked.
+
+So `Shader` takes a `ShaderForm` and has no default. A default would answer the
+question with whichever form happened to work on the machine this was written
+on, which is the shape of the bug the format literal in `Renderer.cpp` was.
+
+**Both are checked before either is staged.** `just shader-check` reads every
+`.spv` against the contract `SDL_CreateGPUShader` documents and then reads the
+`.msl` back against the `.spv` it came from. There is no Metal compiler here, so
+that is structure, entry point and binding indices and not a claim that anything
+runs; `docs/DEFERRED.md` D00001 is where the rest of that sentence lives.
+
 ## A shader a game author writes is a different thing
 
 None of those are in this repository. `render::ShaderCompiler` compiles them at

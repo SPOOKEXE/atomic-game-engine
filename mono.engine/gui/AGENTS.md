@@ -202,10 +202,21 @@ Three rules inside it, none of which the build can check:
 **A host has to install the services, and nothing in `gui` can do it for one.**
 `InstallGuiServices` is where `GuiService` comes from, `scene::InstallServices`
 cannot call it, and every function above answers "no" in a world that has
-neither. `examples::LoadScene` is the caller today, which covers every
-`--script` world in the client and the server. The editor registers the classes
-on its own path and installs no service, so focus does not work there yet —
-`studio/AGENTS.md`'s call, not this module's.
+neither. Three hosts call it: `examples::LoadScene` for every `--script` world
+in the client and the server, `studio::Editor::PrepareWorld` for every world the
+editor makes, and `client::BuildReplicatedWorld` for a replica.
+
+**A replica is completed rather than furnished, and that is what the third
+caller needs.** No `gui.` component is replicated, so a client is shown a
+`GuiService` that is a name and a class with no state on it — and `Select` and
+`Focus` both read that state and both answer `false` without it, which is a
+keyboard that never reaches a `TextBox` and nothing saying why. So
+`InstallGuiServices` adds the state to whatever service the world holds and
+mints one only where minting is legal: `ecs::Store::AdoptOnly` is the test,
+because an authoritative index minted in a replica collides with one the
+authority is handing out, and the join snapshot sweeps what it does not mention
+anyway. That is what makes it safe to call once a tick on a world filling from a
+snapshot, which is how the replica gets one at all.
 
 ## Typing is `Typing.hpp`, and the text it writes is the box's own
 

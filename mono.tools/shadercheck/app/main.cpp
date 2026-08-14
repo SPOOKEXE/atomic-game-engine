@@ -6,7 +6,9 @@
 #include <fstream>
 #include <iostream>
 #include <shadercheck/Contract.hpp>
+#include <shadercheck/Msl.hpp>
 #include <shadercheck/Spirv.hpp>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -67,6 +69,18 @@ namespace {
 		return static_cast<bool>(file.read(reinterpret_cast<char *>(out.data()), size));
 	}
 
+	// The whole of a text file, or nothing when it is not there.
+	bool ReadText(const fs::path &path, std::string &out) {
+		std::ifstream file(path, std::ios::binary);
+		if (!file) {
+			return false;
+		}
+		std::ostringstream buffer;
+		buffer << file.rdbuf();
+		out = buffer.str();
+		return true;
+	}
+
 	std::string Display(const fs::path &path) {
 		std::error_code error;
 		const fs::path relative = fs::relative(path, fs::current_path(), error);
@@ -81,12 +95,15 @@ int main(int argc, char **argv) {
 	engine::core::Arguments arguments(
 		"shadercheck",
 		"Reads compiled SPIR-V and checks it against the resource contract\n"
-		"SDL_CreateGPUShader holds every backend to. Give it directories or .spv files.\n"
+		"SDL_CreateGPUShader holds every backend to, then reads the MSL the build\n"
+		"translated it to back against it. Give it directories or .spv files.\n"
 		"\n"
 		"  shadercheck .cache/build/dev/shaderstage\n"
 		"\n"
-		"It translates nothing and proves nothing about a Metal device; it proves that\n"
-		"the modules carry what a translation to MSL, DXIL or anything else reads.\n"
+		"It translates nothing itself — mono.tools/shadercross does that, and this is\n"
+		"the other end of it. It proves nothing about a Metal device either: there is\n"
+		"no Metal compiler on this platform, so the MSL is checked for structure,\n"
+		"entry point and binding indices and not for compiling.\n"
 		"docs/DEFERRED.md D00001 carries the rest."
 	);
 	arguments.Flag("quiet", "Print only the shaders with findings");
@@ -158,8 +175,29 @@ int main(int argc, char **argv) {
 		}
 
 		const shadercheck::Module module = shadercheck::ReflectBytes(bytes);
-		const std::vector<shadercheck::Finding> findings = shadercheck::Check(module, stage);
+		std::vector<shadercheck::Finding> findings = shadercheck::Check(module, stage);
 		const std::vector<uint32_t> metal = shadercheck::MetalIndices(module.Resources);
+
+		// **A missing `.msl` is a failure and not a skip.** The build writes one
+		// beside every `.spv` it compiles, so its absence means either the
+		// translation step did not run or it ran and produced nothing — and a
+		// check that quietly passed on that would be a translation nobody was
+		// holding to anything, which is the state `docs/DEFERRED.md` D00001 was
+		// corrected for once already.
+		fs::path translated = path;
+		translated.replace_extension(".msl");
+		std::string msl;
+		if (!ReadText(translated, msl)) {
+			findings.push_back(
+				shadercheck::Finding{
+					"has no translated " + Display(translated) +
+					" beside it; the build writes one per shader and nothing here has to be run by hand"
+				}
+			);
+		} else {
+			const std::vector<shadercheck::Finding> mslFindings = shadercheck::CheckMsl(module, msl);
+			findings.insert(findings.end(), mslFindings.begin(), mslFindings.end());
+		}
 
 		if (!findings.empty()) {
 			++failed;
@@ -175,7 +213,8 @@ int main(int argc, char **argv) {
 		}
 
 		std::cout << display << ": ok — " << shadercheck::StageName(module.EntryStage) << " '"
-				  << module.EntryPointName << "', " << module.Resources.size() << " resource(s)\n";
+				  << module.EntryPointName << "' / MSL '" << shadercheck::MSL_ENTRY_POINT << "', "
+				  << module.Resources.size() << " resource(s)\n";
 		for (size_t index = 0; index < module.Resources.size(); ++index) {
 			const shadercheck::Resource &resource = module.Resources[index];
 			const bool isTexture = resource.Kind == shadercheck::ResourceKind::SampledTexture ||
@@ -193,6 +232,7 @@ int main(int argc, char **argv) {
 	}
 
 	std::cout << "\nshaders ok — " << shaders.size()
-			  << " module(s) single-entry, decorated and in the sets SDL's contract names.\n";
+			  << " module(s) single-entry, decorated, in the sets SDL's contract names, and translated "
+				 "to MSL on the indices that contract derives.\n";
 	return 0;
 }

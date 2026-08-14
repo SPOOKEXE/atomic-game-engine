@@ -253,11 +253,67 @@ tick it describes; a client acknowledges the last tick it applied; prediction
 replays the inputs after that tick. A design that agreed on wall time instead
 would need the two clocks to agree, and they do not.
 
-## Prediction is the local player and nothing else
+## Prediction is the local player and nothing else. Dead reckoning is not prediction
 
-Everything else is interpolated authoritative state. Predicting a second entity
-means predicting what another player will do, which is wrong more often than it
-is right and is visible as rubber-banding when it is wrong.
+**Amended at v0.15, on purpose and here, because the rule as written forbade
+`D00015(c)` and was never about it.** What it was about is *agents*: predicting
+a second entity means predicting what another player will do, which is wrong
+more often than it is right and is visible as rubber-banding when it is wrong.
+That argument is untouched and so is the rule it produces — **no entity but the
+one `SnapshotBuffer::Predict` names is ever run ahead of the authority on the
+strength of inputs, nothing replays an input for a row it does not own, and
+`Store::CreatePredicted`'s index range is still the only identity a replica may
+mint.**
+
+What the rule did not distinguish is the other thing a client can do with a row
+somebody else owns. Predicting an input-driven agent is guessing at a human.
+**Dead-reckoning a body is evaluating a function the authority already sent** —
+`scene::Motion` *is* the derivative of the pose, so integrating it reads the
+message rather than inventing one. Three rules follow, and the build checks
+none of them:
+
+- **A body nobody owns may be dead-reckoned, for presentation only.** The guess
+  is an offset on the pose `Sample` hands back and it reaches no component, for
+  the reason the next section already gives about interpolation and one more:
+  `Audit.hpp` hashes what a replica holds, so a row overwritten by a guess would
+  be reported as disagreeing with the authority on every sweep. Presentation was
+  already the rule; anti-entropy is what makes it enforced.
+- **Anything carrying a `scene::NetworkOwner` may not be.** Under v0.13
+  ownership an owned body is simulated by its owner *authoritatively* and there
+  is nothing arriving for a guess to be reconciled against, so dead reckoning it
+  as well simulates it twice with one of the two wrong — and the wrong one is
+  whichever the local machine happens not to own. **Extrapolate what nobody
+  owns** is the whole of the test.
+- **The guess is bounded twice, and by two different things.** In *time* by
+  `InterpolationSettings::ExtrapolateSeconds`, because integrating a quantised
+  velocity accumulates error linearly and past a quarter of a second the result
+  is worse-conditioned than the quantised pose it started from. In *distance* by
+  the body's own half-extent, because that is what stands in for the collision
+  nothing here runs. Both are named constants with the derivation at them.
+
+**This is not licence to simulate on a replica.** No broad phase, no narrow
+phase, no solver and no gravity: `mono.client/AGENTS.md`'s "nothing there
+advances the world" is intact, because nothing here advances one. The whole of
+what runs is `physics::Advanced` over one row — the same function the
+authority's own `IntegrateMotion` is written out of, so a client cannot be
+integrating different arithmetic from the server.
+
+**Where `D00010` and this meet.** D00010 decided a dry buffer *stops* rather
+than extrapolating, on the grounds that guessing forward is "a freeze plus a
+lie" — the snap arrives when the next tick disagrees with the guess. **That
+decision is unchanged**, and `SnapshotBuffer` is where it still is: the render
+clock stops at the newest sample, `Sample` holds the last pose the authority
+described, and `Statistics::Stalls` counts it. What v0.15 adds sits outside the
+buffer and only on the entities carrying the thing D00010 did not have — a
+velocity the server sent, which is a right answer to extrapolate *toward*. A
+player has none, and neither has a body with no `scene::Motion`: there is no
+function to evaluate, so the freeze stands, unchanged and for D00010's reason.
+
+**And the lie is paid back rather than snapped away.** Whatever the guess added
+is `velocity * seconds`, so the correction is `seconds` easing to zero at
+`InterpolationSettings::UnwindFraction` — one number for the whole world instead
+of a per-entity blend, continuous by construction, and unwound slowly enough
+that a corrected body never appears to move backwards.
 
 ## The two halves pull opposite ways, and `SnapshotBuffer` is the other one
 
@@ -404,11 +460,13 @@ the wrong one is `applied=184 refused=17865` with a second way to reach it.
 empty predicate is an empty blob, no extra tick, and the same single-cursor join
 this module always had.
 
-**The script half is not here and is not a gap.** Roblox also runs
-`ReplicatedFirst`'s scripts before the rest of the tree arrives. `mono.client`
-runs no replicated scripts at all, so an ordering guarantee about script
-execution would be a guarantee about something that does not happen. The first
-client that runs a script out of its replica is what makes that a real question.
+**What is missing is the ordering over the scripts, not the scripts.** Roblox
+also runs `ReplicatedFirst`'s scripts before the rest of the tree arrives.
+`client::BuildReplicatedWorld` opens a `script::Runtime` and `replica-scripts`
+runs every client-side `LocalScript` as it lands, so a client does run scripts
+out of its replica — what nothing states is which of them may run before the
+world's first chunk has. The preface is the half that exists; the guarantee that
+a named script goes ahead of it is the half that does not.
 
 ## Structure goes on the reliable channel, and values do not
 
