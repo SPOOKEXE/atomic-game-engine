@@ -17,7 +17,7 @@
 
 TEST_SUITE_ID("cdn.origin")
 TEST_DEPENDS("cdn.gate")
-TEST_DEPENDS("cdn.groupcodec")
+TEST_DEPENDS("cdn.grouper")
 TEST_DEPENDS("cdn.preparedcache")
 TEST_DEPENDS("engine.assets.manifest")
 TEST_DEPENDS("engine.core.framegraph")

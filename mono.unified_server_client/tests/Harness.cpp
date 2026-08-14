@@ -30,7 +30,7 @@ TEST_DEPENDS("client.replicated")
 TEST_DEPENDS("engine.replication.snapshotbuffer")
 TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.wire")
-TEST_DEPENDS("server.simulation")
+TEST_DEPENDS("server.host")
 
 using Catch::Approx;
 using engine::scene::Transform;
