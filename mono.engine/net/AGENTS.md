@@ -382,3 +382,90 @@ and carries the number across.
 
 **Zero means unknown, not instant.** A connection that has sent nothing reliable
 has nothing to measure, and a loopback honestly measures nothing at all.
+
+## The send rate is a function of the path, and `BytesPerTick` is a ceiling over it
+
+`net::CongestionControl` is **Copa** — Arun and Balakrishnan, NSDI 2018 — a
+delay-based window that steers toward a standing queue of `TargetQueuePackets`
+at the bottleneck. The reason it is not a loss-based AIMD window in the NewReno
+lineage is that a loss-based controller *finds the bottleneck by filling its
+buffer*, which is the mechanism rather than a side effect: on a home router with
+a hundred milliseconds of buffer that is a hundred milliseconds added to every
+input a player sends. **For a game the latency argument is the whole point.**
+
+**`LinkSettings::BytesPerTick` survives as a hard ceiling and stopped being the
+only limit.** It was kept rather than removed because the two answer different
+questions: a game may legitimately refuse to spend more than N on one player on
+a path that would carry ten times that, and a hundred players on one host is a
+hundred of these. What it stopped being is a *rate* — it never opened up and it
+never backed off. `PacketsPerTick` is left a fixed cap for a different reason:
+per-packet cost is a property of the two endpoints and not of the path between
+them, so there is nothing on the wire to measure it against.
+
+**Two refusals and two counters.** `ConnectionStats::SendsOverBudget` is a number
+somebody configured being enforced, which a caller answers by changing the
+number; `SendsOverAllowance` is the path refusing, which raising anything does
+not fix. A caller that must not lose a send reads both. Folding them together
+would make "raise the cap" look like a fix for congestion, and `render`'s debug
+panel and `D00007`'s reopen trigger are both phrased against the first meaning.
+
+**No second acknowledgement path, and none may be added.** Both signals come out
+of what already crosses. The delay is `ReliableSender`'s estimate arriving at
+`Link::RecordRoundTrip`, which `replication::Session` has called on every inbound
+packet since v0.9. The loss is holes in `PacketHeader::Acknowledge` and
+`AcknowledgeBits` — the fields `ReliableReceiver::Acknowledging` already stamps on
+every outgoing packet whatever its channel. `ReliableSender` reads them to retire
+payloads and `Link::ObserveAcknowledgement` reads them to find out whether the
+path dropped something. One acknowledgement, two questions.
+
+**Both signals are therefore about the reliable channel only, and that bounds
+what this can see.** Unreliable loss on the way out is reported by nothing and is
+not measured; a direction whose reliable stream is quiet offers no samples at
+all, which on a server publishing a still world is a real gap. It is why the
+controller must never *require* a sample to make progress — the slow-start ramp
+falls back on `AssumedRoundTripSeconds`, and the queueing delay reads as zero
+rather than as unknown when nothing has been measured.
+
+**The controller is clocked by acknowledgements, not by a timer.** Everything
+periodic in it — the slow-start doubling, Copa's velocity parameter, the mode
+switch — waits for the effect of the last decision to come back, and an
+acknowledgement *is* that effect arriving. `Link::Advance` closes the period when
+the far side has acknowledged everything outstanding when it opened, which is one
+round trip measured rather than assumed, and is what makes the same code behave
+on a loopback and on a satellite.
+
+**The whole law runs in exactly one place, and that is rule 5.** Observations
+land whenever a packet does, several times in a tick, and they accumulate into
+windowed minima that do not care about order. The decision that turns them into a
+window happens once, in `Link::Advance`, which every caller already runs
+immediately before `ResetBudget`. **A tick's length is measured between two
+advances and nothing else** — `LastAdvanceAt` is separate from `LastKnownSeconds`
+for that reason, because the packets that arrived earlier in the tick named the
+same instant and measuring against them reads every tick as a stall.
+
+**A cold start is RFC 6928's initial window, once.** Ten datagrams on the opening
+tick, because that is what an initial *window* is and there is no feedback yet to
+pace against; every tick after it is paced at the window over the round trip.
+Ten datagrams *every* tick until the first acknowledgement is what spreading the
+window over a guessed round trip and repeating it comes to, and it is sixty times
+what was opened with.
+
+**The competitive mode is Copa's and the predicate is restated rather than
+copied.** The paper asks whether the queue is ever nearly empty, which works
+because its per-acknowledgement window oscillates hard enough to empty it; a
+window steered once a tick settles at its target instead and never empties
+anything, so that form of the test reads every ordinary path as contested — it
+was measured doing exactly that before this was changed. The question underneath
+survives: **if this end reduces its window round trip after round trip and the
+queueing delay does not follow it down, the queue is not this flow's.**
+
+**Loss restarts the velocity, and without it the cut does not stick.** A path
+that loses packets with no queueing delay to show for it — a policer, a shallow
+buffer, a permanently full one whose round trip never varies — gives the delay
+signal nothing to read, so the window law keeps saying "faster" while the loss
+keeps cutting. Measured on a 20 kB/s path with a 50 ms buffer: at a velocity of
+64 the increase beats the reduction and the window rides the cap for ever.
+
+**Nothing here is random and nothing here reads a clock**, so a recorded run is
+unaffected in the way this module's whole discipline is unaffected. The
+controller's entire state is a function of the sequence of calls it was handed.

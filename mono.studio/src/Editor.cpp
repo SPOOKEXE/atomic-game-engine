@@ -6,6 +6,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
@@ -1766,6 +1767,14 @@ namespace studio {
 		// saved after gets nothing back. Branching on the file's format version
 		// instead would be a version test that has to stay right forever.
 		engine::scene::InstallServices(store);
+
+		// **And `gui`'s, which is a second call because it has to be.** `scene`
+		// may not link `gui`, so `GuiService` cannot come from the line above and
+		// a host calls both. `D00117` recorded this line as owed: without it a
+		// world the editor made had no `GuiService`, `gui::Focus` refused every
+		// press, and clicking a `TextBox` in a viewport took no focus — the same
+		// symptom `examples::LoadScene` closed for every `--script` world.
+		engine::gui::InstallGuiServices(store);
 
 		// **Physics, which nothing in this repository was running.** `D00039`:
 		// the module was complete, tested, benchmarked and connected to nothing

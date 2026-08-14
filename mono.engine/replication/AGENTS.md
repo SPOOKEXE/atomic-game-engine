@@ -495,14 +495,35 @@ dirty bits handed it over, and only re-packed by score when that did not fit.
 A scheme that ranked every entity every tick would be a tax on every server that
 was never over budget.
 
-**Two counters, and they mean different things.**
+**Three counters, and they mean three different things.**
 `Authority::Statistics::Deferred` is the authority holding traffic over, which
 is the ordinary answer to a world larger than a link.
-`net::ConnectionStats::SendsOverBudget` is the *link* refusing, which after the
-cap exists means a misconfiguration or a retransmission storm. D00007 says the
-diagnosis people will get wrong is "that component is broken"; `Deferred` is the
-number that says otherwise, and `Listener` warns at construction when
+`net::ConnectionStats::SendsOverBudget` is the *link* refusing against a number
+somebody configured, which after the cap exists means a misconfiguration or a
+retransmission storm. `net::ConnectionStats::SendsOverAllowance` is the *path*
+refusing, which is congestion and is nobody's mistake. D00007 says the diagnosis
+people will get wrong is "that component is broken"; `Deferred` is the number
+that says otherwise, and `Listener` warns at construction when
 `MessagesPerTick + ChunksPerTick` exceeds `LinkSettings::PacketsPerTick`.
+
+**The link's allowance is the authority and `BytesPerTick` is a ceiling on what
+this module will *produce*.** `Authority::Pack` spends the lower of the two, and
+`Authority::SetAllowance` is how the number gets here — `Listener::Advance`
+reads `ConnectionStats::SendAllowanceBytes` immediately after `ResetBudget`,
+which is where the link decides it.
+
+Packing past the allowance never sent more: `Link::Reserve` refuses the excess
+and `Unsent` rebuilds the same rows next tick. What it did was spend the encode
+and hand the shortfall to the **transport** rather than to the priority
+scheduler, which is the thing that exists to decide what a client sees when not
+all of it fits. A host that never calls `SetAllowance` keeps `SIZE_MAX` and
+behaves exactly as this module did before the controller existed, which is also
+how the case tells the two apart.
+
+**Told rather than read, because this module holds no link.** Same division as
+`SetPriority` and `Rewind::Record`: the arithmetic is here and the lookup is the
+host's. An `Authority` that reached for a `net::Link` would be an `Authority`
+that knows what a socket is.
 
 **Nothing in the ordering may read a clock, a pointer or an unordered
 container.** The comparator is a total order — score, then wait, then entity
@@ -511,6 +532,75 @@ server must produce the same bytes. The recovery walk sorts the unconfirmed
 entities for the same reason, and that one is not hypothetical: the map was
 walked in place, and the only way to see it is to build the same set of entries
 through two different sequences of insertions.
+
+## What an instance *is* crosses whole, and it is three components
+
+`ecs.Hierarchy`, `ecs.InstanceName` and `ecs.InstanceClass` are all replicated
+by default. Until v0.15 only the first was: the rule read "`scene.` or
+`ecs.Hierarchy`", so the other two crossed in a join snapshot — `Store::Save`
+carries every component — and never in a delta. An entity the world already held
+was named on a client and an entity created while that client was connected
+arrived with no name and no class, which `server.replication`'s
+private-containers case saw as four children of a `Player` called nothing.
+
+**A prefix with an exception written into it cannot fail loudly, so it is a
+list.** `Defaults.cpp` names the three, and `engine.replication.defaults` walks
+every registered `ecs.` component and requires each to be either in that list or
+in the exclusions the suite names. A fourth component added to `ecs` is a red
+suite rather than a silence on a delta. Rule 6; the build does not check it and a
+test does.
+
+**They are signed, so they cross once per change and not once per creation.**
+Saying a name in the `Structure` message that creates the entity would be one
+reliable copy and nothing per tick after it, and it would be the v0.7 recolour
+bug again: `.Name` is a writable property a script sets whenever it likes, and a
+fact that crosses only at birth is wrong for ever afterwards. What guarantees
+arrival is the mechanism every other value already has — an entry in
+`Unconfirmed`, re-offered every tick until the client acknowledges a tick it was
+in.
+
+The steady-state cost is therefore **zero bytes**: a hash of two four-byte
+columns per tick, and traffic only on the tick something is created or renamed.
+That is also why there is no string table for the class name. It is text on a
+wire, and a per-connection dictionary to compress a message sent once per
+instance would save nothing on the ticks that matter.
+
+**A class crosses as its registered name, and that is `ecs`'s registration
+rather than a wire form here.** A `ClassId` is a registration index and rule 4
+forbids one on a wire: `Classes::Register` runs wherever the code needing a tree
+runs and `RegisterGuiClasses` is called lazily on first use, so two processes of
+one build can number a class differently depending on which of them opened an
+interface. Changing `Components::Register<InstanceClass>`'s serialiser — rather
+than fitting a `TypeDescriptor::Wire` over it — fixes the save file and the
+studio's edit stream in the same breath, and leaves one answer to "how is a class
+written down" instead of two.
+
+**A class name the receiver does not know leaves the entity untyped, and the
+world untouched.** `ClassOf` answers with an invalid id and a warning names the
+class. That is the render half's answer to a pipeline it cannot build, not
+`studio::RojoSync`'s substituted `Folder`: a Rojo project is written against a
+class tree this engine implements a fraction of, so substituting is right there
+and here it would make `:IsA` tell a confident lie about two builds that do not
+match. Every other component on the entity still arrives.
+
+## A delta's rows are not one width
+
+`Authority::Pack` records an **offset and a length per row**, not one stride per
+component. A stride is right only while every row encodes to the same number of
+bytes, which is true of a `Transform` and false of anything that writes a name:
+`scene.Visual` writes two and `ecs.InstanceName` writes one, and a name is as
+long as its text.
+
+It was reachable before instance names crossed — two parts whose meshes are spelt
+differently is enough — and invisible because a demo world's mesh names are
+almost all empty and therefore all four bytes long. The receiver was never the
+problem: `WriteComponents` reads the values sequentially and always could take
+any width. It was the sender slicing rows back out at `row * stride` after the
+priority sort had reordered them.
+
+The guard at the top of `BuildComponents` is about the *component* and not about
+a row: a type whose stored size already exceeds a message can never produce a row
+that fits. What a given row costs is only known once `offer` has written it.
 
 ## Not here yet
 

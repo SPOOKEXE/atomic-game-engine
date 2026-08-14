@@ -15,6 +15,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
+#include <engine/scene/Tools.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
@@ -1377,7 +1378,25 @@ namespace engine::scene {
 			// vocabulary: `Instance.new("Model")` resolves, `:IsA("Model")`
 			// answers, and a character is a thing rather than six loose parts
 			// under Workspace. `scene::MakeCharacter` is its first caller.
-			(void)ecs::Classes::Register("Model", pvInstance, {});
+			const ecs::ClassId modelClass = ecs::Classes::Register("Model", pvInstance, {});
+
+			// **A `Tool` is a `Model` a character can be holding**, and holding
+			// it is a reparent rather than a flag — `scene/Tools.hpp` carries the
+			// whole decision, including why the handle is a `CharacterLimb` and
+			// not an `Attachment`.
+			//
+			// **Roblox's abstract `BackpackItem` is deliberately not between the
+			// two.** It carries members this engine has nothing behind, and
+			// registering it would put an instantiable class that does nothing
+			// into the insert palette — which is the exact objection
+			// `docs/DEFERRED.md` D00120 held this class back for.
+			//
+			// The component is in the class set, which is `SurfaceCamera`'s
+			// argument: `Instance.new("Tool")` has to make something that can be
+			// equipped rather than something that becomes a tool once a script
+			// assigns a field.
+			const std::array grip{ecs::Components::Of<Tool>()};
+			const ecs::ClassId toolClass = ecs::Classes::Register("Tool", modelClass, grip);
 
 			// **A `MeshPart` is a `BasePart` whose mesh came from somewhere
 			// else**, and that is the whole of the difference. It adds no
@@ -1928,6 +1947,14 @@ namespace engine::scene {
 			// controller a lie it acts on immediately — the jump would fire in
 			// mid-air, which is the exploit this flag exists to gate.
 			ecs::Classes::Computed(humanoidClass, GroundedProperty());
+
+			// The tool's one. **`Grip` and not `GripPos`/`GripForward`/the rest
+			// of Roblox's six**, because those are the same `CFrame` taken apart
+			// into a position and three basis vectors — six properties writing
+			// one field, five of which are a rotation somebody has to keep
+			// orthogonal by hand. A `CFrame` is a declared property type here and
+			// `Attachment.CFrame` already crosses as one.
+			ecs::Classes::Property<&Tool::Grip>(toolClass, "Grip");
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like. The

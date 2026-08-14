@@ -1,6 +1,577 @@
 
 # DEFERRED
 
+### [x] D00031
+
+**Closed at v0.15 by patching the editor's language server, which is the option
+this entry declined three times.** `local face: Enum.NormalId` built and passed
+from v0.14 and was underlined in the editor, because `mono.tools/scriptcheck`
+registers `importedTypeBindings["Enum"]` on its own frontend and luau-lsp, reading
+the same `engine.d.luau`, did not. The dotted spelling now resolves in both, hover
+prints `Enum.NormalId`, and `just check` fails if either stops being true.
+
+**The finding that made the decision, and it is the one the entry had been
+guessing at.** There is no definitions-file spelling that closes this. Luau
+resolves a prefixed type through `Scope::lookupImportedType("Enum", "NormalId")`,
+and both `parseDeclaration` and `parseTypeAlias` reach `parseName`, a single
+identifier — so a `declare` statement cannot produce a dotted name at all, and
+`loadDefinitionFile` only ever writes a flat `exportedTypeBindings` entry. Every
+write to `importedTypeBindings` in `Analysis/` is a `require` or a host reaching
+into the frontend. **So the earlier bullets were right that the generator could
+not fix this and wrong about why**: it is not that nobody had found the spelling,
+it is that the grammar has none.
+
+**The patch is thirteen lines and the hook was already there.**
+`LSPPlatform::mutateRegisteredDefinitions` is a virtual with an empty body called
+on every platform right after each definitions file loads, and luau-lsp's own
+Roblox platform ends its override with `importedTypeBindings.emplace("Enum",
+enumTypes)` from an API dump. The engine's copy sits in
+`WorkspaceFolder::loadDefinitionFile` just after that hook — one hunk, pure
+insertion, no header touched — because a platform of our own would have cost a
+header edit and a second file for the same behaviour, and this is the shape that
+conflicts least when upstream moves.
+
+**The mechanism is a checked-in `.patch`, and that is the part worth carrying
+forward.** `mono.vendor/AGENTS.md` said a patch goes upstream or into a fork;
+neither fitted. There is nothing to send upstream — the loop keys on the `Enum_`
+prefix this repository's generator emits and nobody else's — and a fork is a
+remote to own, a push to make and a `main` to track forever for one hunk.
+`mono.vendor/patches/luau-lsp-dotted-enum-types.patch` needs none of that: it is
+visible in a normal diff, reproducible from a clean clone with `just luau-lsp`,
+and it fails **loudly** at the moment upstream moves the code it edits, which is
+the property the no-copied-files rule exists to protect. That file now carries the
+argument and the three obligations that come with it.
+
+**Hover was the open question and the answer was the one-line addition.** Without
+it hover reads `local side: Enum_NormalId` — the flat name — because the type's
+`name` is what `toString` prints and the binding alone does not change it.
+Roblox's path sets `ctv->name = "Enum." + name` for exactly this reason, and the
+patch does the same, measured both ways over a real `textDocument/hover`
+round-trip rather than inferred. `scriptcheck` got the same line, so a diagnostic
+from `just typecheck` and one from the editor name the same thing.
+
+**Rule 6, which is why this is closed rather than fixed.** `just typecheck-editor`
+runs `luau-lsp analyze` over every example through the language server an editor
+actually runs, and it is in `just check`. **1.5 s**, so it went in rather than
+beside; the cost that is not small is the first build of luau-lsp's own Luau —
+11 minutes of CPU, 39 s wall on 24 cores, once, measured from a deleted build
+tree and an unpatched clone. It catches both halves — a patch that stopped applying
+and a spelling that stopped resolving — and it was proved by mutation in both
+directions: reverse-applying the patch makes it report
+`Portals-1-world.luau(410,39): Unknown type 'Enum.NormalId'` and exit 1, and a
+deliberately broken patch makes `just luau-lsp` stop with the path named.
+
+**Two numbers this entry stated were wrong.** It said 35 enums and then 36;
+`scriptcheck` reports **38**, which is what the generator emits today. And the
+entry was written about `Enum.Material`, which this engine does not have — the
+example that exists, and the one an author tripped over, is `Enum.NormalId`.
+
+**What is not closed, said plainly.** Under luau-lsp's `roblox` platform the
+engine's `Enum_X` types are still mangled by Roblox's own loop, which strips four
+characters and leaves `Enum._NormalId`. That costs nothing because `luau-lsp.json`
+pins `platform.type` to `standard` and switching it was already the worst of the
+three options here, but it is a real interaction rather than a theoretical one.
+
+### [x] D00128
+
+**Closed at v0.15 by moving the reader down rather than by vendoring one.**
+There were three hand-written XML readers — `game::Xml` since v0.7, `Svg.cpp`'s
+private scanner since v0.13, and `bake/src/Xml.hpp` extracted from it earlier in
+this version — and rule 1 was the whole obstacle to there being one: `bake` is L9
+and `game` is L10, so an importer naming `game::ParseXml` would have put `ecs`,
+`world` and the save format underneath a foreign-format parser. The scanner is
+`core/Xml.hpp` now, `bake/src/Xml.{hpp,cpp}` is deleted, and `game/Xml.cpp` lost
+its recursive-descent parser and kept its document model and its writer.
+
+**It landed at L1 and the entry's own candidate was one tier too high.** The test
+applied was what the parser *depends on*, not what would be convenient: it opens
+no file, links no vendor, allocates no global and names no other module's type,
+so its height is the height of the standard library. `assets` was the obvious
+candidate because `assets::ResizeImage` had made exactly this move — but
+`ResizeImage` is arithmetic over an `assets::TextureData` and followed its own
+dependency, and `game` does not link `assets` at all. Consolidating there would
+have dragged content addressing, BLAKE3 and Crypto++ underneath the save format
+to gain a string scanner. **The evidence for the placement is that
+`expected_graph.json` did not change**: every caller already links `core`, so a
+consolidation that needed no new edge is one that went to the right floor.
+
+**The writer did not move, and that was decided rather than skipped.** It writes
+this format's dialect — the declaration, tab indentation, `<x />` for an empty
+element, a `]]>` split across two CDATA sections — has exactly one caller, and
+can have no second one below L10 because nothing in `bake` writes XML. A writer
+at L1 that only `game` calls would be an API nobody reaches for and a second
+place to keep one format true. `EscapeXml` stayed with it for the same reason:
+unescaping faces hostile input and belongs at the reader, escaping is the
+writer's half.
+
+**The two refusal policies are both in the shared header and neither is the
+default.** `CheckEntityReferences` sweeps a whole document, which is right for
+the SVG rasteriser because it never unescapes and so has no point at which a
+reference would otherwise be met; `ReadContent` refuses at each point one is read
+and exempts CDATA, which is right for `.rbxmx` because a real model in this
+repository's corpus carries the Luau pattern `"[&;]"` inside a script and a sweep
+refuses that file while naming an entity nobody wrote. **Collapsing them either
+way round is the most likely way to get this wrong, so each direction has a case
+that goes red**: "an rbxmx script's ampersand is source and not a reference" and
+the CDATA half of "an svg's document type declaration is refused outright", both
+proved red by making `ReadContent` unescape a CDATA section. The save format
+takes `.rbxmx`'s route, for `.rbxmx`'s reason — a world's scripts are CDATA.
+
+**What changed about the save format, stated rather than discovered later.**
+Every document the v0.7 reader accepted is accepted and produces the same tree,
+and `just determinism` and `just replay-check` are byte-identical either side.
+Four differences, three of them narrowing and one of them not:
+
+- **An element may carry at most `XmlLimits::MaximumAttributes`, which is 1024.**
+  The writer emits nine at most, on `<Game>`. This was the one count a document
+  stated that the reader had been taking on trust.
+- **An element or attribute name must be an XML name**, and a `<` inside an
+  attribute value is refused. Both were already true of the save reader and are
+  now true of the two importers as well.
+- **An entity reference must terminate within nine characters of its `&`**, so
+  `&#000000233;` is refused where it used to expand. Every reference either
+  format actually writes is shorter — `&#x10FFFF;` is the longest legal
+  character reference and fits — and `EscapeXml` writes the five named entities
+  and never a numeric one, so no file this engine has written contains one.
+- **Some refusals report a different status**: `<!FOO` is `Refused` where it was
+  `Malformed`, `</>` is `Malformed` where it was `Mismatched`, and a truncated
+  numeric character reference is `Malformed` where it was `Truncated`. What a
+  rejected document is *called* narrowed where the scanner's vocabulary is
+  coarser than the old parser's. `Refused` is the one status that had to survive
+  the mapping and does — it is the only one that means somebody tried something.
+- **The one widening: text between the declaration and the root is now stepped
+  over rather than refused.** `junk<Game/>` is still `Malformed` and so is a
+  CDATA section before the root, both of which the loader checks; but
+  `<?xml?>junk<Game/>` reads. The scanner steps over comments and the declaration
+  inside one call and does not stop between them, so catching it needs either an
+  option nobody else wants or the save reader knowing what a comment looks like —
+  a second copy of the grammar, which is the thing this entry existed to remove.
+  It is accepted because the run expands to nothing: no entity can be declared,
+  so a reference in skipped text is inert, and a document still has to carry a
+  `<Game format="N">` root to load. `game/tests/Xml.cpp` says so where somebody
+  would otherwise read the gap as an oversight.
+
+**The three attacks are tested at four places now rather than two**, because a
+defence that holds in the scanner and is not reached by a caller is a defence
+nobody has: `core/tests/Xml.cpp` drives the scanner, and the save format, the
+model container and the rasteriser each still drive their own. Every case was
+proved red by mutating the shipped source — the `<!` refusal removed, the
+unknown-entity refusal removed, the code point bound removed, the attribute bound
+removed, the name rule removed, and the scanner made recursive, which is the one
+that turns 100,000 levels of nesting from a scan into a stack overflow.
+
+### [x] D00117
+
+**Closed at v0.15: a `TextBox` accumulates characters, and the three things this
+entry named as remaining are the three that landed.** The trigger fired exactly
+as written — somebody typed a character into a box and expected to see it.
+
+- **`SDL_StartTextInput` is on the window, switched by whether
+  `gui::FocusedTextBox` answers something.** Not left on: text input is what
+  raises an on-screen keyboard and starts an input method's composition, so a
+  client that asked once and never stopped would put a keyboard over the game on
+  every platform that has one. Compared before it is called, for the reason
+  `SDL_SetWindowRelativeMouseMode` beside it is.
+- **`Translator::TypedText()` goes to `gui::Type` once a frame**, in
+  `Client::Draw`'s interface block and *before* `Router::Update` — the
+  characters were produced by a keyboard aimed at whatever held the focus when
+  they arrived, so a press processed first would post them into the box the
+  person is only now clicking on. The string never reached `scene::InputState`
+  and did not have to: it crosses no snapshot, so the serialiser
+  `Translate.hpp` refused to buy is still unbought.
+- **The editing is `gui/Typing.hpp`**, which is `Type(store, Typing)` over the
+  focused box: insert at the caret, replace a selection, Backspace one
+  *character*, shift-arrow to extend, and Return that releases a single-line box
+  and breaks a line in a `MultiLine` one. `src/Utf8.hpp` is the one place a
+  character index and a byte offset cross, shared with `Focus`, which is what
+  the entry meant by "the routine an editor would share".
+
+**Three decisions the entry did not make and this closure did:**
+
+- **The text lives in `Label::Text` and nowhere else.** No buffer on the router,
+  none in the translator, no undo stack — rule 2, and the bug the second copy
+  buys is a script writing `TextBox.Text` while somebody types into it.
+- **Return releases rather than submits-and-keeps**, and a `MultiLine` box takes
+  the line break instead. The release owes a `FocusReleased` the router cannot
+  produce, because no press happened: `TypeResult::Released` says when, the
+  caller builds the event, and `GuiEvent::Entered` carries Roblox's
+  `enterPressed` — which was hard `false` under this entry's name and is now the
+  difference between a field submitted and one abandoned.
+- **A script setting `TextBox.Text` does not move the caret, and `Type` clamps
+  before it reads one.** The property is a plain field the class table writes
+  and there is no setter to hook, so a handler replacing the text with something
+  shorter is ordinary — and every offset derived from the old caret would be
+  past the end. The clamp is at the one reader that indexes by it rather than at
+  the write.
+
+**One thing this entry never said was missing, found while proving it:** nothing
+in the shipped tree had ever called `gui::InstallGuiServices`, so no real world
+had a `GuiService`, so `gui::Focus` refused every press and the whole focus half
+was inert outside its own suite. `examples::LoadScene` now calls it beside
+`scene::InstallServices`, which covers every `--script` world in the client and
+the server. **The editor still does not**, and that is `mono.studio`'s to add.
+
+**Still absent, and now for a reason about dispatch rather than about typing:**
+`TextBox:CaptureFocus` and `:ReleaseFocus`. Every gui signal in this engine is
+delivered by the host between frames — `Runtime::DeliverGuiEvents` over a list a
+router or `Type` produced — and a script calling `CaptureFocus` would owe
+`Focused` *inside the call that caused it*, which is a different dispatch rule
+from every other signal here and belongs to whoever changes `script::Signals`
+rather than to this entry. `UserInputService.TextBoxFocused` and its twin stay
+absent for the pump crossing `script/src/UserInputService.cpp` records.
+
+### [x] D00005
+
+**Closed at v0.15 by the owner's decision, and the decision is the one this entry
+had already argued for: no GitHub CI, ever, and a local gate instead.** The
+reopen trigger was *the repository's owner asks for it*, and it fired in the
+negative — what was asked for was the refusal made permanent, plus something
+that makes `just preset=ci check` a recipe that actually gets run. There is no
+`.github/workflows/ci.yml`, no `workflow_dispatch` stub, no action of any kind,
+and `.github/` still holds nothing but `CODEOWNERS`. The paragraph below headed
+*what this rules out* is not superseded; it is the closure.
+
+**The entry's own lesson fired one more time on the way out, which is the useful
+half of closing it.** It was reopened at v0.4 for claiming `just preset=ci check`
+passed while the preset did not compile. Run again at v0.15 before anything was
+touched, it did not compile again:
+
+```
+mono.cdn/src/Settings.cpp:125:75: error: possibly dangling reference to a temporary
+                                        [-Werror=dangling-reference]
+  125 |   for (const std::string &row : Flag("cdn.upstreams").Items()) {
+```
+
+`Items()` returns a `std::span` over the flag table's storage and not over the
+temporary handle, so the reference was never dangling — but GCC cannot see that
+through the call, `ci` makes it fatal, and the preset had therefore been broken
+for however long it took somebody to think of typing `preset=ci`. Eleven
+versions apart, the same warning class, for the same reason: nothing ran it.
+`mono.client/src/Settings.cpp` had been reading the same flag kind through a
+named span since the day it was written, so the fix was a line that already
+existed six directories away. Everything else under `ci` was green — tests,
+architecture, shaders, bindings, typecheck, determinism, replay.
+
+**It was the third time and not the second, and the third is the one that
+settles the argument.** `ROADMAP.md`'s v0.15 entry for the internal /
+scripting-exposed split says the `ci` preset was already broken, lists what it
+found, and finishes *"`just preset=ci build` exits 0 now"* — and
+`mono.cdn/src/Settings.cpp` had carried this warning into the tree earlier the
+same day. Both sentences cannot be true. Whatever the mechanism, a claim about a
+preset written by somebody who had just run it was false within hours, which is
+not a discipline problem and cannot be fixed by a firmer intention to remember.
+
+**The gate is `.githooks/pre-push`, pointed at by `core.hooksPath`, installed by
+`just install-hooks`, which `just setup` runs.** The hook is a file in the tree
+rather than a thing in one clone's `.git/hooks`, because the latter is neither
+cloned nor reviewable — which is the same objection this file has to a rule that
+lives in somebody's memory. Only the pointer is per-clone local config, and a
+fresh clone's first command installs it.
+
+**It builds the `ci` preset and does not run the suites, and that is the whole
+design rather than a shortcut.** The failure class is a warning going fatal,
+which is a compile-time property; the suites are `just check`'s job. They also
+cost two and a half minutes and are red in this tree whenever anybody's
+half-finished module is, and a gate that fails for work that is not yours is a
+gate that gets skipped every time — this entry recurring with extra steps.
+
+**Measured rather than guessed, because a gate nobody tolerates gets disabled.**
+
+| | |
+|---|---|
+| `just preset=ci build`, nothing changed | ~1 s |
+| after a day of `dev`-preset drift | ~1 min |
+| from an empty `.cache/build/ci/` | ~3 min, 1,998 targets |
+| the whole of `just preset=ci check`, warm | ~3 min, of which `test-all` is 2.5 |
+
+`ci` builds into a tree of its own, so a push after working in `dev` recompiles
+what changed since the *last push* rather than nothing. That is the real cost and
+it is why the hook is a build and not the chain.
+
+**Proved rather than asserted, per rule 6.** An unused local was added to
+`mono.tools/linecount/app/main.cpp`; `git push` refused with
+`-Werror=unused-variable` named and the push abandoned, `git push --no-verify`
+went through, and the same push succeeded in 1.4 s once the line was removed. A
+deletion-only push skips the build in five milliseconds, since it compiles
+nothing.
+
+**Two honest limits, neither of which a workflow would have fixed and one of
+which it would.** The hook builds the working tree rather than the commits being
+pushed, so in a worktree with several people or agents in it, somebody else's
+live warning refuses your push; that is correct — the tree is what is being
+published — but it is not the same thing as gating a commit. And what this entry
+always said was lost is still lost: **the second machine.**
+`just check-server-is-headless` and `just check-cdn-is-bare` still prove the tier
+split on a box that *has* a graphics stack, and a check that quietly depends on
+something in this working tree still passes here forever and fails for the first
+person who clones. Nothing local can close either. They are the price of the
+decision, recorded rather than solved.
+
+### [x] D00004
+
+**Closed at v0.15 by the owner's decision, not by the trigger.** The reopen
+trigger this entry finished with — *a program that calls `core::Random` and links
+neither `net` nor `assets`* — never fired, and there is still not one. The owner
+decided to do it anyway on the ground the entry itself had already narrowed to:
+dependency hygiene at the lowest layer, plus one fewer row that
+`THIRD_PARTY_NOTICES.md` owes to the module every other module links. **Not size.
+The entry was right that it saves the shipped programs nothing, and the fresh
+numbers below say so a third time.**
+
+`engine::core::Random` is **SplitMix64's finaliser** now — Steele, Lea and Flood's
+`mix64variant13` from *Fast Splittable Pseudorandom Number Generators* (OOPSLA
+2014), spelled as Vigna's public-domain `splitmix64.c` spells it — over the packed
+`(salt, index)` pair. Specified and citable, which was the only property SHA-256
+was ever here for; three published constants instead of a hash compression. The
+interface did not move, exactly as this entry predicted it would not have to.
+`SecureWipe` went with it, since it was the only other call in `core` reaching
+Crypto++ and `CryptoPP::SecureWipeBuffer` is a four-line volatile loop.
+
+**The measurement, `release` preset, per program, either side of the swap.** Each
+program relinked with `-Wl,-Map` and the map's *Archive member included to satisfy
+reference by* section read directly, which is what reproduces this entry's
+`43 of 173` exactly rather than approximately:
+
+| program | `CryptoPP::` symbols | `libcryptopp.a` members | first cause in `core`? |
+|---|---|---|---|
+| `client` | 6,117 → **6,117** | 43 of 173 → **43 of 173** | none, before or after |
+| `server` | 6,117 → **6,117** | 43 of 173 → **43 of 173** | none, before or after |
+| `cdn`    | 5,712 → **5,712** | 37 of 173 → **37 of 173** | none, before or after |
+
+Every first cause is first-party and none of them is `libengine_core.a`.
+`client` and `server`: `libengine_net.a(Cipher.cpp.o)` five, `Handshake.cpp.o`
+one, `libnetwork_lib.a(SessionKey.cpp.o)` three, `Advert.cpp.o` one. `cdn`:
+`libengine_assets.a(Grant.cpp.o)` two, `Signature.cpp.o` one, and the same two
+`network_lib` objects. **`cdn`'s zero is gone and this entry called why.** It said
+the origin would stop being zero "for a reason that is not this entry's" and
+predicted 36 members first-caused by `Grant.cpp.o` once `Origin` was wired into
+`main`. It is wired, and the answer is 37 and `Grant.cpp.o`. One member out on a
+prediction made two versions early.
+
+**The program that does not exist, which is what the dependency was actually
+worth.** A `main` calling only `Random::Float`, linking `core` and no other
+first-party module, measured with `size`'s text column:
+
+| | text | `CryptoPP::` symbols | members |
+|---|---|---|---|
+| SHA-256 | **1,552,030 B** | 5,647 | 36 of 173 |
+| SplitMix64 | **1,732 B** | 0 | 0 |
+
+That reproduces this entry's *1.55 MB and 5,647 against 1.6 KB and none* to the
+byte on the first column and exactly on the other two — the one figure it recorded
+as no longer reproducing, the 9,479, stayed gone. **Nothing drifted.**
+
+**It also got about twenty-five times faster, which was never an argument for it
+and is now a fact somebody will rely on.** `engine.core.bench.values` on the
+`bench` preset: `Random::Float` 47 ns → **2 ns**, a three-salt position 146 ns →
+**7 ns**, against 1 ns for a bare xorshift32 in the same run. `Random.hpp` used to
+spend five paragraphs warning that it was a load-time budget and must not be
+called per entity per frame; that warning is deleted rather than softened, because
+the reason for it is gone.
+
+**No caller relied on `Random` being unpredictable, and this was checked before
+anything was changed rather than after.** Every security-sensitive site in the
+tree already names `core::Random` in a comment saying it must *not* be used —
+`net::Handshake`, `replication::Hello`, `assets::GrantKey`, `network::SessionKey`
+— and each draws from the OS instead. `script`'s `HttpService:GenerateGUID` is the
+one that looks like a counter-example and is not: it draws from `core::Random`
+deliberately so that a recording replays, stamps the RFC 4122 version and variant
+bits to make the *shape* a UUID, and states in its own comment that the value is
+neither unpredictable nor unique across processes and must not be a session token.
+It also has no first-party caller: nothing under `mono.*` calls it outside the
+suites that test it.
+
+**And the demonstration, because "SHA-256 was in there" invites the assumption
+that something was lost.** `GenerateGUID`'s inputs are a per-runtime counter
+starting at zero and an FNV-1a hash of the world's *name*, and a world's name is
+not a secret. Twelve lines of Python knowing only the string `"scriptcall"` — the
+name the parity suite gives its store — reproduce
+`EA90FF9A-9A3E-498F-B626-EA711F6C37F4`, the exact literal that suite pinned under
+SHA-256, and the three GUIDs after it. The old implementation was as guessable as
+the new one; the hash never bought unpredictability because the thing being hashed
+was public. So the swap is not a security regression: a deterministic generator
+that was never a secret was replaced by a different deterministic generator that
+is not one either.
+
+**What it did break is what the v0.13 re-examination said it would: every seeded
+stream moved.** `Random.new(seed)` in both script VMs draws through here, so the
+sequence is part of what a saved world means. Three suites pinned values from the
+old mixer and are red until the numbers are re-derived, all of them outside this
+change's own module:
+
+- `mono.engine/script/tests/ScriptCall.cpp` — two copies of the literal
+  `EA90FF9A-9A3E-498F-B626-EA711F6C37F4`, which is
+  `C03C1E18-C515-4449-AA47-612C9B59D267` now. **The two VMs do not disagree, and
+  the failure reads as though they do.** `CHECK(luau == javascript)` passes with
+  both sides showing the new string; only `CHECK(luau == probe.Expected)` fails,
+  and Catch2 prints the probe's *name* — "GenerateGUID draws the same sequence in
+  both" — as context on every assertion in the case, which is a sentence that
+  looks like a diagnosis. The `GenerateGUID(0)` truthiness split still reads the
+  same way in each language, and the three cases in `tests/HttpService.cpp` that
+  assert the *properties* — the UUID shape, sixty-four draws with no repeat, and
+  two runs of one world drawing the same sequence — all pass.
+- `mono.engine/replication/tests/SnapshotBuffer.cpp` — `bufferedFrozen == 0`
+  under `LossSettings::Seed = 0x5eed0010`, which is 6 now. The loss pattern is
+  `core::Random::Float(arrivalNumber, seed)` and nothing else, so a different seed
+  restores it; the two comparison figures in the same comment, 23 frozen at
+  `DelayTicks = 0` and 4 at 1, were measured under SHA-256 and need re-measuring
+  with it.
+- `mono.unified_server_client/tests/Harness.cpp` — `DrawnX < ClientX`. The
+  assertion has a latent assumption in it that this change happened to trip: the
+  tracked entity's velocity comes from `Random::Range(index, 7u, -10.0f, 10.0f)`
+  in the placeholder world and now points the other way, so "behind" is the other
+  inequality. `Behind > 0.5` in the same case still passes, which is the same
+  claim without the sign in it.
+
+`just determinism` and `just replay-check` both pass and both would have passed
+whatever was put behind the interface — they compare two runs of one binary, so
+they are green on a generator that changed and agrees with itself. That is why
+`core/tests/Random.cpp` pins actual values, anchored on the constant every
+reference implementation of SplitMix64 prints for seed zero.
+
+**`THIRD_PARTY_NOTICES.md` was checked and deliberately not edited.** Crypto++ is
+still vendored, still linked by `net`, `assets`, `bake`, `network` and the test
+runner, and still ships in all three programs. The root file's Crypto++ paragraph
+already says `core::Random` "is no longer the cause", which was written when that
+became true and is now true twice over.
+
+### [x] D00104
+
+**Closed at v0.15: `.rbxmx` is built, and with it every row of Rojo's file
+table.** The entry's own summary was that an XML model needed a parser
+`mono.vendor` does not carry, that the markup was the smaller half of the job,
+and that when it arrived it would go in `bake` beside `.rbxm` and reuse every one
+of `studio::RojoSync`'s mapping decisions. All three held. `bake::ReadRobloxModelXml`
+hands back the same `RobloxModel` the binary reader does, `RojoSync.cpp` picks the
+reader by extension and nothing else differs, and the editor changed in one line.
+
+**The named reopen trigger was "an XML parser in `mono.vendor`", and the answer
+is that there is still not one — deliberately.** That is the part worth keeping,
+because the entry framed this as a vendor decision and the vendor decision went
+the other way for a reason the entry could not have known. The engine already
+had **two** hand-written XML readers: `game::Xml`, written at v0.7 for the save
+format on the stated ground that the famous XML attacks are attacks on features a
+save file does not need, and a private tag scanner inside `Svg.cpp` since v0.13.
+So vendoring would not have removed a hand-written parser from the repository, it
+would have added a library beside one. `Svg.cpp`'s copy became `bake/src/Xml.hpp`
+and now serves both formats; `mono.vendor/AGENTS.md` carries the whole argument
+under "Not adding one", and `D00128` is the consolidation rule 1 still prevents —
+`game` is L10 and `bake` is L9.
+
+**Three things the entry did not predict, and each cost a real mistake to find:**
+
+- **A script's source is a `CDATA` section**, which is the XML half's version of
+  the `ProtectedString` row the binary half warned about. A scanner that treats
+  `<!` as a declaration refuses every file holding a script; one that treats it
+  as markup mangles them. It was found by reading real files, which is the method
+  the binary half's entry had already recommended.
+- **A document-wide entity sweep is wrong for this format**, and that is not
+  theoretical: a real `.rbxmx` in the corpus carries the Luau pattern `"[&;]"`
+  inside a script, so a sweep that refuses undeclared references refuses that
+  file while naming an entity nobody wrote. The sweep is right for SVG, which
+  never unescapes; here the refusal belongs at each point a reference is read,
+  with CDATA exempt because CDATA is text.
+- **`Content` and `BinaryString` had to be read rather than refused.** They are
+  separate elements in XML for what the binary container stores as one `String`,
+  so refusing them would have made a `Decal` imported from `.rbxmx` lose a texture
+  the same model keeps as `.rbxm` — a subset that looks smaller on paper and is a
+  disagreement in practice. `bake/tests/RobloxModel.cpp` now reads one model
+  written both ways and compares the trees field by field, which is what would
+  have caught it.
+
+**What stayed the same is the part the entry cared about most.** A referent is
+still the shape of the tree and nothing else — in XML it is not even that, since
+the nesting *is* the shape and the `referent` attribute is never read. An enum is
+still refused, a `Ref` is still refused, and an unsupported type still costs its
+property rather than its file.
+
+### [x] D00120
+
+**Closed at v0.15: `Player.Backpack` holds `Tool`s and the engine understands
+one.** The entry's own summary was that the container was real, private to its
+player on the wire, and filled by the spawn pipeline — and that *nothing in the
+engine was a `Tool`*. There is a `Tool` class now, deriving from `Model`, and
+equipping it is a reparent into a character `Model` exactly as it is in Roblox.
+
+**The named reopen trigger was "a joint, or an attachment strong enough to carry
+a handle", and the answer is neither: it is `scene::CharacterLimb`.** The entry
+pointed at `scene::Attachment` as the first thing to look at, and it is the wrong
+half — `ResolveAttachments` runs in `PreRender` and *resolves a frame* rather
+than moving a part, and `Attachments.hpp` says in as many words that a caller
+wanting a weld is asking for what that pass does not promise. What the engine
+already had is the thing `Characters.hpp` chose over `Motor6D` for the whole
+body: a limb is an anchored part carried along by a root at a fixed offset,
+placed by `PoseCharacters` in one `CFrame` product. A held handle is one more
+part in that formation, so a tool needed no constraint solver, no new pass and no
+new component — it needed the row a forearm already has. The entry's premise that
+"a tool that follows a hand is the same missing piece as a rig that does not fall
+apart on a slope" was true of a *jointed* rig and not of this one.
+
+**Three things came free and none of them had to be built.** The offsets
+replicate, because `scene.CharacterLimb` replicates; the handle's per-tick
+`Transform` stops crossing, because that component is already `replication`'s
+suppressor for `scene.Transform`; and a client poses the handle from the root it
+interpolated, because it already poses five limbs that way. `D00115` bought all
+of it and this is its second consumer.
+
+**What equipping is: the parent, and nothing beside it.** No `Equipped` flag and
+no field naming the held tool — both would be a second copy of what the tree
+already says, and the copy that goes stale the first time a script reparents one.
+It is also what makes the wire rule fall out with no rule added:
+`scene::PlayerOwning` answers the owner for anything under a `Player`, so a
+stowed tool reaches exactly one client, and a held one sits under a `Model` in
+`Workspace` and reaches everybody. `mono.server`'s interest predicate already
+said both.
+
+**Who may move one: the authority, through two doors that were already there.** A
+client that can reparent its own tool can duplicate it — the write survives until
+the next delta contradicts it, which presents as an inventory that works
+sometimes. `ecs::Store::SetProperty` has refused every property write in a
+replica since v0.3, which is where this engine answers "who owns a row" and which
+is what refuses a `LocalScript`'s `tool.Parent = ...`; `EquipTool` and
+`UnequipTool` make the same refusal on `Store::AdoptOnly` for the C++ door. That
+is `scene::TakeDamage`'s pair, one class along, rather than a third statement.
+`UpdateToolGrips` is deliberately on the other side of that line: it reparents
+nothing, everything it writes is a function of where a tool already is, and it
+therefore runs on a replica — which is what lets a client pose a handle whose
+tool arrived over the wire.
+
+**What happens on death and departure: nothing new, which is the point.** A
+corpse keeps what it was holding — `Humanoid.Health` at zero leaves the body
+where it fell, `D00121`'s rule — and `LoadCharacter` destroys that body with the
+tool in it on the way to the next one, then refills `Backpack` from
+`StarterGear`. That is the two-container rule `Services.hpp` already states,
+unchanged: only `StarterGear` survives a death, equipped or stowed. A departing
+player's `Backpack` goes with the `Player`, and their held tool goes with the
+character `ReclaimOrphanedCharacters` collects. Neither case needed a line of
+code, and asserting both is how that was established rather than assumed.
+
+**One property, because one property has a reader.** `Tool.Grip` is composed onto
+the grip point and is what places the handle. Roblox's `CanBeDropped`, `Enabled`,
+`RequiresHandle`, `ToolTip` and `TextureId` are absent for the reason this entry
+refused the whole class: there is no drop input, no activation channel and no
+inventory interface, and a property nothing acts on is what "deliberately absent
+rather than half-built" meant. `BackpackItem` is skipped for the same reason —
+registering Roblox's abstract base would put an instantiable class that does
+nothing into the insert palette.
+
+**`Humanoid:EquipTool` is absent and is not the remaining half.** A class table
+here carries properties and no methods, which is why `Sound.Playing` is a
+property rather than `Play()`; and a Roblox script equips by writing
+`tool.Parent = character` anyway, which is a declared property on `Instance` and
+works. `PoseCharacters` calls `UpdateToolGrips`, so the world agrees with the
+tree on every host that draws a character. The day classes carry methods, that
+method sets a parent and nothing else changes.
+
+**One bug fell out of building it, and it was older than this entry.**
+`CharacterLimb` put its `core::CFrame` before its `ecs::Entity`, so the struct
+carried a four-byte hole *and* four bytes of tail padding that `Reserved` had
+been named to prevent — eight uninitialised bytes reaching every save file and
+every wire delta, in a module whose `AGENTS.md` forbids exactly that. Found by
+comparing a restored row against a recomputed one and watching two byte-identical
+limbs disagree. The members are widest-first now and the struct is forty bytes
+with no holes.
+
 ### [x] D00121
 
 **Closed at v0.15: a character dies when `Humanoid.Health` reaches zero, and the

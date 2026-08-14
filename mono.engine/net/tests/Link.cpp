@@ -498,3 +498,213 @@ TEST_CASE("the link reports itself to the frame graph and the metrics sink", "[n
 	CHECK(total("net.link.closed") == 1.0);
 	CHECK(total("net.link.overbudget") == 1.0);
 }
+
+// --- the path's own limit ----------------------------------------------------
+//
+// **Two limits and two counters, and the reason is that they want opposite
+// fixes.** `SendsOverBudget` is a cap somebody configured being enforced, and
+// the answer to it is to raise the cap or send less. `SendsOverAllowance` is the
+// path saying it will not carry the traffic, and raising the cap does nothing at
+// all. One counter for both would make "raise the cap" look like a fix for
+// congestion, which is the confusion `D00007` was recorded to prevent from the
+// other direction.
+
+TEST_CASE("the congestion allowance refuses separately from the configured cap", "[net][link]") {
+	// The stock cap, which is far above what a connection that has measured
+	// nothing is willing to put on the path.
+	Link link = Connected(LinkSettings{});
+
+	const uint32_t allowance = link.Stats().SendAllowanceBytes;
+	REQUIRE(allowance > 0);
+	REQUIRE(allowance < LinkSettings{}.BytesPerTick);
+
+	size_t spent = 0;
+	while (link.Reserve(500)) {
+		spent += 500;
+	}
+
+	CHECK(spent >= allowance - 500);
+	CHECK(link.Stats().SendsOverAllowance == 1);
+
+	// **Untouched, and that is the assertion.** Nothing came near the 64 KB the
+	// caller configured, so nothing it could change would have helped.
+	CHECK(link.Stats().SendsOverBudget == 0);
+}
+
+TEST_CASE("an acknowledgement is never refused by the allowance", "[net][link]") {
+	Link link = Connected(LinkSettings{});
+
+	while (link.Reserve(500)) {}
+	REQUIRE(link.Stats().SendsOverAllowance > 0);
+
+	// A packet carrying only an acknowledgement is what keeps a quiet link from
+	// looking dead and what retires the far side's reliable payloads. A
+	// controller that could refuse it would starve the very feedback it steers
+	// by, and the link would never recover.
+	CHECK(link.Reserve(0));
+}
+
+TEST_CASE("the allowance never exceeds the configured cap", "[net][link]") {
+	LinkSettings narrow = Quick();
+	narrow.BytesPerTick = 200;
+	narrow.IdleTimeoutSeconds = 100.0;
+	Link link = Connected(narrow);
+
+	for (int tick = 1; tick <= 600; tick++) {
+		link.Advance(tick / 60.0);
+		link.ResetBudget();
+		CHECK(link.Stats().SendAllowanceBytes <= narrow.BytesPerTick);
+	}
+
+	// A game that says two hundred bytes a tick means it, however wide the path
+	// turns out to be.
+	CHECK(link.Reserve(200));
+	CHECK_FALSE(link.Reserve(1));
+}
+
+// --- the loss signal, out of the acknowledgement that already crosses --------
+
+namespace {
+	// An arriving header acknowledging `through` on this end's reliable stream,
+	// with `bits` describing the thirty-two before it.
+	PacketHeader Acknowledging(uint16_t through, uint32_t bits) {
+		PacketHeader header;
+		header.Channel = ChannelKind::Unreliable;
+		header.Sequence = 0;
+		header.Acknowledge = through;
+		header.AcknowledgeBits = bits;
+		return header;
+	}
+
+	// The bit that says `sequence` arrived, in a window acknowledging `through`.
+	uint32_t BitFor(uint16_t through, uint16_t sequence) {
+		return 1u << (static_cast<uint16_t>(through - sequence) - 1);
+	}
+}
+
+TEST_CASE("a hole in the far side's acknowledgement is this end's loss", "[net][link]") {
+	Link link = Connected(LinkSettings{});
+
+	// Ten reliable packets go out, sequences zero to nine.
+	for (int index = 0; index < 10; index++) {
+		link.NextHeader(ChannelKind::Reliable);
+	}
+
+	// The far side has eight, and everything from one to seven. Sequence zero
+	// never arrived.
+	uint32_t bits = 0;
+	for (uint16_t sequence = 1; sequence <= 7; sequence++) {
+		bits |= BitFor(8, sequence);
+	}
+	CHECK(link.OnPacket(Acknowledging(8, bits), 0, 1.0));
+
+	// **No second acknowledgement path and nothing added to the wire.** These
+	// are the fields `ReliableReceiver::Acknowledging` already stamps on every
+	// outgoing packet; `ReliableSender` reads them to retire payloads and this
+	// reads them to find out whether the path dropped something.
+	CHECK(link.Stats().SendsLost == 1);
+	CHECK(link.Congestion().Reductions() == 1);
+}
+
+TEST_CASE("a gap near the front is a reorder rather than a loss", "[net][link]") {
+	Link link = Connected(LinkSettings{});
+
+	for (int index = 0; index < 12; index++) {
+		link.NextHeader(ChannelKind::Reliable);
+	}
+
+	// Acknowledging eight, with six and seven still missing. They are inside
+	// the reordering threshold, so they are not judged yet — a gap that close
+	// to the front is far more often a reorder about to resolve than a packet
+	// that is gone, and a controller cutting its rate on every reorder spends a
+	// routed path permanently backed off.
+	uint32_t bits = 0;
+	for (uint16_t sequence = 0; sequence <= 5; sequence++) {
+		bits |= BitFor(8, sequence);
+	}
+	CHECK(link.OnPacket(Acknowledging(8, bits), 0, 1.0));
+	CHECK(link.Stats().SendsLost == 0);
+
+	// They turn up, and the window moves past them with nothing counted.
+	bits = 0;
+	for (uint16_t sequence = 0; sequence <= 9; sequence++) {
+		bits |= BitFor(11, sequence);
+	}
+	CHECK(link.OnPacket(Acknowledging(11, bits), 0, 1.1));
+	CHECK(link.Stats().SendsLost == 0);
+}
+
+TEST_CASE("an acknowledgement of a stream that was never sent is ignored", "[net][link]") {
+	Link link = Connected(LinkSettings{});
+
+	// Nothing reliable has been stamped, so the far side is naming sequences
+	// this end never sent. A peer that could make this end count losses could
+	// pace it down to nothing from outside.
+	CHECK(link.OnPacket(Acknowledging(100, 0), 0, 1.0));
+	CHECK(link.Stats().SendsLost == 0);
+
+	// With a stream open, an acknowledgement running past what went out judges
+	// only what went out and then stops.
+	for (int index = 0; index < 4; index++) {
+		link.NextHeader(ChannelKind::Reliable);
+	}
+	CHECK(link.OnPacket(Acknowledging(100, 0), 0, 1.1));
+	CHECK(link.Stats().SendsLost == 4);
+
+	// **Half the sequence space away is not ahead, it is nonsense**, and
+	// `Packet::IsNewer` says so rather than answering. Nothing is judged, which
+	// is the conservative direction: a peer cannot manufacture losses this end
+	// never had.
+	CHECK(link.OnPacket(Acknowledging(40'000, 0), 0, 1.2));
+	CHECK(link.Stats().SendsLost == 4);
+}
+
+TEST_CASE("a stale packet's acknowledgement still counts", "[net][link]") {
+	Link link = Connected(LinkSettings{});
+
+	for (int index = 0; index < 8; index++) {
+		link.NextHeader(ChannelKind::Reliable);
+	}
+
+	// Open the unreliable window at five, then deliver four — stale, refused,
+	// and carrying an acknowledgement that is not stale at all. The payload is
+	// about a moment that has passed; the acknowledgement is about what the far
+	// side has, which is the newest thing it knows.
+	PacketHeader newest = Acknowledging(0, 0);
+	newest.Sequence = 5;
+	CHECK(link.OnPacket(newest, 8, 1.0));
+
+	PacketHeader late = Acknowledging(5, 0);
+	late.Sequence = 4;
+	CHECK_FALSE(link.OnPacket(late, 8, 1.1));
+
+	CHECK(link.Stats().PacketsStale == 1);
+	CHECK(link.Stats().SendsLost == 3);
+}
+
+TEST_CASE("a tick is measured between advances and not between mentions of the time", "[net][link]") {
+	// **Packets arrive inside a tick and name the same instant it does.** The
+	// controller is stamped with the last time this link was told, but a tick's
+	// *length* is the gap between two advances — measuring it against the last
+	// mention of the time reads every tick as zero, which reads as a stalled
+	// tick, which clamps the allowance to almost nothing.
+	LinkSettings settings;
+	settings.IdleTimeoutSeconds = 100.0;
+	Link busy = Connected(settings);
+	Link quiet = Connected(settings);
+
+	for (int tick = 1; tick <= 60; tick++) {
+		const double now = tick / 60.0;
+
+		// The only difference between the two: one of them hears from the far
+		// side part-way through the tick.
+		busy.OnPacket(Arrival(static_cast<uint16_t>(tick)), 8, now);
+
+		busy.Advance(now);
+		quiet.Advance(now);
+		busy.ResetBudget();
+		quiet.ResetBudget();
+	}
+
+	CHECK(busy.Stats().SendAllowanceBytes == quiet.Stats().SendAllowanceBytes);
+}

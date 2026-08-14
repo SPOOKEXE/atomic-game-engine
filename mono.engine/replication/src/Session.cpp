@@ -241,7 +241,14 @@ namespace engine::replication {
 
 		Sender.OnAcknowledge(packet->Header, nowSeconds);
 
-		Link_.RecordRoundTrip(Sender.SmoothedRoundTripSeconds());
+		// **The variance goes with the estimate, and leaving it out is not a
+		// smaller version of passing it.** The congestion controller reads this
+		// as its delay signal and sizes its noise threshold from RTTVAR; with
+		// nothing to size it from the threshold falls back to a one-millisecond
+		// floor, and a jittery wireless path then reads as a standing queue.
+		// The link narrows for a queue that is not there, on exactly the
+		// connections least able to spare it.
+		Link_.RecordRoundTrip(Sender.SmoothedRoundTripSeconds(), Sender.RoundTripVarianceSeconds());
 
 		if (packet->Header.Channel == net::ChannelKind::Unreliable) {
 			// **An empty payload is an acknowledgement and not a message.**

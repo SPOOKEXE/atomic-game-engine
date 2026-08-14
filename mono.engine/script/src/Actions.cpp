@@ -13,6 +13,8 @@
 
 #include "Actions.hpp"
 
+#include <engine/gui/Services.hpp>
+
 #include <algorithm>
 #include <utility>
 
@@ -67,6 +69,10 @@ namespace engine::script {
 			}
 		}
 		return false;
+	}
+
+	bool InterfaceHasKeyboard(const ecs::Store &store) {
+		return gui::FocusedTextBox(store) != ecs::NULL_ENTITY;
 	}
 
 	bool IsPointerReport(const InputReport &report) {

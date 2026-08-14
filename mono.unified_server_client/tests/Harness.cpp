@@ -108,7 +108,16 @@ TEST_CASE("the client is behind the server, and by the delay", "[unified]") {
 	// The three positions and the two lags between them. Server ahead of the
 	// client's store is the round trip; the store ahead of what is drawn is the
 	// jitter budget, and it is the one this feature bought.
-	REQUIRE(report.DrawnX < report.ClientX);
+	//
+	// **The two gaps are compared by sign, not by coordinate**, because "ahead"
+	// means along the direction of travel and the probe's velocity is drawn from
+	// `core::Random`. Written as `DrawnX < ClientX` this case pinned the probe
+	// happening to move in +X, and it went red the day the generator changed —
+	// which said nothing about lag. Both gaps pointing the same way is the claim
+	// that was always meant, and it holds whichever way the probe is going.
+	const float networkLag = report.ServerX - report.ClientX;
+	const float bufferLag = report.ClientX - report.DrawnX;
+	REQUIRE(networkLag * bufferLag > 0.0f);
 	REQUIRE(report.Behind > 0.5);
 }
 

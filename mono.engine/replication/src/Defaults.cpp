@@ -8,15 +8,66 @@
 namespace engine::replication {
 
 	namespace {
-		// The prefixes a world's shared state lives under.
+		// The prefix a world's shared state lives under.
 		//
-		// **`scene.` is the game's state and `ecs.Hierarchy` is where it hangs
-		// from.** Nothing else is included by prefix: `physics.` is derived from
-		// the shared state every tick and reconstructed on the far side,
-		// `script.` is a server's own, and a module that wants its components on
-		// the wire says so rather than inheriting it from a naming convention.
+		// **`scene.` is the game's state.** Nothing else is included by prefix:
+		// `physics.` is derived from the shared state every tick and
+		// reconstructed on the far side, `script.` is a server's own, and a
+		// module that wants its components on the wire says so rather than
+		// inheriting it from a naming convention.
 		constexpr std::string_view SHARED_PREFIX = "scene.";
-		constexpr std::string_view HIERARCHY = "ecs.Hierarchy";
+
+		// What an instance *is*, and all three of them named rather than a
+		// prefix.
+		//
+		// **`ecs.` used to be a prefix with one exception written into it, and
+		// the exception is how two components went missing.** The rule read
+		// "`scene.` or `ecs.Hierarchy`", so `ecs.InstanceName` and
+		// `ecs.InstanceClass` crossed in a join snapshot — `Store::Save` carries
+		// every component — and never in a delta. An entity the world already
+		// held arrived named, an entity created while a client was connected
+		// arrived with no name and no class, and nothing said so: a client's own
+		// `Player` had four children whose names were empty strings.
+		//
+		// A prefix cannot fail loudly. This list can: `engine.replication.defaults`
+		// walks every registered `ecs.` component and requires each one to be
+		// either here or in the exclusions it names, so the next component added
+		// to `ecs` is a red test rather than a silence. `AGENTS.md` rule 6.
+		//
+		// **Once per change, not once per creation, and the difference is the
+		// v0.7 bug again.** Saying a name in the `Structure` message that creates
+		// the entity would be one reliable copy and nothing per tick after it —
+		// but `.Name` is a writable property a script sets whenever it likes, and
+		// a fact that crosses only at birth is exactly the shape of the part that
+		// was recoloured at runtime and kept its old colour on every client for
+		// ever. So they are signed like every other write-once component, which
+		// costs a hash of two four-byte columns per tick and **zero bytes on a
+		// tick where nothing was renamed**. The recovery walk is what guarantees
+		// arrival: a value stays in `Unconfirmed` and is re-offered every tick
+		// until the client acknowledges a tick it was in, which is the same
+		// promise every other replicated value gets and needs no second one.
+		//
+		// That is also the answer to what a repeated class name costs. It is
+		// text on a wire — `ecs.InstanceClass` crosses as `Classes::Describe`'s
+		// name, because a `ClassId` is a registration index and rule 4 forbids
+		// one — but it crosses on the tick an instance is created and on no
+		// other, so a per-connection string table would be a dictionary
+		// negotiated to compress a message that is already only sent once. The
+		// steady-state saving would be zero.
+		constexpr std::string_view INSTANCE_COMPONENTS[] = {
+			"ecs.Hierarchy",
+			"ecs.InstanceName",
+			"ecs.InstanceClass",
+		};
+
+		bool PartOfAnInstance(std::string_view component) {
+			for (const std::string_view named : INSTANCE_COMPONENTS) {
+				if (component == named) {
+					return true;
+				}
+			}
+			return false;
+		}
 
 		// The two written by a system every tick, so the dirty bits already
 		// know.
@@ -148,7 +199,7 @@ namespace engine::replication {
 					ecs::Components::Describe(ecs::ComponentId{static_cast<uint32_t>(index)});
 
 				const std::string_view name = type.Name.Text();
-				const bool shared = name.starts_with(SHARED_PREFIX) || name == HIERARCHY;
+				const bool shared = name.starts_with(SHARED_PREFIX) || PartOfAnInstance(name);
 				if (!shared || LocalToTheClient(name)) {
 					continue;
 				}

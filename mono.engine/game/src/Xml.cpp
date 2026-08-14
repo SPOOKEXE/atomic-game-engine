@@ -1,3 +1,4 @@
+#include <engine/core/Xml.hpp>
 #include <engine/game/Xml.hpp>
 
 #include <algorithm>
@@ -6,400 +7,41 @@
 namespace engine::game {
 
 	namespace {
-		bool IsSpace(char c) {
-			return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-		}
-
-		// XML's name rule, narrowed. Letters, digits, underscore, hyphen, dot
-		// and colon — and colon only because it is legal, not because anything
-		// here means anything by it. Namespaces are not supported and a
-		// document using one gets a tag whose name happens to contain a colon.
-		bool IsNameStart(char c) {
-			return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == ':';
-		}
-
-		bool IsNameChar(char c) {
-			return IsNameStart(c) || (c >= '0' && c <= '9') || c == '-' || c == '.';
-		}
-
-		// Appends one code point as UTF-8.
+		// What the scanner is told a save file may hold.
 		//
-		// Numeric character references are the one place a document names a
-		// character rather than writing it, and a game file that round-tripped
-		// a player's name through `&#233;` and got a byte back would be a save
-		// file that corrupts non-ASCII text.
-		void AppendUtf8(std::string &out, uint32_t code) {
-			if (code < 0x80) {
-				out.push_back(static_cast<char>(code));
-			} else if (code < 0x800) {
-				out.push_back(static_cast<char>(0xC0 | (code >> 6)));
-				out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-			} else if (code < 0x10000) {
-				out.push_back(static_cast<char>(0xE0 | (code >> 12)));
-				out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
-				out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-			} else {
-				out.push_back(static_cast<char>(0xF0 | (code >> 18)));
-				out.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3F)));
-				out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
-				out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
-			}
+		// **A namespace prefix is kept rather than dropped**, which is the one
+		// setting here a reader could reasonably want the other way round. This
+		// format writes no prefix, so `<x:Game>` is a document somebody else wrote
+		// and reading it as `<Game>` would load it as though it were ours.
+		core::xml::Options ScannerOptions(const XmlLimits &limits) {
+			core::xml::Options options;
+			options.Format = "game";
+			options.MaximumAttributes = limits.MaximumAttributes;
+			options.DropNamespacePrefix = false;
+			return options;
 		}
 
-		// The whole parser's state, so that the recursive descent below carries
-		// one thing rather than seven.
-		struct Parser {
-			std::string_view Text;
-			size_t At = 0;
-			uint32_t Line = 1;
-			XmlLimits Limits;
-			XmlDocument *Out = nullptr;
-			XmlStatus Status = XmlStatus::Ok;
-
-			bool Done() const {
-				return At >= Text.size();
+		// The scanner's refusal in this format's vocabulary.
+		//
+		// **`Refused` survives the trip and that is the whole reason the scanner
+		// reports a kind at all.** A document that tried to declare an entity is a
+		// different event from one that was truncated, and a mapping that flattened
+		// both to "malformed" would bury the only status here that means somebody
+		// tried something.
+		XmlStatus StatusOf(core::xml::Fault fault) {
+			switch (fault) {
+			case core::xml::Fault::Truncated:
+				return XmlStatus::Truncated;
+			case core::xml::Fault::Refused:
+				return XmlStatus::Refused;
+			case core::xml::Fault::TooManyAttributes:
+				return XmlStatus::TooManyAttributes;
+			case core::xml::Fault::None:
+			case core::xml::Fault::Malformed:
+				break;
 			}
-
-			char Peek(size_t ahead = 0) const {
-				return At + ahead < Text.size() ? Text[At + ahead] : '\0';
-			}
-
-			bool Starts(std::string_view prefix) const {
-				return Text.compare(At, prefix.size(), prefix) == 0;
-			}
-
-			void Advance(size_t count = 1) {
-				for (size_t index = 0; index < count && At < Text.size(); index++) {
-					if (Text[At] == '\n') {
-						Line++;
-					}
-					At++;
-				}
-			}
-
-			void SkipSpace() {
-				while (!Done() && IsSpace(Peek())) {
-					Advance();
-				}
-			}
-
-			bool Fail(XmlStatus why) {
-				// First failure wins. A later one is a consequence of this one,
-				// and reporting it would send a reader to the wrong line.
-				if (Status == XmlStatus::Ok) {
-					Status = why;
-				}
-				return false;
-			}
-
-			std::string ReadName() {
-				std::string name;
-				if (Done() || !IsNameStart(Peek())) {
-					return name;
-				}
-				while (!Done() && IsNameChar(Peek())) {
-					name.push_back(Peek());
-					Advance();
-				}
-				return name;
-			}
-
-			// One entity reference, already past the ampersand.
-			bool ReadEntity(std::string &out) {
-				if (Starts("&lt;")) {
-					out.push_back('<');
-					Advance(4);
-					return true;
-				}
-				if (Starts("&gt;")) {
-					out.push_back('>');
-					Advance(4);
-					return true;
-				}
-				if (Starts("&amp;")) {
-					out.push_back('&');
-					Advance(5);
-					return true;
-				}
-				if (Starts("&quot;")) {
-					out.push_back('"');
-					Advance(6);
-					return true;
-				}
-				if (Starts("&apos;")) {
-					out.push_back('\'');
-					Advance(6);
-					return true;
-				}
-
-				if (Starts("&#")) {
-					Advance(2);
-					const int base = Peek() == 'x' || Peek() == 'X' ? 16 : 10;
-					if (base == 16) {
-						Advance();
-					}
-
-					uint32_t code = 0;
-					bool any = false;
-					while (!Done() && Peek() != ';') {
-						const char c = Peek();
-						uint32_t digit = 0;
-						if (c >= '0' && c <= '9') {
-							digit = static_cast<uint32_t>(c - '0');
-						} else if (base == 16 && c >= 'a' && c <= 'f') {
-							digit = static_cast<uint32_t>(c - 'a') + 10;
-						} else if (base == 16 && c >= 'A' && c <= 'F') {
-							digit = static_cast<uint32_t>(c - 'A') + 10;
-						} else {
-							return Fail(XmlStatus::Malformed);
-						}
-
-						// Bounded before it overflows rather than after. Unicode
-						// stops at 0x10FFFF, so anything past it is a malformed
-						// reference and not a character nobody can render.
-						code = code * static_cast<uint32_t>(base) + digit;
-						if (code > 0x10FFFF) {
-							return Fail(XmlStatus::Malformed);
-						}
-						any = true;
-						Advance();
-					}
-
-					if (!any || Done()) {
-						return Fail(Done() ? XmlStatus::Truncated : XmlStatus::Malformed);
-					}
-					Advance();
-					AppendUtf8(out, code);
-					return true;
-				}
-
-				// **Anything else is a refusal, not a parse error.** A document
-				// referencing `&payload;` is a document expecting an entity
-				// declaration it was not allowed to make, which is the XXE
-				// attempt this parser exists to have no answer to.
-				return Fail(XmlStatus::Refused);
-			}
-
-			// Text up to the next `<`, entities resolved.
-			bool ReadText(std::string &out) {
-				while (!Done() && Peek() != '<') {
-					if (Peek() == '&') {
-						if (!ReadEntity(out)) {
-							return false;
-						}
-						continue;
-					}
-					out.push_back(Peek());
-					Advance();
-				}
-				return true;
-			}
-
-			// An attribute value, already past the name and the equals sign.
-			bool ReadAttributeValue(std::string &out) {
-				const char quote = Peek();
-				if (quote != '"' && quote != '\'') {
-					return Fail(XmlStatus::Malformed);
-				}
-				Advance();
-
-				while (!Done() && Peek() != quote) {
-					if (Peek() == '&') {
-						if (!ReadEntity(out)) {
-							return false;
-						}
-						continue;
-					}
-					if (Peek() == '<') {
-						return Fail(XmlStatus::Malformed);
-					}
-					out.push_back(Peek());
-					Advance();
-				}
-
-				if (Done()) {
-					return Fail(XmlStatus::Truncated);
-				}
-				Advance();
-				return true;
-			}
-
-			// Comments, the declaration, and the things this parser refuses.
-			//
-			// Returns false on a refusal or a malformed prologue; sets `skipped`
-			// when something was consumed, so the caller can tell "nothing here"
-			// from "something was here and is now gone".
-			bool SkipProlog(bool &skipped) {
-				skipped = false;
-
-				if (Starts("<!--")) {
-					Advance(4);
-					while (!Done() && !Starts("-->")) {
-						Advance();
-					}
-					if (Done()) {
-						return Fail(XmlStatus::Truncated);
-					}
-					Advance(3);
-					skipped = true;
-					return true;
-				}
-
-				if (Starts("<?")) {
-					// The XML declaration, and nothing else. A processing
-					// instruction is a directive to whatever is reading the
-					// document, and this parser has no business obeying one.
-					Advance(2);
-					while (!Done() && !Starts("?>")) {
-						Advance();
-					}
-					if (Done()) {
-						return Fail(XmlStatus::Truncated);
-					}
-					Advance(2);
-					skipped = true;
-					return true;
-				}
-
-				if (Starts("<!DOCTYPE") || Starts("<!ENTITY") || Starts("<!ELEMENT") || Starts("<!ATTLIST") ||
-					Starts("<!NOTATION")) {
-					// **The refusal this file exists for.** A DOCTYPE is where
-					// every entity-expansion attack is declared, and there is no
-					// version of "support it safely" that is simpler than not
-					// supporting it.
-					return Fail(XmlStatus::Refused);
-				}
-
-				return true;
-			}
-
-			// One element, already positioned at its `<`.
-			bool ReadElement(uint32_t depth, uint32_t &index) {
-				if (depth > Limits.MaximumDepth) {
-					return Fail(XmlStatus::TooDeep);
-				}
-				if (Out->Elements.size() >= Limits.MaximumElements) {
-					return Fail(XmlStatus::TooManyElements);
-				}
-
-				Advance();
-
-				XmlElement element;
-				element.Name = ReadName();
-				if (element.Name.empty()) {
-					return Fail(XmlStatus::Malformed);
-				}
-
-				// Reserved before the children are read, so a child's index is
-				// greater than its parent's and the document reads in order.
-				index = static_cast<uint32_t>(Out->Elements.size());
-				Out->Elements.push_back(std::move(element));
-
-				bool selfClosing = false;
-				for (;;) {
-					SkipSpace();
-					if (Done()) {
-						return Fail(XmlStatus::Truncated);
-					}
-
-					if (Starts("/>")) {
-						Advance(2);
-						selfClosing = true;
-						break;
-					}
-					if (Peek() == '>') {
-						Advance();
-						break;
-					}
-
-					const std::string name = ReadName();
-					if (name.empty()) {
-						return Fail(XmlStatus::Malformed);
-					}
-
-					SkipSpace();
-					if (Peek() != '=') {
-						return Fail(XmlStatus::Malformed);
-					}
-					Advance();
-					SkipSpace();
-
-					std::string value;
-					if (!ReadAttributeValue(value)) {
-						return false;
-					}
-
-					Out->Elements[index].AttributeNames.push_back(name);
-					Out->Elements[index].AttributeValues.push_back(std::move(value));
-				}
-
-				if (selfClosing) {
-					return true;
-				}
-
-				for (;;) {
-					if (Done()) {
-						return Fail(XmlStatus::Truncated);
-					}
-
-					if (Peek() != '<') {
-						std::string text;
-						if (!ReadText(text)) {
-							return false;
-						}
-						Out->Elements[index].Text += text;
-						continue;
-					}
-
-					if (Starts("</")) {
-						Advance(2);
-						const std::string closing = ReadName();
-						SkipSpace();
-						if (Peek() != '>') {
-							return Fail(Done() ? XmlStatus::Truncated : XmlStatus::Malformed);
-						}
-						Advance();
-						if (closing != Out->Elements[index].Name) {
-							return Fail(XmlStatus::Mismatched);
-						}
-						return true;
-					}
-
-					if (Starts("<![CDATA[")) {
-						Advance(9);
-						const size_t start = At;
-						while (!Done() && !Starts("]]>")) {
-							Advance();
-						}
-						if (Done()) {
-							return Fail(XmlStatus::Truncated);
-						}
-
-						// Appended raw. **This is what makes the writer's `]]>`
-						// split invisible**: two adjacent sections concatenate
-						// into the text that was written, and nothing here has
-						// to know the split happened.
-						Out->Elements[index].Text.append(Text.substr(start, At - start));
-						Advance(3);
-						continue;
-					}
-
-					bool skipped = false;
-					if (!SkipProlog(skipped)) {
-						return false;
-					}
-					if (skipped) {
-						continue;
-					}
-
-					uint32_t child = 0;
-					if (!ReadElement(depth + 1, child)) {
-						return false;
-					}
-					Out->Elements[index].Children.push_back(child);
-				}
-			}
-		};
+			return XmlStatus::Malformed;
+		}
 	}
 
 	const char *Describe(XmlStatus status) {
@@ -418,6 +60,8 @@ namespace engine::game {
 			return "the document is larger than the limit allows";
 		case XmlStatus::TooManyElements:
 			return "the document holds more elements than the limit allows";
+		case XmlStatus::TooManyAttributes:
+			return "an element carries more attributes than the limit allows";
 		case XmlStatus::Refused:
 			return "the document uses a feature this reader refuses — a doctype, "
 				   "an entity declaration, or an undeclared entity reference";
@@ -448,47 +92,141 @@ namespace engine::game {
 			return XmlStatus::TooLarge;
 		}
 
-		Parser parser;
-		parser.Text = text;
-		parser.Limits = limits;
-		parser.Out = &out;
+		const core::xml::Options options = ScannerOptions(limits);
+		std::string_view rest = text;
 
-		// The prologue: whitespace, comments and the declaration, before the
-		// root. A DOCTYPE would be here too, and is where it is refused.
+		// The elements still open, innermost last, as indices into
+		// `out.Elements`. **The stack is a vector and not the C stack**, which is
+		// what makes a document nested a million deep a `TooDeep` instead of a
+		// crash with no file named — and is why `MaximumDepth` is a number a
+		// caller may raise.
+		std::vector<uint32_t> open;
+
+		core::xml::Failure failure;
+		std::vector<core::xml::Attribute> attributes;
+		std::string content;
+		XmlStatus status = XmlStatus::Ok;
+
 		for (;;) {
-			parser.SkipSpace();
-			if (parser.Done()) {
-				parser.Fail(XmlStatus::Truncated);
+			if (open.empty()) {
+				// **Nothing but whitespace may precede the root**, comments and
+				// the declaration aside — the scanner steps over those. A
+				// document that begins with character data is not one this format
+				// wrote, and a CDATA section is character data however much of
+				// the punctuation it borrows.
+				const size_t markup = rest.find('<');
+				const std::string_view before =
+					markup == std::string_view::npos ? rest : rest.substr(0, markup);
+				if (before.find_first_not_of(" \t\r\n\f") != std::string_view::npos ||
+					rest.substr(before.size()).starts_with("<![CDATA[")) {
+					status = XmlStatus::Malformed;
+					break;
+				}
+				rest.remove_prefix(before.size());
+			} else {
+				// Text and CDATA, concatenated across the runs an element holds.
+				// **The refusal is here rather than in a sweep over the whole
+				// document**, and that is the difference `core/Xml.hpp` warns
+				// against collapsing: a save file's scripts are CDATA, and a `&`
+				// in Luau is an operator.
+				if (!core::xml::ReadContent(rest, options, content, failure)) {
+					status = StatusOf(failure.Reason);
+					break;
+				}
+				out.Elements[open.back()].Text += content;
+			}
+
+			core::xml::Tag tag;
+			const core::xml::Scan scan = core::xml::NextTag(rest, options, tag, failure);
+			if (scan == core::xml::Scan::Error) {
+				status = StatusOf(failure.Reason);
+				break;
+			}
+			if (scan == core::xml::Scan::End) {
+				// A document with no root and one that stops inside an element
+				// are the same event: it ended in the middle of something.
+				status = XmlStatus::Truncated;
 				break;
 			}
 
-			bool skipped = false;
-			if (!parser.SkipProlog(skipped)) {
-				break;
-			}
-			if (skipped) {
+			if (tag.Closing) {
+				if (open.empty() || !tag.Attributes.empty()) {
+					status = XmlStatus::Malformed;
+					break;
+				}
+				if (out.Elements[open.back()].Name != tag.Name) {
+					status = XmlStatus::Mismatched;
+					break;
+				}
+
+				open.pop_back();
+				if (open.empty()) {
+					// The root closed. Whatever follows it is not read, which is
+					// what a save file's loader has always done.
+					break;
+				}
 				continue;
 			}
 
-			if (parser.Peek() != '<') {
-				parser.Fail(XmlStatus::Malformed);
+			// Both bounds are checked before the element is built rather than
+			// after, so a document that trips one costs the check and not the
+			// work.
+			if (open.size() > limits.MaximumDepth) {
+				status = XmlStatus::TooDeep;
+				break;
+			}
+			if (out.Elements.size() >= limits.MaximumElements) {
+				status = XmlStatus::TooManyElements;
+				break;
+			}
+			if (!core::xml::ReadAttributes(tag.Attributes, options, attributes, failure)) {
+				status = StatusOf(failure.Reason);
 				break;
 			}
 
-			uint32_t root = 0;
-			parser.ReadElement(0, root);
-			break;
+			XmlElement element;
+			element.Name = tag.Name;
+			for (const core::xml::Attribute &attribute : attributes) {
+				std::string value;
+				if (!core::xml::Unescape(attribute.Value, options, value, failure)) {
+					status = StatusOf(failure.Reason);
+					break;
+				}
+				element.AttributeNames.emplace_back(attribute.Name);
+				element.AttributeValues.push_back(std::move(value));
+			}
+			if (status != XmlStatus::Ok) {
+				break;
+			}
+
+			// The index is taken before the push so that a child's is greater
+			// than its parent's and the document reads in order.
+			const uint32_t index = static_cast<uint32_t>(out.Elements.size());
+			if (!open.empty()) {
+				out.Elements[open.back()].Children.push_back(index);
+			}
+			out.Elements.push_back(std::move(element));
+
+			if (!tag.SelfClosing) {
+				open.push_back(index);
+			} else if (open.empty()) {
+				break;
+			}
 		}
 
 		if (line != nullptr) {
-			*line = parser.Line;
+			// Counted at the end rather than carried through the parse, because
+			// the scanner works in views and a line number is wanted once, on a
+			// document that failed.
+			const std::string_view read = text.substr(0, text.size() - rest.size());
+			*line = 1 + static_cast<uint32_t>(std::count(read.begin(), read.end(), '\n'));
 		}
 
-		if (parser.Status != XmlStatus::Ok) {
+		if (status != XmlStatus::Ok) {
 			// Emptied rather than left half built, for `ecs::Store::Load`'s
 			// reason: a document that is partly one file looks like it works.
 			out.Elements.clear();
-			return parser.Status;
+			return status;
 		}
 
 		return XmlStatus::Ok;

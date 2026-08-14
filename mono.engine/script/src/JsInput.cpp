@@ -301,9 +301,10 @@ namespace engine::script {
 		};
 
 		// Decided once for the whole beat, exactly as the Luau pump does — see
-		// `InterfaceHasPointer` for what it means and why a key is never
-		// processed.
-		const bool processed = InterfaceHasPointer(interface);
+		// `InterfaceHasPointer` and `InterfaceHasKeyboard` for what each means
+		// and why they are two answers rather than one.
+		const bool pointerTaken = InterfaceHasPointer(interface);
+		const bool keyboardTaken = InterfaceHasKeyboard(*bound.World);
 
 		// One edge's arguments: the `InputObject` and Roblox's
 		// `gameProcessedEvent`. Built and freed per edge, because the object
@@ -311,7 +312,7 @@ namespace engine::script {
 		const auto fireReport = [&](core::Name signal, const InputReport &report) {
 			JSValue arguments[2];
 			arguments[0] = MakeJsInputObject(context, report);
-			arguments[1] = JS_NewBool(context, processed && IsPointerReport(report));
+			arguments[1] = JS_NewBool(context, IsPointerReport(report) ? pointerTaken : keyboardTaken);
 
 			note(FireInputSignal(context, signal, arguments));
 

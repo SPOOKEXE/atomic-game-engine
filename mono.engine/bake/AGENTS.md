@@ -2,8 +2,8 @@
 
 L9 `shared`. The importers and the node pipeline: the only code in this engine
 that reads a `.glb`, a `.pmx`, an `.obj`, a `.png`, a `.jpg`, a `.bmp`, an
-`.svg` or an `.rbxm`. `assets` is what a baked mesh or texture *is*; this is how
-somebody else's file becomes one.
+`.svg`, an `.rbxm` or an `.rbxmx`. `assets` is what a baked mesh or texture *is*;
+this is how somebody else's file becomes one.
 
 ## Nothing a shipped game links may link this
 
@@ -57,6 +57,13 @@ allocated. Named cases that must not be relaxed:
   parent table's depth, checked against `MAXIMUM_ROBLOX_DEPTH` — which is also
   the cycle check, because a chain that has not reached a root within it is
   either too deep or a loop and both refuse the file.
+- **`.rbxmx`**: the same tree in XML, and the bounds are different because the
+  container is. **It states no length anywhere**, so there is no count to lie
+  with — an XML file cannot claim an instance it did not spend bytes on, which
+  is the one respect in which it is safer than its binary twin. What it can do
+  instead is nest, so the element stack is bounded by `MAXIMUM_ROBLOX_DEPTH` and
+  the parts of one property value by a tighter pair of their own. Instances are
+  counted as they are read rather than believed from a header.
 - **SVG**: the bomb is XML rather than pixels. A `<!DOCTYPE>` or `<!ENTITY>` is
   **refused outright rather than bounded** — entity expansion is a kilobyte of
   markup that unfolds into gigabytes while it is being parsed, an external
@@ -114,6 +121,16 @@ rather than approximated:
   type number carrying identical bytes to a `String`, and it is what a script's
   `Source` is written as — so a reader that knows only `String` imports every
   script in the file with no program in it and reports nothing worth reading.
+
+  **The XML container has the same row wearing a different hat.** There a
+  `ProtectedString` is written inside a `<![CDATA[ ]]>` section, which a scanner
+  that treated `<!` as a declaration refuses and one that treated it as markup
+  mangles. Both were found by reading real files rather than by reasoning about
+  the format, which is the method to use on the next row of either list. Two
+  more are XML-only and are read rather than refused for the same reason:
+  `Content` and `BinaryString` are separate elements here for what the binary
+  container stores as one `String`, so refusing them would make a `Decal`
+  imported from XML lose a texture the same model keeps as an `.rbxm`.
 - **Most of SVG.** The subset drawn is `<svg>`, `<g>`, `<rect>`, `<circle>`,
   `<ellipse>`, `<line>`, `<polyline>`, `<polygon>` and `<path>` with M, L, H, V,
   C and Z; solid `fill` and `stroke` with their opacities and `fill-rule`; and a
@@ -128,12 +145,74 @@ rather than approximated:
   recognisably the right icon and wrong, which is the failure the whole of this
   section is about.
 
-## An `.rbxm` is the one importer here whose output is not a mesh or a picture
+## One XML scanner, and it is not this module's any more
+
+`core::xml` is the tag scanner both `Svg.cpp` and `RobloxModelXml.cpp` run on.
+It was `Svg.cpp`'s private copy until v0.15, this module's `src/Xml.hpp` for the
+rest of that version, and `core/Xml.hpp` from `D00128` — each move happened when
+another format wanted markup, for the reason the box filter moved to `assets`:
+two copies of a thing that refuses a `<!DOCTYPE` are two places to keep that
+refusal true, and the second to be edited is the one that gets forgotten.
+
+**Vendoring was the alternative and it was argued rather than assumed.**
+`mono.vendor/AGENTS.md` carries the whole of it; the part to remember here is
+that vendoring would not have removed a hand-written parser from this
+repository, because this module already had one and `game/Xml.cpp` has had a
+second since v0.7. The choice was one scanner or a submodule *and* a scanner,
+and consolidating deleted code rather than adding a dependency.
+
+**`game::ParseXml` is still not called from here and the reason is still the
+tier.** `game` is L10 and this is L9, so an importer naming it would put `ecs`,
+`world` and the save format underneath a foreign-format parser — the same
+argument `RobloxModel.hpp` makes about `game::PropertyValue`. What `D00128` did
+was move the scanning *down* to L1, where every caller can reach it; `game` now
+builds its document over the same scanner these two do.
+
+**Settings are this module's and the scanner is nobody's.** `Svg.cpp` and
+`RobloxModelXml.cpp` each bind an `xml::Options` — the name a refusal calls
+itself, the attribute bound, and that a namespace prefix means nothing to either
+format — and each flattens `xml::Failure` to the string it reports. Neither is
+allowed to reach into the other's.
+
+Three properties of that scanner are the ones a change must not lose, and each
+has a test in both suites here as well as in `core/tests/Xml.cpp`:
+
+- **A `<!DOCTYPE` or `<!ENTITY` is refused rather than bounded.** There is no
+  code here that could expand an entity, so there is no option that could switch
+  one on — which is a stronger statement than a library's default.
+- **An entity reference that is not one of the five predefines or a numeric
+  character reference is refused where it is read.** The second lock on the same
+  door, so that a bomb reads as a bomb rather than as a dropped character.
+- **Nothing recurses.** `NextTag` scans and the caller keeps the stack, so depth
+  is a count somebody bounded rather than the C stack running out with no file
+  named.
+
+**The document-wide entity sweep is `Svg.cpp`'s and must not be copied to
+`.rbxmx`.** An SVG never unescapes, so a reference has to be caught by a sweep;
+an `.rbxmx` holds CDATA, and a real file in this repository's own corpus carries
+the Luau pattern `"[&;]"` inside a script — a sweep refuses that file while
+naming an entity nobody wrote. Both policies live in `core::xml` and neither is
+the default, because which one is right is a property of the format rather than
+of the scanner. Each has a case that goes red if the two are collapsed: "an
+rbxmx script's ampersand is source and not a reference", and the CDATA half of
+"an svg's document type declaration is refused outright".
+
+## Roblox's model containers are the one importer here whose output is not a mesh or a picture
 
 Every other reader hands back an `assets::MeshData` or an `assets::TextureData`.
-Roblox's binary model is an *instance tree*, so `ReadRobloxModel` hands back a
-tree of class names, instance names and values, and who turns that into rows in
-a store is the caller's problem — `bake` is L9 and knows nothing about `ecs`.
+A Roblox model is an *instance tree*, so `ReadRobloxModel` and
+`ReadRobloxModelXml` hand back a tree of class names, instance names and values,
+and who turns that into rows in a store is the caller's problem — `bake` is L9
+and knows nothing about `ecs`.
+
+**Two containers, one `RobloxModel`, and that is not negotiable.** The binary
+and the XML are the same tree written twice, so they produce the same types and
+go through the same mapping in `studio::RojoSync`. A second model type for the
+second container would be the copy that drifts, and
+`tests/RobloxModel.cpp` holds the case that stops it — one model written both
+ways, asserted field by field to come back identical. The subsets are the same
+list for the same reason; where they differ it is in what the *format* can do,
+and each difference is written down in `RobloxModel.hpp`.
 
 Two consequences worth stating, because both look like duplication until you
 check the tier:
@@ -149,11 +228,19 @@ check the tier:
   cannot leak out as identity. It becomes the shape of the tree and dies with
   the parse.
 
-Its own LZ4 block decompressor is the one place this module departs from
-`mono.vendor/AGENTS.md`'s preference for a submodule, and the argument is in
-`RobloxModel.cpp`: an LZ4 block has no framing, no checksum and no dictionary,
-and a submodule for it would be larger than the decompressor. Zstandard is the
-opposite trade and is vendored.
+Its own LZ4 block decompressor is where this module departs from
+`mono.vendor/AGENTS.md`'s preference for a submodule, and the argument is at the
+code in `RobloxModel.cpp`. Zstandard is the opposite trade and is vendored. The
+XML scanner was the second such departure and is `core/Xml.hpp`'s since
+`D00128`, argument included.
+
+**A refused property costs its property in both containers, and the reason is
+not the same one.** A `PROP` chunk holds one property of one class and nothing
+after it depends on its bytes; an XML element carries its own end tag. The
+second is the stronger property, so the XML reader goes one step further: a
+value that is *malformed* rather than merely unknown is skipped there, where in
+the binary container a payload that ran short has lost the cursor and ends the
+file.
 
 ## The two conversions that are not optional
 
@@ -236,9 +323,10 @@ pipeline puts the node immediately before the write.
   `Submesh::Material` is what the source file called a run and `Submesh::Texture`
   is an asset that exists; when a material format arrives, the second becomes
   what that material references.
-- **No `.rbxm` writer, and no `.rbxl`.** The reader reads; nothing here produces
-  the format. A place file is the same container with more services in it and
-  would read today, but nothing asks for one — Rojo's table maps a *model*.
+- **No model writer, and no `.rbxl` or `.rbxlx`.** Both readers read; nothing
+  here produces either format. A place file is the same container with more
+  services in it and would read today, but nothing asks for one — Rojo's table
+  maps a *model*.
 - **No animation, no morph targets, no rigid bodies.** PMX carries all three and
   this reads none of them. The index widths are parsed anyway so that the day
   there is a consumer, the cursor already knows how to step over them.

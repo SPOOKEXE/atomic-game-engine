@@ -14,7 +14,9 @@
 // exercise the prefix, the exclusions and the detector — and what the real scene
 // holds is `scene`'s business, asserted where both are linked.
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -81,6 +83,13 @@ namespace defaults_test {
 		);
 		engine::ecs::Components::Register<Bulky>("scene.DefaultsTestBulky");
 		engine::ecs::Components::Register<Outside>("defaults_test.Outside");
+
+		// **The `ecs.` half of the table, and it has to be registered before the
+		// table is built or the exhaustiveness case below asserts over nothing.**
+		// `RegisterInstanceRoot` is idempotent and is the public way in — it
+		// registers `ecs.Hierarchy`, `ecs.InstanceName`, `ecs.InstanceClass` and
+		// `ecs.AttributeTable`, which is the whole set the case has to classify.
+		engine::ecs::Classes::RegisterInstanceRoot();
 	}
 }
 
@@ -200,9 +209,66 @@ TEST_CASE("the set is derived, and never contradicts the exclusions", "[replicat
 		// Nothing local ever appears, whatever is registered.
 		CHECK_FALSE(LocalToTheClient(component.Name));
 
-		// And nothing that is neither a scene component nor the tree.
-		const bool shared = component.Name.starts_with("scene.") || component.Name == "ecs.Hierarchy";
+		// And nothing that is neither a scene component nor part of an
+		// instance's identity.
+		const bool shared = component.Name.starts_with("scene.") || component.Name == "ecs.Hierarchy" ||
+							component.Name == "ecs.InstanceName" || component.Name == "ecs.InstanceClass";
 		CHECK(shared);
+	}
+}
+
+TEST_CASE("what an instance is crosses whole", "[replication][defaults]") {
+	defaults_test::Ready();
+
+	// **The three together, because two of them went missing for eight versions
+	// and nothing said so.** `ecs.Hierarchy` was admitted by name and
+	// `ecs.InstanceName` and `ecs.InstanceClass` were not, so an entity in the
+	// join snapshot — `Store::Save` carries every component — arrived named and
+	// an entity created afterwards arrived with no name and no class. A tree
+	// position without a name or a class is a node a client can hold and cannot
+	// ask for.
+	REQUIRE(Row("ecs.Hierarchy") != nullptr);
+	REQUIRE(Row("ecs.InstanceName") != nullptr);
+	REQUIRE(Row("ecs.InstanceClass") != nullptr);
+
+	// Signed, not observed. A name and a class are set at creation and almost
+	// never again, so the dirty column an observed component costs every tick
+	// would be paid for a write that does not happen — and *almost* never is why
+	// they are not simply said once at creation instead. See `Defaults.cpp`.
+	CHECK(Row("ecs.InstanceName")->Detection == ChangeDetection::Signature);
+	CHECK(Row("ecs.InstanceClass")->Detection == ChangeDetection::Signature);
+}
+
+TEST_CASE("every ecs component is classified rather than left to a prefix", "[replication][defaults]") {
+	defaults_test::Ready();
+
+	// **The check that would have caught the bug the case above describes, and
+	// `AGENTS.md` rule 6 for this table.** The old rule was a `scene.` prefix
+	// with one hand-written exception — "or `ecs.Hierarchy`" — and a rule of that
+	// shape cannot fail: a component added to `ecs` simply does not appear, on
+	// the wire or in this suite.
+	//
+	// So every registered `ecs.` component has to be *named* on one side or the
+	// other. Adding a fourth without deciding is a red suite here rather than a
+	// silence on a delta.
+	for (size_t index = 0; index < engine::ecs::Components::Count(); index++) {
+		const engine::ecs::TypeDescriptor &type =
+			engine::ecs::Components::Describe(engine::ecs::ComponentId{static_cast<uint32_t>(index)});
+
+		const std::string_view name = type.Name.Text();
+		if (!name.starts_with("ecs.")) {
+			continue;
+		}
+
+		INFO("component: " << name);
+
+		// `ecs.AttributeTable` is the one deliberately left out, and for the
+		// reason the catalogues are: it holds a map, so it is not trivially
+		// copyable and cannot be *signed*. A non-trivial component that should
+		// cross needs `Observed` and a matching `Store::Observe`, which is a
+		// decision per component and belongs in the host that wants it.
+		const bool excluded = name == "ecs.AttributeTable";
+		CHECK((excluded || Row(name) != nullptr));
 	}
 }
 

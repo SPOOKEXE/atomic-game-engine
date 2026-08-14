@@ -238,20 +238,34 @@ with none of them changing. It is read-only and nil on a server: a `Script`
 reaching for it gets nothing rather than somebody else's player, which is the one
 thing a shared codebase must not get wrong.
 
-## An `.rbxm` is read in `bake` and only mapped here
+## A model file is read in `bake` and only mapped here
 
-The Rojo sync builds Roblox's binary model format as of v0.15, and the split is
-the point: `bake::ReadRobloxModel` turns bytes into a tree of class names, names
-and values, and `RojoSync.cpp` turns that tree into instances. A parser for a
-foreign binary format is the largest attack surface a content pipeline has and
-`bake/AGENTS.md` is where that rule lives; putting one in an editor would put it
-in a shipped program's dependency graph the first time somebody linked the two.
+The Rojo sync builds both of Roblox's model containers as of v0.15, and the
+split is the point: `bake::ReadRobloxModel` and `bake::ReadRobloxModelXml` turn
+bytes into a tree of class names, names and values, and `RojoSync.cpp` turns
+that tree into instances. A parser for a foreign format is the largest attack
+surface a content pipeline has and `bake/AGENTS.md` is where that rule lives;
+putting one in an editor would put it in a shipped program's dependency graph the
+first time somebody linked the two.
+
+**The extension picks the reader and nothing else differs.** Both readers hand
+back the same `RobloxModel`, so there is one mapping below them rather than one
+each — an `.rbxmx` gets the same class lookup, the same property conversion and
+the same source staging as an `.rbxm`, because every one of those is a decision
+about a tree and not about the bytes it came out of. Sniffing instead of reading
+the extension would be a second answer to a question Rojo's table has already
+answered.
+
+**With `.rbxmx` closed, no row of Rojo's table is unbuilt**, and `UnbuiltKind` —
+the function that named the ones that were — is gone rather than left returning
+nothing. Anything that now falls past `BuildMapped` really is a file the table
+says nothing about, so "not a script" is finally the whole truth.
 
 Three decisions are this program's rather than the reader's, and each is the
 kind that is easy to take differently by accident:
 
-- **One instance, named after the file.** The container allows any number at its
-  top level; Rojo's table maps a model file to one. A file with several is
+- **One instance, named after the file.** Both containers allow any number at
+  their top level; Rojo's table maps a model file to one. A file with several is
   refused by name rather than wrapped in a folder nobody wrote.
 - **A class this engine does not have becomes a `Folder` and says so** — the
   same answer `$className` already gets. Two answers to one question is how a

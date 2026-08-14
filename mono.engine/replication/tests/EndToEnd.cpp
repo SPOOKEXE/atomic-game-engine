@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -168,6 +169,109 @@ TEST_CASE("the listener's own send loop hands refusals back", "[replication]") {
 
 	REQUIRE(connector.Joined());
 	REQUIRE(replica.CountMatching<Spot>() == 200);
+}
+
+namespace {
+	// Runs one listener and one connector to a join, then measures how many
+	// bytes the authority *produced* on the busiest steady-state tick.
+	//
+	// **Produced rather than sent, which is the whole question.** A packer that
+	// ignores what the path will carry does not send more — `Link::Reserve`
+	// refuses the excess and `Unsent` rolls it back — it spends the encode and
+	// then hands the shortfall to the transport instead of to the priority
+	// scheduler. So what tells the two apart is what came out of `Publish`, and
+	// `Authority::Statistics::Bytes` is reset per `Publish` for that reason.
+	size_t BusiestTick(size_t linkBytesPerTick) {
+		engine::replication::ListenerSettings serving;
+		serving.Session.Link.BytesPerTick = static_cast<uint32_t>(linkBytesPerTick);
+
+		RegisterTypes();
+
+		std::vector<std::unique_ptr<Transport>> transports = MakeLoopbackTransport(2);
+		REQUIRE(transports.size() == 2);
+
+		Store world("server");
+		world.Observe<Spot>();
+
+		std::vector<Entity> all;
+		for (int index = 0; index < 600; index++) {
+			const Entity entity = world.Create();
+			world.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+			all.push_back(entity);
+		}
+
+		double now = 0.0;
+		engine::replication::Listener listener(*transports[0], serving);
+		listener.Authority().Replicate(Name("endtoend_test.Spot"));
+
+		Store replica("client");
+		engine::replication::Connector connector(*transports[1], transports[0]->Local(), now);
+
+		uint64_t tick = 0;
+		const auto step = [&]() {
+			now += 1.0 / 60.0;
+			tick++;
+
+			for (const Entity entity : all) {
+				world.GetMutable<Spot>(entity)->X = static_cast<float>(tick);
+			}
+
+			connector.Poll(replica, now);
+			listener.Poll(now);
+			listener.Publish(world, tick, now);
+			listener.Advance(now);
+			connector.Poll(replica, now);
+			connector.Advance(now);
+		};
+
+		for (int attempt = 0; attempt < 2048 && !connector.Joined(); attempt++) {
+			step();
+		}
+		REQUIRE(connector.Joined());
+
+		// Measured after the join, because a snapshot chunk is not a delta and
+		// the packer this is about only ever sees the delta.
+		size_t busiest = 0;
+		for (int round = 0; round < 120; round++) {
+			step();
+			busiest = std::max(busiest, static_cast<size_t>(listener.Authority().Stats().Bytes));
+		}
+
+		REQUIRE(replica.CountMatching<Spot>() == 600);
+		return busiest;
+	}
+}
+
+TEST_CASE("a link that says it will carry less makes the authority build less", "[replication]") {
+	// **The two byte budgets stopped being two independent opinions.**
+	// `AuthoritySettings::BytesPerTick` is a number somebody typed and
+	// `ConnectionStats::SendAllowanceBytes` is what the congestion controller
+	// measured, and packing past the second buys nothing: `Link::Reserve` turns
+	// the excess away and `Unsent` rebuilds it next tick, so the encode is spent
+	// and the shortfall reaches the transport rather than the priority
+	// scheduler — which is the thing that exists to choose what a client sees
+	// when not all of it fits.
+	//
+	// **Asserted as a comparison rather than against a constant**, because a
+	// case that only checked the `min` is computed would pass against a wiring
+	// that never calls `SetAllowance`: the authority's own ceiling would still
+	// be in force and the number would look plausible. Two runs of one world,
+	// differing only in what the *link* says it will carry.
+	const size_t narrow = BusiestTick(2 * 1024);
+	const size_t wide = BusiestTick(64 * 1024);
+
+	// The authority's own ceiling is 32 KB in both runs, so a packer reading
+	// only its own settings produces the same number twice.
+	REQUIRE(narrow < wide);
+
+	// And it respects the number rather than merely noticing it. The link's cap
+	// bounds the allowance — `Link::ResetBudget` takes the lower of it and what
+	// the controller worked out — so nothing may be built past it.
+	REQUIRE(narrow <= 2 * 1024);
+
+	// The wide run is genuinely over the narrow cap, or the comparison above is
+	// a world too small to say anything.
+	REQUIRE(wide > 2 * 1024);
 }
 
 TEST_CASE("a creation the link refused is announced again", "[replication]") {

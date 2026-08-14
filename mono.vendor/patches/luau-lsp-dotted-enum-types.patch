@@ -1,0 +1,84 @@
+mono.vendor/patches/luau-lsp-dotted-enum-types.patch
+
+Make `local face: Enum.NormalId` resolve in the editor.
+
+WHY THIS IS A PATCH AND NOT A DEFINITIONS FILE
+    Luau resolves a dotted type through `importedTypeBindings["Enum"]["NormalId"]`.
+    That map is written by `require` and by a host that reaches into the frontend;
+    `parseDeclaration` and `parseTypeAlias` both call `parseName`, a single
+    identifier, so no `declare` statement can produce a dotted name and no spelling
+    of `mono.engine/script/bindings/engine.d.luau` can reach the map.
+    `mono.tools/scriptcheck` registers the prefix itself, which is why `just
+    typecheck` accepts a dotted annotation the editor otherwise underlines. This
+    patch is that same registration, on luau-lsp's side of the same definitions
+    file.
+
+WHY IT IS CARRIED HERE RATHER THAN UPSTREAM OR IN A FORK
+    It keys on `Enum_`, which is this engine's generator convention and nobody
+    else's, so there is nothing to send upstream. `mono.vendor/AGENTS.md` names
+    this file as the third shape and says why a fork was not taken.
+
+WHERE IT GOES
+    `WorkspaceFolder::loadDefinitionFile`, immediately after the two
+    `mutateRegisteredDefinitions` calls — one hunk, pure insertion, no header
+    touched. The hook it sits beside is `LSPPlatform::mutateRegisteredDefinitions`,
+    and `RobloxPlatform`'s override ends with the identical operation against an
+    API dump. Overriding the hook for a platform of our own would work equally
+    well and costs a header edit and a second file; this is the shape that
+    conflicts least when upstream moves.
+
+WHEN IT STOPS APPLYING
+    `just luau-lsp` fails and prints this path. Re-point the hunk at whatever
+    `loadDefinitionFile` looks like then; if the hook has been removed outright,
+    the entry to reopen is `docs/retired/DEFERRED.md` D00031.
+
+    A submodule pointer bump re-checks-out the tree and drops the patch. That is
+    fine and is the reason the recipe applies it every run rather than once:
+    the next `just luau-lsp` puts it back, or stops because it no longer fits.
+
+diff --git a/src/Workspace.cpp b/src/Workspace.cpp
+index b756435..864218d 100644
+--- a/src/Workspace.cpp
++++ b/src/Workspace.cpp
+@@ -515,6 +515,41 @@ Luau::LoadDefinitionFileResult WorkspaceFolder::loadDefinitionFile(
+     platform->mutateRegisteredDefinitions(frontend.globals, metadata);
+     platform->mutateRegisteredDefinitions(frontend.globalsForAutocomplete, metadata);
+ 
++    // atomic-game-engine: make `Enum.NormalId` resolve in a type position.
++    //
++    // Luau resolves a dotted type through `importedTypeBindings["Enum"]["NormalId"]`,
++    // and that map is written by `require` and by a host — never by a `declare`
++    // statement, which only ever produces a flat `exportedTypeBindings` entry. So
++    // the engine's generated definitions can declare `Enum_NormalId` and nothing
++    // else; the prefix has to be registered here. `mono.tools/scriptcheck` does
++    // exactly this loop against its own frontend, which is why the build accepts a
++    // dotted annotation that the editor otherwise underlines.
++    //
++    // The rename matches what `RobloxPlatform::mutateRegisteredDefinitions` does for
++    // its own enums in `src/platform/roblox/RobloxLuauExt.cpp`: the binding is still
++    // keyed by the flat name, so both spellings resolve, but hover and every
++    // diagnostic print the dotted one.
++    {
++        constexpr std::string_view enumPrefix = "Enum_";
++        const auto aliasDottedEnums = [&](Luau::GlobalTypes& globals)
++        {
++            if (!globals.globalScope)
++                return;
++            auto& imported = globals.globalScope->importedTypeBindings["Enum"];
++            for (const auto& [name, binding] : globals.globalScope->exportedTypeBindings)
++            {
++                if (name.size() <= enumPrefix.size() || name.compare(0, enumPrefix.size(), enumPrefix) != 0)
++                    continue;
++                std::string shortName = name.substr(enumPrefix.size());
++                if (auto* ctv = Luau::getMutable<Luau::ExternType>(binding.type))
++                    ctv->name = "Enum." + shortName;
++                imported[std::move(shortName)] = binding;
++            }
++        };
++        aliasDottedEnums(frontend.globals);
++        aliasDottedEnums(frontend.globalsForAutocomplete);
++    }
++
+     if (result.success)
+     {
+         TextDocument textDocument(Uri(), "luau", 0, source);

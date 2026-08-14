@@ -2,6 +2,7 @@
 #include <engine/delivery/Source.hpp>
 
 #include <cdn/Settings.hpp>
+#include <span>
 #include <string>
 
 namespace cdn {
@@ -122,7 +123,14 @@ namespace cdn {
 		// **`NAME=HOST:PORT`, one per entry.** A row with no `=` is dropped
 		// rather than half-read: an upstream named after its whole address would
 		// be one nothing can refer to, which is worse than one that is missing.
-		for (const std::string &row : Flag("cdn.upstreams").Items()) {
+		//
+		// The span is named rather than iterated straight off the temporary
+		// `Flag`: it views the flag table's storage and not the handle, but GCC
+		// cannot see that through the call and `-Wdangling-reference` is fatal
+		// under the `ci` preset. `mono.client/src/Settings.cpp` reads the same
+		// flag kind the same way.
+		const std::span<const std::string> upstreams = Flag("cdn.upstreams").Items();
+		for (const std::string &row : upstreams) {
 			const size_t equals = row.find('=');
 			if (equals == std::string::npos) {
 				continue;

@@ -23,7 +23,7 @@ _default:
     @just --list --unsorted
 
 # Submodules, and anything else a fresh clone needs before it can configure.
-setup:
+setup: install-hooks
     git submodule update --init --recursive --depth 1
     # shaderc pins glslang, SPIRV-Tools and SPIRV-Headers in its own DEPS file
     # rather than as submodules, so the line above clones shaderc and leaves
@@ -31,6 +31,33 @@ setup:
     # MonoVendor.cmake pointing back here.
     python3 mono.vendor/shaderc/utils/git-sync-deps
     @echo "vendors ready"
+
+# Point git at the hooks this repository carries. Once per clone.
+#
+# **`core.hooksPath`, so the hook is a file in the tree rather than a thing
+# somebody remembers to copy.** `.git/hooks/` is not cloned and not reviewable;
+# `.githooks/` is both. The cost is that the pointer is per-clone local config,
+# which is why `just setup` runs this — a fresh clone's first command installs
+# it, and nobody has to be told twice.
+#
+# Safe to re-run, and it refuses rather than silently replacing a hooksPath
+# somebody else set — a hook you did not install running on your push is worse
+# than no hook.
+#
+# Installs `.githooks/pre-push`, which builds `preset=ci` before a push.
+install-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    existing=$(git config --local --get core.hooksPath || true)
+    if [ -n "$existing" ] && [ "$existing" != ".githooks" ]; then
+        echo "core.hooksPath is already '$existing', not .githooks — leaving it alone." >&2
+        echo "  Set it yourself if you meant to:  git config core.hooksPath .githooks" >&2
+        exit 1
+    fi
+    git config --local core.hooksPath .githooks
+    chmod +x .githooks/*
+    echo "hooks installed — .githooks/pre-push builds preset=ci before a push."
+    echo "Escape one deliberately with: git push --no-verify"
 
 # Configure one preset. Safe to re-run; CMake reuses the cache.
 configure:
@@ -148,6 +175,45 @@ deps-check: build
     fi
     echo "deps ok — $total first-party object(s) track their headers"
 
+# Every compiled shader against the resource contract SDL documents.
+#
+# **The half of `docs/DEFERRED.md` D00001 that does not need a Mac.** That entry
+# has said since v0.1 that macOS compiles SPIR-V and not MSL, with no trigger on
+# it because nobody here has the machine that would trip it. Most of what that
+# machine would find is not about Metal: `SDL_CreateGPUShader` documents one
+# resource layout per shader format, and every one of them — MSL, DXIL, DXBC — is
+# derived from the descriptor sets and bindings in the SPIR-V. If those are
+# wrong, the translation is wrong, and the SPIR-V is here.
+#
+# So this checks what is checkable from Linux: one entry point per module, named
+# what the renderer asks for, at the stage the filename claims; every resource
+# explicitly decorated; every resource in the descriptor set SDL's contract names
+# for its stage; bindings contiguous within a set, because every other format
+# numbers them by counting and a gap shifts everything after it; and no SPIR-V
+# capability outside an allowlist of what MSL can express — `double` being the
+# one that compiles happily for Vulkan and cannot be translated at all.
+#
+# **It translates nothing and proves nothing about a Metal device.** Deliberately:
+# a check that asserted something this machine cannot observe would be the same
+# untested claim D00001 already records, arriving a second time.
+#
+# `--quiet` here because `just check` runs it. Drop it — `shadercheck
+# .cache/build/dev/shaderstage` — for the per-shader table, including the
+# `[[texture(n)]]` and `[[buffer(n)]]` index each resource lands on.
+shader-check: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    stage="{{build}}/shaderstage"
+    if [ ! -d "$stage" ]; then
+        # A server or cdn preset configures no shader compiler and stages no
+        # shaders. Said out loud, for `just typecheck`'s reason: a check that
+        # passes by having nothing to do is one nobody notices has stopped
+        # running.
+        echo "shader-check skipped: preset {{preset}} builds no client, so no shader was compiled."
+        exit 0
+    fi
+    ./{{build}}/tools/shadercheck --quiet "$stage"
+
 # Regenerate the scripting manifest and the type declarations.
 #
 # The class table is the source; these are its output. Run this after changing a
@@ -206,6 +272,27 @@ typecheck: (build "scriptcheck")
     ./node_modules/.bin/tsc --noEmit
     echo "typecheck ok — luau and typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
 
+# The same scripts again, through the language server an editor actually runs.
+#
+# **`just typecheck` and an editor are two frontends over one definitions file,
+# and they have disagreed.** `scriptcheck` registers `importedTypeBindings["Enum"]`
+# on its own frontend, which is a host-side call no definitions file can make — so
+# `local face: Enum.NormalId` compiled, passed, and was underlined in the editor
+# for three versions. `docs/retired/DEFERRED.md` D00031 is that gap and the patch
+# that closed it; this recipe is what stops it reopening unnoticed, because a
+# patch that stops applying and a spelling that stops resolving both land here.
+#
+# It also enables Luau's feature flags, which `scriptcheck` does not — that is how
+# the `declare class` deprecation was caught.
+#
+# **1.5 s over every example**, so it is in `just check` rather than beside it.
+# What is not free is the first run: `luau-lsp` compiles its own copy of Luau —
+# 11 minutes of CPU, 39 s wall on 24 cores, once. Afterwards the dependency is a
+# no-op.
+typecheck-editor: luau-lsp
+    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
+    @echo "typecheck-editor ok — every example agrees with the language server"
+
 # The editor, with its control surface open for a Model Context Protocol client.
 #
 # **Two processes and one port.** This starts the editor listening on loopback;
@@ -260,11 +347,13 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 # alternative is editing a file inside two vendored trees.
 #
 # **This is the version skew `.gitmodules` warns about, arriving early.** Our own
-# `mono.vendor/luau` is 0.732 and builds clean — the tree that does not is the
+# `mono.vendor/luau` is 0.731 and builds clean — the tree that does not is the
 # one luau-lsp brought with it.
 #
-# Flags rather than patches, because `mono.vendor/AGENTS.md` says a patch goes
-# upstream or into a fork, never into a file in this tree.
+# Flags rather than patches wherever a flag will do. Where one will not, the
+# patch is a file under `mono.vendor/patches/` applied here — the third shape
+# `mono.vendor/AGENTS.md` argues for, taken over a fork so that nothing has to be
+# pushed to a remote we do not own.
 luau-lsp:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -288,6 +377,39 @@ luau-lsp:
         exit 1
     fi
 
+    # **The patches, and a failure here is meant to stop the build rather than
+    # degrade it.** A language server that silently lost one is a language server
+    # that underlines a line which compiles, which is the whole problem
+    # `mono.vendor/patches/luau-lsp-dotted-enum-types.patch` exists to remove.
+    # Each patch carries its own preamble saying what it does and where to
+    # re-point it; `git apply` is checked in reverse first so a re-run is a no-op
+    # rather than an error.
+    shopt -s nullglob
+    patches=(mono.vendor/patches/luau-lsp-*.patch)
+    if [ ${#patches[@]} -eq 0 ]; then
+        echo "no patch found under mono.vendor/patches/ — one is checked in and this tree has none." >&2
+        exit 1
+    fi
+
+    for patch in "${patches[@]}"; do
+        if git -C mono.vendor/luau-lsp apply --reverse --check "$(pwd)/$patch" 2> /dev/null; then
+            echo "patch already applied: $patch"
+            continue
+        fi
+        if ! git -C mono.vendor/luau-lsp apply "$(pwd)/$patch"; then
+            echo "" >&2
+            echo "$patch does not apply to mono.vendor/luau-lsp at $(git -C mono.vendor/luau-lsp rev-parse --short HEAD)." >&2
+            echo "" >&2
+            echo "Upstream moved the code it edits. Read the preamble at the top of the" >&2
+            echo "patch — it says what the hunk is for and where to re-point it — then" >&2
+            echo "regenerate it with 'git -C mono.vendor/luau-lsp diff'. Do not skip it:" >&2
+            echo "without it the editor underlines every 'Enum.<Name>' annotation that" >&2
+            echo "'just typecheck' accepts." >&2
+            exit 1
+        fi
+        echo "patch applied: $patch"
+    done
+
     cmake -S mono.vendor/luau-lsp -B .cache/build/luau-lsp -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized -include cstdint" > /dev/null
@@ -298,11 +420,11 @@ luau-lsp:
 
 # Every check there is, in the order to run them, against one preset.
 #
-# **The whole guarantee, and it is local and manual.** No machine other than
-# this one runs any of it: there is no workflow on GitHub, and there will not be
-# one until the repository's owner asks for it. `docs/DEFERRED.md` D00005 carries
-# that decision and what it costs. So this recipe is not "what CI runs" — it is
-# what a person runs before a push, and nothing runs it for them.
+# **The whole guarantee, and it is local.** No machine other than this one runs
+# any of it: there is no workflow on GitHub and there will not be one — the
+# repository's owner decided that, and `docs/retired/DEFERRED.md` D00005 carries
+# the decision and what it costs. So this recipe is not "what CI runs". It is
+# what a person runs before a push.
 #
 # The order is cheapest and most likely to fail first, so a misformatted file
 # does not wait behind a compile.
@@ -310,8 +432,13 @@ luau-lsp:
 # Not `preset=ci` by default, because that makes every warning fatal and the
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
 # strictest configuration this repository has.
-check: format-check build test-all test-architecture check-one-node-graph bindings-check typecheck determinism replay-check
-    @echo "check ok — format, build, tests, architecture, bindings, typecheck, determinism, replay"
+#
+# **The one part of it that is not manual is the `ci` build**, which
+# `.githooks/pre-push` does for you — because that is the half that has gone
+# uncompilable three times while being described as the standard, twice inside
+# v0.15 alone, and a check nobody runs stops being true.
+check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check typecheck typecheck-editor determinism replay-check
+    @echo "check ok — format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay"
 
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")

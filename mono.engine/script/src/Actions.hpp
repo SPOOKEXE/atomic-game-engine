@@ -33,6 +33,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/scene/Input.hpp>
 
@@ -137,22 +138,48 @@ namespace engine::script {
 	// the pointer has just left, which is the frame the interface stopped having
 	// it.
 	//
-	// **A keyboard press is never processed, and that is a gap rather than a
-	// decision.** Roblox's answer is true while a `TextBox` has focus, and `gui`
-	// has no focus at all — `Router` tracks a hover and a press and nothing else,
-	// and a `TextBox` is a class that draws. Closing it needs the router to hold a
-	// focused element and release it on a press elsewhere, which is a change in
-	// `gui` rather than here; until then a key is honestly unprocessed, which is
-	// what it is. `DEFERRED.md` D00117 carries the whole of what it would take.
+	// **This answers for the pointer only, and the keyboard has its own
+	// question.** See `InterfaceHasKeyboard`: a beat where the interface took a
+	// click and a beat where it is swallowing keystrokes are different beats, and
+	// a single flag covering both would mark every key on the frame somebody
+	// clicked a button.
 	//
 	// @param events What the router produced for this beat, in its order.
 	// @return `true` when a pointer event this beat should read as handled.
 	bool InterfaceHasPointer(std::span<const gui::GuiEvent> events);
 
+	// Whether the 2D interface has the keyboard.
+	//
+	// **A `TextBox` with focus is the whole of it, which is Roblox's rule.**
+	// While somebody is typing into a box, `W` is a letter rather than a step
+	// forward, and a place that moves its character on `InputBegan` has to be
+	// told so — that is what `gameProcessedEvent` is for on a key.
+	//
+	// **A state and not a queue, where the pointer's half is the other way
+	// round.** A press is an event and having the keyboard is a condition that
+	// lasts until something takes it away, so this reads the world rather than
+	// this beat's events: `gui::FocusedTextBox` is the one place the answer
+	// lives, and a copy of it here would be rule 2's second statement of a fact.
+	//
+	// **The consequence worth knowing: a key is marked from the frame the box
+	// takes focus and stays marked until a press lands elsewhere**, including on
+	// frames the router produced no events at all.
+	//
+	// @param store The world the pump is running against.
+	// @return `true` when a key this beat should read as handled.
+	// @since v0.15
+	bool InterfaceHasKeyboard(const ecs::Store &store);
+
 	// Whether an input report describes the pointer rather than the keyboard.
 	//
-	// The filter `InterfaceHasPointer` is applied through: the interface takes
-	// clicks, moves and wheel notches, and nothing it does can consume a key.
+	// **The selector between the two answers above, and it used to be a gate.**
+	// While the interface could only take the pointer, this was what kept a
+	// `true` off a key — `processed && IsPointerReport(report)`. Now that a
+	// `TextBox` can hold the keyboard there are two answers rather than one and a
+	// veto, and the shape a pump wants is
+	// `IsPointerReport(report) ? pointerTaken : keyboardTaken`. Both pumps use
+	// exactly that, for this file's stated reason: two of them deciding what "the
+	// game already handled this" means is two answers.
 	//
 	// @param report The report.
 	// @return `true` for a button, a motion or a wheel notch.

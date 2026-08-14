@@ -188,6 +188,29 @@ frame before anything reads them.
 presentation** — so a `Sound` a script started this frame is heard this frame
 rather than next, and the state it reads has stopped moving.
 
+## The keyboard reaches the interface through the world, not through a member
+
+Three steps, all in `Client::Draw`'s interface block, and each is a hop that
+was missing once:
+
+- **`SDL_StartTextInput` is asked for only while `gui::FocusedTextBox` answers
+  something**, and compared before it is called. It is not a subscription — it
+  raises an on-screen keyboard on a phone and opens an input method's window on
+  a desktop — so a client that started it once and left it on would put a
+  keyboard over the game. Headless has no window and therefore never calls it.
+- **`Translator::TypedText()` goes straight to `gui::Type`**, which writes
+  `Label::Text` in the store. Nothing here keeps the string: `input/AGENTS.md`
+  says why it never reached `scene::InputState`, and this is the one hop it
+  makes instead.
+- **Typing is applied before `Router::Update`.** The characters were produced by
+  a keyboard aimed at whatever held the focus when they arrived; routing first
+  would post them into the box the person is only now clicking on.
+
+`--type TEXT` synthesises the SDL event so that the second and third steps are
+checkable with no keyboard attached. It needs `--click NAME` to have focused a
+box first, and it cannot check the first step at all — the log line the toggle
+writes is what says that call was made.
+
 ## Sound is a seam, and it holds the state neither side can
 
 `scene::Sound` is rows in a world and `engine::audio` is nodes in a graph.

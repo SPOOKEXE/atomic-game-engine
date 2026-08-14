@@ -5,7 +5,7 @@
 // translation unit — so a surface that names no VM was compiled against
 // `<lua.h>`, and the pump that fires its signals sat under a heading rather than
 // behind a file name. `LuauInput.cpp` is the pump and `JsInput.cpp` is its twin;
-// what is left here is the seven methods, the ten properties and the six signal
+// what is left here is the eight methods, the ten properties and the six signal
 // rows, every one of which both languages install from this one description.
 //
 // **The tag is the single Luau fact still in the file, and it is a number.**
@@ -23,6 +23,7 @@
 
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 
@@ -286,6 +287,23 @@ namespace engine::script {
 			}
 		}
 
+		// `UserInputService:GetFocusedTextBox()` — the box being typed into, or
+		// nil.
+		//
+		// **Read from the world rather than counted from the focus signals**,
+		// which is the same rule every other member here keeps: `gui::Focus` is
+		// the one door a focus change goes through and
+		// `GuiServiceState::FocusedTextBox` is where it rests, so this is a
+		// lookup rather than a tally a missed event could put out of step.
+		//
+		// Nil for a world with no `GuiService`, for a box that has since been
+		// destroyed, and for the ordinary case of nobody typing — see
+		// `gui::FocusedTextBox`, which validates the handle rather than trusting
+		// it.
+		void GetFocusedTextBox(ScriptCall &call) {
+			call.ReturnInstance(gui::FocusedTextBox(call.World()));
+		}
+
 		// `UserInputService.KeyboardEnabled` and `.MouseEnabled`.
 		//
 		// True on anything with a window and false headless, which is what "is
@@ -330,12 +348,20 @@ namespace engine::script {
 		//   `scene::KeyCode`, which is a change in those two files rather than
 		//   this one.
 		//
-		// - **`TouchStarted` and its five neighbours, `GetFocusedTextBox`,
-		//   `TextBoxFocused`, `TextBoxFocusReleased`.** There is no touch surface,
-		//   and `gui` has no keyboard focus at all — `Router` holds a hover and a
-		//   press and a `TextBox` is a class that draws. That absence is also why
-		//   `gameProcessedEvent` is false for every key; `InterfaceHasPointer`
-		//   carries it.
+		// - **`TouchStarted` and its five neighbours.** There is no touch
+		//   surface anywhere in `input::Translator`, so every one of them would
+		//   be a signal that never fires.
+		//
+		// - **`TextBoxFocused` and `TextBoxFocusReleased`**, which are the
+		//   service-wide twins of the pair a `TextBox` now carries. Not absent
+		//   for want of the fact — `gui::EventKind::Focused` is exactly it — but
+		//   because these two are `SignalKind::PropertyChanged` rows fired by
+		//   `PumpInput` from `scene::InputState`, and a focus change arrives at
+		//   the *other* pump, through `DeliverGuiEvents`, carrying the element it
+		//   is about. Firing an instance-subject event from a world-subject row
+		//   would put the two pumps in one another's business for a signal whose
+		//   own version already reaches a script. Worth adding when something
+		//   wants to hear about focus without holding the box.
 		//
 		// - **`MouseIcon`.** A cursor *image* is an asset the renderer would have
 		//   to hand SDL as a surface, and nothing in `render` produces one.
@@ -353,7 +379,7 @@ namespace engine::script {
 	}
 
 	const ServiceSurface &UserInputServiceSurface() {
-		static constexpr std::array<ServiceMethod, 7> METHODS{{
+		static constexpr std::array<ServiceMethod, 8> METHODS{{
 			{"IsKeyDown", IsKeyDown},
 			{"IsMouseButtonPressed", IsMouseButtonPressed},
 			{"GetMouseLocation", GetMouseLocation},
@@ -361,6 +387,7 @@ namespace engine::script {
 			{"GetKeysPressed", GetKeysPressed},
 			{"GetMouseButtonsPressed", GetMouseButtonsPressed},
 			{"GetLastInputType", GetLastInputType},
+			{"GetFocusedTextBox", GetFocusedTextBox},
 		}};
 
 		// **Ten properties, three of them writable.** The seven read-only rows

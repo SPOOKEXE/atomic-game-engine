@@ -193,6 +193,10 @@ namespace engine::input {
 
 		Current.MouseDelta = {};
 		Current.WheelDelta = 0.0f;
+
+		// A delta like the two above it: a character was typed once, and there
+		// is no previous value for it to be an edge against.
+		Typed.clear();
 	}
 
 	bool Translator::HandleEvent(const SDL_Event &event) {
@@ -220,6 +224,34 @@ namespace engine::input {
 			Current.LastSource = scene::InputSource::Keyboard;
 			return true;
 		}
+
+		case SDL_EVENT_TEXT_INPUT:
+			// **Appended whole, because one byte is not one character.** SDL
+			// hands over the composed UTF-8 a keystroke produced — one byte for
+			// `a`, two for `é`, four for an emoji, and more than one character
+			// at once when an input method commits a word — so anything here
+			// that took a byte at a time, or assumed one event was one letter,
+			// would cut a codepoint in half the first time somebody typed in
+			// their own language.
+			//
+			// **Accumulated rather than assigned**, for `MouseDelta`'s reason:
+			// several of these arrive in a frame and the text is all of them.
+			//
+			// **A key event with this in the same frame is not a duplicate.**
+			// `SDL_EVENT_KEY_DOWN` says which key moved and this says what it
+			// spelled; a game reads the first for movement and a text box reads
+			// the second, and the layout is the whole of the difference between
+			// them.
+			//
+			// **SDL sends none of these until a host calls `SDL_StartTextInput`
+			// on the window**, which is the platform's rule rather than this
+			// module's: text input is what raises an on-screen keyboard and
+			// starts composition, so it is off until something says it is
+			// wanted. `client::Client` asks while a `TextBox` has the keyboard,
+			// so this case runs for exactly as long as somebody is typing.
+			Typed += event.text.text;
+			Current.LastSource = scene::InputSource::Keyboard;
+			return true;
 
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -287,5 +319,6 @@ namespace engine::input {
 		Current.Buttons = 0;
 		Current.MouseDelta = {};
 		Current.WheelDelta = 0.0f;
+		Typed.clear();
 	}
 }

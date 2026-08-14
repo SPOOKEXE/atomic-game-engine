@@ -447,3 +447,35 @@ TEST_CASE("a chunk larger than a sealed datagram is capped", "[replication][encr
 	}
 	CHECK(wire.ServerSide->Link().Stats().SendsOverBudget == 0);
 }
+
+TEST_CASE("the round trip reaches the link with its variance", "[replication]") {
+	// **`Session` is the only thing that measures a round trip in this engine,
+	// and the congestion controller is the only thing that reads one.** The
+	// estimate has crossed since v0.9; what it now has to carry beside it is the
+	// variance, because that is what sizes the controller's noise threshold.
+	// Passing the estimate alone is not a smaller version of passing both: the
+	// threshold falls back to a one-millisecond floor, and a jittery path then
+	// reads as a standing queue and the link narrows for something that is not
+	// there.
+	//
+	// RFC 6298 seeds the variance at half the first sample, so this is non-zero
+	// after a single measured trip and does not need jitter arranged for it —
+	// which is the point, since a case needing an unstable link to see a field
+	// arrive would be measuring the link.
+	Wire wire;
+	wire.Server.Set<Spot>(wire.Server.Create(), Spot{1.0f, 0.0f});
+	REQUIRE(wire.Join());
+
+	for (int tick = 0; tick < 30; tick++) {
+		wire.Tick();
+	}
+
+	// The estimate itself, so a variance of zero is read as "not passed" rather
+	// than as "nothing was ever measured".
+	// **The client's end, because that is the end whose reliable stream is
+	// being acknowledged here.** A round trip is recorded where an
+	// acknowledgement lands, and in this exchange the client is the side sending
+	// reliably enough to have one closed for it every tick.
+	CHECK(wire.ClientSide->Link().Stats().RoundTripMilliseconds > 0.0f);
+	CHECK(wire.ClientSide->Link().Stats().RoundTripVarianceMilliseconds > 0.0f);
+}

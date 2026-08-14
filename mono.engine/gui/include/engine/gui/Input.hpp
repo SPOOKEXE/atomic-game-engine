@@ -92,6 +92,27 @@ namespace engine::gui {
 		// genuinely differ: releasing off the button ends the input and
 		// activates nothing.
 		Activated,
+
+		// A press landed on a `TextBox` and the keyboard went to it.
+		//
+		// **The pair below is the only thing in this enum that is not about the
+		// pointer**, and it is here because the pointer is what decides it: a
+		// press is the one gesture that says "type into this one and not that
+		// one". `gui::Focus` is where the fact comes to rest.
+		//
+		// @since v0.15
+		Focused,
+
+		// A press landed elsewhere and the keyboard left the box it was in.
+		//
+		// **Not emitted for a focused box that was destroyed.** The event names
+		// an element and a dead element has nothing to fire at, which is
+		// `Router::Forget`'s argument: firing at something that is no longer
+		// there is worse than firing nothing. `FocusedTextBox` answers null the
+		// frame after either way, so nothing reads as still focused.
+		//
+		// @since v0.15
+		FocusReleased,
 	};
 
 	// One thing that happened to one element.
@@ -111,6 +132,18 @@ namespace engine::gui {
 		// handle wants, and it is here because the router already knows the
 		// rectangle and the caller would have to look it up again.
 		core::Vector2 Local;
+
+		// Whether Return is what ended it. Only read on `FocusReleased`.
+		//
+		// **The one field here the router never sets**, and that is what it is
+		// for: a press releasing a box is `Router::Update`'s to report and a
+		// Return releasing one is `gui::Type`'s, and both owe a script the same
+		// `FocusLost` with Roblox's `enterPressed` telling them apart. A caller
+		// that submits a box builds the event itself — `TypeResult::Released`
+		// says when — because no press happened and no element was picked.
+		//
+		// @since v0.15
+		bool Entered = false;
 	};
 
 	// The element under a point, or null.
@@ -160,10 +193,23 @@ namespace engine::gui {
 	// in the store: rule 2 is about data another module also reads, and nobody
 	// replicates where a mouse is.
 	//
+	// **The keyboard focus is the exception, and it is why `Update` takes a
+	// mutable store.** Two modules read which `TextBox` is focused — this one, to
+	// know whether a press changed it, and the scripting layer, for
+	// `UserInputService:GetFocusedTextBox` — and L9 has no route to a router. So
+	// the fact lives in `GuiServiceState::FocusedTextBox` and this class decides
+	// it, which is rule 2 applied rather than avoided. Where a mouse is has one
+	// reader and stays here.
+	//
 	// @since v0.8
 	class Router {
 	  public:
 		// Works out what changed since the last call.
+		//
+		// **Mutable, because a press moves the keyboard focus** and that fact is
+		// the world's rather than this object's — see the note above. Nothing
+		// else here writes to the store, and a world with no `GuiService` is
+		// routed exactly as it was before focus existed.
 		//
 		// @param store   The world.
 		// @param list    The compiled list for this frame.
@@ -171,8 +217,7 @@ namespace engine::gui {
 		// @return The events, in the order they happened. Valid until the next
 		//         call — the vector is reused rather than reallocated, because
 		//         this runs every frame and produces nothing most of them.
-		std::span<const GuiEvent>
-		Update(const ecs::Store &store, const DrawList &list, const Pointer &pointer);
+		std::span<const GuiEvent> Update(ecs::Store &store, const DrawList &list, const Pointer &pointer);
 
 		// The element the pointer is over, or null.
 		//
@@ -196,6 +241,11 @@ namespace engine::gui {
 		// For a caller whose canvas went away — a panel closed, a world
 		// unloaded — where firing a `MouseLeave` at an element that no longer
 		// exists would be worse than firing nothing.
+		//
+		// **The keyboard focus is deliberately not forgotten here**, and it
+		// could not be: it belongs to the world rather than to this object, and
+		// a router being torn down is not somebody having finished typing. A
+		// caller that means to release it calls `gui::Focus` with a null entity.
 		void Forget() {
 			Over = ecs::NULL_ENTITY;
 			Holding = ecs::NULL_ENTITY;

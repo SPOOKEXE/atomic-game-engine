@@ -56,6 +56,24 @@ instead of vendoring one is that the grammar fits on a page and can be read.
 If something needs a feature this parser does not have, it needs a different
 format — not this file needing a feature.
 
+**The scanner is `core::xml` since v0.15 and the writer is still here.** This
+module's reader was one of three that refused the same things in three places —
+`bake` could not call it, because `bake` is L9 and this is L10 — so `D00128`
+moved the scanning down to a tier every caller can reach. What is left in
+`Xml.cpp` is what is *this format's*: the tree, `XmlLimits`, `XmlStatus` and the
+writer, which writes this dialect and has no possible second caller below L10.
+
+Two consequences worth knowing before changing either half:
+
+- **`XmlStatus` is a mapping and not a set of parse errors.** `core::xml::Fault`
+  says malformed, truncated, refused or too many attributes, and `StatusOf` is
+  where that becomes this format's vocabulary. `Refused` has to survive the
+  trip — it is the only status that means somebody tried something.
+- **An undeclared entity is refused where it is read, and CDATA is exempt.** A
+  save file's scripts are CDATA and a `&` in Luau is an operator, so the
+  document-wide sweep `Svg.cpp` uses would refuse a perfectly good world.
+  `core/Xml.hpp` carries both policies and what breaks if they are collapsed.
+
 ## Another module's format is embedded, never restated
 
 A block this file carries on behalf of another module goes in as that module's

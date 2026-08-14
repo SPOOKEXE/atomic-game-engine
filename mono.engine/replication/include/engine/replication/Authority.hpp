@@ -344,6 +344,31 @@ namespace engine::replication {
 		// @return `true` when it resolves.
 		bool Holds(ClientId client) const;
 
+		// Tells this authority what one client's link says the path will carry.
+		//
+		// **The link's allowance is the authority and `BytesPerTick` is a
+		// ceiling on what this module is willing to *produce*.** Congestion
+		// control measures the path; `BytesPerTick` is a number somebody typed.
+		// Packing rows past the allowance does not send more — `Link::Reserve`
+		// refuses them — it spends the encode and then hands the refusal to
+		// `Unsent`, which rebuilds the same rows next tick. Under the allowance
+		// the same shortfall reaches the *priority scheduler* instead, which is
+		// the thing that exists to decide what a client sees when not all of it
+		// fits.
+		//
+		// **Told rather than read, because this module holds no link.** That is
+		// the same division `SetPriority` and `Rewind::Record` are built on: the
+		// arithmetic is here and the lookup is the host's. `Listener::Advance`
+		// is the caller.
+		//
+		// A caller that never calls this is unchanged: the default allowance is
+		// unbounded and `BytesPerTick` alone decides, exactly as before v0.15.
+		//
+		// @param client The client whose link this describes.
+		// @param bytes  `ConnectionStats::SendAllowanceBytes` for that link.
+		// @since v0.15
+		void SetAllowance(ClientId client, size_t bytes);
+
 		// Builds this tick's messages for every client.
 		//
 		// @param store The authoritative world.
@@ -642,6 +667,10 @@ namespace engine::replication {
 			// already exists — a second path that resent a value would be the
 			// second way to do one job.
 			std::vector<uint64_t> Repairing;
+
+			// What the link last said the path will carry in a tick, or
+			// `SIZE_MAX` for a caller that has never said. See `SetAllowance`.
+			size_t AllowanceBytes = SIZE_MAX;
 		};
 
 		// One entity's value for one component, built and waiting for a place
@@ -650,7 +679,19 @@ namespace engine::replication {
 		struct Candidate {
 			uint32_t Entry = 0;
 
-			uint32_t Row = 0;
+			// Where this row's encoded value sits inside its entry's `Values`,
+			// and how long it is.
+			//
+			// **A span rather than a row number times a stride, because a row is
+			// not a fixed width.** A component may serialise to a different
+			// number of bytes per entity — `scene.Visual` writes two names and
+			// `ecs.InstanceName` writes one, so two parts whose meshes have
+			// differently-spelt names are two different lengths in the same
+			// entry. `Pack` reorders rows by priority and slices them out again,
+			// and slicing at `Row * stride` reads the wrong bytes for every row
+			// after the first one whose length differs.
+			uint32_t Offset = 0;
+			uint32_t Bytes = 0;
 
 			ecs::Entity Entity;
 
@@ -764,7 +805,6 @@ namespace engine::replication {
 
 		std::vector<uint32_t> Order;
 
-		std::vector<size_t> Strides;
 		std::vector<size_t> SourceSlot;
 
 		std::vector<size_t> OpenEntry;

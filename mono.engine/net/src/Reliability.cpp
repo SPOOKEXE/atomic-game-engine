@@ -75,12 +75,34 @@ namespace engine::net {
 				return;
 			}
 
-			// RFC 6298's weight. The first sample is taken whole, because
-			// smoothing towards zero would make the estimate say "instant" for
-			// the first several round trips of every connection.
-			constexpr double WEIGHT = 0.125;
-			SmoothedRoundTrip =
-				SmoothedRoundTrip <= 0.0 ? trip : SmoothedRoundTrip * (1.0 - WEIGHT) + trip * WEIGHT;
+			// RFC 6298's weights, and the variance is not optional company for
+			// the mean. **A congestion controller reading the smoothed value
+			// alone cannot tell a path with fifteen milliseconds of queue on it
+			// from a wireless link whose trip swings by fifteen milliseconds**,
+			// and one of those is a reason to back off while the other is a
+			// reason to do nothing.
+			constexpr double MEAN_WEIGHT = 0.125;
+			constexpr double VARIANCE_WEIGHT = 0.25;
+
+			if (SmoothedRoundTrip <= 0.0) {
+				// The first sample is taken whole, because smoothing towards
+				// zero would make the estimate say "instant" for the first
+				// several round trips of every connection. RFC 6298 seeds the
+				// variance at half the first sample for the same reason: zero
+				// would claim a certainty one sample cannot support.
+				SmoothedRoundTrip = trip;
+				RoundTripVariance = trip * 0.5;
+				return;
+			}
+
+			// Against the estimate *before* it moves, which is the order RFC
+			// 6298 states and is not interchangeable: updating the mean first
+			// measures the deviation against a value that has already absorbed
+			// part of the sample, and the variance then reads low on exactly
+			// the samples that should widen it.
+			const double deviation = std::abs(SmoothedRoundTrip - trip);
+			RoundTripVariance = RoundTripVariance * (1.0 - VARIANCE_WEIGHT) + deviation * VARIANCE_WEIGHT;
+			SmoothedRoundTrip = SmoothedRoundTrip * (1.0 - MEAN_WEIGHT) + trip * MEAN_WEIGHT;
 		};
 
 		const size_t before = Pending.size();

@@ -1,13 +1,15 @@
 // What the value types and the deterministic generator cost in bulk.
 //
-// **`Random` is the one to read first, and it is not cheap.** Every function on
-// it is the first 32 bits of SHA-256 over the `(index, salt)` pair — a
-// specified algorithm rather than a constant nobody can check, which is exactly
-// why it was chosen, but a full hash compression round is three orders of
-// magnitude more work than the integer mixer it replaced. That is a defensible
-// trade for a spawn path called once per entity and an indefensible one for
-// something called per frame per entity, and the only way to know which side of
-// the line a call site is on is to have the figure. It is here.
+// **The `Random` rows are here because they used to be the alarming ones.**
+// Every function on it was a full SHA-256 compression until v0.15 — around 47 ns
+// a call, which made a three-salt position dearer than iterating the whole
+// world and made "is this call site per-frame or per-spawn?" a question somebody
+// had to answer before writing it. It is SplitMix64's finaliser now and the rows
+// below read within a nanosecond or two of the raw-mixer control, so that
+// question has stopped being interesting.
+//
+// They stay measured anyway. The figure is what retired the warning, and a
+// warning nobody can re-check is a warning that comes back.
 //
 // The `CFrame` and `AABB` rows are the arithmetic every part in a scene goes
 // through on its way to a draw call. They are bulk on purpose: one transform
@@ -135,11 +137,10 @@ BENCH("Random::Range · 100k", COUNT) {
 
 BENCH("Random · one Vector3 each, 100k", COUNT) {
 	// **The shape a spawn path actually calls: three salts for one position.**
-	// Three SHA-256 compressions per entity, and this row is what that is worth
-	// per entity spawned. Read it against `Each · 100k entities` in the `ecs`
-	// suite: if generating a position costs more than iterating every entity in
-	// the world does, a spawn loop that generates per frame is the bug and this
-	// is where it is visible.
+	// Read it against `Each · 100k entities` in the `ecs` suite. It used to be
+	// the larger of the two by a wide margin, which is what made a spawn loop
+	// running per frame a bug you could see from here; the point of keeping the
+	// row is that the comparison is the thing, not the absolute figure.
 	float total = 0.0f;
 	for (uint32_t index = 0; index < COUNT; index++) {
 		const Vector3 position(
@@ -153,10 +154,11 @@ BENCH("Random · one Vector3 each, 100k", COUNT) {
 }
 
 BENCH("control · xorshift32, 100k", COUNT) {
-	// The integer mixer `Random` replaced, at the same call count. **Not a
-	// proposal to go back** — this one is neither specified nor portable, which
-	// is the whole reason it went — but the ratio is what determinism-by-SHA-256
-	// costs, and a number nobody has is a number nobody can weigh.
+	// The copy-pasted mixer `Random` replaced, at the same call count. **Not a
+	// proposal to go back** — that one is neither specified nor portable, which
+	// is the whole reason it went. It is the floor: whatever the rows above cost
+	// over this one is what a *specified* generator is charging, and for two
+	// versions that was fifty times and is now roughly nothing.
 	uint32_t state = 0x9E37'79B9u;
 	uint32_t mixed = 0;
 	for (uint32_t index = 0; index < COUNT; index++) {

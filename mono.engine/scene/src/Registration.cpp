@@ -19,6 +19,7 @@
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/Tools.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 
@@ -767,6 +768,22 @@ namespace engine::scene {
 		ecs::Components::Register<Team>("scene.Team");
 		ecs::Components::Register<PlayerTeam>("scene.PlayerTeam");
 		ecs::Components::Register<SpawnLocation>("scene.SpawnLocation");
+
+		// **What a `Tool` instance is, appended for this list's standing
+		// reason**: a component id is registration order, an archetype is a
+		// sorted list of ids, and inserting one anywhere but the end reorders how
+		// every row in the engine is visited.
+		//
+		// The generated form — one `CFrame` and no name, which is the argument
+		// `scene.Pivot` already makes.
+		//
+		// **It crosses, and what it decides is where a handle is drawn.** A
+		// stowed tool reaches only its owner because it is under a `Player` and
+		// `scene::PlayerOwning` says so; an equipped one is under a character in
+		// `Workspace` and reaches everybody, and the `Grip` is what every one of
+		// those clients poses the handle by. Nothing about that needed a rule of
+		// its own — see `scene/Tools.hpp`.
+		ecs::Components::Register<Tool>("scene.Tool");
 	}
 
 	void RegisterSceneClasses() {

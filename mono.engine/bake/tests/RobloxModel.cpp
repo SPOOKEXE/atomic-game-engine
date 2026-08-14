@@ -1,4 +1,4 @@
-// Reading Roblox's binary model container.
+// Reading Roblox's two model containers, and asserting that they agree.
 //
 // **The fixture is written by this file rather than checked in**, and the reason
 // is the opposite of `Model.cpp`'s: a `.glb` fixture is a blob because a blob is
@@ -12,6 +12,13 @@
 // construction the case pins the value — the transposed arrays are written out
 // plane by plane here and read back plane by plane there, and both are asserted
 // against numbers a person typed.
+//
+// **Both containers are in one suite because one case needs both.** `.rbxmx` is
+// the same instance tree in XML and has to produce the same `RobloxModel`, so
+// the case that matters most is the one that reads a model written both ways and
+// compares the trees field by field. Split across two files it would need the
+// binary builder copied into the second one, and a copied writer is how the two
+// fixtures would quietly stop describing the same model.
 
 #include <engine/bake/RobloxModel.hpp>
 #include <engine/testing/Suite.hpp>
@@ -31,8 +38,10 @@ TEST_SUITE_ID("engine.bake.robloxmodel")
 
 using Catch::Approx;
 using engine::bake::ReadRobloxModel;
+using engine::bake::ReadRobloxModelXml;
 using engine::bake::RobloxInstance;
 using engine::bake::RobloxModel;
+using engine::bake::RobloxValue;
 using engine::bake::RobloxValueKind;
 
 namespace {
@@ -654,4 +663,552 @@ TEST_CASE("something that is not an rbxm is refused by its signature", "[bake][r
 	// Named, because an `.rbxmx` renamed to `.rbxm` is the way somebody actually
 	// arrives here and "not an rbxm" would not tell them that.
 	CHECK(failure.find("wrong signature") != std::string::npos);
+}
+
+// --- the XML container ---------------------------------------------------------
+//
+// `.rbxmx` is the same instance tree in markup. The cases below are in the order
+// the risks are: does it read at all, does it read *the same*, and is the parser
+// safe against the three attacks an XML reader has that a binary one does not.
+
+namespace {
+	// The same model `Fixture` writes, in the XML container.
+	//
+	// **Written out rather than generated**, which is the opposite choice to the
+	// binary fixture above and is the point of it: a generator that emitted both
+	// containers from one description would agree with itself whatever either
+	// reader did. Two hand-written files that a person can read and compare are
+	// what makes the agreement case mean anything.
+	//
+	// Every awkward row the binary fixture carries is here in its XML spelling —
+	// the `token` that is an enum and is refused, the `Color3uint8` that is one
+	// packed number rather than three byte planes, the whole rotation matrix
+	// where the binary container writes one byte naming it, and a script's source
+	// inside the `CDATA` section that is the only way this format writes a
+	// program.
+	constexpr std::string_view FIXTURE_RBXMX = R"xml(<?xml version="1.0" encoding="utf-8"?>
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" version="4">
+	<Meta name="ExplicitAutoJoints">true</Meta>
+	<External>null</External>
+	<External>nil</External>
+	<Item class="Model" referent="RBX0">
+		<Properties>
+			<string name="Name">Crate</string>
+		</Properties>
+		<Item class="Part" referent="RBX1">
+			<Properties>
+				<bool name="Anchored">true</bool>
+				<token name="Material">256</token>
+				<string name="Name">Lid</string>
+				<Vector3 name="Size">
+					<X>4</X>
+					<Y>1</Y>
+					<Z>2</Z>
+				</Vector3>
+				<float name="Transparency">0.5</float>
+				<Color3uint8 name="Color">4294901760</Color3uint8>
+				<CoordinateFrame name="CFrame">
+					<X>1</X>
+					<Y>2</Y>
+					<Z>3</Z>
+					<R00>1</R00>
+					<R01>0</R01>
+					<R02>0</R02>
+					<R10>0</R10>
+					<R11>1</R11>
+					<R12>0</R12>
+					<R20>0</R20>
+					<R21>0</R21>
+					<R22>1</R22>
+				</CoordinateFrame>
+			</Properties>
+		</Item>
+		<Item class="Script" referent="RBX2">
+			<Properties>
+				<string name="Name">Boot</string>
+				<ProtectedString name="Source"><![CDATA[print('hello')
+]]></ProtectedString>
+			</Properties>
+		</Item>
+	</Item>
+</roblox>
+)xml";
+
+	std::span<const std::byte> Bytes(std::string_view text) {
+		return {reinterpret_cast<const std::byte *>(text.data()), text.size()};
+	}
+
+	// A whole document, so a case can bend one line of the fixture without
+	// repeating the rest of it.
+	std::string WithProperties(std::string_view properties) {
+		return std::string(R"xml(<roblox version="4"><Item class="Part"><Properties>)xml") +
+			   std::string(properties) + "</Properties></Item></roblox>";
+	}
+
+	RobloxModel ReadXml(std::string_view document) {
+		RobloxModel model;
+		std::string failure;
+		const bool read = ReadRobloxModelXml(Bytes(document), model, failure);
+		INFO("failure was: " << failure);
+		REQUIRE(read);
+		CHECK(failure.empty());
+		return model;
+	}
+
+	// The refusal's reason, so a case can assert what it names.
+	std::string RefusedXml(std::string_view document) {
+		RobloxModel model;
+		std::string failure;
+		REQUIRE_FALSE(ReadRobloxModelXml(Bytes(document), model, failure));
+		REQUIRE_FALSE(failure.empty());
+
+		// Left alone on failure, which is the rule every reader here follows.
+		CHECK(model.Roots.empty());
+		return failure;
+	}
+
+	bool Mentions(const std::string &failure, std::string_view word) {
+		INFO("failure was: " << failure);
+		return failure.find(word) != std::string::npos;
+	}
+
+	// Two values, compared on the field their kind says is meaningful.
+	//
+	// **Exact rather than approximate**, because the two containers are being
+	// asserted to agree rather than to be close: they take the same bytes to the
+	// same `float` through the same conversions, and a tolerance here would hide
+	// the day one of them stopped doing that.
+	bool Same(const RobloxValue &left, const RobloxValue &right) {
+		if (left.Kind != right.Kind) {
+			return false;
+		}
+
+		switch (left.Kind) {
+		case RobloxValueKind::Bool:
+			return left.Bool == right.Bool;
+		case RobloxValueKind::Integer:
+			return left.Integer == right.Integer;
+		case RobloxValueKind::Number:
+			return left.Number == right.Number;
+		case RobloxValueKind::Text:
+			return left.Text == right.Text;
+		case RobloxValueKind::Vector3:
+			return left.Vector3 == right.Vector3;
+		case RobloxValueKind::Vector2:
+			return left.Vector2 == right.Vector2;
+		case RobloxValueKind::Color3:
+			return left.Color3 == right.Color3;
+		case RobloxValueKind::CFrame:
+			return left.CFrame.Position == right.CFrame.Position &&
+				   left.CFrame.QuaternionX == right.CFrame.QuaternionX &&
+				   left.CFrame.QuaternionY == right.CFrame.QuaternionY &&
+				   left.CFrame.QuaternionZ == right.CFrame.QuaternionZ &&
+				   left.CFrame.QuaternionW == right.CFrame.QuaternionW;
+		case RobloxValueKind::UDim:
+			return left.UDim == right.UDim;
+		case RobloxValueKind::UDim2:
+			return left.UDim2 == right.UDim2;
+		case RobloxValueKind::Rect:
+			return left.Rect == right.Rect;
+		case RobloxValueKind::NumberRange:
+			return left.NumberRange == right.NumberRange;
+		}
+		return false;
+	}
+
+	bool Same(const RobloxInstance &left, const RobloxInstance &right) {
+		INFO(
+			"comparing " << left.ClassName << " '" << left.Name << "' with " << right.ClassName << " '"
+						 << right.Name << "'"
+		);
+
+		if (left.ClassName != right.ClassName || left.Name != right.Name ||
+			left.Properties.size() != right.Properties.size() ||
+			left.Children.size() != right.Children.size()) {
+			return false;
+		}
+
+		for (size_t index = 0; index < left.Properties.size(); index++) {
+			INFO("property " << left.Properties[index].Name);
+			if (left.Properties[index].Name != right.Properties[index].Name ||
+				!Same(left.Properties[index].Value, right.Properties[index].Value)) {
+				return false;
+			}
+		}
+
+		for (size_t index = 0; index < left.Children.size(); index++) {
+			if (!Same(left.Children[index], right.Children[index])) {
+				return false;
+			}
+		}
+		return true;
+	}
+}
+
+TEST_CASE("an rbxmx comes back as the tree it describes", "[bake][rbxmx]") {
+	const RobloxModel model = ReadXml(FIXTURE_RBXMX);
+
+	// One root, and the nesting of the markup is the shape of the tree — which
+	// is the whole of what a referent is allowed to become, and here it is not
+	// even that: the `referent` attributes are never read.
+	REQUIRE(model.Roots.size() == 1);
+	const RobloxInstance &crate = model.Roots[0];
+	CHECK(crate.ClassName == "Model");
+	CHECK(crate.Name == "Crate");
+
+	REQUIRE(crate.Children.size() == 2);
+	const RobloxInstance &lid = crate.Children[0];
+	CHECK(lid.ClassName == "Part");
+	CHECK(lid.Name == "Lid");
+
+	// **The name is lifted out of the properties**, exactly as the binary reader
+	// lifts it, so nothing downstream has two places to read it from.
+	CHECK(Find(lid, "Name") == nullptr);
+
+	const RobloxValue *size = Find(lid, "Size");
+	REQUIRE(size != nullptr);
+	CHECK(size->Kind == RobloxValueKind::Vector3);
+	CHECK(size->Vector3.X == Approx(4.0f));
+	CHECK(size->Vector3.Y == Approx(1.0f));
+	CHECK(size->Vector3.Z == Approx(2.0f));
+
+	// One packed number, alpha in the top byte and discarded.
+	const RobloxValue *colour = Find(lid, "Color");
+	REQUIRE(colour != nullptr);
+	CHECK(colour->Kind == RobloxValueKind::Color3);
+	CHECK(colour->Color3.R == Approx(1.0f));
+	CHECK(colour->Color3.G == Approx(0.0f));
+	CHECK(colour->Color3.B == Approx(0.0f));
+
+	// **A script's source is a CDATA section**, which is this container's
+	// equivalent of the binary one's `ProtectedString` type number: a reader that
+	// treated it as ordinary character data would import every script with
+	// `<![CDATA[` in front of its first line.
+	const RobloxInstance &boot = crate.Children[1];
+	CHECK(boot.ClassName == "Script");
+	CHECK(boot.Name == "Boot");
+
+	const RobloxValue *source = Find(boot, "Source");
+	REQUIRE(source != nullptr);
+	CHECK(source->Kind == RobloxValueKind::Text);
+	CHECK(source->Text == "print('hello')\n");
+}
+
+TEST_CASE("an rbxmx and an rbxm of one model come back the same", "[bake][rbxmx]") {
+	// **The case that keeps the two readers honest.** Everything downstream —
+	// `studio::RojoSync`'s class lookup, its property conversion, its source
+	// staging — is written against one `RobloxModel`, so the day the two
+	// containers stop producing the same one, half of it starts behaving
+	// differently depending on which file an author exported.
+	const Blob binary = Fixture();
+
+	RobloxModel fromBinary;
+	std::string failure;
+	REQUIRE(ReadRobloxModel(Bytes(binary.Bytes), fromBinary, failure));
+
+	const RobloxModel fromXml = ReadXml(FIXTURE_RBXMX);
+
+	REQUIRE(fromBinary.Roots.size() == 1);
+	REQUIRE(fromXml.Roots.size() == 1);
+	CHECK(Same(fromBinary.Roots[0], fromXml.Roots[0]));
+
+	// And the refusal is the same refusal, not merely a refusal each: both
+	// containers carry the same enum and both name it.
+	CHECK(Noted(fromBinary, "Part.Material is an Enum"));
+	CHECK(Noted(fromXml, "Part.Material is an Enum"));
+}
+
+TEST_CASE("an rbxmx entity declaration is refused outright", "[bake][rbxmx]") {
+	// **The billion laughs**, which is what an XML reader has instead of a
+	// decompression bomb: a kilobyte of declarations that expands into gigabytes
+	// while it is being parsed. There is no bound that makes this safe and
+	// nothing a model needs it for, so the declaration itself is the refusal.
+	const std::string bomb =
+		R"xml(<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 ")xml"
+		R"xml(&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">]>)xml" +
+		WithProperties(R"xml(<string name="Name">&lol2;</string>)xml");
+
+	CHECK(Mentions(RefusedXml(bomb), "DOCTYPE"));
+	CHECK(Mentions(RefusedXml(bomb), "ENTITY"));
+
+	// An external entity is the same declaration and the same refusal — and it
+	// is a file read, which is the thing this whole module is arranged never to
+	// do.
+	const std::string external = R"xml(<!DOCTYPE roblox [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>)xml" +
+								 WithProperties(R"xml(<string name="Name">&xxe;</string>)xml");
+	CHECK(Mentions(RefusedXml(external), "DOCTYPE"));
+
+	// **The second lock, and it is the one that has to hold on its own.** No
+	// declaration survives the scanner, so a reference to anything but the five
+	// predefines names something nobody could have declared — refused where it
+	// would have been expanded rather than dropped, because a dropped one makes
+	// a bomb look like a file with a typo in it.
+	CHECK(Mentions(RefusedXml(WithProperties(R"xml(<string name="Name">&xxe;</string>)xml")), "xxe"));
+
+	// And in an attribute, which is the half a content-only check would miss.
+	CHECK(Mentions(RefusedXml(R"xml(<roblox version="4"><Item class="&xxe;"/></roblox>)xml"), "xxe"));
+
+	// The five that are read, and a numeric character reference, which expands
+	// to exactly one character however many of them there are.
+	const RobloxModel model =
+		ReadXml(WithProperties(R"xml(<string name="Name">a &lt;b&gt; &amp; &#99;</string>)xml"));
+	REQUIRE(model.Roots.size() == 1);
+	CHECK(model.Roots[0].Name == "a <b> & c");
+}
+
+TEST_CASE("an rbxmx script's ampersand is source and not a reference", "[bake][rbxmx]") {
+	// **The case that goes red if somebody gives this reader `Svg.cpp`'s
+	// document-wide sweep.** An SVG never unescapes, so a reference there has to
+	// be caught by sweeping the whole file; a model holds CDATA, and CDATA is
+	// text. A real model in this repository's corpus carries the Luau pattern
+	// `"[&;]"` inside a script — a sweep refuses that file while naming an entity
+	// nobody wrote, which is a valid model rejected for a reason its author
+	// cannot act on.
+	//
+	// So the refusal lives at each point a reference is actually read, with CDATA
+	// exempt. `core/Xml.hpp` carries both halves and says what breaks either way
+	// round; this is the half that has to hold here.
+	const RobloxModel model = ReadXml(WithProperties(
+		"<ProtectedString name=\"Source\"><![CDATA[local mask = \"[&;]\"\nlocal both = a and b]]>"
+		"</ProtectedString>"
+	));
+
+	REQUIRE(model.Roots.size() == 1);
+	const RobloxValue *source = Find(model.Roots[0], "Source");
+	REQUIRE(source != nullptr);
+	CHECK(source->Text == "local mask = \"[&;]\"\nlocal both = a and b");
+
+	// And outside a CDATA section the same document is refused, so what is exempt
+	// is CDATA rather than this format.
+	CHECK(Mentions(RefusedXml(WithProperties(R"xml(<string name="Name">a &mask; b</string>)xml")), "mask"));
+}
+
+TEST_CASE("an rbxmx nested past what this reads is refused rather than followed", "[bake][rbxmx]") {
+	// **Unbounded nesting is the third attack, and a parser that recursed would
+	// meet it as a stack overflow with no file named.** Nothing in this reader
+	// recurses: the walk keeps its own stack and the bound is a count on it, so
+	// this is a refusal rather than a crash.
+	constexpr int DEEP = 5000;
+
+	std::string nested = R"xml(<roblox version="4">)xml";
+	for (int level = 0; level < DEEP; level++) {
+		nested += R"xml(<Item class="Folder">)xml";
+	}
+	for (int level = 0; level < DEEP; level++) {
+		nested += "</Item>";
+	}
+	nested += "</roblox>";
+	CHECK(Mentions(RefusedXml(nested), "deeper"));
+
+	// The same bound over elements that are not instances, because a document is
+	// free to nest anything.
+	std::string markup = R"xml(<roblox version="4">)xml";
+	for (int level = 0; level < DEEP; level++) {
+		markup += "<a>";
+	}
+	markup += "</roblox>";
+	CHECK(Mentions(RefusedXml(markup), "deeper"));
+
+	// And inside one property's value, where the bound is tighter still: a
+	// `Rect2D` is the deepest value this format has and it is two levels.
+	std::string value = R"xml(<Vector3 name="Size">)xml";
+	for (int level = 0; level < DEEP; level++) {
+		value += "<a>";
+	}
+	value += "</Vector3>";
+	CHECK(Mentions(RefusedXml(WithProperties(value)), "deeper"));
+}
+
+TEST_CASE("a value this cannot read costs its property and not its file", "[bake][rbxmx]") {
+	// A refused type and a malformed value, each between two properties that
+	// must still arrive. **Both are here rather than in cases of their own**,
+	// because what is being asserted is the same fact twice: an element carries
+	// its own end tag, so nothing after one depends on what was inside it.
+	const RobloxModel model = ReadXml(WithProperties(
+		R"xml(<float name="Reflectance">0.25</float>)xml"
+		R"xml(<token name="Material">256</token>)xml"
+		R"xml(<Ref name="PrimaryPart">RBX7</Ref>)xml"
+		R"xml(<Vector3 name="Size"><X>4</X></Vector3>)xml"
+		R"xml(<Font name="FontFace"><Family>rbxasset://x</Family></Font>)xml"
+		R"xml(<bool name="Anchored">true</bool>)xml"
+	));
+
+	REQUIRE(model.Roots.size() == 1);
+	const RobloxInstance &part = model.Roots[0];
+
+	// An enum and a reference are refusals of principle rather than of effort,
+	// and both are named — the same words the binary reader uses, so one refusal
+	// reads the same whichever container it came out of.
+	CHECK(Find(part, "Material") == nullptr);
+	CHECK(Noted(model, "Part.Material is an Enum"));
+	CHECK(Find(part, "PrimaryPart") == nullptr);
+	CHECK(Noted(model, "Part.PrimaryPart is a reference"));
+	CHECK(Noted(model, "Part.FontFace is a Font"));
+
+	// **A malformed value costs its property here, where the binary reader has
+	// to refuse the file.** A `Vector3` missing two of its three components is
+	// not a `Vector3`, and this says so and carries on.
+	CHECK(Find(part, "Size") == nullptr);
+	CHECK(Noted(model, "Part.Size does not hold a Vector3"));
+
+	// The two either side of all of it.
+	CHECK(Find(part, "Reflectance") != nullptr);
+	CHECK(Find(part, "Anchored") != nullptr);
+}
+
+TEST_CASE("the value types an rbxmx spells differently come back the same", "[bake][rbxmx]") {
+	const RobloxModel model = ReadXml(WithProperties(
+		R"xml(<UDim name="CornerRadius"><S>0.5</S><O>8</O></UDim>)xml"
+		R"xml(<UDim2 name="Position"><XS>0.25</XS><XO>4</XO><YS>0.75</YS><YO>-6</YO></UDim2>)xml"
+		R"xml(<Rect2D name="SliceCenter"><min><X>1</X><Y>2</Y></min><max><X>3</X><Y>4</Y></max></Rect2D>)xml"
+		R"xml(<NumberRange name="Lifetime">1 1.5 </NumberRange>)xml"
+		R"xml(<Vector2 name="SpreadAngle"><X>5</X><Y>6</Y></Vector2>)xml"
+		R"xml(<Color3 name="Color3"><R>0.5</R><G>0.25</G><B>0</B></Color3>)xml"
+		R"xml(<int64 name="SourceAssetId">-1</int64>)xml"
+		R"xml(<double name="Weight">2.5</double>)xml"
+		R"xml(<Content name="Texture"><url>rbxassetid://1</url></Content>)xml"
+		R"xml(<Content name="LinkedSource"><null></null></Content>)xml"
+		R"xml(<BinaryString name="Tags">aGk=</BinaryString>)xml"
+	));
+
+	REQUIRE(model.Roots.size() == 1);
+	const RobloxInstance &part = model.Roots[0];
+
+	const RobloxValue *corner = Find(part, "CornerRadius");
+	REQUIRE(corner != nullptr);
+	CHECK(corner->Kind == RobloxValueKind::UDim);
+	CHECK(corner->UDim.Scale == Approx(0.5f));
+	CHECK(corner->UDim.Offset == Approx(8.0f));
+
+	const RobloxValue *position = Find(part, "Position");
+	REQUIRE(position != nullptr);
+	CHECK(position->Kind == RobloxValueKind::UDim2);
+	CHECK(position->UDim2.X.Scale == Approx(0.25f));
+	CHECK(position->UDim2.Y.Offset == Approx(-6.0f));
+
+	// `min` and `max` are child elements of their own, which is the one value
+	// here that nests twice.
+	const RobloxValue *slice = Find(part, "SliceCenter");
+	REQUIRE(slice != nullptr);
+	CHECK(slice->Kind == RobloxValueKind::Rect);
+	CHECK(slice->Rect.Min.X == Approx(1.0f));
+	CHECK(slice->Rect.Max.Y == Approx(4.0f));
+
+	// Two numbers in the element's own text, with the trailing space Studio
+	// always writes.
+	const RobloxValue *lifetime = Find(part, "Lifetime");
+	REQUIRE(lifetime != nullptr);
+	CHECK(lifetime->Kind == RobloxValueKind::NumberRange);
+	CHECK(lifetime->NumberRange.Minimum == Approx(1.0f));
+	CHECK(lifetime->NumberRange.Maximum == Approx(1.5f));
+
+	const RobloxValue *assetId = Find(part, "SourceAssetId");
+	REQUIRE(assetId != nullptr);
+	CHECK(assetId->Kind == RobloxValueKind::Integer);
+	CHECK(assetId->Integer == -1);
+
+	// **`Content` and `BinaryString` are read rather than refused**, because the
+	// binary container stores both as a plain `String` — refusing them here would
+	// make a `Decal` lose the texture the same model keeps as a `.rbxm`.
+	const RobloxValue *texture = Find(part, "Texture");
+	REQUIRE(texture != nullptr);
+	CHECK(texture->Text == "rbxassetid://1");
+	CHECK(Find(part, "LinkedSource")->Text.empty());
+	CHECK(Find(part, "Tags")->Text == "hi");
+}
+
+TEST_CASE("a shared string is resolved out of the table that follows it", "[bake][rbxmx]") {
+	// **The table is written after every instance that refers to it**, which is
+	// why this container needs a pass of its own to find it — and why a reader
+	// that resolved as it went would hand back the key instead of the value.
+	const RobloxModel model = ReadXml(
+		R"xml(<roblox version="4"><Item class="Part"><Properties>)xml"
+		R"xml(<SharedString name="PhysicalConfigData">a2V5</SharedString>)xml"
+		R"xml(</Properties></Item>)xml"
+		R"xml(<SharedStrings><SharedString md5="a2V5">aGVsbG8=</SharedString></SharedStrings>)xml"
+		R"xml(</roblox>)xml"
+	);
+
+	REQUIRE(model.Roots.size() == 1);
+	const RobloxValue *shared = Find(model.Roots[0], "PhysicalConfigData");
+	REQUIRE(shared != nullptr);
+	CHECK(shared->Kind == RobloxValueKind::Text);
+	CHECK(shared->Text == "hello");
+
+	// The table itself is not an instance, however much it looks like one from
+	// the outside.
+	CHECK(model.Roots.size() == 1);
+}
+
+TEST_CASE("a truncated rbxmx is refused at every length", "[bake][rbxmx]") {
+	// **Every prefix, not one.** The interesting lengths are the ones that land
+	// inside a tag, inside an attribute's quotes and inside a CDATA section, and
+	// a loop finds all three where a hand-picked case finds none of them.
+	for (size_t length = 0; length < FIXTURE_RBXMX.size() - 1; length++) {
+		RobloxModel model;
+		std::string failure;
+		CHECK_FALSE(ReadRobloxModelXml(Bytes(FIXTURE_RBXMX.substr(0, length)), model, failure));
+		CHECK(model.Roots.empty());
+		CHECK_FALSE(failure.empty());
+	}
+}
+
+TEST_CASE("each container refuses the other by name", "[bake][rbxmx]") {
+	// A renamed file is how somebody actually arrives here, so each reader names
+	// the container it was actually given rather than saying the file is broken.
+	const Blob binary = Fixture();
+
+	RobloxModel model;
+	std::string failure;
+	CHECK_FALSE(ReadRobloxModelXml(Bytes(binary.Bytes), model, failure));
+	CHECK(Mentions(failure, "binary .rbxm container"));
+
+	CHECK_FALSE(ReadRobloxModel(Bytes(FIXTURE_RBXMX), model, failure));
+	CHECK(Mentions(failure, "wrong signature"));
+}
+
+TEST_CASE("an rbxmx this cannot trust is refused rather than half-read", "[bake][rbxmx]") {
+	// A version this does not know, refused rather than guessed — the same
+	// answer the binary reader gives to anything but version 0.
+	CHECK(Mentions(RefusedXml(R"xml(<roblox version="3"><Item class="Part"/></roblox>)xml"), "version"));
+	CHECK(Mentions(RefusedXml(R"xml(<roblox><Item class="Part"/></roblox>)xml"), "version"));
+
+	// Something that is not this format at all.
+	CHECK(Mentions(RefusedXml(R"xml(<svg width="4" height="4"/>)xml"), "not <roblox>"));
+
+	// A closing tag naming something other than what is open, which is where a
+	// scanner that only counted depth would build a tree out of the wrong
+	// nesting.
+	CHECK(Mentions(
+		RefusedXml(R"xml(<roblox version="4"><Item class="Part"></Properties></roblox>)xml"), "closes"
+	));
+
+	// An instance with no class, which is a row of the file naming nothing.
+	CHECK(Mentions(RefusedXml(R"xml(<roblox version="4"><Item/></roblox>)xml"), "no class"));
+
+	// An unquoted attribute value, which is where a scanner that stopped at the
+	// first space would read the rest of the tag as an attribute.
+	CHECK(Mentions(RefusedXml(R"xml(<roblox version=4/>)xml"), "unquoted"));
+}
+
+TEST_CASE("an rbxmx may hold any number of instances at its top level", "[bake][rbxmx]") {
+	// **The reader's answer and the studio's are different on purpose.** The
+	// container allows any number and Rojo's file table maps a model file to
+	// one, so which count is acceptable is a question for whoever asked rather
+	// than for the reader — exactly as it is for the binary container.
+	const RobloxModel model = ReadXml(
+		R"xml(<roblox version="4"><Item class="Model"><Properties>)xml"
+		R"xml(<string name="Name">First</string></Properties></Item>)xml"
+		R"xml(<Item class="Model"><Properties><string name="Name">Second</string>)xml"
+		R"xml(</Properties></Item></roblox>)xml"
+	);
+
+	REQUIRE(model.Roots.size() == 2);
+	CHECK(model.Roots[0].Name == "First");
+	CHECK(model.Roots[1].Name == "Second");
+
+	// An empty container is empty rather than an error. What to do about a model
+	// file with nothing in it is the caller's question too.
+	const RobloxModel empty = ReadXml(R"xml(<roblox version="4"/>)xml");
+	CHECK(empty.Roots.empty());
 }

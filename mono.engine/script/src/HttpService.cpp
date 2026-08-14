@@ -792,9 +792,10 @@ namespace engine::script {
 		// as a UUID for anything that reads it as one. That is a statement about
 		// the *shape*, not a claim about the entropy.
 		//
-		// Four draws of thirty-two bits each. About 190 nanoseconds, since every
-		// draw is a full SHA-256 compression — fine for naming a thing, wrong
-		// inside a per-tick loop, and `core/Random.hpp` says why.
+		// Four draws of thirty-two bits each, and about eight nanoseconds for the
+		// set: `core::Random` is SplitMix64's finaliser, which `core/Random.hpp`
+		// measures at two nanoseconds a call. There is no per-tick budget to
+		// respect here.
 		void GenerateGuid(ScriptCall &call) {
 			// **Braces by default**, which is Roblox's default and the surprising
 			// half of its signature. A script that passes nothing gets

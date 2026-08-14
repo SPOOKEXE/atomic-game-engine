@@ -410,6 +410,69 @@ if(MONO_BUILD_CLIENT)
 	add_subdirectory("${MONO_VENDOR}/shaderc" EXCLUDE_FROM_ALL)
 endif()
 
+# --- SPIRV-Cross -------------------------------------------------------------
+# SPIR-V to MSL. The other end of shaderc: glslc produces SPIR-V and SDL's Metal
+# backend takes MSL or a metallib and never SPIR-V, so this is what stands
+# between the two on that platform. `docs/DEFERRED.md` D00001 is the item.
+#
+# Client-gated, beside shaderc and for its reason rather than by analogy: the
+# only two consumers are `mono.tools/shadercross`, which translates the built-in
+# shaders during the build, and `render::ShaderCompiler`, which translates
+# runtime-authored ones. `render` is client-tier and a server preset configures
+# neither, so a headless build pays nothing.
+#
+# **Three of its eight libraries, and the omissions are the point.** `core` is
+# the parser, `glsl` is the emitter every other backend derives from, `msl` is
+# the one thing here that is wanted. HLSL, the deprecated C++ backend, the JSON
+# reflection backend, the C API and the CLI are all off — this engine authors
+# GLSL and reads SPIR-V, and a target nothing links is build time spent on a
+# claim we do not make.
+if(MONO_BUILD_CLIENT)
+	if(NOT EXISTS "${MONO_VENDOR}/spirv-cross/CMakeLists.txt")
+		message(FATAL_ERROR "mono.vendor/spirv-cross is missing. Run `just setup`.")
+	endif()
+
+	set(SPIRV_CROSS_STATIC        ON  CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_SHARED        OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_CLI           OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_TESTS  OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_GLSL   ON  CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_MSL    ON  CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_HLSL   OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_CPP    OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_REFLECT OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_UTIL   OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_C_API  OFF CACHE BOOL "" FORCE)
+	# Unconditional install rules, so they are skipped as well as excluded from
+	# `all`. Upstream's macro also calls `export(TARGETS ...)`, which writes a
+	# stray config file into the build tree when it is left on.
+	set(SPIRV_CROSS_SKIP_INSTALL  ON  CACHE BOOL "" FORCE)
+	# Their code, our compiler. Same rule as shaderc above: a new warning in a
+	# future GCC must not turn into a failed engine build.
+	set(SPIRV_CROSS_WERROR        OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_MISC_WARNINGS OFF CACHE BOOL "" FORCE)
+
+	add_subdirectory("${MONO_VENDOR}/spirv-cross" EXCLUDE_FROM_ALL)
+
+	# One name for the three, so a consumer links what the job needs rather than
+	# knowing which of upstream's libraries the emitter lives in.
+	add_library(vendor_spirv_cross INTERFACE)
+	add_library(Vendor::spirv-cross ALIAS vendor_spirv_cross)
+	target_link_libraries(vendor_spirv_cross INTERFACE spirv-cross-msl spirv-cross-glsl spirv-cross-core)
+
+	# SYSTEM, for the reason `mono.vendor/AGENTS.md` gives: the `ci` preset builds
+	# first-party code with -Werror and a warning in a vendored header must never
+	# be able to fail our build. Upstream declares its include directory PUBLIC
+	# and not SYSTEM, so it is re-declared here rather than wrapped —
+	# `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` is what CMake 3.24 has; the `SYSTEM`
+	# target property is 3.25 and the root file asks for 3.24.
+	foreach(spirv_cross_target IN ITEMS spirv-cross-core spirv-cross-glsl spirv-cross-msl)
+		get_target_property(spirv_cross_includes ${spirv_cross_target} INTERFACE_INCLUDE_DIRECTORIES)
+		set_property(TARGET ${spirv_cross_target}
+			APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${spirv_cross_includes})
+	endforeach()
+endif()
+
 # --- Crypto++ ---------------------------------------------------------------
 # Two submodules, and the second one is the build system. `.gitmodules` has the
 # long form of why; the short form is that weidai11/cryptopp ships a GNUmakefile

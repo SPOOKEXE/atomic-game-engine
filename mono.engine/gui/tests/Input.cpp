@@ -4,6 +4,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -30,6 +31,13 @@ namespace {
 
 		explicit World(std::string_view name) : Data(name) {
 			RegisterGuiClasses();
+
+			// **The `GuiService`, because that is where the keyboard focus
+			// lives.** A world without one routes the pointer exactly as it did
+			// before focus existed and takes none at all — `gui::Focus`'s stated
+			// answer — so a fixture that skipped this would pass every focus
+			// case below by never focusing anything.
+			InstallGuiServices(Data);
 
 			// **A bare `Instance`, because `StarterGui` is not a `gui` class.**
 			// It is `scene`'s service and this module may not link `scene`; what
@@ -448,4 +456,126 @@ TEST_CASE("a rotated element is clickable where it is drawn", "[gui][input]") {
 	// allowed to stand in for either — a test that only checked the middle would
 	// pass against a hit test that ignored rotation entirely.
 	CHECK(Pick(world.Data, world.List.Commands(), Vector2{200.0f, 200.0f}) == button);
+}
+
+// --- the keyboard focus -----------------------------------------------------
+//
+// **What the router decides, where `gui/tests/Services.cpp` covers where the
+// answer rests.** Both halves are needed: the storage cases would pass against a
+// router that never called `Focus`, and these would pass against a `Focus` that
+// stored nothing if they only looked at the events.
+
+namespace {
+	// A `TextBox` with a rectangle, which is what a pointer can be aimed at.
+	Entity MakeTextBox(World &world, Entity parent, float x, float y) {
+		const Entity made = world.Make("TextBox", parent);
+		world.Box(made, x, y, 100.0f, 40.0f);
+		return made;
+	}
+}
+
+TEST_CASE("a press takes the keyboard and a press elsewhere gives it back", "[gui][input]") {
+	World world("gui_input.focus");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = MakeTextBox(world, screen, 0.0f, 0.0f);
+	const Entity button = world.Make("TextButton", screen);
+	world.Box(button, 0.0f, 100.0f, 100.0f, 40.0f);
+
+	// Arriving over the box takes nothing: a hover is not a decision about
+	// where typing goes.
+	std::vector<GuiEvent> events = world.Move(50.0f, 20.0f);
+	CHECK_FALSE(world.Has(events, EventKind::Focused, box));
+	CHECK(FocusedTextBox(world.Data) == NULL_ENTITY);
+
+	events = world.Move(50.0f, 20.0f, true);
+	CHECK(world.Has(events, EventKind::InputBegan, box));
+	CHECK(world.Has(events, EventKind::Focused, box));
+	CHECK(FocusedTextBox(world.Data) == box);
+
+	// **The release does not give it back**, which is what makes dragging a
+	// selection out of a box and letting go somewhere else keep it focused.
+	events = world.Move(50.0f, 120.0f, false);
+	CHECK_FALSE(world.Has(events, EventKind::FocusReleased, box));
+	CHECK(FocusedTextBox(world.Data) == box);
+
+	// A press on the button does.
+	events = world.Move(50.0f, 120.0f, true);
+	CHECK(world.Has(events, EventKind::FocusReleased, box));
+	CHECK_FALSE(world.Has(events, EventKind::Focused, button));
+	CHECK(FocusedTextBox(world.Data) == NULL_ENTITY);
+}
+
+TEST_CASE("a press that lands on nothing releases the keyboard", "[gui][input]") {
+	// **Roblox's answer, and the one a person expects**: clicking the background
+	// is how anybody stops typing. Keeping focus until some *other* box took it
+	// would leave a game with no way to give the keyboard back to itself without
+	// adding a widget for the purpose.
+	World world("gui_input.focus_background");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = MakeTextBox(world, screen, 0.0f, 0.0f);
+
+	world.Move(50.0f, 20.0f, true);
+	REQUIRE(FocusedTextBox(world.Data) == box);
+	world.Move(50.0f, 20.0f, false);
+
+	const std::vector<GuiEvent> events = world.Move(600.0f, 500.0f, true);
+	CHECK(world.Has(events, EventKind::FocusReleased, box));
+	CHECK(FocusedTextBox(world.Data) == NULL_ENTITY);
+}
+
+TEST_CASE("the focus moves between two boxes as one pair of events", "[gui][input]") {
+	// **Released before captured**, for the reason `MouseLeave` precedes
+	// `MouseEnter`: a handler putting state back runs before the one reacting to
+	// the arrival. A world in which two boxes both read as focused never exists.
+	World world("gui_input.focus_swap");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity first = MakeTextBox(world, screen, 0.0f, 0.0f);
+	const Entity second = MakeTextBox(world, screen, 0.0f, 100.0f);
+
+	world.Move(50.0f, 20.0f, true);
+	world.Move(50.0f, 20.0f, false);
+	REQUIRE(FocusedTextBox(world.Data) == first);
+
+	const std::vector<GuiEvent> events = world.Move(50.0f, 120.0f, true);
+	CHECK(FocusedTextBox(world.Data) == second);
+
+	size_t released = events.size();
+	size_t focused = events.size();
+	for (size_t index = 0; index < events.size(); index++) {
+		if (events[index].Kind == EventKind::FocusReleased && events[index].Instance == first) {
+			released = index;
+		}
+		if (events[index].Kind == EventKind::Focused && events[index].Instance == second) {
+			focused = index;
+		}
+	}
+
+	REQUIRE(released < events.size());
+	REQUIRE(focused < events.size());
+	CHECK(released < focused);
+}
+
+TEST_CASE("a destroyed focused box releases nothing and blocks nothing", "[gui][input]") {
+	// **The dangling case from the router's side.** `FocusReleased` names an
+	// element and a dead element has nothing to fire at — `Router::Forget`'s
+	// argument — so the event is not emitted; what must still be true is that the
+	// next press focuses, which a stale handle compared against itself would
+	// refuse.
+	World world("gui_input.focus_destroyed");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = MakeTextBox(world, screen, 0.0f, 0.0f);
+	const Entity other = MakeTextBox(world, screen, 0.0f, 100.0f);
+
+	world.Move(50.0f, 20.0f, true);
+	REQUIRE(FocusedTextBox(world.Data) == box);
+	world.Move(50.0f, 20.0f, false);
+
+	world.Data.DestroyInstance(box);
+	CHECK(FocusedTextBox(world.Data) == NULL_ENTITY);
+
+	const std::vector<GuiEvent> events = world.Move(50.0f, 120.0f, true);
+	for (const GuiEvent &event : events) {
+		CHECK(event.Kind != EventKind::FocusReleased);
+	}
+	CHECK(FocusedTextBox(world.Data) == other);
 }

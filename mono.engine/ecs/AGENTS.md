@@ -112,6 +112,22 @@ each program — makes agreement a discipline repeated in every program and ever
 test, and the failure mode of forgetting one is a receiver decoding ten bytes as
 twenty-eight.
 
+**A component holding an index into any table this module keeps needs a written
+pair, and there are two of them.** `Components::Register<T>`'s generated
+serialisation is the object representation, so a component holding a `core::Name`
+writes an interning counter and one holding a `ClassId` writes a registration
+index — both first-seen order within one process, both meaningless in a file or
+on a wire. `InstanceName` has had a written pair since v0.8 for the first reason;
+`InstanceClass` got one at v0.15 for the second, and writes the class's
+registered name instead. Nothing makes two processes number their classes the
+same way: `Classes::Register` runs wherever the code needing a tree runs, and
+`gui`'s tree is registered lazily on first use.
+
+`Hierarchy` is the one that genuinely may use the generated form, and the reason
+is not "it is only handles" — it is that `Store::Load` restores the directory
+*exactly*, index and generation alike, so an `Entity` inside a component still
+names the same row. Nothing restores the class table that way.
+
 ## There is no escape hatch out of `Store`, and there used to be
 
 `Store::Native()` was v0.1's debt: flecs was the backing store, wrapping all of

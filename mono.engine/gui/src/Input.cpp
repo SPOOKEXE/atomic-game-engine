@@ -4,6 +4,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -74,8 +75,16 @@ namespace engine::gui {
 		// field the button constructor sets. Setting the field instead would
 		// let a script clear it and produce a button that cannot be clicked
 		// with nothing in the tree explaining why.
+		//
+		// **A `TextBox` is the second class that does, and it had to be.** A
+		// press is the only gesture that decides where typing goes, so a box the
+		// pick walked *past* could never be focused — clicking one landed on
+		// whatever was behind it, which is the state this engine shipped in and
+		// which reads as a text field that ignores the mouse. `Entry` is the
+		// test for the same reason `Element` is the `GuiObject` test in
+		// `ElementsAt`: the component is on that class and on no other.
 		bool TakesInput(const Store &store, Entity instance) {
-			if (store.IsA(instance, ButtonClass())) {
+			if (store.IsA(instance, ButtonClass()) || store.Get<Entry>(instance) != nullptr) {
 				return true;
 			}
 			const Element *element = store.Get<Element>(instance);
@@ -208,8 +217,7 @@ namespace engine::gui {
 		return found.size();
 	}
 
-	std::span<const GuiEvent>
-	Router::Update(const Store &store, const DrawList &list, const Pointer &pointer) {
+	std::span<const GuiEvent> Router::Update(Store &store, const DrawList &list, const Pointer &pointer) {
 		ENGINE_PROFILE_CAT("gui route", engine::core::ProfileCategory::ECS);
 
 		Events.clear();
@@ -251,6 +259,30 @@ namespace engine::gui {
 		if (pointer.Down && !WasDown) {
 			Holding = found;
 			emit(EventKind::InputBegan, found);
+
+			// **A press that landed on nothing releases the focus, which is
+			// Roblox's answer and the one a person expects**: clicking the
+			// background is how anybody stops typing. The alternative — keeping
+			// focus until some *other* box takes it — leaves a game with no way
+			// to give the keyboard back to itself without adding a widget for the
+			// purpose.
+			//
+			// **Only a press moves it.** A hover does not take the keyboard and
+			// a release does not give it back, which is what makes dragging a
+			// selection out of a box and letting go somewhere else keep the box
+			// focused — the same interaction `InputEnded`'s rule protects one
+			// paragraph up.
+			//
+			// **After `InputBegan`, because the press is the cause and the focus
+			// change is what it did**, and release before capture for the reason
+			// `MouseLeave` precedes `MouseEnter`: a handler putting state back
+			// runs before the one reacting to the arrival.
+			const Entity had = FocusedTextBox(store);
+			const Entity wanted = store.Get<Entry>(found) != nullptr ? found : NULL_ENTITY;
+			if (wanted != had && Focus(store, wanted)) {
+				emit(EventKind::FocusReleased, had);
+				emit(EventKind::Focused, wanted);
+			}
 		} else if (!pointer.Down && WasDown) {
 			// **`InputEnded` goes to where the press began, not to where the
 			// release happened.** That is what makes dragging off a button and

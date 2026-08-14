@@ -801,15 +801,25 @@ declare extern type UserInputServiceType with
 	-- Roblox answers `None`. There is no such member here for `InputSource`'s
 	-- reason: every member is one something in this engine can produce.
 	function GetLastInputType(self): Enum_UserInputType
+
+	-- The `TextBox` a person is typing into, or nil.
+	--
+	-- **A lookup rather than a tally of the focus signals**, because
+	-- `gui::Focus` is the one door a focus change goes through and
+	-- `GuiServiceState::FocusedTextBox` is where the answer rests. Nil for a
+	-- world with no `GuiService`, and nil for a box destroyed while focused.
+	function GetFocusedTextBox(self): Instance?
 end
 
 -- **What `UserInputService` deliberately does not have**, which is the half a
 -- migrating author needs most. `script/src/UserInputService.cpp` names each and
 -- what closing it would take; the short version is that there is no gamepad, no
--- touch surface, no keyboard focus in `gui`, no cursor image in `render` and no
--- keyboard-layout query below L12 — so `GetConnectedGamepads`, `GetGamepadState`,
--- the six touch signals, `GetFocusedTextBox`, `MouseIcon` and
--- `GetStringForKeyCode` are absent rather than present and useless.
+-- touch surface, no cursor image in `render` and no keyboard-layout query below
+-- L12 — so `GetConnectedGamepads`, `GetGamepadState`, the six touch signals,
+-- `MouseIcon` and `GetStringForKeyCode` are absent rather than present and
+-- useless. `TextBoxFocused` and its twin are absent for a different reason: the
+-- fact exists and reaches a script as `textBox.Focused`, and a world-subject row
+-- firing about an instance would put the two input pumps in each other's work.
 
 declare UserInputService: UserInputServiceType
 
@@ -935,6 +945,32 @@ end
 declare extern type PointerSignal with
 	function Connect(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
 	function Once(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
+end
+
+-- `textBox.Focused`, which takes no arguments.
+--
+-- **Its own name rather than `GuiSignal`**, for `TweenCompletedSignal`'s
+-- reason: the two are structurally identical and a name is what a reader gets
+-- out of a declaration file. This one is about the keyboard and the other three
+-- are about the pointer.
+declare extern type FocusSignal with
+	function Connect(self, handler: () -> ()): RBXScriptConnection
+	function Once(self, handler: () -> ()): RBXScriptConnection
+end
+
+-- `textBox.FocusLost`, which takes `enterPressed` and nothing after it.
+--
+-- **One of Roblox's two arguments.** The second is the `InputObject` that took
+-- the focus away, and the router deals in `gui::GuiEvent` — there is no report
+-- to hand over that would not be invented at the call site, which is the trade
+-- `GuiSignal` above is on.
+--
+-- `enterPressed` is true when Return released the box and false when a press
+-- somewhere else did, which is how a handler tells a submitted field from an
+-- abandoned one.
+declare extern type FocusLostSignal with
+	function Connect(self, handler: (enterPressed: boolean) -> ()): RBXScriptConnection
+	function Once(self, handler: (enterPressed: boolean) -> ()): RBXScriptConnection
 end
 
 -- --- queries ---------------------------------------------------------------
@@ -1981,6 +2017,15 @@ declare task: {
 				out << "\tMouseLeave: PointerSignal\n";
 				out << "\tMouseMoved: PointerSignal\n";
 
+				// **A `TextBox`'s pair, on `Instance` for the reason the six
+				// above it are.** Only a box can take the keyboard —
+				// `gui::Focus` refuses anything with no `Entry` — so a
+				// connection made anywhere else is inert by construction, and
+				// declaring them on `TextBox` alone would refuse code the engine
+				// accepts.
+				out << "\tFocused: FocusSignal\n";
+				out << "\tFocusLost: FocusLostSignal\n";
+
 				// **The interface surface, declared on `Instance` for the reason
 				// every method above it is.** Which instance each is *for* is
 				// Roblox's answer and not the run time's: `GetGuiObjectsAtPosition`
@@ -2369,15 +2414,23 @@ declare interface UserInputService {
 	// `Enum.UserInputType.Keyboard` on a world nobody has touched, where Roblox
 	// answers `None` — there is no such member here.
 	GetLastInputType(): Enum.UserInputType;
+
+	// The `TextBox` a person is typing into, or null. A lookup rather than a
+	// tally of the focus signals: `gui::Focus` is the one door a focus change
+	// goes through and `GuiServiceState::FocusedTextBox` is where it rests.
+	GetFocusedTextBox(): Instance | null;
 }
 
 // What `UserInputService` deliberately does not have, and it is the half a
-// migrating author needs most: no gamepad, no touch surface, no keyboard focus
-// in `gui`, no cursor image in `render`, no keyboard-layout query below L12. So
-// `GetConnectedGamepads`, `GetGamepadState`, the six touch signals,
-// `GetFocusedTextBox`, `MouseIcon` and `GetStringForKeyCode` are absent rather
-// than present and useless. `script/src/UserInputService.cpp` names each one and
-// what closing it would take.
+// migrating author needs most: no gamepad, no touch surface, no cursor image in
+// `render`, no keyboard-layout query below L12. So `GetConnectedGamepads`,
+// `GetGamepadState`, the six touch signals, `MouseIcon` and
+// `GetStringForKeyCode` are absent rather than present and useless.
+// `TextBoxFocused` and its twin are absent for a different reason: the fact
+// exists and reaches a script as `textBox.Focused`, and a world-subject row
+// firing about an instance would put the two input pumps in each other's work.
+// `script/src/UserInputService.cpp` names each one and what closing it would
+// take.
 
 // What a world decides about how it is heard. See the Luau half for the eleven
 // Roblox members that are absent and what each would need first.
@@ -2438,6 +2491,24 @@ declare interface PointerSignal {
 	Connect(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Once(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Equals(other: PointerSignal): boolean;
+}
+
+// `textBox.Focused`. Its own name rather than `GuiSignal` for the reason the
+// Luau half gives: the two are structurally identical and this one is about the
+// keyboard.
+declare interface FocusSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: FocusSignal): boolean;
+}
+
+// `textBox.FocusLost`, with one of Roblox's two arguments. See the Luau half for
+// why the `InputObject` is not the second, and for what `enterPressed`
+// distinguishes.
+declare interface FocusLostSignal {
+	Connect(handler: (enterPressed: boolean) => void): RBXScriptConnection;
+	Once(handler: (enterPressed: boolean) => void): RBXScriptConnection;
+	Equals(other: FocusLostSignal): boolean;
 }
 
 // --- queries ---------------------------------------------------------------
@@ -3212,6 +3283,11 @@ declare const task: {
 				out << "\treadonly MouseEnter: PointerSignal;\n";
 				out << "\treadonly MouseLeave: PointerSignal;\n";
 				out << "\treadonly MouseMoved: PointerSignal;\n";
+
+				// A `TextBox`'s pair, on `Instance` and inert anywhere else —
+				// the Luau half says why.
+				out << "\treadonly Focused: FocusSignal;\n";
+				out << "\treadonly FocusLost: FocusLostSignal;\n";
 
 				// The interface surface, matching the Luau half — including the
 				// `UDim2 | Vector3` goal, which is the target's own property type

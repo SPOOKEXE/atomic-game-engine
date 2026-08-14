@@ -6,6 +6,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
@@ -181,6 +182,22 @@ namespace engine::examples {
 		// than behind a check: a world that came out of a file already has its
 		// nine roots and this leaves them alone.
 		scene::InstallServices(store);
+
+		// **And `gui`'s, which is a second call because it has to be.** `scene`
+		// may not link `gui` — `gui/AGENTS.md` refuses the edge in both
+		// directions — so `GuiService` cannot come from the line above it and a
+		// host calls both. This loader is that host for every `--script` world.
+		//
+		// **Nothing in the shipped tree called this, and the symptom was the
+		// keyboard.** `gui::Focus` refuses a world with no `GuiService` because
+		// there is nowhere for the fact to rest, so clicking a `TextBox` in a
+		// real client took no focus, `GetFocusedTextBox` answered nil forever and
+		// every character typed went nowhere. The router was right and the
+		// service it writes to had never been installed — the same shape as the
+		// router that was never `Update`d one version earlier.
+		//
+		// Idempotent, for the reason the call above it is.
+		gui::InstallGuiServices(store);
 
 		// **The shipped Luau libraries, mounted before anything runs.**
 		//

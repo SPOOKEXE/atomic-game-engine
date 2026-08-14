@@ -213,15 +213,23 @@ declare interface UserInputService {
 	// `Enum.UserInputType.Keyboard` on a world nobody has touched, where Roblox
 	// answers `None` — there is no such member here.
 	GetLastInputType(): Enum.UserInputType;
+
+	// The `TextBox` a person is typing into, or null. A lookup rather than a
+	// tally of the focus signals: `gui::Focus` is the one door a focus change
+	// goes through and `GuiServiceState::FocusedTextBox` is where it rests.
+	GetFocusedTextBox(): Instance | null;
 }
 
 // What `UserInputService` deliberately does not have, and it is the half a
-// migrating author needs most: no gamepad, no touch surface, no keyboard focus
-// in `gui`, no cursor image in `render`, no keyboard-layout query below L12. So
-// `GetConnectedGamepads`, `GetGamepadState`, the six touch signals,
-// `GetFocusedTextBox`, `MouseIcon` and `GetStringForKeyCode` are absent rather
-// than present and useless. `script/src/UserInputService.cpp` names each one and
-// what closing it would take.
+// migrating author needs most: no gamepad, no touch surface, no cursor image in
+// `render`, no keyboard-layout query below L12. So `GetConnectedGamepads`,
+// `GetGamepadState`, the six touch signals, `MouseIcon` and
+// `GetStringForKeyCode` are absent rather than present and useless.
+// `TextBoxFocused` and its twin are absent for a different reason: the fact
+// exists and reaches a script as `textBox.Focused`, and a world-subject row
+// firing about an instance would put the two input pumps in each other's work.
+// `script/src/UserInputService.cpp` names each one and what closing it would
+// take.
 
 // What a world decides about how it is heard. See the Luau half for the eleven
 // Roblox members that are absent and what each would need first.
@@ -282,6 +290,24 @@ declare interface PointerSignal {
 	Connect(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Once(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Equals(other: PointerSignal): boolean;
+}
+
+// `textBox.Focused`. Its own name rather than `GuiSignal` for the reason the
+// Luau half gives: the two are structurally identical and this one is about the
+// keyboard.
+declare interface FocusSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: FocusSignal): boolean;
+}
+
+// `textBox.FocusLost`, with one of Roblox's two arguments. See the Luau half for
+// why the `InputObject` is not the second, and for what `enterPressed`
+// distinguishes.
+declare interface FocusLostSignal {
+	Connect(handler: (enterPressed: boolean) => void): RBXScriptConnection;
+	Once(handler: (enterPressed: boolean) => void): RBXScriptConnection;
+	Equals(other: FocusLostSignal): boolean;
 }
 
 // --- queries ---------------------------------------------------------------
@@ -858,6 +884,8 @@ declare interface Instance {
 	readonly MouseEnter: PointerSignal;
 	readonly MouseLeave: PointerSignal;
 	readonly MouseMoved: PointerSignal;
+	readonly Focused: FocusSignal;
+	readonly FocusLost: FocusLostSignal;
 	GetGuiObjectsAtPosition(x: number, y: number): Instance[];
 	TweenPosition(endPosition: UDim2 | Vector3, easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, time?: number, override?: boolean, callback?: () => void): boolean;
 	TweenSize(endSize: UDim2 | Vector3, easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, time?: number, override?: boolean, callback?: () => void): boolean;
@@ -902,6 +930,10 @@ declare interface SpawnLocation extends Part {
 }
 
 declare interface Model extends PVInstance {
+}
+
+declare interface Tool extends Model {
+	Grip: CFrame;
 }
 
 declare interface MeshPart extends BasePart {
@@ -1830,6 +1862,7 @@ declare const Instance: {
 		(className: "Part", parent?: Instance): Part;
 		(className: "SpawnLocation", parent?: Instance): SpawnLocation;
 		(className: "Model", parent?: Instance): Model;
+		(className: "Tool", parent?: Instance): Tool;
 		(className: "MeshPart", parent?: Instance): MeshPart;
 		(className: "Camera", parent?: Instance): Camera;
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;

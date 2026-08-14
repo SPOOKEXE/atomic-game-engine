@@ -1045,6 +1045,19 @@ namespace engine::script {
 			case gui::EventKind::Activated:
 				note(FireJsSignal(context, SignalKind::GuiActivated, event.Instance, 0, nullptr));
 				break;
+
+			case gui::EventKind::Focused:
+				note(FireJsSignal(context, SignalKind::GuiFocused, event.Instance, 0, nullptr));
+				break;
+
+			case gui::EventKind::FocusReleased: {
+				// The Luau pump's `enterPressed`, off the event for the reason
+				// `SignalKind::GuiFocusLost` gives.
+				JSValue entered = JS_NewBool(context, event.Entered ? 1 : 0);
+				note(FireJsSignal(context, SignalKind::GuiFocusLost, event.Instance, 1, &entered));
+				JS_FreeValue(context, entered);
+				break;
+			}
 			}
 		}
 
@@ -1170,6 +1183,12 @@ namespace engine::script {
 			JS_CGETSET_DEF("MouseEnter", InstanceTreeSignal<SignalKind::GuiMouseEnter>, nullptr),
 			JS_CGETSET_DEF("MouseLeave", InstanceTreeSignal<SignalKind::GuiMouseLeave>, nullptr),
 			JS_CGETSET_DEF("MouseMoved", InstanceTreeSignal<SignalKind::GuiMouseMoved>, nullptr),
+
+			// A `TextBox`'s pair. On every instance and inert anywhere else, for
+			// the reason the six above are — `LuauInstances.cpp` says the same
+			// from the other VM.
+			JS_CGETSET_DEF("Focused", InstanceTreeSignal<SignalKind::GuiFocused>, nullptr),
+			JS_CGETSET_DEF("FocusLost", InstanceTreeSignal<SignalKind::GuiFocusLost>, nullptr),
 		};
 		// **`std::size`, not a number somebody has to remember.** This read
 		// `10` while the list held sixteen, so the last six — including

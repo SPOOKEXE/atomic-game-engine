@@ -1,37 +1,40 @@
 #include <engine/core/Random.hpp>
 
-#include <cryptopp/sha.h>
-
 namespace engine::core {
 
+	namespace {
+		// SplitMix64's finaliser, whole and unmodified.
+		//
+		// From Steele, Lea and Flood, *Fast Splittable Pseudorandom Number
+		// Generators* (OOPSLA 2014), where it is `mix64variant13`; the spelling
+		// below is Vigna's public-domain `splitmix64.c` and it is what Java's
+		// `SplittableRandom` draws through. Three constants and four shifts, all
+		// of them published — which is the same property SHA-256 was here for
+		// and the whole reason a hand-rolled mixer was not acceptable.
+		//
+		// The golden-gamma addition is part of the algorithm, not decoration.
+		// Without it the finaliser maps zero to zero, and `Bits(0, 0)` — the
+		// most-called pair in the engine — would be zero rather than a number.
+		uint32_t SplitMix64(uint64_t state) {
+			uint64_t z = state + 0x9E3779B97F4A7C15ull;
+			z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+			z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+			z = z ^ (z >> 31);
+			return static_cast<uint32_t>(z >> 32);
+		}
+	}
+
 	uint32_t Random::Bits(uint32_t index, uint32_t salt) {
-		// Big-endian, written a byte at a time. The value must not depend on
-		// the host's byte order — a server on one machine and a client on
-		// another have to agree, and memcpy of a uint32_t would make them
-		// disagree on a big-endian build without ever failing to compile.
-		const CryptoPP::byte input[8] = {
-			static_cast<CryptoPP::byte>(index >> 24),
-			static_cast<CryptoPP::byte>(index >> 16),
-			static_cast<CryptoPP::byte>(index >> 8),
-			static_cast<CryptoPP::byte>(index),
-			static_cast<CryptoPP::byte>(salt >> 24),
-			static_cast<CryptoPP::byte>(salt >> 16),
-			static_cast<CryptoPP::byte>(salt >> 8),
-			static_cast<CryptoPP::byte>(salt),
-		};
-
-		CryptoPP::byte digest[CryptoPP::SHA256::DIGESTSIZE];
-
-		// One block, one compression. CalculateDigest does Update and Final
-		// together and restarts the object, so constructing it per call costs
-		// eight word stores and nothing else. On any CPU with SHA-NI — which
-		// Crypto++ selects at runtime — the compression itself is a handful of
-		// instructions.
-		CryptoPP::SHA256 hash;
-		hash.CalculateDigest(digest, input, sizeof(input));
-
-		return static_cast<uint32_t>(digest[0]) << 24 | static_cast<uint32_t>(digest[1]) << 16 |
-			   static_cast<uint32_t>(digest[2]) << 8 | static_cast<uint32_t>(digest[3]);
+		// **Arithmetic all the way down, so byte order cannot reach the result.**
+		// The SHA-256 this replaced had to assemble its input a byte at a time
+		// and say why in a comment, because a `memcpy` of two `uint32_t` would
+		// have disagreed on a big-endian build without ever failing to compile.
+		// A shift and an or have one answer on every machine.
+		//
+		// The pair is packed rather than mixed together first: the finaliser is
+		// a bijection on 64 bits, so distinct `(index, salt)` pairs cannot
+		// collide before the truncation to 32.
+		return SplitMix64(static_cast<uint64_t>(salt) << 32 | static_cast<uint64_t>(index));
 	}
 
 	float Random::Float(uint32_t index, uint32_t salt) {
@@ -39,7 +42,8 @@ namespace engine::core {
 		// representable in a float and the scale is a power of two, so this
 		// conversion rounds nowhere and gives the same answer on every
 		// implementation. Dividing the full 32 bits by 0xFFFFFFFF, as the
-		// mixer this replaced did, both rounds and can return exactly 1.0f.
+		// copy-pasted mixer this type replaced did, both rounds and can return
+		// exactly 1.0f.
 		return static_cast<float>(Bits(index, salt) >> 8) * 0x1p-24f;
 	}
 

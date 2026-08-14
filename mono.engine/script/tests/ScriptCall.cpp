@@ -1060,7 +1060,7 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 		 [](Language language) {
 			 return Say(language, Call(language, "HttpService", "GenerateGUID(false)"));
 		 },
-		 "EA90FF9A-9A3E-498F-B626-EA711F6C37F4"},
+		 "C03C1E18-C515-4449-AA47-612C9B59D267"},
 
 		// **An empty table is `{}` and not `[]` in both**, which is `Codec.hpp`'s
 		// choice rather than JSON's: Lua cannot tell an empty list from an empty
@@ -1189,7 +1189,7 @@ TEST_CASE("an optional flag reads each language's own truthiness", "[scripting][
 		Answer(Language::JavaScript, Say(Language::JavaScript, "HttpService.GenerateGUID(0)"));
 
 	CHECK(luau == "{" + javascript + "}");
-	CHECK(javascript == "EA90FF9A-9A3E-498F-B626-EA711F6C37F4");
+	CHECK(javascript == "C03C1E18-C515-4449-AA47-612C9B59D267");
 }
 
 TEST_CASE("a wrong argument to a service method is refused in both", "[scripting][scriptcall]") {

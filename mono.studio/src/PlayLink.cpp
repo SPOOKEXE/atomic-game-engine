@@ -1,7 +1,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/gui/Services.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -14,8 +14,8 @@
 #include <algorithm>
 #include <client/Replicated.hpp>
 #include <string>
-#include <vector>
 #include <studio/PlayLink.hpp>
+#include <vector>
 
 namespace studio {
 
@@ -71,12 +71,18 @@ namespace studio {
 		interpolation.TickRate = tickRate;
 
 		universe.Enter(replica, [&interpolation](Store &store, engine::ecs::Scheduler &systems) {
-			// Replicas present received state; they do not simulate.
-			client::BuildReplicatedWorld(store, systems, interpolation);
-
-			// Replicas cannot publish bus writes or mint authoritative entities.
+			// **Both refusals first, because the build now asks about them.**
+			// Replicas cannot publish bus writes or mint authoritative entities,
+			// and `BuildReplicatedWorld` opens a VM and installs `GuiService` —
+			// each of which asks the store whether minting is legal. Setting the
+			// flag afterwards left a window in which the answer was wrong.
 			store.SetResource(engine::world::Replica{});
 			store.SetAdoptOnly(true);
+
+			// Replicas present received state and run the client's own scripts;
+			// they do not simulate. The runtime is held by the scheduler, which
+			// drops it with the world.
+			(void)client::BuildReplicatedWorld(store, systems, interpolation);
 		});
 
 		for (const engine::replication::ReplicatedComponent &component :

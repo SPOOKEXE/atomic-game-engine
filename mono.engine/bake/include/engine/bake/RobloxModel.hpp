@@ -1,7 +1,7 @@
 #pragma once
 
-// Roblox's binary model container, `.rbxm`, read into a tree of classes, names
-// and values.
+// Roblox's model containers, `.rbxm` and `.rbxmx`, read into a tree of classes,
+// names and values.
 //
 // **The one importer here whose output is not a mesh or a picture.** Every other
 // reader in this module turns somebody else's file into an `assets::MeshData` or
@@ -10,14 +10,24 @@
 // turns that into rows in a store is the caller's business — `bake` is L9 and
 // knows nothing about `ecs`.
 //
+// **Two containers, one tree, and that is the point.** `ReadRobloxModel` reads
+// the binary `.rbxm` and `ReadRobloxModelXml` reads the XML `.rbxmx`; both hand
+// back a `RobloxModel` and a caller cannot tell which it was given. The same
+// model exported both ways comes back the same, which
+// `bake/tests/RobloxModel.cpp` asserts outright — a second model type for the
+// second container would have been the copy that drifts.
+//
 // **A referent is a within-file encoding and never leaves as identity.** The
-// format numbers its instances so that its `PRNT` chunk can say which is inside
-// which, and those numbers are chosen by whatever wrote the file. So a referent
-// becomes exactly one thing here — **the shape of the tree** — and is discarded
-// with the parse. Nothing in what comes back is numbered, and a `Ref`-typed
-// property is refused rather than turned into an index, because a number that
-// named a row of one file is not a name anything outside it can resolve. That is
-// `AGENTS.md` rule 4 read from the parser's side.
+// binary format numbers its instances so that its `PRNT` chunk can say which is
+// inside which, and those numbers are chosen by whatever wrote the file. So a
+// referent becomes exactly one thing here — **the shape of the tree** — and is
+// discarded with the parse. Nothing in what comes back is numbered, and a
+// `Ref`-typed property is refused rather than turned into an index, because a
+// number that named a row of one file is not a name anything outside it can
+// resolve. That is `AGENTS.md` rule 4 read from the parser's side. The XML
+// container puts the shape in the nesting of its elements and keeps referents
+// only so that a `Ref` has something to point at, so there the attribute is not
+// read at all.
 //
 // ## The subset, said once
 //
@@ -43,11 +53,24 @@
 // else's table; `NumberSequence`, `ColorSequence`, `PhysicalProperties`, `Font`
 // and everything else the format carries.
 //
+// The XML container spells the same subset differently and reads exactly it:
+// `CoordinateFrame` is the `CFrame`, `Rect2D` is the `Rect`, `token` is the
+// `Enum` and is refused, and `Content` and `BinaryString` are separate elements
+// for what the binary container stores as one `String` — so both are read, since
+// refusing them would make a `Decal` imported from XML lose a texture the same
+// model keeps when it is imported from `.rbxm`. A script's source is a
+// `ProtectedString` in both, written there as a type number and here inside a
+// `CDATA` section.
+//
 // **A refused property costs its property and not its file.** Every `PROP` chunk
 // carries one property of one class and nothing after it depends on its bytes, so
 // a type this does not decode is a chunk skipped whole. That is the structural
 // fact that makes a partial reader of this format safe rather than lucky, and it
-// is why the list above can grow one row at a time.
+// is why the list above can grow one row at a time. An XML element carries its
+// own end tag, which gives the same property for a different reason — and gives
+// it one step further, since a value that is malformed rather than merely
+// unknown costs its property there too, where in the binary container it ends
+// the file.
 //
 // **An `Enum` is refused rather than guessed** and it is the row most likely to
 // be argued with. The file stores an enum as a number, and that number indexes
@@ -257,7 +280,7 @@ namespace engine::bake {
 	// too deep or a loop, and both answers are the same one.
 	constexpr uint32_t MAXIMUM_ROBLOX_DEPTH = 64;
 
-	// Reads a `.rbxm`.
+	// Reads a `.rbxm`, the binary container.
 	//
 	// Every count and length in the file is treated as hostile, for `Image.hpp`'s
 	// reason: this runs over a file somebody supplied.
@@ -271,4 +294,27 @@ namespace engine::bake {
 	//         saying what was left out.
 	// @since v0.15
 	bool ReadRobloxModel(std::span<const std::byte> bytes, RobloxModel &out, std::string &failure);
+
+	// Reads a `.rbxmx`, the XML container, into the same tree.
+	//
+	// **A separate entry point rather than one that sniffs**, because the caller
+	// already knows: Rojo's file table maps each extension to a container, and a
+	// reader that guessed would be a second answer to a question the file's name
+	// has already answered. Each refuses the other by name, so an author who
+	// renamed a file is told which one they have.
+	//
+	// The XML this reads is markup and not a document — no document type
+	// declaration, no entities beyond the five XML predefines and numeric
+	// character references, no external anything. A `<!DOCTYPE` or `<!ENTITY` is
+	// refused outright rather than bounded, which is the same answer `ReadSvg`
+	// gives and for the same two reasons: entity expansion is how a kilobyte of
+	// markup becomes a gigabyte, and an external entity is a file read by a
+	// module that opens nothing.
+	//
+	// @param bytes   The file.
+	// @param out     Filled on success, left alone on failure.
+	// @param failure Set to why on failure. Untouched on success.
+	// @return `false` on a file this cannot read or will not trust.
+	// @since v0.15
+	bool ReadRobloxModelXml(std::span<const std::byte> bytes, RobloxModel &out, std::string &failure);
 }

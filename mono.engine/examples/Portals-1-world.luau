@@ -403,10 +403,9 @@ hallSouth.CFrame = CFrame.new(hallSouth.Position) * CFrame.Angles(0, math.pi / 2
 -- **`Enum.NormalId` in the annotation, which is the spelling everywhere else in
 -- this file.** An enum is `Enum.<set>.<member>` as a value, so it is
 -- `Enum.<set>` as a type; `mono.tools/scriptcheck` registers the `Enum` prefix
--- and `just typecheck` resolves it. `docs/DEFERRED.md` D00031 is the one place
--- that does not — luau-lsp's standard platform reads the declaration file,
--- which can only declare the flat `Enum_NormalId`, so an editor squiggles a
--- line the build accepts.
+-- and `just typecheck` resolves it. The editor resolves it too —
+-- `docs/retired/DEFERRED.md` D00031 — so a line the build accepts is a line
+-- luau-lsp accepts.
 local function link(pane: Part, face: Enum.NormalId, destination: Part, name: string)
 	local portal = Instance.new("Portal")
 	portal.Name = name

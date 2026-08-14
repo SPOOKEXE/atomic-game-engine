@@ -4,6 +4,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -358,6 +359,31 @@ namespace engine::script {
 		std::sort(found.begin(), found.end(), [](ecs::Entity left, ecs::Entity right) {
 			return left.Id < right.Id;
 		});
+		return found;
+	}
+
+	std::vector<ecs::Entity> ClientScriptsIn(ecs::Store &store) {
+		// **The identity first, because without it the answer is "none".** A
+		// client is told which player is its own over the user channel — see
+		// `game::JoinNotice` — and until that arrives there is no "own subtree"
+		// for a script to be in. Running everything in the meantime would run
+		// another player's scripts for the few ticks before the notice lands.
+		const scene::LocalPlayer *viewer = store.Resource<scene::LocalPlayer>();
+		const ecs::Entity self = viewer != nullptr ? viewer->Instance : ecs::NULL_ENTITY;
+
+		std::vector<ecs::Entity> found;
+		for (const ecs::Entity instance : ScriptsIn(store, false, true)) {
+			// Roblox's two containers. `ReplicatedFirst` is everybody's and runs
+			// ahead of the world; a player's own subtree is theirs alone.
+			if (scene::InReplicatedFirst(store, instance)) {
+				found.push_back(instance);
+				continue;
+			}
+
+			if (self != ecs::NULL_ENTITY && scene::PlayerOwning(store, instance) == self) {
+				found.push_back(instance);
+			}
+		}
 		return found;
 	}
 

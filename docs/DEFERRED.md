@@ -36,32 +36,6 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
-### [_] D00120
-
-**A `Player.Backpack` holds instances and nothing in the engine is a `Tool`.**
-The container is real, it is private to its player on the wire, and the spawn
-pipeline empties and refills it from `StarterGear` exactly as Roblox does — so a
-game can put whatever it likes in it and read it back. What it cannot do is have
-the engine *understand* one: there is no `Tool` class, no equip, no
-`Character`-parented handle, and no `Humanoid:EquipTool`.
-
-**Deliberately absent rather than half-built**, for `gui/Services.hpp`'s stated
-reason about `Path2D`: a `Tool` class registered with no equip behaviour would
-appear in the insert palette, be parentable into a `Backpack`, save into a game
-file — and then do nothing, for ever, with no error. That is worse than not
-having it.
-
-**What it needs first.** Equipping is a reparent from `Backpack` into the
-character plus a weld from the tool's handle to the right arm, and this engine
-has no joints — `Characters.hpp` says the limbs are `CharacterLimb` rows resolved
-in one flat pass precisely *because* there is no constraint solver that respects
-`Motor6D`. So a tool that follows a hand is the same missing piece as a rig that
-does not fall apart on a slope.
-
-**Reopen trigger: a joint, or an attachment strong enough to carry a handle.**
-`scene::Attachment` exists and resolves a frame off a part; whether that is
-enough for a tool is the first question to ask when somebody wants one.
-
 ### [_] D00119
 
 **`Player.CharacterAppearanceId` is absent, and it is absent because the thing
@@ -106,30 +80,6 @@ What is *still* absent is the `TeamCreate`-style permission rule the original
 entry also named. Nothing in the engine asks who may edit what, so there is
 nothing for it to attach to; it belongs with whatever brings collaborative
 editing permissions rather than here.
-
-### [_] D00117
-
-**`gameProcessedEvent` is true for a pointer and never for a key, because `gui`
-has no keyboard focus.** Roblox's answer is true while a `TextBox` has focus and
-this engine has nothing to be focused: `gui::Router` holds a hover and a press,
-`Pick` walks a draw list, and `TextBox` is a class that draws and takes no
-characters. So a key is honestly unprocessed and `IsPointerReport` in
-`script/src/Actions.cpp` is what keeps the answer from leaking onto one.
-
-**The pointer half is real and is the half that matters today.** A press the
-router took produces a `gui::GuiEvent` naming an element, both input pumps read
-that beat's queue through `InterfaceHasPointer`, and a click on a `TextButton`
-therefore arrives at `InputBegan` marked rather than swallowed. That is the
-behaviour a place actually guards on.
-
-**What closing the keyboard half needs, in order:** a focused element on
-`gui::Router`, set when a press lands on a `TextBox` and released when one lands
-elsewhere; a `Focused`/`FocusReleased` pair in `gui::EventKind` so a script can
-hear it; text entry from `SDL_EVENT_TEXT_INPUT`, which `input::Translator` does
-not handle at all today; and then `UserInputService:GetFocusedTextBox` and the
-two `TextBox` signals follow for free. None of it is in this module.
-
-**Reopen trigger: the first `TextBox` somebody wants to type into.**
 
 ### [_] D00116
 
@@ -352,54 +302,6 @@ be conspicuous by its absence.
 **Reopen trigger: a vendored QuickJS with a debugger API**, or the first
 TypeScript plugin big enough that its author asks for one.
 
-### [_] D00104
-
-**`.rbxmx` is the last row of Rojo's file table this engine does not build, and
-it is a vendor decision before it is a feature.** The engine vendors JSON and
-nothing else that reads a markup tree, so an XML model needs a parser
-`mono.vendor` does not carry. The format is also not simply "XML": it is
-`Item`/`Properties` elements with typed children and its own referent table, so
-the markup parser is the smaller half of the job.
-
-**When it arrives it goes in `bake`, beside `.rbxm`.** That is now a decision
-with a precedent rather than a proposal: `bake::ReadRobloxModel` hands back a
-tree of class names, names and values, and `studio::RojoSync` maps that tree onto
-instances. An XML reader producing the same `RobloxModel` reuses every one of
-those mapping decisions — one instance named after the file, an unknown class
-becoming a `Folder`, a script's `Source` staged into the world's `SourceCache` —
-and nothing in the editor changes.
-
-**Reopen trigger: an XML parser in `mono.vendor`,** or a project that carries an
-`.rbxmx` somebody needs. It is named in the sync report by what Rojo says it is,
-so a gap reads as a gap rather than as an unrecognised file, and
-`studio.rojosync` asserts both halves: that it is named and that the rows around
-it are silent.
-
-**`.rbxm` shipped at v0.15 and is no longer part of this entry.** It was held
-back on the stated ground that a binary container is a format reader rather than
-a mapping, and that it belongs beside the other model decoders rather than in an
-editor. That is where it went, and three things the entry did not predict are
-worth keeping:
-
-- **The refusals that matter are refusals of principle, not of effort.** An
-  **enum** in the file is a number naming a member of Roblox's table and an
-  engine that honoured one would be shipping Roblox's numbering or using its own
-  declaration order — the second being exactly what rule 4 forbids. A
-  **referent** is a number naming a row of the file; it becomes the shape of the
-  tree and dies with the parse, so nothing that leaves the reader is numbered.
-- **A partial reader of this format is safe rather than lucky, and the format is
-  why.** A `PROP` chunk holds one property of one class and nothing after it
-  depends on its bytes, so a type the reader does not decode is a chunk skipped
-  whole. That is what lets the supported list grow one row at a time, and it is
-  the fact any later work here should check before assuming a subset is a
-  liability.
-- **`ProtectedString` is the row nobody would think to add.** A script's
-  `Source` is written under a type number of its own carrying identical bytes to
-  a `String`, so a reader written from the type list alone imports every script
-  with no program in it. It was found by reading real files rather than by
-  reasoning about the format, which is the method the `.rbxmx` half should use
-  too.
-
 ### [_] D00103
 
 **Per-pass GPU time is not measured. The Vulkan path that measured it was
@@ -558,17 +460,6 @@ through it — so two viewports each update at half the rate.**
   it is buying: about 150 us of CPU record per viewport, 18% of a 300 fps frame
   at four panels.
 
-### [_] D00031
-
-**The editor does not know `Enum.Material`, because luau-lsp reads the definitions file and nothing registers the prefix for it.**
-
-- `just typecheck` accepts `local m: Enum.Material` — `scriptcheck` registers `importedTypeBindings["Enum"]` itself. luau-lsp loads the same definitions file and does not, so an author writing the dotted form sees a red squiggle on a line that builds and passes.
-- **The flat spelling still resolves everywhere**, so this is a cosmetic gap with a workaround rather than a broken surface: `Enum_Material` is what the declaration file declares and what the editor understands.
-- **Three ways to close it, and none is obviously right yet.** Teach luau-lsp the prefix, which means a patch to a vendored tool and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork. Switch `luau-lsp.platform.type` to `roblox`, which makes the editor typecheck against Roblox's class tree rather than this engine's — worse than the squiggle. Or generate an `Enum.luau` module and have scripts `require` it, which works in both and costs a line at the top of every file.
-- **Re-examined at v0.13 and deliberately left as it is, because all three ways out cost more than the problem.** Patching luau-lsp is a fork to maintain against a moving target for a cosmetic squiggle. Switching to the `roblox` platform typechecks against the wrong class tree. And generating an `Enum.luau` to require has a hazard the entry did not name: `local Enum = require(...)` **shadows the runtime `Enum` global**, so every value use — `Enum.Material.Plastic` — would then resolve through the module rather than the engine, and the fix for the annotation would break the thing the annotation is about. `scriptcheck` reports 35 enums reachable as `Enum.<Name>` in a type position, so the build is not what is wrong; one editor is.
-- **v0.14 settled which spelling authored scripts use, and it is the dotted one.** An enum is `Enum.<set>.<member>` as a value, so it is `Enum.<set>` as a type, and a script that spelled the type `Enum_NormalId` would be naming the declaration file's internal vocabulary rather than the language's. `Portals-1-world.luau` is the first to write one. The build checks it — `scriptcheck` reports 36 enums reachable under the prefix — so what is left is one editor disagreeing with one line, which is what this entry has always been about rather than a choice still to make.
-- **Reopen trigger: an editor squiggle somebody actually trips over.** The engine's own scripts have four annotations between them, and one of them is dotted.
-
 ### [_] D00030
 
 **A mutable property on a script *global* reads once and never again, because `luaL_sandbox` enables Luau's `safeenv`.**
@@ -585,13 +476,15 @@ through it — so two viewports each update at half the rate.**
 ### [_] D00019
 
 **The engine's Luau is held at the revision the editor tool can consume so that
-the editor and the type check agree. The current engine revision is Luau 0.732.**
+the editor and the type check agree. The current engine revision is Luau 0.731,
+and 0.732 is the ceiling it is held under rather than where it is.**
 
-- `mono.vendor/luau` is pinned to commit `f8ca77ac` (Luau **0.732**), and `mono.vendor/luau-lsp/luau` must be pinned to the same commit when that optional submodule is checked out. `mono.tools/scriptcheck` links the first and gates `just typecheck`; the language server in an editor uses the second. Two Luaus would mean an author reading diagnostics from a language the engine does not run, which is worse than no editor support because it looks authoritative.
+- `mono.vendor/luau` is pinned to commit `f8ca77ac`, which is `Sync to upstream/release/731` and which `git describe` reports as **0.731**. 0.732 is the first revision luau-lsp cannot build against — it removed the `ConstraintSolver::reportError` overloads that `src/platform/roblox/RobloxLuauExt.cpp` calls — so it is the number that bounds this entry, not the number either tree is on. `mono.vendor/luau-lsp/luau` must be pinned to the same commit when that optional submodule is checked out. `mono.tools/scriptcheck` links the first and gates `just typecheck`; the language server in an editor uses the second. Two Luaus would mean an author reading diagnostics from a language the engine does not run, which is worse than no editor support because it looks authoritative.
 - **The exact upstream ceiling belongs to luau-lsp.** Its nested Luau must remain buildable against the language-server sources. Do not bump the engine submodule alone: the sync check is the contract, and a failed `just luau-lsp` is preferable to silently giving authors diagnostics for another language revision.
 - **Checked, not written down.** `just luau-lsp` compares the two `HEAD`s and refuses to build when they differ, naming both. Verified by mutation: bumping `mono.vendor/luau` alone makes the recipe fail with the two SHAs printed. Without that, the drift is invisible — the engine keeps passing every check it has, and only an editor is wrong.
 - **What the choice actually costs, so a later reader can weigh it.** The engine follows the editor's compatible revision rather than independently following upstream. The trade is only defensible while the gap stays small; a long-lived gap would invert it, and the answer then is the fork below rather than a wider gap.
 - **The fork is the way out and was declined at v0.7 on purpose.** Pointing luau-lsp at `mono.vendor/luau` needs sixteen mechanical call-site changes, and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork whose remote is recorded in `.gitmodules` — never into a file in this tree. That is a fork to maintain against a moving target, for a developer tool.
+- **The third option arrived at v0.15 and this entry did not take it.** `docs/retired/DEFERRED.md` D00031 needed a change inside luau-lsp too, and what it used is a `.patch` under `mono.vendor/patches/` that `just luau-lsp` applies after cloning — no fork, no remote, no push. So "a patch goes upstream or into a fork" is no longer the whole of the rule, and the sixteen call sites above are now *mechanically* available at that price. They are still not worth it: D00031's patch is one hunk in a function that has not moved in two years, where sixteen hunks across a file upstream edits every release is a rebase every bump — which is a fork's cost with a fork's ceremony removed rather than a cheaper thing. The reopen trigger below is unchanged; what changed is that the way out is now measured in hunks rather than in whether a mechanism exists.
 - **Checked at v0.13 and the trigger has not fired.** Upstream luau-lsp at `53f4238` pins Luau `f8ca77acdcb50241e3da21af663f8ef97b4b5ce4`, which is byte for byte the commit `mono.vendor/luau` is on. **There is no gap to close**: this engine is already at the editor's ceiling rather than lagging behind it, which is the state this entry describes as defensible. Worth recording because "held at the revision the editor can consume" reads as a compromise, and right now it costs nothing at all.
 - **Reopen trigger: luau-lsp syncs to a later Luau revision.** Bump both submodules together, run `just luau-lsp` — which refuses if only one moved — then run `just check`.
 
@@ -656,97 +549,83 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 
 ### [_] D00014
 
-- **QUIC underneath `net::Transport`, replacing the hand-rolled reliability, handshake and framing.** Raised as a direction rather than a complaint: what is built works and is tested, and the argument for QUIC is not that ours is wrong but that a great deal of it is a worse version of something standardised.
-- **What it would buy, in the order the arguments actually weigh.** Congestion control, which **this engine has none of** — `LinkSettings` has `BytesPerTick` and `PacketsPerTick`, and a *fixed cap is not congestion control*: it does not back off when the path is congested and it does not open up when it is not, so on a real internet path it is either wasting the link or contributing to a collapse it cannot detect. Then per-stream loss recovery without head-of-line blocking across streams, which is exactly the shape this module arrived at by hand — structure reliable, values not. Then TLS 1.3, which subsumes the engine's X25519/HKDF/ChaCha20-Poly1305 and server-identity binding, now closed in D00006. Then connection migration and 0-RTT resumption, neither of which we would build.
-- **It passes this repository's second-consumer test, which is the standard that justifies work here.** The game link is one. `ROADMAP.md`'s cdn wire streaming is the other: it is blocked on `net` growing an `http/` sub-area, because a content origin serves bulk bytes over request/response rather than over a game datagram channel with a per-tick budget. **HTTP/3 is QUIC.** One dependency answers both, and the alternative is hand-rolling a second protocol beside the first.
-- **The seam already exists and was built for exactly this.** `net::Transport` is the interface a caller cannot see through, `Endpoint` is this engine's own value type precisely so that no public header names a socket or an `error_code`, and `replication` at L12 names entities and components and hands bytes down. So QUIC is **a `Transport` implementation plus the deletion of the reliability layer**, not a rewrite of `replication`. That is the cheap part and it is worth saying, because it makes the expensive parts legible.
-- **The blocking obstacle is the clock, and it is this module's central invariant rather than a detail.** `net/AGENTS.md`: *"Every call that could care about now takes it as an argument. There is no `Clock` member and there must not be."* Every QUIC stack runs loss detection, pacing and congestion control off timers of its own. Some can be driven entirely from a caller-supplied time — `picoquic` and `ngtcp2` take an explicit timestamp on every entry point — and others cannot without fighting them. **That choice is the whole feasibility question**, and it has to be settled before a library is picked, not after: get it wrong and `just determinism` and `just replay-check` stop meaning what they say, which is the one thing this repository checks rather than claims.
-- **Three more costs, none fatal and all real.** A QUIC library needs a TLS stack — BoringSSL or quictls — which is a large addition to `mono.vendor` and threatens the property `MONO_VENDORED_GLSLC` exists to protect, that a fresh clone needs CMake, Ninja and a C++ compiler and nothing else. **Unreliable datagrams are an extension (RFC 9221), not core QUIC**, and this engine is unreliable-first with reliability opted into *by message kind inside `Session`* — a library with weak DATAGRAM support would push the game link toward reliable-everything, which is precisely the failure `ChannelFor` exists to prevent and which v0.3 already wrote down as how one lost packet becomes a visible stall. And head-of-line blocking still applies *within* a stream, so the stream layout is a design decision rather than a free win.
-- **What gets deleted, and it should be deleted rather than left beside it.** `Handshake`, `Cipher`, `Cookie`, `ReliableSender`/`ReliableReceiver`, most of `Link`'s state machine, and the packet framing. That is most of v0.3's `net` and most of this session's `D00006`. Sunk cost is not an argument for keeping it, but **two overlapping reliability stacks is a worse outcome than either**, so this lands as a replacement or not at all.
-- **Correction at v0.7: this entry's trigger named a version rather than a thing, and the version moved.** It said "v0.8's cdn wire streaming"; the scripted interface took v0.8 and cdn wire streaming is **v0.9's**. Nothing about the argument changes — the trigger was always the streaming, not the number — but for a version it read as due when it was not, which is the same drift `D00004`'s figure and `D00001`'s "two of four" are recorded for. Stated against the work from here on.
-- **Reopen trigger: whichever comes first of cdn wire streaming — v0.9 as this is written — or the first deployment over a path that is not loopback or a LAN.** The second is the one that bites without warning — the absence of congestion control is invisible until it is a stall nobody can reproduce, and `ConnectionStats` counts refusals against our own fixed budget, not against what the path would have carried.
+**Congestion control shipped at v0.15 without QUIC, which takes this entry's
+first and heaviest argument away from it.** The rest of the argument is intact
+and is what the entry now is. Recorded rather than closed, and recorded rather
+than deleted, because the reason the first argument could be answered separately
+is itself the finding: *congestion control is a property of the send rate, and
+the send rate is ours whatever carries the bytes.*
 
-**Scoped at v0.13 and deliberately not started.** The library question this entry
-left open is now answered and the cost is written out, because the useful thing
-to know before starting is how much has to be true at once. **This is not a
-change; it is a project.** Nothing below is speculative — every claim was checked
-against the upstream trees rather than remembered.
+- **The algorithm is Copa** — Arun and Balakrishnan, *Copa: Practical Delay-Based Congestion Control for the Internet*, NSDI 2018 — a delay-based window steering toward a standing queue of `1/delta` packets at the bottleneck, spelled `CongestionSettings::TargetQueuePackets` because that number *is* the packets of queue it settles at. **A loss-based AIMD window in the NewReno lineage was rejected and the reason is not a preference**: a loss-based controller finds the bottleneck by *filling its buffer*, which is the mechanism and not a side effect, so on a home router with a hundred milliseconds of buffer it adds a hundred milliseconds to every input a player sends. Vegas was the other delay-based candidate and Copa is strictly better: same equilibrium argument, plus an answer for the case Vegas is famous for losing. BBR trades better than either and wants per-packet delivery-rate sampling and a pacing engine, neither of which this transport has.
+- **Against a TCP download on the same bottleneck it stops being polite, and only for as long as it has to.** A pure delay-based controller is starved — it backs off as the queue grows, the loss-based flow does not back off until the queue overflows, and the delay-based share converges toward nothing. Copa's competitive mode is implemented: when the window is reduced round trip after round trip and the queueing delay does not follow it down, the queue is not this flow's, and `TargetQueuePackets` then moves AIMD-style — one packet added per round trip, halved on a loss — which is the law the neighbour is playing. When the queue comes back down the mode ends and the target returns to two packets. **Latency is given up only while somebody else is taking it anyway.**
+- **The mode-switch predicate is a restatement of Copa's and it was measured being wrong first.** The paper asks whether the queue is ever nearly empty, which holds because its per-acknowledgement window oscillates hard enough to empty it. A window steered once a tick settles at its target instead and empties nothing, so the paper's form read *every* ordinary path as contested — the controller latched into competitive mode on a solo 250 kB/s path and ratcheted its own standing queue from 9 ms to 190 ms. Both the absolute form and the fraction-of-recent-range form did that. The response test does not.
+- **`LinkSettings::BytesPerTick` survives as a hard ceiling with the controller underneath it.** Kept rather than deleted because the two answer different questions: a game may legitimately refuse to spend more than N on one player on a path that would carry ten times that, and a hundred players on one host is a hundred of these — the operator's bill is not a function of what the path can take. What it stopped being is a *rate*. `PacketsPerTick` is left a fixed cap for a different reason: per-packet cost is a property of the two endpoints rather than of the path between them, so there is nothing on the wire for a controller to measure it against.
+- **`SendsOverBudget` did not stop meaning what it meant, which this entry predicted it would have to.** The prediction assumed one counter for both refusals. There are two: `SendsOverBudget` is a number somebody configured being enforced and `SendsOverAllowance` is the path refusing, and the distinction is that a caller answers the first by changing the number and cannot answer the second by changing anything. `render`'s debug panel documents the first meaning against `D00007` and is untouched, and the panel and its header therefore do **not** have to move with this after all.
+- **No second acknowledgement path was added and none may be.** Both signals come out of what already crosses the wire. The delay is `ReliableSender`'s RFC 6298 estimate arriving at `Link::RecordRoundTrip`, which `replication::Session` has called on every inbound packet since v0.9 — the estimator grew the variance it never had, because a controller told only the mean cannot tell a wireless link's fifteen-millisecond swing from fifteen milliseconds of queue. The loss is holes in `PacketHeader::Acknowledge` and `AcknowledgeBits`, the fields `ReliableReceiver::Acknowledging` already stamps on every outgoing packet whatever its channel: `ReliableSender` reads them to retire payloads and `Link::ObserveAcknowledgement` reads them to find out whether the path dropped something. One acknowledgement, two questions.
+- **The honest limitation is that both signals are about the reliable channel.** Unreliable loss on the way out is reported by nothing, and a direction whose reliable stream is quiet offers no samples at all — which on a server publishing a still world is a real gap, since deltas are unreliable and structure messages are occasional. The controller is built so that no sample is never a *stall*: the slow-start ramp falls back on an assumed round trip and the queueing delay reads as zero rather than unknown. Closing the gap properly wants per-packet delivery feedback, which is a second ack path, which is QUIC — see below.
+- **Determinism was answered before it was written and not after.** `net` reads no clock and nothing here is random, so the controller's whole state is a function of the sequence of calls it was handed — the same property the idle timeout has had since v0.3. `just determinism` and `just replay-check` are unaffected twice over: by construction, and because `mono.server` does not call `ServeClients` on the replay path at all, so no recording has ever contained network state. Both pass byte-identical.
+- **Cold start is RFC 6928's initial window, once.** Ten datagrams on the opening tick, because that is what an initial *window* is and there is no feedback yet to pace against; every tick after it is paced at the window over the round trip. The controller is then clocked by acknowledgements rather than by a timer — the doubling, Copa's velocity parameter and the mode switch all wait for the far side to acknowledge what was outstanding when the period opened, which is one round trip measured rather than assumed, and is what makes one implementation behave on a loopback and on a satellite.
+- **Twenty-nine mutations, twenty-nine red.** Four of them needed a test written that did not exist, and the two worth naming are the ones a review would not have found. Measuring the round-trip variance *after* moving the mean rather than before survives every directional assertion, because the wrong order is still in the right direction — it is pinned as arithmetic. And a tick's length measured against the last time anybody named a time, rather than against the last `Advance`, reads every tick as a stall and clamps the allowance to sixty bytes: the packets that arrived earlier in the tick named the same instant. That one was found by `replication`'s suite and now has a `net` case of its own.
 
-**The library is `ngtcp2`, and the reason is that its core needs no TLS at all.**
-Nothing under `ngtcp2/lib/` references OpenSSL, wolfSSL, GnuTLS or picotls — the
-backends are separate `ngtcp2_crypto_*` helper libraries behind `ENABLE_*`
-options, and so is every `find_package` in its top-level CMake. So the core is
-**one MIT submodule with no Perl and no Go**, which is the only shape that keeps
-the property this entry already names: a fresh clone needs CMake, Ninja and a C++
-compiler and nothing else. It also settles the clock question by construction —
-every entry point takes an explicit `ngtcp2_tstamp` — and it carries Reno, Cubic
-and BBRv2, which is this entry's first argument, and RFC 9221 DATAGRAM, which is
-its third.
+**What is left of the QUIC argument, which is most of it.**
 
-**What was ruled out, so it is not re-evaluated from scratch.** `picoquic` hard
--requires picotls through `find_package(PTLS REQUIRED)` or a configure-time
-`FetchContent`, which is a third-party dependency arriving by download rather
-than by submodule, and defaults `WITH_OPENSSL` on. **wolfSSL is GPLv2 or
-commercial**, which is a licence problem against MPL-2.0 and not a preference.
-BoringSSL needs Go *and* Perl; quictls and LibreSSL need Perl.
+- Per-stream loss recovery without head-of-line blocking across streams, which is the shape this module arrived at by hand — structure reliable, values not.
+- TLS 1.3, which subsumes the engine's X25519/HKDF/ChaCha20-Poly1305 and the server-identity binding closed in `D00006`.
+- Connection migration and 0-RTT resumption, neither of which we would build.
+- **A delivery signal for unreliable traffic**, which is new to the argument and which v0.15 could not give itself. QUIC's ACK frames acknowledge packets rather than payloads, so DATAGRAM frames are acknowledged too — the controller would see the whole outbound stream instead of the reliable slice of it, and that is the one thing the hand-rolled version structurally cannot have without inventing a second ack path.
+- **It still passes the second-consumer test.** The game link is one; `ROADMAP.md`'s cdn wire streaming is the other, blocked on `net` growing an `http/` sub-area because a content origin serves bulk bytes over request/response rather than over a game datagram channel with a per-tick budget. **HTTP/3 is QUIC.** One dependency answers both.
+- The clock question is settled and stays settled: `ngtcp2` takes an explicit `ngtcp2_tstamp` on every entry point, which is the only shape compatible with *time is passed in, never read*.
 
-**The crypto is a callback table, which is the good news and the trap.** ngtcp2
-asks the application for `encrypt`, `decrypt`, `hp_mask`, `update_key`,
-`client_initial`, `recv_crypto_data` and `rand`. That makes the TLS backend a
-*later, contained* decision rather than a foundational one. It also means
-**`net::Cipher` cannot serve those callbacks as it stands**, and the three
-mismatches are structural rather than plumbing:
+**Everything the v0.13 scoping wrote out still stands, minus one line.** The
+library is `ngtcp2`, because nothing under its `lib/` references a TLS stack —
+one MIT submodule, no Perl and no Go, which is the only shape that keeps a fresh
+clone needing CMake, Ninja and a C++ compiler and nothing else. `picoquic` was
+ruled out for hard-requiring picotls by `find_package` or `FetchContent`;
+**wolfSSL is GPLv2 or commercial**, which is a licence problem against MPL-2.0
+and not a preference; BoringSSL needs Go *and* Perl; quictls and LibreSSL need
+Perl. The crypto is a callback table, which is the good news and the trap:
+`net::Cipher` cannot serve those callbacks as it stands, and the three mismatches
+are structural — QUIC owns the nonce where `Sealer` holds it privately and only
+moves it forward, header protection is a raw ChaCha20 keystream this engine does
+not expose, and AES-128-GCM is mandatory for Initial packets and Retry integrity
+whatever suite is negotiated. The TLS backend is the one open decision and the
+three answers differ in what they buy: a minimal in-tree TLS 1.3 over `D00006`'s
+primitives with RFC 7250 raw public keys, `D00006`'s exchange carried inside
+CRYPTO frames (smallest, and it serves neither HTTP/3 nor the cdn argument), or
+quictls beside ngtcp2 (interoperable, and it costs the fresh-clone property).
+The whole of what has to land is unchanged — the vendor and its
+`MonoVendor.cmake` target, a `THIRD_PARTY_NOTICES.md` line, the TLS answer, a
+crypto seam for the three mismatches, connection ids and transport parameters and
+Retry and stateless-reset tokens (which subsume `Cookie` and must keep its rule
+that an unanswered challenge costs zero bytes), the expiry timer driven off the
+tick through `ngtcp2_conn_get_expiry`/`handle_expiry`, the channel model mapped
+onto DATAGRAM frames and streams, the deletions with their suites and benchmarks,
+then the rewiring of `replication::Session`, `Listener`, `Connector`,
+`mono.server`, `mono.client`, `mono.studio`, `mono.unified_server_client` and
+`mono.network`'s discovery, then `expected_graph.json` and the tier check, then
+the suites. **The one line that comes off the list is `ConnectionStats` and
+`render`'s panel**, which v0.15 has already sorted out by adding a counter rather
+than redefining one.
 
-- **QUIC owns the nonce and `Cipher` owns it privately.** RFC 9001 derives the
-  nonce by XORing the packet number into a static IV, so ngtcp2 supplies the full
-  twelve bytes on every call. `Sealer` takes a four-byte prefix and holds a
-  private counter that only moves forward, which is the invariant `Cipher.hpp`
-  says may not be weakened "to make plumbing convenient". This is exactly that
-  request, and the answer is a *second* type rather than a loosened `Sealer`.
-- **Header protection is a primitive this engine does not have.** It is a raw
-  ChaCha20 keystream block masking five bytes, not an AEAD, and `Cipher` exposes
-  no keystream and no constructor from raw key material by design.
-- **AES-128-GCM is mandatory whatever cipher suite is negotiated.** Initial
-  packets are keyed by HKDF from the destination connection id (RFC 9001 §5.2)
-  and Retry integrity is AES-128-GCM under a fixed key (§5.8). Crypto++ has it;
-  `net` does not expose it, and there is no version of QUIC that skips it.
+**Staging is not a preference here.** Two overlapping reliability stacks is worse
+than either, so the order is: land the QUIC session beside the old one and prove
+it, rewire, and only then delete — with every commit green, rather than a sweep
+that leaves the tree with no working link. **`net::CongestionControl` is on the
+delete list when that happens**, since ngtcp2 carries Reno, Cubic and BBRv2, and
+it is a hundred and eighty lines rather than a project.
 
-**The TLS backend is the one open decision, and the three answers differ in what
-they buy rather than in effort alone.** (i) A minimal real TLS 1.3 in-tree over
-the primitives D00006 already vendored, with RFC 7250 raw public keys so no X.509
-parser is needed — standards-compliant on the wire, no new dependency, and about
-two thousand lines of security-critical code this repository would own. (ii)
-D00006's existing exchange carried inside QUIC's CRYPTO frames — smallest and
-lowest risk, and a private variant: no HTTP/3, no Wireshark decode, and **the
-cdn second-consumer argument above is not served**, which is half of why this
-entry exists. (iii) quictls beside ngtcp2 — fully interoperable, and it costs the
-fresh-clone property and adds a very large vendor tree.
-
-**The whole of what has to land, because the cost is the count and not any one
-item.** The vendor and its `MonoVendor.cmake` target with everything but `lib/`
-disabled, and a `THIRD_PARTY_NOTICES.md` line. The TLS answer above. A crypto
-seam for the three mismatches. Connection ids, transport parameters, Retry and
-stateless-reset tokens — which subsume `Cookie` and have to keep its rule that an
-unanswered challenge costs zero bytes. The expiry timer driven off the tick's
-`nowSeconds` through `ngtcp2_conn_get_expiry`/`handle_expiry`, since a QUIC stack
-that arms its own timer breaks `just determinism` and `just replay-check` in a
-way that shows as neither passing nor failing but as two runs disagreeing. The
-channel model mapped onto QUIC — unreliable to DATAGRAM frames, reliable to
-streams, and the stream layout is a design decision because head-of-line blocking
-still applies within one. Then the deletions this entry already lists, with their
-suites and benchmarks. Then the rewiring: `replication::Session`, `Listener`,
-`Connector`, `mono.server`, `mono.client`, `mono.studio`,
-`mono.unified_server_client`, and `mono.network`'s discovery. Then
-`ConnectionStats`, where **`SendsOverBudget` stops meaning what it means today** —
-a fixed cap refusing is not a congestion controller pacing, and `render`'s debug
-panel documents that distinction against `D00007`, so the panel and its header
-move with this. Then `expected_graph.json` and the tier check. Then the suites,
-most of which currently test things that would no longer exist.
-
-**Staging is not a preference here.** This entry already says two overlapping
-reliability stacks is worse than either, so the order is: land the QUIC session
-beside the old one and prove it, rewire, and only then delete — with every commit
-green, rather than a sweep that leaves the tree with no working link.
+**Reopen trigger, replaced because the old one fired and was answered by
+something other than this entry.** It read "whichever comes first of cdn wire
+streaming or the first deployment over a path that is not loopback or a LAN", and
+the second half is now covered: a real path is paced by a real controller, and
+`ConnectionStats` counts refusals against what the path would have carried as well
+as against our own cap. **What is left is cdn wire streaming**, which is a second
+consumer that request/response over TCP would also serve — so the trigger is
+sharpened to the point where one dependency is cheaper than two protocols: *the
+first time `http/` needs something TCP does not give it*, or *the first
+measurement showing head-of-line blocking inside the reliable channel costing a
+player something visible*. Either is a thing that can be observed rather than a
+version number, which is what the v0.7 correction to this entry was about.
 
 ### [_] D00008
 
@@ -758,38 +637,19 @@ green, rather than a sweep that leaves the tree with no working link.
 - **Reopen trigger, unchanged and now twice unmet: a client linking server code to host a server in its own process.** Restated against the link line rather than against the feature, because the feature has now shipped twice without needing it. When it does arrive the edge is two lines and the comment already says which two.
 - Worth keeping straight, because the two are easy to confuse: the escape is about *linking*, not about connecting. A single-player client that spawned `mono.server` as a child process and connected to it over loopback would need no escape either, and is a legitimate third option to weigh at that point — it costs a process and buys the same crash isolation `parallel/process` already argues for.
 
-### [_] D00005
-
-- **`.github/workflows/ci.yml` is deferred by decision, not by effort.** What was never committed is the file that makes a machine other than this one run the checks, and it is deliberately not going to be: a workflow on GitHub fires jobs, and this repository does not want jobs firing.
-- **Correction, made at v0.4: this entry used to say "the checks it would run are written and pass", and that was half false for as long as it was written down.** It was true of `just check`, which defaults to the `dev` preset. It was false of `just preset=ci check` — the configuration this very entry names as "what the pipeline actually enforces" — which **did not compile at all**, because `ci` makes every warning fatal and two of them were live: a `-Wmissing-field-initializers` in `core::Arguments` and a `-Wdangling-reference` at five sites in `world`'s suites. Both are now fixed and the preset passes end to end. **The lesson is the one this file already records about `just docs-check` in v0.2** — a check nobody can run stops being read, and then stops being true, and the sentence claiming it passes ages into a false one. If a recipe is named here as the standard, something has to run it.
-- So the guarantee today is **local and manual**: `just check` before a push, run by a person who remembers to. That is honest rather than green — it is the same guarantee the repository has had all along, now written down instead of implied by a roadmap line that read as pending work.
-- **What is actually lost is the second machine, not the checks.** Two things only a different box can prove. The tier split: `just check-server-is-headless` and `just check-cdn-is-bare` currently pass on a machine that *has* a graphics stack, so they prove the binary does not link one — but a job on a box with no graphics stack at all would prove it by building there and succeeding. And the fresh-clone case: a check that quietly depends on something in this working tree passes here forever and fails for the first person who clones.
-- The split a workflow should take, if one is ever wanted, is by **what each job needs installed** rather than by what it checks — that is what makes the headless job's environment the proof. `just check`'s list is the job list, in the same order, or "it passes here" and "it passes in CI" stop meaning one thing.
-- **Reopen trigger, restated at v0.7 and now the only one: the repository's owner asks for it.** This previously read "a second contributor, or a pipeline that is not GitHub's", which is a condition a *reader* could decide had been met — and a deferral whose trigger somebody else can judge is an invitation rather than a decision. It is a decision. Nothing here is to grow a workflow file, a `workflow_dispatch` stub or an action of any kind until it is asked for by name, and the reason is not the objection to jobs firing: **the engine is not finished enough to be worth gating.** A pipeline that goes red on a half-built subsystem trains everybody to ignore red.
-- **What this rules out, so a later reader does not relitigate it.** Not a `workflow_dispatch`-only workflow, not a "tests and typecheck, no build" job, not a lint-only job. The narrower forms were considered at v0.7 and are the same answer: the constraint is that GitHub builds nothing and runs nothing for this repository yet. The one thing worth knowing when the answer changes is that **the C++ suites cannot run without compiling** — `just test-all` builds the engine to produce the test binaries — so a genuinely build-free job could only ever run `just typecheck`'s TypeScript half and `format-check`. The Luau half would need either `scriptcheck` compiled or a downloaded `luau-lsp` binary, which has the `analyze --definitions` mode `mono.tools/scriptcheck` reimplements.
-- Removed from `ROADMAP.md` v0.2 rather than left unticked. The two items that once claimed CI existed were corrected before this was deferred, and both now read accurately: v0.2's recipe item says the recipes "exist and pass locally", and the determinism item describes `just check` as the local chain. Nothing left in the roadmap asserts a pipeline.
-
-### [_] D00004
-
-- ~~`Engine::core` links Crypto++ for `engine::core::Random`, and everything links `core` — so a SHA-256 implementation is in the client and the server alike.~~ **Measured per program, and removing it would save the client, the server and the cdn nothing at all.** Since this was written, `net` gained X25519, HKDF-SHA256, ChaCha20-Poly1305 and an HMAC-SHA256 admission cookie, and `assets` gained Ed25519, HMAC-SHA256 and BLAKE3. Both programs that carry Crypto++ link `net`, and `net` is what puts it there.
-- **The measurement, `release` preset, per program.** client and server each carry **6,102 `CryptoPP::` symbols and 43 of the archive's 173 members**; `cdn` carries **zero of both**. Every one of those 43 is first-caused by `libengine_net.a` — `Cipher.cpp.o`, `Handshake.cpp.o`, `Cookie.cpp.o` — and **not one by `core`**. Linked alone, `core::Random` pulls **36** members, and those 36 are a strict subset of the 43; net's extra seven are the ChaCha, Poly1305 and curve25519 objects. Confirmed a second way, by relinking both programs against a `core` whose `Random` is a plain integer mixer: **43 members and 6,102 symbols, unchanged**, with 1.2 KB of text and 91 KB of debug info the only difference.
-- **`cdn` is zero today for a reason that is not this entry's, and it will stop being zero for a reason that is not this entry's either.** `mono.cdn/app/main.cpp` is a 59-line stub that mounts a `ContentRoot`; it never constructs an `Origin`, so one of `libcdn_lib.a`'s six members is linked and neither `assets` nor `blake3` contributes anything. Force the whole of `cdn_lib` in — what wiring `Origin` into `main` will do — and it pulls **36 members and 5,647 symbols, first-caused by `libengine_assets.a(Grant.cpp.o)`**, because `cdn::Gate` opens grants and a grant is an HMAC. `core::Random` is not pulled into `cdn` in either case; nothing under `mono.cdn/` calls it.
-- **The 9,479 figure this entry carried does not reproduce and has not for some time.** `core::Random` alone is **5,647** symbols now and the shipped client and server are **6,102**. The `36 of 173` half reproduces exactly. Recorded rather than quietly corrected, because a number drifting inside a deferred entry is the failure D00005 was reopened for.
-- **What the dependency is actually worth, for the program that does not exist:** a `main` calling only `Random::Float` is **1.55 MB of text and 5,647 symbols** against **1.6 KB and none** with a plain mixer. Enormous in isolation; zero in everything that ships. Any future program that links `core` and neither `net` nor `assets` pays the whole 36.
-- **So the v0.6 question survives but it is a smaller one, and it is no longer about size.** "Does anything still need `Random` when the demo dies" is now a question about one file and about `THIRD_PARTY_NOTICES.md`, not about what is in the binary. The cheaper option stands and is now the *only* argument for it: keep the interface, put a small specified integer mixer behind it. The interface was designed for that swap.
-- **What `Random` is for is unchanged and is why this is not simply deleted.** A value identical on every machine, which `std::mt19937` plus `std::uniform_real_distribution` cannot promise. That determinism is also exactly why it must never produce a cryptographic key, and why the answer is never "use a system source".
-- **The old trigger fired at v0.6, and the question it was holding is answered.** The C++ demo died — `BuildDemoWorld` is deleted, `Demo.hpp`/`Demo.cpp` are gone — so "does anything still need `Random` when the demo dies" can finally be asked. **It does.** `Random.new(seed)` is bound into both script VMs, drawn as a counter over `core::Random::Float` so a stream is indexed rather than stateful. That is the first consumer that exists because somebody wanted the numbers rather than because a demo needed some, and it is *userland* — which settles the direction: the interface stays. It settles nothing about what is behind it, so the small specified integer mixer is still the cheaper option and still costs the shipped programs nothing either way.
-- **The narrowed trigger fired too, and the measurement says the trigger was phrased wrong.** `mono.tools/bindings` arrived at v0.6 linking `core`, `ecs`, `scene` and `script` — and `script` reaches `world`, `physics`, `spatial` and `parallel` and **neither `net` nor `assets`**. That is precisely the shape this bullet named. It pays **zero**: 16,593 symbols in the binary, **0 `CryptoPP::`, 0 `core::Random`**, against the client's 10,307 and 3 in the same preset. Nothing was pulled because static archives link per object — the tool's `main` calls `ScriptClass()` and never reaches the datatype bindings, so `LuauDatatypes.cpp.o` is not in the binary and `Random.cpp.o` is not pulled behind it.
-- **So the trigger is a link-line property and the cost is a call-graph property, and this entry conflated them for two versions.** Restated: **a program that *calls* `Random` while linking neither `net` nor `assets` pays the whole 36.** Linking `core` is not enough and never was — every measurement in this entry is consistent with that and none of them said it.
-- **Re-examined at v0.13 and the swap is deliberately not done.** Everything above says it costs the shipped programs nothing, and the other half of the trade has not been written down until now: **`Random.new(seed)` is bound into both script VMs**, so changing what is behind the interface changes every seeded stream every game has. That is a real behaviour change for a saving this entry has already measured at zero. The interface stays and so does what is behind it, until the trigger below actually fires.
-- **Reopen trigger, re-phrased: a program that calls `core::Random` and links neither `net` nor `assets`.** There is still not one. The nearest miss is `mono.tools/bindings`, which has the link line and not the call.
-
 ### [_] D00001
 
 - ~~`--script PATH` is accepted and warns.~~ **Closed at v0.5**, and it was the oldest thing in this entry — accepted and ignored since v0.1. Two VMs are vendored and linked, the file extension picks between them, and the flag loads a scene: `--script` on the client, `--game` on the server (ignored since v0.3), `--scene` on the unified harness. `mono.engine/examples/Rings.luau` and `Rings.js` build the same world through the same bindings, and the unified harness reads 512 entities on the server and 512 on the client from either.
 - ~~`core/types` has `Vector3`, `Color3` and `CFrame` only.~~ **Closed at v0.4.** `AABB`, `Ray` and `RayHit` landed with the consumers this bullet was waiting for — `spatial`'s queries and `physics`'s narrow phase. Nothing else was added, deliberately: `Vector2` was considered and refused because §3.4 gates it on "the overlay or editor needs it" and neither does, and the culling operations an `AABB` invites (`Inverted`, `Grown`, `Contains(AABB)`) have no caller until v0.6's frustum cull.
 - ~~`Column`, `ComponentSet`, `SparseSet` and `ChangeChannel` are not in `ecs` yet.~~ **Closed at v0.2** by the storage rewrite, and reopened and closed again at v0.4 by chunking. Recorded here rather than deleted because this bullet is why the entry was still `[_]` after the other half of it had shipped.
-- macOS builds compile SPIR-V but not MSL; the cross-compile step is wired in CMake and untested. Linux/Vulkan is the verified path. **Still open, and still the least examined line in this file** — it is the only item here with no trigger, because nobody has a Mac to trip it.
+- ~~macOS builds compile SPIR-V but not MSL; the cross-compile step is wired in CMake and untested.~~ **Examined at v0.15, and the half of that sentence that mattered was false.** There is no cross-compile step. Nothing in the root `CMakeLists.txt`, `mono.build/MonoLibrary.cmake` or any module's CMake names MSL, SPIRV-Cross or `shadercross`, and `mono.vendor/` holds no translator: `shaderc` pins glslang, SPIRV-Tools and SPIRV-Headers in its `DEPS` and carries no `spvc`. "Wired and untested" is a worse state to record than "absent", because it reads as a step somebody has only to run. This is what the entry meant by the least examined line in the file, and it is why the correction is the first thing here rather than the last.
+- **The second thing the examination found is that the item is in two places rather than one.** `mono.engine/render` links `shaderc` into the shipped client and `render::ShaderCompiler` compiles runtime-authored GLSL to SPIR-V while the engine runs, for every `ShaderScript` a `graph` pass names. So a build-time translation would cover the 49 built-in modules and leave every user-authored shader broken on the platform. macOS needs SPIR-V to MSL *in the binary*, which is a vendored library and a runtime code path, not a CMake line.
+- **What runs and is checked on Linux now: `just shader-check`, in `just check`.** `mono.tools/shadercheck` reflects every `.spv` the build produces and holds it to the resource contract `SDL_CreateGPUShader` documents. One entry point per module, named what the renderer asks for, at the stage the filename claims; every resource carrying an explicit `layout(set, binding)`; every resource in the descriptor set SDL names for its stage; bindings contiguous within a set, because every other shader format numbers them by counting and a gap shifts everything after it; and every SPIR-V capability on an allowlist of what MSL can express, `Float64` being the one that compiles happily for Vulkan and cannot be translated at all. 49 modules pass. **This is the part of the item that never needed a Mac**: MSL, DXIL and DXBC all derive their bindings from those sets, so wrong sets make every translation wrong, and the sets are readable here.
+- **What it deliberately does not claim.** It translates nothing, and it proves nothing about a Metal device. `MetalIndices` derives the `[[texture(n)]]` and `[[buffer(n)]]` each resource would land on and the tool prints it, because that assignment is a property of the SPIR-V and can therefore be read from a machine with no Metal, but a derivation is not an observation. Asserting more than that would be the same untested claim this bullet was corrected for, arriving a second time.
+- **A macOS client now fails at the configure with the reason.** Previously it configured, compiled, linked, staged, started and died inside `SDL_CreateGPUDevice`, because `render::Renderer` asks for `SDL_GPU_SHADERFORMAT_SPIRV` and Metal offers `MSL` and `METALLIB` and never that. The root `CMakeLists.txt` says so at the second the configure knows it. `--preset server` and `--preset cdn` are untouched and are the presets that should build on macOS today.
+- **What is left, in the order it has to happen.** A vendored SPIRV-Cross, pinned like its neighbours. The MSL entry point, which is `main0` and not `main`, because MSL reserves `main`, so `Renderer::LoadShader`, `InterfacePass` and the constant in `shadercheck`'s `Contract.cpp` move together. A shader format chosen at runtime rather than the literal `SDL_GPU_SHADERFORMAT_SPIRV` at three sites. `render::ShaderCompiler` gaining a second half, so a `ShaderScript` still works. Then the things only the machine can answer: whether the argument-buffer default matches what SDL's Metal backend binds, and the depth range, which is the classic difference and is silent.
+- **Reopen trigger, and it replaces "nobody has a Mac" with something that can actually fire: anybody configures a client preset on Darwin.** The `message(FATAL_ERROR)` above is the trigger, made of the same material as the item rather than left to somebody's memory of this file. Two things follow from that phrasing. It fires for the first person who tries rather than for the first person who owns the hardware, which is the population that matters. And it cannot fire by accident on Linux, so it costs the verified path nothing.
+- **The honest guess at what breaks first, recorded now so the guess can be graded later.** Not the translation. `SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, ...)` returning null before a single shader is read, because the format request is a literal in `Renderer.cpp` and has nothing to do with what is on disk. Second, the `main` against `main0` entry point, which fails per shader with a message that names the shader and not the reason. Third, the runtime compiler, which fails only when somebody writes a `ShaderScript` and therefore looks like a content bug.
 - **Correction at v0.6, to the second bullet's reasoning rather than to its verdict.** "`Vector2` was considered and refused because §3.4 gates it on 'the overlay or editor needs it' and neither does" — **`Vector2` shipped at v0.6, and for neither of those reasons.** `UDim2` and `Rect` are made of it, and both arrived with the datatype vocabulary a script surface owes an author. The gate was right and the list of things that could open it was short by one, which is the useful half: a gate phrased as "who needs it" only names the consumers somebody had thought of. The other half of that sentence closed exactly as written — the `AABB` operations got their caller in `graph::Cull`, and `Frustum::Intersects` is the positive-vertex test that wanted an `AABB` rather than eight points.
 
-**Three of four bullets are now closed and the entry stays `[_]` for macOS alone.** The paragraph that used to stand here said "two of four", which was true when it was written at v0.4 and stopped being true at v0.5 when `--script` closed — recorded rather than silently re-counted, for the reason D00004's drifting figure is recorded. `v02v03v04.md` predicted the v0.4 edit and said it belonged "with the next pass over `docs/DEFERRED.md`, not here".
+**Three of four bullets are now closed and the entry stays `[_]` for macOS alone.** The paragraph that used to stand here said "two of four", which was true when it was written at v0.4 and stopped being true at v0.5 when `--script` closed — recorded rather than silently re-counted, for the reason D00004's drifting figure is recorded. `v02v03v04.md` predicted the v0.4 edit and said it belonged "with the next pass over `docs/DEFERRED.md`, not here". **The count is still of the original four**, which is why it did not move at v0.15 when the macOS bullet grew from one line to eight: the eight are one item examined, not seven new ones, and the item is still open.

@@ -125,6 +125,11 @@ namespace engine::script {
 			"PlayerRemoving",
 			"CharacterAdded",
 			"CharacterRemoving",
+
+			// The 2D tree's input, and then the keyboard pair a `TextBox`
+			// carries. Grouped with blank lines and a comment so the list stays
+			// one name per line: without them the formatter packs nineteen
+			// short strings into a grid nobody can add to without reflowing it.
 			"Activated",
 			"MouseButton1Click",
 			"InputBegan",
@@ -132,6 +137,8 @@ namespace engine::script {
 			"MouseEnter",
 			"MouseLeave",
 			"MouseMoved",
+			"Focused",
+			"FocusLost",
 		};
 
 		int InstanceIndex(lua_State *state) {
@@ -249,6 +256,20 @@ namespace engine::script {
 			}
 			if (name == "MouseMoved") {
 				PushSignal(state, SignalKind::GuiMouseMoved, instance);
+				return 1;
+			}
+
+			// **A `TextBox`'s pair, offered on every instance for the reason the
+			// six above it are.** Only a `TextBox` can take the keyboard —
+			// `gui::Focus` refuses anything with no `Entry` component — so a
+			// connection on a `Frame` is inert by construction rather than by a
+			// class test on every field access in the world.
+			if (name == "Focused") {
+				PushSignal(state, SignalKind::GuiFocused, instance);
+				return 1;
+			}
+			if (name == "FocusLost") {
+				PushSignal(state, SignalKind::GuiFocusLost, instance);
 				return 1;
 			}
 
@@ -1014,6 +1035,21 @@ namespace engine::script {
 
 			case gui::EventKind::Activated:
 				note(FireSignal(state, SignalKind::GuiActivated, event.Instance, 0));
+				break;
+
+			case gui::EventKind::Focused:
+				note(FireSignal(state, SignalKind::GuiFocused, event.Instance, 0));
+				break;
+
+			case gui::EventKind::FocusReleased:
+				// **`enterPressed`, read off the event rather than assumed.**
+				// Roblox's first argument, which a handler written
+				// `function(enterPressed)` reads — see `SignalKind::GuiFocusLost`
+				// for why the second argument it also declares is not here. True
+				// when Return released the box and false when a press elsewhere
+				// did, which is the difference `GuiEvent::Entered` carries.
+				lua_pushboolean(state, event.Entered ? 1 : 0);
+				note(FireSignal(state, SignalKind::GuiFocusLost, event.Instance, 1));
 				break;
 			}
 		}

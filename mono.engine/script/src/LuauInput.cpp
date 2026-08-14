@@ -304,27 +304,29 @@ namespace engine::script {
 
 		std::string firstError;
 
-		// **Whether the interface already took the pointer, decided once for the
-		// whole beat.** `InterfaceHasPointer` carries what the answer means and
-		// why a key is never processed; asking it per edge would walk the same
-		// queue for every button on a frame that produced several.
-		const bool processed = InterfaceHasPointer(interface);
+		// **What the interface already took, decided once for the whole beat.**
+		// `InterfaceHasPointer` and `InterfaceHasKeyboard` carry what each answer
+		// means; asking the first per edge would walk the same queue for every
+		// button on a frame that produced several.
+		const bool pointerTaken = InterfaceHasPointer(interface);
+		const bool keyboardTaken = InterfaceHasKeyboard(*ContextOf(state).World);
 
 		// The two shapes every input signal below is fired with. **Named rather
 		// than written out four times**, because the argument list is the half a
 		// pump gets wrong — a signal that quietly passed one argument where its
 		// neighbour passed two is `InputChanged` again.
 		const auto pushNothing = [] { return 0; };
-		const auto pushReport = [state, processed](const InputReport &report) {
-			return [state, processed, &report] {
+		const auto pushReport = [state, pointerTaken, keyboardTaken](const InputReport &report) {
+			return [state, pointerTaken, keyboardTaken, &report] {
 				PushInputObject(state, report);
 
-				// **Roblox's second argument, and it is `false` for a key rather
-				// than absent.** A handler written `function(input, processed)`
-				// reads nil as false either way; one written `if not processed
-				// then` on a signal that passed nothing would too, which is
-				// exactly why the gap was invisible for six versions.
-				lua_pushboolean(state, processed && IsPointerReport(report));
+				// **Roblox's second argument, and it is `false` rather than
+				// absent when nothing took the input.** A handler written
+				// `function(input, processed)` reads nil as false either way; one
+				// written `if not processed then` on a signal that passed nothing
+				// would too, which is exactly why the gap was invisible for six
+				// versions.
+				lua_pushboolean(state, IsPointerReport(report) ? pointerTaken : keyboardTaken);
 				return 2;
 			};
 		};

@@ -110,6 +110,11 @@ int main(int argc, char **argv) {
 		"Press the interface element with this name once, mid-run. A diagnostic; see Options::ClickElement"
 	);
 	arguments.Value(
+		"type",
+		"TEXT",
+		"Type this into the focused TextBox once, mid-run. Pairs with --click; see Options::TypedText"
+	);
+	arguments.Value(
 		"capture",
 		"PATH",
 		"Write a BMP of the scene near the end of the run. Needs --frames; renders offscreen"
@@ -261,6 +266,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto element = arguments.Get("click")) {
 		options.ClickElement = std::string(*element);
+	}
+	if (auto typed = arguments.Get("type")) {
+		options.TypedText = std::string(*typed);
 	}
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);

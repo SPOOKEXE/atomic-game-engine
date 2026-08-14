@@ -193,6 +193,36 @@ namespace engine::script {
 	// @return The instances to run, in order.
 	std::vector<ecs::Entity> ScriptsIn(ecs::Store &store, bool server, bool client);
 
+	// Every script instance a client should run in a world it does not own.
+	//
+	// **A class rule and a container rule, because a replica needs both.**
+	// `ScriptsIn` answers the class half — a `Script` is the server's and a
+	// `LocalScript` is a client's — and that is the whole answer for a host that
+	// owns the world it is running. It is not the answer for a replica: the rows
+	// there are somebody else's, and a client that ran every `LocalScript` it
+	// could see would run the ones in *other people's* players and the ones in
+	// `StarterPlayerScripts`, which is a template rather than a program.
+	//
+	// **Roblox's containers, and no new vocabulary was needed for them.** A
+	// `LocalScript` runs when it is under the local player's own subtree —
+	// `scene::PlayerOwning` against `scene::LocalPlayer` — or under
+	// `ReplicatedFirst`, which is `scene::InReplicatedFirst`. `scene::AddPlayer`
+	// is what copies `StarterPlayerScripts` into a player's `PlayerScripts`, so
+	// the template's own children are excluded by being where they are rather
+	// than by being named here.
+	//
+	// **This is not `ScriptsIn` with an extra argument, and that is deliberate.**
+	// A single-player host is a server *and* a client and owns the world it is
+	// in; the containment rule there would stop a `LocalScript` an author parked
+	// in `Workspace` from ever running, which is a change to how every existing
+	// scene loads for the sake of a rule about a replica.
+	//
+	// @param store The replicated world.
+	// @return The instances to run, in creation order. Empty until the host has
+	//         said which player is this client's.
+	// @since v0.15
+	std::vector<ecs::Entity> ClientScriptsIn(ecs::Store &store);
+
 	// Creates a script instance naming a file.
 	//
 	// @param store The world.

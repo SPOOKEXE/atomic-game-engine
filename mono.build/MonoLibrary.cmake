@@ -128,11 +128,84 @@ function(_mono_add_shaders name target defines)
 			VERBATIM
 		)
 		list(APPEND outputs "${spv}")
+
+		# **MSL beside the SPIR-V, on every platform rather than on Apple.** The
+		# translation is a property of the module and not of the machine doing
+		# it, so translating only where the result is loaded would mean the one
+		# platform that cannot run `just check` is the only one that ever
+		# produces the file. Emitting it everywhere is what lets a Linux build
+		# fail on a shader Metal could not express — which is the half of
+		# `docs/DEFERRED.md` D00001 that does not need a Mac.
+		#
+		# The cost is one small process per shader; `just shader-check` reads
+		# every one of these back, so nothing here is produced and unread.
+		set(msl "${stage}/${shader_name}.msl")
+		add_custom_command(
+			OUTPUT "${msl}"
+			COMMAND shadercross "${spv}" -o "${msl}"
+			DEPENDS "${spv}" shadercross
+			COMMENT "MSL ${name}/${shader_name}"
+			VERBATIM
+		)
+		list(APPEND outputs "${msl}")
 	endforeach()
 
 	add_custom_target(${target}_shaders DEPENDS ${outputs})
 	set_property(TARGET ${target} PROPERTY MONO_SHADER_DIR "${stage}")
 	set_property(TARGET ${target} PROPERTY MONO_SHADER_TARGET ${target}_shaders)
+
+	# **A module's staging directory is reconciled here, not merely written
+	# to.** A `.spv` is an `add_custom_command` output and CMake deletes an
+	# output only when the command that made it is re-run — so a shader that is
+	# renamed, deleted, or moved to another module leaves its compiled form on
+	# disk forever. `just shader-check` then reports on files whose source no
+	# longer exists, which it did: 35 orphans from a v0.15 move sat beside 14
+	# real ones and inflated the count to 49.
+	#
+	# Configure time is the right time because `CONFIGURE_DEPENDS` on the glob
+	# above already re-runs the configure the moment the source set changes.
+	set(expected "")
+	foreach(output IN LISTS outputs)
+		get_filename_component(output_name "${output}" NAME)
+		list(APPEND expected "${output_name}")
+	endforeach()
+	_mono_prune_directory("${stage}" "${expected}")
+
+	set_property(GLOBAL APPEND PROPERTY MONO_SHADER_MODULES "${name}")
+endfunction()
+
+# Everything in `directory` that is not named in `keep`, deleted.
+#
+# Not recursive and deliberately so: a shader stage is flat, and a sweep that
+# descended would be one that could reach a directory somebody put there on
+# purpose.
+function(_mono_prune_directory directory keep)
+	if(NOT IS_DIRECTORY "${directory}")
+		return()
+	endif()
+	file(GLOB present RELATIVE "${directory}" "${directory}/*")
+	foreach(entry IN LISTS present)
+		if(NOT entry IN_LIST keep)
+			file(REMOVE_RECURSE "${directory}/${entry}")
+			message(STATUS "shaders: removed stale ${directory}/${entry}")
+		endif()
+	endforeach()
+endfunction()
+
+# The shader stage against the modules that still own shaders.
+#
+# **The other half of the reconciliation, and it is the half `_mono_add_shaders`
+# structurally cannot do.** That function returns early for a module with no
+# `shaders/` directory, so a module that *stops* owning shaders is a module
+# nothing looks at again — which is exactly what happened when the built-in GLSL
+# moved from `render` to `resources` and `shaderstage/render/` was left behind
+# whole. Call this after every module has been declared.
+function(mono_prune_shader_stage)
+	if(NOT MONO_SHADER_STAGE)
+		return()
+	endif()
+	get_property(owners GLOBAL PROPERTY MONO_SHADER_MODULES)
+	_mono_prune_directory("${MONO_SHADER_STAGE}" "${owners}")
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -480,6 +553,7 @@ function(mono_add_program name)
 	_mono_transitive_deps("${ARG_DEPS}" all_deps)
 	set(shader_targets "")
 	set(shader_commands "")
+	set(shader_modules "")
 	foreach(dep IN LISTS all_deps)
 		get_target_property(dir ${dep} MONO_SHADER_DIR)
 		if(NOT dir OR dir STREQUAL "dir-NOTFOUND")
@@ -488,9 +562,24 @@ function(mono_add_program name)
 		get_target_property(module ${dep} MONO_MODULE_NAME)
 		get_target_property(shader_target ${dep} MONO_SHADER_TARGET)
 		list(APPEND shader_targets ${shader_target})
+		list(APPEND shader_modules "${module}")
+		# `rm -rf` before the copy, so the staged directory is the module's
+		# directory rather than the union of every one it has ever been. A copy
+		# alone leaves a renamed shader staged beside its replacement, and the
+		# renderer opens files by name — so the stale one loads and nothing says
+		# which of the two it got. The whole directory is a handful of kilobytes
+		# and this target already runs every build, so it costs nothing to be
+		# exact.
 		list(APPEND shader_commands
+			COMMAND ${CMAKE_COMMAND} -E rm -rf "${stage}/shaders/${module}"
 			COMMAND ${CMAKE_COMMAND} -E copy_directory "${dir}" "${stage}/shaders/${module}")
 	endforeach()
+
+	# A module this program no longer links leaves a whole directory behind, and
+	# the per-module sweep above cannot see it — there is no command for a module
+	# that is not on the link line. Configure time, for `_mono_add_shaders`'
+	# reason: the link row is known here and changes to it re-run the configure.
+	_mono_prune_directory("${stage}/shaders" "${shader_modules}")
 
 	if(shader_commands)
 		# A target of its own rather than a POST_BUILD command, so that a

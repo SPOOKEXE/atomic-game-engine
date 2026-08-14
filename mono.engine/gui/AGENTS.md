@@ -168,6 +168,75 @@ Two rules inside it are worth keeping:
   two adjacent buttons produces an enter against state the leave is about to
   undo.
 
+## The keyboard's focus is the world's; the router only decides it
+
+`Router` holds the hover and the press privately, because nobody else reads
+where a mouse is. The focused `TextBox` is the opposite case and lives in
+`GuiServiceState::FocusedTextBox`: the scripting layer reads it for
+`UserInputService:GetFocusedTextBox` and L9 has no route to a router, so a
+handle kept beside the decision would be rule 2's second statement of one fact.
+
+That is why `Router::Update` takes a **mutable** `ecs::Store &`, and it is the
+only thing in the class that writes one. A world with no `GuiService` routes the
+pointer exactly as it did before focus existed and takes none at all — the
+honest answer rather than an oversight, since there is nowhere for the fact to
+live.
+
+Three rules inside it, none of which the build can check:
+
+- **Only a press moves it.** A hover does not take the keyboard and a release
+  does not give it back, which is what makes dragging a selection out of a box
+  and letting go somewhere else keep it focused — `InputEnded`'s rule one
+  section up, for the same interaction.
+- **A press that lands on nothing releases it**, which is Roblox's answer:
+  clicking the background is how anybody stops typing, and the alternative
+  leaves a game with no way to give the keyboard back to itself.
+- **The handle is validated on the way out, never swept.** `FocusedTextBox`
+  answers null for a box that has been destroyed, because the generation in the
+  id has moved — the same argument `Rendered` is swept for, one section up.
+  Reparenting therefore does *not* release the focus, deliberately. And a
+  destroyed box emits no `FocusReleased`: the event names an element, and
+  `Router::Forget` already states that firing at one that is gone is worse than
+  firing nothing.
+
+**A host has to install the services, and nothing in `gui` can do it for one.**
+`InstallGuiServices` is where `GuiService` comes from, `scene::InstallServices`
+cannot call it, and every function above answers "no" in a world that has
+neither. `examples::LoadScene` is the caller today, which covers every
+`--script` world in the client and the server. The editor registers the classes
+on its own path and installs no service, so focus does not work there yet —
+`studio/AGENTS.md`'s call, not this module's.
+
+## Typing is `Typing.hpp`, and the text it writes is the box's own
+
+`Router` decides which box has the keyboard; `Type` decides what a keystroke
+does to it. Neither knows about the other's gesture, which is why they are two
+files: a press is routed by position and a character is not routed at all.
+
+- **`Label::Text` is the buffer.** There is no edit state anywhere — no pending
+  string, no undo stack, no "box being edited". Rule 2, and the specific bug a
+  second copy would buy is a script writing `TextBox.Text` while somebody types
+  into it and the two disagreeing until the next repaint.
+- **The caret is characters and the string is bytes, and `src/Utf8.hpp` is the
+  only place that crosses between them.** `Focus` counts to the end of the text
+  and `Type` inserts in the middle; two copies of that arithmetic would be two
+  answers to where the caret is, and both would be right for English.
+- **`Type` clamps the caret before reading it, and that is not defensive
+  programming.** `TextBox.Text` is a plain property with no setter to hook — the
+  class table writes the field — so a handler replacing the text with something
+  shorter is an ordinary event, and every offset derived from the old caret is
+  then past the end. Clamping lives at the one reader that indexes by it.
+- **Return releases a single-line box and breaks a line in a `MultiLine` one**,
+  and the release owes a `FocusReleased` the router cannot produce, because no
+  press happened. `GuiEvent::Entered` is how a script tells the two apart, and
+  the caller builds that event from `TypeResult::Released`.
+
+**A `TextBox` takes input, and that is a second class in `TakesInput` rather
+than a field.** It is not a `GuiButton` and its `Active` is false by default, so
+the pick walked past it and a click reached whatever was behind — which is what
+made focus unreachable and, before that, made a text field ignore the mouse.
+`Entry` is the test, for the reason `Element` is the `GuiObject` test below.
+
 ## `ElementsAt` asks `Pick`'s question and reads the compile's answer
 
 `PlayerGui:GetGuiObjectsAtPosition` wants *everything* under a point, in paint

@@ -56,12 +56,78 @@ namespace engine::net {
 		// the packets that inflated it were not stale at all.
 		uint64_t PacketsStale = 0;
 
-		// Sends refused this tick because the byte budget was spent.
+		// Sends refused because a *configured* budget was spent.
 		//
 		// The number DATATYPES_LIBRARIES.md §15.1 asks to be visible. Without
 		// it, an enforced budget and a congested link look identical from a
 		// game's point of view.
+		//
+		// The byte budget, the packet budget and a payload too large to frame —
+		// every reason that is a number somebody chose, and therefore every
+		// reason a caller can answer by choosing differently. Congestion is
+		// `SendsOverAllowance` and is not counted here.
 		uint64_t SendsOverBudget = 0;
+
+		// Sends refused because the *congestion controller* would not carry them.
+		//
+		// **Kept apart from `SendsOverBudget` on purpose, and the distinction is
+		// the whole reading.** That one is a number somebody configured being
+		// enforced, and the answer to it is to raise the number or send less.
+		// This one is the path saying it cannot take the traffic, and raising
+		// anything does nothing at all. A single counter would make "raise the
+		// cap" look like a fix for congestion.
+		//
+		// **A caller that must not lose the send has to read both.** Either off
+		// zero means the payload did not go; `replication::Authority::Unsent` is
+		// the reader that knows what that costs.
+		//
+		// @since v0.15
+		uint64_t SendsOverAllowance = 0;
+
+		// Reliable packets this end sent that the far side's acknowledgement
+		// showed missing.
+		//
+		// The outbound twin of `PacketsLost`, and the two must not be added
+		// together: that one is about the path coming in and this one is about
+		// the path going out, and on an asymmetric link they routinely disagree.
+		// This is the loss signal the congestion controller acts on, because it
+		// is the only one that is about the direction this end is sending in.
+		//
+		// **Only the reliable channel is visible here**, since it is the only
+		// one the far side acknowledges. Unreliable loss on the way out is not
+		// reported by anything and is not measured by this.
+		//
+		// @since v0.15
+		uint64_t SendsLost = 0;
+
+		// Payload bytes the congestion controller will carry this tick.
+		//
+		// The lower of what the path looks able to take and
+		// `LinkSettings::BytesPerTick`. Read it beside `SendsOverAllowance`:
+		// a number well under the cap with refusals against it is a link doing
+		// exactly what it should on a path that cannot take more.
+		//
+		// @since v0.15
+		uint32_t SendAllowanceBytes = 0;
+
+		// Standing queue the path looks to be holding, in milliseconds.
+		//
+		// The round trip now, less the least this connection has ever seen. It
+		// is the number the whole controller is built around: a delay-based
+		// algorithm settles this at a couple of packets' worth, where a
+		// loss-based one settles it at however deep the bottleneck's buffer is.
+		//
+		// @since v0.15
+		float QueueMilliseconds = 0.0f;
+
+		// How much the round trip moves about, in milliseconds.
+		//
+		// RFC 6298's `RTTVAR`, and what a player interface should show as
+		// jitter. `RoundTripMilliseconds` alone says nothing about whether the
+		// next packet will be near it.
+		//
+		// @since v0.15
+		float RoundTripVarianceMilliseconds = 0.0f;
 
 		// Gaps in the far side's sequence numbers — packets that never arrived.
 		//

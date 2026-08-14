@@ -947,6 +947,29 @@ TEST_CASE("an svg's document type declaration is refused outright", "[bake][imag
 	CHECK(Mentions(
 		Refused(R"(<svg width="8" height="8" fill="&payload;"><rect width="8" height="8"/></svg>)"), "payload"
 	));
+
+	// **A CDATA section is the one `<!` that is character data**, and it is
+	// skipped rather than refused since the scanner became `bake`'s own
+	// `Xml.hpp` at v0.15 and `core::xml` at `D00128` — `.rbxmx` needs it,
+	// because a CDATA section is how Roblox writes a script's source. Nothing
+	// inside one is markup, so the rectangle below is text and the picture is
+	// empty.
+	const TextureData hidden =
+		Drawn(R"(<svg width="2" height="2"><![CDATA[<rect width="2" height="2" fill="red"/>]]></svg>)", 0, 0);
+	CHECK(At(hidden, 0, 0) == Pixel{0, 0, 0, 0});
+
+	// **And the sweep reaches inside that section, which is where this
+	// rasteriser's policy and `.rbxmx`'s deliberately part company.** This
+	// format never unescapes — an attribute value is used exactly as written —
+	// so there is no point at which a reference would otherwise be met and a
+	// sweep over the whole document is the only place left to refuse one. A
+	// model takes the other route because a model's CDATA is a script, and
+	// `core/Xml.hpp` says what breaks if the two are collapsed into one policy.
+	// This case goes red the moment somebody gives this format `.rbxmx`'s.
+	CHECK(Mentions(
+		Refused(R"(<svg width="8" height="8"><![CDATA[&payload;]]><rect width="8" height="8"/></svg>)"),
+		"payload"
+	));
 }
 
 TEST_CASE("everything outside the svg subset is refused by name", "[bake][image]") {

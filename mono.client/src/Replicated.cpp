@@ -1,5 +1,8 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/game/Game.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -7,11 +10,14 @@
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/Instances.hpp>
 
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <cstring>
+#include <memory>
 #include <optional>
+#include <string>
 
 namespace client {
 
@@ -99,7 +105,7 @@ namespace client {
 		}
 	}
 
-	void
+	std::shared_ptr<engine::script::Runtime>
 	BuildReplicatedWorld(Store &store, Scheduler &scheduler, const InterpolationSettings &interpolation) {
 		// Register snapshot component names before applying one.
 		engine::scene::RegisterSceneComponents();
@@ -152,6 +158,51 @@ namespace client {
 
 		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimReplicatedSurfaces);
 		scheduler.Add("collect-replicated", Phase::PreRender, CollectReplicated);
+
+		// **`GuiService` comes over the wire without the thing it is for.** No
+		// `gui.` component is replicated, so the row a client is shown is a name
+		// and a class; `gui::Focus` and `gui::Select` both read the state on it
+		// and both answer `false` without one, which is a keyboard that never
+		// reaches a `TextBox` and nothing saying why. `InstallGuiServices` mints
+		// nothing in a replica and completes whatever arrived, so this is safe
+		// once a tick and does nothing on the ticks before the join.
+		scheduler.Add("replica-gui-services", Phase::PreSimulation, [](Store &world) {
+			(void)engine::gui::InstallGuiServices(world);
+		});
+
+		// **A client's VM, over a world it does not own.** The role is what
+		// decides which scripts it may run at all — a `Script` is the server's —
+		// and `ClientScriptsIn` adds the container half below.
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfClient();
+
+		std::string failure;
+		std::shared_ptr<engine::script::Runtime> runtime =
+			engine::game::StartWorldScripts(store, scheduler, limits, failure);
+
+		// Reported rather than returned. A replica is empty at this point, so
+		// there is nothing here to fail — but the parameter is filled in by the
+		// same call three other hosts make, and swallowing it would make this the
+		// one that hides a start-up error.
+		if (!failure.empty()) {
+			ENGINE_ERROR("replica '{}': {}", store.Name(), failure);
+		}
+
+		// **The one thing about a replica's scripts that is not a host's.** A
+		// host starts a world's scripts once because the world is already built;
+		// this one fills from the wire, so what has to be asked every tick is
+		// what arrived — and `RunNewScripts` is what makes asking repeatedly
+		// cost one binary search per script rather than a second run of it.
+		//
+		// Before the heartbeat, because `StartWorldScripts` installs that in
+		// `Phase::Simulation`: a script that arrived this tick connects to
+		// `RunService.Heartbeat` in time to be beaten on the same tick, which is
+		// the ordering every other loader already gives.
+		scheduler.Add("replica-scripts", Phase::PreSimulation, [runtime](Store &world) {
+			(void)runtime->RunNewScripts(engine::script::ClientScriptsIn(world));
+		});
+
+		return runtime;
 	}
 
 	Entity AimReplicaViewer(Store &store, const CFrame &frame, const engine::scene::Camera &lens) {

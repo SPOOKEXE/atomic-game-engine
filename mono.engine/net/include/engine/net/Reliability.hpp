@@ -247,6 +247,27 @@ namespace engine::net {
 			return SmoothedRoundTrip;
 		}
 
+		// How much the round trip moves about, in seconds, or zero before the
+		// first sample.
+		//
+		// RFC 6298's `RTTVAR`: the smoothed mean deviation of a sample from the
+		// estimate, at a weight of one quarter. It is the half of the estimator
+		// that says how much to trust the other half.
+		//
+		// **A congestion controller needs both and a single last-sample is no
+		// substitute for either.** Queueing delay is read as the round trip
+		// rising above its own floor, and on a wireless link the trip rises and
+		// falls by tens of milliseconds with nothing queued anywhere — so a
+		// controller with no variance to compare against reads jitter as
+		// congestion and backs off for ever. `CongestionSettings::VarianceFactor`
+		// is what consumes this.
+		//
+		// @return The variance in seconds. Zero means nothing has been measured.
+		// @since v0.15
+		double RoundTripVarianceSeconds() const {
+			return RoundTripVariance;
+		}
+
 		// What is due to be sent again, oldest first.
 		//
 		// **Offer each one to `Link::Reserve` before sending it.** A resend is
@@ -282,6 +303,9 @@ namespace engine::net {
 
 		// The smoothed round trip in seconds, or zero before the first sample.
 		double SmoothedRoundTrip = 0.0;
+
+		// The smoothed mean deviation of a sample from that estimate.
+		double RoundTripVariance = 0.0;
 
 		ReliabilitySettings Paced;
 		DisconnectReason Overflowed = DisconnectReason::None;

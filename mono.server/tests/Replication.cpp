@@ -38,6 +38,7 @@
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Tools.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -48,6 +49,7 @@
 #include <fstream>
 #include <numbers>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -987,7 +989,21 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 		REQUIRE(file);
 		file << "local block = Instance.new(\"Part\")\n"
 			 << "block.Anchored = true\n"
-			 << "block.Parent = workspace\n";
+			 << "block.Parent = workspace\n"
+
+			 // **A `Tool` in `StarterPack`, because a container is only private
+			 // if what is *in* it is.** The four containers arriving empty proved
+			 // the predicate hides a row under a player; a game keys "what am I
+			 // holding" off the contents, and a client reading another's
+			 // `Backpack` reads their inventory. `AddPlayer` clones this into
+			 // each occupant's `StarterGear` and the spawn refills `Backpack`
+			 // from that, so each client ends up with a copy of its own.
+			 << "local tool = Instance.new(\"Tool\")\n"
+			 << "tool.Name = \"Sword\"\n"
+			 << "local handle = Instance.new(\"Part\")\n"
+			 << "handle.Name = \"Handle\"\n"
+			 << "handle.Parent = tool\n"
+			 << "tool.Parent = game:GetService(\"StarterPack\")\n";
 	}
 
 	Remote first;
@@ -1018,7 +1034,22 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 	CHECK(first.World.Alive(second.Mine));
 
 	// **And what is under one is not.** Four containers of its own, none of
-	// theirs — `PlayerGui`, `PlayerScripts`, `Backpack` and `StarterGear`.
+	// theirs — and they are asked for **by name**, which is the assertion this
+	// case could not make until v0.15.
+	//
+	// The containers are built by `AddPlayer` when a client joins, so they are
+	// exactly the case `replication::DefaultReplicatedComponents` used to get
+	// wrong: it admitted `ecs.Hierarchy` and the `scene.` prefix and nothing else
+	// from `ecs.`, so `ecs.InstanceName` crossed in a join snapshot and never in
+	// a delta and every one of these arrived called nothing at all. Counting
+	// anonymous handles was the workaround; a name is what a game actually holds
+	// them by.
+	for (const std::string_view container : {"PlayerGui", "PlayerScripts", "Backpack", "StarterGear"}) {
+		INFO("container: " << container);
+		CHECK(first.World.FindFirstChild(first.Mine, container) != engine::ecs::NULL_ENTITY);
+		CHECK(second.World.FindFirstChild(second.Mine, container) != engine::ecs::NULL_ENTITY);
+	}
+
 	CHECK(children(first.World, first.Mine) == 4);
 	CHECK(children(first.World, second.Mine) == 0);
 
@@ -1026,6 +1057,57 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 	// "the first one to ask wins".
 	CHECK(children(second.World, second.Mine) == 4);
 	CHECK(children(second.World, first.Mine) == 0);
+
+	// **And the gear inside them, which is what a `Tool` made worth asserting.**
+	// Four empty containers prove the predicate hides a *row* under a player; a
+	// game keys "what am I holding" off the contents, so what has to be proved is
+	// that one client cannot count the other's. Each occupant has two copies of
+	// the template — one in `StarterGear` and the one the spawn refilled
+	// `Backpack` with — and none of anybody else's.
+	//
+	// **Named at every step, container and tool alike.** `Sword` is what the
+	// scene called it, so a client holding a `Tool` under an unnamed parent, or
+	// a named container holding an unnamed tool, is a failure here rather than a
+	// count that still comes to two.
+	const auto swordIn = [](Store &world, Entity player, std::string_view container) {
+		const Entity holder = world.FindFirstChild(player, container);
+		return holder != engine::ecs::NULL_ENTITY &&
+			   world.FindFirstChild(holder, "Sword") != engine::ecs::NULL_ENTITY;
+	};
+
+	CHECK(swordIn(first.World, first.Mine, "Backpack"));
+	CHECK(swordIn(first.World, first.Mine, "StarterGear"));
+
+	// The same from the other side, so the answer is per client here too.
+	CHECK(swordIn(second.World, second.Mine, "Backpack"));
+	CHECK(swordIn(second.World, second.Mine, "StarterGear"));
+
+	// And neither can reach into the other's, which is the half the naming does
+	// not change: the interest predicate is what keeps one client's inventory out
+	// of another's world, and asking by name would find it if it were there.
+	CHECK_FALSE(swordIn(first.World, second.Mine, "Backpack"));
+	CHECK_FALSE(swordIn(second.World, first.Mine, "Backpack"));
+
+	// The count stays, because "two, and not one or three" is a different claim
+	// from "the named one is there" — a spawn that refilled `Backpack` twice
+	// would pass every assertion above.
+	const auto toolsUnder = [](Store &world, Entity player) {
+		size_t found = 0;
+		world.Each<const engine::scene::Tool>([&](Entity tool, const engine::scene::Tool &) {
+			for (Entity at = tool; at != engine::ecs::NULL_ENTITY; at = world.ParentOf(at)) {
+				if (at == player) {
+					found++;
+					return;
+				}
+			}
+		});
+		return found;
+	};
+
+	CHECK(toolsUnder(first.World, first.Mine) == 2);
+	CHECK(toolsUnder(first.World, second.Mine) == 0);
+	CHECK(toolsUnder(second.World, second.Mine) == 2);
+	CHECK(toolsUnder(second.World, first.Mine) == 0);
 
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);

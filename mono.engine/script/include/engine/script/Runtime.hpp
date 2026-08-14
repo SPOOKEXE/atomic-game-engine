@@ -198,6 +198,29 @@ namespace engine::script {
 		// @return How many ran without error.
 		size_t RunWorldScripts();
 
+		// Runs the scripts in `wanted` this runtime has not already run.
+		//
+		// **What a world that gains scripts after it started needs, and a
+		// replica is the world that does.** `RunWorldScripts` is a host saying
+		// "start this game": it is called once, over a world that is already
+		// built, and calling it twice starts every script twice. A client's
+		// replica is empty when its VM opens and fills from the wire afterwards,
+		// so the question there is not "what does this world hold" but "what has
+		// arrived since last time".
+		//
+		// **The selection is the caller's**, because a replica's is not a host's:
+		// `ClientScriptsIn` adds Roblox's container rule to the class rule
+		// `RunWorldScripts` applies through `RuntimeLimits::Role`, and a runtime
+		// that decided for itself would have to know it was in a replica.
+		//
+		// Every script runs even when one fails, and the first failure is in
+		// `LastError` — `RunWorldScripts`' reason exactly.
+		//
+		// @param wanted The instances to consider, in the order to run them.
+		// @return How many started on this call.
+		// @since v0.15
+		size_t RunNewScripts(std::span<const ecs::Entity> wanted);
+
 		// Calls everything connected to `RunService.Heartbeat`.
 		//
 		// **This is what makes a script the simulation rather than a setup
@@ -453,6 +476,25 @@ namespace engine::script {
 
 		// Where execution should be reported from. Read through `Debug`.
 		Debugger Breakpoints;
+
+	  private:
+		// Records `instance` as started here, answering whether it is new.
+		//
+		// @param instance The script instance.
+		// @return `true` the first time this runtime is asked about it.
+		bool RememberStarted(ecs::Entity instance);
+
+		// Which script instances this runtime has already run, by entity id.
+		//
+		// **The VM's own record and not a fact about the world**, which is why
+		// it is here rather than a tag on the row: "has this program been given
+		// to this interpreter" is a property of the interpreter, and two VMs over
+		// one world would each have to answer it separately. Rule 2 asks that two
+		// modules not keep two copies of one fact; nothing else keeps this one.
+		//
+		// Sorted by id, so a lookup is a binary search and the order never
+		// depends on a hash.
+		std::vector<ecs::Entity> StartedScripts;
 	};
 
 	// Opens a VM of the given language over `store`.

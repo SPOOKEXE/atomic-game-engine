@@ -306,7 +306,14 @@ namespace engine::gui {
 		// Whether a person may type into it at all.
 		bool TextEditable = true;
 
-		// The caret's index into the text, or -1 when unfocused.
+		// The caret's position in the text, or -1 when unfocused.
+		//
+		// **Roblox's number: one-based, and counted in characters rather than
+		// in bytes.** `1` is before the first character and `n + 1` is after the
+		// last, so an empty box that has just taken focus reads `1`. The
+		// distinction is not academic — `Label::Text` is UTF-8, and a caret set
+		// from `Text.size()` sits past the end of anything typed in a language
+		// with accents in it. `gui::Focus` counts the characters.
 		int32_t CursorPosition = -1;
 
 		// Where a selection started, or -1 when there is none.
@@ -795,5 +802,22 @@ namespace engine::gui {
 		// Roblox's `AutoSelectGuiEnabled`. False means a game drives selection
 		// itself and `SelectNext` refuses to seed one from nothing.
 		bool AutoSelectGuiEnabled = true;
+
+		// The `TextBox` the keyboard is going to, or null.
+		//
+		// **The focus lives here rather than on `gui::Router`, because two
+		// modules read it and only one decides it.** The router decides — a
+		// press lands on a text box or somewhere else — and
+		// `UserInputService:GetFocusedTextBox` at L9 reads, with no route to a
+		// router at all. A copy held beside the decision would be rule 2's
+		// second statement of one fact, and the two would part company the first
+		// frame a box was destroyed.
+		//
+		// **A handle and never a pointer**, which is what makes a focused box
+		// that has since been destroyed a question rather than a crash: the
+		// generation in the id goes stale and `FocusedTextBox` answers null.
+		//
+		// @since v0.15
+		ecs::Entity FocusedTextBox;
 	};
 }

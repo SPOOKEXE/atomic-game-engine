@@ -84,7 +84,16 @@ namespace engine::replication {
 	// The wire format version.
 	//
 	// Unknown versions are refused; wire changes require a version bump.
-	inline constexpr uint16_t PROTOCOL_VERSION = 7;
+	//
+	// **8 — no message changed shape, and it still had to move.** A peer of
+	// version 7 registers `ecs.InstanceClass` and would resolve the name in a
+	// delta perfectly well, then read a length-prefixed class name as a raw
+	// four-byte `ClassId` and lose the cursor for every value behind it. A
+	// version's job is to refuse that at the first field rather than at the
+	// twentieth; the two encodings are indistinguishable from the bytes alone,
+	// which is the same test `ecs::Store::SNAPSHOT_VERSION` 3 applies to the
+	// same change on the other side.
+	inline constexpr uint16_t PROTOCOL_VERSION = 8;
 
 	// Which half of a join a snapshot chunk belongs to.
 	//

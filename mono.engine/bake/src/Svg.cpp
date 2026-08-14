@@ -1,5 +1,7 @@
 #include "Decoders.hpp"
 
+#include <engine/core/Xml.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -38,6 +40,10 @@
 // point count and the raster target.
 
 namespace engine::bake {
+
+	// The scanner is `core`'s since v0.15 — `D00128`, and `core/Xml.hpp` carries
+	// why it is at the bottom rather than beside a format that reads markup.
+	namespace xml = core::xml;
 
 	namespace {
 
@@ -136,12 +142,6 @@ namespace engine::bake {
 		char Lowered(char character) {
 			return (character >= 'A' && character <= 'Z') ? static_cast<char>(character - 'A' + 'a')
 														  : character;
-		}
-
-		void SkipSpace(std::string_view &text) {
-			while (!text.empty() && IsSpace(text.front())) {
-				text.remove_prefix(1);
-			}
 		}
 
 		// Whitespace or a comma, which is how every SVG number list separates.
@@ -472,185 +472,57 @@ namespace engine::bake {
 		// ---------------------------------------------------------------------
 		// The XML subset
 		// ---------------------------------------------------------------------
+		//
+		// **`core::xml` is the scanner and this is only its settings.** It was a
+		// copy living here until v0.13 and this module's own `Xml.hpp` until
+		// v0.15; each move happened when another format wanted markup and two
+		// places to keep a DOCTYPE refused became one too many. `core/Xml.hpp`
+		// carries the argument for writing one at all rather than vendoring it.
 
-		struct Tag {
-			std::string_view Name;
-			std::string_view Attributes;
-			bool Closing = false;
-			bool SelfClosing = false;
-		};
+		using xml::Attribute;
+		using xml::Find;
+		using xml::Scan;
+		using xml::Tag;
 
-		enum class Scan : uint8_t { Tag, End, Error };
+		// What a failure here is called, what one element may carry, and that a
+		// prefix means nothing to a drawing — `<svg:rect>` is a `<rect>`.
+		constexpr xml::Options XML{"svg", MAXIMUM_ATTRIBUTES, true};
 
-		// A namespace prefix dropped, so `<svg:rect>` is `<rect>`. Prefixes carry
-		// no meaning this cares about — there is one vocabulary here and an
-		// element outside it is refused whatever it is spelled.
-		std::string_view WithoutPrefix(std::string_view name) {
-			const size_t colon = name.find(':');
-			return colon == std::string_view::npos ? name : name.substr(colon + 1);
-		}
-
+		// The scanner with this format's settings already bound, so that a call
+		// site says what it is asking for rather than repeating the settings.
+		//
+		// **The refusal's kind is dropped and its sentence kept.** A drawing that
+		// is refused is refused; nothing here does anything different for a
+		// DOCTYPE than for a tag with no name, which is what `game` needs the
+		// kind for.
+		//@{
 		Scan NextTag(std::string_view &text, Tag &tag, std::string &failure) {
-			while (true) {
-				const size_t open = text.find('<');
-				if (open == std::string_view::npos) {
-					text = {};
-					return Scan::End;
-				}
-				text.remove_prefix(open + 1);
-
-				if (text.starts_with("!--")) {
-					const size_t end = text.find("-->");
-					if (end == std::string_view::npos) {
-						failure = "svg: a comment is never closed";
-						return Scan::Error;
-					}
-					text.remove_prefix(end + 3);
-					continue;
-				}
-
-				if (text.starts_with("!")) {
-					// **DOCTYPE and ENTITY, refused outright rather than bounded.**
-					// An entity declaration is the billion-laughs expansion — a
-					// kilobyte of markup that unfolds into gigabytes — and an
-					// external one is a file read performed by a parser that this
-					// module's whole design says never touches a filesystem. There
-					// is nothing a drawing needs either for.
-					failure = "svg: a DOCTYPE or ENTITY declaration is refused — entity expansion is how "
-							  "a kilobyte of XML becomes a gigabyte, and an external entity is a file "
-							  "read";
-					return Scan::Error;
-				}
-
-				if (text.starts_with("?")) {
-					const size_t end = text.find("?>");
-					if (end == std::string_view::npos) {
-						failure = "svg: an XML declaration is never closed";
-						return Scan::Error;
-					}
-					text.remove_prefix(end + 2);
-					continue;
-				}
-
-				break;
+			xml::Failure refusal;
+			const Scan scan = xml::NextTag(text, XML, tag, refusal);
+			if (scan == Scan::Error) {
+				failure = std::move(refusal.Message);
 			}
-
-			tag = {};
-			if (text.starts_with("/")) {
-				tag.Closing = true;
-				text.remove_prefix(1);
-			}
-
-			size_t nameEnd = 0;
-			while (nameEnd < text.size() && !IsSpace(text[nameEnd]) && text[nameEnd] != '>' &&
-				   text[nameEnd] != '/') {
-				nameEnd++;
-			}
-			if (nameEnd == 0) {
-				failure = "svg: a tag has no name";
-				return Scan::Error;
-			}
-			tag.Name = WithoutPrefix(text.substr(0, nameEnd));
-			text.remove_prefix(nameEnd);
-
-			// The attribute run, ending at the first `>` that is not inside a
-			// quoted value — a `>` in an attribute is legal XML and ending the
-			// tag on it would read the rest of the document as character data.
-			size_t index = 0;
-			char quote = 0;
-			while (index < text.size()) {
-				const char character = text[index];
-				if (quote != 0) {
-					if (character == quote) {
-						quote = 0;
-					}
-				} else if (character == '"' || character == '\'') {
-					quote = character;
-				} else if (character == '>') {
-					break;
-				}
-				index++;
-			}
-			if (index >= text.size()) {
-				failure = "svg: a tag is never closed";
-				return Scan::Error;
-			}
-
-			std::string_view attributes = text.substr(0, index);
-			text.remove_prefix(index + 1);
-
-			attributes = Trimmed(attributes);
-			if (!attributes.empty() && attributes.back() == '/') {
-				tag.SelfClosing = true;
-				attributes.remove_suffix(1);
-			}
-
-			tag.Attributes = attributes;
-			return Scan::Tag;
+			return scan;
 		}
-
-		struct Attribute {
-			std::string_view Name;
-			std::string_view Value;
-		};
 
 		bool ReadAttributes(std::string_view text, std::vector<Attribute> &out, std::string &failure) {
-			out.clear();
-
-			while (true) {
-				SkipSpace(text);
-				if (text.empty()) {
-					return true;
-				}
-				if (out.size() >= MAXIMUM_ATTRIBUTES) {
-					failure = "svg: an element carries more than " + std::to_string(MAXIMUM_ATTRIBUTES) +
-							  " attributes";
-					return false;
-				}
-
-				const size_t equals = text.find('=');
-				if (equals == std::string_view::npos) {
-					failure = "svg: attribute '" + std::string(Trimmed(text)) + "' has no value";
-					return false;
-				}
-
-				Attribute attribute;
-				attribute.Name = Trimmed(text.substr(0, equals));
-				text.remove_prefix(equals + 1);
-				SkipSpace(text);
-
-				if (text.empty() || (text.front() != '"' && text.front() != '\'')) {
-					failure = "svg: attribute '" + std::string(attribute.Name) + "' has an unquoted value";
-					return false;
-				}
-
-				const char quote = text.front();
-				text.remove_prefix(1);
-				const size_t end = text.find(quote);
-				if (end == std::string_view::npos) {
-					failure = "svg: attribute '" + std::string(attribute.Name) + "' is never closed";
-					return false;
-				}
-
-				attribute.Value = text.substr(0, end);
-				text.remove_prefix(end + 1);
-
-				if (attribute.Name.empty()) {
-					failure = "svg: an attribute has no name";
-					return false;
-				}
-				out.push_back(attribute);
+			xml::Failure refusal;
+			if (xml::ReadAttributes(text, XML, out, refusal)) {
+				return true;
 			}
+			failure = std::move(refusal.Message);
+			return false;
 		}
 
-		const Attribute *Find(const std::vector<Attribute> &attributes, std::string_view name) {
-			for (const Attribute &attribute : attributes) {
-				if (attribute.Name == name) {
-					return &attribute;
-				}
+		bool CheckEntityReferences(std::string_view text, std::string &failure) {
+			xml::Failure refusal;
+			if (xml::CheckEntityReferences(text, XML, refusal)) {
+				return true;
 			}
-			return nullptr;
+			failure = std::move(refusal.Message);
+			return false;
 		}
+		//@}
 
 		// Attributes that would change the drawing, and that this does not do.
 		//
@@ -1561,54 +1433,6 @@ namespace engine::bake {
 			return true;
 		}
 
-		// Refuses an entity reference that is not one of the five XML predefines.
-		//
-		// **A second lock on the same door `<!ENTITY>`'s refusal closes.** No
-		// declaration survives the scanner, so no other entity can be defined —
-		// this is what makes a reference to one a refusal rather than a silently
-		// dropped character.
-		bool CheckEntityReferences(std::string_view text, std::string &failure) {
-			size_t position = 0;
-			while (true) {
-				position = text.find('&', position);
-				if (position == std::string_view::npos) {
-					return true;
-				}
-
-				const size_t semicolon = text.find(';', position);
-				if (semicolon == std::string_view::npos || semicolon - position > 10) {
-					failure = "svg: an unterminated entity reference";
-					return false;
-				}
-
-				const std::string_view name = text.substr(position + 1, semicolon - position - 1);
-				const bool predefined =
-					name == "lt" || name == "gt" || name == "amp" || name == "quot" || name == "apos";
-
-				// `&#48;` and `&#x30;`, which expand to exactly one character
-				// each and so cannot be a bomb however many of them there are.
-				bool numeric = name.size() > 1 && name.front() == '#';
-				if (numeric) {
-					const bool hexadecimal = name.size() > 2 && Lowered(name[1]) == 'x';
-					const size_t start = hexadecimal ? 2u : 1u;
-					numeric = start < name.size();
-					for (size_t index = start; numeric && index < name.size(); index++) {
-						uint32_t digit = 0;
-						numeric = hexadecimal ? HexDigit(name[index], digit) : IsDigit(name[index]);
-					}
-				}
-
-				if (!predefined && !numeric) {
-					failure = "svg: entity reference '&" + std::string(name) +
-							  ";' — only the five predefined entities are read, because anything else "
-							  "would need a declaration this refuses";
-					return false;
-				}
-
-				position = semicolon + 1;
-			}
-		}
-
 		// A canvas out of premultiplied floats, into non-premultiplied RGBA8.
 		void Resolve(const Canvas &canvas, assets::TextureData &out) {
 			out = {};
@@ -1673,6 +1497,13 @@ namespace engine::bake {
 		// while naming `&lol;` — which reads like a typo — instead of naming the
 		// `<!ENTITY>` that is the actual thing to remove. XML puts any
 		// declaration before the root, so by here the scanner has already met it.
+		//
+		// **A sweep rather than an unescape, because this format never
+		// unescapes**: an attribute value is used exactly as written, so there is
+		// no point at which a reference would otherwise have been met. `.rbxmx`
+		// takes the other route for the reason `xml::ReadContent` gives, and the
+		// two must not be collapsed into one policy — `core/Xml.hpp` says what
+		// breaks either way round.
 		if (!CheckEntityReferences(whole, failure)) {
 			return false;
 		}

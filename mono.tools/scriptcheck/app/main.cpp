@@ -160,15 +160,15 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	// --- `Enum.Material` as a *type* ------------------------------------------
+	// --- `Enum.NormalId` as a *type* ------------------------------------------
 	//
 	// **A definitions file cannot declare a dotted type and the host can register
 	// one**, which is the whole of why this exists here rather than in
 	// `mono.tools/bindings`.
 	//
-	// Luau parses `Enum.Material` in a type position as a reference with a
+	// Luau parses `Enum.NormalId` in a type position as a reference with a
 	// *prefix*, and resolves it through `Scope::lookupImportedType("Enum",
-	// "Material")` — that is, `importedTypeBindings["Enum"]["Material"]`. That map
+	// "NormalId")` — that is, `importedTypeBindings["Enum"]["NormalId"]`. That map
 	// is populated by `require` (`ConstraintGenerator.cpp:1512` assigns a required
 	// module's exported bindings into it) and by nothing a `declare` statement can
 	// say. `loadDefinitionFile` only ever writes `exportedTypeBindings[name]`, a
@@ -176,8 +176,14 @@ int main(int argc, char **argv) {
 	//
 	// **So Roblox is not doing anything a definitions file can do — it is doing
 	// this.** luau-lsp's Roblox platform registers the same map from an API dump.
-	// The generator emits `Enum_Material` as a flat extern type, and this aliases
+	// The generator emits `Enum_NormalId` as a flat extern type, and this aliases
 	// every one of them under the `Enum` prefix, so a script may write either.
+	//
+	// **This loop is duplicated on purpose, and the copy is a patch**:
+	// `mono.vendor/patches/luau-lsp-dotted-enum-types.patch` performs it inside
+	// luau-lsp, because a host-side registration is the only way to spell it and an
+	// editor is a different host. `just typecheck-editor` is what keeps the two
+	// agreeing.
 	//
 	// **Before `freeze`**, because freezing the arena is what stops anything
 	// adding to the vocabulary afterwards.
@@ -191,7 +197,15 @@ int main(int argc, char **argv) {
 			if (name.size() <= PREFIX.size() || name.compare(0, PREFIX.size(), PREFIX) != 0) {
 				continue;
 			}
-			bindings[name.substr(PREFIX.size())] = binding;
+			const std::string shortName = name.substr(PREFIX.size());
+
+			// Renamed so a diagnostic names the spelling scripts are written in.
+			// The binding is still keyed by the flat name, so both resolve.
+			if (auto *externType = Luau::getMutable<Luau::ExternType>(binding.type)) {
+				externType->name = "Enum." + shortName;
+			}
+
+			bindings[shortName] = binding;
 			aliased++;
 		}
 

@@ -27,6 +27,7 @@
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -145,6 +146,29 @@ namespace {
 			pointer.Down = down;
 
 			runtime.DeliverGuiEvents(Route.Update(Data, List.Commands(), pointer));
+
+			Data.FlushSignals();
+			INFO(runtime.LastError());
+			REQUIRE(runtime.Heartbeat(1.0f / 60.0f));
+		}
+
+		// One frame of the client's keyboard half: type, and deliver what Return
+		// released.
+		//
+		// **The composition `Client::Draw` makes, spelled out here for the reason
+		// `Frame` spells out the pointer's.** `gui::Type` produces no event —
+		// `Router::Update` is where events come from and no press happened — so
+		// the caller owes the `FocusReleased` that a script's `FocusLost` is
+		// listening for, with `Entered` set. A fixture that fired the signal
+		// directly would pass against a runtime that ignored the flag.
+		void Typed(Runtime &runtime, const engine::gui::Typing &typing) {
+			const engine::gui::TypeResult result = engine::gui::Type(Data, typing);
+			if (result.Released) {
+				const engine::gui::GuiEvent released{
+					engine::gui::EventKind::FocusReleased, result.Instance, {}, {}, true
+				};
+				runtime.DeliverGuiEvents(std::span<const engine::gui::GuiEvent>(&released, 1));
+			}
 
 			Data.FlushSignals();
 			INFO(runtime.LastError());
@@ -543,5 +567,146 @@ TEST_CASE("the collector and the service carry what an author sets", "[scripting
 
 		world.Compile();
 		CHECK(engine::gui::ElementsAt(world.Data, world.PlayerGui, Vector2{50.0f, 50.0f}, found) == 0);
+	}
+}
+
+TEST_CASE(
+	"a text box's focus signals fire from a real pointer, in both languages", "[scripting][guisurface]"
+) {
+	// **The keyboard half of D00117, driven the way the pointer half is.** The
+	// pointer goes in, `gui::Router` decides that a press landed on a `TextBox`,
+	// and what comes out is `textBox.Focused` in a script — no hand-built event,
+	// because a suite that synthesised one would pass against a router that never
+	// took focus, which is exactly the bug the pointer half already shipped once.
+	//
+	// **`GetFocusedTextBox` is asked from inside the handlers**, so what is
+	// asserted is that the world and the signals agree: a focus that fired an
+	// event and stored nothing would log `Entry?nil` here.
+	for (const Language language : LANGUAGES) {
+		INFO((language == Language::Luau ? "luau" : "javascript"));
+
+		Interface world("guisurface.focus");
+		const Entity box = world.Box("TextBox", "Entry", 0.0f, 0.0f, 100.0f, 100.0f);
+		const Entity button = world.Box("TextButton", "Button", 200.0f, 0.0f, 100.0f, 100.0f);
+		REQUIRE(box != NULL_ENTITY);
+		REQUIRE(button != NULL_ENTITY);
+
+		const auto runtime = MakeRuntime(world.Data, language);
+		REQUIRE(runtime != nullptr);
+
+		const std::string connect =
+			language == Language::Luau
+				? Note(language) +
+					  "local UIS = game:GetService('UserInputService')\n"
+					  "local box = game:GetService('Players').LocalPlayer:FindFirstChild('Entry', true)\n"
+					  "local function who() local it = UIS:GetFocusedTextBox() return it and it.Name or "
+					  "'nil' end\n"
+					  "box.Focused:Connect(function() note('focused=' .. who() .. ' ') end)\n"
+					  "box.FocusLost:Connect(function(entered)\n"
+					  "	note('lost=' .. tostring(entered) .. ',' .. who() .. ' ')\n"
+					  "end)\n"
+				: Note(language) +
+					  "let UIS = game.GetService('UserInputService')\n"
+					  "let box = game.GetService('Players').LocalPlayer.FindFirstChild('Entry', true)\n"
+					  "function who() { let it = UIS.GetFocusedTextBox(); return it ? it.Name : 'nil' }\n"
+					  "box.Focused.Connect(function () { note('focused=' + who() + ' ') })\n"
+					  "box.FocusLost.Connect(function (entered) {\n"
+					  "	note('lost=' + String(entered) + ',' + who() + ' ')\n"
+					  "})\n";
+
+		INFO(connect);
+		const bool connected = runtime->Run(connect.c_str());
+		INFO(runtime->LastError());
+		REQUIRE(connected);
+
+		world.Frame(*runtime, 50.0f, 50.0f, false); // arrive over the box
+		world.Frame(*runtime, 50.0f, 50.0f, true);	// press: it takes the keyboard
+		world.Frame(*runtime, 50.0f, 50.0f, false); // release: it keeps it
+		CHECK(engine::gui::FocusedTextBox(world.Data) == box);
+
+		world.Frame(*runtime, 250.0f, 50.0f, false); // move to the button
+		world.Frame(*runtime, 250.0f, 50.0f, true);	 // press: it loses the keyboard
+		CHECK(engine::gui::FocusedTextBox(world.Data) == NULL_ENTITY);
+
+		// **`enterPressed` is false because a press took the keyboard away**,
+		// which is the answer that makes the argument worth passing — the case
+		// below is the other one.
+		CHECK(world.Log() == "focused=Entry lost=false,nil ");
+	}
+}
+
+TEST_CASE("typing reaches the box and Return says so, in both languages", "[scripting][guisurface]") {
+	// **The rest of D00117, from the script's side.** A press takes the
+	// keyboard, characters land in `Label::Text`, and Return releases the box
+	// with Roblox's `enterPressed` finally answering something — which is what
+	// tells a search field it was submitted rather than abandoned.
+	//
+	// **The text is read back through the property**, not off the component, so
+	// what is asserted is the thing a script sees: one string, in the world,
+	// where `gui::Type` put it.
+	for (const Language language : LANGUAGES) {
+		INFO((language == Language::Luau ? "luau" : "javascript"));
+
+		Interface world("guisurface.typing");
+		const Entity box = world.Box("TextBox", "Entry", 0.0f, 0.0f, 100.0f, 100.0f);
+		REQUIRE(box != NULL_ENTITY);
+
+		// Off, so the press does not empty the box before anything is typed —
+		// the default is on, which is what a search field wants.
+		engine::gui::Entry entry;
+		entry.ClearTextOnFocus = false;
+		world.Data.Set(box, entry);
+
+		const auto runtime = MakeRuntime(world.Data, language);
+		REQUIRE(runtime != nullptr);
+
+		const std::string connect =
+			language == Language::Luau
+				? Note(language) +
+					  "local box = game:GetService('Players').LocalPlayer:FindFirstChild('Entry', true)\n"
+					  "box.FocusLost:Connect(function(entered)\n"
+					  "	note('lost=' .. tostring(entered) .. ',' .. box.Text .. ' ')\n"
+					  "end)\n"
+				: Note(language) +
+					  "let box = game.GetService('Players').LocalPlayer.FindFirstChild('Entry', true)\n"
+					  "box.FocusLost.Connect(function (entered) {\n"
+					  "	note('lost=' + String(entered) + ',' + box.Text + ' ')\n"
+					  "})\n";
+
+		INFO(connect);
+		const bool connected = runtime->Run(connect.c_str());
+		INFO(runtime->LastError());
+		REQUIRE(connected);
+
+		world.Frame(*runtime, 50.0f, 50.0f, false);
+		world.Frame(*runtime, 50.0f, 50.0f, true);
+		REQUIRE(engine::gui::FocusedTextBox(world.Data) == box);
+
+		// Two frames of characters, because that is how they arrive: a frame's
+		// worth at a time, appended at the caret.
+		engine::gui::Typing typing;
+		typing.Text = "Ad";
+		world.Typed(*runtime, typing);
+
+		// Four bytes of `é` and a Backspace over it, so what the box holds is a
+		// character count rather than a byte count.
+		typing.Text = "\xC3\xA9";
+		world.Typed(*runtime, typing);
+
+		typing.Text = {};
+		typing.Backspace = true;
+		world.Typed(*runtime, typing);
+		CHECK(world.Data.Get<engine::gui::Label>(box)->Text == "Ad");
+
+		typing.Backspace = false;
+		typing.Text = "a";
+		world.Typed(*runtime, typing);
+
+		typing.Text = {};
+		typing.Submit = true;
+		world.Typed(*runtime, typing);
+
+		CHECK(engine::gui::FocusedTextBox(world.Data) == NULL_ENTITY);
+		CHECK(world.Log() == "lost=true,Ada ");
 	}
 }

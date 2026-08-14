@@ -58,6 +58,54 @@ something. `server` proves the client tier is absent; `cdn` proves the content
 origin needs no graphics stack at all — it configures where there is no Vulkan
 SDK, no SDL and no shader compiler.
 
+## The `ci` preset, and the hook that runs it
+
+`ci` is `dev` with `MONO_WERROR=ON`, which makes every warning fatal. Nothing on
+GitHub runs it and nothing on GitHub is going to — that is a decision, and
+`docs/retired/DEFERRED.md` D00005 carries it. What runs it is your own push:
+
+```sh
+just install-hooks    # once per clone; `just setup` already does it
+```
+
+which points `core.hooksPath` at the checked-in `.githooks/`, and
+`.githooks/pre-push` builds the `ci` preset before a push leaves the machine.
+
+**It exists because this preset went uncompilable three times while being
+described as the standard.** At v0.4 — a `-Wmissing-field-initializers` in
+`core::Arguments` and a `-Wdangling-reference` across `world`'s suites. Twice
+more inside v0.15, the second a `-Wdangling-reference` in `cdn::OriginFromFlags`
+iterating a `std::span` straight off a temporary `Flag`, live while a roadmap
+line written hours earlier said the preset exited 0. Each was there for as long
+as it took somebody to think of typing `preset=ci`. A check nobody runs stops
+being read and then stops being true, which is the same thing this repository
+already learnt from `just docs-check` at v0.2.
+
+**The hook builds and does not test**, which is the whole of its design. The
+failure class is a warning going fatal, and that is a compile-time property; the
+suites are `just check`'s job, cost two and a half minutes, and go red for
+whoever else's half-finished module is in the tree. A gate that fails for work
+that is not yours is a gate that gets skipped every time.
+
+| What | Cost, measured on this machine |
+|---|---|
+| `just preset=ci build`, nothing changed | ~1 s |
+| `just preset=ci build`, a day of another preset's drift | ~1 min |
+| `just preset=ci build`, from an empty `.cache/build/ci/` | ~3 min, once — 1,998 targets, vendors included |
+| `just preset=ci check`, warm | ~3 min, and `test-all` is 2.5 of them |
+
+`ci` builds into `.cache/build/ci/`, a tree of its own, so the first push after
+working in `dev` recompiles what changed since the last push rather than
+nothing. That is the cost, and it is why the hook is a build and not the chain.
+
+Skip one deliberately with `git push --no-verify`. There is no way to skip one
+accidentally, and that asymmetry is the point.
+
+It compiles the working tree rather than the commits being pushed, so in a tree
+several people or agents are editing at once, somebody else's live warning
+refuses your push. That is the tree you are publishing, so it is the right
+answer — but it is worth knowing before it happens.
+
 **Third-party code is optimised in every preset, and only first-party code is
 not.** `AGENTS.md`'s argument for `-O0` — a profile should measure what this
 engine does rather than what the optimiser rescued — is about this engine, and
@@ -648,6 +696,13 @@ editor knows what a script may name without anything being restated by hand:
 ```sh
 just luau-lsp              # clones the submodule if needed, prints the binary's path
 ```
+
+That recipe also applies `mono.vendor/patches/luau-lsp-*.patch` to the cloned
+tree, and **stops rather than building without one**. There is one today: it
+registers the `Enum` prefix so `local face: Enum.NormalId` resolves the way it
+already does in `just typecheck`, and the file's own preamble says why it is a
+patch here rather than a fork. If it ever fails to apply, upstream moved the code
+it edits — the message names the file to read.
 
 Point your editor at that binary and at `luau-lsp.json`. `.vscode/` is
 gitignored — editor configuration is personal here — so `luau-lsp.json` is the
@@ -2022,8 +2077,9 @@ ctest -N            # list without running
 ctest -R ecs        # only suites matching a pattern
 ```
 
-`ctest` never consults the cache. Use it in CI and before a pull request; use
-`just test` in the inner loop.
+`ctest` never consults the cache. Use it before a pull request — there is no CI
+to use it in, and [the `ci` preset](#the-ci-preset-and-the-hook-that-runs-it)
+says why; use `just test` in the inner loop.
 
 ## One suite, directly
 
@@ -2070,6 +2126,33 @@ configure time and fails the build with the offending edge named. This checks
 the graph against the checked-in expectation, so that an architectural change
 shows up as a diff somebody reviews.
 
+## The shader check
+
+```sh
+just shader-check
+```
+
+Every `.spv` the build produced, against the resource contract
+`SDL_CreateGPUShader` documents: one entry point named what the renderer asks
+for, at the stage the filename claims; every resource carrying an explicit
+`layout(set = ..., binding = ...)`; every resource in the descriptor set SDL
+names for its stage; bindings contiguous within a set; and no SPIR-V capability
+outside an allowlist of what MSL can express.
+
+Directly, and without `--quiet`, for the per-shader table — including the
+`[[texture(n)]]` or `[[buffer(n)]]` each resource would land on once translated:
+
+```sh
+./.cache/build/dev/tools/shadercheck .cache/build/dev/shaderstage
+```
+
+**It translates nothing and says nothing about a Metal device.** What it is for
+is the half of `docs/DEFERRED.md` D00001 that a machine with no Mac can answer:
+MSL, DXIL and DXBC all derive their bindings from those descriptor sets, so
+wrong sets make every translation wrong, and the sets are readable here. A
+`server` or `cdn` preset compiles no shader and the recipe says it skipped
+rather than passing quietly.
+
 ## The script type check
 
 ```sh
@@ -2086,14 +2169,31 @@ tests but are not included by the current `just typecheck` glob. Directly:
 ./node_modules/.bin/tsc --noEmit
 ```
 
-The language server answers the same question and is worth running after
-changing the generator, because it enables Luau's feature flags and
-`scriptcheck` does not — which is how the `declare class` deprecation was caught:
+The language server answers the same question, and asking it is a recipe rather
+than a habit — it enables Luau's feature flags where `scriptcheck` does not,
+which is how the `declare class` deprecation was caught:
 
 ```sh
-just luau-lsp
+just typecheck-editor      # builds luau-lsp if needed, then analyzes every example
+```
+
+Directly, once the tool is built:
+
+```sh
 ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
 ```
+
+**It is in `just check`, and 1.5 s of it.** What is not free is the first
+`just luau-lsp`, which compiles that tool's own copy of Luau — 11 minutes of CPU,
+39 s wall on 24 cores, once. Afterwards the dependency is a no-op.
+
+**The two frontends have disagreed, which is why this is checked rather than
+suggested.** `scriptcheck` registers `importedTypeBindings["Enum"]` on its own
+frontend — a host-side call no definitions file can make — so
+`local face: Enum.NormalId` compiled, passed, and was underlined in an editor for
+three versions. A patch under `mono.vendor/patches/` closed that, and this recipe
+is what reports it if the patch stops applying or the spelling stops resolving.
+`docs/retired/DEFERRED.md` D00031 is the whole story.
 
 **Both run the same Luau.** `mono.vendor/luau` and `mono.vendor/luau-lsp/luau`
 are pinned to one commit, and `just luau-lsp` refuses to build if they drift —

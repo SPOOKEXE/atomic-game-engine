@@ -6,6 +6,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -63,6 +64,11 @@ namespace engine::script {
 		ScriptCosts.reserve(scripts.size());
 
 		for (const ecs::Entity instance : scripts) {
+			// Recorded whether or not it is new: this call starts everything it
+			// finds, and what the record is for is stopping `RunNewScripts` from
+			// starting the same instance a second time.
+			(void)RememberStarted(instance);
+
 			const uint64_t before = StepsTaken();
 			const bool ok = RunInstance(instance);
 			const uint64_t after = StepsTaken();
@@ -89,6 +95,50 @@ namespace engine::script {
 
 		Error = firstError;
 		return ran;
+	}
+
+	bool Runtime::RememberStarted(ecs::Entity instance) {
+		const auto at = std::lower_bound(
+			StartedScripts.begin(), StartedScripts.end(), instance, [](ecs::Entity left, ecs::Entity right) {
+				return left.Id < right.Id;
+			}
+		);
+
+		if (at != StartedScripts.end() && at->Id == instance.Id) {
+			return false;
+		}
+
+		StartedScripts.insert(at, instance);
+		return true;
+	}
+
+	size_t Runtime::RunNewScripts(std::span<const ecs::Entity> wanted) {
+		Error.clear();
+
+		size_t started = 0;
+		std::string firstError;
+
+		for (const ecs::Entity instance : wanted) {
+			if (!RememberStarted(instance)) {
+				continue;
+			}
+
+			if (RunInstance(instance)) {
+				started++;
+				continue;
+			}
+
+			// Logged per failure and reported once, for the reason
+			// `RunWorldScripts` gives: a world where half the scripts silently
+			// did not start is a bug report with nothing in it.
+			ENGINE_ERROR("script '{}': {}", Store.InstanceNameOf(instance).Text(), Error);
+			if (firstError.empty()) {
+				firstError = Error;
+			}
+		}
+
+		Error = firstError;
+		return started;
 	}
 
 	std::unique_ptr<Runtime> MakeRuntime(ecs::Store &store, Language language, const RuntimeLimits &limits) {

@@ -27,6 +27,12 @@
 -- - The **right-aligned and left-aligned labels** catch the two text alignment
 --   enums being read as each other, which is easy because Roblox numbers them
 --   differently and this engine keeps its numbering.
+-- - The **text box** catches a press that never lands on one. A `TextBox` is not
+--   a `GuiButton`, so the hit test walked past it until the keyboard needed
+--   somewhere to go — clicking one reached whatever was behind, which reads as a
+--   text field that ignores the mouse. It also catches the half after that: a
+--   window never asked for text sees no keystrokes at all, and the box then
+--   focuses, reports, and accumulates nothing.
 --
 -- ## Why it does not animate
 --
@@ -81,7 +87,11 @@ local card = Instance.new("Frame")
 card.Name = "Card"
 card.AnchorPoint = Vector2.new(0.5, 0.5)
 card.Position = UDim2.new(0.5, 0, 0.5, 0)
-card.Size = UDim2.new(0, 520, 0, 380)
+-- **Tall enough for the sections plus the list's gaps and the padding**, added
+-- up rather than eyeballed: 44 + 96 + 56 + 52 + 74 of section, four 12-pixel
+-- gaps and 16 of padding at each end is 402. `AutomaticSize` is the property
+-- that would derive it and it is declared and not implemented — `D00021`.
+card.Size = UDim2.new(0, 520, 0, 412)
 card.BackgroundColor3 = PANEL
 card.BorderSizePixel = 0
 card.Parent = screen
@@ -325,6 +335,80 @@ cancel.Activated:Connect(function()
 	clicks = 0
 	picked = SWATCHES[1]
 	refresh()
+end)
+
+-- --- the keyboard, which the pointer decides ----------------------------------
+--
+-- **A `TextBox` is the one element a press does something to besides fire an
+-- event: it takes the keyboard.** `gui::Router` sets
+-- `GuiServiceState::FocusedTextBox` when a press lands on one and releases it
+-- when a press lands anywhere else, and the pair of signals below is that
+-- decision reaching a script. `UserInputService:GetFocusedTextBox()` is the same
+-- fact asked for rather than listened to, which is why the handler asks instead
+-- of remembering.
+--
+-- **What this catches is a focus that fires and stores nothing**, or the
+-- reverse: the status line would read `Entry` from the signal and `nil` from the
+-- service, and either half alone looks like it works.
+--
+-- **Click it and type, which is the point of the section.** The client asks SDL
+-- for text only while a box holds the keyboard, hands `input::Translator::
+-- TypedText` to `gui::Type` once a frame, and that writes `Label::Text` — so
+-- what appears in the box is the world's own text and not a copy anybody kept.
+-- Backspace removes a *character*, which matters the first time somebody types
+-- in a language with accents in it, and Return releases the focus because this
+-- box is not `MultiLine`.
+--
+-- **The status line is a second element rather than the box's own text**, and
+-- that is the interesting half. A handler that wrote into `box.Text` on focus —
+-- which this file did while nothing could be typed — replaces the string a
+-- person is editing out from under their caret. `gui::Type` clamps for exactly
+-- that reason and nothing breaks, but what they typed is still gone, so the
+-- report goes somewhere it cannot do that.
+-- **The section is not called `Entry`, and the box is.** `--click NAME` finds
+-- the first element of that name, so two of them meant a synthetic press landed
+-- on the frame and released the keyboard instead of taking it.
+local entry = section("Field", 5, 74)
+
+local box = Instance.new("TextBox")
+box.Name = "Entry"
+box.Size = UDim2.new(1, -16, 0, 28)
+box.Position = UDim2.new(0, 8, 0, 8)
+box.BackgroundColor3 = PANEL
+box.BorderSizePixel = 0
+box.Text = ""
+box.PlaceholderText = "click here and type"
+box.ClearTextOnFocus = false
+box.TextColor3 = PAPER
+box.TextSize = 13
+box.Parent = entry
+
+local boxCorner = Instance.new("UICorner")
+boxCorner.CornerRadius = UDim.new(0, 6)
+boxCorner.Parent = box
+
+local status = Instance.new("TextLabel")
+status.Name = "EntryStatus"
+status.Size = UDim2.new(1, -16, 0, 20)
+status.Position = UDim2.new(0, 8, 0, 42)
+status.BackgroundTransparency = 1
+status.Text = "not focused"
+status.TextColor3 = MUTED
+status.TextSize = 12
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = entry
+
+local UserInputService = game:GetService("UserInputService")
+
+box.Focused:Connect(function()
+	local held = UserInputService:GetFocusedTextBox()
+	status.Text = string.format("focused · service says %s", held and held.Name or "nil")
+end)
+
+-- `enterPressed` is Roblox's first argument and is now a real answer: true when
+-- Return released the box, false when a press somewhere else did.
+box.FocusLost:Connect(function(enterPressed: boolean)
+	status.Text = string.format("released · enterPressed=%s · text %q", tostring(enterPressed), box.Text)
 end)
 
 -- --- the close button ---------------------------------------------------------

@@ -7,6 +7,7 @@
 // *states* rather than something it waits for.
 
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
@@ -34,6 +35,7 @@ using engine::ecs::Store;
 using engine::replication::ApplyStatus;
 using engine::replication::Authority;
 using engine::replication::AuthoritySettings;
+using engine::replication::ChangeDetection;
 using engine::replication::ClientId;
 using engine::replication::Prediction;
 using engine::replication::Replica;
@@ -58,10 +60,36 @@ namespace replication_test {
 			engine::ecs::Components::Register<Spot>("replication_test.Spot");
 			engine::ecs::Components::Register<Secret>("replication_test.Secret");
 			engine::ecs::Components::Register<Marked>("replication_test.Marked");
-			engine::ecs::Components::Register<engine::ecs::Hierarchy>("ecs.Hierarchy");
+
+			// `ecs.Hierarchy`, `ecs.InstanceName` and `ecs.InstanceClass` in one
+			// call, and idempotent — which is why it replaces the hand-written
+			// `Register<Hierarchy>` that used to stand here. Registering one of
+			// the three by hand is how the other two get forgotten, which is the
+			// same shape as the bug the cases below cover.
+			engine::ecs::Classes::RegisterInstanceRoot();
 			return true;
 		}();
 		(void)once;
+	}
+
+	// Two classes of this suite's own, so that "the class arrived" is a
+	// statement about *which* class rather than about the only one there is.
+	//
+	// Their names are this suite's, because a class table is process-wide and a
+	// stand-in under a real name is the collision `Defaults.cpp` already records
+	// having made once.
+	engine::ecs::ClassId HolderClass() {
+		static const engine::ecs::ClassId id = engine::ecs::Classes::Register(
+			"ReplicationTestHolder", engine::ecs::Classes::RegisterInstanceRoot(), {}
+		);
+		return id;
+	}
+
+	engine::ecs::ClassId CarriedClass() {
+		static const engine::ecs::ClassId id = engine::ecs::Classes::Register(
+			"ReplicationTestCarried", engine::ecs::Classes::RegisterInstanceRoot(), {}
+		);
+		return id;
 	}
 
 	std::vector<std::byte> Bytes(std::string_view text) {
@@ -518,6 +546,101 @@ TEST_CASE("a component nobody replicated never crosses", "[replication]") {
 	REQUIRE(pair.Client.Alive(entity));
 	REQUIRE_FALSE(pair.Authority_.Replicated(Name("replication_test.Secret")));
 	REQUIRE(pair.Client.Get<Secret>(entity) == nullptr);
+}
+
+// --- what an instance is -------------------------------------------------------
+
+TEST_CASE("an instance created after a join arrives with its name and its class", "[replication]") {
+	// **The bug this case exists for was invisible from the server.**
+	// `DefaultReplicatedComponents` admitted `ecs.Hierarchy` and the `scene.`
+	// prefix and nothing else from `ecs.`, so `ecs.InstanceName` and
+	// `ecs.InstanceClass` crossed in the join snapshot — `Store::Save` carries
+	// every component — and never in a delta. An entity the world already held
+	// was named on a client and an entity created while that client was
+	// connected was not, which is why `server.replication` had to count a
+	// player's tools by walking `ecs::Entity` handles instead of asking for a
+	// child called `Backpack`.
+	//
+	// The join is deliberately taken *before* the instance is made, because a
+	// snapshot would have carried both and the case would pass with the bug in.
+	Pair pair;
+	pair.Authority_.Replicate(Name("ecs.Hierarchy"));
+	pair.Authority_.Replicate(Name("ecs.InstanceName"), ChangeDetection::Signature);
+	pair.Authority_.Replicate(Name("ecs.InstanceClass"), ChangeDetection::Signature);
+
+	REQUIRE(pair.Join());
+
+	const Entity holder = pair.Server.CreateInstance(HolderClass(), "Holder");
+	const Entity carried = pair.Server.CreateInstance(CarriedClass(), "Backpack");
+	REQUIRE(pair.Server.SetParent(carried, holder));
+
+	// Two ticks: the first says the entities exist, the second offers their
+	// values through the recovery walk an entity coming into view already gets.
+	pair.Tick();
+	pair.Tick();
+
+	REQUIRE(pair.Client.Alive(carried));
+
+	// The name, and it is asked for the way a script would rather than read off
+	// the component — `FindFirstChild` is the assertion the bug was hiding from.
+	REQUIRE(pair.Client.InstanceNameOf(carried) == Name("Backpack"));
+	REQUIRE(pair.Client.FindFirstChild(holder, "Backpack") == carried);
+
+	// And the class, which is the half that could not simply be admitted: a
+	// `ClassId` is a registration index, so what crosses is the registered
+	// *name* and the receiver resolves it in its own table.
+	REQUIRE(pair.Client.ClassOf(carried) == CarriedClass());
+	REQUIRE(pair.Client.ClassOf(holder) == HolderClass());
+
+	// A rename after the fact crosses too, which is why these are signed rather
+	// than said once in the `Structure` message that created the entity. A fact
+	// that only crossed at birth is the v0.7 recolour bug in another component.
+	REQUIRE(pair.Server.SetInstanceName(carried, "Satchel"));
+	pair.Tick();
+	REQUIRE(pair.Client.InstanceNameOf(carried) == Name("Satchel"));
+	REQUIRE(pair.Client.FindFirstChild(holder, "Satchel") == carried);
+}
+
+TEST_CASE("rows of different lengths land on the right entities", "[replication]") {
+	// **A delta's rows are not one width, and the packer used to assume they
+	// were.** It recorded one stride per component — the entry's bytes divided
+	// by its rows — and sliced each row back out at `row * stride` after the
+	// priority sort had reordered them. That is right only while every row
+	// encodes to the same length, which is true of a `Transform` and false of
+	// anything that writes a name: `scene.Visual` writes two, `ecs.InstanceName`
+	// writes one, and a name is as long as its text.
+	//
+	// It was already reachable before instance names crossed — two parts whose
+	// meshes are spelt differently is enough — and it was invisible because the
+	// names in a demo world are almost always empty and therefore all four bytes
+	// long. So the lengths here are deliberately far apart.
+	Pair pair;
+	pair.Authority_.Replicate(Name("ecs.InstanceName"), ChangeDetection::Signature);
+	pair.Authority_.Replicate(Name("ecs.InstanceClass"), ChangeDetection::Signature);
+
+	REQUIRE(pair.Join());
+
+	const std::vector<std::string> names = {
+		"a",
+		"a name long enough that a stride taken from the average is wrong",
+		"bb",
+		"ccc",
+		"an altogether different length again",
+	};
+
+	std::vector<Entity> made;
+	for (const std::string &name : names) {
+		made.push_back(pair.Server.CreateInstance(CarriedClass(), name));
+	}
+
+	pair.Tick();
+	pair.Tick();
+
+	for (size_t index = 0; index < names.size(); index++) {
+		INFO("name: " << names[index]);
+		REQUIRE(pair.Client.Alive(made[index]));
+		REQUIRE(pair.Client.InstanceNameOf(made[index]) == Name(names[index]));
+	}
 }
 
 // --- interest ------------------------------------------------------------------

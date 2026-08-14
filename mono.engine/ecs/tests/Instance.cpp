@@ -9,7 +9,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.instance")
@@ -281,6 +283,74 @@ TEST_CASE("an instance name crosses a snapshot as text", "[ecs][instance]") {
 	REQUIRE(restored.InstanceNameOf(child) == Name("Wheel"));
 	REQUIRE_FALSE(restored.InstanceNameOf(anonymous).IsValid());
 	REQUIRE(restored.FindFirstChild(model, "Wheel") == child);
+}
+
+TEST_CASE("an instance class crosses as its registered name", "[ecs][instance]") {
+	// **A `ClassId` is a registration index, which is `AGENTS.md` rule 4 exactly,
+	// and it went out as a number until v0.15.** `Hierarchy`'s handles survive
+	// because a snapshot restores the directory exactly; nothing restores the
+	// *class* table the same way. `Classes::Register` runs wherever the code
+	// needing a tree runs and `RegisterGuiClasses` is called lazily on first use,
+	// so two processes of one build can number a class differently depending on
+	// which of them opened an interface — and a receiver resolving the number
+	// would get whatever class took the slot.
+	//
+	// One process shares one class table, so a wrong answer cannot be reproduced
+	// here. What can be asserted is that what goes on the wire is the *text*.
+	const Tree &tree = Classes_();
+	Store store("class-text");
+
+	const Entity part = store.CreateInstance(tree.Part, "Baseplate");
+
+	const ComponentId id = Components::Of<InstanceClass>();
+	ByteWriter writer;
+	Components::Describe(id).Write(writer, store.Get<InstanceClass>(part), 1);
+
+	// The class's name is in the bytes, and its index is not the only thing
+	// there. A four-byte index would be four bytes; this is a length and a
+	// string.
+	const std::span<const std::byte> encoded = writer.Bytes();
+	const std::string_view text(reinterpret_cast<const char *>(encoded.data()), encoded.size());
+	REQUIRE(text.find(Classes::Describe(tree.Part).Name.Text()) != std::string_view::npos);
+
+	InstanceClass decoded;
+	ByteReader reader(encoded);
+	Components::Describe(id).Read(reader, &decoded, 1);
+	REQUIRE_FALSE(reader.Failed());
+	REQUIRE(decoded.Class == tree.Part);
+}
+
+TEST_CASE("a class this build has never heard of reads back as no class", "[ecs][instance]") {
+	// **The world is kept and only the class is refused**, which is the answer
+	// the render half already gives a pipeline it cannot build: a receiver
+	// holding a class name this process has not registered is two builds
+	// disagreeing, and every other component on the entity is still perfectly
+	// good. Substituting a `Folder` — which is what `studio::RojoSync` does, and
+	// rightly, because a Rojo project is written against a class tree this engine
+	// implements a fraction of — would make `:IsA` answer a confident lie about
+	// two builds that do not match.
+	(void)Classes_();
+
+	ByteWriter writer;
+	writer.WriteName(Name("AClassNothingRegisters"));
+
+	InstanceClass decoded{ClassId{7}};
+	ByteReader reader(writer.Bytes());
+	Components::Describe(Components::Of<InstanceClass>()).Read(reader, &decoded, 1);
+
+	REQUIRE_FALSE(reader.Failed());
+	REQUIRE_FALSE(decoded.Class.IsValid());
+
+	// And an instance with no class at all round-trips as one, rather than as
+	// the first class in the table.
+	ByteWriter empty;
+	Components::Describe(Components::Of<InstanceClass>()).Write(empty, &decoded, 1);
+
+	InstanceClass again{ClassId{7}};
+	ByteReader back(empty.Bytes());
+	Components::Describe(Components::Of<InstanceClass>()).Read(back, &again, 1);
+	REQUIRE_FALSE(back.Failed());
+	REQUIRE_FALSE(again.Class.IsValid());
 }
 
 // --- creating instances ---------------------------------------------------

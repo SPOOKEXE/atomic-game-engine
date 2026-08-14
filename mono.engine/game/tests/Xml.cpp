@@ -150,6 +150,70 @@ TEST_CASE("CDATA survives a closing sequence inside it", "[game][xml]") {
 	CHECK(document.Root()->Text == program);
 }
 
+TEST_CASE("a script's ampersand is source and not a reference", "[game][xml]") {
+	// **A save file's scripts are CDATA and CDATA is text**, so the refusal of
+	// an undeclared entity sits at each point a reference is actually read
+	// rather than in a sweep over the document. A sweep would refuse this file
+	// while naming an entity nobody wrote — which is the bug a real `.rbxmx` in
+	// this repository's corpus found, one format along, and the reason
+	// `core/Xml.hpp` keeps the two policies apart.
+	const std::string program = "local mask = \"[&;]\"\nif a and b then end";
+
+	XmlWriter writer;
+	writer.Open("Source");
+	writer.Verbatim(program);
+	writer.Close();
+
+	XmlDocument document;
+	REQUIRE(ParseXml(writer.Finish(), document) == XmlStatus::Ok);
+	CHECK(document.Root()->Text == program);
+
+	// Outside a section it is still a reference, and still refused. What is
+	// exempt is CDATA, not this format.
+	CHECK(ParseXml("<Source>local mask = &mask;</Source>", document) == XmlStatus::Refused);
+}
+
+TEST_CASE("character data before the root is refused", "[game][xml]") {
+	// A document that begins with text is not one this format wrote, and a CDATA
+	// section is character data however much of markup's punctuation it borrows —
+	// the scanner steps over one as text, so the refusal is the loader's to make.
+	XmlDocument document;
+	CHECK(ParseXml("junk<Game format=\"1\" />", document) == XmlStatus::Malformed);
+	CHECK(ParseXml("<![CDATA[junk]]><Game format=\"1\" />", document) == XmlStatus::Malformed);
+
+	// **What is deliberately not asserted here is text between the declaration
+	// and the root**, which this reads and the v0.7 one refused. Catching it
+	// needs the scanner to stop after each comment it steps over, or this file to
+	// know what a comment looks like, and neither is worth it for a run of text
+	// that expands to nothing: `D00128` records it as the one thing the move down
+	// widened.
+	CHECK(ParseXml("<?xml version=\"1.0\"?><Game format=\"1\" />", document) == XmlStatus::Ok);
+}
+
+TEST_CASE("an element carrying more attributes than the limit is refused", "[game][xml]") {
+	// **The one count this reader used to take on trust**, closed when the
+	// scanner moved down at `D00128`: every other number a document states is
+	// checked before the vector holding it grows, and this is now the same. The
+	// default is far past the nine a `<Game>` carries, so the limit is driven
+	// from a test rather than from a document nobody would write.
+	std::string element = "<Game";
+	for (int index = 0; index < 8; index++) {
+		element += " a" + std::to_string(index) + "=\"1\"";
+	}
+	element += " />";
+
+	XmlLimits limits;
+	limits.MaximumAttributes = 4;
+
+	XmlDocument document;
+	CHECK(ParseXml(element, document, limits) == XmlStatus::TooManyAttributes);
+	CHECK(document.Elements.empty());
+
+	limits.MaximumAttributes = 8;
+	CHECK(ParseXml(element, document, limits) == XmlStatus::Ok);
+	CHECK(document.Root()->AttributeNames.size() == 8);
+}
+
 TEST_CASE("what the writer writes, the parser reads back", "[game][xml]") {
 	XmlWriter writer;
 	writer.Open("Game");

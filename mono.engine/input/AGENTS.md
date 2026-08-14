@@ -51,6 +51,38 @@ that swapped its prompts on an alt-tab would be reporting a keyboard nobody
 touched. A key *release* does stamp it, or a place flickers every time somebody
 stops walking.
 
+## Text is a sixth field, and it is cleared rather than rolled
+
+`SDL_EVENT_TEXT_INPUT` is what a keystroke *spelled*, where a key event is which
+key moved. The two arrive together and are not duplicates: the layout, the
+modifiers and any input method sit between them, so `Shift` and `1` is two key
+bits in one and `!` in the other.
+
+`Translator::TypedText` accumulates it and `BeginFrame` clears it. **It is not
+rolled**, and that is the distinction the section above is about: a key that is
+down has a previous value to be an edge against, and a character was produced
+once. `ReleaseAll` drops it with the other deltas, because a frame that ended
+with the window going away did not finish delivering.
+
+Two conventions the build cannot check:
+
+- **UTF-8, so one byte is not one character.** The event's text is appended
+  whole. Anything that indexes it, truncates it or takes a byte at a time cuts a
+  codepoint in half the first time somebody types in their own language.
+- **The string lives here rather than on `scene::InputState`**, where every
+  other frame delta lives. `InputState` is a registered trivially-copyable
+  component and a `std::string` on it would owe a hand-written serialiser, so
+  the one reader takes it from here instead: `client::Client` hands
+  `TypedText()` to `gui::Type` once a frame, which writes the world's own
+  `Label::Text`. The delta never crosses a snapshot at all, which is why it did
+  not have to move.
+
+**SDL sends none of these until a host calls `SDL_StartTextInput`**, which is
+the platform's rule and not this module's: text input raises an on-screen
+keyboard and starts composition, so it is off until something asks. The client
+asks while a `TextBox` has the keyboard and stops when it does not — that call
+belongs where the window is, and this module has no window.
+
 ## Every action needs a binding and a name
 
 `GetActionBinding` feeds the overlay, so an action with no binding string is a

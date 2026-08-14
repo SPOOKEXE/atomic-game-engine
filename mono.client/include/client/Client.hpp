@@ -291,6 +291,28 @@ namespace client {
 		// @since v0.15
 		std::string ClickElement;
 
+		// Type this into whichever `TextBox` has the keyboard, once, mid-run.
+		//
+		// **`ClickElement`'s diagnostic for the keyboard, and it needs that flag
+		// to have run first**: only a press moves the focus, so
+		// `--click Entry --type hello` is the pair, and this does nothing until
+		// something is focused. Nothing is typed twice.
+		//
+		// **Synthesised as an `SDL_EVENT_TEXT_INPUT` into `input::Translator`**,
+		// for the reason the press is synthesised as a real button event: the
+		// string then travels the path a real keystroke travels — the same
+		// translator, the same `Translator::TypedText`, the same `gui::Type` —
+		// and a shortcut past any of it would be a check of the shortcut.
+		//
+		// **What it cannot check is `SDL_StartTextInput`**, which is the other
+		// half of the same wiring: this injects the event SDL would have sent, so
+		// a client that never asked SDL for text would still pass. The log line
+		// the toggle writes is what says the call was made, and a real keyboard
+		// is the only thing that proves the platform answered it.
+		//
+		// @since v0.15
+		std::string TypedText;
+
 		// Where to write a BMP of the scene, or empty for none.
 		//
 		// **A diagnostic rather than a feature**, and it changes how the frame
@@ -545,6 +567,9 @@ namespace client {
 		// because that is what a press *is*.
 		int ClickFrames = -1;
 
+		// Whether `--type`'s string has been sent. Once per run, like the click.
+		bool TypedTextSent = false;
+
 		// How long this session has been drawing, in seconds.
 		//
 		// **What animation is played against**, and it is accumulated from the
@@ -589,6 +614,18 @@ namespace client {
 		// `SDL_ShowCursor` is the same kind of round trip.
 		bool PointerIconEnabled = true;
 		bool AppliedPointerIcon = true;
+
+		// Whether the window has been told somebody is typing.
+		//
+		// **The pointer pair's arrangement with one field instead of two**,
+		// because what a text box wants is what the window was last told and
+		// there is no second question to ask: `gui::FocusedTextBox` is the
+		// authority and this is only the record of the last call made about it.
+		// `SDL_StartTextInput` is a round trip for the same reason
+		// `SDL_SetWindowRelativeMouseMode` is — it raises an on-screen keyboard
+		// on a phone and starts an input method's composition on a desktop — so
+		// it is made on the frame the answer changes and no other.
+		bool TextInputActive = false;
 		engine::core::FrameClock Clock;
 
 		// The world, and the only place simulation state lives. Everything
@@ -622,6 +659,20 @@ namespace client {
 		// @param world Which world.
 		// @return The runtime, or null.
 		engine::script::Runtime *RuntimeOf(engine::world::WorldId world);
+
+		// Which world's 2D tree is laid out, routed and typed into.
+		//
+		// **The one the local player is standing in, which is not always the one
+		// in front.** A connected client draws its local scene beside the
+		// server's, and a person's `PlayerGui` is a subtree of their own
+		// `Player` — a row in the replica. Compiling `Rendered` and delivering
+		// the press there is what made every button in a replicated world
+		// silent: the router picked the right element and the event went to the
+		// wrong VM.
+		//
+		// @return The replicated world once the join has completed, and the
+		//         drawn world otherwise.
+		engine::world::WorldId InterfaceWorld() const;
 
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;

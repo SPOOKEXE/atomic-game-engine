@@ -400,6 +400,18 @@ namespace engine::replication {
 			peer.Wire->Link().Advance(nowSeconds);
 			peer.Wire->Link().ResetBudget();
 
+			// **Right after `ResetBudget`, because that is where the link
+			// decides the number.** The allowance is a function of one tick's
+			// worth of observation, and reading it anywhere else in the tick
+			// reads whatever is left of it rather than what it was.
+			//
+			// No reordering was needed to make this current: `Advance` runs
+			// after `Publish`, so what the next `Publish` reads is the allowance
+			// this tick's observations produced. See `Authority::SetAllowance`.
+			Authority_.SetAllowance(
+				peer.Client, static_cast<size_t>(peer.Wire->Link().Stats().SendAllowanceBytes)
+			);
+
 			if (peer.Wire->Link().State() == net::ConnectionState::Disconnected) {
 				Drop(index - 1);
 			}

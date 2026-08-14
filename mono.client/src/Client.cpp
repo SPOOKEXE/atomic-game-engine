@@ -12,6 +12,8 @@
 #include <engine/game/Play.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
+#include <engine/gui/Services.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
@@ -1150,31 +1152,56 @@ namespace client {
 			return false;
 		}
 
-		Universe_->Enter(Replicated, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-			// The v0.2 refusal, used for what it was reserved for. A replica
-			// that published to a bus would be telling the universe
-			// something the server never said; the inbox still delivers,
-			// which is how it receives.
-			store.SetResource(engine::world::Replica{true});
+		std::shared_ptr<engine::script::Runtime> replicaScripts;
 
-			// A replicated world runs no *simulation* system: everything in
-			// it arrived, and simulating it here would be this process
-			// disagreeing with the authority once per tick. What this
-			// installs is the `PreRender` half — the draw list and the
-			// system that fills it — which derives what to draw and writes
-			// no component.
-			//
-			// **The rate the snapshot buffer measures its delay against is the
-			// server's, and nothing on the wire carries it.** What is passed is
-			// the rate this process was told to run at, which is the same
-			// default both programs take. A disagreement is absorbed by the
-			// buffer's own correction up to a few percent, and past that shows
-			// as `replica.stalls` rather than as something mysterious.
-			engine::replication::InterpolationSettings interpolation;
-			interpolation.TickRate = Settings.TickRate;
+		Universe_->Enter(
+			Replicated, [this, &replicaScripts](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				// The v0.2 refusal, used for what it was reserved for. A replica
+				// that published to a bus would be telling the universe
+				// something the server never said; the inbox still delivers,
+				// which is how it receives.
+				store.SetResource(engine::world::Replica{true});
 
-			BuildReplicatedWorld(store, systems, interpolation);
-		});
+				// **Said here rather than left to the first `Connector::Poll`,
+				// because something now builds instances between the two.**
+				// `BuildReplicatedWorld` opens a VM and installs `GuiService`,
+				// and both of those ask the store whether minting is legal — an
+				// authoritative index taken in the window before the connector
+				// spoke would be one the server is also handing out. The
+				// connector still sets it, idempotently, for a store it was
+				// handed by some other route.
+				store.SetAdoptOnly(true);
+
+				// A replicated world simulates nothing: everything in it
+				// arrived, and stepping it here would be this process
+				// disagreeing with the authority once per tick. What this
+				// installs is the `PreRender` half — the draw list and the
+				// system that fills it — and, since v0.15, a VM whose scripts
+				// are the ones this client may run out of somebody else's
+				// world.
+				//
+				// **The rate the snapshot buffer measures its delay against is
+				// the server's, and nothing on the wire carries it.** What is
+				// passed is the rate this process was told to run at, which is
+				// the same default both programs take. A disagreement is
+				// absorbed by the buffer's own correction up to a few percent,
+				// and past that shows as `replica.stalls` rather than as
+				// something mysterious.
+				engine::replication::InterpolationSettings interpolation;
+				interpolation.TickRate = Settings.TickRate;
+
+				replicaScripts = BuildReplicatedWorld(store, systems, interpolation);
+			}
+		);
+
+		// **Named here, which is the whole of what `DeliverGuiEvents` needs.**
+		// The scheduler holds a reference and drops it with the world — that is
+		// the lifetime and it has not changed — but a VM nothing can *name* is
+		// one no press can be handed to, which is the shape the demo path had
+		// until v0.14 and the replicated path had until now.
+		if (replicaScripts != nullptr) {
+			Runtimes.emplace_back(Replicated, std::move(replicaScripts));
+		}
 
 		engine::replication::ConnectorSettings connector;
 		if (!Settings.ServerKey.empty()) {
@@ -1222,6 +1249,17 @@ namespace client {
 
 		ENGINE_INFO("connecting to {} from {}", server->Text(), Socket->Local().Text());
 		return true;
+	}
+
+	engine::world::WorldId Client::InterfaceWorld() const {
+		// Gated on the join rather than on the connection, because a `PlayerGui`
+		// is a subtree of a `Player` and neither exists until the world has
+		// arrived. Before that there is nothing there to lay out, and the local
+		// scene's own interface is still the only one a person can press.
+		if (ReportedJoin && Replicated.IsValid()) {
+			return Replicated;
+		}
+		return Rendered;
 	}
 
 	engine::script::Runtime *Client::RuntimeOf(engine::world::WorldId world) {
@@ -2063,9 +2101,32 @@ namespace client {
 		}
 
 		engine::render::InterfacePass *hook = nullptr;
-		if (Rendered.IsValid()) {
+
+		// **Whether the window should be listening for text, decided from the
+		// world.** Read inside the `Enter` below and applied outside it, because
+		// the answer is the world's and the call is the window's.
+		bool wantsTextInput = false;
+
+		// **Whose interface this is, which is not always the world in front.** A
+		// connected client draws its local scene *and* the server's; the
+		// `PlayerGui` a person can press lives under their own `Player`, which is
+		// a row in the replica. Compiling the local world and routing the press
+		// into it is what made every button in a replicated world silent — the
+		// press was picked correctly, produced the right event, and was handed to
+		// a VM that was not the one the button's script was in.
+		const engine::world::WorldId interfaceWorld = InterfaceWorld();
+
+		if (interfaceWorld.IsValid()) {
 			engine::gui::CompileRequest request;
 			std::span<const engine::gui::GuiEvent> interfaceEvents;
+
+			// **What Return did, which the router cannot produce.** Releasing the
+			// focus with a key is not a press, so nothing is picked and
+			// `Router::Update` names no element — `gui::TypeResult::Released` is
+			// the only record of it, and a script's `FocusLost` is owed one
+			// however the focus went away.
+			std::vector<engine::gui::GuiEvent> typedEvents;
+
 			request.Display.Width = static_cast<float>(Settings.Width);
 			request.Display.Height = static_cast<float>(Settings.Height);
 
@@ -2075,7 +2136,7 @@ namespace client {
 			request.Hovered = InterfaceRouter.Hovered();
 			request.Pressed = InterfaceRouter.Pressed();
 
-			Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+			Universe_->Enter(interfaceWorld, [&](engine::ecs::Store &store) {
 				// **Before the layout, and that order is the whole of it.** A
 				// `SurfaceGui` sized in pixels-per-stud and a `BillboardGui`
 				// sized in studs both need numbers `gui` cannot reach — the
@@ -2088,6 +2149,60 @@ namespace client {
 				engine::render::ResolveSpatialCanvases(store, request.Display);
 				engine::gui::Layout(store, request.Display);
 				InterfaceList.Rebuild(store, request);
+
+				// **This frame's characters, and before the press that may move
+				// the focus.** They were produced by a keyboard aimed at whichever
+				// box held it when they arrived; routing first would post them
+				// into the box the person is only now clicking on.
+				//
+				// **The synthetic keystroke, and it goes in before the frame reads
+				// what was typed.** `--type` is `--click`'s diagnostic for the
+				// keyboard and needs it to have run first, because only a press
+				// moves the focus. It enters as an SDL event so the translator
+				// stays the only thing in the engine that decodes one —
+				// `Options::TypedText` says what this does and does not cover.
+				if (!Settings.TypedText.empty() && !TypedTextSent &&
+					engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY) {
+					TypedTextSent = true;
+
+					SDL_Event typedEvent{};
+					typedEvent.type = SDL_EVENT_TEXT_INPUT;
+					typedEvent.text.text = Settings.TypedText.c_str();
+					Input.HandleEvent(typedEvent);
+
+					ENGINE_INFO("type: sent '{}' on frame {}", Settings.TypedText, FramesDrawn);
+				}
+
+				// **Straight from the translator into `Label::Text`, with nothing
+				// in between.** `Translate.hpp` keeps the string on the translator
+				// rather than on `scene::InputState` because that resource is
+				// trivially copyable and a `std::string` on it buys a hand-written
+				// serialiser, so this is the one hop it makes — into the world,
+				// where rule 2 says the text lives.
+				engine::gui::Typing typing;
+				typing.Text = Input.TypedText();
+				typing.Backspace = Input.State().WasKeyPressed(engine::scene::KeyCode::Backspace);
+				typing.Submit = Input.State().WasKeyPressed(engine::scene::KeyCode::Return);
+				typing.Extend = Input.State().IsKeyDown(engine::scene::KeyCode::LeftShift) ||
+								Input.State().IsKeyDown(engine::scene::KeyCode::RightShift);
+
+				// **One step per press and not one per repeat**, because
+				// `input::Translator` drops SDL's key repeats deliberately — a
+				// held arrow moves the caret once until something records how many
+				// times it fired.
+				if (Input.State().WasKeyPressed(engine::scene::KeyCode::Left)) {
+					typing.Caret = -1;
+				} else if (Input.State().WasKeyPressed(engine::scene::KeyCode::Right)) {
+					typing.Caret = 1;
+				}
+
+				if (const engine::gui::TypeResult typed = engine::gui::Type(store, typing); typed.Released) {
+					engine::gui::GuiEvent released;
+					released.Kind = engine::gui::EventKind::FocusReleased;
+					released.Instance = typed.Instance;
+					released.Entered = true;
+					typedEvents.push_back(released);
+				}
 
 				// **The hit test, which a shipped client did not do at all.** The
 				// router was constructed, read for `Hovered` and `Pressed`, and
@@ -2124,14 +2239,27 @@ namespace client {
 				}
 
 				interfaceEvents = InterfaceRouter.Update(store, InterfaceList.Commands(), pointer);
+
+				// **After the router, because this frame's press is what may have
+				// changed it.** A click that lands on a box has to reach the
+				// window on the frame it happened, or the first character somebody
+				// types is the one SDL was never asked for.
+				wantsTextInput = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
 			});
 
 			// **Outside the world's lock, because it reaches a VM.** The span
 			// points into the router's own vector, which is a member and is only
 			// rewritten by the next `Update`; `DeliverGuiEvents` copies.
-			if (!interfaceEvents.empty()) {
-				if (engine::script::Runtime *runtime = RuntimeOf(Rendered); runtime != nullptr) {
-					runtime->DeliverGuiEvents(interfaceEvents);
+			if (!typedEvents.empty() || !interfaceEvents.empty()) {
+				if (engine::script::Runtime *runtime = RuntimeOf(interfaceWorld); runtime != nullptr) {
+					// Typing first, because it happened first — the keystroke is
+					// applied above the routing for the reason stated there.
+					if (!typedEvents.empty()) {
+						runtime->DeliverGuiEvents(typedEvents);
+					}
+					if (!interfaceEvents.empty()) {
+						runtime->DeliverGuiEvents(interfaceEvents);
+					}
 				}
 			}
 
@@ -2142,6 +2270,39 @@ namespace client {
 				);
 				hook = &Interface;
 			}
+		}
+
+		// **SDL is asked for text only while a `TextBox` has the keyboard, and
+		// that is a decision rather than a saving.** Text input is not a stream
+		// somebody switches on to receive characters — it is what raises the
+		// on-screen keyboard on a phone and opens an input method's composition
+		// window on a desktop, and both of those cover the game. A client that
+		// started it once and left it on would be a game with a keyboard over it
+		// on every platform that has one, which is why SDL makes a host ask at
+		// all.
+		//
+		// **`gui::FocusedTextBox` is the switch, and being a lookup is exactly
+		// what makes it usable as one.** The fact rests in the world, one module
+		// decides it and this reads it — no flag here mirrors it, which is the
+		// same refusal `WriteInput`'s three surviving fields are about.
+		//
+		// **Compared before it is called**, for the reason the pointer mode above
+		// is: this is a window-manager round trip on some platforms and a client
+		// that made it every frame would pay for it every frame to say what it
+		// already said.
+		if (Window != nullptr && wantsTextInput != TextInputActive) {
+			TextInputActive = wantsTextInput;
+
+			// **Logged because nothing else can see it.** Whether the platform
+			// accepted the request is SDL's answer and there is no test that can
+			// ask — a headless run has no input method to raise — so the one
+			// record that the call was made on the frame the focus changed is
+			// this line. `--type` synthesises the event SDL would have sent and
+			// therefore proves the hop after this one, never this one.
+			const bool accepted = wantsTextInput ? SDL_StartTextInput(Window) : SDL_StopTextInput(Window);
+			ENGINE_INFO(
+				"text input: {} — SDL {}", wantsTextInput ? "on" : "off", accepted ? "ok" : SDL_GetError()
+			);
 		}
 
 		// **A capture needs an offscreen target, so asking for one turns the

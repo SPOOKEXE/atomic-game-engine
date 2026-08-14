@@ -9,7 +9,7 @@
 // stall and the exclusion are all statements about *when* a tick is recorded
 // and nothing about how it got here. The second runs the same measurement over
 // `Wire.hpp`'s real loopback, real framing and real encryption with
-// `net::LossyTransport` losing a seeded share of it — because jitter is the
+// `net::LossyTransport` losing a nominated share of it — because jitter is the
 // entire justification for this feature and it is now something a suite can
 // state rather than argue about.
 
@@ -467,7 +467,7 @@ TEST_CASE("an entity that stops being replicated is dropped", "[replication][int
 }
 
 TEST_CASE(
-	"under seeded loss the replica is drawn smoothly and the raw stream is not",
+	"under constructed loss the replica is drawn smoothly and the raw stream is not",
 	"[replication][interpolation][loss]"
 ) {
 	// **The comparison is the test.** Both columns are measured from the same
@@ -477,13 +477,24 @@ TEST_CASE(
 	// on every frame when it is interpolated — and no counter is being asserted
 	// on, only how often the drawn position actually changed.
 	//
-	// Seeded rather than nominated, because the point here is that the *link* is
-	// bad rather than that one particular datagram went missing. The seed is
-	// what keeps that reproducible: `LossyTransport` draws from the arrival
-	// number and the seed and from nothing else.
+	// **Nominated rather than drawn, which is what `LossyTransport`'s own header
+	// asks for and this case used to ignore.** It lost a tenth of the link
+	// against `Random::Float(arrival, seed)`, so the pattern was whatever that
+	// generator happened to produce — and when `core::Random` was replaced at
+	// v0.15 every draw moved, a burst of three consecutive losses appeared where
+	// there had been none, and `bufferedFrozen == 0` went red for a reason that
+	// had nothing to do with interpolation. A seed is not a statement about the
+	// link; this list is.
+	//
+	// **One in ten and never two in a row, because that is the pattern
+	// `DelayTicks = 2` is documented to absorb** — "one lost and recovered by
+	// the next, absorbed with nothing to spare". So the assertions below test
+	// the guarantee the constant claims rather than a run that happened to stay
+	// inside it.
 	LossSettings toClient;
-	toClient.LossChance = 0.10f;
-	toClient.Seed = 0x5eed'0010u;
+	for (uint64_t arrival = 7; arrival < 400; arrival += 10) {
+		toClient.Drop.push_back(arrival);
+	}
 
 	Wire wire({}, {}, toClient);
 
@@ -542,7 +553,8 @@ TEST_CASE(
 		}
 	}
 
-	// The link really did lose things, or this case proves nothing.
+	// The link really did lose things, or this case proves nothing. 24 of 241
+	// arrivals, which is the tenth the list above nominates.
 	REQUIRE(wire.ClientEnd->Stats().Dropped > 0);
 	REQUIRE(frames > 800);
 
@@ -551,17 +563,21 @@ TEST_CASE(
 	REQUIRE(rawFrozen > frames / 2);
 
 	// **The buffered one never froze at all, and zero is the measurement rather
-	// than an aspiration.** On this seed the same run gives 23 frozen frames at
-	// `DelayTicks = 0` and 4 at 1, so this single number is what pins the
-	// default: it is the assertion that fails if the delay is taken away, and it
-	// is the "does not stall" claim stated as something on screen rather than as
-	// a counter.
+	// than an aspiration.** The same run at `DelayTicks = 0` freezes 23 frames,
+	// so this is the assertion that fails if the delay is taken away.
 	REQUIRE(bufferedFrozen == 0);
 
-	// The counter agrees, and it is the more sensitive of the two — the clock
-	// reaching the newest sample does not always cost a frozen frame. Four on
-	// this seed, against 14 at `DelayTicks = 1` and 56 at 0.
-	REQUIRE(buffer.Stats().Stalls < 10);
+	// **And this is what pins the default at two rather than one.** A run this
+	// regular is absorbed by a one-tick delay too — 0 frozen frames — so the
+	// frozen count alone no longer tells the two apart; the stall counter does,
+	// because it is the more sensitive of the two and the clock reaching the
+	// newest sample does not always cost a frozen frame. Measured on this
+	// pattern: 0 stalls at `DelayTicks = 2`, 4 at 1, 54 at 0.
+	//
+	// Exact rather than a bound, because nothing in this case is drawn any more
+	// — the loss list, the tick schedule and the frame schedule are all stated,
+	// so a stall that appears is a change in the buffer and not in a generator.
+	REQUIRE(buffer.Stats().Stalls == 0);
 
 	// And it never snaps. The raw stream jumps a whole tick's worth at a time
 	// and more across a loss; the buffered one covers a quarter of a tick per

@@ -13,6 +13,12 @@ it, so a mistake here is a mistake everywhere.
   metrics sink, and Tracy instrumentation.
 - **L1** — pure value types with no runtime behind them: `Vector3`, `Color3`,
   `CFrame`, and the math on them.
+- **L1** — a format several modules have to agree on, when reading or writing it
+  needs nothing but the standard library. `Bytes` is the byte layout everything
+  serialises through, `Config` reads a settings file, and `Xml` is the tag
+  scanner three formats above here run on. **The test is the dependency, not the
+  usefulness**: something that needs another module's types belongs in that
+  module however many callers it would have here.
 
 ## What may not
 
@@ -111,6 +117,66 @@ The registry never removes an entry and the storage never moves, which is what
 lets `Text()` hand out a `string_view` that stays valid. That is why it is a
 deque rather than a vector; changing it to a vector would dangle every view
 already given out, and the corruption would appear far from the change.
+
+## `core` links no cryptography library, and `Random` is why it used to
+
+`engine::core::Random` is SplitMix64's finaliser — Steele, Lea and Flood's
+`mix64variant13`, OOPSLA 2014 — over the packed `(salt, index)` pair. It was
+SHA-256 from Crypto++ until v0.15, and it plus `SecureWipe`'s zeroing loop were
+the only two calls that made `Engine::core` link a cryptography library at all.
+Both are written out in this module now and the `VENDOR` line is gone.
+
+**Do not put one back.** Not for a better mixer, not for a checksum somebody
+wants at L0 for an unrelated reason. Everything in the engine links `core`, so a
+vendor here is a vendor everywhere. The argument for removing this one was never
+binary size and adding one back cannot be justified on size either: `net` and
+`assets` link Crypto++ themselves and are what put it in the client, the server
+and the origin. `docs/retired/DEFERRED.md` D00004 has the per-program numbers,
+measured either side of the swap, and they are identical.
+
+**`Random` must never produce anything that has to be unpredictable.** A stream
+is a pure function of two arguments an attacker can guess, and that determinism
+is the entire reason the type exists — it cannot be fixed without destroying what
+it is for. Every caller that needs entropy already draws from the operating
+system through `net::Handshake` or `assets::GrantKey`, and each of those headers
+says so where somebody would otherwise be tempted. `script`'s `GenerateGUID` is
+the one that looks like an exception and is not: it stamps the version and
+variant bits to make the *shape* a UUID and states in its own comment that the
+value is neither unpredictable nor unique across processes.
+
+**The sequence is pinned, and moving it is a breaking change to every game.**
+`Random.new(seed)` in both script VMs draws through here, so the algorithm is
+part of what a saved world means. `tests/Random.cpp` pins actual values rather
+than comparing two runs — `just determinism` and `just replay-check` compare one
+run against another and stay green on a generator that changed and agrees with
+itself.
+
+## `Xml` is a scanner and there is exactly one of it
+
+`Xml.hpp` is here because it needs nothing, not because everybody wants it. It
+opens no file, links no vendor and names no other module's type, so L1 is its
+height; `assets` was the other candidate and is one tier above what the parser
+depends on. **The reason it is at the bottom is that three modules above it were
+each keeping the same refusals true** — `game` since v0.7, `Svg.cpp` since v0.13
+and `bake/src/Xml.hpp` at v0.15 — and `bake` could not call `game`'s, because
+`game` is L10. `D00128`, and the header carries the whole argument.
+
+Three rules, and the third is the one somebody will get wrong:
+
+- **It is not a document model and must not grow into one.** A caller drives
+  `NextTag` and keeps its own stack. That is what makes depth a count somebody
+  bounded rather than the C stack running out with no file named, and it is why
+  `game`'s tree is in `game`.
+- **A `<!DOCTYPE` or `<!ENTITY` is not parsed at all.** Not bounded, not
+  configurable — there is no code here that could expand an entity, so there is
+  no option that could switch one on. Everything this rejects, it rejects by
+  construction rather than by default.
+- **The two entity policies are both here and neither is the default.**
+  `CheckEntityReferences` sweeps a document for a caller that never unescapes;
+  `ReadContent` refuses at each point a reference is read and exempts CDATA, for
+  a caller whose CDATA is a program. Collapsing them refuses a valid file — a
+  real `.rbxmx` in the corpus carries the Luau pattern `"[&;]"` inside a
+  script — and each caller has a case that goes red if somebody does.
 
 ## Value types stay values
 

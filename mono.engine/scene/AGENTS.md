@@ -121,6 +121,49 @@ needs no predicate change and needs the scoping test extended in both directions
 — `server.replication` asserts a client holds four of its own and none of
 anybody else's.
 
+## Equipping is a reparent, and the tree is the only record of it
+
+A `Tool` in a `Player.Backpack` is stowed and a `Tool` that is a direct child of
+a character `Model` is equipped. `Tools.hpp` carries the whole design; what
+belongs here is what a reviewer should refuse.
+
+- **An `Equipped` flag, or a field naming the equipped tool.** Both are a second
+  copy of what the hierarchy already says, and both are the copy that goes stale
+  the first time a script reparents one — rule 2. `EquippedTool` is a walk of a
+  model's few children and `HolderOf` is one `ParentOf`.
+- **A second answer to "may this machine move a tool".** `EquipTool` and
+  `UnequipTool` refuse on `ecs::Store::AdoptOnly` and `ecs::Store::SetProperty`
+  refuses a `.Parent` write in a replica. That is `TakeDamage`'s pair — one rule
+  with a C++ door and a script door — and a flag on the class or a check in a
+  host would be a third statement covering one caller.
+- **An `Attachment` carrying the handle.** `ResolveAttachments` runs in
+  `PreRender` and *resolves a frame* rather than moving a part;
+  `Attachments.hpp` says a caller wanting a weld is asking for what that pass
+  does not promise. A `CharacterLimb` is what the rig is already made of, so a
+  held handle is one more part in the same formation — and it inherits the
+  replication `D00115` already bought, because `scene.CharacterLimb` is
+  `replication`'s suppressor for `scene.Transform`.
+- **`UpdateToolGrips` reparenting or destroying anything.** It runs on a replica,
+  through `PoseCharacters`, on every host that draws a character. Everything it
+  writes is a function of where a tool already is, which is what makes that safe;
+  the moment it moves something it is a replica fighting its authority.
+- **An equip that rewrites `Anchored`, `CanCollide`, `CollisionGroup` or a
+  physical property.** Every one of them is a declared property an author set.
+  Taking `Motion` away is the exception and is not one of them: it is the
+  archetype move `physics` makes for a sleeping body, and it is put back only
+  where a `RigidBody` says there is a body to move.
+- **Death or departure growing a special case.** A corpse keeps what it was
+  holding and `LoadCharacter` destroys the body with the tool in it, which is the
+  two-container rule stated one section up: only `StarterGear` survives a death.
+  A departing player's `Backpack` goes with the `Player` and their held tool goes
+  with the character `ReclaimOrphanedCharacters` collects. Neither needed a line.
+
+**`Humanoid:EquipTool` is absent and it is not a gap.** A class table here
+carries properties and no methods — `Sound.Playing` is a property for exactly
+that reason — and a Roblox script equips by writing `tool.Parent = character`
+anyway, which is a declared property and works. The day classes carry methods,
+that method sets a parent and nothing else changes.
+
 ## A spawn is found by class *and* by name, and that is the one exception
 
 `scene::FindSpawn` looked for a child called `SpawnLocation` from v0.14 to

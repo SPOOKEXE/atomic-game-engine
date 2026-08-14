@@ -7,6 +7,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Teams.hpp>
+#include <engine/scene/Tools.hpp>
 
 #include <algorithm>
 #include <array>
@@ -44,7 +45,7 @@ namespace engine::scene {
 			{"Head", {1.5f, 1.0f, 1.5f}, {0.0f, 2.0f, 0.0f}, Palette::Skin},
 			{"Torso", {2.0f, 2.0f, 1.0f}, {0.0f, 0.5f, 0.0f}, Palette::Shirt},
 			{"Left Arm", {1.0f, 2.0f, 1.0f}, {-1.5f, 0.5f, 0.0f}, Palette::Skin},
-			{"Right Arm", {1.0f, 2.0f, 1.0f}, {1.5f, 0.5f, 0.0f}, Palette::Skin},
+			{RIGHT_ARM_NAME, {1.0f, 2.0f, 1.0f}, {1.5f, 0.5f, 0.0f}, Palette::Skin},
 			{"Left Leg", {1.0f, 2.0f, 1.0f}, {-0.5f, -1.5f, 0.0f}, Palette::Trousers},
 			{"Right Leg", {1.0f, 2.0f, 1.0f}, {0.5f, -1.5f, 0.0f}, Palette::Trousers},
 		}};
@@ -317,13 +318,13 @@ namespace engine::scene {
 			}
 
 			MakeIntangible(store, entity);
-			store.Set(entity, CharacterLimb{CFrame(limb.Offset), root, 0});
+			store.Set(entity, CharacterLimb{root, CFrame(limb.Offset), 0});
 		}
 
 		// The model follows the root like everything else does — see
 		// `CharacterLimb` for why it is a row here rather than a case in the
 		// pass.
-		store.Set(model, CharacterLimb{CFrame(), root, 0});
+		store.Set(model, CharacterLimb{root, CFrame(), 0});
 
 		// **A sibling of the parts, which is Roblox's arrangement and the one
 		// `Part.cpp` registered the class for.** A humanoid on the root part
@@ -808,6 +809,13 @@ namespace engine::scene {
 	}
 
 	size_t PoseCharacters(ecs::Store &store) {
+		// **Before the walk, because it decides what the walk will find.** A
+		// tool equipped this tick has a handle that is not yet a limb, and one
+		// dropped this tick has a handle that still is; running this afterwards
+		// would place every held tool one frame behind its own arm. See the
+		// declaration for why it is here rather than in a system of its own.
+		(void)UpdateToolGrips(store);
+
 		size_t placed = 0;
 
 		store.Each<const CharacterLimb, Transform>(

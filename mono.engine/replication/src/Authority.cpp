@@ -499,6 +499,14 @@ namespace engine::replication {
 	Authority::Placement Authority::Pack(Client &client, const Delta &delta, size_t messageLimit) {
 		const size_t budget = Settings_.ChunkBytes;
 
+		// **The lower of what the path will carry and what this module is
+		// willing to produce.** `SetAllowance` carries the argument; the shape
+		// worth noting here is that it is a `min` and not a replacement — a host
+		// that never wires a link keeps `SIZE_MAX` and the configured number
+		// alone decides, and a host that does still cannot be talked past its
+		// own ceiling by a controller that has read the path optimistically.
+		const size_t spend = std::min(Settings_.BytesPerTick, client.AllowanceBytes);
+
 		Placement placed;
 		size_t messages = 0;
 		size_t bytes = 0;
@@ -519,7 +527,7 @@ namespace engine::replication {
 				piece.Final = false;
 
 				std::vector<std::byte> encoded = Encode(piece);
-				if (messages >= messageLimit || bytes + encoded.size() > Settings_.BytesPerTick) {
+				if (messages >= messageLimit || bytes + encoded.size() > spend) {
 					return false;
 				}
 
@@ -548,8 +556,7 @@ namespace engine::replication {
 		bool room = true;
 		for (size_t position = 0; room && position < Order.size(); position++) {
 			const Candidate &candidate = Candidates[Order[position]];
-			const size_t stride = Strides[candidate.Entry];
-			const size_t perEntity = sizeof(uint64_t) + stride;
+			const size_t perEntity = sizeof(uint64_t) + candidate.Bytes;
 
 			size_t entry = OpenEntry[candidate.Entry];
 			size_t needs = perEntity + (entry == NOWHERE ? ENTRY_OVERHEAD : 0);
@@ -576,8 +583,8 @@ namespace engine::replication {
 			into.Entities.push_back(candidate.Entity);
 			into.Values.insert(
 				into.Values.end(),
-				source.Values.begin() + static_cast<ptrdiff_t>(candidate.Row * stride),
-				source.Values.begin() + static_cast<ptrdiff_t>((candidate.Row + 1) * stride)
+				source.Values.begin() + static_cast<ptrdiff_t>(candidate.Offset),
+				source.Values.begin() + static_cast<ptrdiff_t>(candidate.Offset + candidate.Bytes)
 			);
 
 			used += needs;
@@ -859,7 +866,6 @@ namespace engine::replication {
 		client.Unconfirmed.resize(Components.size());
 
 		Candidates.clear();
-		Strides.clear();
 		SourceSlot.clear();
 
 		for (size_t slot = 0; slot < Components.size(); slot++) {
@@ -895,10 +901,17 @@ namespace engine::replication {
 				continue;
 			}
 
+			// **A coarse guard, and it is about the component rather than about
+			// a row.** A type whose *stored* size already exceeds a message can
+			// never produce a row that fits, which is worth saying once at the
+			// top instead of building rows nothing will take. It is not a bound
+			// on the encoded length: a serialiser that writes names writes as
+			// many bytes as the text is long, so what a given row costs is only
+			// known after `offer` has written it.
 			const size_t crossing = WireBytes(descriptor);
 			if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + crossing > Settings_.ChunkBytes) {
 				ENGINE_WARN(
-					"replication: '{}' is {} bytes on the wire and cannot fit a delta message.",
+					"replication: '{}' is {} bytes stored and cannot fit a delta message.",
 					name.Text(),
 					crossing
 				);
@@ -911,17 +924,31 @@ namespace engine::replication {
 			const uint32_t entry = static_cast<uint32_t>(delta.Components.size());
 			const size_t before = Candidates.size();
 
-			const auto offer = [&](ecs::Entity entity) {
+			core::ByteWriter values;
+
+			// **The value is written here rather than beside each call, so that
+			// one place records where it landed.** A row's encoded length is
+			// only known once it has been written — `scene.Visual` and
+			// `ecs.InstanceName` both write names, and a name is as long as its
+			// text — and `Pack` has to be able to slice any one row back out
+			// after the priority sort has reordered them.
+			const auto offer = [&](ecs::Entity entity, const void *value) {
 				Outstanding &pending = unconfirmed[entity.Id];
 				if (pending.WaitingSince == 0) {
 					pending.WaitingSince = tick;
 				}
 				pending.ConsideredAt = tick;
 
+				const size_t at = values.Bytes().size();
+				if (descriptor.Size > 0) {
+					WriteValue(values, descriptor, value);
+				}
+
 				Candidates.push_back(
 					Candidate{
 						entry,
-						static_cast<uint32_t>(component.Entities.size()),
+						static_cast<uint32_t>(at),
+						static_cast<uint32_t>(values.Bytes().size() - at),
 						entity,
 						pending.WaitingSince,
 						0.0f
@@ -929,8 +956,6 @@ namespace engine::replication {
 				);
 				component.Entities.push_back(entity);
 			};
-
-			core::ByteWriter values;
 
 			// The tag that takes this component's rows off the wire per entity,
 			// or invalid when this slot has none — which is every slot by
@@ -961,8 +986,7 @@ namespace engine::replication {
 						continue;
 					}
 
-					offer(entity);
-					WriteValue(values, descriptor, value);
+					offer(entity, value);
 				}
 			} else {
 				store.EachChangedRuns(id, [&](const ecs::Entity *entities, void *data, size_t rows) {
@@ -975,14 +999,7 @@ namespace engine::replication {
 							continue;
 						}
 
-						offer(entity);
-						if (descriptor.Size > 0) {
-							WriteValue(
-								values,
-								descriptor,
-								static_cast<const std::byte *>(data) + row * descriptor.Size
-							);
-						}
+						offer(entity, static_cast<const std::byte *>(data) + row * descriptor.Size);
 					}
 				});
 			}
@@ -1009,10 +1026,7 @@ namespace engine::replication {
 					continue;
 				}
 
-				offer(entity);
-				if (descriptor.Size > 0) {
-					WriteValue(values, descriptor, value);
-				}
+				offer(entity, value);
 			}
 
 			if (component.Entities.empty()) {
@@ -1022,7 +1036,6 @@ namespace engine::replication {
 
 			component.Values.assign(values.Bytes().begin(), values.Bytes().end());
 
-			Strides.push_back(component.Values.size() / component.Entities.size());
 			SourceSlot.push_back(slot);
 			delta.Components.push_back(std::move(component));
 		}
@@ -1210,6 +1223,12 @@ namespace engine::replication {
 				Stats_.Bytes += message.size();
 			}
 			Stats_.Messages += client.Outgoing.size();
+		}
+	}
+
+	void Authority::SetAllowance(ClientId client, size_t bytes) {
+		if (Client *found = Reach(client); found != nullptr) {
+			found->AllowanceBytes = bytes;
 		}
 	}
 

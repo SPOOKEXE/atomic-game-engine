@@ -94,15 +94,26 @@ namespace engine::scene {
 	//
 	// @since v0.14
 	struct CharacterLimb {
+		// The root part this hangs off.
+		//
+		// **Widest first, and it was not until v0.15.** An `ecs::Entity` is
+		// eight-byte aligned and a `core::CFrame` is twenty-eight bytes, so with
+		// the frame first this struct had a four-byte hole after it *and* four
+		// bytes of tail padding — eight bytes `Reserved` was named to prevent
+		// and did not, because it was put after the member that caused them.
+		// The object representation is what a snapshot writes, so those eight
+		// bytes reached every save file and every wire delta uninitialised.
+		// Found by comparing a restored row against a recomputed one and
+		// watching two byte-identical limbs disagree.
+		ecs::Entity Root;
+
 		// The rest pose, in the root's own frame.
 		core::CFrame Offset;
 
-		// The root part this hangs off.
-		ecs::Entity Root;
-
 		// Explicit padding, so the object representation a snapshot writes
 		// holds no uninitialised bytes. The reason every other `Reserved` here
-		// gives.
+		// gives — and see `Root` for why the order of these three is the part
+		// that makes it true.
 		uint32_t Reserved = 0;
 	};
 
@@ -136,6 +147,17 @@ namespace engine::scene {
 	// something else would cast its ground ray from inside its own shins, which
 	// is a character that can never jump and gives no clue why.
 	inline constexpr float CHARACTER_HEIGHT = 5.0f;
+
+	// What the limb a character holds things with is called.
+	//
+	// **Stated once here because two files spell it.** `MakeCharacter` names the
+	// limb and `scene::ToolGrip` finds it again to work out where a handle sits,
+	// and a rename on one side without the other would put every tool at a
+	// character's feet with nothing saying why. Roblox's spelling, space
+	// included, so a script written against `character["Right Arm"]` resolves.
+	//
+	// @since v0.15
+	inline constexpr std::string_view RIGHT_ARM_NAME = "Right Arm";
 
 	// One player gaining or losing a body.
 	//
@@ -535,6 +557,14 @@ namespace engine::scene {
 	// alone rather than moved to the origin — a dead root is a character being
 	// torn down, and a pile of limbs at the origin is a worse picture than a
 	// pile where it died.
+	//
+	// **It decides which handles are limbs before it places them**, by calling
+	// `scene::UpdateToolGrips`. An equipped `Tool`'s handle is carried by the
+	// same rest-offset row a forearm is — `Tools.hpp` carries the whole argument
+	// — and what makes a handle one is where its tool is parented, which is a
+	// fact a script or a wire delta can change without calling anything. So the
+	// pass that hangs limbs off a root is where that is worked out: one call,
+	// one phase, and every host that draws a character already runs this one.
 	//
 	// @param store The world.
 	// @return How many limbs were placed.

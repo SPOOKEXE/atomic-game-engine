@@ -154,6 +154,21 @@
 			]
 		},
 		{
+			"name": "Tool",
+			"parent": "Model",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Tool", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Grip", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Tool"], "writes": ["scene.Tool"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+			]
+		},
+		{
 			"name": "MeshPart",
 			"parent": "BasePart",
 			"constructible": true,

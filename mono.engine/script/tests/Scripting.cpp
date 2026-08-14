@@ -10,6 +10,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -1846,6 +1847,150 @@ TEST_CASE("a click the interface took is game-processed and a key is not", "[scr
 		// **The key is false on the beat the click was true**, which is the pair
 		// that says this is the interface's answer and not the frame's.
 		CHECK(Trace(store, log) == "Keyboard=false;MouseButton1=true;Keyboard=false;MouseButton1=false;");
+	}
+}
+
+TEST_CASE("a key is game-processed while a TextBox has focus", "[scripting][gui]") {
+	// **The other half of the case above, and the half that did not exist.** A
+	// key was hard `false` because `gui` had nothing to be focused; now a press
+	// on a `TextBox` puts the keyboard there and `W` is a letter rather than a
+	// step forward. A place that moves its character on `InputBegan` reads this
+	// argument to know which.
+	//
+	// **The pointer is asserted on the same beats and answers the other way**,
+	// which is what makes this about two independent answers rather than one
+	// flag that moved: nothing is delivered from the router here, so a pump that
+	// had merged the two would report the click as processed as well.
+	//
+	// **The focus is set through `gui::Focus` rather than by writing the
+	// component**, because that function is the one door and a test that wrote
+	// the field would pass against a `GetFocusedTextBox` that read a different
+	// one.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store("script_test");
+		store.SetResource(engine::scene::InputState{});
+
+		engine::gui::RegisterGuiClasses();
+		REQUIRE(engine::gui::InstallGuiServices(store) != engine::ecs::NULL_ENTITY);
+
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const Entity box = store.CreateInstance(engine::gui::GuiClass("TextBox"), "Entry");
+		store.SetParent(box, engine::scene::WorkspaceOf(store));
+		const Entity log = MakeLog(store);
+
+		const bool luau = language == Language::Luau;
+		INFO((luau ? "luau" : "javascript"));
+
+		MustRun(
+			*runtime,
+			luau ? R"(
+			local log = workspace:FindFirstChild('Log')
+			local UIS = game:GetService('UserInputService')
+			UIS.InputBegan:Connect(function(input, gameProcessed)
+				log.Name = log.Name .. input.UserInputType.Name .. '=' .. tostring(gameProcessed) .. ';'
+			end)
+		)"
+				 : R"(
+			const log = workspace.FindFirstChild('Log');
+			const UIS = game.GetService('UserInputService');
+			UIS.InputBegan.Connect((input, gameProcessed) => {
+				log.Name = log.Name + input.UserInputType.Name + '=' + String(gameProcessed) + ';';
+			});
+		)"
+		);
+
+		// The beat before anything has focus, which is the control: without it
+		// this passes against a pump that marks every key.
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		input->Previous = input->Down;
+		input->Down.Set(engine::scene::KeyCode::Q, true);
+		REQUIRE(runtime->Heartbeat(0.016f));
+
+		REQUIRE(engine::gui::Focus(store, box));
+
+		input = store.ResourceMutable<engine::scene::InputState>();
+		input->Previous = input->Down;
+		input->Down.Set(engine::scene::KeyCode::Q, false);
+		input->Down.Set(engine::scene::KeyCode::W, true);
+		input->PreviousButtons = input->Buttons;
+		input->Buttons = 1u << static_cast<uint8_t>(engine::scene::MouseButton::Left);
+		REQUIRE(runtime->Heartbeat(0.016f));
+
+		// And released again, which says the answer is the focus rather than the
+		// beat focus was taken on.
+		REQUIRE(engine::gui::Focus(store, engine::ecs::NULL_ENTITY));
+
+		input = store.ResourceMutable<engine::scene::InputState>();
+		input->Previous = input->Down;
+		input->PreviousButtons = input->Buttons;
+		input->Down.Set(engine::scene::KeyCode::E, true);
+		REQUIRE(runtime->Heartbeat(0.016f));
+
+		// **The click is false on the beat the key was true**, which is the pair
+		// the case above asserts the other way round.
+		CHECK(Trace(store, log) == "Keyboard=false;Keyboard=true;MouseButton1=false;Keyboard=false;");
+	}
+}
+
+TEST_CASE("the focused text box is what a script is told it is", "[scripting][gui]") {
+	// **A lookup and not a tally**, which is what `GetFocusedTextBox` is: the
+	// focus signals could be missed, dropped or delivered twice and this would
+	// still answer, because `gui::Focus` is the one door and the world is where
+	// the answer rests.
+	//
+	// **Asserted inside the chunk rather than logged out of it**, because the
+	// question is asked three times against three different worlds-states and a
+	// log part would have to be re-found by a name the previous answer changed.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store("script_test");
+
+		engine::gui::RegisterGuiClasses();
+		REQUIRE(engine::gui::InstallGuiServices(store) != engine::ecs::NULL_ENTITY);
+
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const Entity box = store.CreateInstance(engine::gui::GuiClass("TextBox"), "Entry");
+		store.SetParent(box, engine::scene::WorkspaceOf(store));
+
+		const bool luau = language == Language::Luau;
+		INFO((luau ? "luau" : "javascript"));
+
+		const char *nobody = luau ? R"(
+			local box = game:GetService('UserInputService'):GetFocusedTextBox()
+			assert(box == nil, 'nobody is typing and something was reported')
+		)"
+								  : R"(
+			{
+				const box = game.GetService('UserInputService').GetFocusedTextBox();
+				if (box) { throw new Error('nobody is typing and something was reported') }
+			}
+		)";
+
+		MustRun(*runtime, nobody);
+
+		REQUIRE(engine::gui::Focus(store, box));
+		MustRun(
+			*runtime,
+			luau ? R"(
+			local box = game:GetService('UserInputService'):GetFocusedTextBox()
+			assert(box ~= nil and box.Name == 'Entry', 'the focused box was not reported')
+		)"
+				 : R"(
+			const focused = game.GetService('UserInputService').GetFocusedTextBox();
+			if (!focused || focused.Name !== 'Entry') { throw new Error('the focused box was not reported') }
+		)"
+		);
+
+		// **Destroyed while focused, which is the case the handle is validated
+		// for.** A script asking after that gets nil rather than an instance
+		// standing on a recycled row.
+		store.DestroyInstance(box);
+		MustRun(*runtime, nobody);
 	}
 }
 

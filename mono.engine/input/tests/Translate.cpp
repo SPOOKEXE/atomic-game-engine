@@ -33,6 +33,19 @@ namespace {
 		return event;
 	}
 
+	// One `SDL_EVENT_TEXT_INPUT`, carrying whatever UTF-8 a keystroke produced.
+	//
+	// **The pointer is into the caller's literal, which is what SDL does too.**
+	// `SDL_TextInputEvent::text` is borrowed for the duration of the handler and
+	// the translator copies out of it — a test that owned the storage would be
+	// testing a contract the platform does not offer.
+	SDL_Event TextEvent(const char *text) {
+		SDL_Event event{};
+		event.type = SDL_EVENT_TEXT_INPUT;
+		event.text.text = text;
+		return event;
+	}
+
 	SDL_Event ButtonEvent(uint8_t button, bool down) {
 		SDL_Event event{};
 		event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
@@ -250,4 +263,55 @@ TEST_CASE("the last device is stamped by whoever spoke and is an edge", "[input]
 	REQUIRE(translator.HandleEvent(WindowEvent(false)));
 	CHECK(translator.State().LastSource == InputSource::Keyboard);
 	CHECK_FALSE(translator.State().WasLastSourceChanged());
+}
+
+TEST_CASE("typed text arrives as UTF-8 and is a frame delta", "[input][translate]") {
+	// **The half of the keyboard that is not a keycode.** A key event says which
+	// key moved; this says what it spelled, and the two are different questions
+	// — the layout, the modifiers and any composition the platform ran all sit
+	// between them, so `Shift` plus `1` is two key bits there and `!` here.
+	//
+	// **The assertion that matters is byte-exact.** `SDL_TextInputEvent` carries
+	// UTF-8, and anything that took a byte at a time or assumed one event was one
+	// letter would cut a codepoint in half the first time somebody typed in their
+	// own language — which is the failure this case exists to catch and which no
+	// ASCII-only check would.
+	Translator translator;
+	translator.BeginFrame();
+
+	CHECK(translator.TypedText().empty());
+
+	// `H`, then `é` in two bytes, then an emoji in four. Three events, because
+	// several arrive in one frame and the text is all of them.
+	REQUIRE(translator.HandleEvent(TextEvent("H")));
+	REQUIRE(translator.HandleEvent(TextEvent("\xC3\xA9")));
+	REQUIRE(translator.HandleEvent(TextEvent("\xF0\x9F\x98\x80")));
+
+	CHECK(translator.TypedText() == "H\xC3\xA9\xF0\x9F\x98\x80");
+	CHECK(translator.TypedText().size() == 7);
+
+	// **Typing is the keyboard speaking**, exactly as a press and a release are —
+	// a place that swapped its prompts on a key edge and not on a character
+	// would report the wrong device for anybody using an input method.
+	CHECK(translator.State().LastSource == InputSource::Keyboard);
+
+	// **Cleared and not rolled**, which is the difference between a delta and a
+	// level: a character was produced once and has no previous value to be an
+	// edge against.
+	translator.BeginFrame();
+	CHECK(translator.TypedText().empty());
+
+	// A key event in the same frame does not invent text, and text does not
+	// invent a key: the two are independent halves of one keystroke.
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_A, true)));
+	CHECK(translator.TypedText().empty());
+	CHECK(translator.State().IsKeyDown(KeyCode::A));
+
+	REQUIRE(translator.HandleEvent(TextEvent("a")));
+	CHECK(translator.TypedText() == "a");
+
+	// **Losing the window drops what was typed into it**, for the reason every
+	// other delta is dropped there: the frame did not finish delivering.
+	REQUIRE(translator.HandleEvent(WindowEvent(false)));
+	CHECK(translator.TypedText().empty());
 }

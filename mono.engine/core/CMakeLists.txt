@@ -14,17 +14,18 @@ mono_add_library(core
 		glm::glm
 		Tracy::TracyClient
 
-	# SHA-256 behind Random.hpp, which needs a value that is identical on every
-	# machine rather than merely random. VENDOR, not VENDOR_PUBLIC: Random.hpp
-	# exposes uint32_t and float and no Crypto++ type, so nothing about it
-	# leaves this module and no other module pays for the header.
+	# **core links no vendor but those three, and Crypto++ was the fourth until
+	# v0.15.** It was here for `Random`'s SHA-256 and `SecureWipe`'s zeroing
+	# loop, both of which are now specified algorithms written out in this
+	# module — SplitMix64's finaliser and a volatile store.
 	#
-	# Everything links core, so this is the widest a vendor gets here. It costs
-	# other modules nothing to compile, and the linker drops what nobody calls —
-	# the same way shaderc is linked by render and absent from the client, as
-	# THIRD_PARTY_NOTICES.md records.
-	VENDOR
-		Vendor::cryptopp
+	# Not removed to make anything smaller. `net` and `assets` link Crypto++
+	# themselves and are what put it in the client, the server and the origin,
+	# and all three carry the same 43 archive members they did before;
+	# `docs/retired/DEFERRED.md` D00004 has the numbers. It is removed because
+	# every module in the engine links `core`, so a dependency here is a
+	# dependency everywhere, and a program that wants a deterministic float
+	# should not acquire a cryptography library to get one.
 
 	DEFINES
 		$<$<BOOL:${MONO_TRACY}>:ENGINE_TRACY>

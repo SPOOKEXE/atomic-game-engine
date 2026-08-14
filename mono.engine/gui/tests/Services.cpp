@@ -448,3 +448,127 @@ TEST_CASE("two players hold two interfaces and three spawns keep them apart", "[
 	// The template is still exactly two, after five resets.
 	CHECK(world.CountIn(world.Starter) == 2);
 }
+
+// --- the keyboard focus -----------------------------------------------------
+//
+// **Where the focus lives is the decision under test, not where it is set
+// from.** `gui::Router` decides it and these cases do not go through the router
+// at all: what they pin is that `GuiServiceState::FocusedTextBox` is the one
+// place the answer rests, that a handle is validated rather than trusted, and
+// that the caret is counted in characters.
+
+namespace {
+	// A `TextBox` with text in it, which is the fixture every case below wants.
+	//
+	// `ClearTextOnFocus` is off by default here and on by default in the
+	// component, because most of these cases are about the caret and a box that
+	// empties itself has nothing to count.
+	Entity TextBox(World &world, const char *name, std::string text, bool clearOnFocus = false) {
+		const Entity made = world.Data.CreateInstance(GuiClass("TextBox"), name);
+		world.Data.SetParent(made, world.Screen);
+
+		Label label;
+		label.Text = std::move(text);
+		world.Data.Set(made, label);
+
+		Entry entry;
+		entry.ClearTextOnFocus = clearOnFocus;
+		world.Data.Set(made, entry);
+		return made;
+	}
+}
+
+TEST_CASE("the keyboard goes to a text box and to nothing else", "[gui][services]") {
+	World world("gui_services.focus");
+	const Entity box = TextBox(world, "Entry", "hi");
+	const Entity button = world.Button("Button", 0.0f, 0.0f, 10.0f, 10.0f);
+
+	CHECK(FocusedTextBox(world.Data) == engine::ecs::NULL_ENTITY);
+
+	// **A `TextButton` is refused**, for the reason an unselectable element is
+	// refused by `Select`: focus parked on something that cannot take a
+	// character is a state nothing can leave.
+	CHECK_FALSE(Focus(world.Data, button));
+	CHECK(FocusedTextBox(world.Data) == engine::ecs::NULL_ENTITY);
+
+	CHECK(Focus(world.Data, box));
+	CHECK(FocusedTextBox(world.Data) == box);
+
+	// Focusing what is already focused changes nothing, so a caller that calls
+	// this every frame does not produce an event every frame.
+	CHECK_FALSE(Focus(world.Data, box));
+
+	CHECK(Focus(world.Data, engine::ecs::NULL_ENTITY));
+	CHECK(FocusedTextBox(world.Data) == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("a destroyed text box is not focused and a reparented one still is", "[gui][services]") {
+	// **The dangling case, which is the failure mode this design is arranged
+	// around.** The handle carries a generation, so the answer is a question
+	// rather than a use-after-free — and nothing had to hook `DestroyInstance`
+	// for that to be true.
+	World world("gui_services.focus_lifetime");
+	const Entity box = TextBox(world, "Entry", "hi");
+	const Entity elsewhere = world.Data.CreateInstance(GuiClass("ScreenGui"), "Other");
+	world.Data.SetParent(elsewhere, world.Container);
+
+	REQUIRE(Focus(world.Data, box));
+
+	// **Moving does not interrupt typing.** A handle does not change when its
+	// instance is reparented, and nothing the person did says they stopped.
+	REQUIRE(world.Data.SetParent(box, elsewhere));
+	CHECK(FocusedTextBox(world.Data) == box);
+
+	world.Data.DestroyInstance(box);
+	CHECK(FocusedTextBox(world.Data) == engine::ecs::NULL_ENTITY);
+
+	// And the world is focusable again afterwards, which a stale handle left in
+	// place would not be: `Focus` compares against what `FocusedTextBox`
+	// answers, so a dead box would still equal itself and refuse the next one.
+	const Entity replacement = TextBox(world, "Entry2", "");
+	CHECK(Focus(world.Data, replacement));
+	CHECK(FocusedTextBox(world.Data) == replacement);
+}
+
+TEST_CASE("taking focus places the caret in characters, not in bytes", "[gui][services]") {
+	// **`Entry::CursorPosition` is one-based and counted in characters**, which
+	// is Roblox's number. `Label::Text` is UTF-8, so a caret derived from
+	// `Text.size()` sits past the end of anything typed in a language with
+	// accents in it — one place too far for `é` and three for an emoji.
+	World world("gui_services.caret");
+
+	// Five characters in nine bytes: `h`, `é` (two), `l`, `l`, `😀` (four).
+	const Entity box = TextBox(world, "Entry", "h\xC3\xA9ll\xF0\x9F\x98\x80");
+	REQUIRE(world.Data.Get<Label>(box)->Text.size() == 9);
+
+	REQUIRE(Focus(world.Data, box));
+	CHECK(world.Data.Get<Entry>(box)->CursorPosition == 6);
+
+	// Releasing puts it back to what "unfocused" means in that field.
+	REQUIRE(Focus(world.Data, engine::ecs::NULL_ENTITY));
+	CHECK(world.Data.Get<Entry>(box)->CursorPosition == -1);
+	CHECK(world.Data.Get<Entry>(box)->SelectionStart == -1);
+}
+
+TEST_CASE("ClearTextOnFocus empties the box at the moment focus is taken", "[gui][services]") {
+	// The property has been declared, saved and bound since the tree went in
+	// and nothing read it — the state this version's rule refuses to leave a
+	// property in, and the same argument `Selectable` is here for.
+	World world("gui_services.clear_on_focus");
+	const Entity clearing = TextBox(world, "Search", "last search", true);
+	const Entity keeping = TextBox(world, "Name", "Ada", false);
+
+	REQUIRE(Focus(world.Data, clearing));
+	CHECK(world.Data.Get<Label>(clearing)->Text.empty());
+
+	// **The caret is counted after the text is decided**, so an emptied box
+	// reads 1 rather than the twelve its old contents would have given.
+	CHECK(world.Data.Get<Entry>(clearing)->CursorPosition == 1);
+
+	// Moving the focus releases the first box and leaves its text alone: what
+	// `ClearTextOnFocus` describes is what happens on the way *in*.
+	REQUIRE(Focus(world.Data, keeping));
+	CHECK(world.Data.Get<Entry>(clearing)->CursorPosition == -1);
+	CHECK(world.Data.Get<Label>(keeping)->Text == "Ada");
+	CHECK(world.Data.Get<Entry>(keeping)->CursorPosition == 4);
+}

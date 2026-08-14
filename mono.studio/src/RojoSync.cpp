@@ -76,34 +76,18 @@ namespace studio {
 			return found;
 		}
 
-		// What Rojo says a file becomes, for the one this engine cannot build.
+		// **There is no longer a row of Rojo's table this engine cannot build**,
+		// and the function that used to name the ones it could not is gone rather
+		// than left returning nothing.
 		//
-		// **Named by what it *would* be rather than skipped as unrecognised**,
-		// and the difference matters to whoever reads the log: "not a script" is
-		// what you say about a stray `.DS_Store`, and it is the wrong thing to
-		// say about an `.rbxmx`, which Rojo maps and this engine has no reader
-		// for. One is noise in the project and the other is a gap here.
-		//
-		// The list is `rojo.space/docs/v7/sync-details`. `D00104` carries what
-		// closing it would take.
-		const char *UnbuiltKind(const std::filesystem::path &file) {
-			const std::string leaf = file.filename().string();
-
-			// **One left, and it is a vendor decision before it is a feature.**
-			// Everything else in Rojo's table is built — `BuildMapped` is the
-			// dispatcher — so anything reaching here is a gap with a named cause
-			// rather than an unrecognised file.
-			//
-			// `.toml` closed at v0.13 and `.rbxm` at v0.15, and the two went
-			// differently on purpose: TOML's cost was a submodule because the
-			// mapping was already the `*.json` one, and `.rbxm`'s was a binary
-			// reader, which is why it lives in `bake` beside the other model
-			// decoders rather than in this file.
-			if (EndsWith(leaf, ".rbxmx")) {
-				return "an XML Roblox model, and nothing here parses XML";
-			}
-			return nullptr;
-		}
+		// It existed so that a `.rbxmx` read as a gap rather than as an
+		// unrecognised file — "not a script" is what you say about a stray
+		// `.DS_Store` and was the wrong thing to say about a mapping Rojo has and
+		// this engine did not. `.toml` closed at v0.13, `.rbxm` and `.rbxmx` at
+		// v0.15, and with the table complete anything that now falls past
+		// `BuildMapped` really is noise in the project. A helper kept for the next
+		// unbuilt mapping would be a branch nothing takes, which is worse than
+		// the one line it saves whoever adds one.
 
 		// The `init` file a directory carries, which makes the directory itself
 		// the script rather than a folder holding one.
@@ -178,9 +162,10 @@ namespace studio {
 		// --- the rest of Rojo's table ----------------------------------------
 		//
 		// `rojo.space/docs/v7/sync-details` maps nine more things than the
-		// scripts above. Eight of them are built — the last of those, `.rbxm`,
-		// through `bake` — and the one that is not needs an XML parser this
-		// repository does not vendor. `D00104` carries what that would take.
+		// scripts above, and **as of v0.15 every one of them is built**. The last
+		// two were Roblox's model containers and both went through `bake`: a
+		// parser for a foreign format belongs beside the other decoders rather
+		// than in an editor, and `bake/AGENTS.md` is where that rule lives.
 
 		// One JSON value, read as a property of a declared type.
 		//
@@ -767,13 +752,21 @@ namespace studio {
 			return node;
 		}
 
-		// --- Roblox's binary model -------------------------------------------
+		// --- Roblox's models, in both containers ------------------------------
 		//
-		// The last row of Rojo's table this engine could not build. The reader is
-		// `bake::ReadRobloxModel`, which lives beside the other model decoders
-		// because a binary format's parser is the largest attack surface a
-		// content pipeline has and `bake/AGENTS.md` is where that is written
-		// down. What is here is only the mapping onto instances.
+		// The last rows of Rojo's table this engine could not build. The readers
+		// are `bake::ReadRobloxModel` and `bake::ReadRobloxModelXml`, which live
+		// beside the other model decoders because a parser for a foreign format
+		// is the largest attack surface a content pipeline has and
+		// `bake/AGENTS.md` is where that is written down. What is here is only
+		// the mapping onto instances.
+		//
+		// **One mapping for both containers, because both hand back the same
+		// tree.** Everything below — one instance named after the file, an
+		// unknown class becoming a `Folder`, a script's `Source` staged into the
+		// world's `SourceCache` — is a decision about a `RobloxModel` and not
+		// about the bytes it came out of. A second copy for the XML container
+		// would be where the two answers started to differ.
 
 		// The whole of a file, as bytes.
 		//
@@ -800,11 +793,11 @@ namespace studio {
 			return static_cast<bool>(in.read(reinterpret_cast<char *>(out.data()), size));
 		}
 
-		// One value out of a `.rbxm` as the property the class declares.
+		// One value out of a model file as the property the class declares.
 		//
 		// **Keyed on the declared type and never on what the file stored**, which
-		// is `ReadPropertyJson`'s rule one format along and matters more here: an
-		// `.rbxm` states its own type for every value, and taking that as the
+		// is `ReadPropertyJson`'s rule one format along and matters more here: a
+		// model file states its own type for every value, and taking that as the
 		// answer would let a file decide what a component holds.
 		//
 		// A number widens or narrows to whatever the property is, because Roblox
@@ -854,8 +847,8 @@ namespace studio {
 
 			case PropertyType::Name:
 			case PropertyType::Enum:
-				// **A `.rbxm` enum never reaches here**, because the reader
-				// refuses one: it is a number naming a member of Roblox's table
+				// **A model file's enum never reaches here**, because both readers
+				// refuse one: it is a number naming a member of Roblox's table
 				// and this engine names members by string. What can reach here is
 				// a *string* landing on a property this engine declares as an
 				// enum, and that is checked against `EnumTable` for
@@ -894,7 +887,7 @@ namespace studio {
 			case PropertyType::CFrame:
 				// **The rotation survives, unlike the JSON path's.** A
 				// `.model.json` writes a `CFrame` as twelve numbers and this
-				// module reads only the three of its position; a `.rbxm` states
+				// module reads only the three of its position; a model file states
 				// an orientation the reader has already turned into a
 				// quaternion, so there is nothing left to approximate.
 				if (value.Kind != Kind::CFrame) {
@@ -939,7 +932,7 @@ namespace studio {
 			}
 		}
 
-		// What building one `.rbxm` is accumulating.
+		// What building one model file is accumulating.
 		struct RobloxImport {
 			RojoSyncReport &Report;
 
@@ -957,7 +950,7 @@ namespace studio {
 			//
 			// **Counted rather than reported one by one.** A `.meta.json` is
 			// written by hand, so a key this engine does not have is a typo worth
-			// naming; an `.rbxm` is written by Studio, which stores every property
+			// naming; a model file is written by Studio, which stores every property
 			// of every class — a note each would be a hundred lines saying the
 			// engine is smaller than Roblox, and would bury the notes that are
 			// about this file.
@@ -983,7 +976,7 @@ namespace studio {
 			return candidate;
 		}
 
-		// Builds one instance out of a `.rbxm`, and everything under it.
+		// Builds one instance out of a model file, and everything under it.
 		//
 		// @param name The instance's name. The root's is the file's, which is
 		//        every other row of Rojo's table's rule; a child's is its own.
@@ -1074,10 +1067,19 @@ namespace studio {
 			return instance;
 		}
 
-		// Builds a `*.rbxm` into one instance.
+		// One of `bake`'s two model readers, chosen by the file's extension.
+		//
+		// **Rojo's table decides, not a signature.** The name says which
+		// container it is, and a reader that sniffed instead would be a second
+		// answer to a question the file's own name has already answered. Each
+		// reader refuses the other container by name, so a renamed file is
+		// reported as a renamed file.
+		using RobloxReader = bool (*)(std::span<const std::byte>, engine::bake::RobloxModel &, std::string &);
+
+		// Builds a `*.rbxm` or a `*.rbxmx` into one instance.
 		//
 		// **One instance, because that is what Rojo's table maps a model file
-		// to.** The container allows any number of roots and a file with several
+		// to.** Both containers allow any number of roots and a file with several
 		// is refused by name rather than wrapped in a folder somebody would then
 		// have to explain — inventing a level the author did not write is the
 		// kind of quiet wrongness this whole file is against.
@@ -1086,7 +1088,8 @@ namespace studio {
 			const std::filesystem::path &file,
 			const std::string &key,
 			const std::string &name,
-			RojoSyncReport &report
+			RojoSyncReport &report,
+			RobloxReader read
 		) {
 			const std::string leaf = file.filename().string();
 
@@ -1098,10 +1101,11 @@ namespace studio {
 
 			engine::bake::RobloxModel model;
 			std::string failure;
-			if (!engine::bake::ReadRobloxModel(bytes, model, failure)) {
-				// **With the reader's own message.** "Is not a valid rbxm" sends
-				// an author back to stare at a binary file; "wrong signature" tells
-				// them they renamed an `.rbxmx`.
+			if (!read(bytes, model, failure)) {
+				// **With the reader's own message.** "Is not a valid model" sends
+				// an author back to stare at a file; "wrong signature" tells them
+				// they renamed an `.rbxmx` to `.rbxm`, and the XML reader says the
+				// same thing from the other side.
 				report.Notes.push_back(leaf + " could not be read (" + failure + ") — skipped");
 				return NULL_ENTITY;
 			}
@@ -1249,13 +1253,24 @@ namespace studio {
 						report.Scripts++;
 					}
 				}
-			} else if (EndsWith(leaf, ".rbxm")) {
+			} else if (EndsWith(leaf, ".rbxm") || EndsWith(leaf, ".rbxmx")) {
 				// **Named after the file, not after what the file called it.**
 				// Every other row of Rojo's table takes the instance's name from
 				// the path — a `.model.json`, a `.txt`, a script — and a model
 				// file that kept its own would be the one place in a project
 				// where renaming a file did nothing.
-				node = BuildRobloxModel(store, file, keyPrefix + leaf, name, report);
+				//
+				// The two containers differ here and nowhere else: the extension
+				// picks the reader, and everything after it is one path.
+				node = BuildRobloxModel(
+					store,
+					file,
+					keyPrefix + leaf,
+					name,
+					report,
+					EndsWith(leaf, ".rbxmx") ? engine::bake::ReadRobloxModelXml
+											 : engine::bake::ReadRobloxModel
+				);
 			} else if (EndsWith(leaf, ".txt")) {
 				node = BuildTextValue(store, file, "StringValue", name, report);
 			} else if (EndsWith(leaf, ".csv")) {
@@ -1390,14 +1405,10 @@ namespace studio {
 				const ScriptFile file = ClassifyFile(entry);
 				if (!file.IsScript) {
 					// Named rather than skipped in silence, so an author whose
-					// `.rbxm` did not appear knows why — and named by *what Rojo
-					// says it is* where there is an answer, so a gap here reads
-					// as a gap rather than as an unrecognised file.
-					if (const char *kind_ = UnbuiltKind(entry); kind_ != nullptr) {
-						report.Notes.push_back(entry.filename().string() + " is " + kind_ + " — skipped");
-					} else {
-						report.Notes.push_back(entry.filename().string() + " is not a script — skipped");
-					}
+					// file did not appear knows why. Every mapping Rojo has is
+					// built above, so anything reaching here is a file the table
+					// says nothing about.
+					report.Notes.push_back(entry.filename().string() + " is not a script — skipped");
 					continue;
 				}
 
@@ -1478,12 +1489,9 @@ namespace studio {
 			const ScriptFile file = ClassifyFile(source);
 			if (!file.IsScript) {
 				// The same accounting a directory walk does. A `$path` naming a
-				// `.rbxm` used to produce nothing and say nothing, which is the
-				// one outcome an author cannot act on.
-				const char *unbuilt = UnbuiltKind(source);
-				report.Notes.push_back(
-					path + " is " + (unbuilt != nullptr ? unbuilt : "not a script") + " — skipped"
-				);
+				// model file used to produce nothing and say nothing, which is
+				// the one outcome an author cannot act on.
+				report.Notes.push_back(path + " is not a script — skipped");
 				return;
 			}
 

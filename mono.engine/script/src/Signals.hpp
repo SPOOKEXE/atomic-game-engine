@@ -172,6 +172,36 @@ namespace engine::script {
 		// `guiObject.MouseMoved` — it moved while over the element.
 		GuiMouseMoved,
 
+		// `textBox.Focused` — a press landed on it and the keyboard is now its.
+		//
+		// **The only pair here that is about the keyboard rather than the
+		// pointer, and it still arrives from the router**, because a press is
+		// what decides where typing goes. `gui::EventKind::Focused` is the
+		// event; `GuiServiceState::FocusedTextBox` is where the fact rests, and
+		// `UserInputService:GetFocusedTextBox` reads it there rather than
+		// counting these.
+		//
+		// @since v0.15
+		GuiFocused,
+
+		// `textBox.FocusLost` — a press landed somewhere else.
+		//
+		// **The handler is called with `enterPressed` and nothing after it.**
+		// Roblox passes a second argument, the `InputObject` that took the focus
+		// away, and this engine has no such object to pass: the router deals in
+		// `gui::GuiEvent` and `script::InputReport` is built by the *input* pump
+		// from a different frame's state, so anything handed over here would be
+		// a value made up at the call site.
+		//
+		// **`enterPressed` is `GuiEvent::Entered`, and the two producers are what
+		// make it worth an argument.** A press landing elsewhere releases a box
+		// through `gui::Router` and answers false; Return releases one through
+		// `gui::Type` and answers true, which is how a script tells a submitted
+		// field from an abandoned one.
+		//
+		// @since v0.15
+		GuiFocusLost,
+
 		// `CrossWorldService:OpenChannel(name)` — a payload another world in this
 		// universe addressed to that channel on this one.
 		//

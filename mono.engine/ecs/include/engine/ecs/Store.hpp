@@ -1689,7 +1689,22 @@ namespace engine::ecs {
 		// generations as authoritative slots and silently produce a world with
 		// entities nothing named. Bumped rather than sniffed, because the two
 		// layouts are indistinguishable from the bytes alone.
-		static constexpr uint32_t SNAPSHOT_VERSION = 2;
+		//
+		// **3 — `ecs.InstanceClass` is written as the class's name.** It was the
+		// registration index, which is `AGENTS.md` rule 4 in a file: nothing
+		// restores the class table the way `Load` restores the directory, so a
+		// world reloaded by a build that registered its classes in another order
+		// came back with every instance the wrong class. The bump is here rather
+		// than left to the reader because a length prefix read as a `ClassId`
+		// does not fail on that field — it consumes the bytes of the values
+		// behind it, and the load dies somewhere unrelated with nothing naming
+		// the cause.
+		//
+		// A component's serialiser is not the envelope this version usually
+		// describes, and that is not a reason to leave it. `ecs.InstanceName`
+		// went the same way at v0.8 without one, and every world saved before it
+		// loaded with its names garbled rather than being refused.
+		static constexpr uint32_t SNAPSHOT_VERSION = 3;
 
 		// The number of tables this world holds.
 		//

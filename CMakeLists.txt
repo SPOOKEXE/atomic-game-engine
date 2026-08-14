@@ -127,6 +127,36 @@ if(MONO_BUILD_CLIENT)
 		find_program(MONO_GLSLC glslc REQUIRED
 			DOC "GLSL to SPIR-V compiler, from shaderc")
 	endif()
+
+	# **A macOS client is stopped at the configure rather than at the first
+	# frame.** SDL's Metal backend accepts MSL or a metallib and never SPIR-V,
+	# and SPIR-V is the only thing this build produces — so without this a macOS
+	# client configures, compiles, links, stages, starts, and dies inside
+	# `SDL_CreateGPUDevice`, having been knowable before the first object
+	# compiled.
+	#
+	# `docs/DEFERRED.md` D00001 carries what closing this needs, and the short
+	# version is that it is needed in two places rather than one: here, for the
+	# shaders `mono.engine/render` and `mono.engine/resources` ship, and inside
+	# the shipped client, because `render::ShaderCompiler` compiles
+	# runtime-authored GLSL to SPIR-V while the engine runs. A build-time step
+	# alone would leave every `ShaderScript` broken on the platform.
+	#
+	# `just shader-check` is the half of that entry a Linux machine can hold up:
+	# it proves the SPIR-V carries the descriptor sets and bindings every
+	# translation derives from. Delete this block when the translation lands.
+	# Do not add an option that skips it — a client that starts and cannot draw
+	# is worse than one that says why it will not build.
+	if(APPLE)
+		message(FATAL_ERROR
+			"A client cannot be built for macOS yet: the build produces SPIR-V and "
+			"SDL's Metal backend takes MSL or a metallib.\n"
+			"  Nothing here cross-compiles to MSL, and `render::ShaderCompiler` "
+			"would need to as well, at runtime.\n"
+			"  docs/DEFERRED.md D00001 has the whole of what is missing.\n"
+			"  --preset server and --preset cdn own no shaders and are what to reach "
+			"for here; neither has been run on macOS by anybody, so say what happens.")
+	endif()
 endif()
 include(MonoLibrary)
 
@@ -207,6 +237,12 @@ add_subdirectory(mono.tools)
 # Every target now exists, so the tier rule can be checked across the whole
 # graph rather than only against what had been declared at each point.
 mono_check_all_tiers()
+
+# And so the shader stage can be compared with the modules that still own
+# shaders. Here rather than in `mono_add_library` because the case it catches is
+# a module that owns *none* — which is a module `_mono_add_shaders` returns early
+# for and therefore never revisits.
+mono_prune_shader_stage()
 
 # The checked-in expectation mono.tools/architecture/ compares against.
 mono_write_target_graph("${CMAKE_BINARY_DIR}/target-graph.json")

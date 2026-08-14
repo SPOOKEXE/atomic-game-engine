@@ -76,8 +76,19 @@ namespace engine::gui {
 	// twice does nothing the second time, which is what lets the studio run
 	// them after every load without checking which kind of file it got.
 	//
+	// **A replica is furnished by the wire and this only completes it.** No
+	// `gui.` component is replicated, so a client is shown a `GuiService` that
+	// is a name and a class and nothing else — and `Select` and `Focus` both
+	// answer `false` without the state on it. So this adds the state to whatever
+	// service the world holds, and mints one only where minting is legal:
+	// `ecs::Store::AdoptOnly` is the test, because an authoritative index minted
+	// in a replica collides with one the authority is handing out. That makes it
+	// safe to call every tick on a replica, which is what a world filling from a
+	// snapshot needs.
+	//
 	// @param store The world to furnish.
-	// @return The `GuiService` instance.
+	// @return The `GuiService` instance, or a null entity for a replica that has
+	//         not been sent one yet.
 	ecs::Entity InstallGuiServices(ecs::Store &store);
 
 	// The world's `GuiService`, or a null entity when it has none.
@@ -147,6 +158,51 @@ namespace engine::gui {
 	// @param move  Which way to go.
 	// @return Whether the selection changed.
 	bool SelectNext(ecs::Store &store, const DrawList &list, SelectionMove move);
+
+	// The `TextBox` the keyboard is going to, or a null entity.
+	//
+	// **Validated on the way out rather than swept**, which is the same shape
+	// `SelectNext` uses on `GuiServiceState::SelectedObject` and is what makes a
+	// focused box that has since been destroyed answerable instead of fatal: the
+	// stored handle carries a generation, so `Store::Alive` tells a live box from
+	// a recycled row, and a stale one reads as no focus at all. Nothing has to
+	// hook `DestroyInstance` for that to be true — which is the same argument
+	// `gui/AGENTS.md` makes for `Rendered` being swept rather than maintained.
+	//
+	// **Reparenting deliberately does not release it.** A handle does not change
+	// when its instance moves, so a box dragged into another `ScreenGui` mid-word
+	// keeps the keyboard. The person is still typing; nothing they did says
+	// otherwise.
+	//
+	// @param store The world.
+	// @return The focused `TextBox`, or `ecs::NULL_ENTITY`.
+	// @since v0.15
+	ecs::Entity FocusedTextBox(const ecs::Store &store);
+
+	// Points the keyboard at one `TextBox`, or releases it.
+	//
+	// **Refuses anything that is not a `TextBox`**, for the reason `Select`
+	// refuses an unselectable element: focus parked on something that cannot take
+	// a character is a state nothing in the engine can leave. `Entry` is the test
+	// and no class lookup is needed for it — that component is on `TextBox` and
+	// on nothing else, which is the same trick `ElementsAt` plays with `Element`.
+	//
+	// **Capturing applies `ClearTextOnFocus` and places the caret**, because
+	// those are the two things Roblox does at exactly this moment and both are
+	// declared properties this engine had no reader for. Releasing puts
+	// `Entry::CursorPosition` back to -1, which is what "unfocused" means in that
+	// field.
+	//
+	// **A world with no `GuiService` refuses**, and that is the honest answer
+	// rather than an oversight: there is nowhere for the fact to live, so a host
+	// that never called `InstallGuiServices` gets a router that routes the
+	// pointer exactly as it did before and takes no focus.
+	//
+	// @param store   The world.
+	// @param textBox The box to focus, or `ecs::NULL_ENTITY` to release.
+	// @return Whether the focus changed.
+	// @since v0.15
+	bool Focus(ecs::Store &store, ecs::Entity textBox);
 
 	// Rebuilds a player's interface from the world's `StarterGui`.
 	//
