@@ -126,6 +126,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] finish replication for server/client, server authoritative — the mechanisms are in place and what remains is a *game*: a client that sends inputs from real aim, a player entity per connection to give `SetClientViewpoint` something true to say, — `net::ConnectionStats::RoundTripMilliseconds` is measured now, which it had not been since it was declared at v0.3: `ReliableSender` samples the gap between a reliable packet and its acknowledgement, smoothed at RFC 6298's one eighth, and **skips any packet that was resent** because an acknowledgement of a resend does not say which transmission it answers. That is Karn's rule, and the first version of it was inverted — `Attempts` counts *re*sends and starts at zero, so a check for one measured precisely the packets the rule exists to exclude
 - [_] add engine-level and cdn-level fast-flags for enable/disable types of content (mp4, gif, svg)
 - [_] add more engine-level, cdn-level, client and server level configs.
+- [_] as many deferred items now as possible.
 
 ### v0.17
 
