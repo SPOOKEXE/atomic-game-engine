@@ -39,7 +39,7 @@ several module `AGENTS.md` files. None of those design notes is committed —
 `git rev-list --all --objects` finds no such path. Said once, at the top, rather
 than qualified at every citation. The former `v02v03v04.md` plan is different:
 its committed retirement copy is
-[`docs/retired/v02v03v04.md`](docs/retired/v02v03v04.md).
+`v02v03v04.md`.
 
 **Four of the five are in a sibling repository, `../atomic-game-engine-hidden-docs`**,
 which is where a section reference can actually be followed — along with
@@ -101,7 +101,7 @@ Deferred:
 
 ### v0.2
 
-Planned in [v02v03v04.md](docs/retired/v02v03v04.md). Userland gets Roblox-style instancing, tweaked; the engine underneath is full ECS. The order below is the order the steps land in, and each one leaves the tree building and passing.
+Planned in `v02v03v04.md`. Userland gets Roblox-style instancing, tweaked; the engine underneath is full ECS. The order below is the order the steps land in, and each one leaves the tree building and passing.
 
 Standing discipline for v0.2 and v0.4, in that document's own section: preallocate and reuse by default, take the better data structure without ceremony but attach a number to an algorithm swap, and allow async only for work the tick cannot observe finishing.
 
@@ -157,7 +157,7 @@ Deferred:
 
 ### v0.3
 
-Replication. The server has authority and a client simulates its own replica and syncs against it — decided while planning v0.2, which reserves the seam for it (see [v02v03v04.md](docs/retired/v02v03v04.md) §2.12) and builds nothing else. It sits here rather than later so that physics, scripting and rendering are all built against a replicated world instead of being retrofitted into one.
+Replication. The server has authority and a client simulates its own replica and syncs against it — decided while planning v0.2, which reserves the seam for it (see `v02v03v04.md` §2.12) and builds nothing else. It sits here rather than later so that physics, scripting and rendering are all built against a replicated world instead of being retrofitted into one.
 
 **Where this version actually stands:** the two modules are built, covered and passing — `net` at L11 and `replication` at L12 — and **both programs now link them**: `mono.server --listen PORT` serves its world and `mono.client --connect HOST:PORT` replicates one beside its demo, over a real UDP socket between two real processes.
 
@@ -188,7 +188,7 @@ Deferred:
 
 ### v0.4
 
-Planned in [v02v03v04.md](docs/retired/v02v03v04.md) — written when this was v0.3, before replication took that slot.
+Planned in `v02v03v04.md` — written when this was v0.3, before replication took that slot.
 
 **Where this version stands:** all eleven items below are resolved. `scene` at L7, `spatial` at L6 and `physics` at L8 are built, covered and passing; `core/types` has its value types; both programs are off their duplicated component definitions and onto `scene`; the entity directory has a reserved range; and the storage layout has been reopened and closed. The layer heights the plan inferred were confirmed rather than assumed — `physics` sharing L8 with `assets` is recorded as a decision in its `AGENTS.md`, with the reason it is safe (the two modules are disjoint, so there is no edge for the layer rule to adjudicate) and the condition that would break it.
 
@@ -241,7 +241,7 @@ Deferred:
 
 ### v0.5
 
-The engine has been full ECS since v0.2 and userland instancing is a façade over it — see [docs/retired/v02v03v04.md](docs/retired/v02v03v04.md) and [docs/retired/v05.md](docs/retired/v05.md). This version makes the façade reachable from script, and **the scene moved a version early**: `Rings.luau` and `Rings.js` build and animate it themselves. What v0.6 keeps is what a scene file cannot yet say — a camera, its own scripts, and the rendering they describe.
+The engine has been full ECS since v0.2 and userland instancing is a façade over it — see `v02v03v04.md` and `v05.md`. This version makes the façade reachable from script, and **the scene moved a version early**: `Rings.luau` and `Rings.js` build and animate it themselves. What v0.6 keeps is what a scene file cannot yet say — a camera, its own scripts, and the rendering they describe.
 
 - [x] **a property stopped being a component and an offset and became a conversion** — the item below assumed a manifest could be generated from the property lists, and **the property lists were empty and the model could not have described them.** `Classes::Property` was called zero times outside `ecs`'s own suites, and `PropertyDescriptor` was `{component, offset, type, size}`: enough for `Visible`, and incapable of `Size` (a doubled half-extent), `Position` (a sub-range of a `CFrame` whose rotation must survive) or `Anchored` (not stored anywhere — it is whether `RigidBody` and `Motion` exist). Roblox's `Size` is a full extent and `Bounds::HalfExtent` is half of one, so **a member pointer was the wrong primitive**, which is what `scene/AGENTS.md` had been saying under "do not add half of one". A descriptor is now a getter, a setter, the component sets it reads and writes, and a kind — `Field`, `Computed` or `Structural`. One mechanism: a plain field's conversion is generated from a member pointer taken as a *template* argument, which is what makes it captureless
 - [x] `PropertyType` gains `Vector3`, `CFrame` and `Color3` — and stays small permanently, because under conversions it describes the **userland value** rather than the storage. `spatial::LayerMask` will never need a case: no property is one, `CollisionGroup` is a `Name`
@@ -256,7 +256,7 @@ The engine has been full ECS since v0.2 and userland instancing is a façade ove
 - [x] **the bindings manifest** — `mono.tools/bindings` emits `mono.engine/script/bindings/manifest.json` from the class table: five classes, their trees, their component sets, and every property's type, kind, byte width, writability and the components each side reads and writes. **No offsets anywhere in it**, which is not restraint — a property is a conversion, so there is no byte offset to leak, and rule 4 is satisfied by construction rather than by a disclaimer about which fields survive a recompile. Versioned from the first commit. Component names are sorted rather than left in registration order, because registration order depends on which translation unit ran its static initialiser first and a manifest that changed when a link line moved would fail its own check for a reason nobody could act on
 - [x] **`just bindings-check`, inside `just check`** — regenerate, diff, fail on drift, and **proved to fail rather than assumed to**: renaming one property in the checked-in file makes it exit non-zero with the name and the recipe to fix it. Rule 6 is what makes it mandatory, and this repository has twice watched a check rot into a false claim
 - [x] **the `.d.ts` and Luau declarations**, generated from the same manifest so the two surfaces cannot drift into two APIs. The TypeScript one is a type root, which is the shape a toolchain consumes in place of `@rbxts/types`; the derived interfaces carry only what each class declares itself, because repeating an inherited property would be a second declaration of one fact that TypeScript would silently accept a narrowing of
-- [x] **the concurrency document** — [docs/retired/SCRIPT_CONCURRENCY.md](docs/retired/SCRIPT_CONCURRENCY.md), and it builds nothing: `Universe`, `ExecutionMode`, `Postbox` over four buses, `Ticket` and the barrier all exist. It settles the rule everything follows — **a script may only resume from something the barrier delivers in a deterministic order**, which is narrower than "no yielding" and stricter than "yield freely" — and then what falls out of it: `wait` in ticks with a recommendation to rename rather than redefine, a value-to-bytes codec that must sort keys and produce **identical bytes from both VMs** (one shared test, not two), a cross-world lock that is `MemoryStore::Update`'s versioned compare-and-swap because rule 3 leaves no shared memory to guard, and budgets and replica refusals as part of the contract rather than as implementation detail
+- [x] **the concurrency document** — `SCRIPT_CONCURRENCY.md`, and it builds nothing: `Universe`, `ExecutionMode`, `Postbox` over four buses, `Ticket` and the barrier all exist. It settles the rule everything follows — **a script may only resume from something the barrier delivers in a deterministic order**, which is narrower than "no yielding" and stricter than "yield freely" — and then what falls out of it: `wait` in ticks with a recommendation to rename rather than redefine, a value-to-bytes codec that must sort keys and produce **identical bytes from both VMs** (one shared test, not two), a cross-world lock that is `MemoryStore::Update`'s versioned compare-and-swap because rule 3 leaves no shared memory to guard, and budgets and replica refusals as part of the contract rather than as implementation detail
 - [x] **QuickJS is linked, and JavaScript runs beside Luau.** `Runtime` is an interface; `LuauRuntime` and `JavaScriptRuntime` are two files in one module and adding the second changed no caller — which is what the module's `VENDOR`-not-`VENDOR_PUBLIC` row was for. The extension picks the VM, so `Rings.luau` and `Rings.js` build **the same world** through the same bindings and every program loads either. **Three things the tests caught rather than the design:** `JS_NewContext` adds `Date`, so the context is built from `JS_NewContextRaw` and an explicit intrinsic list; `JS_AddIntrinsicEval` turned out to be required by `JS_Eval` itself, so excluding it produced "eval is not supported" for every script rather than a sandbox, and the global `eval` is deleted afterwards instead; and `JS_AddIntrinsicBigInt` over a raw context leaves an object alive so `JS_FreeRuntime` asserts, reproduced against upstream in isolation. Instances are sealed and scripts run in strict mode, because in sloppy mode assigning to a non-extensible object **silently does nothing** — `part.Transparency = 0.5` would have looked like it worked
 - [x] **`Instance.new`, properties and the hierarchy bind to the class table — the same one C++ calls.** A calling convention rather than a second mechanism: `Instance.new` goes through `Store::CreateInstance`, `part.Size = v` through `Store::SetProperty`, and `part.Parent = workspace` through `Store::SetParent`. The marshalling switches on `PropertyType` and **never on a property's name**, so a property `scene` declares tomorrow is reachable from both languages today. **What is not bound yet is named in v0.6 rather than implied**: `.Changed`, `:IsA`, `:Destroy`, `:Clone` and `:GetChildren` all exist in C++ and none of them has a script spelling
 - [x] **`--script PATH` stops warning and starts loading**, which closes the oldest bullet in `D00001` — it had been accepted and ignored since v0.1. `--script` on the client, `--game` on the server (ignored since v0.3), `--scene` on the unified harness, and the extension picks the VM
@@ -269,7 +269,7 @@ The engine has been full ECS since v0.2 and userland instancing is a façade ove
 
 Where a world *contains* its scripts rather than being handed one, and where the renderer catches up with what a script can already say. v0.5 made the façade real; what is left is the half a Roblox author reaches for next — signals, the instance methods, the datatype vocabulary — and the rendering those scripts describe.
 
-**The rule everything script-side lands under is already written**: [docs/retired/SCRIPT_CONCURRENCY.md](docs/retired/SCRIPT_CONCURRENCY.md) §1 — a script may only resume from something the barrier delivers in a deterministic order. Every item below that yields answers to it.
+**The rule everything script-side lands under is already written**: `SCRIPT_CONCURRENCY.md` §1 — a script may only resume from something the barrier delivers in a deterministic order. Every item below that yields answers to it.
 
 **Where this version stands.** The script half is built and measured; the render half is not started. That split is not arbitrary — everything below the line needs `mono.engine/graph/` at L9, and everything above it needed only the class table `scene` already declared. The items are marked individually rather than the version being called done.
 

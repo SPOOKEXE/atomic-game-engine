@@ -845,6 +845,7 @@ namespace engine::scene {
 
 	// Every linked portal in the world.
 	//
+	// @param store The world to walk.
 	// @param seams Cleared, then filled.
 	// @return How many there are.
 	// @since v0.15
@@ -991,7 +992,10 @@ namespace engine::scene {
 	// **The nearest pane wins**, which the plainer form did not have to decide
 	// because nothing could tell its answers apart.
 	//
-	// @param hop Filled when the answer is true, untouched otherwise.
+	// @param store The world holding the panes.
+	// @param from  Where the segment starts, in world space.
+	// @param to    Where it ends.
+	// @param hop   Filled when the answer is true, untouched otherwise.
 	// @since v0.15
 	bool
 	PortalCrossing(ecs::Store &store, const core::Vector3 &from, const core::Vector3 &to, PortalHop &hop);

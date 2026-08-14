@@ -13,9 +13,10 @@
 //
 // **Nothing here is a parser.** `ScanBackwards` walks left from the caret over
 // identifier characters, dots and colons and stops at the first thing that is
-// neither. That resolves `part.`, `Enum.Material.` and `Instance.new("` — which
-// is most of what an author is doing when they want a list — and it resolves
-// nothing about `f().` on purpose. A real parse would need the language's
+// neither. That resolves a caret sitting after the dot in `part` or
+// `Enum.Material`, and after the opening quote of an `Instance.new` call —
+// what an author is doing when they want a list — and it resolves nothing about
+// a call like `f()` on purpose. A real parse would need the language's
 // grammar twice over, and this file covers two languages.
 //
 // **There is no type inference. There is assignment following, which is a
@@ -131,7 +132,7 @@ namespace studio {
 		// separator, or when what precedes it is not a plain dotted chain.
 		std::string_view Subject;
 
-		// `.`, `:`, or `\0` when the prefix stands alone.
+		// A dot, a colon, or `\0` when the prefix stands alone.
 		//
 		// The two are kept apart rather than folded together because Luau uses
 		// them for different things: `part:Destroy()` passes the instance and
@@ -167,9 +168,9 @@ namespace studio {
 		// it: classes, properties, enums and keywords still come through.
 		const engine::script::ScriptSurface *Surface = nullptr;
 
-		// The names of instances beside this script, for `script.Parent.` and
-		// `workspace.`. Gathered by the panel, because reading them means being
-		// inside `Universe::Enter` and this function is not.
+		// The names of instances beside this script, for a caret after
+		// `script.Parent` or `workspace`. Gathered by the panel, because reading
+		// them means being inside `Universe::Enter` and this function is not.
 		std::span<const std::string> Children;
 	};
 

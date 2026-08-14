@@ -204,4 +204,9 @@ INCLUDED_BY_GRAPH      = NO
 # the honest setting is one above what is actually here. A class that reaches
 # this is a class to split, and the warning coming back is a reasonable way to
 # hear about it.
-DOT_GRAPH_MAX_NODES    = 64
+# `studio::Editor` collaborates with 76 types, so the default 64 dropped its
+# graph silently — a page that is missing the one diagram somebody opened it
+# for, with the reason only in a build log nobody reads. 128 covers the largest
+# type here with room to grow; a graph past that is unreadable anyway and the
+# warning is the right answer again.
+DOT_GRAPH_MAX_NODES    = 128

@@ -102,11 +102,13 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/CONTRIBUTING.md"
 	"${CMAKE_SOURCE_DIR}/RUNNING.md"
 	"${CMAKE_SOURCE_DIR}/ROADMAP.md"
-	# ROADMAP.md links to this from four of its version sections, so leaving it
-	# out is four dangling links rather than a smaller site — and `docs-check`
-	# fails on those, which took the whole gate down while the target was
-	# spelled `v02v03.md` and no such file had ever existed.
-	"${CMAKE_SOURCE_DIR}/v02v03v04.md"
+	# RUNNING.md links to this from its content-origin section, so leaving it out
+	# is a dangling link rather than a smaller site — and `docs-check` fails on
+	# those. The design notes that used to sit beside it here were deleted in
+	# `document-cleanup`; the entry went with them, because an input that does
+	# not exist is guarded by `EXISTS` below and therefore silently does nothing,
+	# which is how a stale line survives being wrong.
+	"${CMAKE_SOURCE_DIR}/SETUP-CDN.md"
 	"${CMAKE_SOURCE_DIR}/SECURITY.md"
 	"${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
 	"${CMAKE_SOURCE_DIR}/docs"

@@ -746,6 +746,7 @@ namespace client {
 				released.button.x = Input.State().MousePosition.X;
 				released.button.y = Input.State().MousePosition.Y;
 				Input.HandleEvent(released);
+				ENGINE_INFO("click: released on frame {}", FramesDrawn);
 			}
 			return;
 		}
@@ -796,7 +797,13 @@ namespace client {
 		pressed.button.y = centre.Y;
 		Input.HandleEvent(pressed);
 
-		ENGINE_INFO("click: pressed '{}' at {}, {}", Settings.ClickElement, centre.X, centre.Y);
+		ENGINE_INFO(
+			"click: pressed '{}' at {}, {} on frame {}",
+			Settings.ClickElement,
+			centre.X,
+			centre.Y,
+			FramesDrawn
+		);
 		ClickFrames = 2;
 	}
 

@@ -385,7 +385,6 @@ namespace studio {
 		// taken of a known frame rather than of whenever somebody looked.
 		int64_t MaximumFrames = -1;
 
-
 		// Which mode to start in, rather than Edit.
 		//
 		// **What makes the run cycle testable without a person.** A headless run
@@ -2601,15 +2600,6 @@ namespace studio {
 		//         refusal to start rather than a run that cannot be undone.
 		bool BeginRun(WorldId world, RunMode mode);
 
-		// Destroys this world's runtime and restores it from its snapshot.
-		//
-		// **The world is rebuilt rather than overwritten**, because
-		// `ReadWorldDocument` creates a scene rather than restoring into one.
-		// `Universe::Adopt` reuses the hole a destroy leaves, so the handle
-		// survives — the same trick `RenameWorld` depends on, and the reason a
-		// viewport pinned to this world still points at it afterwards.
-		//
-		// @param world The scene to stop. Not running is not an error.
 		// Presents every world this one's portals look into.
 		//
 		// **A world builds its draw list when somebody presents it**, and until
@@ -2626,6 +2616,15 @@ namespace studio {
 		// @param frameSeconds This frame's length, as `Present` wants it.
 		void PresentPortalDestinations(WorldId shown, float frameSeconds);
 
+		// Destroys this world's runtime and restores it from its snapshot.
+		//
+		// **The world is rebuilt rather than overwritten**, because
+		// `ReadWorldDocument` creates a scene rather than restoring into one.
+		// `Universe::Adopt` reuses the hole a destroy leaves, so the handle
+		// survives — the same trick `RenameWorld` depends on, and the reason a
+		// viewport pinned to this world still points at it afterwards.
+		//
+		// @param world The scene to stop. Not running is not an error.
 		void EndRun(WorldId world);
 
 		// Stops every running world. For shutdown, New Game and Open.
@@ -2962,11 +2961,6 @@ namespace studio {
 		// Every world currently running. Worlds absent from this are in edit.
 		std::vector<WorldRun> Runs;
 
-		// This world's run, or null when it is being edited.
-		//
-		// @param world The scene to ask about.
-		// @return The record, or null.
-		//@{
 		// The run a world belongs to, whether it is the authority or a replica.
 		//
 		// **`RunOf` answers for the authority alone**, because a run is recorded
@@ -2978,6 +2972,16 @@ namespace studio {
 		// @return The run, or null when that world is not part of one.
 		WorldRun *RunOwning(WorldId world);
 
+		// This world's run, or null when it is being edited.
+		//
+		// **The group is the const pair and nothing else.** It used to open
+		// before `RunOwning` as well, so this block documented all three — and
+		// `RunOwning`, which carries its own, ended up with two `@param world`
+		// sections and no way to tell which described it.
+		//
+		// @param world The scene to ask about.
+		// @return The record, or null.
+		//@{
 		WorldRun *RunOf(WorldId world);
 		const WorldRun *RunOf(WorldId world) const;
 		//@}
@@ -3952,7 +3956,6 @@ namespace studio {
 		// several worlds tick and it is not the end state: drawing them all in
 		// one frame is a change to `Render` to take a list of views.
 		size_t DrawingViewport = 0;
-
 
 		// Where the rotation is up to, over the *open* panels rather than over
 		// all of them.

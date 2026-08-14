@@ -94,8 +94,8 @@ namespace engine::script {
 		// Every global, in no particular order.
 		std::vector<VocabularyEntry> Globals;
 
-		// The methods and signals every instance carries, so that `part:` and
-		// `part.` can be answered without a class.
+		// The methods and signals every instance carries, so that a `part` followed
+		// by `:` or by a dot can be answered without a class.
 		//
 		// Properties are deliberately absent: those come from `ecs::Classes`,
 		// which knows the class an instance actually is and can therefore answer

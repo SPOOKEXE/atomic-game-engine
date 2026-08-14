@@ -317,7 +317,7 @@ which is the answer to "why is this not what I set".
 ## The file
 
 Sectioned `key = value`, where the section is the setting's prefix. `#` and `;`
-start a comment; `"` keeps a value that contains one.
+start a comment, and a double quote keeps a value that contains one.
 
 ```ini
 # atomic.cfg
@@ -688,8 +688,8 @@ its own, and it needs no language server and no configuration:
 | `Escape` | dismiss |
 | `Tab` | still indents — it is never the accept key |
 
-It offers classes inside `Instance.new("`, properties after a `.`, methods and
-signals after a `:`, enum sets and their members, the globals of whichever
+It offers classes inside an `Instance.new` call, properties after a dot, methods
+and signals after a colon, enum sets and their members, the globals of whichever
 language the script's `CodeSourceContainerSelector` selected, that language's
 keywords, the identifiers already in the file, and **the names of the instances
 beside the script in the tree** — which is the one thing luau-lsp cannot know,

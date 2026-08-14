@@ -31,7 +31,6 @@
 | [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist — run it before opening one |
 | [docs/CODE_FORMAT.md](docs/CODE_FORMAT.md) | naming, includes, and what a comment is for |
 | [docs/CODE_DOCUMENTING.md](docs/CODE_DOCUMENTING.md) | where a comment ends up in the generated reference, and the tags |
-| [docs/retired/CPP_LINKER.md](docs/retired/CPP_LINKER.md) | what a vendor actually costs a binary, measured — and why `VENDOR` is not a size argument |
 | [AGENTS.md](AGENTS.md) | the four rules, and how AI is used here |
 | [ROADMAP.md](ROADMAP.md) | what is built, what is next |
 | [docs/DEFERRED.md](docs/DEFERRED.md) | deferred items from ROADMAP.md that need to be revisited |

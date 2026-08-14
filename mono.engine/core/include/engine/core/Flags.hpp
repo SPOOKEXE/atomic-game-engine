@@ -117,6 +117,9 @@ namespace engine::core {
 		// needs it and named after what it is about.
 		std::string_view Name;
 
+		// How the text is read. A default that is not a value of this kind is
+		// refused loudly at `Declare`, because it is a bug in the table rather
+		// than in whoever set the flag.
 		FlagKind Kind = FlagKind::Boolean;
 
 		// The built-in value, spelled as a config file would spell it.
@@ -252,10 +255,22 @@ namespace engine::core {
 	// borrows from it too.
 	class FlagTableBuilder {
 	  public:
+		// Adds one row, formatting `value` as the text a config file would write.
+		//
+		// Each returns `*this`, so a table is one chained expression — which is
+		// what keeps a program's settings readable as a list rather than as a
+		// paragraph of statements.
+		//
+		// @param name        The flag's dotted, lowercase name.
+		// @param value       Its built-in value.
+		// @param description One line, in the imperative, for `--flags`.
+		// @return `*this`.
+		//@{
 		FlagTableBuilder &Boolean(std::string_view name, bool value, std::string_view description);
 		FlagTableBuilder &Integer(std::string_view name, int64_t value, std::string_view description);
 		FlagTableBuilder &Number(std::string_view name, double value, std::string_view description);
 		FlagTableBuilder &Text(std::string_view name, std::string_view value, std::string_view description);
+		//@}
 
 		// A list, whose built-in value is the empty one.
 		//

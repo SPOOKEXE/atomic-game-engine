@@ -625,6 +625,9 @@ namespace studio::nodes {
 		// Links go back through `Connect`, so a document that lies about a type
 		// or would close a loop loses the link rather than the graph.
 		//
+		// @param other The graph to copy in. Left untouched.
+		// @param dx    How far right to place the copies, in canvas units.
+		// @param dy    How far down.
 		// @param owner Which depth the roots land at.
 		// @return The nodes that landed at `owner` — the copies of what was
 		//         top-level in `other`.
@@ -1370,12 +1373,15 @@ namespace studio::nodes {
 	// texture, the caching and the drawing are the code that was already there,
 	// and it can be checked with no window.
 	//
+	// @param surface The heights to draw.
 	// @param colour Optional albedo, sampled across the surface — the same
 	//               square the 2-D view shows. Grey ramp without one.
 	// @param yaw    Rotation about the vertical, radians.
 	// @param pitch  Tilt towards the viewer, radians, clamped to a sane range.
 	// @param relief How tall the height range stands, in units of the surface's
 	//               width. 0 is flat.
+	// @param side   The square picture's edge, in pixels.
+	// @param out    The picture to draw into. Resized to `side`.
 	bool RenderSurface(
 		const Surface &surface,
 		const PreviewImage *colour,

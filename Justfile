@@ -389,7 +389,12 @@ client-smoke: (build "client")
     test -f "$scene" || { echo "FAIL: no staged scene at $scene"; exit 1; }
     log=$(mktemp)
     trap 'rm -f "$log"' EXIT
-    ./{{build}}/client/client --headless --frames 60 --width 960 --height 540 \
+    # **300 frames, and the margin is the point.** The press lands on frame 0 and
+    # the release two frames later, but the script's handler does not run in the
+    # same breath — at 60 frames the run ended before it had, about one time in
+    # four, which is a flake that would read as the click being broken. The run
+    # costs about a third of a second either way.
+    ./{{build}}/client/client --headless --frames 300 --width 960 --height 540 \
         --script "$scene" --click Swatch3 > "$log" 2>&1
     grep -q "click: pressed 'Swatch3'" "$log" \
         || { echo "FAIL: the client never found or pressed the button"; tail -20 "$log"; exit 1; }
