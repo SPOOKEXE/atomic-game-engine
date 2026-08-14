@@ -175,6 +175,63 @@ deps-check: build
     fi
     echo "deps ok - $total first-party object(s) track their headers"
 
+# Build outputs whose source is gone.
+#
+# **A stale artefact is not untidiness, it is a wrong answer.** Four separate
+# times in one session this repository answered a question with a file that
+# should not have existed. An orphaned `test_nodeview` binary, left when that
+# module was reverted, was still discovered by the runner and inflated the suite
+# count by three. Thirty-five `.spv` files, left when the built-in shaders moved
+# from `render` to `resources`, made `shader-check` report 49 modules where
+# there are 14. An object for a source `bake` no longer has turned `deps-check`
+# red. In every case the artefact was not merely present, it was *consulted*.
+#
+# Ninja already knows which outputs its current graph produces, so `-t cleandead`
+# is the whole check rather than a heuristic over file names. It is why this
+# recipe is six lines and not a scanner that has to be kept in step with the
+# layout.
+#
+# This reports and never deletes, so it is safe inside `check`. `orphan-clean`
+# is the fix, and it sweeps every configured preset rather than this one,
+# because a stale `release` or `bench` tree answers just as loudly and is
+# consulted far less often.
+orphan-check: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    listing=$(ninja -C {{build}} -n -t cleandead 2>&1 || true)
+    # ninja says "N files." when asked and "Cleaning... N files." when doing, so
+    # take the count off whichever it printed rather than anchoring on one.
+    dead=$(printf '%s\n' "$listing" | grep -oE '[0-9]+ files' | tail -1 | grep -oE '[0-9]+' || true)
+    dead=${dead:-0}
+    if [ "$dead" -gt 0 ]; then
+        printf '%s\n' "$listing" | grep '^Remove ' | sed 's/^Remove /  /' | head -20 || true
+        if [ "$dead" -gt 20 ]; then echo "  ... and $((dead - 20)) more"; fi
+        echo "orphan-check FAILED - $dead output(s) in {{build}} are no longer produced by the build."
+        echo "A file whose source is gone still gets linked, counted and scanned."
+        echo "Run 'just orphan-clean' to sweep every configured preset."
+        exit 1
+    fi
+    echo "orphans ok - every output in {{build}} is still produced by the build"
+
+# Delete build outputs the graph no longer produces, in every preset.
+#
+# Safe by construction: ninja removes only what its own graph says is dead, so
+# this can never take a file the next build would have wanted. It is a separate
+# recipe rather than something `build` does quietly, because a build that
+# deletes files nobody asked it to delete is a build people stop trusting.
+orphan-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    total=0
+    for dir in .cache/build/*/; do
+        [ -f "$dir/build.ninja" ] || continue
+        removed=$(ninja -C "$dir" -t cleandead 2>&1 | grep -oE '[0-9]+ files' | tail -1 | grep -oE '[0-9]+' || true)
+        removed=${removed:-0}
+        total=$((total + removed))
+        printf '  %-12s %s file(s)\n' "$(basename "$dir")" "$removed"
+    done
+    echo "orphan-clean ok - $total dead output(s) removed"
+
 # Every compiled shader against the resource contract SDL documents.
 #
 # **The half of `docs/DEFERRED.md` D00001 that does not need a Mac.** That entry
@@ -446,8 +503,8 @@ luau-lsp:
 # `.githooks/pre-push` does for you - because that is the half that has gone
 # uncompilable three times while being described as the standard, twice inside
 # v0.15 alone, and a check nobody runs stops being true.
-check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check typecheck typecheck-editor determinism replay-check
-    @echo "check ok - format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay"
+check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check typecheck typecheck-editor determinism replay-check orphan-check
+    @echo "check ok - format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")

@@ -10,6 +10,8 @@ mistakes. **Read the module's `AGENTS.md` before changing anything in it.**
 
 NEVER ADD AGENT AS CO-AUTHOR CREDITS OR GENERATED FOOTERS.
 
+NEVER USE EM-DASHES.
+
 ---
 
 ## RULES!
