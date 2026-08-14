@@ -7,7 +7,7 @@
 // shapes inside them and writes a `ContactManifold` for each pair that really
 // meets.
 //
-// **Six exact analytic pairs and no library** — `v02v03v04.md` decision 3.
+// **Six exact analytic pairs and no library** - `v02v03v04.md` decision 3.
 // Box-box, box-sphere, box-cylinder, sphere-sphere, sphere-cylinder,
 // cylinder-cylinder, written in `src/ContactPairs.cpp`. There is no physics
 // engine behind this module and there is not going to be one.
@@ -40,7 +40,7 @@ namespace engine::physics {
 	// `PhysicsWorld::Manifolds` and `PhysicsWorld::Events` and refills the
 	// first; the second is `Publish`'s to fill.
 	//
-	// Manifolds come out in pair order, which is `(min id, max id)` — the
+	// Manifolds come out in pair order, which is `(min id, max id)` - the
 	// solver visits them in that order and sequential impulse is
 	// order-dependent, so the ordering is a determinism requirement rather than
 	// tidiness.

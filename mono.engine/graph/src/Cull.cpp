@@ -17,7 +17,7 @@ namespace engine::graph {
 
 		// Sized to the worst case once rather than grown as it fills. The worst
 		// case is "everything is visible", which is also the common case for a
-		// camera framing its own scene — so a reserve that assumed otherwise
+		// camera framing its own scene - so a reserve that assumed otherwise
 		// would reallocate on exactly the frames that matter.
 		visible.clear();
 		visible.reserve(instances.size());
@@ -41,7 +41,7 @@ namespace engine::graph {
 		//
 		// **A corner at or behind the camera's plane gives one.** Its projection
 		// is unbounded and its sign flips, so any number derived from it is
-		// noise — and a box straddling the camera is one filling the screen,
+		// noise - and a box straddling the camera is one filling the screen,
 		// which is the answer "one" already means.
 		float ScreenCoverage(const glm::mat4 &camera, const core::AABB &box) {
 			float left = 1.0f;
@@ -98,7 +98,7 @@ namespace engine::graph {
 		}
 
 		// The box each slot's pane occupies, unioned over every instance naming
-		// it — which is one instance in every scene anybody has built, and a
+		// it - which is one instance in every scene anybody has built, and a
 		// union rather than an assignment because nothing forbids two.
 		//
 		// **Kept between calls rather than sized per frame.** This runs once per
@@ -144,8 +144,8 @@ namespace engine::graph {
 		// surfaces were gathered in.
 		//
 		// **One round per bounce the surface pass will draw.** A round is one
-		// level of surface-seen-in-surface, and running a single one — which is
-		// what this did until the mismatch below was found — culls every level
+		// level of surface-seen-in-surface, and running a single one - which is
+		// what this did until the mismatch below was found - culls every level
 		// past the first while the pass goes on drawing them. See `Cull.hpp`.
 		static thread_local std::vector<uint8_t> onScreen;
 
@@ -198,7 +198,7 @@ namespace engine::graph {
 	) {
 		// **The absolute half-axes summed, which is `FromOrientedBox` written for
 		// a rectangle.** Whatever way the pane is turned, its box reaches
-		// `|first| + |second|` from the centre on each world axis — and the axis
+		// `|first| + |second|` from the centre on each world axis - and the axis
 		// the rectangle has no thickness on comes out zero, which is exact rather
 		// than something to guard.
 		const core::Vector3 reach{

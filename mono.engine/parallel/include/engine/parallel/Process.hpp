@@ -10,10 +10,10 @@
 // simulating two worlds are not faster than two threads doing the same; they
 // are more survivable.
 //
-// **What a process boundary can and cannot isolate.** A soft fault — a system
-// throwing, a script erroring, a tick budget overrun — is caught at the
-// world-tick boundary and never needs a process. A hard fault — `abort()`, a
-// segfault, an out-of-memory kill — takes the address space, and no amount of
+// **What a process boundary can and cannot isolate.** A soft fault - a system
+// throwing, a script erroring, a tick budget overrun - is caught at the
+// world-tick boundary and never needs a process. A hard fault - `abort()`, a
+// segfault, an out-of-memory kill - takes the address space, and no amount of
 // care inside a process can arrange otherwise. Catching `SIGSEGV` and carrying
 // on means carrying on with a heap that may already be corrupt, which makes the
 // *neighbours* suspect too. So the only honest isolation from a hard fault is a
@@ -106,7 +106,7 @@ namespace engine::parallel {
 
 		// Terminates and reaps the child if it is still running.
 		//
-		// A supervisor that goes away must not leave hosts behind — an
+		// A supervisor that goes away must not leave hosts behind - an
 		// orphaned host holds its worlds, its memory and its port, and nothing
 		// is left that knows to stop it.
 		~Process();
@@ -142,7 +142,7 @@ namespace engine::parallel {
 		// to carry something only two layers understand.
 		//
 		// **The endpoint is consumed either way.** On success it belongs to the
-		// child and this process closes its copy — which is what makes the
+		// child and this process closes its copy - which is what makes the
 		// child see the channel close when this process dies, and what makes
 		// this process see it close when the child does. Holding a spare copy
 		// would mean neither end ever noticed the other going away.
@@ -205,7 +205,7 @@ namespace engine::parallel {
 		bool Kill();
 
 	  private:
-		// Opaque so that no public header names an operating system —
+		// Opaque so that no public header names an operating system -
 		// `MonoLibrary.cmake` says the build is the only place that does.
 		uint64_t Identifier = 0;
 

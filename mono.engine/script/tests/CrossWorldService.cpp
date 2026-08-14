@@ -4,14 +4,14 @@
 // **The half of `CrossWorldService` a parity case in `engine.script.scriptcall`
 // cannot reach.** `OpenChannel` answers on the spot and can be checked against a
 // bare store; a delivery and a `SendAsync` reply need a second world, a router
-// and a barrier — so they are here, over a real `Universe`, and asserted in both
+// and a barrier - so they are here, over a real `Universe`, and asserted in both
 // languages because that is the whole claim the v0.16 row makes.
 //
 // **What the suite is written to catch is drift between the two pumps.** The
 // service was Luau's alone until v0.16, and closing it took describing the
 // service once and teaching `PumpJsDeliveries` about `world::BusKind::Channel`.
 // Only the second is testable from a script, and without it the signal would have
-// been reachable, connectable and permanently silent — the failure
+// been reachable, connectable and permanently silent - the failure
 // `script/AGENTS.md` names twice. v0.17 put a *name* on the channel and the same
 // exposure came back one level down: a pump that ignored the filter would deliver
 // every channel to every listener, which looks like the feature working until a
@@ -146,13 +146,13 @@ TEST_CASE("a channel message reaches only its own listeners, in either language"
 		});
 
 		// The open reaches the bus at the next barrier, which is why the send is
-		// a tick later — a message addressed to a channel that did not exist when
+		// a tick later - a message addressed to a channel that did not exist when
 		// it was sent is refused, and that is the honest answer rather than a
 		// race.
 		universe.Tick(1.0f / 60.0f);
 
 		// **Encoded through the shared codec**, because that is what a script's
-		// own `SendAsync` would have done — a raw byte string would decode to
+		// own `SendAsync` would have done - a raw byte string would decode to
 		// nothing and the handler would read `nil.score`.
 		universe.Enter(sender, [](Store &store) {
 			engine::script::ScriptValue score{engine::script::ValueTag::Number};
@@ -169,7 +169,7 @@ TEST_CASE("a channel message reaches only its own listeners, in either language"
 		universe.Tick(1.0f / 60.0f);
 
 		// The delivery lands in the inbox at the barrier and the runtime's own
-		// beat is what hands it to the connection — which is the first of the
+		// beat is what hands it to the connection - which is the first of the
 		// four steps `LuauRuntime::Heartbeat` runs, in both languages.
 		universe.Enter(receiver, [&](Store &store) {
 			INFO(runtime->LastError());
@@ -216,7 +216,7 @@ TEST_CASE("a script reads the status a channel send answered with", "[scripting]
 		});
 
 		// Each barrier carries one reply and each resume issues the next send, so
-		// the pair of calls takes several beats to finish — the shape every
+		// the pair of calls takes several beats to finish - the shape every
 		// suspending store call in `engine.script.scripting` has.
 		for (int beat = 0; beat < 6; beat++) {
 			universe.Tick(1.0f / 60.0f);

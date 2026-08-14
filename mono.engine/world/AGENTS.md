@@ -1,4 +1,4 @@
-# world — module invariants
+# world - module invariants
 
 L4. Universe and worlds, above storage and below everything that draws.
 
@@ -20,15 +20,15 @@ above this line ever held the store.
 
 ## A world names another world only through the bus
 
-Everything crossing goes through a bus — MessagingService, MemoryStore,
-DataStore, Teleport, Channel — so routing is hub-and-spoke rather than a mesh,
+Everything crossing goes through a bus - MessagingService, MemoryStore,
+DataStore, Teleport, Channel - so routing is hub-and-spoke rather than a mesh,
 ordering is decided in one place, and there is no type in this module that pairs
 a world with an entity.
 
 `v02v03.md` §2.7 has the reasoning. The short version: the cross-world entity
 reference is the type that would have broken "nothing crossing a world boundary
 is a pointer", and it does not exist. **A destination is a `core::Name`, and that
-is the whole of what a world may know about another one** — Teleport and Channel
+is the whole of what a world may know about another one** - Teleport and Channel
 carry one, and neither can be turned into a handle by anybody holding it.
 
 ## A channel is `(world, channel)`, and both halves are enforced
@@ -44,7 +44,7 @@ receiving world opens the channel first. Three rules a reviewer should hold to:
 - **Every failure is a `BusStatus` and none is a silent drop.** `SendTo` always
   asks for a reply, so there is always a carrier: `NoSuchWorld`, `NoSuchChannel`,
   `WorldNotReady`, `Overflow`, or no ticket at all when the world is over budget.
-  `Bus.hpp` carries the table. Delivery is at-most-once and nothing retries —
+  `Bus.hpp` carries the table. Delivery is at-most-once and nothing retries -
   only the sender knows whether re-sending is correct.
 - **The queue is bounded and the bound is observable.**
   `UniverseSettings::ChannelQueueLimit` caps how many channel deliveries one
@@ -58,7 +58,7 @@ receiving world opens the channel first. Three rules a reviewer should hold to:
   entry behind each time, and every entry is live universe state a snapshot
   carries. It is the router's count and not the world's, which is why
   `Postbox::OpenChannel` hands back a ticket where `CloseChannel` and the two
-  `Messaging` equivalents hand back a boolean — a world cannot answer a total it
+  `Messaging` equivalents hand back a boolean - a world cannot answer a total it
   does not hold, so the barrier answers and the reply carries it. **Closing an
   idle channel on the world's behalf is a different feature and is deliberately
   not here:** a channel that goes away while somebody still holds its signal is
@@ -75,7 +75,7 @@ handed out in interning order, so it depends on which world was named first *in
 this process*: a universe restored from a snapshot interns in file order where
 the run that wrote it interned in creation order, and the same two envelopes then
 apply in the opposite order. `BusRouter::SortedKeys` had already been given this
-exact argument for the snapshot codec — the barrier's sort simply had not been.
+exact argument for the snapshot codec - the barrier's sort simply had not been.
 
 The cost is a string compare where there was an integer one, over a range that is
 already nearly sorted because each world's outbox is ordered by construction.
@@ -91,15 +91,15 @@ So:
 - **A world is bound to a different thread most ticks**, because whichever
   worker claims it runs it. That is why `Store::Owner` is atomic.
 - **`EachParallel` inside a world tick runs inline**, because the pool is
-  already claimed. That changes timing and not results — see
+  already claimed. That changes timing and not results - see
   `parallel/AGENTS.md`.
 
 ## Two kinds of failure, and they are not the same
 
 | | Caught | Blast radius |
 |---|---|---|
-| **Soft** — a system throws, a script errors, a budget overruns | at the world-tick boundary | one world, marked `Faulted` |
-| **Hard** — `abort()`, segfault, OOM | not caught | the whole host |
+| **Soft** - a system throws, a script errors, a budget overruns | at the world-tick boundary | one world, marked `Faulted` |
+| **Hard** - `abort()`, segfault, OOM | not caught | the whole host |
 
 Do not blur them. Catching `SIGSEGV` and continuing means continuing with a heap
 that may be corrupt, which makes the *neighbours* suspect too. A world that
@@ -109,7 +109,7 @@ gets a host of its own.
 ## The barrier is where everything happens
 
 Only the world ticks run in parallel. Creating a world, destroying one,
-suspending one, applying bus traffic, firing deferred signals — all of it
+suspending one, applying bus traffic, firing deferred signals - all of it
 happens on the driver thread with nothing else running. That is one place to
 reason about, and it is why the control queue exists rather than
 `CreateWorld` mutating the world list from wherever it was called.

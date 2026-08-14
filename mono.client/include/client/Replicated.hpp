@@ -5,7 +5,7 @@
 // **This file used to be the duplication and is now the opposite of it.** It
 // declared a `ReplicatedPosition` and a `ReplicatedVelocity` registered under
 // `server.Position` and `server.Velocity`, because a snapshot travels by
-// component *name* and the two programs shared no component set — so the client
+// component *name* and the two programs shared no component set - so the client
 // had to declare the server's types a second time and keep the layouts in step
 // by hand. `mono.engine/scene` at L7 ended that: both programs register the same
 // `scene` components under the same names, and a snapshot and a delta cross with
@@ -31,7 +31,7 @@
 //
 // **Nor is dead-reckoning a body the buffer has run out of ticks for.** When
 // nothing has arrived to interpolate toward, a row carrying a `scene::Motion`
-// and no `scene::NetworkOwner` is drawn where that velocity says it would be —
+// and no `scene::NetworkOwner` is drawn where that velocity says it would be -
 // bounded in time by `replication::InterpolationSettings::ExtrapolateSeconds`
 // and in distance by the body's own size, through `physics::Advanced` and into
 // a `DrawInstance`. No system runs, no phase is added and no component is
@@ -42,7 +42,7 @@
 // ## What a script running here may write, and what refuses the rest
 //
 // **The mechanism is `ecs::Store`'s and this file adds none.** A replica's rows
-// belong to the authority, and two calls in the store say so — every property
+// belong to the authority, and two calls in the store say so - every property
 // write is refused by `Store::SetProperty`'s adopt-only check, and every attempt
 // to mint an authoritative entity is refused by the same flag through
 // `Store::Create`, `CreateInstance` and `CloneInstance`. Both refusals predate
@@ -52,7 +52,7 @@
 // So a `LocalScript` here **reads, connects and calls**. It cannot set a
 // property on anything, replicated or not, and it cannot create an instance.
 // What it can write is what is not a row the authority owns: an attribute, a
-// world resource, its own upvalues — and the client-only surfaces the engine
+// world resource, its own upvalues - and the client-only surfaces the engine
 // hands it, `UserInputService` and the interface it is shown.
 //
 // **A refusal is visible to the author rather than silent, which is the half
@@ -62,8 +62,8 @@
 // that was rejected from one that was applied and overwritten by the next delta.
 //
 // **A script here cannot see what the server did not send.** There is no second
-// store and no back channel: the VM is opened over *this* store — one runtime,
-// one world, `script/AGENTS.md` — and this store holds exactly what
+// store and no back channel: the VM is opened over *this* store - one runtime,
+// one world, `script/AGENTS.md` - and this store holds exactly what
 // `replication::Replica::Apply` put in it. Interest is decided on the authority
 // by `Authority::SetInterest` over `scene::VisibleToClients` and
 // `scene::PlayerOwning`, so a row this client was not sent is not a row it can
@@ -85,7 +85,7 @@ namespace client {
 	// Installs the presentation half of a replicated world, and opens its VM.
 	//
 	// Called once, when the world is created and before any snapshot is
-	// applied — a resource added later is still legal, but a draw list that
+	// applied - a resource added later is still legal, but a draw list that
 	// appeared halfway through a join would leave the first frames with nothing
 	// to publish.
 	//
@@ -94,7 +94,7 @@ namespace client {
 	// calls `game::StartWorldScripts` over a world it has already built, so
 	// `RunWorldScripts` starts everything in one pass; this world is empty when
 	// its runtime opens and fills from the wire, so `replica-scripts` starts
-	// what arrived on the tick it arrives — `script::ClientScriptsIn` decides
+	// what arrived on the tick it arrives - `script::ClientScriptsIn` decides
 	// which, and `script::Runtime::RunNewScripts` starts each exactly once.
 	//
 	// **Through `game::StartWorldScripts` and not a loader of its own**, so the
@@ -111,7 +111,7 @@ namespace client {
 	//        authority's, not this client's frame rate.
 	// @return The world's runtime, which is never null. The scheduler holds a
 	//         reference too and drops it with the world, so a caller that keeps
-	//         none still leaves the VM alive for exactly as long as the store —
+	//         none still leaves the VM alive for exactly as long as the store -
 	//         `game::StartWorldScripts` carries the argument.
 	std::shared_ptr<engine::script::Runtime> BuildReplicatedWorld(
 		engine::ecs::Store &store,
@@ -129,7 +129,7 @@ namespace client {
 	// frame rate dipped below the tick rate, and the buffer would then be
 	// interpolating across gaps that the network never produced.
 	//
-	// Cheap to call on a tick already recorded — it asks the buffer first and
+	// Cheap to call on a tick already recorded - it asks the buffer first and
 	// walks nothing.
 	//
 	// @param store The replicated world, after the connection wrote into it.
@@ -143,15 +143,15 @@ namespace client {
 	// **A replica has to construct its own viewer, and this is why.** A mirror
 	// reflects the *eye*, so a reflection computed on the authority is correct
 	// for the authority's camera and wrong for every client watching. What
-	// crosses the wire is therefore the mirror — the `SurfaceCamera`, its lens
-	// and the tree that says which pane it belongs to — and never the aim. Each
+	// crosses the wire is therefore the mirror - the `SurfaceCamera`, its lens
+	// and the tree that says which pane it belongs to - and never the aim. Each
 	// client aims it again, from where that client is standing, which is the
 	// only place the right answer exists.
 	//
 	// The camera is minted from the **predicted** range. A replica may not mint
-	// an authoritative entity — `Store::SetAdoptOnly` says why: the index would
+	// an authoritative entity - `Store::SetAdoptOnly` says why: the index would
 	// collide exactly with one the authority allocates and `Apply` would be
-	// right to merge them — but the reserved high range is a client's own, and a
+	// right to merge them - but the reserved high range is a client's own, and a
 	// camera nobody else can see is precisely what it is for.
 	//
 	// Created on the first call and reused after, so this is one component write

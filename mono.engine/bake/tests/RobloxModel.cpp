@@ -9,7 +9,7 @@
 //
 // The builder is the format's writer, so it is deliberately dumb: it computes
 // nothing the reader will check. Where the two would otherwise agree by
-// construction the case pins the value — the transposed arrays are written out
+// construction the case pins the value - the transposed arrays are written out
 // plane by plane here and read back plane by plane there, and both are asserted
 // against numbers a person typed.
 //
@@ -45,7 +45,7 @@ using engine::bake::RobloxValue;
 using engine::bake::RobloxValueKind;
 
 namespace {
-	// The tag that ends a file, whose fourth byte is a NUL — so it is spelled
+	// The tag that ends a file, whose fourth byte is a NUL - so it is spelled
 	// with its length rather than left to `strlen`, which would write three
 	// bytes and a chunk header the reader would land in the middle of.
 	constexpr std::string_view END_TAG("END\0", 4);
@@ -139,7 +139,7 @@ namespace {
 	//
 	// **A legal block that happens to compress nothing.** The last sequence of an
 	// LZ4 block is literals with no match after it, so this is the shortest valid
-	// framing there is — which makes it the right one for asserting that the
+	// framing there is - which makes it the right one for asserting that the
 	// *framing* is understood without the case also owning a compressor.
 	void Lz4Chunk(Blob &file, std::string_view tag, const Blob &payload) {
 		Blob block;
@@ -264,8 +264,8 @@ namespace {
 			return prop;
 		}());
 
-		// One rotation byte — 0x02 is the identity Studio writes for an unrotated
-		// part — then the whole chunk's positions, as one transposed array.
+		// One rotation byte - 0x02 is the identity Studio writes for an unrotated
+		// part - then the whole chunk's positions, as one transposed array.
 		Chunk(file, "PROP", [] {
 			Blob prop = Property(1, "CFrame", 0x10);
 			prop.U8(0x02);
@@ -339,7 +339,7 @@ TEST_CASE("an rbxm comes back as the tree it describes", "[bake][rbxm]") {
 	REQUIRE(ReadRobloxModel(Bytes(file.Bytes), model, failure));
 	CHECK(failure.empty());
 
-	// One root, because the parent table says the Part is inside the Model —
+	// One root, because the parent table says the Part is inside the Model -
 	// which is the only thing a referent is allowed to become.
 	REQUIRE(model.Roots.size() == 1);
 	const RobloxInstance &crate = model.Roots[0];
@@ -463,7 +463,7 @@ TEST_CASE("an lz4 chunk inflates, matches included", "[bake][rbxm]") {
 	CHECK(model.Roots[0].Name == "Crate");
 
 	// **A block with a match in it, hand-written**, because an all-literal block
-	// exercises none of the copy loop — and the copy loop is where an offset of
+	// exercises none of the copy loop - and the copy loop is where an offset of
 	// one has to repeat a byte it is in the middle of producing. This one spells
 	// a `Name` of sixteen a's as one literal and a fifteen-long match at offset
 	// one, which a block copy would read as uninitialised memory.
@@ -501,7 +501,7 @@ TEST_CASE("an lz4 chunk inflates, matches included", "[bake][rbxm]") {
 
 TEST_CASE("a truncated rbxm is refused at every length", "[bake][rbxm]") {
 	// **Every prefix, not one.** A model missing its parent table is not a
-	// shallower model and one missing half a chunk is not a smaller one — and
+	// shallower model and one missing half a chunk is not a smaller one - and
 	// the interesting lengths are the ones that land inside a length field,
 	// which is exactly what a loop finds and a hand-picked case does not.
 	const Blob file = Fixture();
@@ -540,7 +540,7 @@ TEST_CASE("a count larger than the bytes behind it is refused", "[bake][rbxm]") 
 	}
 
 	SECTION("an instance count past the ceiling") {
-		// Not a count that outruns this file — one that outruns any file, so it
+		// Not a count that outruns this file - one that outruns any file, so it
 		// is refused before it is turned into an allocation.
 		Blob file;
 		Header(file, 1, 1);
@@ -579,7 +579,7 @@ TEST_CASE("a count larger than the bytes behind it is refused", "[bake][rbxm]") 
 	}
 
 	SECTION("a chunk that inflates to less than it states") {
-		// A legal LZ4 block — four literals and nothing else — under a header
+		// A legal LZ4 block - four literals and nothing else - under a header
 		// claiming sixty-four kilobytes. **The refusal has to come from the
 		// length rather than from the parse**, because the bytes it produces are
 		// perfectly readable and simply are not all of them.
@@ -680,7 +680,7 @@ namespace {
 	// reader did. Two hand-written files that a person can read and compare are
 	// what makes the agreement case mean anything.
 	//
-	// Every awkward row the binary fixture carries is here in its XML spelling —
+	// Every awkward row the binary fixture carries is here in its XML spelling -
 	// the `token` that is an enum and is refused, the `Color3uint8` that is one
 	// packed number rather than three byte planes, the whole rotation matrix
 	// where the binary container writes one byte naming it, and a script's source
@@ -848,7 +848,7 @@ namespace {
 TEST_CASE("an rbxmx comes back as the tree it describes", "[bake][rbxmx]") {
 	const RobloxModel model = ReadXml(FIXTURE_RBXMX);
 
-	// One root, and the nesting of the markup is the shape of the tree — which
+	// One root, and the nesting of the markup is the shape of the tree - which
 	// is the whole of what a referent is allowed to become, and here it is not
 	// even that: the `referent` attributes are never read.
 	REQUIRE(model.Roots.size() == 1);
@@ -895,9 +895,9 @@ TEST_CASE("an rbxmx comes back as the tree it describes", "[bake][rbxmx]") {
 }
 
 TEST_CASE("an rbxmx and an rbxm of one model come back the same", "[bake][rbxmx]") {
-	// **The case that keeps the two readers honest.** Everything downstream —
+	// **The case that keeps the two readers honest.** Everything downstream -
 	// `studio::RojoSync`'s class lookup, its property conversion, its source
-	// staging — is written against one `RobloxModel`, so the day the two
+	// staging - is written against one `RobloxModel`, so the day the two
 	// containers stop producing the same one, half of it starts behaving
 	// differently depending on which file an author exported.
 	const Blob binary = Fixture();
@@ -931,7 +931,7 @@ TEST_CASE("an rbxmx entity declaration is refused outright", "[bake][rbxmx]") {
 	CHECK(Mentions(RefusedXml(bomb), "DOCTYPE"));
 	CHECK(Mentions(RefusedXml(bomb), "ENTITY"));
 
-	// An external entity is the same declaration and the same refusal — and it
+	// An external entity is the same declaration and the same refusal - and it
 	// is a file read, which is the thing this whole module is arranged never to
 	// do.
 	const std::string external = R"xml(<!DOCTYPE roblox [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>)xml" +
@@ -940,7 +940,7 @@ TEST_CASE("an rbxmx entity declaration is refused outright", "[bake][rbxmx]") {
 
 	// **The second lock, and it is the one that has to hold on its own.** No
 	// declaration survives the scanner, so a reference to anything but the five
-	// predefines names something nobody could have declared — refused where it
+	// predefines names something nobody could have declared - refused where it
 	// would have been expanded rather than dropped, because a dropped one makes
 	// a bomb look like a file with a typo in it.
 	CHECK(Mentions(RefusedXml(WithProperties(R"xml(<string name="Name">&xxe;</string>)xml")), "xxe"));
@@ -961,7 +961,7 @@ TEST_CASE("an rbxmx script's ampersand is source and not a reference", "[bake][r
 	// document-wide sweep.** An SVG never unescapes, so a reference there has to
 	// be caught by sweeping the whole file; a model holds CDATA, and CDATA is
 	// text. A real model in this repository's corpus carries the Luau pattern
-	// `"[&;]"` inside a script — a sweep refuses that file while naming an entity
+	// `"[&;]"` inside a script - a sweep refuses that file while naming an entity
 	// nobody wrote, which is a valid model rejected for a reason its author
 	// cannot act on.
 	//
@@ -1037,7 +1037,7 @@ TEST_CASE("a value this cannot read costs its property and not its file", "[bake
 	const RobloxInstance &part = model.Roots[0];
 
 	// An enum and a reference are refusals of principle rather than of effort,
-	// and both are named — the same words the binary reader uses, so one refusal
+	// and both are named - the same words the binary reader uses, so one refusal
 	// reads the same whichever container it came out of.
 	CHECK(Find(part, "Material") == nullptr);
 	CHECK(Noted(model, "Part.Material is an Enum"));
@@ -1108,7 +1108,7 @@ TEST_CASE("the value types an rbxmx spells differently come back the same", "[ba
 	CHECK(assetId->Integer == -1);
 
 	// **`Content` and `BinaryString` are read rather than refused**, because the
-	// binary container stores both as a plain `String` — refusing them here would
+	// binary container stores both as a plain `String` - refusing them here would
 	// make a `Decal` lose the texture the same model keeps as a `.rbxm`.
 	const RobloxValue *texture = Find(part, "Texture");
 	REQUIRE(texture != nullptr);
@@ -1119,7 +1119,7 @@ TEST_CASE("the value types an rbxmx spells differently come back the same", "[ba
 
 TEST_CASE("a shared string is resolved out of the table that follows it", "[bake][rbxmx]") {
 	// **The table is written after every instance that refers to it**, which is
-	// why this container needs a pass of its own to find it — and why a reader
+	// why this container needs a pass of its own to find it - and why a reader
 	// that resolved as it went would hand back the key instead of the value.
 	const RobloxModel model = ReadXml(
 		R"xml(<roblox version="4"><Item class="Part"><Properties>)xml"
@@ -1168,7 +1168,7 @@ TEST_CASE("each container refuses the other by name", "[bake][rbxmx]") {
 }
 
 TEST_CASE("an rbxmx this cannot trust is refused rather than half-read", "[bake][rbxmx]") {
-	// A version this does not know, refused rather than guessed — the same
+	// A version this does not know, refused rather than guessed - the same
 	// answer the binary reader gives to anything but version 0.
 	CHECK(Mentions(RefusedXml(R"xml(<roblox version="3"><Item class="Part"/></roblox>)xml"), "version"));
 	CHECK(Mentions(RefusedXml(R"xml(<roblox><Item class="Part"/></roblox>)xml"), "version"));
@@ -1195,7 +1195,7 @@ TEST_CASE("an rbxmx may hold any number of instances at its top level", "[bake][
 	// **The reader's answer and the studio's are different on purpose.** The
 	// container allows any number and Rojo's file table maps a model file to
 	// one, so which count is acceptable is a question for whoever asked rather
-	// than for the reader — exactly as it is for the binary container.
+	// than for the reader - exactly as it is for the binary container.
 	const RobloxModel model = ReadXml(
 		R"xml(<roblox version="4"><Item class="Model"><Properties>)xml"
 		R"xml(<string name="Name">First</string></Properties></Item>)xml"

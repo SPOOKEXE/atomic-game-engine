@@ -1,4 +1,4 @@
-# spatial — module invariants
+# spatial - module invariants
 
 L6, `shared` tier. A uniform hash grid over `{id, AABB, layers}` and the queries
 that read it. `v02v03v04.md` §3.1 and §3.5 are the design; this file is what a
@@ -22,7 +22,7 @@ Refuse:
 - `Engine::ecs` appearing in `CMakeLists.txt`, in any form and for any reason.
 - `ecs::Entity` in a signature, even converted at the boundary. The conversion is
   the caller's, on both sides.
-- A `Proxy` growing anything that only an ECS could fill in — an archetype, a
+- A `Proxy` growing anything that only an ECS could fill in - an archetype, a
   row index, a component id.
 - `scene::Collider` or any other component reaching a signature here. `scene` is
   L7 and above this; the direction of that edge is the whole reason `spatial`
@@ -33,7 +33,7 @@ Refuse:
 ## The grid is rebuilt, never edited
 
 There is no `Insert`, no `Move` and no `Remove`, and adding one is not an
-extension — it is a different data structure. Count-then-fill produces one flat
+extension - it is a different data structure. Count-then-fill produces one flat
 array with no per-cell vector and no per-tick allocation, which is what the
 allocation table in `v02v03v04.md` states as a standing rule. An editable grid
 needs a per-cell list with holes in it: it allocates, it fragments, and it
@@ -53,7 +53,7 @@ it is not a "just this one" `Insert`.
 
 A proxy spanning several cells appears in several buckets. It is reported from
 the first cell of the walk that lies in both its own cell range and the query's
-— and because every axis is walked ascending, that cell is the corner formed by
+- and because every axis is walked ascending, that cell is the corner formed by
 taking the larger minimum on each axis. One comparison, no scratch memory, and
 the same answer whatever order anything runs in.
 
@@ -77,7 +77,7 @@ its own box.
 
 **Do not remove the box re-test on the grounds that the cell check already
 narrowed it down.** They answer different questions. The cell check says "not
-this cell"; the box test says "not this volume", and a cell is coarse — two
+this cell"; the box test says "not this volume", and a cell is coarse - two
 proxies in one cell need not touch each other or the query.
 
 The entry has to carry its cell. Without it, a proxy whose *own* two cells
@@ -87,8 +87,8 @@ de-duplication bug and is not one.
 ## `std::floor`, not a cast
 
 A cast truncates toward zero, so -0.5 and +0.5 land in the same cell and the
-cell at the origin is twice the width of every other. It loses nothing — the
-build and the query agree — which is exactly why it survives review: it silently
+cell at the origin is twice the width of every other. It loses nothing - the
+build and the query agree - which is exactly why it survives review: it silently
 doubles the busiest cell in every scene, because scenes are built around the
 origin. `CellCoordinateOf` in `src/GridInternals.hpp` is the only place a world
 coordinate becomes a cell, and it is the only place that may be.
@@ -100,7 +100,7 @@ order by a cursor, oversized proxies are examined in proxy order after the
 cells, and the cell walk is ascending on every axis.
 
 A broad phase that visits pairs in a different order produces a different solver
-result and a recorded run stops replaying — a long way from here, in
+result and a recorded run stops replaying - a long way from here, in
 `just determinism`. Refuse anything that makes the order a function of the
 previous contents: a hash seeded from a clock or an address, a bucket count that
 grows rather than being chosen from the entry count, an early exit that leaves a
@@ -112,7 +112,7 @@ cursor where it stopped.
 and nothing should: an index is derived from whatever order layers were
 declared in, which is rule 4 of the root `AGENTS.md`. A save file, a wire format
 or a manifest names a layer with a string and resolves it to an index once, at
-load, in whatever module owns the naming — not in this one.
+load, in whatever module owns the naming - not in this one.
 
 `LayerMask` is a struct rather than a bare `uint32_t` because a collider carries
 two of them, the layer it is on and the set it collides against, and swapping
@@ -157,7 +157,7 @@ rather than preferences.
   that.
 - **`WALK_CELL_ALLOWANCE`.** Past it a query scans every proxy instead of
   walking cells, because at that size the scan is both cheaper and bounded. The
-  answer must not change between the two routes — only the route.
+  answer must not change between the two routes - only the route.
 
 Raising either is a measurement, not an opinion.
 
@@ -170,7 +170,7 @@ Raising either is a measurement, not an opinion.
 - **No frustum culling.** It is the second consumer this structure was made a
   module for, and it wants a `render` consumer that arrives at v0.6. A plane set
   and a half-space test with nothing calling them is surface with a maintenance
-  cost and no benefit — §3.4's rule applied to this module.
+  cost and no benefit - §3.4's rule applied to this module.
 - **No BVH.** Decision 4 chose the uniform grid on the grounds that a world is a
   bounded subarea. Replacing it is an *algorithmic* change, which by the
   allocation and algorithms rule needs a measurement taken in `release` and a
@@ -181,7 +181,7 @@ Raising either is a measurement, not an opinion.
   one the de-duplication rule is built on. It is an optimisation with a rule
   change attached; take both together or neither.
 - **No parallel query.** Every query here is a read, and two threads may run two
-  of them against one grid — which is what the visited-stamp rule protects.
+  of them against one grid - which is what the visited-stamp rule protects.
   Nothing here starts a job, because the grain for a raycast is a `physics`
   decision about how many rays it has, not a `spatial` one.
 - **No `Vector2` and no 2D grid.** The same cells serve a flat world with one

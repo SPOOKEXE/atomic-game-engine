@@ -3,7 +3,7 @@
 // **Reachable headlessly because none of it needs a frame.** The preferences
 // page that edits this list is imgui; the list itself is ordinary data with a
 // text format either side of it, which is the half that can be wrong without a
-// window — a dropped row, a lost `off`, a priority order that comes back
+// window - a dropped row, a lost `off`, a priority order that comes back
 // reversed.
 //
 // The order is the feature, so most of what is pinned here is order:
@@ -13,7 +13,7 @@
 //
 // **The HTTP tab's listing is here too, and it is a source's feature rather than
 // a catalogue's.** What decides whether an origin can be enumerated is the row
-// somebody typed on the Content page — the address, and the key beside it — and
+// somebody typed on the Content page - the address, and the key beside it - and
 // what the panel must never do is answer the question from somewhere else. The
 // last group of cases is that rule: every way of not knowing is drawn as its own
 // sentence, and none of them is drawn as an empty table.
@@ -104,7 +104,7 @@ TEST_CASE("a fresh install starts with the store on this machine", "[studio][con
 
 	// **Two rows, and the first is the local folder.** This used to be one HTTP
 	// origin and no publisher key, and "no key" is what `DeliverySettings::
-	// IsValid` refuses — so a fresh editor built no delivery client and fetched
+	// IsValid` refuses - so a fresh editor built no delivery client and fetched
 	// nothing at all. A `MeshPart` drew the fallback cube however good its
 	// `MeshId` was.
 	REQUIRE(sources.Sources.size() == 2);
@@ -115,7 +115,7 @@ TEST_CASE("a fresh install starts with the store on this machine", "[studio][con
 	// one would be defaulting who this editor believes" is still true and is
 	// exactly why this one is `cdn::DevelopmentSigningKey`'s public half: it
 	// believes the store this machine publishes to, which is the folder on the
-	// row above it. Pointing a row anywhere else means supplying the real key —
+	// row above it. Pointing a row anywhere else means supplying the real key -
 	// see `cdn/LocalStore.hpp` for where that stops.
 	CHECK_FALSE(sources.PublisherKey.empty());
 }
@@ -157,7 +157,7 @@ TEST_CASE("a saved list comes back in the same order", "[studio][contentsources]
 }
 
 TEST_CASE("a missing file leaves the list alone", "[studio][contentsources]") {
-	// Not an error, and — the part worth pinning — not a reset either. `Load`
+	// Not an error, and - the part worth pinning - not a reset either. `Load`
 	// returns before it clears anything, so a caller that loads over a list it
 	// already has keeps that list rather than being silently emptied.
 	ContentSources sources;
@@ -307,7 +307,7 @@ TEST_CASE("reads and writes go to different origins", "[studio][contentsources]"
 
 	const engine::delivery::DeliverySettings settings = sources.ToSettings();
 
-	// Both rows reach the settings — the split happens when they are asked for,
+	// Both rows reach the settings - the split happens when they are asked for,
 	// not when they are written down, so a row keeps its address whichever
 	// direction it is in.
 	REQUIRE(settings.Sources.size() == 2);
@@ -334,7 +334,7 @@ TEST_CASE("an unrecognised role reads as both rather than dropping the row", "[s
 	REQUIRE(sources.Load(path));
 	REQUIRE(sources.Sources.size() == 1);
 
-	// The permissive answer is the one that keeps a list working — a row
+	// The permissive answer is the one that keeps a list working - a row
 	// dropped over a word nobody recognises is an origin that vanished.
 	CHECK(sources.Sources.front().Role == SourceRole::Both);
 
@@ -345,7 +345,7 @@ TEST_CASE("an unrecognised role reads as both rather than dropping the row", "[s
 
 TEST_CASE("a fresh editor can fetch from the store on this machine", "[studio][content]") {
 	// **The default was an address nobody is listening on and no publisher
-	// key**, which `DeliverySettings::IsValid` refuses — so `MakeAssetClient`
+	// key**, which `DeliverySettings::IsValid` refuses - so `MakeAssetClient`
 	// was never called and the editor fetched *nothing at all*. A `MeshPart`
 	// drew the fallback cube however good its `MeshId` was, a `ColorMap` drew
 	// nothing, and the assets panel happily listed a store full of content none
@@ -426,7 +426,7 @@ TEST_CASE("raw folders and the memory-only flag survive a save", "[studio][conte
 	REQUIRE_FALSE(read.MemoryOnly);
 
 	// **A raw folder is not an origin**, and reading one back as a source would
-	// put a folder of PNGs into the list `delivery::AssetClient` fetches from —
+	// put a folder of PNGs into the list `delivery::AssetClient` fetches from -
 	// where every name has to be one a signed manifest carries.
 	REQUIRE(read.Sources.size() == 1);
 
@@ -562,7 +562,7 @@ TEST_CASE(
 ) {
 	// **The rule D00111 was filed to protect.** Each of these is a different
 	// fact about one origin, and a blank table under a named tab would read as
-	// the first one — "this origin holds nothing" — whichever of them was true.
+	// the first one - "this origin holds nothing" - whichever of them was true.
 	const ListingOutcome cannot[] = {
 		ListingOutcome::NotAsked,
 		ListingOutcome::NoKey,
@@ -648,7 +648,7 @@ TEST_CASE("an origin that answered and holds nothing says that instead", "[studi
 }
 
 TEST_CASE("a directory source is never asked over the wire", "[studio][contentsources]") {
-	// A published tree is listed by reading its manifest — asking it anything
+	// A published tree is listed by reading its manifest - asking it anything
 	// would be a second reader of a format that already has one.
 	StubLister lister(OriginListing{.Outcome = ListingOutcome::Listed, .Entries = {}});
 
@@ -722,7 +722,7 @@ TEST_CASE("a listing origin refuses the wrong key, and the tab says which", "[st
 
 TEST_CASE("a page that is not a listing is refused whole", "[studio][contentsources]") {
 	// An origin is something anybody can run, so a body that is not this format
-	// is reported rather than half-read — half a page of invented names under a
+	// is reported rather than half-read - half a page of invented names under a
 	// named origin's tab is the failure this whole feature exists to avoid.
 	CHECK_FALSE(studio::ParseCataloguePage("", "far").has_value());
 	CHECK_FALSE(studio::ParseCataloguePage("<html>nope</html>\n", "far").has_value());

@@ -2,8 +2,8 @@
 #
 # **No first-party dependency at all, which is unusual and is the point.** It
 # takes words and hands back a string, so it sits below everything that has an
-# opinion about shaders and can be linked by `mono.tools/shadercross` — a build
-# step that must not drag the renderer in — and by `Engine::render`, which needs
+# opinion about shaders and can be linked by `mono.tools/shadercross` - a build
+# step that must not drag the renderer in - and by `Engine::render`, which needs
 # the same translation while the engine runs. One implementation is what stops
 # a `ShaderScript` and a built-in shader from landing on different Metal indices.
 #

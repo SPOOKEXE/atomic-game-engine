@@ -3,9 +3,9 @@
 // Hand-built SPIR-V for the suites, one instruction at a time.
 //
 // **The inputs are written rather than compiled, and that is the point.** Every
-// case worth checking is a shader somebody has not written yet — a resource with
+// case worth checking is a shader somebody has not written yet - a resource with
 // no binding, a gap in a descriptor set, a fragment shader in a vertex shader's
-// sets — and compiling one of those needs GLSL that a compiler will accept and a
+// sets - and compiling one of those needs GLSL that a compiler will accept and a
 // compiler in the test's dependency list. Assembling the words directly gives
 // the negative cases for the same cost as the positive one, and makes the suite
 // hermetic: it runs in a preset with no shader compiler configured at all.
@@ -97,7 +97,7 @@ namespace shadercheck::testing {
 			return Text(OpEntryPoint, {executionModel, 1}, name);
 		}
 
-		// A combined image sampler at one set and binding — GLSL's `sampler2D`.
+		// A combined image sampler at one set and binding - GLSL's `sampler2D`.
 		// `id` must be unique in the module; the three type ids derived from it
 		// are what keeps two of these from colliding.
 		Builder &SampledTexture(uint32_t id, uint32_t set, uint32_t binding, std::string_view name) {
@@ -113,7 +113,7 @@ namespace shadercheck::testing {
 			return Instruction(OpVariable, {pointer, id, ClassUniformConstant});
 		}
 
-		// A `Block`-decorated struct behind a `Uniform` variable — GLSL's
+		// A `Block`-decorated struct behind a `Uniform` variable - GLSL's
 		// `layout(...) uniform Name { ... }`.
 		Builder &UniformBuffer(uint32_t id, uint32_t set, uint32_t binding, std::string_view name) {
 			const uint32_t block = id + 100;
@@ -126,7 +126,7 @@ namespace shadercheck::testing {
 			return Instruction(OpVariable, {pointer, id, ClassUniform});
 		}
 
-		// A `StorageBuffer`-class variable — GLSL's `buffer Name { ... }`.
+		// A `StorageBuffer`-class variable - GLSL's `buffer Name { ... }`.
 		Builder &StorageBuffer(uint32_t id, uint32_t set, uint32_t binding, std::string_view name) {
 			const uint32_t block = id + 100;
 			const uint32_t pointer = id + 300;

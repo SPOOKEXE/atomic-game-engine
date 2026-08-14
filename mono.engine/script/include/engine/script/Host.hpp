@@ -3,8 +3,8 @@
 // The one way a program offers a script something the engine does not.
 //
 // **A script's vocabulary is the world, and a tool's is the program.** Every
-// surface in this module so far — `Instance`, `workspace`, `World`, the
-// datatypes — is about the scene, because that is what a *game* script talks
+// surface in this module so far - `Instance`, `workspace`, `World`, the
+// datatypes - is about the scene, because that is what a *game* script talks
 // about. An editor tool talks about the editor: a toolbar, a button, a docked
 // panel, the file a script instance was loaded from. None of that is a world,
 // and none of it can be added here, because this module does not know what an
@@ -19,7 +19,7 @@
 //
 // `script/AGENTS.md`'s first rule is that no VM type appears in a public header,
 // so a host cannot be handed a state to push onto. What crosses instead is
-// `HostValue` — the same shape the bus codec uses, plus the two things an
+// `HostValue` - the same shape the bus codec uses, plus the two things an
 // in-process call can carry that a wire cannot:
 //
 // - **An `Instance`.** A handle is meaningless outside the world holding it,
@@ -33,7 +33,7 @@
 //
 // **It is deliberately not `ScriptValue` widened.** That type is what crosses a
 // world boundary, where rule 3 says everything is a copy and a handle means
-// nothing — adding an instance tag to it would make the wrong thing expressible
+// nothing - adding an instance tag to it would make the wrong thing expressible
 // on a bus. Two types is the correct answer here, and the duplication is a
 // dozen fields rather than a mechanism.
 //
@@ -95,7 +95,7 @@ namespace engine::script {
 	// pressed, and releases it when the button goes away.
 	//
 	// **A host that never releases leaks a closure for the life of the
-	// runtime**, which is a plugin's whole session — survivable, and still worth
+	// runtime**, which is a plugin's whole session - survivable, and still worth
 	// releasing, because a panel that is opened and closed a hundred times
 	// should not hold a hundred handlers.
 	//
@@ -271,7 +271,7 @@ namespace engine::script {
 		// Every name this host answers.
 		//
 		// **Used to build the global rather than to document it**, so a name the
-		// host does not list is one a script cannot call — which turns a typo
+		// host does not list is one a script cannot call - which turns a typo
 		// into "no such member" at the call site instead of a refusal from
 		// inside the host.
 		//
@@ -282,7 +282,7 @@ namespace engine::script {
 		//
 		// **So a host's API reads as its own rather than as plumbing.** An
 		// editor's is `plugin`, and `plugin.CreateToolbar(...)` is what a person
-		// who has written a Roblox plugin expects — where `host.CreateToolbar`
+		// who has written a Roblox plugin expects - where `host.CreateToolbar`
 		// would read as an implementation detail leaking into a surface.
 		//
 		// One table and one name, not several: a host that wanted two
@@ -297,7 +297,7 @@ namespace engine::script {
 		//
 		// **A name with a dot in it is a service**, and the part before the dot
 		// is its global. `Selection.Get` becomes `Selection:Get()`, which
-		// `game:GetService("Selection")` then finds for free — that function
+		// `game:GetService("Selection")` then finds for free - that function
 		// resolves a service by looking up a global of the same name, so a host
 		// offering one needs nothing added to it.
 		//

@@ -1,4 +1,4 @@
-# mono.server — a library plus a thin executable.
+# mono.server - a library plus a thin executable.
 #
 # The library is `server` tier, so the tier check refuses to let anything
 # `shared` or `client` link it. The client will link it by name, once
@@ -24,7 +24,7 @@ mono_add_library(server
 		# L8, `shared`. The server is the authority, so the server is what
 		# simulates: a hosted game integrates its bodies and resolves its
 		# contacts here, and every client watches the result. This row was
-		# missing while `Server.cpp` already called `physics::Raycast` — the
+		# missing while `Server.cpp` already called `physics::Raycast` - the
 		# link came in sideways through `examples` and `game`, which is a
 		# dependency that works and is not declared. Naming it changes no
 		# closure and costs the headless property nothing: a broad phase and a
@@ -40,14 +40,14 @@ mono_add_library(server
 
 		# L7, `shared`. **A headless server that knows what an interface is, and
 		# it has to.** `StarterGui` is a template whose contents are *copied* into
-		# each player's own `PlayerGui` when they spawn — `gui::ResetPlayerGui` is
+		# each player's own `PlayerGui` when they spawn - `gui::ResetPlayerGui` is
 		# the rule and `gui::Layer::ResetOnSpawn` is what decides whether a copy
 		# survives a death. Those copies are world content: they are authored on
 		# the authority and replicate to the one client that owns them, exactly as
 		# a part does.
 		#
 		# **It costs the headless property nothing.** This module depends on
-		# `Engine::core` and `Engine::ecs` and nothing else — it produces a
+		# `Engine::core` and `Engine::ecs` and nothing else - it produces a
 		# `DrawList` and a `GuiEvent`, which are data. `mono.engine/ui` is the one
 		# that paints, and this process does not link it. `just
 		# check-server-is-headless` is the standing proof.
@@ -73,7 +73,7 @@ mono_add_library(server
 		#
 		# **It costs the headless property nothing**, which is the line to check
 		# when this row is edited: `Mono::network` is `shared` tier and links
-		# `core`, `net` and Crypto++ — a UDP socket and an HMAC, neither of
+		# `core`, `net` and Crypto++ - a UDP socket and an HMAC, neither of
 		# which needs a device. `just check-server-is-headless` is the standing
 		# proof.
 		Mono::network
@@ -85,14 +85,14 @@ mono_add_library(server
 		Engine::game
 
 		# `shared`. The content origin, run in-process when `--content-store`
-		# asks for it — CDN.md §6's "local store", which is the self-hosted
+		# asks for it - CDN.md §6's "local store", which is the self-hosted
 		# case: a small game, a LAN session, development. It is the same
 		# library `mono.cdn` deploys on its own and scaled, so a client cannot
 		# tell the two apart, which is the property repo_layout.md §11 wants.
 		#
 		# **It costs the headless property nothing**, which is the line to check
 		# when this row is edited: `Mono::cdn` is `shared` tier and links
-		# `core`, `assets`, `delivery`, `net` and `parallel` — a hash, a socket
+		# `core`, `assets`, `delivery`, `net` and `parallel` - a hash, a socket
 		# and a compressor, none of which needs a device. `just
 		# check-server-is-headless` is the standing proof.
 		Mono::cdn

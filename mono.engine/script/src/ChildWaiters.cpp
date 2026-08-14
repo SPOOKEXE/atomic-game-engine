@@ -47,7 +47,7 @@ namespace engine::script {
 
 			// **At or past, rather than past.** The deadline is the tick the
 			// wait gives up *on*, so a one-tick wait made on tick five is
-			// answered on tick six and never on tick seven — which is what makes
+			// answered on tick six and never on tick seven - which is what makes
 			// `TicksFor`'s "at least one tick, never zero" mean one beat of
 			// waiting rather than one or two depending on where in the barrier
 			// the call happened to land.

@@ -1,4 +1,4 @@
-// Rings of orbiting, spinning parts — the JavaScript twin of `Rings.luau`.
+// Rings of orbiting, spinning parts - the JavaScript twin of `Rings.luau`.
 //
 // **The same scene, the same bindings, the same result.** Two VMs over one
 // binding surface: `game.GetService`, `Instance.new`, `Vector3`, `Color3`,
@@ -8,9 +8,9 @@
 // Two things read differently, and both are the language rather than the
 // engine:
 //
-//   - `game.GetService("RunService")` — a dot, because JavaScript has no
+//   - `game.GetService("RunService")` - a dot, because JavaScript has no
 //     colon-call. Luau writes `game:GetService`.
-//   - `a.mul(b)` — a method, because JavaScript has no operator overloading.
+//   - `a.mul(b)` - a method, because JavaScript has no operator overloading.
 //     Luau writes `a * b`. The transform being composed is identical.
 //
 // Neither language is made to pretend it is the other. What is shared is the
@@ -85,7 +85,7 @@ RunService.Heartbeat.Connect((deltaTime) => {
 	for (const orbiter of orbiters) {
 		orbiter.angle += orbiter.speed * deltaTime;
 
-		// The part's own turn, accumulated by composition — the same thing
+		// The part's own turn, accumulated by composition - the same thing
 		// `spin *= CFrame.Angles(...)` does in Luau.
 		orbiter.spin = orbiter.spin.mul(
 			CFrame.Angles(

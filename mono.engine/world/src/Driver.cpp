@@ -124,7 +124,7 @@ namespace engine::world {
 		//
 		// **A driver cannot time another address space**, so it plots the
 		// latest figure each host measured and sent. That is a barrier behind,
-		// which is the price of the only honest number available — and being a
+		// which is the price of the only honest number available - and being a
 		// barrier behind about a host beats the alternative, which is a frame
 		// graph on which a process holding half the universe does not appear.
 		for (const HostStatus &host : Supervisor_.Hosts()) {

@@ -42,7 +42,7 @@ namespace engine::bake {
 		}
 
 		// `GIF87a` or `GIF89a`. Four bytes rather than six, because the version
-		// changes nothing this decoder does — see `Gif.cpp`.
+		// changes nothing this decoder does - see `Gif.cpp`.
 		if (bytes.size() >= 4 && static_cast<char>(bytes[0]) == 'G' && static_cast<char>(bytes[1]) == 'I' &&
 			static_cast<char>(bytes[2]) == 'F' && static_cast<char>(bytes[3]) == '8') {
 			return ImageFormat::Gif;
@@ -119,11 +119,11 @@ namespace engine::bake {
 		// **The caller's target is checked here and the document's own size is
 		// checked in `Svg.cpp`.** They are different numbers from different
 		// people: this one is a pipeline's, and the reason it is refused rather
-		// than clamped is `assets::ResizeImage`'s — a texture silently smaller
+		// than clamped is `assets::ResizeImage`'s - a texture silently smaller
 		// than what was asked for is a bake that looks like it worked.
 		if ((width == 0) != (height == 0)) {
 			failure = "svg: a raster target of " + std::to_string(width) + "x" + std::to_string(height) +
-					  " — give both axes, or neither for the size the document declares";
+					  " - give both axes, or neither for the size the document declares";
 			return false;
 		}
 		if (width > assets::Texture::MAXIMUM_DIMENSION || height > assets::Texture::MAXIMUM_DIMENSION) {

@@ -91,7 +91,7 @@ namespace cdn {
 		// space each large one did not use, so a group ends up with a few big
 		// members and many small ones. Packing smallest-first would fill whole
 		// groups with tiny assets and leave the large ones alone in groups of
-		// their own — every group then pathological in one direction or the
+		// their own - every group then pathological in one direction or the
 		// other.
 		//
 		// The root is the last tiebreak so the order is total: two clusters of
@@ -110,7 +110,7 @@ namespace cdn {
 		Group current;
 		// No oversized check in here, and it is not an omission. A packed group
 		// is flushed before a cluster would take it past the target, so it can
-		// only ever weigh at most one cluster more than empty — and a cluster
+		// only ever weigh at most one cluster more than empty - and a cluster
 		// heavier than the ceiling is diverted below and never reaches this. The
 		// one path that can produce an oversized group is the one that counts it.
 		const auto flush = [&assembly, &current]() {

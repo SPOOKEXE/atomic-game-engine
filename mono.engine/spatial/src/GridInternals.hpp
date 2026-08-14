@@ -31,7 +31,7 @@ namespace engine::spatial {
 	// negative cell index far from anything.
 	//
 	// At the default spacing this is a quarter of a million cells, or about a
-	// million metres, in each direction from the origin — well past the point
+	// million metres, in each direction from the origin - well past the point
 	// where a float position has metre resolution at all.
 	inline constexpr int32_t CELL_LIMIT = 1 << 18;
 
@@ -59,8 +59,8 @@ namespace engine::spatial {
 	inline int32_t CellCoordinateOf(float value, float inverseSpacing) {
 		const float cell = std::floor(value * inverseSpacing);
 
-		// Written as a pair of rejections rather than a clamp so that NaN —
-		// which compares false against everything — lands on the lower limit
+		// Written as a pair of rejections rather than a clamp so that NaN -
+		// which compares false against everything - lands on the lower limit
 		// instead of being cast, which is undefined.
 		if (!(cell > static_cast<float>(-CELL_LIMIT))) {
 			return -CELL_LIMIT;
@@ -126,7 +126,7 @@ namespace engine::spatial {
 		//
 		// **Once**, not once per shared cell. A proxy spanning several cells is
 		// reported from the first cell of the walk that lies in both its own
-		// cell range and the query's — which, because every axis is walked
+		// cell range and the query's - which, because every axis is walked
 		// ascending, is the corner formed by taking the larger minimum on each
 		// axis, and is therefore an O(1) comparison with no scratch memory.
 		//
@@ -158,7 +158,7 @@ namespace engine::spatial {
 												 (static_cast<int64_t>(maximumZ) - minimumZ + 1);
 
 			// An empty grid has no buckets to mask against, so it takes the
-			// scan — which still has to run, because a proxy too large for
+			// scan - which still has to run, because a proxy too large for
 			// cells produces no entries and is found nowhere else.
 			if (inverted || grid.Entries.empty() ||
 				cells > static_cast<int64_t>(grid.Entries.size()) + WALK_CELL_ALLOWANCE) {

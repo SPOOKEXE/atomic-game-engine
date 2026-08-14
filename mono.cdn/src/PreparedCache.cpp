@@ -16,7 +16,7 @@ namespace cdn {
 			size_t operator()(const PreparedKey &key) const noexcept {
 				// The digests are already uniformly distributed, so the first
 				// eight bytes of each are as good a hash as anything derived
-				// from all sixty-four — and combining the two halves matters
+				// from all sixty-four - and combining the two halves matters
 				// because one dictionary and many bundles is the ordinary case.
 				size_t bundle = 0;
 				size_t dictionary = 0;
@@ -49,7 +49,7 @@ namespace cdn {
 	};
 
 	PreparedCache::PreparedCache(uint64_t capacityBytes) : State(std::make_shared<Impl>()) {
-		// Zero would make a cache that evicts everything it is given — something
+		// Zero would make a cache that evicts everything it is given - something
 		// that looks like a cache and behaves like a leak of CPU.
 		State->Capacity = capacityBytes == 0 ? DEFAULT_CAPACITY_BYTES : capacityBytes;
 	}
@@ -87,7 +87,7 @@ namespace cdn {
 		const auto existing = State->Entries.find(key);
 		if (existing != State->Entries.end()) {
 			// Two threads prepared the same group and raced. Both results are
-			// byte-identical — preparation is deterministic — so the first one
+			// byte-identical - preparation is deterministic - so the first one
 			// wins and the second is discarded rather than churning the entry
 			// and invalidating whatever is streaming it.
 			State->Recency.splice(State->Recency.begin(), State->Recency, existing->second.Position);

@@ -1,8 +1,8 @@
 // Resolving a mesh from the id somebody wrote in `MeshId`.
 //
 // **There is one id space and four things read it**, which is the property this
-// suite exists to hold. A `MeshPart.MeshId` is a string — rule 4, a name crosses
-// and a number does not — and between an author typing it and a triangle
+// suite exists to hold. A `MeshPart.MeshId` is a string - rule 4, a name crosses
+// and a number does not - and between an author typing it and a triangle
 // appearing, four separate pieces of code have to agree about what that string
 // means:
 //
@@ -14,7 +14,7 @@
 // They agree today by all asking `assets::BuiltinFromName` the same question.
 // The failure when they do not is silent in both directions: a built-in fetched
 // from a CDN is a miss logged as though content were broken, and a store asset
-// handed to `MakeBuiltin` is a cube where a dragon should be — and
+// handed to `MakeBuiltin` is a cube where a dragon should be - and
 // `MeshTable::Resolve` returns the fallback cube for an unknown name, which is
 // also exactly what a mesh that has not arrived yet looks like.
 //
@@ -98,8 +98,8 @@ TEST_CASE("every built-in id resolves to geometry", "[studio][mesh]") {
 
 TEST_CASE("a built-in id is offered by the picker", "[studio][mesh]") {
 	// **`IsRuntimeReadable` is the picker's own filter**, and it works on the
-	// extension. A built-in id has no extension in the usual sense —
-	// `engine.Cube` ends in `.Cube` — so this pins that the filter does not read
+	// extension. A built-in id has no extension in the usual sense -
+	// `engine.Cube` ends in `.Cube` - so this pins that the filter does not read
 	// that as a source format and drop the only meshes an empty store has.
 	for (const std::string &id : BuiltinIds()) {
 		INFO(id);
@@ -109,8 +109,8 @@ TEST_CASE("a built-in id is offered by the picker", "[studio][mesh]") {
 
 TEST_CASE("a built-in id is never fetched", "[studio][mesh]") {
 	// **The other half of offering them.** `CollectWantedContent` walks
-	// `Visual::Mesh` and cannot tell a built-in from a store asset — nor should
-	// it, because it is one list of names — so the decision is made where the
+	// `Visual::Mesh` and cannot tell a built-in from a store asset - nor should
+	// it, because it is one list of names - so the decision is made where the
 	// request is issued. A built-in that reached a delivery client would be a
 	// guaranteed miss, logged once per id, describing geometry that is already
 	// registered.
@@ -166,7 +166,7 @@ TEST_CASE("two parts naming one id share it", "[studio][mesh]") {
 	// **Instancing is what the id buys**, and it costs nothing to state: two
 	// parts naming the same string are two `DrawInstance`s carrying the same
 	// `core::Name`, which `MeshTable::Resolve` answers from one entry and one
-	// upload. Counting how many name an id is therefore counting instances —
+	// upload. Counting how many name an id is therefore counting instances -
 	// there is no per-part copy of the geometry to find.
 	engine::scene::RegisterSceneComponents();
 	engine::scene::RegisterSceneClasses();
@@ -203,7 +203,7 @@ TEST_CASE("an unknown id is not silently a cube", "[studio][mesh]") {
 	// `MeshTable::Resolve` draws the fallback cube for a name it does not hold,
 	// which is deliberate and is why a wrong id looks exactly like a mesh that
 	// has not streamed in. What must stay true is that the *world* keeps the id
-	// it was given rather than being rewritten to a built-in — so
+	// it was given rather than being rewritten to a built-in - so
 	// `TrianglesCount` reads zero and says "this world does not hold that",
 	// which is the one signal that tells the two apart.
 	engine::scene::RegisterSceneComponents();
@@ -230,7 +230,7 @@ TEST_CASE("a material previews as a render, not a bitmap", "[studio][meshresolut
 	using engine::assets::AssetKind;
 
 	// **The two kinds that have no picture of their own.** A mesh is geometry
-	// and a material is a texture *reference* — neither is bytes anybody can
+	// and a material is a texture *reference* - neither is bytes anybody can
 	// blit, so both go to the preview slot and get drawn.
 	CHECK(studio::PreviewIsRendered(AssetKind::Mesh));
 	CHECK(studio::PreviewIsRendered(AssetKind::Material));

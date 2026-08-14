@@ -6,7 +6,7 @@
 //
 // **Written twice until v0.16, and neither half did anything a VM decides.**
 // This file and a retired `JsDebrisService.cpp` were the same twenty lines with
-// two spellings of "read an instance and a number" around them — including two
+// two spellings of "read an instance and a number" around them - including two
 // copies of `TicksFor`, which is where the two could most easily have come to
 // disagree about what half a second means. The service is a `ServiceSurface`
 // now and the pump takes a store and a queue, so there is nothing left for a
@@ -33,7 +33,7 @@ namespace engine::script {
 		// `Debris:AddItem(instance, lifetime)`
 		//
 		// **Answers nothing, like Roblox's.** The one thing a caller might want
-		// to know — whether the queue was full — is answered by the item that
+		// to know - whether the queue was full - is answered by the item that
 		// was evicted going early rather than by this call, and a boolean here
 		// would be one almost nobody reads and everybody has to think about.
 		void AddItem(ScriptCall &call) {
@@ -68,7 +68,7 @@ namespace engine::script {
 	void PumpDebris(ecs::Store &store, DebrisQueue &queue) {
 		// **Collected and then destroyed**, rather than destroyed from inside
 		// the drain: `DestroyInstance` dispatches `DescendantRemoving`
-		// synchronously, so a handler runs here — and a handler that adds
+		// synchronously, so a handler runs here - and a handler that adds
 		// something to the queue must not do it to a list being walked.
 		std::vector<ecs::Entity> expired;
 		queue.Advance(store.Time().Tick, expired);
@@ -76,7 +76,7 @@ namespace engine::script {
 		for (const ecs::Entity instance : expired) {
 			// **No liveness test first.** An instance destroyed by some other
 			// route between being queued and coming due is ordinary, and
-			// `DestroyInstance` on a row that has gone is already a no-op —
+			// `DestroyInstance` on a row that has gone is already a no-op -
 			// a check here would be a second answer to the same question.
 			store.DestroyInstance(instance);
 		}

@@ -9,7 +9,7 @@ namespace engine::net {
 	namespace {
 		size_t ChannelSlot(ChannelKind channel) {
 			// The enum's own order, and the array below is sized from the last
-			// value rather than from a literal — a channel added without a slot
+			// value rather than from a literal - a channel added without a slot
 			// would index past the end, which is the one bug in this file that
 			// would not show up as a wrong number.
 			return static_cast<size_t>(channel);
@@ -84,13 +84,13 @@ namespace engine::net {
 		// in a tick; they accumulate into windowed minima, which do not care
 		// what order they arrive in. The decision that turns them into a window
 		// happens here, once, at the point in the tick every caller already
-		// advances this link's timeouts — and before anything asks `Reserve`
+		// advances this link's timeouts - and before anything asks `Reserve`
 		// what it may send, which is the order the header states.
 		//
 		// A tick's length is measured rather than configured because the tick
 		// rate is not this module's to know: a rate needs seconds and the only
 		// seconds available are the ones the caller keeps handing in. **Measured
-		// between two advances and nothing else** — the packets that arrived
+		// between two advances and nothing else** - the packets that arrived
 		// earlier in this tick named the same instant, so measuring against the
 		// last time anybody named a time reads every tick as a stall. The very
 		// first call has nothing to measure against at all, so the initial
@@ -139,7 +139,7 @@ namespace engine::net {
 		if (!window.Seen) {
 			// A channel's first packet opens its window wherever the far side
 			// happens to have got to. It is judged against nothing, because
-			// there is nothing yet to be older than, and it counts no loss —
+			// there is nothing yet to be older than, and it counts no loss -
 			// a stream that opens at 5000 has not lost 5000 packets.
 			window.Seen = true;
 			window.Highest = sequence;
@@ -203,7 +203,7 @@ namespace engine::net {
 		// **A hostile peer can acknowledge a sequence far ahead of anything
 		// sent, and `IsNewer(next, ...)` is the whole answer to it.** The
 		// frontier only ever moves over sequences this end actually stamped, so
-		// the loop is bounded by what was sent rather than by what was claimed —
+		// the loop is bounded by what was sent rather than by what was claimed -
 		// and a link that has stamped nothing has `next` equal to the frontier,
 		// which is why there is no separate guard for that case.
 		const uint16_t next = OutgoingSequence[ChannelSlot(ChannelKind::Reliable)];
@@ -214,7 +214,7 @@ namespace engine::net {
 			const uint16_t behind = static_cast<uint16_t>(header.Acknowledge - JudgedSequence);
 
 			// Outside the 32 the window covers is undecidable from this packet,
-			// and it is undecidable from every later one too — the window only
+			// and it is undecidable from every later one too - the window only
 			// moves further away. Counted lost, which is also what the far side
 			// is telling the sender by never setting the bit.
 			const bool acknowledged = behind <= 32 && (header.AcknowledgeBits & (1u << (behind - 1))) != 0;
@@ -249,7 +249,7 @@ namespace engine::net {
 		if (header.Channel == ChannelKind::Handshake) {
 			// No window, and deliberately none. A handshake datagram is answered
 			// before there is a link to number it, so its sequence belongs to no
-			// stream — judging it against a mark, or letting it move one, would
+			// stream - judging it against a mark, or letting it move one, would
 			// be inventing a numbering the sender never used. It still proves
 			// the peer is alive, which the lines above have already recorded.
 			return true;
@@ -265,7 +265,7 @@ namespace engine::net {
 
 		// The stale rule: unreliable traffic only, against **this channel's own
 		// high-water mark**. A reliable packet arriving late is a resend that
-		// still has to be delivered in order — discarding it here would silently
+		// still has to be delivered in order - discarding it here would silently
 		// drop an event the sender believes was acknowledged. And judging an
 		// unreliable packet against the reliable channel's mark is the same
 		// mistake from the other side: the two counters advance at completely
@@ -315,7 +315,7 @@ namespace engine::net {
 		// **The configured budgets are asked first and the path second, so
 		// `SendsOverBudget` still means exactly what it has always meant.** It
 		// is what `D00007`'s reopen trigger is phrased against and what
-		// `render`'s debug panel documents as not being congestion — and a
+		// `render`'s debug panel documents as not being congestion - and a
 		// caller reading it wants to know whether its own numbers are the thing
 		// turning traffic away, because that is the half it can fix by changing
 		// them. Congestion is the other counter, and it is a fact about the path
@@ -341,7 +341,7 @@ namespace engine::net {
 
 		if (channel == ChannelKind::Reliable && !ReliableStreamOpen) {
 			// Where judging starts. Nothing before the stream's first sequence
-			// was ever sent, so nothing before it can be missing — and a
+			// was ever sent, so nothing before it can be missing - and a
 			// frontier that started at zero on a stream opening elsewhere would
 			// report every sequence below it as lost, which is the mirror of the
 			// bug `ChannelWindow::Seen` exists to prevent.

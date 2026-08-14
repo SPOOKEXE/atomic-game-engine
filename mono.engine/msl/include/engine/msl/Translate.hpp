@@ -17,7 +17,7 @@
 // `SDL_CreateGPUShader` documents a different order: sampled textures then
 // storage textures, uniform buffers then storage buffers, each in descriptor
 // order. The two agree for a shader with one of everything and disagree
-// silently for every shader with two — measured on `opaque.frag`, where the
+// silently for every shader with two - measured on `opaque.frag`, where the
 // automatic assignment put the last texture in the set at `[[texture(0)]]`.
 //
 // No SPIRV-Cross type appears here, for `ShaderCompiler.hpp`'s reason: words in,
@@ -54,7 +54,7 @@ namespace engine::msl {
 	// **MSL reserves `main`, so SPIRV-Cross emits `main0`.** A caller passing
 	// this to `SDL_GPUShaderCreateInfo::entrypoint` is passing the same fact the
 	// translation produced, rather than a literal that has to be kept true by
-	// hand — which is what `mono.tools/shadercheck` checks the built-in shaders
+	// hand - which is what `mono.tools/shadercheck` checks the built-in shaders
 	// for from the other end.
 	inline constexpr const char *ENTRY_POINT = "main0";
 

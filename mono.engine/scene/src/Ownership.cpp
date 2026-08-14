@@ -27,16 +27,16 @@ namespace engine::scene {
 		}
 
 		// **Nothing to simulate, nothing to own.** An anchored part carries no
-		// `RigidBody` — anchored decides presence rather than setting a flag —
+		// `RigidBody` - anchored decides presence rather than setting a flag -
 		// and neither does a `Folder` or a service. See the header.
 		if (store.Get<RigidBody>(instance) == nullptr) {
 			return false;
 		}
 
 		// **Checked, because the failure is otherwise silent and permanent.**
-		// Handing a body to a `Folder` writes a row nothing will ever reclaim —
+		// Handing a body to a `Folder` writes a row nothing will ever reclaim -
 		// the reclaim below only fires for an owner that *was* alive and stopped
-		// being — so a scene would carry a body owned by something that cannot
+		// being - so a scene would carry a body owned by something that cannot
 		// own it for the rest of the session.
 		if (!store.Alive(player) || !ecs::Classes::IsA(store.ClassOf(player), PlayerClass())) {
 			return false;

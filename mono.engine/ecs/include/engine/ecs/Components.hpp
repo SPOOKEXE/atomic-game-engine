@@ -12,7 +12,7 @@
 // list of them; archetypes are iterated in id order. Two runs that register the
 // same types in a different order therefore visit rows in a different order,
 // and a floating-point sum over those rows diverges. Registering everything
-// during single-threaded startup is what pins it — which is what `Seal` is for.
+// during single-threaded startup is what pins it - which is what `Seal` is for.
 //
 // @tier L3 · shared
 
@@ -27,7 +27,7 @@ namespace engine::ecs {
 	// Interns component types and hands back dense ids.
 	//
 	// All static: there is one table, it lives for the process, and nothing
-	// unregisters. That mirrors `core::Name`, and for the same reason — an id
+	// unregisters. That mirrors `core::Name`, and for the same reason - an id
 	// that could be recycled would let a stale one silently name a new type.
 	//
 	// @since v0.2
@@ -56,7 +56,7 @@ namespace engine::ecs {
 		// Registers `T` with an explicit name, writer and reader.
 		//
 		// The form to use when the raw object representation is the wrong
-		// serialisation — most importantly for any component holding a
+		// serialisation - most importantly for any component holding a
 		// `core::Name`, whose id is process-local and must never reach a file.
 		//
 		// @param name  The stable name to register under.
@@ -127,14 +127,14 @@ namespace engine::ecs {
 		// **The form to reach for on a path that must not decide a type's
 		// name.** `Of<T>()` registers under the compiler-spelled name when it
 		// finds nothing, and that name then loses to an explicit registration
-		// — but only by aborting, because a type cannot have two. So a call
+		// - but only by aborting, because a type cannot have two. So a call
 		// made *before* startup names the type is a call that decides the name
 		// wrongly and takes the process with it later.
 		//
 		// The gap is not theoretical: `Store::Destroy` asks whether the row it
 		// is freeing sits in a tree, and it is reachable long before anything
 		// registers `ecs.Hierarchy`. An invalid answer there is the correct
-		// one — a type nothing has registered is a type no row can carry.
+		// one - a type nothing has registered is a type no row can carry.
 		//
 		// @return The id, or an invalid id when `T` has not been registered.
 		template <class T> static ComponentId Assigned() {
@@ -146,7 +146,7 @@ namespace engine::ecs {
 		// **The one entry point that is not a template, because its caller has
 		// no `T`.** A component a game declares in a script or a data file is
 		// described by its fields rather than by a struct, so `DescribeType<T>`
-		// has nothing to work from and the descriptor is built by hand — see
+		// has nothing to work from and the descriptor is built by hand - see
 		// `Schema.hpp`, which is the only caller and the only one that should
 		// be.
 		//
@@ -156,7 +156,7 @@ namespace engine::ecs {
 		//
 		// **`slot` is the identity, and the caller owns it.** Its *address* is
 		// what the table compares to tell "this type again" from "a second type
-		// under one name" — the same mechanism `Slot<T>()` provides for a C++
+		// under one name" - the same mechanism `Slot<T>()` provides for a C++
 		// type. It must therefore be a distinct object per described type and
 		// must outlive every use of the component.
 		//

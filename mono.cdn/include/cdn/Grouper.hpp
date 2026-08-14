@@ -5,7 +5,7 @@
 // A group is the unit that is compressed, streamed, prioritised and cancelled,
 // and it has one defining property: **a group that lands makes something
 // appear.** That is the whole of "the game progressively builds", and it is
-// decided here — when the group is *built* — rather than by anything about how
+// decided here - when the group is *built* - rather than by anything about how
 // the bytes travel. A group holding half a scene's meshes and none of its
 // textures has arrived and shown nothing. CDN.md §5.
 //
@@ -24,7 +24,7 @@
 // 3. **Priority.** Groups come out in the order the player will need them.
 //
 // This is policy and it lives with the origin, not with the format. What a
-// bundle *is* — a root over sorted asset roots — is `Engine::assets`.
+// bundle *is* - a root over sorted asset roots - is `Engine::assets`.
 //
 // @tier shared
 
@@ -39,7 +39,7 @@ namespace cdn {
 
 	// The size envelope groups are assembled within.
 	//
-	// Starting points rather than measurements — CDN.md §9 carries the group
+	// Starting points rather than measurements - CDN.md §9 carries the group
 	// bound as an open question, and there is no number beside it yet.
 	struct GroupPolicy {
 		// What a group aims to weigh, uncompressed.
@@ -49,7 +49,7 @@ namespace cdn {
 		//
 		// Not a hard limit: rule 1 outranks it, so a single affinity heavier
 		// than this becomes one oversized group rather than being split. That
-		// case is reported rather than hidden — see Assembly::Oversized.
+		// case is reported rather than hidden - see Assembly::Oversized.
 		uint64_t MaximumBytes = 32ull * 1024 * 1024;
 
 		// Whether these can be used. Requires 0 < Target <= Maximum.
@@ -65,7 +65,7 @@ namespace cdn {
 		uint64_t Bytes = 0;
 
 		// What it is needed *with*. Assets sharing an affinity land in one
-		// group and are never split — a mesh, its textures, its material and
+		// group and are never split - a mesh, its textures, its material and
 		// its collider share one.
 		//
 		// Zero means "belongs with nothing in particular" and is the only value
@@ -81,7 +81,7 @@ namespace cdn {
 
 	// One assembled group.
 	struct Group {
-		// Member asset roots, sorted — the arrangement `Manifest::AddBundle`
+		// Member asset roots, sorted - the arrangement `Manifest::AddBundle`
 		// will put them in anyway, done here so the two cannot disagree.
 		std::vector<engine::assets::ContentHash> Assets;
 

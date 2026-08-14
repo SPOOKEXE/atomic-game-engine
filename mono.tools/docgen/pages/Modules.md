@@ -2,7 +2,7 @@
 
 One page per module, each holding the rules that catch real mistakes in that
 module rather than the ones that apply everywhere. **Read the one for a module
-before changing anything in it** — [AGENTS.md](@ref md_AGENTS) says why, and the
+before changing anything in it** - [AGENTS.md](@ref md_AGENTS) says why, and the
 layer stack it describes is what decides which of these a module may read.
 
 The engine, bottom to top, then the three programs and the tooling. A module

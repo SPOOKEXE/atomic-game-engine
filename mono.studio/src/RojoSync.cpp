@@ -46,7 +46,7 @@ namespace studio {
 			// **A plain `.luau` is a module, which is Rojo's own rule.** Only the
 			// suffixed files are programs the host runs; everything else in a
 			// project is something a program requires. Mapping them all to
-			// `Script` — which this did before `ModuleScript` existed — meant a
+			// `Script` - which this did before `ModuleScript` existed - meant a
 			// synced project executed every library it contained.
 			bool Module = false;
 			std::string Name;
@@ -81,7 +81,7 @@ namespace studio {
 		// than left returning nothing.
 		//
 		// It existed so that a `.rbxmx` read as a gap rather than as an
-		// unrecognised file — "not a script" is what you say about a stray
+		// unrecognised file - "not a script" is what you say about a stray
 		// `.DS_Store` and was the wrong thing to say about a mapping Rojo has and
 		// this engine did not. `.toml` closed at v0.13, `.rbxm` and `.rbxmx` at
 		// v0.15, and with the table complete anything that now falls past
@@ -96,8 +96,8 @@ namespace studio {
 		// to do something when an author breaks it. Refusing the whole sync
 		// would be one mistake costing every other folder; picking silently
 		// would be a directory whose class depends on which name happened to
-		// sort first. So the order is fixed and written down — module, then
-		// server, then client — and the extras are reported.
+		// sort first. So the order is fixed and written down - module, then
+		// server, then client - and the extras are reported.
 		struct InitFile {
 			std::filesystem::path File;
 			bool Local = false;
@@ -133,7 +133,7 @@ namespace studio {
 
 				if (chosen.Present()) {
 					report.Notes.push_back(
-						directory.filename().string() + " has more than one init file — used " +
+						directory.filename().string() + " has more than one init file - used " +
 						chosen.File.filename().string() + " and ignored " + candidate.Leaf
 					);
 					continue;
@@ -151,7 +151,7 @@ namespace studio {
 		// The loop over a directory has to skip every one of them: the chosen
 		// one was consumed by the directory itself, and an ignored one must not
 		// come back as a child called `init`. That second case is the bug this
-		// replaced — only `init.luau` was skipped, so `init.server.luau` became
+		// replaced - only `init.luau` was skipped, so `init.server.luau` became
 		// a folder plus a stray `Script` named `init`.
 		bool IsInitFile(const std::filesystem::path &file) {
 			const std::string leaf = file.filename().string();
@@ -170,13 +170,13 @@ namespace studio {
 		// One JSON value, read as a property of a declared type.
 		//
 		// **Accepts both shapes Rojo has used**, because a project in the wild
-		// has either: the bare value — `"Size": [4, 1, 2]` — and the named-part
-		// object — `"Size": {"X": 4, "Y": 1, "Z": 2}`. Neither is more correct
+		// has either: the bare value - `"Size": [4, 1, 2]` - and the named-part
+		// object - `"Size": {"X": 4, "Y": 1, "Z": 2}`. Neither is more correct
 		// and refusing one would refuse half the projects.
 		//
 		// **Keyed on the property's declared type and never on the JSON's
 		// shape.** An array of three numbers is a `Vector3` for a `Vector3`
-		// property and nothing at all for a `bool` one — guessing from the value
+		// property and nothing at all for a `bool` one - guessing from the value
 		// would make `"Anchored": 1` mean something.
 		bool ReadPropertyJson(
 			const engine::ecs::PropertyDescriptor &property,
@@ -232,7 +232,7 @@ namespace studio {
 				// **An enum member is refused here rather than at the store.**
 				// `ecs::EnumTable` is what decides membership, and letting a
 				// typo through would land a name in a component that renders as
-				// the default for reasons nobody can see — which is the whole
+				// the default for reasons nobody can see - which is the whole
 				// argument `PropertyType::Enum` was added on.
 				if (!value.is_string()) {
 					return false;
@@ -258,8 +258,8 @@ namespace studio {
 
 			case PropertyType::CFrame: {
 				// Position only. A `.model.json` writes a `CFrame` as twelve
-				// numbers — three of position and a nine-element rotation
-				// matrix — and this engine's `CFrame` is a quaternion, so the
+				// numbers - three of position and a nine-element rotation
+				// matrix - and this engine's `CFrame` is a quaternion, so the
 				// conversion is real work for a case no project in the seed
 				// content uses. Reported by the caller rather than done wrong.
 				const json position = value.is_object() ? value.value("Position", value) : value;
@@ -287,7 +287,7 @@ namespace studio {
 
 			default:
 				// `UDim2`, `Rect`, the two sequences and a `Reference`. A
-				// reference is the one that cannot be done at all from a file —
+				// reference is the one that cannot be done at all from a file -
 				// it names an instance, and a `.meta.json` has no way to say
 				// which. The rest are shapes nothing has asked for.
 				return false;
@@ -315,7 +315,7 @@ namespace studio {
 		//
 		// **Every key is looked up in the class's own property list**, so a
 		// patch naming something the class does not have is reported rather than
-		// silently dropped — which is the difference between "this engine has no
+		// silently dropped - which is the difference between "this engine has no
 		// `Reflectance`" and "your file has a typo", and an author needs to be
 		// told which.
 		void ApplyMetadata(Store &store, Entity instance, const json &document, RojoSyncReport &report) {
@@ -335,7 +335,7 @@ namespace studio {
 			for (const auto &entry : properties->items()) {
 				const engine::ecs::PropertyDescriptor *found = PropertyNamed(store, instance, entry.key());
 				if (found == nullptr) {
-					report.Notes.push_back(entry.key() + " is not a property here — skipped");
+					report.Notes.push_back(entry.key() + " is not a property here - skipped");
 					continue;
 				}
 
@@ -343,13 +343,13 @@ namespace studio {
 				if (!ReadPropertyJson(*found, entry.value(), value)) {
 					report.Notes.push_back(
 						entry.key() + " could not be read as a " + engine::ecs::Describe(found->Type) +
-						" — skipped"
+						" - skipped"
 					);
 					continue;
 				}
 
 				if (!engine::game::WriteProperty(store, instance, *found, value)) {
-					report.Notes.push_back(entry.key() + " was refused by the world — skipped");
+					report.Notes.push_back(entry.key() + " was refused by the world - skipped");
 				}
 			}
 		}
@@ -371,7 +371,7 @@ namespace studio {
 				// hand and has broken is the one case where silence costs the
 				// most: the instance simply does not appear, and nothing says
 				// the file was even looked at.
-				report.Notes.push_back(path.filename().string() + " is not valid JSON — skipped");
+				report.Notes.push_back(path.filename().string() + " is not valid JSON - skipped");
 				return false;
 			}
 			return true;
@@ -382,7 +382,7 @@ namespace studio {
 		// **A conversion rather than a second emitter, which is the whole reason
 		// this row was cheap.** `LuauModuleFor` already turns a document into a
 		// `ModuleScript` that returns it, and Rojo maps `*.toml` and `*.json` to
-		// exactly the same thing — so the only part that was ever missing was a
+		// exactly the same thing - so the only part that was ever missing was a
 		// parser, and everything downstream of this function is shared with the
 		// JSON path unchanged. `D00104` predicted that and it held.
 		//
@@ -452,20 +452,20 @@ namespace studio {
 			buffer << in.rdbuf();
 
 			// **The non-throwing overload**, because a parse failure here is an
-			// ordinary outcome — somebody is editing the file by hand — and this
+			// ordinary outcome - somebody is editing the file by hand - and this
 			// sync reports rather than aborts. Same reason `ReadJsonFile` passes
 			// `false` for its `allow_exceptions`.
 			toml::parse_result parsed = toml::parse(buffer.str());
 			if (!parsed) {
 				// Named rather than skipped, and **with the parser's own
 				// message**, which is the half a JSON note cannot give: TOML
-				// fails on things that look right — a repeated key, a table
-				// redefined, a bare string with a stray quote — and "is not
+				// fails on things that look right - a repeated key, a table
+				// redefined, a bare string with a stray quote - and "is not
 				// valid TOML" on its own sends an author back to stare at a file
 				// they have already stared at.
 				report.Notes.push_back(
 					path.filename().string() + " is not valid TOML (" +
-					std::string(parsed.error().description()) + ") — skipped"
+					std::string(parsed.error().description()) + ") - skipped"
 				);
 				return false;
 			}
@@ -505,7 +505,7 @@ namespace studio {
 				return found;
 			}
 
-			report.Notes.push_back(std::string(name) + " is not a class here — made a Folder instead");
+			report.Notes.push_back(std::string(name) + " is not a class here - made a Folder instead");
 			return FolderClass();
 		}
 
@@ -513,7 +513,7 @@ namespace studio {
 		//
 		// **The text goes into `SourceCache`, not onto the filesystem the engine
 		// reads assets from.** A Rojo project lives wherever its author keeps it,
-		// which is not under `Paths::Assets()` — and `ReadSource` checks the
+		// which is not under `Paths::Assets()` - and `ReadSource` checks the
 		// world's table first for exactly this kind of reason. The upshot is a
 		// synced game that runs and saves without anything being copied.
 		bool StageProgram(Store &store, const std::filesystem::path &file, const std::string &key) {
@@ -592,24 +592,24 @@ namespace studio {
 		// A JSON document as a Luau chunk that returns it.
 		//
 		// **Rojo makes a `*.json` a `ModuleScript` returning a table**, and this
-		// is that, emitted rather than parsed at run time — a module is source,
+		// is that, emitted rather than parsed at run time - a module is source,
 		// and generating source is what keeps `require` one mechanism instead of
 		// two.
 		//
 		// **Every key is emitted as `["..."]` rather than as a bare
 		// identifier.** A JSON key may be anything at all, and `{ foo-bar = 1 }`
-		// is a syntax error where `{ ["foo-bar"] = 1 }` is not — so the bracket
+		// is a syntax error where `{ ["foo-bar"] = 1 }` is not - so the bracket
 		// form is used for all of them rather than a rule that has to decide.
 		//
 		// **Numbers go through `FormatNumber`.** `std::to_string` is `%f`, which
-		// writes 1e-8 as "0.000000" — a value that round-trips through this
+		// writes 1e-8 as "0.000000" - a value that round-trips through this
 		// module as zero. `game::FormatNumber` is the shortest text that reads
 		// back as the same double, and it exists because a document has numbers
 		// that are not property values.
 		void EmitLuauValue(const json &value, std::string &out, int depth) {
 			// **A bound, because JSON nests as deep as a file says it does.** A
 			// hand-written document twenty thousand levels deep would otherwise
-			// recurse until the C stack ran out — a crash with no line number,
+			// recurse until the C stack ran out - a crash with no line number,
 			// from a sync of a file somebody dropped in a folder.
 			constexpr int MAXIMUM_DEPTH = 64;
 
@@ -632,7 +632,7 @@ namespace studio {
 				return;
 			case json::value_t::string: {
 				// Through the JSON dumper, whose escaping is a superset of
-				// Luau's for the characters that matter — quotes, backslashes
+				// Luau's for the characters that matter - quotes, backslashes
 				// and control codes all come out in a form Luau reads back
 				// identically. Writing a second escaper here would be a second
 				// thing to get wrong about a tab.
@@ -679,7 +679,7 @@ namespace studio {
 			return source;
 		}
 
-		// Builds a `*.model.json` — a class, its properties and its children.
+		// Builds a `*.model.json` - a class, its properties and its children.
 		//
 		// **The same patch `ApplyMetadata` applies**, which is why the two share
 		// it: a `.model.json` is a `.meta.json` with a class name and children,
@@ -762,9 +762,9 @@ namespace studio {
 		// the mapping onto instances.
 		//
 		// **One mapping for both containers, because both hand back the same
-		// tree.** Everything below — one instance named after the file, an
+		// tree.** Everything below - one instance named after the file, an
 		// unknown class becoming a `Folder`, a script's `Source` staged into the
-		// world's `SourceCache` — is a decision about a `RobloxModel` and not
+		// world's `SourceCache` - is a decision about a `RobloxModel` and not
 		// about the bytes it came out of. A second copy for the XML container
 		// would be where the two answers started to differ.
 
@@ -802,7 +802,7 @@ namespace studio {
 		//
 		// A number widens or narrows to whatever the property is, because Roblox
 		// and this engine disagree about which of `Transparency` and `ZIndex` is
-		// a float — and that disagreement is not something an author can fix in
+		// a float - and that disagreement is not something an author can fix in
 		// their file.
 		bool ReadPropertyRoblox(
 			const engine::ecs::PropertyDescriptor &property,
@@ -951,7 +951,7 @@ namespace studio {
 			// **Counted rather than reported one by one.** A `.meta.json` is
 			// written by hand, so a key this engine does not have is a typo worth
 			// naming; a model file is written by Studio, which stores every property
-			// of every class — a note each would be a hundred lines saying the
+			// of every class - a note each would be a hundred lines saying the
 			// engine is smaller than Roblox, and would bury the notes that are
 			// about this file.
 			size_t Absent = 0;
@@ -995,7 +995,7 @@ namespace studio {
 			// **A script's program comes out of the file, not out of a path.**
 			// Roblox stores `Source` on the instance and this engine stores a key
 			// into the world's `SourceCache`, so the import stages the text under
-			// a key derived from where the instance sits — which is what makes an
+			// a key derived from where the instance sits - which is what makes an
 			// imported Tool's scripts run rather than exist.
 			const bool module = node.ClassName == "ModuleScript";
 			const bool local = node.ClassName == "LocalScript";
@@ -1045,14 +1045,14 @@ namespace studio {
 				if (!ReadPropertyRoblox(*found, property.Value, value)) {
 					import.Report.Notes.push_back(
 						name + "." + property.Name + " is not a " + engine::ecs::Describe(found->Type) +
-						" here — skipped"
+						" here - skipped"
 					);
 					continue;
 				}
 
 				if (!engine::game::WriteProperty(store, instance, *found, value)) {
 					import.Report.Notes.push_back(
-						name + "." + property.Name + " was refused by the world — skipped"
+						name + "." + property.Name + " was refused by the world - skipped"
 					);
 				}
 			}
@@ -1081,7 +1081,7 @@ namespace studio {
 		// **One instance, because that is what Rojo's table maps a model file
 		// to.** Both containers allow any number of roots and a file with several
 		// is refused by name rather than wrapped in a folder somebody would then
-		// have to explain — inventing a level the author did not write is the
+		// have to explain - inventing a level the author did not write is the
 		// kind of quiet wrongness this whole file is against.
 		Entity BuildRobloxModel(
 			Store &store,
@@ -1106,7 +1106,7 @@ namespace studio {
 				// an author back to stare at a file; "wrong signature" tells them
 				// they renamed an `.rbxmx` to `.rbxm`, and the XML reader says the
 				// same thing from the other side.
-				report.Notes.push_back(leaf + " could not be read (" + failure + ") — skipped");
+				report.Notes.push_back(leaf + " could not be read (" + failure + ") - skipped");
 				return NULL_ENTITY;
 			}
 
@@ -1117,7 +1117,7 @@ namespace studio {
 			if (model.Roots.size() != 1) {
 				report.Notes.push_back(
 					leaf + " holds " + std::to_string(model.Roots.size()) +
-					" instances at its top level, and a model file maps to one — skipped"
+					" instances at its top level, and a model file maps to one - skipped"
 				);
 				return NULL_ENTITY;
 			}
@@ -1128,7 +1128,7 @@ namespace studio {
 			if (import.Absent > 0) {
 				report.Notes.push_back(
 					leaf + " carries " + std::to_string(import.Absent) +
-					" property value(s) this engine has no property for — skipped"
+					" property value(s) this engine has no property for - skipped"
 				);
 			}
 			return built;
@@ -1186,7 +1186,7 @@ namespace studio {
 		// Everything in Rojo's table that is not a script and not a directory.
 		//
 		// **One function, because every one of them is "read a file, make an
-		// instance, parent it"** — and because the order the suffixes are tested
+		// instance, parent it"** - and because the order the suffixes are tested
 		// in is a rule rather than an accident: `.meta.json` and `.model.json`
 		// both end in `.json`, so the specific ones have to be asked first or a
 		// model would become a module returning its own description.
@@ -1243,7 +1243,7 @@ namespace studio {
 				// **The same instance a `*.json` produces**, because Rojo maps
 				// them to the same thing. The document is converted to a `json`
 				// and handed to the same emitter rather than getting a second
-				// one — see `JsonFromToml`.
+				// one - see `JsonFromToml`.
 				json document;
 				if (ReadTomlFile(file, document, report)) {
 					const std::string key = keyPrefix + leaf;
@@ -1256,7 +1256,7 @@ namespace studio {
 			} else if (EndsWith(leaf, ".rbxm") || EndsWith(leaf, ".rbxmx")) {
 				// **Named after the file, not after what the file called it.**
 				// Every other row of Rojo's table takes the instance's name from
-				// the path — a `.model.json`, a `.txt`, a script — and a model
+				// the path - a `.model.json`, a `.txt`, a script - and a model
 				// file that kept its own would be the one place in a project
 				// where renaming a file did nothing.
 				//
@@ -1299,8 +1299,8 @@ namespace studio {
 			// is quiet rather than loud: every wally package ships one, mapping
 			// its `lib/` or `src/` folder onto the module a game requires. A
 			// sync that followed the project *and* walked the folder beside it
-			// built both — one copy under the name the package publishes and one
-			// under the folder's own — and two copies of a `ModuleScript` are
+			// built both - one copy under the name the package publishes and one
+			// under the folder's own - and two copies of a `ModuleScript` are
 			// two modules with two states, which is `mono.studio/AGENTS.md`'s own
 			// rule about a module being keyed by instance.
 			//
@@ -1334,14 +1334,14 @@ namespace studio {
 					const std::string leaf = entry.filename().string();
 
 					// An `init` file makes the directory itself the script
-					// rather than a folder containing one — which is how a
+					// rather than a folder containing one - which is how a
 					// program gets children without every path gaining a level.
 					//
 					// **Which class it becomes is the init file's suffix**,
 					// exactly as it is for any other file: `init.luau` is a
 					// module, `init.server.luau` a `Script`, `init.client.luau`
-					// a `LocalScript`. Reading only `init.luau` — which this did
-					// — made every `init.server.luau` project a folder plus a
+					// a `LocalScript`. Reading only `init.luau` - which this did
+					// - made every `init.server.luau` project a folder plus a
 					// stray script called `init`.
 					Entity node = NULL_ENTITY;
 					const InitFile init = FindInit(entry, report);
@@ -1366,7 +1366,7 @@ namespace studio {
 					store.SetParent(node, parent);
 
 					// **`init.meta.json` patches the directory's own instance,
-					// and may change its class outright** — which is Rojo's one
+					// and may change its class outright** - which is Rojo's one
 					// way of saying "this folder is really a `Model`". Applied
 					// after the node exists and before its children are built,
 					// so a child parented into it lands under the right thing.
@@ -1396,7 +1396,7 @@ namespace studio {
 
 				// **The rest of Rojo's table, before the script test**, because
 				// a `.model.json` is not a script and a `.meta.json` is not an
-				// instance at all — and both end in an extension the script
+				// instance at all - and both end in an extension the script
 				// classifier has never heard of.
 				if (BuildMapped(store, entry, parent, keyPrefix, report)) {
 					continue;
@@ -1408,7 +1408,7 @@ namespace studio {
 					// file did not appear knows why. Every mapping Rojo has is
 					// built above, so anything reaching here is a file the table
 					// says nothing about.
-					report.Notes.push_back(entry.filename().string() + " is not a script — skipped");
+					report.Notes.push_back(entry.filename().string() + " is not a script - skipped");
 					continue;
 				}
 
@@ -1431,7 +1431,7 @@ namespace studio {
 
 				// **A script takes a sidecar like anything else.** Rojo's
 				// `.meta.json` patches whatever the file of that stem produced,
-				// and a script is the most common thing it produces —
+				// and a script is the most common thing it produces -
 				// `Disabled` on a `Script` is the first patch anybody writes.
 				ApplySidecar(store, entry, script, report);
 			}
@@ -1441,7 +1441,7 @@ namespace studio {
 		//
 		// **One implementation, because two things map a path onto a node.** A
 		// node in a project's tree does it, and so does the *root* of a nested
-		// project — a wally package is `{"tree": {"$path": "lib"}}` and nothing
+		// project - a wally package is `{"tree": {"$path": "lib"}}` and nothing
 		// else, so a nested build that only walked the root's children built
 		// nothing at all for every package a game installs. That failure was
 		// invisible while directories were also walked beside their project
@@ -1479,7 +1479,7 @@ namespace studio {
 			// file is written against.
 			//
 			// The prefix is the file's *folder*, because `BuildMapped` appends
-			// the leaf — passing the whole path would key a staged module under
+			// the leaf - passing the whole path would key a staged module under
 			// `src/data.json/data.json`.
 			const std::string folder = path.substr(0, path.find_last_of('/') + 1);
 			if (BuildMapped(store, source, into, folder, report)) {
@@ -1491,7 +1491,7 @@ namespace studio {
 				// The same accounting a directory walk does. A `$path` naming a
 				// model file used to produce nothing and say nothing, which is
 				// the one outcome an author cannot act on.
-				report.Notes.push_back(path + " is not a script — skipped");
+				report.Notes.push_back(path + " is not a script - skipped");
 				return;
 			}
 
@@ -1551,8 +1551,8 @@ namespace studio {
 		// they installed.
 		//
 		// **The cycle check is the part that has to exist before the
-		// recursion.** Two projects that include each other — or one that
-		// includes itself, which is what a copy-pasted `$path` produces — would
+		// recursion.** Two projects that include each other - or one that
+		// includes itself, which is what a copy-pasted `$path` produces - would
 		// otherwise recurse until the stack ran out, with no line number and no
 		// file named. The set is of *canonical* paths, so two spellings of one
 		// file are one entry.
@@ -1561,7 +1561,7 @@ namespace studio {
 		) {
 			// **A file-local static would be wrong and a member would be
 			// surface.** The set has to live exactly as long as one top-level
-			// sync, and this is the only recursion in it — so it is a static
+			// sync, and this is the only recursion in it - so it is a static
 			// inside the function that opens and closes the scope, cleared by
 			// the outermost call.
 			static std::vector<std::filesystem::path> loading;
@@ -1572,7 +1572,7 @@ namespace studio {
 
 			if (std::find(loading.begin(), loading.end(), key) != loading.end()) {
 				report.Notes.push_back(
-					file.filename().string() + " includes itself — the second visit was skipped"
+					file.filename().string() + " includes itself - the second visit was skipped"
 				);
 				return true;
 			}
@@ -1592,8 +1592,8 @@ namespace studio {
 			loading.push_back(key);
 
 			// **The root's own `$path` first, into the including node.** A
-			// package's project file is a root with a path and no children —
-			// `{"tree": {"$path": "lib"}}` — so a build that started at the
+			// package's project file is a root with a path and no children -
+			// `{"tree": {"$path": "lib"}}` - so a build that started at the
 			// children built nothing for it. The root maps onto the node that
 			// included it rather than onto a new instance: a nested project is a
 			// subtree of the one that named it, and creating an extra level here
@@ -1602,7 +1602,7 @@ namespace studio {
 			BuildPathInto(store, file.parent_path(), nested.Tree.Path, parent, report);
 
 			// **Then the tree's own children, exactly as a top-level sync builds
-			// them** — and under the *including* node, for the same reason.
+			// them** - and under the *including* node, for the same reason.
 			for (const RojoNode &child : nested.Tree.Children) {
 				BuildNode(store, child, file.parent_path(), parent, report);
 			}
@@ -1634,7 +1634,7 @@ namespace studio {
 
 		const auto tree = document.find("tree");
 		if (tree == document.end() || !tree->is_object()) {
-			error = "no 'tree' — this is not a Rojo project file";
+			error = "no 'tree' - this is not a Rojo project file";
 			return false;
 		}
 
@@ -1666,7 +1666,7 @@ namespace studio {
 
 		// **The tree's own children, not the tree itself.** The root node is the
 		// `DataModel`, which this engine models as the world rather than as an
-		// instance in it — so its children become the world's roots.
+		// instance in it - so its children become the world's roots.
 		for (const RojoNode &child : project.Tree.Children) {
 			BuildNode(store, child, root, NULL_ENTITY, report);
 		}
@@ -1699,7 +1699,7 @@ namespace studio {
 
 		const auto worlds = document.find("worlds");
 		if (worlds == document.end() || !worlds->is_object()) {
-			error = "no 'worlds' — this is not a universe file";
+			error = "no 'worlds' - this is not a universe file";
 			return false;
 		}
 
@@ -1817,7 +1817,7 @@ namespace studio {
 			worlds.Enter(id, [&](Store &store) {
 				// A world this call made has none of the services a place
 				// needs, and `BuildNode` reuses an existing `Workspace` rather
-				// than making a second — so installing them first is what stops
+				// than making a second - so installing them first is what stops
 				// a synced world from having two.
 				if (created) {
 					engine::scene::InstallServices(store);
@@ -1830,7 +1830,7 @@ namespace studio {
 			});
 
 			if (!result.Synced && result.Error.empty()) {
-				// `Enter` refused — the world is remote, faulted or held down.
+				// `Enter` refused - the world is remote, faulted or held down.
 				// Named rather than left as a silent failure, because "nothing
 				// happened and nothing said why" is the report this layer exists
 				// to avoid.

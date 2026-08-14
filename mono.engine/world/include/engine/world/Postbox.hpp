@@ -2,8 +2,8 @@
 
 // How a system talks to a bus.
 //
-// A system takes the world and nothing else — that is `ecs/AGENTS.md`'s rule
-// and it is not negotiable — so the mailbox has to be *in* the world. It is:
+// A system takes the world and nothing else - that is `ecs/AGENTS.md`'s rule
+// and it is not negotiable - so the mailbox has to be *in* the world. It is:
 // `Outbox` and `Inbox` are resources on the world's store, which means they are
 // covered by the affinity check, visible to the profiler, and carried by a
 // snapshot. Pending traffic is world state, and a crash recovery that lost it
@@ -41,7 +41,7 @@ namespace engine::world {
 	//
 	// A resource rather than a member of `World`, because a member would be
 	// exactly the "private vector for data another module reads" that
-	// `ecs/AGENTS.md` forbids — and because a snapshot has to carry it.
+	// `ecs/AGENTS.md` forbids - and because a snapshot has to carry it.
 	//
 	// @since v0.2
 	struct Outbox {
@@ -60,7 +60,7 @@ namespace engine::world {
 	// What reached this world at the last barrier.
 	//
 	// Replaced wholesale each barrier rather than appended to, so a system that
-	// forgets to drain it does not accumulate an unbounded backlog — it misses
+	// forgets to drain it does not accumulate an unbounded backlog - it misses
 	// messages, which is visible, instead of leaking, which is not.
 	//
 	// @since v0.2
@@ -93,7 +93,7 @@ namespace engine::world {
 	//
 	// Refused at the call rather than at review time, because "do not do this"
 	// is a rule somebody eventually does. A replica may still *read* its inbox
-	// — that is how it receives what the server published.
+	// - that is how it receives what the server published.
 	//
 	// @since v0.2
 	struct Replica {
@@ -136,7 +136,7 @@ namespace engine::world {
 		// Subscribes this world to a topic.
 		//
 		// Idempotent. Takes effect at the next barrier, so a message published
-		// in the same tick as the subscription is not received — which is the
+		// in the same tick as the subscription is not received - which is the
 		// honest answer, since the subscription did not exist when it was sent.
 		//
 		// @param topic The topic to subscribe to.
@@ -219,7 +219,7 @@ namespace engine::world {
 		// listening for and can tell a sender that named something else. Nothing
 		// is delivered on a channel this was never called for.
 		//
-		// Idempotent, and it takes effect at the next barrier — so a message sent
+		// Idempotent, and it takes effect at the next barrier - so a message sent
 		// in the same tick as the open is refused, which is the honest answer
 		// since the channel did not exist when it was addressed. That is
 		// `Subscribe`'s rule, said again because it is the same one.
@@ -227,7 +227,7 @@ namespace engine::world {
 		// **A ticket rather than a boolean, alone among the opens and closes on
 		// this bus, because this is the one of them an authority may refuse.**
 		// `UniverseSettings::ChannelsPerWorld` caps how many channels a world may
-		// hold, and the count lives in the router's table — a world cannot answer
+		// hold, and the count lives in the router's table - a world cannot answer
 		// it from its own store without keeping a second copy of that table, and
 		// the copy would drift the first time an open was refused. So the answer
 		// is decided at the barrier and comes back the way every other barrier
@@ -265,7 +265,7 @@ namespace engine::world {
 		// attached.
 		//
 		// **The addressed route out of a world, which this module did not have.**
-		// `Publish` is a topic fan-out — the sender does not know or care who is
+		// `Publish` is a topic fan-out - the sender does not know or care who is
 		// listening, which is right for "the boss died" and wrong for "world B,
 		// here is the score you asked for". `Teleport` is the only other
 		// operation that names a world and it moves a *person*, so a game wanting
@@ -290,7 +290,7 @@ namespace engine::world {
 		// `Publish`. `BusStatus` carries the table of what each case answers.
 		//
 		// The delivery arrives with `Bus == BusKind::Channel`, `Key` set to the
-		// channel and `From` to the sender — a channel is the one route where
+		// channel and `From` to the sender - a channel is the one route where
 		// answering is the point, and the destination already knows it is itself.
 		//
 		// @param world   The destination world's name.
@@ -314,7 +314,7 @@ namespace engine::world {
 		// Queues an envelope, or reports that the budget is spent.
 		//
 		// `target` is the destination world and only a channel send has one, so
-		// it is last and defaulted rather than sitting beside `key` — the two are
+		// it is last and defaulted rather than sitting beside `key` - the two are
 		// both `core::Name` and adjacent is where a positional call swaps them.
 		Ticket Post(
 			BusKind bus,
@@ -332,7 +332,7 @@ namespace engine::world {
 	// Registers the mailbox resource types with serialisers of their own.
 	//
 	// An outbox holds a vector and a `core::Name`, neither of which survives
-	// being written as its object representation — the vector is a pointer and
+	// being written as its object representation - the vector is a pointer and
 	// the name is a process-local id. Called once at startup by whatever builds
 	// a universe.
 	void RegisterMailboxTypes();

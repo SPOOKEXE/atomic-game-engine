@@ -3,7 +3,7 @@
 // **What is worth testing here is the ordering, not the map.** A vector keyed
 // by name is not interesting; "the cache is consulted before the disk" is,
 // because getting it backwards produces an editor whose unsaved changes appear
-// to run and do not — the file on disk is stale by exactly one edit, which is
+// to run and do not - the file on disk is stale by exactly one edit, which is
 // the hardest possible version of that bug to see.
 
 #include <engine/core/Paths.hpp>
@@ -52,7 +52,7 @@ TEST_CASE("a cached program is used and the file is not read", "[script][sourcec
 	std::string error;
 
 	// The path names nothing on disk at all. If the resolution order were the
-	// other way round this would fail to open a file — which is exactly the
+	// other way round this would fail to open a file - which is exactly the
 	// assertion, stated as a path that could not possibly succeed by accident.
 	REQUIRE(ReadSource(store, Name("does/not/exist.luau"), program, error));
 	CHECK(program == "return 42");
@@ -99,8 +99,8 @@ TEST_CASE("setting a path twice replaces rather than appends", "[script][sourcec
 	cache.Set(Name("Main.luau"), "second");
 
 	// A history of edits would make the serialisation grow every time the
-	// editor saved, and insertion order — the thing that makes two loads of one
-	// game file byte-identical — would stop meaning anything.
+	// editor saved, and insertion order - the thing that makes two loads of one
+	// game file byte-identical - would stop meaning anything.
 	REQUIRE(cache.Count() == 1);
 	REQUIRE(cache.Find(Name("Main.luau")) != nullptr);
 	CHECK(*cache.Find(Name("Main.luau")) == "second");
@@ -114,7 +114,7 @@ TEST_CASE("a script instance runs from the cache", "[script][sourcecache]") {
 	Store store = MakeWorld();
 
 	// The end-to-end version: not `ReadSource` directly, but the path
-	// `RunWorldScripts` takes — because the point of the cache is that the
+	// `RunWorldScripts` takes - because the point of the cache is that the
 	// runtime consults it, and a helper nobody called would pass every test
 	// above while changing nothing.
 	SourceCache cache;

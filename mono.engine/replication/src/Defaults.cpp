@@ -23,8 +23,8 @@ namespace engine::replication {
 		// **`ecs.` used to be a prefix with one exception written into it, and
 		// the exception is how two components went missing.** The rule read
 		// "`scene.` or `ecs.Hierarchy`", so `ecs.InstanceName` and
-		// `ecs.InstanceClass` crossed in a join snapshot — `Store::Save` carries
-		// every component — and never in a delta. An entity the world already
+		// `ecs.InstanceClass` crossed in a join snapshot - `Store::Save` carries
+		// every component - and never in a delta. An entity the world already
 		// held arrived named, an entity created while a client was connected
 		// arrived with no name and no class, and nothing said so: a client's own
 		// `Player` had four children whose names were empty strings.
@@ -36,7 +36,7 @@ namespace engine::replication {
 		//
 		// **Once per change, not once per creation, and the difference is the
 		// v0.7 bug again.** Saying a name in the `Structure` message that creates
-		// the entity would be one reliable copy and nothing per tick after it —
+		// the entity would be one reliable copy and nothing per tick after it -
 		// but `.Name` is a writable property a script sets whenever it likes, and
 		// a fact that crosses only at birth is exactly the shape of the part that
 		// was recoloured at runtime and kept its old colour on every client for
@@ -48,9 +48,9 @@ namespace engine::replication {
 		// promise every other replicated value gets and needs no second one.
 		//
 		// That is also the answer to what a repeated class name costs. It is
-		// text on a wire — `ecs.InstanceClass` crosses as `Classes::Describe`'s
+		// text on a wire - `ecs.InstanceClass` crosses as `Classes::Describe`'s
 		// name, because a `ClassId` is a registration index and rule 4 forbids
-		// one — but it crosses on the tick an instance is created and on no
+		// one - but it crosses on the tick an instance is created and on no
 		// other, so a per-connection string table would be a dictionary
 		// negotiated to compress a message that is already only sent once. The
 		// steady-state saving would be zero.
@@ -73,7 +73,7 @@ namespace engine::replication {
 		// know.
 		//
 		// Hashing either would be a pass over the world to learn what was free.
-		// Everything else is written once by a script and then never — observing
+		// Everything else is written once by a script and then never - observing
 		// those buys a dirty column paid every tick and read never, and *not*
 		// signing them is the v0.7 bug where a part recoloured at runtime kept
 		// its old colour on every client for ever.
@@ -86,14 +86,14 @@ namespace engine::replication {
 		// **The client makes its own main camera, and the component that says
 		// *which* camera that is, is the one to keep local.** `ActiveCamera`
 		// names the live one and `client::AimReplicaViewer` mints a predicted
-		// camera and points it there — a replica may not mint an authoritative
-		// entity — so a replicated `ActiveCamera` would be a second answer to
+		// camera and points it there - a replica may not mint an authoritative
+		// entity - so a replicated `ActiveCamera` would be a second answer to
 		// which eye the world is seen through, and the two would fight every
 		// frame. `CameraController` is how a machine drives its own.
 		//
 		// **`scene.Camera` itself must cross, and that is not a hedge.** It is a
 		// *lens*, not a viewpoint: a `SurfaceCamera` carries one, so a mirror
-		// with no replicated `Camera` cannot be aimed at all —
+		// with no replicated `Camera` cannot be aimed at all -
 		// `AimSurfaceCameras` finds nothing, the pane samples nothing, and the
 		// mirror is a flat grey rectangle on every client. That is not
 		// hypothetical: excluding it broke `studio.playlink`'s "a mirror arrives
@@ -101,7 +101,7 @@ namespace engine::replication {
 		// this. An authored `Camera` instance is scene content like any other.
 		// **A portal proxy is a piece of another room, made and unmade inside one
 		// tick.** It exists so a body standing in a hole has the far room's floor
-		// under it — `physics/Portals.hpp` — and it is never the same entity two
+		// under it - `physics/Portals.hpp` - and it is never the same entity two
 		// ticks running, so replicating one would be a create and a destroy per
 		// tick per proxy on the wire, describing geometry the client already has
 		// on the other side of the pane.
@@ -122,7 +122,7 @@ namespace engine::replication {
 		// **The authority's bookkeeping about a life that has not started yet.**
 		// `scene.PlayerRespawn` is a deadline `scene::UpdateRespawns` computes
 		// and only the authority runs that pass, so a replicated one is a row a
-		// client can do nothing with — and it is added and removed on every
+		// client can do nothing with - and it is added and removed on every
 		// death and spawn, which is an archetype move and a structural message
 		// per respawn per player for a number nobody reads.
 		//
@@ -132,8 +132,8 @@ namespace engine::replication {
 		//
 		// **`scene.CharacterChanges` is a *queue*, and the whole of it is
 		// per-machine.** Each side records its own transitions and drains them
-		// into its own VM — a client learns it has a character by receiving
-		// `PlayerCharacter` and rebuilding the link locally — so shipping the
+		// into its own VM - a client learns it has a character by receiving
+		// `PlayerCharacter` and rebuilding the link locally - so shipping the
 		// authority's list would fire every client's `CharacterAdded` twice, once
 		// for its own record and once for a copy of somebody else's.
 		if (component == "scene.PlayerRespawn" || component == "scene.CharacterChanges") {
@@ -142,7 +142,7 @@ namespace engine::replication {
 
 		// **A statement about hosting, not about what the world looks like.**
 		// `scene.AwakeWorld` is how a game tells its host that a world with
-		// nobody in it still has to tick — NPCs, an economy, a round timer. A
+		// nobody in it still has to tick - NPCs, an economy, a round timer. A
 		// client neither needs it nor has any business setting it, and a
 		// replicated one would be a client asking a server to keep a machine
 		// running.
@@ -166,13 +166,13 @@ namespace engine::replication {
 		// the *frustum fitted to its pane* does not, because that fit is made
 		// from where the local eye is standing. The authority's answer is
 		// correct for the authority's camera and wrong for every client
-		// watching — which is the rule `client/Replicated.hpp` states for the
+		// watching - which is the rule `client/Replicated.hpp` states for the
 		// placement, and a lens is the placement's other half.
 		//
 		// Both ends run `AimSurfaceCameras` and recompute it, so what crosses is
 		// the mirror and never the aim. Replicating it would pay wire to send
 		// every client a frustum aimed at somebody else's eye, which the
-		// receiver then overwrites — wrong *and* wasteful, and wrong in a way
+		// receiver then overwrites - wrong *and* wasteful, and wrong in a way
 		// that would only show on a second machine.
 		//
 		// `scene.Portal` is deliberately not here: which part a portal leads to
@@ -206,7 +206,7 @@ namespace engine::replication {
 
 				// **A type with no serialisation cannot cross and is skipped
 				// rather than declared.** Declaring one would have the authority
-				// refuse it per tick — a component that looks replicated,
+				// refuse it per tick - a component that looks replicated,
 				// reports nothing and costs a check for ever.
 				if (!type.Serialisable) {
 					continue;
@@ -216,14 +216,14 @@ namespace engine::replication {
 				// *signed*, which is what everything here but the two above
 				// uses.** `Authority` warns and declines it, so declaring one is
 				// a warning per host per run describing a component nobody meant
-				// to send: the catalogues are the case — `scene.TextureCatalogue`
+				// to send: the catalogues are the case - `scene.TextureCatalogue`
 				// and its two siblings are resources holding maps, they hang off
 				// no entity, and they arrived here only because they share the
 				// prefix.
 				//
 				// A non-trivial component that genuinely should cross needs
 				// `Observed` and a matching `Store::Observe`, which is a decision
-				// per component rather than something a prefix can infer — so it
+				// per component rather than something a prefix can infer - so it
 				// is named in the host that wants it rather than defaulted here.
 				if (!type.Trivial && !WrittenEveryTick(name)) {
 					continue;
@@ -236,7 +236,7 @@ namespace engine::replication {
 				// bytes for the root alone.
 				//
 				// `scene.CharacterLimb` is the tag because it already means exactly
-				// this — an entity carrying one *is* an entity whose frame is a
+				// this - an entity carrying one *is* an entity whose frame is a
 				// product of its root and its rest offset. Nothing new had to be
 				// declared, which is also why this needed no second consumer to
 				// check the idea against: the second consumer would have wanted the
@@ -244,7 +244,7 @@ namespace engine::replication {
 				//
 				// The offsets still cross, because `scene.CharacterLimb` is itself
 				// replicated and is not what this filters. Only `scene.Transform`
-				// rows for those entities stop, and only as deltas — the baseline a
+				// rows for those entities stop, and only as deltas - the baseline a
 				// newly admitted client receives still carries one copy, so its
 				// first frame is right before any derivation has run. `D00115`.
 				const bool derived = name == "scene.Transform";

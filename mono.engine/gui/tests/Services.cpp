@@ -2,7 +2,7 @@
 //
 // **The selection is the whole reason this class is registered.**
 // `GuiObject::Selectable` has been a declared, saved, bound property since the
-// tree went in and nothing read it — which is the state the version's own rule
+// tree went in and nothing read it - which is the state the version's own rule
 // refuses to leave a property in. These cases are that rule being satisfied:
 // they fail if selection stops working, rather than merely if it stops
 // compiling.
@@ -10,7 +10,7 @@
 // `Path2D` and `GuidRegistryService` are deliberately absent and
 // `gui/Services.hpp` gives the reason at length: there is no `DrawKind` a path
 // could compile to and nothing for a GUID registry to keep, so both would be
-// classes that do nothing forever with no error — the failure that kept
+// classes that do nothing forever with no error - the failure that kept
 // `VideoFrame` out.
 
 #include <engine/ecs/Classes.hpp>
@@ -91,7 +91,7 @@ namespace {
 
 TEST_CASE("installing the services is idempotent", "[gui][services]") {
 	// The studio runs this after every load without checking which kind of file
-	// it got, exactly as it does `scene::InstallServices` — so a second call has
+	// it got, exactly as it does `scene::InstallServices` - so a second call has
 	// to be a lookup rather than a second service.
 	World world("gui_services.idempotent");
 
@@ -131,7 +131,7 @@ TEST_CASE("selection refuses an element that cannot hold it", "[gui][services]")
 	CHECK(Select(world.Data, ok));
 	CHECK(world.Selected() == ok);
 
-	// Clearing is always allowed — it is the one move that cannot strand
+	// Clearing is always allowed - it is the one move that cannot strand
 	// anything.
 	CHECK(Select(world.Data, engine::ecs::NULL_ENTITY));
 	CHECK(world.Selected() == engine::ecs::NULL_ENTITY);
@@ -210,7 +210,7 @@ TEST_CASE("selection does not move past the edge", "[gui][services]") {
 TEST_CASE("a level neighbour is not above anything", "[gui][services]") {
 	// **Strictly forward, and this is the case that pins it.** Two buttons in a
 	// row have equal Y, so an implementation testing "not below" rather than
-	// "above" selects a sibling when a player presses up — which reads as the
+	// "above" selects a sibling when a player presses up - which reads as the
 	// stick being drifting rather than as a bug.
 	World world("gui_services.level");
 
@@ -243,7 +243,7 @@ TEST_CASE("alignment breaks a tie without overruling distance", "[gui][services]
 
 TEST_CASE("an element that is not drawn cannot be selected into", "[gui][services]") {
 	// **Candidates come from the compiled list, not the tree**, so an element
-	// under a disabled collector is unreachable because it is not on screen —
+	// under a disabled collector is unreachable because it is not on screen -
 	// which is the same reason `Pick` walks the list rather than descending.
 	World world("gui_services.hidden");
 
@@ -274,7 +274,7 @@ namespace {
 	// A world with a `StarterGui` root and one player holding a `PlayerGui`.
 	//
 	// **Both built by hand rather than by `scene::InstallServices`**, because
-	// `gui` may not link `scene` — the refusal `STARTER_GUI` exists because of.
+	// `gui` may not link `scene` - the refusal `STARTER_GUI` exists because of.
 	// What the names have to be is exactly what that constant says, and
 	// `examples/tests/Scene.cpp` is where the two spellings are pinned together.
 	struct SpawnWorld {
@@ -321,7 +321,7 @@ TEST_CASE("a spawn copies the template into the player's own container", "[gui][
 	// this engine did not have at all: `Layout` drew a `ScreenGui` from
 	// `StarterGui` *or* from a `PlayerGui`, so every client drew the same
 	// instances. That works in single player and is wrong the moment there are
-	// two — a script hiding one player's health bar hid everybody's.
+	// two - a script hiding one player's health bar hid everybody's.
 	SpawnWorld world("gui.spawn.copy");
 	world.Collector(world.Starter, "Hud", true);
 	world.Collector(world.Starter, "Menu", true);
@@ -358,8 +358,8 @@ TEST_CASE("a respawn replaces what resets and leaves what does not", "[gui][serv
 	CHECK(world.CountIn(world.PlayerGui) == 2);
 
 	// **The identities are the assertion, not the count.** The health bar is a
-	// *different* instance — destroyed and re-cloned, so a script's leftover
-	// state goes with it — and the minimap is the same one, still holding
+	// *different* instance - destroyed and re-cloned, so a script's leftover
+	// state goes with it - and the minimap is the same one, still holding
 	// whatever a script put in it.
 	CHECK(world.FindIn(world.PlayerGui, "Hud") != firstHud);
 	CHECK(world.FindIn(world.PlayerGui, "Minimap") == firstMap);
@@ -392,7 +392,7 @@ TEST_CASE("what is not a collector is copied and never cleared", "[gui][services
 	const Entity copied = world.FindIn(world.PlayerGui, "Assets");
 	REQUIRE(copied != engine::ecs::NULL_ENTITY);
 
-	// Not cleared on the next spawn, and therefore not copied again either —
+	// Not cleared on the next spawn, and therefore not copied again either -
 	// it survives by the same rule a `ResetOnSpawn = false` collector does.
 	CHECK(ResetPlayerGui(world.Data, world.Player) == 0);
 	CHECK(world.FindIn(world.PlayerGui, "Assets") == copied);
@@ -401,7 +401,7 @@ TEST_CASE("what is not a collector is copied and never cleared", "[gui][services
 TEST_CASE("two players hold two interfaces and three spawns keep them apart", "[gui][services]") {
 	// **The multiplayer half, which is the whole reason `StarterGui` is a
 	// template.** A one-player check passes against the version this replaced,
-	// where every client drew the template's own instances — so a script hiding
+	// where every client drew the template's own instances - so a script hiding
 	// one player's health bar hid everybody's.
 	//
 	// **Three spawns rather than two**, because a survivor has to keep its
@@ -433,7 +433,7 @@ TEST_CASE("two players hold two interfaces and three spawns keep them apart", "[
 	CHECK(mineHud != world.FindIn(world.Starter, "Hud"));
 
 	// Two more lives for the first player, and the second's is untouched by
-	// either — a reset that reached the template rather than the copy would
+	// either - a reset that reached the template rather than the copy would
 	// show up here and nowhere else.
 	CHECK(ResetPlayerGui(world.Data, world.Player) == 1);
 	CHECK(ResetPlayerGui(world.Data, world.Player) == 1);
@@ -505,7 +505,7 @@ TEST_CASE("the keyboard goes to a text box and to nothing else", "[gui][services
 TEST_CASE("a destroyed text box is not focused and a reparented one still is", "[gui][services]") {
 	// **The dangling case, which is the failure mode this design is arranged
 	// around.** The handle carries a generation, so the answer is a question
-	// rather than a use-after-free — and nothing had to hook `DestroyInstance`
+	// rather than a use-after-free - and nothing had to hook `DestroyInstance`
 	// for that to be true.
 	World world("gui_services.focus_lifetime");
 	const Entity box = TextBox(world, "Entry", "hi");
@@ -534,7 +534,7 @@ TEST_CASE("taking focus places the caret in characters, not in bytes", "[gui][se
 	// **`Entry::CursorPosition` is one-based and counted in characters**, which
 	// is Roblox's number. `Label::Text` is UTF-8, so a caret derived from
 	// `Text.size()` sits past the end of anything typed in a language with
-	// accents in it — one place too far for `é` and three for an emoji.
+	// accents in it - one place too far for `é` and three for an emoji.
 	World world("gui_services.caret");
 
 	// Five characters in nine bytes: `h`, `é` (two), `l`, `l`, `😀` (four).
@@ -552,7 +552,7 @@ TEST_CASE("taking focus places the caret in characters, not in bytes", "[gui][se
 
 TEST_CASE("ClearTextOnFocus empties the box at the moment focus is taken", "[gui][services]") {
 	// The property has been declared, saved and bound since the tree went in
-	// and nothing read it — the state this version's rule refuses to leave a
+	// and nothing read it - the state this version's rule refuses to leave a
 	// property in, and the same argument `Selectable` is here for.
 	World world("gui_services.clear_on_focus");
 	const Entity clearing = TextBox(world, "Search", "last search", true);

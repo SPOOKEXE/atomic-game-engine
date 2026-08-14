@@ -66,7 +66,7 @@ namespace engine::scene {
 		//
 		// **Both masks cleared, rather than `Collider::Trigger`.** A trigger is
 		// still a pair the solver considers and still produces an event per
-		// frame per limb per contact — five limbs standing inside their own root
+		// frame per limb per contact - five limbs standing inside their own root
 		// would report thirty overlaps a tick that nothing reads. An empty layer
 		// is never a candidate, which is the ECS-native form of the same wish.
 		void MakeIntangible(ecs::Store &store, ecs::Entity part) {
@@ -85,7 +85,7 @@ namespace engine::scene {
 		// a scripted NPC puts the humanoid on the part itself. `StepCharacters`
 		// and `GroundCharacters` both branch on `Humanoid::RootPart` for exactly
 		// this, and the whole point of resolving it here is that they never have
-		// to guess again — `SetPlayerCharacter` writes the field back.
+		// to guess again - `SetPlayerCharacter` writes the field back.
 		bool
 		ResolveRig(const ecs::Store &store, ecs::Entity model, ecs::Entity &root, ecs::Entity &humanoid) {
 			humanoid = store.Has<Humanoid>(model)
@@ -98,7 +98,7 @@ namespace engine::scene {
 			}
 
 			// **The humanoid's own answer first**, so a rig that already knows
-			// its body keeps it — a model with two parts one of which happens to
+			// its body keeps it - a model with two parts one of which happens to
 			// be called `HumanoidRootPart` should not overrule the field.
 			root = steering->RootPart;
 			if (root == ecs::NULL_ENTITY || !store.Alive(root)) {
@@ -118,15 +118,15 @@ namespace engine::scene {
 		// Writes down that a player gained or lost a body.
 		//
 		// **One place, because `SetPlayerCharacter` is one door.** Every path
-		// that binds or releases a character goes through that function —
+		// that binds or releases a character goes through that function -
 		// `LoadCharacter`, `RemoveCharacter`, `LinkPlayerCharacters` and the
-		// `Player.Character` setter — so recording here is recording once. A
+		// `Player.Character` setter - so recording here is recording once. A
 		// second record beside it would be the copy that disagreed.
 		// The most a world will hold before it starts dropping the oldest.
 		//
 		// **A bound, because nothing guarantees a drain.** A world with no
-		// script runtime — a client replica, a headless world a host never
-		// scripted — records here and never empties, which is an allocation that
+		// script runtime - a client replica, a headless world a host never
+		// scripted - records here and never empties, which is an allocation that
 		// grows with the session and nothing to notice it. Dropping the *oldest*
 		// is the conservative direction for a signal nobody is listening to: the
 		// newest transition is the one a runtime attached later would care about.
@@ -172,16 +172,16 @@ namespace engine::scene {
 		// Whether one instance is somewhere a character may be put.
 		//
 		// **Two answers, and the second is a bridge rather than a fallback.**
-		// `SpawnLocation` is a class from v0.15 and was a *name* before it — the
-		// deliberate stop `Characters.hpp` recorded — so every scene already
+		// `SpawnLocation` is a class from v0.15 and was a *name* before it - the
+		// deliberate stop `Characters.hpp` recorded - so every scene already
 		// written builds its pad as a `Part` called `SpawnLocation` and must
 		// keep working with nothing edited. A part still wearing the name is
 		// read as a spawn with the class's defaults, which are neutral and
 		// enabled.
 		//
 		// **Not the shape `scene/AGENTS.md` refuses.** That rule is about
-		// *fixtures* — a service found by name is one a script can rename out of
-		// existence — and a spawn pad is content an author names on purpose.
+		// *fixtures* - a service found by name is one a script can rename out of
+		// existence - and a spawn pad is content an author names on purpose.
 		// Here the name is a documented second door into one class, not a lookup
 		// somebody forgot to convert.
 		bool IsSpawn(const ecs::Store &store, ecs::Entity instance) {
@@ -206,7 +206,7 @@ namespace engine::scene {
 		// **A model with no `Humanoid` row is alive**, which is the only reading
 		// that does not invent a policy: `SetPlayerCharacter` refuses a model
 		// with no humanoid in it, so the case left here is a rig whose humanoid
-		// was destroyed under it — and `LinkPlayerCharacters` releases that
+		// was destroyed under it - and `LinkPlayerCharacters` releases that
 		// player on the same tick. Calling it dead would respawn somebody the
 		// other pass is about to release anyway, a respawn earlier.
 		bool CharacterIsDead(const ecs::Store &store, ecs::Entity model) {
@@ -224,7 +224,7 @@ namespace engine::scene {
 		// **Refused in a replica, and this is the authority decision written
 		// where it can be enforced.** A client holds a copy of every
 		// `scene.Humanoid` in the world, so a client allowed to subtract from one
-		// is a client deciding who died — and the value it wrote would survive
+		// is a client deciding who died - and the value it wrote would survive
 		// exactly until the next delta, which presents as "my damage works
 		// sometimes" rather than as a refusal. `ecs::Store::SetProperty` makes
 		// the same refusal for the script door and says the same thing; this is
@@ -240,8 +240,8 @@ namespace engine::scene {
 
 		// **Already dead takes nothing, which is what makes a death happen
 		// once.** Two hits landing in one tick otherwise each read zero as a
-		// fresh death, and anything hanging off the transition — a kill counter,
-		// a `GetPropertyChangedSignal("Health")` handler — would run twice for
+		// fresh death, and anything hanging off the transition - a kill counter,
+		// a `GetPropertyChangedSignal("Health")` handler - would run twice for
 		// one body.
 		if (IsDead(*steering) || !(amount > 0.0f)) {
 			return false;
@@ -253,7 +253,7 @@ namespace engine::scene {
 		}
 
 		// **The intent goes with the life.** `StepCharacters` already refuses to
-		// drive a dead humanoid, so this changes no motion — what it stops is a
+		// drive a dead humanoid, so this changes no motion - what it stops is a
 		// corpse replicating a `MoveDirection` its owner was holding, which is a
 		// body that looks like it is still trying to walk.
 		steering->MoveDirection = Vector3{};
@@ -268,7 +268,7 @@ namespace engine::scene {
 		}
 
 		// **`Frame` is the feet and the root is the centre.** The conversion
-		// happens here and nowhere else — `CharacterDesc::Frame` says why the
+		// happens here and nowhere else - `CharacterDesc::Frame` says why the
 		// argument is the feet, and a second place that added half a height is
 		// the place the two would disagree.
 		const CFrame centre = desc.Frame * CFrame(Vector3{0.0f, CHARACTER_HEIGHT * 0.5f, 0.0f});
@@ -321,7 +321,7 @@ namespace engine::scene {
 			store.Set(entity, CharacterLimb{root, CFrame(limb.Offset), 0});
 		}
 
-		// The model follows the root like everything else does — see
+		// The model follows the root like everything else does - see
 		// `CharacterLimb` for why it is a row here rather than a case in the
 		// pass.
 		store.Set(model, CharacterLimb{root, CFrame(), 0});
@@ -393,14 +393,14 @@ namespace engine::scene {
 		(void)CloneChildrenInto(store, store.FindFirstChild(player, STARTER_GEAR_NAME), backpack);
 
 		// **The camera is not aimed here.** `FollowOwnCharacter` is the one rule
-		// and it runs every frame — see its header for why the moment of
+		// and it runs every frame - see its header for why the moment of
 		// spawning is the wrong place to decide what a viewer is looking at.
 		return model;
 	}
 
 	ecs::Entity LoadCharacter(ecs::Store &store, ecs::Entity player) {
 		// **The player is passed, which is what makes a team decide where you
-		// appear.** Without it a side is a coloured label — the exact objection
+		// appear.** Without it a side is a coloured label - the exact objection
 		// `docs/DEFERRED.md` D00119 held `Player.Team` back for.
 		return LoadCharacter(store, player, FindSpawn(store, player));
 	}
@@ -411,7 +411,7 @@ namespace engine::scene {
 			return false;
 		}
 
-		// **Stopped, then destroyed, then released — and the order was reversed
+		// **Stopped, then destroyed, then released - and the order was reversed
 		// until v0.17.** The release used to come first so that it could read
 		// the rig it was stopping; `StopCharacter` on its own does that, and
 		// doing it here rather than through the release is what lets the destroy
@@ -419,13 +419,13 @@ namespace engine::scene {
 		//
 		// That is what `Player.CharacterRemoving` rides:
 		// `Store::OnDescendantRemoving` announces the model before a single link
-		// moves, and the filter is `Character::Owner` — so releasing first meant
+		// moves, and the filter is `Character::Owner` - so releasing first meant
 		// the signal fired for nobody, on every respawn, for ever. The queued
 		// half then reports it with a handle nothing can read.
 		StopCharacter(store, model);
 
 		// **The model, which takes its children with it.** Destroying the root
-		// alone would leave five limbs following an entity that is not alive —
+		// alone would leave five limbs following an entity that is not alive -
 		// which `PoseCharacters` handles by leaving them where they fell, and
 		// which is still a pile of limbs nobody asked for.
 		store.DestroyInstance(model);
@@ -482,7 +482,7 @@ namespace engine::scene {
 		}
 
 		// **Written back, so every later pass resolves the body this did.** A
-		// humanoid that *is* the body keeps a null field — that is how
+		// humanoid that *is* the body keeps a null field - that is how
 		// `StepCharacters` spells "the row itself", and setting it to the row
 		// would be a second spelling of one arrangement.
 		if (Humanoid *steering = store.GetMutable<Humanoid>(humanoid); steering != nullptr) {
@@ -555,7 +555,7 @@ namespace engine::scene {
 				return;
 			}
 
-			// **A live body is not enough any more — it has to be a *living*
+			// **A live body is not enough any more - it has to be a *living*
 			// one.** This was `CharacterOf(...) != NULL_ENTITY` until v0.15,
 			// which measured the delay from the tick a player was seen with no
 			// model. Roblox measures it from the tick the humanoid reached zero
@@ -649,7 +649,7 @@ namespace engine::scene {
 		// `Character` to a model that had none, and an archetype move under an
 		// `Each` is the iteration invalidating itself. The vector holds only the
 		// players whose link is *wrong*, which on a settled world is none of
-		// them — the allocation is the respawn frame's and no other.
+		// them - the allocation is the respawn frame's and no other.
 		std::vector<std::pair<ecs::Entity, ecs::Entity>> pending;
 
 		store.Each<const PlayerCharacter>([&](ecs::Entity player, const PlayerCharacter &held) {
@@ -730,7 +730,7 @@ namespace engine::scene {
 		// anybody may use.** Roblox picks at random among everything a player is
 		// allowed on; this picks the first of the best kind, in tree order,
 		// because a spawn point chosen by a random draw is a respawn that does
-		// not replay — the same rule `UpdateRespawns` keeps about its deadline.
+		// not replay - the same rule `UpdateRespawns` keeps about its deadline.
 		ecs::Entity own = ecs::NULL_ENTITY;
 		ecs::Entity neutral = ecs::NULL_ENTITY;
 
@@ -797,7 +797,7 @@ namespace engine::scene {
 		}
 
 		// **A `Scriptable` camera is left alone**, because a cutscene that took
-		// the camera must keep it across a respawn — the same refusal
+		// the camera must keep it across a respawn - the same refusal
 		// `UpdateCameraControl` and `PlaceCamera` already make, and for the same
 		// reason: two writers and the last one wins.
 		if (camera->Mode == CameraMode::Scriptable) {
@@ -823,7 +823,7 @@ namespace engine::scene {
 				const Transform *root = store.Get<Transform>(limb.Root);
 				if (root == nullptr) {
 					// A dead root is a character being torn down. Left where it is
-					// — see the header for why that beats the origin.
+					// - see the header for why that beats the origin.
 					return;
 				}
 

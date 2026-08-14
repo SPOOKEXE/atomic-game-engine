@@ -1,11 +1,11 @@
-// Four of the ribbon's five tabs — the manipulators, the steps and the two
+// Four of the ribbon's five tabs - the manipulators, the steps and the two
 // flags. The fifth is `Editor::DrawPluginTools`, which lives beside the rest of
 // the plugin host in `Plugins.cpp` rather than here: what it draws is whatever
 // the installed plugins asked for, and none of it is this editor's own.
 //
 // **Everything here was already reachable and none of it was reachable while
 // working.** The tool modes were keyboard-only, the snap steps were on the
-// Preferences page, and `Anchored` was a checkbox in the properties grid — so
+// Preferences page, and `Anchored` was a checkbox in the properties grid - so
 // the ordinary loop of "select, move, anchor, move the next one" crossed three
 // panels. Roblox puts the same set in one ribbon for that reason, and the
 // screenshots `ROADMAP.md` points at are that ribbon.
@@ -16,7 +16,7 @@
 // could not be moved or closed. That argument was wrong about which cost was
 // larger: a floating Tools window sat over the viewport, had to be dragged out
 // of the way of the thing it was editing, and duplicated the manipulators the
-// toolbar already carried — so the same three buttons existed twice and could
+// toolbar already carried - so the same three buttons existed twice and could
 // disagree. There is now one of each, on the strip that was already pinned.
 // See `Editor::DrawToolbar`.
 //
@@ -31,7 +31,7 @@
 // | Edit Pivot | `PivotEditing`, which points the same handles at `PivotOffset` |
 // | Reset Pivot | writes the identity to `PivotOffset` |
 //
-// Every one of the writes is one command, so it undoes in one press — which is
+// Every one of the writes is one command, so it undoes in one press - which is
 // the thing a per-instance loop gets wrong by default.
 
 #include <engine/core/Log.hpp>
@@ -58,7 +58,7 @@ namespace studio {
 		// **A dim pipe rather than `ImGui::SeparatorEx`.** A vertical separator
 		// sizes itself to the tallest item submitted so far, which on a row
 		// holding buttons, checkboxes and drag fields is a line that changes
-		// height as the contents change — and the strip already used this
+		// height as the contents change - and the strip already used this
 		// spelling before the ribbon existed.
 		void Divider() {
 			ImGui::SameLine();
@@ -71,7 +71,7 @@ namespace studio {
 		// **The operator table decides whether it may run and says why it may
 		// not.** A button that reached past it would be a second answer to that
 		// question, and the two would disagree the first time one of them
-		// learned about a running world — which is exactly the duplicate
+		// learned about a running world - which is exactly the duplicate
 		// `studio/Operators.hpp` exists to prevent.
 		const Availability can = Operators.Available(id);
 
@@ -101,7 +101,7 @@ namespace studio {
 		// **A mixed selection answers `false`**, which is what decides what one
 		// press does next: the first turns everything on rather than half of it
 		// off. An instance with no such property counts as off for the same
-		// reason — a `Folder` in the selection must not make the button claim
+		// reason - a `Folder` in the selection must not make the button claim
 		// everything is anchored.
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : Selection) {
@@ -128,7 +128,7 @@ namespace studio {
 			for (const Entity instance : Selection) {
 				bool was = false;
 				if (!store.GetProperty(instance, key, &was, sizeof(was))) {
-					// Not every selected instance has the property — a `Folder`
+					// Not every selected instance has the property - a `Folder`
 					// has neither of these. Skipped rather than refused, because
 					// a mixed selection is the ordinary way somebody works.
 					continue;
@@ -214,8 +214,8 @@ namespace studio {
 
 	void Editor::DrawHomeTools() {
 		// **One strip, and the dividers are what make it scannable.** A ribbon
-		// row is read left to right in groups — what to insert, which handle,
-		// how far it steps, what the selection is — and a run of twelve
+		// row is read left to right in groups - what to insert, which handle,
+		// how far it steps, what the selection is - and a run of twelve
 		// evenly-spaced buttons is a row nobody can find anything in.
 
 		ImGui::BeginDisabled(!Active.IsValid());
@@ -249,7 +249,7 @@ namespace studio {
 			CurrentTool = ToolMode::Select;
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("click to select — no handles");
+			ImGui::SetTooltip("click to select - no handles");
 		}
 		ImGui::SameLine();
 
@@ -373,8 +373,8 @@ namespace studio {
 		// what it does and what it shows while it does it.
 		//
 		// Not disabled with an empty selection, unlike the pair above. Both are
-		// modes rather than edits — there is nothing to apply them to and
-		// nothing to fail — and greying a mode until you have chosen a target
+		// modes rather than edits - there is nothing to apply them to and
+		// nothing to fail - and greying a mode until you have chosen a target
 		// is the wrong way round for somebody who sets it before reaching for
 		// the part.
 		ImGui::EndDisabled();
@@ -402,7 +402,7 @@ namespace studio {
 				"Draws which way the selection is facing: a line out of the\n"
 				"front face to a ball, and a ring round the ball with an arrow\n"
 				"at the point that is up.\n\n"
-				"A box says nothing about its orientation — two parts sitting\n"
+				"A box says nothing about its orientation - two parts sitting\n"
 				"identically may be turned a quarter apart."
 			);
 		}
@@ -417,7 +417,7 @@ namespace studio {
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
 				"Points the Move and Rotate handles at the pivot instead of the\n"
-				"part. The part does not move — which is the point: a door whose\n"
+				"part. The part does not move - which is the point: a door whose\n"
 				"hinge is wrong is fixed by moving the hinge."
 			);
 		}
@@ -432,7 +432,7 @@ namespace studio {
 		if (PivotEditing && CurrentTool == ToolMode::Scale) {
 			// **Said rather than left to be discovered.** A pivot has no size,
 			// so the scale handles go on resizing the part while the mode claims
-			// to be editing pivots — which reads as the mode being broken.
+			// to be editing pivots - which reads as the mode being broken.
 			ImGui::SameLine();
 			ImGui::TextDisabled("Scale still resizes the part.");
 		}
@@ -443,7 +443,7 @@ namespace studio {
 		//
 		// **Through the operator table rather than by calling the editor's own
 		// methods.** Every one of these is already a command with an
-		// availability rule and a keybinding — see `studio/Operators.hpp` — so a
+		// availability rule and a keybinding - see `studio/Operators.hpp` - so a
 		// button that reached past it would be a second answer to "may this run
 		// right now", and the two would disagree the first time one learned
 		// about a running world.
@@ -470,8 +470,8 @@ namespace studio {
 	void Editor::DrawScriptTools() {
 		// **The three programs, inserted where the explorer would put them.**
 		// Which class a file becomes is the whole of Rojo's naming convention
-		// one door along — `Script` runs on a server, `LocalScript` on a client
-		// and `ModuleScript` runs when something requires it — so offering the
+		// one door along - `Script` runs on a server, `LocalScript` on a client
+		// and `ModuleScript` runs when something requires it - so offering the
 		// three by name is offering the decision an author actually makes.
 		if (Universe == nullptr || !Active.IsValid()) {
 			ImGui::TextDisabled("no scene");

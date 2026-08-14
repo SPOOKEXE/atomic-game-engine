@@ -5,8 +5,8 @@
 // **The easing curve is here and the tween is not.** `TweenInfo` describes a
 // shape; running one needs a target instance, a property name and a place in the
 // tick to advance from, none of which belong to a value type at L1. So this
-// header answers one question — *given how far through I am, how far along am
-// I?* — and `Evaluate` is a pure function of a normalised alpha.
+// header answers one question - *given how far through I am, how far along am
+// I?* - and `Evaluate` is a pure function of a normalised alpha.
 //
 // That split is what makes the curve testable at all. An easing function inside
 // a tween service is checked by watching something move; a pure one is checked
@@ -143,7 +143,7 @@ namespace engine::core {
 		// Shapes a normalised progress into a normalised position.
 		//
 		// @param alpha How far through, 0 to 1. Clamped.
-		// @return How far along, where 0 and 1 are always the endpoints — except
+		// @return How far along, where 0 and 1 are always the endpoints - except
 		//         for `Back` and `Elastic`, which overshoot by design.
 		float Evaluate(float alpha) const {
 			return Ease(alpha, Style, Direction);
@@ -151,8 +151,8 @@ namespace engine::core {
 
 		// Shapes a normalised progress with an explicit curve.
 		//
-		// Static so a caller with a style and no `TweenInfo` — an editor
-		// previewing a curve, a test sweeping the set — needs no throwaway
+		// Static so a caller with a style and no `TweenInfo` - an editor
+		// previewing a curve, a test sweeping the set - needs no throwaway
 		// object.
 		//
 		// @param alpha     How far through, 0 to 1. Clamped.
@@ -161,7 +161,7 @@ namespace engine::core {
 		// @return How far along.
 		static float Ease(float alpha, EasingStyle style, EasingDirection direction) {
 			// Clamped rather than extrapolated. Past the end a tween is
-			// finished, and `Elastic` past one grows without bound — which would
+			// finished, and `Elastic` past one grows without bound - which would
 			// surface as a part flung out of the world rather than as a bad
 			// alpha.
 			const float time = alpha < 0.0f ? 0.0f : (alpha > 1.0f ? 1.0f : alpha);
@@ -233,7 +233,7 @@ namespace engine::core {
 			}
 			case EasingStyle::Bounce:
 				// Defined by its `Out` form everywhere it appears, so the `In`
-				// form is that run backwards — the same relation `Ease` uses,
+				// form is that run backwards - the same relation `Ease` uses,
 				// applied the other way round.
 				return 1.0f - BounceOut(1.0f - time);
 			}

@@ -14,18 +14,18 @@
 // **Every destination gets every file, which is the opposite of a fetch and the
 // right opposite.** A fetch wants one copy of the bytes; a publish wants each
 // write origin to end up holding them. So a failure against one destination is
-// reported and the others still receive the file — `DeliverySettings::Writable`
+// reported and the others still receive the file - `DeliverySettings::Writable`
 // carries the same note from the other end.
 //
 // **One file in flight at a time.** An editor uploading a content tree is
 // bounded by somebody's upstream link rather than by concurrency, and one file
-// at a time means one file's bytes in memory rather than sixteen — which for a
+// at a time means one file's bytes in memory rather than sixteen - which for a
 // content store whose largest entries are tens of megabytes is the difference
 // between a bounded process and a hopeful one.
 //
 // **Nothing here signs anything and nothing here publishes.** What arrives at
 // an origin's inbox is raw content, and a client will not look at it until a
-// publisher has signed a manifest naming it — CDN.md §1. Uploading is moving
+// publisher has signed a manifest naming it - CDN.md §1. Uploading is moving
 // bytes; publishing is `cdn::Publish`, it needs a signing key, and it stays a
 // separate act on purpose.
 //
@@ -46,7 +46,7 @@ namespace engine::delivery {
 	// What an uploader has done, for a diagnostic and for a test.
 	//
 	// Counted per file *per destination*, so two write origins and ten files is
-	// twenty of these — which is the number an operator watching a mirror
+	// twenty of these - which is the number an operator watching a mirror
 	// actually wants, and the one that makes "did it reach both" answerable.
 	//
 	// @since v0.10
@@ -57,7 +57,7 @@ namespace engine::delivery {
 		// Files a destination already held.
 		//
 		// **Not a failure and usually the majority.** The bytes are the
-		// identity, so a tree uploaded twice is almost entirely this — and the
+		// identity, so a tree uploaded twice is almost entirely this - and the
 		// `HEAD` probe that produces the number is what makes the second
 		// upload cost a round trip a file instead of the whole tree.
 		uint64_t Skipped = 0;
@@ -73,7 +73,7 @@ namespace engine::delivery {
 		// failure is something to fix at the far end.
 		uint64_t Refused = 0;
 
-		// Uploads that did not complete — an unreachable origin, a file that
+		// Uploads that did not complete - an unreachable origin, a file that
 		// could not be read, a directory that could not be written.
 		uint64_t Failed = 0;
 	};
@@ -144,7 +144,7 @@ namespace engine::delivery {
 		//
 		// **Resolved once, so a source that is misconfigured says so at
 		// start-up** rather than as a stream of individually plausible failures
-		// at file rate — `ContentRoot::Mount`'s rule, the same one
+		// at file rate - `ContentRoot::Mount`'s rule, the same one
 		// `AssetClient` follows.
 		virtual const std::vector<Source> &Destinations() const = 0;
 	};
@@ -154,7 +154,7 @@ namespace engine::delivery {
 	// @param settings Where content may be sent. Only `Writable()` entries are
 	//        used; the publisher key is not consulted, because nothing on this
 	//        path verifies a manifest.
-	// @return The uploader, or nothing when no source accepts writes — which is
+	// @return The uploader, or nothing when no source accepts writes - which is
 	//         the ordinary state of a configuration that has never been told
 	//         where its write origin is, and is worth being an absent object
 	//         rather than one that silently does nothing.

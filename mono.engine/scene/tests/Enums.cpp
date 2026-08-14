@@ -70,7 +70,7 @@ TEST_CASE("every face has a name, and they are Roblox's", "[scene][enums]") {
 	}
 
 	// **Roblox's spelling, which is the one a ported script uses.** `Top` and
-	// `Bottom` rather than Up and Down — a second name for one face is the
+	// `Bottom` rather than Up and Down - a second name for one face is the
 	// duplicate `scene/AGENTS.md` calls the most expensive kind of debt.
 	CHECK(std::string(Describe(NormalId::Right)) == "Right");
 	CHECK(std::string(Describe(NormalId::Top)) == "Top");
@@ -83,7 +83,7 @@ TEST_CASE("every face has a name, and they are Roblox's", "[scene][enums]") {
 TEST_CASE("the face ordinals are the format and are pinned", "[scene][enums]") {
 	// **This is a format assertion rather than a tidiness one.**
 	// `SurfaceCamera::Face` stores the ordinal in a trivially-copied component,
-	// so the number reaches a snapshot and a game file — and they are Roblox's
+	// so the number reaches a snapshot and a game file - and they are Roblox's
 	// numbers so that a `Face` of 1 means `Top` in a file this engine wrote and
 	// in one it did not. Reordering the enum is a format change, and this is
 	// what says so out loud.

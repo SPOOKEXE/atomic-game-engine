@@ -6,7 +6,7 @@
 // cases below assert what came out rather than that nothing threw.
 //
 // The tree is built on a scratch directory laid out the way a real project is,
-// rather than against a checked-in fixture — a fixture would be a second copy of
+// rather than against a checked-in fixture - a fixture would be a second copy of
 // somebody else's format and would go stale the first time Rojo changed.
 
 #include <engine/ecs/Classes.hpp>
@@ -342,7 +342,7 @@ TEST_CASE("init.luau makes the directory itself the script", "[studio][rojosync]
 	const Entity config = Child(store, shared, "Config");
 	REQUIRE(config != NULL_ENTITY);
 
-	// It is a module, not a folder — and it kept its children. `init` is how a
+	// It is a module, not a folder - and it kept its children. `init` is how a
 	// module gets children, not how a folder becomes a program.
 	CHECK(store.ClassOf(config) == engine::ecs::Classes::Find(Name("ModuleScript")));
 	CHECK(Child(store, config, "Values") != NULL_ENTITY);
@@ -352,7 +352,7 @@ TEST_CASE("init.luau makes the directory itself the script", "[studio][rojosync]
 }
 
 TEST_CASE("a .client suffix makes a LocalScript", "[studio][rojosync]") {
-	// The intent is in the file name, which is Rojo's convention — and a rule
+	// The intent is in the file name, which is Rojo's convention - and a rule
 	// based on which folder it sat in would disagree with the same file moved.
 	Tree tree;
 	Store store("rojo_test");
@@ -403,7 +403,7 @@ TEST_CASE("a .server suffix makes a Script", "[studio][rojosync]") {
 TEST_CASE("a script's text is staged where the runtime will look", "[studio][rojosync]") {
 	// **The reason a synced project runs without anything being copied.** A Rojo
 	// project lives wherever its author keeps it, which is not under the assets
-	// root — and `ReadSource` checks the world's own table first.
+	// root - and `ReadSource` checks the world's own table first.
 	Tree tree;
 	Store store("rojo_test");
 	engine::scene::EnsureClassTree();
@@ -458,7 +458,7 @@ TEST_CASE("a class this engine does not have becomes a folder, and says so", "[s
 
 	// **`Chat` rather than `Teams`, which this engine gained at v0.15.** The
 	// case needs a class Roblox has and this build does not, so the example has
-	// to move every time one of them lands — which is the point of the test
+	// to move every time one of them lands - which is the point of the test
 	// rather than an annoyance with it.
 	RojoProject project;
 	std::string error;
@@ -476,7 +476,7 @@ TEST_CASE("a class this engine does not have becomes a folder, and says so", "[s
 	REQUIRE(chat != NULL_ENTITY);
 	CHECK(store.ClassOf(chat) == studio::FolderClass());
 
-	// Substituted, not silently — an author whose `Chat` behaves like a folder
+	// Substituted, not silently - an author whose `Chat` behaves like a folder
 	// needs to be told rather than left to work it out.
 	CHECK_FALSE(report.Notes.empty());
 }
@@ -555,7 +555,7 @@ TEST_CASE("the three script classes come from the three file shapes", "[studio][
 //
 // `rojo.space/docs/v7/sync-details` is the table these assert against. The three
 // `init` forms are the half that was wrong: only `init.luau` was consumed, so a
-// project using `init.server.luau` — which is most of them — got a folder plus a
+// project using `init.server.luau` - which is most of them - got a folder plus a
 // stray script called `init`.
 
 namespace {
@@ -649,7 +649,7 @@ TEST_CASE("each init form decides what its directory becomes", "[studio][rojosyn
 	const Entity src = Child(store, store.FindFirstRoot("ReplicatedStorage"), "Shared");
 	REQUIRE(src != NULL_ENTITY);
 
-	// The directory *is* the script, and it keeps its children — which is the
+	// The directory *is* the script, and it keeps its children - which is the
 	// whole reason Rojo has the convention.
 	const Entity module = Child(store, src, "Module");
 	REQUIRE(module != NULL_ENTITY);
@@ -689,7 +689,7 @@ TEST_CASE("a directory with two init files picks one and says so", "[studio][roj
 	const Entity both = Child(store, src, "Both");
 	REQUIRE(both != NULL_ENTITY);
 
-	// The order is fixed and written down — module, then server, then client —
+	// The order is fixed and written down - module, then server, then client -
 	// so the class does not depend on which name sorts first.
 	CHECK(store.ClassOf(both) == engine::ecs::Classes::Find(Name("ModuleScript")));
 
@@ -796,7 +796,7 @@ namespace {
 			// **A package as a package manager writes one**: a project whose
 			// whole tree is a `$path`, beside the source and tests it was
 			// published with. This is the shape every wally dependency has, and
-			// the two ways of getting it wrong are both silent — building
+			// the two ways of getting it wrong are both silent - building
 			// nothing because the root has no children, or building the folder
 			// *as well* and ending up with two copies of every module.
 			Write("src/Wally/default.project.json", R"({
@@ -810,7 +810,7 @@ namespace {
 			// **The same awkward cases `Data.json` carries, in TOML.** Rojo maps
 			// the two to the same `ModuleScript`, so the emitter is shared and
 			// the interesting question is whether the *parse* reaches it intact
-			// — plus a date, which is the one TOML type JSON has no answer for.
+			// - plus a date, which is the one TOML type JSON has no answer for.
 			Write("src/Config.toml", R"(plain = 1
 "not-an-identifier" = true
 quoted = 'a "quoted" word'
@@ -825,7 +825,7 @@ list = [1, 2, 3]
 			// one cut off part way through, and one holding two instances at its
 			// top level. The bad ones are here rather than in a tree of their own
 			// because what they have to prove is that **one bad model costs its
-			// own file** — a refusal that stopped the sync would be invisible in
+			// own file** - a refusal that stopped the sync would be invisible in
 			// a tree that held nothing else.
 			//
 			// **The pairs are what keep the containers answering alike.**
@@ -898,7 +898,7 @@ TEST_CASE("a model file builds its class, its properties and its children", "[st
 	REQUIRE(crate != NULL_ENTITY);
 	CHECK(store.ClassOf(crate) == engine::ecs::Classes::Find(Name("Part")));
 
-	// **The properties are read back off the store**, not off the document — a
+	// **The properties are read back off the store**, not off the document - a
 	// version that parsed them and never wrote them passes any check that only
 	// looks at the tree.
 	bool anchored = false;
@@ -965,7 +965,7 @@ TEST_CASE("a json file becomes a module whose source compiles", "[studio][rojosy
 	const std::string_view source = *staged;
 
 	// **A key that is not an identifier has to be bracketed**, or the chunk is a
-	// syntax error — which is the failure a round trip through a table would not
+	// syntax error - which is the failure a round trip through a table would not
 	// have caught, because the table is never built.
 	CHECK(source.find("[\"not-an-identifier\"]") != std::string_view::npos);
 
@@ -979,7 +979,7 @@ TEST_CASE("a json file becomes a module whose source compiles", "[studio][rojosy
 	REQUIRE(runtime->Run(
 		// **Through the service, because a bare chunk has no `script`.** That
 		// global is written onto the thread by `RunInstance`, and this chunk is
-		// not a script instance — the module it wants is still reachable the way
+		// not a script instance - the module it wants is still reachable the way
 		// any script would reach one in another container.
 		"local shared = game:GetService('ReplicatedStorage').Shared\n"
 		"local data = require(shared.Data)\n"
@@ -1037,7 +1037,7 @@ TEST_CASE("a nested project is followed, and a cycle in one is not", "[studio][r
 	CHECK(Child(store, inner, "Helper") != NULL_ENTITY);
 
 	// **A project that includes itself terminates and says so**, which is the
-	// case that recurses until the stack runs out without the check — a crash
+	// case that recurses until the stack runs out without the check - a crash
 	// with no line number, from a file somebody copy-pasted a `$path` into.
 	CHECK(Mentioned(report, "includes itself"));
 }
@@ -1055,14 +1055,14 @@ TEST_CASE("a package's project replaces its folder rather than joining it", "[st
 
 	// **The root `$path` is built into the including node.** A package's project
 	// file is a root with a path and no children, so a sync that only walked the
-	// children built nothing at all — and the modules a game requires by name
+	// children built nothing at all - and the modules a game requires by name
 	// were simply absent, which reads as a broken package rather than as a
 	// missing rule.
 	REQUIRE(Child(store, wally, "Module") != NULL_ENTITY);
 	REQUIRE(Child(store, Child(store, wally, "Inner"), "Deep") != NULL_ENTITY);
 
 	// **And the folder beside it is not walked.** `lib/` reached the tree under
-	// the package's own name, so a `lib` folder here would be the second copy —
+	// the package's own name, so a `lib` folder here would be the second copy -
 	// two `ModuleScript`s of one file, which are two modules with two states.
 	CHECK(Child(store, wally, "lib") == NULL_ENTITY);
 
@@ -1081,7 +1081,7 @@ TEST_CASE("every row of Rojo's table is built rather than named", "[studio][rojo
 	(void)SyncTable(store, tree, report);
 
 	// Nothing that *is* built is reported as missing. **`.toml` joined this list
-	// at v0.13 and `.rbxmx` at v0.15** — each was an unbuilt mapping named by
+	// at v0.13 and `.rbxmx` at v0.15** - each was an unbuilt mapping named by
 	// what it would have been, and closing one moved its assertion here rather
 	// than adding one beside the old one. This list is now the whole table, so a
 	// mapping that stops working comes back as a note nobody expected.
@@ -1095,7 +1095,7 @@ TEST_CASE("every row of Rojo's table is built rather than named", "[studio][rojo
 // --- Roblox's binary model ----------------------------------------------------
 //
 // The last row of Rojo's table, closed at v0.15. The reader is `bake`'s and its
-// own suite bends the format; what these assert is the half that lives here —
+// own suite bends the format; what these assert is the half that lives here -
 // that a file becomes instances, that the ones it cannot become are named, and
 // that a model this engine will not build costs its own file and nothing else.
 
@@ -1121,7 +1121,7 @@ TEST_CASE("a binary model builds its class, its properties and its children", "[
 
 	// **Read back off the store, not off the file.** A version that decoded the
 	// properties and never wrote them passes any check that only looks at the
-	// tree — which is the same trap the `.model.json` case is written against.
+	// tree - which is the same trap the `.model.json` case is written against.
 	bool anchored = false;
 	REQUIRE(store.GetProperty(lid, Name("Anchored"), &anchored, sizeof(anchored)));
 	CHECK(anchored);
@@ -1175,7 +1175,7 @@ TEST_CASE("a binary model's rotation survives, unlike a model.json's", "[studio]
 TEST_CASE("a script inside a binary model arrives with its program", "[studio][rojosync]") {
 	// **Roblox keeps a script's text on the instance and this engine keeps a key
 	// into the world's `SourceCache`.** So an import that only made the instance
-	// would produce a `Script` that exists, sits in the tree, and never runs —
+	// would produce a `Script` that exists, sits in the tree, and never runs -
 	// which is the failure that looks exactly like a script with a bug in it.
 	TableTree tree;
 	Store store("rojo_table");
@@ -1209,7 +1209,7 @@ TEST_CASE("a binary model gives the same answers about what it could not build",
 	REQUIRE(chest != NULL_ENTITY);
 
 	// **A class this engine does not have becomes a folder and says so**, which
-	// is the answer `SyncRojoProject` already gives for a `$className` — one
+	// is the answer `SyncRojoProject` already gives for a `$className` - one
 	// answer to one question, whichever format asked it.
 	const Entity chat = Child(store, chest, "Chat");
 	REQUIRE(chat != NULL_ENTITY);
@@ -1223,7 +1223,7 @@ TEST_CASE("a binary model gives the same answers about what it could not build",
 
 	// **A property Roblox has and this engine does not is counted, not listed.**
 	// Studio stores every property of every class, so a note each would be a
-	// hundred lines saying this engine is smaller than Roblox — and would bury
+	// hundred lines saying this engine is smaller than Roblox - and would bury
 	// the notes that are about this file.
 	CHECK(Mentioned(report, "this engine has no property for"));
 	CHECK_FALSE(Mentioned(report, "RootPriority"));
@@ -1259,7 +1259,7 @@ TEST_CASE("a binary model this engine will not build costs its own file", "[stud
 //
 // The last row of Rojo's table, closed at v0.15 beside the binary one. `bake`'s
 // own suite asserts that the two containers produce the same tree; what these
-// assert is that this file treats them as one thing — the same mapping, the same
+// assert is that this file treats them as one thing - the same mapping, the same
 // answers about what it could not build, and the same cost for a file it will
 // not build at all.
 
@@ -1322,8 +1322,8 @@ TEST_CASE("an xml model's scripts and unknown classes land where a binary one's 
 	const Entity casket = Child(store, shared, "Casket");
 	REQUIRE(casket != NULL_ENTITY);
 
-	// A script's program comes out of the file — out of a `CDATA` section here
-	// and out of a `ProtectedString` there — and is staged under where the
+	// A script's program comes out of the file - out of a `CDATA` section here
+	// and out of a `ProtectedString` there - and is staged under where the
 	// instance sits, so an imported script runs rather than merely exists.
 	const Entity boot = Child(store, casket, "Boot");
 	REQUIRE(boot != NULL_ENTITY);
@@ -1427,7 +1427,7 @@ TEST_CASE("a toml file becomes a module whose source compiles", "[studio][rojosy
 // --- the universe above them -------------------------------------------------
 //
 // **The property under test is that the worlds are independent.** One project
-// file with a typo in it has to cost its own world and nothing else — a sync
+// file with a typo in it has to cost its own world and nothing else - a sync
 // that stopped at the first bad file would make one mistake look like the whole
 // game was broken, and the author would have no way to tell which folder was at
 // fault.
@@ -1546,7 +1546,7 @@ TEST_CASE("every world in a universe is built into its own store", "[studio][roj
 	CHECK(report.Synced() == 2);
 	CHECK(report.Failed() == 0);
 
-	// Each world got its own tree, and only its own — the scripts are staged
+	// Each world got its own tree, and only its own - the scripts are staged
 	// per store, so a world reading the other's source would show up here.
 	for (const auto &synced : report.Worlds) {
 		INFO(synced.World << ": " << synced.Error);

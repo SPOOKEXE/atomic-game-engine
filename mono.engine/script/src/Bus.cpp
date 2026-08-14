@@ -58,7 +58,7 @@ namespace engine::script {
 			// **Walked rather than listed, so the switch above is the only
 			// place a status is spelled.** `DescribeStatus` answers `"Unknown"`
 			// for anything it does not recognise, which is exactly the end of
-			// the enum — and a status appended to `world::BusStatus` without a
+			// the enum - and a status appended to `world::BusStatus` without a
 			// case here is a `-Wswitch` error rather than a word this walk
 			// silently stops before.
 			//

@@ -152,7 +152,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// **Radians, because Roblox's `CFrame.Angles` is radians** — and the
+		// **Radians, because Roblox's `CFrame.Angles` is radians** - and the
 		// `Orientation` property is degrees, because Roblox's is degrees.
 		//
 		// That looks like an inconsistency and it is Roblox's, reproduced
@@ -169,11 +169,11 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `CFrame.lookAt(from, to, up)` — Roblox's, and the one a camera needs.
+		// `CFrame.lookAt(from, to, up)` - Roblox's, and the one a camera needs.
 		//
 		// **Without it a camera can only be placed, not aimed.** `CFrame.new`
 		// carries identity rotation, which in this engine's convention looks
-		// down -Z — so a camera positioned behind a mirror to reflect it faced
+		// down -Z - so a camera positioned behind a mirror to reflect it faced
 		// away from the mirror and rendered empty space. That was a real bug in
 		// `Mirrors-1-world.luau`, and it is the sort a binding gap produces:
 		// the script was correct about *where* and had no way to say *which
@@ -221,7 +221,7 @@ namespace engine::script {
 
 		// **Value equality, not identity.** `Vector3.new(1, 2, 3) ==
 		// Vector3.new(1, 2, 3)` is true in Roblox and was false here, because
-		// two userdata are two objects — so every comparison an author wrote
+		// two userdata are two objects - so every comparison an author wrote
 		// against a constructed value silently failed. Roblox's semantics are
 		// what a script expects, and a value type whose equality is identity is
 		// not a value type.
@@ -301,7 +301,7 @@ namespace engine::script {
 			lua_setfield(state, -2, "__index");
 
 			// **What `typeof` actually reads.** Luau's `typeof` is a fastcall
-			// builtin, so a global of that name is never consulted — the VM
+			// builtin, so a global of that name is never consulted - the VM
 			// reaches `luaB_typeof` directly, and that function returns this
 			// field when a metatable carries one. One string beside the type's
 			// own name, rather than a table of userdata tags somewhere else.
@@ -407,7 +407,7 @@ namespace engine::script {
 	//
 	// The tag is what makes the check safe rather than the size. `Vector2`,
 	// `UDim` and the two halves of a `UDim2` are all pairs of floats, so a check
-	// on shape would accept any of them for any other — and `frame.Position =
+	// on shape would accept any of them for any other - and `frame.Position =
 	// Vector2.new(0, 0)` would silently mean an offset of zero at scale zero.
 
 	core::Vector2 *PushVector2(lua_State *state) {
@@ -495,7 +495,7 @@ namespace engine::script {
 	//
 	// **These three are the first values here that are not a handful of floats.**
 	// A `ColorSequence` is 408 bytes, so `lua_newuserdatatagged` allocates that
-	// much per push — which is why the property path reads into a stack buffer
+	// much per push - which is why the property path reads into a stack buffer
 	// once and pushes once, rather than pushing a temporary per keypoint the way
 	// the `Keypoints` getter does. The getter is a script asking for the stops;
 	// this is a property read, and it happens on every `.Changed` fan-out.
@@ -554,13 +554,13 @@ namespace engine::script {
 		//
 		// **A field on the global table rather than a case in `Vector3Index`**,
 		// and the difference is which side of the dot it is on. `Vector3Index`
-		// answers `someVector.X` — a member of a *value* — and Roblox's `zero` and
+		// answers `someVector.X` - a member of a *value* - and Roblox's `zero` and
 		// `one` are members of the *library*, the same shelf `Vector3.new` sits on.
 		// Putting them in the index would make `part.Position.zero` answer, which
 		// is a member nobody wrote.
 		//
 		// Pushed as an ordinary userdata, so it carries the same metatable and the
-		// same tag as anything `Vector3.new` returns — a constant that failed
+		// same tag as anything `Vector3.new` returns - a constant that failed
 		// `CheckVector3` would be a constant no property could be assigned from.
 		//
 		// **A fresh copy per read is not what this gives**, and that is worth

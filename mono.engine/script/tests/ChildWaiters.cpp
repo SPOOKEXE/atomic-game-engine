@@ -8,8 +8,8 @@
 // here drives the barrier and looks at the world between beats.
 //
 // **The beat advances the world's tick, as the debris suite's does.** A timeout
-// is a tick number — `ChildWaiters.hpp` says why seconds in and ticks underneath
-// — so a heartbeat on a world whose clock never moves would test a deadline that
+// is a tick number - `ChildWaiters.hpp` says why seconds in and ticks underneath
+// - so a heartbeat on a world whose clock never moves would test a deadline that
 // never comes due.
 //
 // **The answer crosses as `workspace.Name`**, which is `engine.script.scriptcall`'s
@@ -111,7 +111,7 @@ namespace {
 	// Something to wait under, for the cases that drive the table directly.
 	//
 	// **An ordinary instance rather than the `Workspace`**, because the services
-	// are installed by a *runtime* and these cases have none — `WorkspaceOf` on a
+	// are installed by a *runtime* and these cases have none - `WorkspaceOf` on a
 	// bare store answers a null entity, which is a parent that is never alive and
 	// would make every wait below resume for the wrong reason.
 	Entity Container(Store &store) {
@@ -124,7 +124,7 @@ namespace {
 TEST_CASE("a child that arrives later resumes the wait with it", "[scripting][waitforchild]") {
 	// **The case the method exists for, and the one a lookup cannot answer.**
 	// The child is absent when the script asks, absent for three more beats, and
-	// then arrives — and the script that has been suspended the whole time is
+	// then arrives - and the script that has been suspended the whole time is
 	// handed the instance rather than nil.
 	for (const Language language : LANGUAGES) {
 		Store store = Fresh("waitforchild_arrival");
@@ -156,7 +156,7 @@ TEST_CASE("a child that arrives later resumes the wait with it", "[scripting][wa
 TEST_CASE("a child that is already there is answered without waiting", "[scripting][waitforchild]") {
 	// **No beat at all between the call and the answer.** Roblox's first step,
 	// and the reason it is worth asserting is that it is the half a wait must
-	// *not* charge a tick for — a script reading a child that is plainly there
+	// *not* charge a tick for - a script reading a child that is plainly there
 	// should not be a tick behind one that used `FindFirstChild`.
 	for (const Language language : LANGUAGES) {
 		Store store = Fresh("waitforchild_present");
@@ -176,7 +176,7 @@ TEST_CASE("a child that is already there is answered without waiting", "[scripti
 TEST_CASE("a wait gives up on the tick it was told to, twice the same", "[scripting][waitforchild]") {
 	// **The deadline is a tick count, and this is what that buys.** Half a second
 	// is thirty beats at sixty hertz on every machine and in every replay, so the
-	// beat the answer lands on is asserted rather than a range — and the whole
+	// beat the answer lands on is asserted rather than a range - and the whole
 	// scenario runs twice, because "the same script gave up at the same point
 	// twice" is the property a wall-clock timeout would fail while still looking
 	// approximately right.
@@ -214,7 +214,7 @@ TEST_CASE("a wait gives up on the tick it was told to, twice the same", "[script
 
 TEST_CASE("a timeout that is not a number of seconds gives up at once", "[scripting][waitforchild]") {
 	// **`0/0` is one line of script away in either language**, and the deadline
-	// it used to produce was a cast of NaN to an unsigned integer — undefined
+	// it used to produce was a cast of NaN to an unsigned integer - undefined
 	// behaviour rather than a long wait, because every comparison against NaN is
 	// false and `TicksFor`'s guard was written as `<= 0`. It answers one tick for
 	// anything that is not a positive number of seconds now, so the wait gives up
@@ -239,7 +239,7 @@ TEST_CASE("the form with no timeout is refused, and says why", "[scripting][wait
 	// **Roblox's `WaitForChild(name)` waits for ever and this engine will not.**
 	// The refusal is the divergence, so it is asserted as hard as the behaviour:
 	// the call fails, in both languages, with a message naming the argument that
-	// is missing — because an author porting a place meets this message and
+	// is missing - because an author porting a place meets this message and
 	// nothing else.
 	for (const Language language : LANGUAGES) {
 		Store store = Fresh("waitforchild_unbounded");
@@ -294,7 +294,7 @@ TEST_CASE("a child renamed into the name answers a wait too", "[scripting][waitf
 	// **The reason the match is a store lookup rather than a filter over
 	// `ecs::TreeChange`.** Renaming a child that is already parented produces no
 	// reparent at all, so an arrival-list filter would leave this script waiting
-	// until its timeout — for a child that is, by then, plainly there.
+	// until its timeout - for a child that is, by then, plainly there.
 	Store store = Fresh("waitforchild_rename");
 	const Entity container = Container(store);
 	const Entity child = Arrives(store, container, "before");
@@ -316,7 +316,7 @@ TEST_CASE("a child renamed into the name answers a wait too", "[scripting][waitf
 
 TEST_CASE("a wait whose parent is destroyed is answered at once", "[scripting][waitforchild]") {
 	// **Nothing can ever arrive under a row that has gone**, so the deadline is
-	// not worth waiting out — and a script left suspended on one is holding a
+	// not worth waiting out - and a script left suspended on one is holding a
 	// coroutine for a question that has already been answered.
 	Store store = Fresh("waitforchild_dead");
 	const Entity box = Container(store);
@@ -336,8 +336,8 @@ TEST_CASE("a wait whose parent is destroyed is answered at once", "[scripting][w
 TEST_CASE("a full queue refuses a wait rather than dropping one", "[scripting][waitforchild]") {
 	// **The opposite trade from `DebrisQueue`, and the direction is the point.**
 	// Evicting the oldest waiter would resume a script with nil for a child that
-	// was about to arrive — a wrong answer in the one case the method exists for
-	// — where refusing is an error naming the script that filled the queue.
+	// was about to arrive - a wrong answer in the one case the method exists for
+	// - where refusing is an error naming the script that filled the queue.
 	Store store = Fresh("waitforchild_full");
 	const Entity container = Container(store);
 

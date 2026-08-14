@@ -9,10 +9,10 @@
 // one table with three columns now, so a format added to it arrives everywhere
 // at once and there is no second list to forget.
 //
-// - **The form** is the format — `Png`, `Gif`, `Svg`, `Mp4`, `AMesh`. This is
+// - **The form** is the format - `Png`, `Gif`, `Svg`, `Mp4`, `AMesh`. This is
 //   the fine-grained answer, and the one a policy is written against, because
 //   "turn GIF off" is not a statement about textures.
-// - **The kind** is the routing label — `assets::AssetKind`. Several forms map
+// - **The kind** is the routing label - `assets::AssetKind`. Several forms map
 //   to one kind by design: a publisher pointed at a source tree and one pointed
 //   at a baked tree must classify the same way.
 // - **Whether it is a source**, meaning a baker still has to convert it. That
@@ -38,7 +38,7 @@ namespace engine::assets {
 	// A content format, as an extension names it.
 	//
 	// **Ordinals are not on the wire.** A manifest records the `AssetKind`, and
-	// a form is derived from the name every time it is wanted — so this list may
+	// a form is derived from the name every time it is wanted - so this list may
 	// be reordered, which `AssetKind` may not be. What *does* cross a boundary is
 	// `Describe`'s text, because a flag is named after a form.
 	enum class ContentForm : uint8_t {
@@ -106,7 +106,7 @@ namespace engine::assets {
 		JavaScript,
 
 		// **Moving pictures, with nothing behind them.** `AssetKind::Video` is a
-		// routing label and this engine holds no decoder — `examples/Assets.luau`
+		// routing label and this engine holds no decoder - `examples/Assets.luau`
 		// has a bay that says "no decoder" rather than showing a stand-in. The
 		// form exists so a deployment can refuse the bytes rather than deliver
 		// megabytes nothing will ever draw.
@@ -128,7 +128,7 @@ namespace engine::assets {
 	//
 	// **The name is the contract**, which is rule 4: it reaches a flag, a config
 	// file, a log line and a refusal message. Where two extensions name one form
-	// — `.jpg` and `.jpeg` — this answers the one a setting is written with.
+	// - `.jpg` and `.jpeg` - this answers the one a setting is written with.
 	//
 	// @param form The form.
 	// @return A view valid for the lifetime of the process.
@@ -156,7 +156,7 @@ namespace engine::assets {
 	// Whether a baker still has to convert this form.
 	//
 	// **`Unknown` is not a source.** A name with no extension, or one this
-	// engine has no row for, is whatever it is — the same answer `KindOfName`
+	// engine has no row for, is whatever it is - the same answer `KindOfName`
 	// gives it.
 	//
 	// @param form The form.

@@ -4,20 +4,20 @@
 // let one go and the column that asks next.
 //
 // **Why a pool rather than the allocator.** A chunked column gives a chunk back
-// the moment its rows stop reaching into it — that release is the whole point
+// the moment its rows stop reaching into it - that release is the whole point
 // of the item, because a world that peaked at ten thousand entities and settled
 // at a hundred has to hand the difference back rather than hold it forever.
 // Doing it straight to `operator new` would trade one problem for another: a
 // population oscillating across a chunk boundary would allocate and free on
 // every oscillation, and *more allocations of the same bytes* is exactly what
-// got a smaller `SparseSet` page rejected — they interleave with the columns
+// got a smaller `SparseSet` page rejected - they interleave with the columns
 // and scatter them, measured at 8% to 21% slower. The pool is what makes the
 // release affordable, so it is not an optimisation beside the chunking; it is
 // the half that stops the chunking from costing more than it saves.
 //
 // **Process-wide, not per store.** The shape this exists for is a thousand
 // worlds in one host. A per-store pool would keep its spares a thousand times
-// over, which relocates the leak rather than closing it — and worlds hand
+// over, which relocates the leak rather than closing it - and worlds hand
 // chunks around anyway, since one world's peak is another world's next
 // allocation.
 //
@@ -57,7 +57,7 @@ namespace engine::ecs {
 		//
 		// @param bytes     The chunk size, which must be non-zero.
 		// @param alignment The alignment the component type requires.
-		// @return The chunk, never null — an exhausted allocator throws.
+		// @return The chunk, never null - an exhausted allocator throws.
 		// @threadsafe
 		static void *Acquire(size_t bytes, size_t alignment);
 
@@ -78,7 +78,7 @@ namespace engine::ecs {
 		// The explicit half of the trim policy, and the smaller half: the cap
 		// above is what bounds a running host, and this is for one that knows it
 		// has just stopped needing the spares. Nothing in the engine calls it
-		// yet, deliberately — a hook into world suspension would buy at most
+		// yet, deliberately - a hook into world suspension would buy at most
 		// `RETAINED_BYTES_CAP` and would put a storage detail in an `ecs` public
 		// header for `world` to reach. The day a host wants the pages back on a
 		// schedule, this is the call it makes.

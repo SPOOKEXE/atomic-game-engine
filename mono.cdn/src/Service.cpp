@@ -112,7 +112,7 @@ namespace cdn {
 				Codebook = Store.ReadDictionary();
 				if (!Published) {
 					ENGINE_WARN(
-						"cdn: no manifest at {} — clients will get 503 until one is published",
+						"cdn: no manifest at {} - clients will get 503 until one is published",
 						Store.Directory().string()
 					);
 				}
@@ -162,7 +162,7 @@ namespace cdn {
 				}
 				// Matched exactly or with a cursor, rather than by prefix, so
 				// `/cataloguery` is the unknown route it is rather than a
-				// malformed listing — a `400` there would tell an
+				// malformed listing - a `400` there would tell an
 				// unauthenticated caller that something answers near that word.
 				if (request.Target == "/catalogue" || request.Target.starts_with("/catalogue/")) {
 					return CatalogueOf(request);
@@ -179,7 +179,7 @@ namespace cdn {
 				http::Response response;
 				response.Code = code;
 				// **No body on a refusal.** A diagnostic in one is a reason
-				// returned to a client, which is an oracle — Gate's rule.
+				// returned to a client, which is an oracle - Gate's rule.
 				return response;
 			}
 
@@ -211,8 +211,8 @@ namespace cdn {
 
 			http::Response DictionaryOf(const http::Request &request) {
 				if (!Codebook || Codebook->empty()) {
-					// An origin with no dictionary is ordinary — its groups are
-					// compressed without one — so this is a plain `404` and the
+					// An origin with no dictionary is ordinary - its groups are
+					// compressed without one - so this is a plain `404` and the
 					// client carries on.
 					return Refuse(http::Status::NotFound);
 				}
@@ -224,19 +224,19 @@ namespace cdn {
 			//
 			// **The one route that answers a question the caller could not
 			// already ask.** Every other route is looked up by a value the
-			// caller arrived holding — a bundle root, a content hash, a manifest
-			// a publisher signed — and this one hands over the names, which is
+			// caller arrived holding - a bundle root, a content hash, a manifest
+			// a publisher signed - and this one hands over the names, which is
 			// why it is off unless configured and admitted by the key that
 			// already exists. `CatalogueSettings` carries the whole argument.
 			//
 			// **The page is text, one line an asset, and the name is last.** A
-			// name is the one field with no bound on what is inside it —
-			// AGENTS.md rule 4 — so it ends its line, where no separator has to
+			// name is the one field with no bound on what is inside it -
+			// AGENTS.md rule 4 - so it ends its line, where no separator has to
 			// survive it. The two characters that could still break the format
 			// are the two an entry is dropped for.
 			http::Response CatalogueOf(const http::Request &request) {
 				if (!Enumerates) {
-					// **`404`, as though the route were not there** —
+					// **`404`, as though the route were not there** -
 					// `IngestOf`'s argument on the read side. A `403` would
 					// tell an unauthenticated caller that this origin can
 					// enumerate and only the key is missing, which is exactly
@@ -273,7 +273,7 @@ namespace cdn {
 
 				const std::vector<engine::assets::AssetEntry> &assets = current->Contents().Assets();
 				// At least one, because a page size of zero would hand back an
-				// empty page whose cursor never moves — a caller following
+				// empty page whose cursor never moves - a caller following
 				// `next` would walk it forever.
 				const size_t page = std::max<size_t>(Listing.PageEntries, 1);
 				const size_t first = std::min<size_t>(*cursor, assets.size());
@@ -379,7 +379,7 @@ namespace cdn {
 
 				// Constant time, because a byte-at-a-time compare on a secret
 				// leaks it one byte per round trip to anybody who can time a
-				// response — `assets::Grant`'s rule, and this is the one place
+				// response - `assets::Grant`'s rule, and this is the one place
 				// in the service holding a secret to compare.
 				const std::string_view offered = request.Find("x-atomic-ingest").value_or(std::string_view{});
 				if (!SameSecret(offered, Writes.Key)) {
@@ -408,7 +408,7 @@ namespace cdn {
 				}
 
 				// **The path is built from the parsed hash**, never from the
-				// target text — CDN.md §8. `ToHex` re-renders it, so even a
+				// target text - CDN.md §8. `ToHex` re-renders it, so even a
 				// target that parsed is not the thing that names the file.
 				const std::filesystem::path stored = Writes.Inbox / (named->ToHex() + *suffix);
 				const bool present = std::filesystem::exists(stored, failure);
@@ -441,13 +441,13 @@ namespace cdn {
 					// that do not hash to the name they were sent under are not
 					// stored under any name at all.
 					++Tally.IngestRefused;
-					ENGINE_WARN("cdn: ingest refused — body did not hash to {}", named->ToHex());
+					ENGINE_WARN("cdn: ingest refused - body did not hash to {}", named->ToHex());
 					return Refuse(http::Status::BadRequest);
 				}
 
 				if (present) {
 					// **Already here is a success.** The bytes are the identity
-					// — `LocalStore::ImportFile`'s rule — so a retry after a
+					// - `LocalStore::ImportFile`'s rule - so a retry after a
 					// dropped socket costs a hash and nothing else.
 					++Tally.IngestDuplicates;
 					http::Response response;
@@ -552,7 +552,7 @@ namespace cdn {
 				}
 
 				// Prepared inline. CPU work with a known end, which is what
-				// `Origin::Pump` is for — and the payload is resolved before
+				// `Origin::Pump` is for - and the payload is resolved before
 				// its fan-out, so no worker is occupied waiting on a disk.
 				Serving.Pump([this](const ContentHash &root) { return Payload(root); });
 
@@ -580,7 +580,7 @@ namespace cdn {
 			// Resolves a bundle's uncompressed bytes out of the chunk store.
 			//
 			// This is what `PayloadSource` was a seam for, now that the on-disk
-			// layout is decided — `assets::ChunkStore`. The bundle's payload is
+			// layout is decided - `assets::ChunkStore`. The bundle's payload is
 			// its members concatenated in member order, which is the one
 			// definition of a group's bytes and is also what the client's
 			// `SliceOf` cuts back up.
@@ -676,7 +676,7 @@ namespace cdn {
 	bool ServiceSettings::Lists() const {
 		// **The key is the ingest key and there is no second one.** An operator
 		// who wants an origin that enumerates and takes no uploads sets the key
-		// and leaves `Inbox` empty — `IngestSettings::Accepts` needs both, so
+		// and leaves `Inbox` empty - `IngestSettings::Accepts` needs both, so
 		// that origin still refuses every write.
 		return Catalogue.Enabled && !Ingest.Key.empty();
 	}
@@ -688,13 +688,13 @@ namespace cdn {
 			// **A request is parsed whole, so an upload has to fit in the
 			// connection's buffer before it can be answered at all.** Leaving
 			// the read-only default in place would make every upload past 64 KB
-			// die as a dropped socket — the worst diagnostic there is, because
+			// die as a dropped socket - the worst diagnostic there is, because
 			// it points at the network rather than at a limit.
 			//
 			// Raising `Limits.BodyBytes` to the same ceiling is what turns an
 			// over-large upload into a `413`: the length is checked while the
 			// *headers* parse, so the refusal is answered before a byte of body
-			// is read. Order matters here — the buffer has to hold a file the
+			// is read. Order matters here - the buffer has to hold a file the
 			// limit will admit, or the limit would let through what the buffer
 			// then drops.
 			const uint64_t ceiling = settings.Ingest.MaximumFileBytes;
@@ -729,7 +729,7 @@ namespace cdn {
 				settings.Catalogue.PageEntries
 			);
 		} else if (settings.Catalogue.Enabled) {
-			ENGINE_WARN("cdn: /catalogue is switched on and has no key to admit it — it stays closed");
+			ENGINE_WARN("cdn: /catalogue is switched on and has no key to admit it - it stays closed");
 		}
 
 		ENGINE_INFO("cdn: serving on {}", listener->Local().Text());

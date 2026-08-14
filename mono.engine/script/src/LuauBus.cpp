@@ -1,8 +1,8 @@
 // The Luau half of the bus: the value walk, the prep, and the delivery pump.
 //
 // **What is here is what a VM decides, and nothing else.** The four services
-// themselves are `ServiceSurface`s in `BusServices.cpp` — one description, two
-// installers — so what a topic is, what a teleport carries and how a store
+// themselves are `ServiceSurface`s in `BusServices.cpp` - one description, two
+// installers - so what a topic is, what a teleport carries and how a store
 // refuses is written once. This file is the three things that cannot be:
 // turning a Lua table into a `ScriptValue`, registering the mailbox types, and
 // resuming or calling whoever a delivery is for.
@@ -44,7 +44,7 @@ namespace engine::script {
 		//
 		// A Luau value in, a `ScriptValue` out. **The sort is not here**: this
 		// walks the table in whatever order Luau offers and `Encode` sorts, which
-		// is the arrangement `Codec.hpp` argues for — a binding that had to
+		// is the arrangement `Codec.hpp` argues for - a binding that had to
 		// remember to sort would be a second place the determinism guarantee
 		// could be lost.
 		//
@@ -54,7 +54,7 @@ namespace engine::script {
 		// caller; `HttpService:JSONEncode` is the second, and a JSON encoder that
 		// walked a table itself would be a second answer to which tables are
 		// arrays, what a cycle is and what a key becomes. What is still private
-		// is everything below — the two helpers those entry points are made of.
+		// is everything below - the two helpers those entry points are made of.
 
 		// Whether a table is a dense array. Lua has one table type and two
 		// meanings for it, and the wire needs to know which.
@@ -90,7 +90,7 @@ namespace engine::script {
 		// has a second caller now. `HttpService:JSONEncode` needs the same cycle
 		// check, and an install order that happened to put it before
 		// `OpenServices` would have turned a missing registry key into "attempt
-		// to index nil" from inside a script — a failure a long way from the line
+		// to index nil" from inside a script - a failure a long way from the line
 		// that caused it, and one nothing in the build would catch.
 		void PushVisiting(lua_State *state) {
 			lua_getfield(state, LUA_REGISTRYINDEX, VISITING);
@@ -109,7 +109,7 @@ namespace engine::script {
 			// **Grow the stack before recursing.** A C function is guaranteed
 			// `LUA_MINSTACK` slots and one level of this walk holds the visiting
 			// table, the key, the value and the stringified key at the same
-			// time — so a table nested five deep already wants more than the VM
+			// time - so a table nested five deep already wants more than the VM
 			// promised, and `CODEC_MAX_DEPTH` allows sixteen. `ReadHostValue`
 			// grows for exactly this reason and `script/AGENTS.md` records what
 			// overrunning looked like: an illegal instruction from a script that
@@ -161,7 +161,7 @@ namespace engine::script {
 					// **A key is a string, a number or a boolean, and anything
 					// else is refused.** `luaL_tolstring` will stringify a table
 					// or a function perfectly happily, and what it produces is
-					// the *address* — which differs between two runs of one
+					// the *address* - which differs between two runs of one
 					// script, so a table used as a key put a pointer into a
 					// payload that a recording then has to reproduce. That is
 					// the exact failure `Codec.hpp` §1's sort exists to prevent,
@@ -179,7 +179,7 @@ namespace engine::script {
 
 					// **Keys cross as strings, always.** A numeric key becomes
 					// its decimal text, because the far side may be JavaScript
-					// where every object key already is one — and a format whose
+					// where every object key already is one - and a format whose
 					// key type depended on which VM wrote it is not one format.
 					size_t length = 0;
 					const char *text = luaL_tolstring(state, -2, &length);
@@ -198,7 +198,7 @@ namespace engine::script {
 			}
 
 			// Out of the visiting set on the way back up, so a table appearing
-			// twice as a *sibling* is fine — only a table reachable from itself
+			// twice as a *sibling* is fine - only a table reachable from itself
 			// is a cycle.
 			PushVisiting(state);
 			lua_pushvalue(state, index);
@@ -259,7 +259,7 @@ namespace engine::script {
 
 		// A function, a thread, or an instance. **An `Entity` is meaningless
 		// outside this world**, so a reference must cross as whatever the
-		// game uses to name things rather than as a handle — rule 3, stated
+		// game uses to name things rather than as a handle - rule 3, stated
 		// as a refusal an author can read.
 		why = CodecStatus::Unsupported;
 		return false;
@@ -359,7 +359,7 @@ namespace engine::script {
 				// **A yield here is success, not failure**, and getting that
 				// wrong is what a chained `SetAsync` then `GetAsync` found: the
 				// second call suspends the same thread from inside this
-				// `lua_resume`, so the return is `LUA_YIELD` — and reading an
+				// `lua_resume`, so the return is `LUA_YIELD` - and reading an
 				// error message off a *suspended* thread's stack is reading
 				// whatever the yield left there.
 				//
@@ -382,7 +382,7 @@ namespace engine::script {
 			}
 
 			// **An arrival is not this pump's any more, and that is the fix
-			// rather than a tidy-up.** It used to be admitted here — which meant
+			// rather than a tidy-up.** It used to be admitted here - which meant
 			// a teleport was only ever taken in by a world with a *Luau* script
 			// executing. A destination the studio was not playing, or one whose
 			// scripts are JavaScript, or a scene furnished by C++, took the
@@ -396,7 +396,7 @@ namespace engine::script {
 			}
 
 			// **A channel message goes to the channel's own connections**, which
-			// is one `SignalKind` with no subject filtered by name — the trick
+			// is one `SignalKind` with no subject filtered by name - the trick
 			// `GetPropertyChangedSignal` and `GetAttributeChangedSignal` are
 			// already on. Without the filter every listener in this world would
 			// hear every channel it had opened, which is the traffic separation
@@ -411,8 +411,8 @@ namespace engine::script {
 
 				// **The sender's name, second, which is what makes a channel a
 				// channel.** A topic subscriber is told which topic; a channel
-				// receiver already knows the channel — it named it to get this
-				// handle — and what it cannot know is who to answer.
+				// receiver already knows the channel - it named it to get this
+				// handle - and what it cannot know is who to answer.
 				const std::string_view from = delivery.From.Text();
 				lua_pushlstring(state, from.data(), from.size());
 

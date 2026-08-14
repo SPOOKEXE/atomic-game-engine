@@ -2,7 +2,7 @@
 //
 // No transport here on purpose. `Authority` produces messages and `Replica`
 // consumes them, so the whole of replication can be driven by handing byte
-// vectors from one to the other — which is what lets these cases run in
+// vectors from one to the other - which is what lets these cases run in
 // microseconds and what makes a lost or reordered message something a test
 // *states* rather than something it waits for.
 
@@ -62,7 +62,7 @@ namespace replication_test {
 			engine::ecs::Components::Register<Marked>("replication_test.Marked");
 
 			// `ecs.Hierarchy`, `ecs.InstanceName` and `ecs.InstanceClass` in one
-			// call, and idempotent — which is why it replaces the hand-written
+			// call, and idempotent - which is why it replaces the hand-written
 			// `Register<Hierarchy>` that used to stand here. Registering one of
 			// the three by hand is how the other two get forgotten, which is the
 			// same shape as the bug the cases below cover.
@@ -110,7 +110,7 @@ namespace replication_test {
 
 		// One tick: publish, deliver everything, acknowledge.
 		//
-		// `drop` decides which messages are lost, by index within the tick —
+		// `drop` decides which messages are lost, by index within the tick -
 		// an unreliable transport is the normal case, not the exception.
 		void Tick(const std::function<bool(size_t)> &drop = {}) {
 			Now++;
@@ -125,7 +125,7 @@ namespace replication_test {
 			}
 
 			// The world's change bits are the delta source, so they are cleared
-			// after publishing and not before — clearing first is how a tick's
+			// after publishing and not before - clearing first is how a tick's
 			// worth of movement goes missing.
 			Server.ClearChanges();
 
@@ -169,7 +169,7 @@ TEST_CASE("a client joins by full snapshot and sees the world", "[replication]")
 	REQUIRE(pair.Join());
 	REQUIRE(pair.Replica_.Stats().Snapshots == 1);
 
-	// The same entities, by the same handles — which only holds because the
+	// The same entities, by the same handles - which only holds because the
 	// snapshot reproduces the directory exactly, index and generation alike.
 	for (int index = 0; index < 24; index++) {
 		const Entity entity = entities[static_cast<size_t>(index)];
@@ -208,7 +208,7 @@ TEST_CASE("what a host puts in front of the world arrives in front of it", "[rep
 	// **`D00122`: a score orders a stream and a join is a byte cursor.** The
 	// entities a host wants seen first were ranked ahead of everything for the
 	// life of the connection and it changed nothing about the one moment that
-	// matters — a client's first view of a world is one `ecs::Store::Save`
+	// matters - a client's first view of a world is one `ecs::Store::Save`
 	// chunked across ticks in whatever order the store wrote its archetypes.
 	//
 	// What is asserted is *before* and not *eventually*: at the tick the
@@ -216,7 +216,7 @@ TEST_CASE("what a host puts in front of the world arrives in front of it", "[rep
 	// only proved it arrives passes against the code this exists to change.
 	//
 	// Spelled with this suite's own components rather than `scene`'s, because
-	// `replication` does not link `scene` and must not — `Marked` stands in for
+	// `replication` does not link `scene` and must not - `Marked` stands in for
 	// "under `ReplicatedFirst`", and the predicate reaching across that boundary
 	// is exactly how the real one does it.
 	AuthoritySettings settings;
@@ -296,7 +296,7 @@ TEST_CASE("a re-snapshotted client is not emptied by the preface", "[replication
 	// **The failure that swapping the two apply modes would produce, and it is
 	// invisible from the preface alone.** A preface is a slice of a world, so a
 	// receiver applying it authoritatively sweeps everything it does not
-	// mention — which on a join is nothing and on a *re-snapshot* is the entire
+	// mention - which on a join is nothing and on a *re-snapshot* is the entire
 	// world this client already holds.
 	AuthoritySettings settings;
 	settings.ResnapshotAfterTicks = 4;
@@ -353,7 +353,7 @@ TEST_CASE("a tagged entity stops paying for a row the receiver derives", "[repli
 	// **`D00115`: the filter was per component and a character needed it per
 	// row.** Five of a character's six parts have their frame derived from the
 	// root by `scene::PoseCharacters` on whichever machine draws, so the frames
-	// that crossed for them were overwritten the moment they landed — five
+	// that crossed for them were overwritten the moment they landed - five
 	// ten-byte quantised `CFrame`s per character per tick against roughly ten
 	// for the root alone.
 	//
@@ -380,7 +380,7 @@ TEST_CASE("a tagged entity stops paying for a row the receiver derives", "[repli
 	REQUIRE(pair.Client.Get<Spot>(limb) != nullptr);
 	CHECK(pair.Client.Get<Spot>(limb)->X == 2.0f);
 
-	// And the tag itself still crosses — it is what carries a limb's rest
+	// And the tag itself still crosses - it is what carries a limb's rest
 	// offset, and filtering it would be the mistake `D00115` warned against.
 	CHECK(pair.Client.Get<Marked>(limb) != nullptr);
 
@@ -405,7 +405,7 @@ TEST_CASE("an entity with no replicated component is not in the snapshot", "[rep
 	// **A row with nothing in it still says how many entities the world holds.**
 	// Interest filters entities and `Replicate` filters components, and the
 	// entity that passed the first and had nothing left after the second used to
-	// cross as a bare row — no data, and a count of a world the client was never
+	// cross as a bare row - no data, and a count of a world the client was never
 	// told it could see.
 	//
 	// Counted rather than inspected: what is being asserted is the *number* of
@@ -554,8 +554,8 @@ TEST_CASE("an instance created after a join arrives with its name and its class"
 	// **The bug this case exists for was invisible from the server.**
 	// `DefaultReplicatedComponents` admitted `ecs.Hierarchy` and the `scene.`
 	// prefix and nothing else from `ecs.`, so `ecs.InstanceName` and
-	// `ecs.InstanceClass` crossed in the join snapshot — `Store::Save` carries
-	// every component — and never in a delta. An entity the world already held
+	// `ecs.InstanceClass` crossed in the join snapshot - `Store::Save` carries
+	// every component - and never in a delta. An entity the world already held
 	// was named on a client and an entity created while that client was
 	// connected was not, which is why `server.replication` had to count a
 	// player's tools by walking `ecs::Entity` handles instead of asking for a
@@ -582,7 +582,7 @@ TEST_CASE("an instance created after a join arrives with its name and its class"
 	REQUIRE(pair.Client.Alive(carried));
 
 	// The name, and it is asked for the way a script would rather than read off
-	// the component — `FindFirstChild` is the assertion the bug was hiding from.
+	// the component - `FindFirstChild` is the assertion the bug was hiding from.
 	REQUIRE(pair.Client.InstanceNameOf(carried) == Name("Backpack"));
 	REQUIRE(pair.Client.FindFirstChild(holder, "Backpack") == carried);
 
@@ -603,15 +603,15 @@ TEST_CASE("an instance created after a join arrives with its name and its class"
 
 TEST_CASE("rows of different lengths land on the right entities", "[replication]") {
 	// **A delta's rows are not one width, and the packer used to assume they
-	// were.** It recorded one stride per component — the entry's bytes divided
-	// by its rows — and sliced each row back out at `row * stride` after the
+	// were.** It recorded one stride per component - the entry's bytes divided
+	// by its rows - and sliced each row back out at `row * stride` after the
 	// priority sort had reordered them. That is right only while every row
 	// encodes to the same length, which is true of a `Transform` and false of
 	// anything that writes a name: `scene.Visual` writes two, `ecs.InstanceName`
 	// writes one, and a name is as long as its text.
 	//
-	// It was already reachable before instance names crossed — two parts whose
-	// meshes are spelt differently is enough — and it was invisible because the
+	// It was already reachable before instance names crossed - two parts whose
+	// meshes are spelt differently is enough - and it was invisible because the
 	// names in a demo world are almost always empty and therefore all four bytes
 	// long. So the lengths here are deliberately far apart.
 	Pair pair;
@@ -697,7 +697,7 @@ TEST_CASE("losing sight of an entity is a forget, never a destroy", "[replicatio
 TEST_CASE("a forget too big for one datagram is split", "[replication]") {
 	// **The same rule as a snapshot and a delta, and the path that missed it.**
 	// A world going out of view all at once names every entity in one message,
-	// and three hundred handles is well past a datagram — which `Link::Reserve`
+	// and three hundred handles is well past a datagram - which `Link::Reserve`
 	// refuses outright rather than fragmenting, so the one message that says
 	// "stop drawing these" would be the one that never arrives and the client
 	// would draw a world that is no longer there.
@@ -767,7 +767,7 @@ TEST_CASE("no message fits a datagram only by luck", "[replication]") {
 	// because `Link::Reserve` refuses an oversized message with the same answer
 	// it gives ordinary backpressure. So the largest thing this can build is
 	// measured rather than reasoned about, against the number `Reserve` actually
-	// compares with — the plaintext limit, not the sealed one.
+	// compares with - the plaintext limit, not the sealed one.
 	//
 	// `ChunkBytes` is asked for above what can ever fit, so what is being
 	// measured is the cap rather than a value that happened to be small.
@@ -874,7 +874,7 @@ TEST_CASE("a re-snapshot is not counted as a tick short of a part", "[replicatio
 	REQUIRE(pair.Replica_.Applied() == pair.Now);
 
 	// One tick was short of a part and it was never superseded by a newer one,
-	// so nothing ever abandoned it — and a rejoin must not be recorded as
+	// so nothing ever abandoned it - and a rejoin must not be recorded as
 	// having done so.
 	REQUIRE(pair.Replica_.Stats().Incomplete == 0);
 	REQUIRE(pair.Client.Get<Spot>(all[0])->X == 11.0f);
@@ -909,7 +909,7 @@ TEST_CASE("a part number past the bound is refused", "[replication]") {
 
 TEST_CASE("a message limit past what a part number can carry is capped", "[replication]") {
 	// **A part a receiver refuses is a part that never arrives**, and a tick
-	// missing a part is never acknowledged — so a limit above `MAXIMUM_PARTS`
+	// missing a part is never acknowledged - so a limit above `MAXIMUM_PARTS`
 	// would not merely waste the excess, it would stall the stream outright.
 	// Capped at construction for the same reason `ChunkBytes` is.
 	//
@@ -980,7 +980,7 @@ TEST_CASE("a truncated message is refused at every length", "[replication]") {
 TEST_CASE("a tick's parts complete it in any order and however often", "[replication]") {
 	// **A part number is a position, not an arrival order**, and this is the
 	// case that says so. Parts ride the unreliable channel, which delivers out
-	// of order and twice as readily as once and in order — so a receiver that
+	// of order and twice as readily as once and in order - so a receiver that
 	// counted arrivals would read a duplicate as progress and acknowledge a tick
 	// it is a part short of, which is D00013 with an extra step.
 	//
@@ -1055,7 +1055,7 @@ TEST_CASE("a tick missing one of its parts is not acknowledged", "[replication]"
 
 	// A middle part, not the first and not the last. The first is what a
 	// receiver stopping at the first hole would have, and the last is the one
-	// carrying the marker — so a hole in the middle is the case that needs the
+	// carrying the marker - so a hole in the middle is the case that needs the
 	// whole set rather than a high-water mark.
 	for (const Entity entity : all) {
 		pair.Server.GetMutable<Spot>(entity)->X = 3.0f;
@@ -1070,7 +1070,7 @@ TEST_CASE("a tick missing one of its parts is not acknowledged", "[replication]"
 
 	// **Every survivor twice, which is what makes this case discriminating.**
 	// A receiver counting arrivals rather than positions would have as many
-	// deltas as the tick had parts and read the hole as filled — and the hole is
+	// deltas as the tick had parts and read the hole as filled - and the hole is
 	// filled by duplicates of the wrong parts, which is the D00013 bug with a
 	// receiver that looks like it is checking.
 	for (size_t index = 0; index < parts.size(); index++) {
@@ -1135,7 +1135,7 @@ TEST_CASE("reconciliation retires what the server consumed and keeps the rest", 
 	REQUIRE(prediction.Ahead() == 4);
 
 	// What is left is exactly what has to be replayed to arrive back at the
-	// present — the inputs *after* the acknowledged tick, oldest first.
+	// present - the inputs *after* the acknowledged tick, oldest first.
 	REQUIRE(prediction.Pending()[0].Tick == 7);
 	REQUIRE(prediction.Pending().back().Tick == 10);
 }
@@ -1163,7 +1163,7 @@ TEST_CASE("the prediction buffer is bounded and says when it overflowed", "[repl
 	REQUIRE(prediction.Ahead() == 4);
 	REQUIRE(prediction.Dropped() == 6);
 
-	// The oldest went, not the newest — the newest is the input the player just
+	// The oldest went, not the newest - the newest is the input the player just
 	// made, and it is the one they can see not happening.
 	REQUIRE(prediction.Pending().front().Tick == 7);
 	REQUIRE(prediction.Pending().back().Tick == 10);
@@ -1265,7 +1265,7 @@ TEST_CASE("a value lost in transit is resent until it is confirmed", "[replicati
 	REQUIRE(pair.Replica_.Applied() > 0);
 
 	// One move, and then the entity is still for the rest of the test. This is
-	// the case that used to be unrecoverable — a change that happens once and
+	// the case that used to be unrecoverable - a change that happens once and
 	// whose only delta is dropped.
 	pair.Server.Set<Spot>(entity, Spot{9.0f, 9.0f});
 	pair.Tick([](size_t) { return true; });
@@ -1293,7 +1293,7 @@ TEST_CASE("a confirmed value stops being resent", "[replication]") {
 	REQUIRE(pair.Client.Get<Spot>(entity)->X == 5.0f);
 
 	// Acknowledged, so the entry retires. A world where nothing is moving has
-	// to fall silent — a baseline that never retired would turn every delta
+	// to fall silent - a baseline that never retired would turn every delta
 	// into a full world update forever, which is the opposite of what carrying
 	// one is for.
 	pair.Tick();
@@ -1334,7 +1334,7 @@ TEST_CASE("a run of losses still converges", "[replication]") {
 TEST_CASE("a destroyed entity leaves the replica's tree walkable", "[replication]") {
 	// **The repair may not be left to the delta that follows.** A destroy rides
 	// the reliable channel and the corrected links ride the delta, and the two
-	// do not arrive together — `ApplyStructure` says so itself. A client renders
+	// do not arrive together - `ApplyStructure` says so itself. A client renders
 	// in between, and a parent still naming a freed child makes `EachChild` hand
 	// its body a dead handle and stop there, taking every sibling behind it off
 	// the tree.
@@ -1444,7 +1444,7 @@ namespace replication_test {
 
 // **The flash, at the far end of the wire.** A spawn crosses as a `Structure`
 // naming the entity and a delta carrying its rows, and the bandwidth budget
-// splits a delta — so the row that puts a part in `Workspace` can arrive a tick
+// splits a delta - so the row that puts a part in `Workspace` can arrive a tick
 // before the row that says where it is. In between, the client's own
 // `scene::SyncRendered` reaches it and it draws at the identity: a part at the
 // origin, then a jump. `examples/Slide.luau` shows it on every block it spawns.
@@ -1475,8 +1475,8 @@ TEST_CASE("a spawned entity is not put in the tree until its tick is whole", "[r
 	REQUIRE(pair.Client.Alive(child));
 
 	// Part zero of the tick: it says where the entity goes and the tick is not
-	// finished, so the rest of what it is — its transform, its size, its colour
-	// — has not arrived.
+	// finished, so the rest of what it is - its transform, its size, its colour
+	// - has not arrived.
 	REQUIRE(
 		pair.Replica_.Receive(pair.Client, replication_test::ParentPart(tick, 0, false, child, room)) ==
 		ApplyStatus::Ok

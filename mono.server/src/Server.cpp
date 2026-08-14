@@ -82,7 +82,7 @@ namespace server {
 		//
 		// **A constant and never a roll.** A damage drawn from a random number is
 		// a recording that does not replay, which is the rule `scene::FindSpawn`
-		// already keeps about picking a pad in tree order — and `just
+		// already keeps about picking a pad in tree order - and `just
 		// replay-check` would report it a long way from here.
 		constexpr float SHOT_DAMAGE = 25.0f;
 
@@ -139,7 +139,7 @@ namespace server {
 		if (!store) {
 			ENGINE_ERROR("server: no content store at {}", Settings.ContentStore.string());
 			ENGINE_ERROR(
-				"server: publish one first — cdn --publish DIR --store {} --signing-key HEX",
+				"server: publish one first - cdn --publish DIR --store {} --signing-key HEX",
 				Settings.ContentStore.string()
 			);
 			return false;
@@ -159,7 +159,7 @@ namespace server {
 				"server: --content-store needs --content-grant-key, {} hex characters", secret.size() * 2
 			);
 			ENGINE_ERROR(
-				"server: the secret is the deployment's to supply — this engine has no "
+				"server: the secret is the deployment's to supply - this engine has no "
 				"cryptographic generator to invent one with"
 			);
 			return false;
@@ -233,7 +233,7 @@ namespace server {
 		}
 		scope.ExpiresAtSeconds = nowSeconds + lifetimeSeconds;
 		// What an operator will accept being billed for rather than a secrecy
-		// bound — game content is not secret, it ships to everyone who plays.
+		// bound - game content is not secret, it ships to everyone who plays.
 		scope.ByteBudget = 1024ull * 1024ull * 1024ull;
 
 		const auto grant = engine::assets::Grant::Issue(scope, *ContentGrantSecret);
@@ -264,7 +264,7 @@ namespace server {
 			Settings.Processes > 0 ? Settings.Processes : 1u + static_cast<unsigned>(PlannedHosts());
 
 		// The configured count wins, and zero means work it out from how many
-		// processes are sharing the machine — see `parallel::ConfiguredWorkers`.
+		// processes are sharing the machine - see `parallel::ConfiguredWorkers`.
 		const unsigned configured = engine::parallel::ConfiguredWorkers();
 		engine::parallel::Jobs::Start(
 			configured != 0 ? configured : engine::parallel::WorkersPerHost(processes)
@@ -429,8 +429,8 @@ namespace server {
 		}
 
 		// **Every world runs, and the first one is what a client joins.**
-		// Replication is one world per connection today — `Session` binds a
-		// client to a world — so a game of several scenes simulates all of them
+		// Replication is one world per connection today - `Session` binds a
+		// client to a world - so a game of several scenes simulates all of them
 		// and streams one. Said in the log rather than left to be discovered:
 		// a player who joined and saw the lobby instead of the arena has no way
 		// to tell which world they got.
@@ -452,7 +452,7 @@ namespace server {
 					// part.** `PreparePhysicsWorld` calls `Store::Observe`,
 					// which moves every row already carrying the component
 					// into an archetype with somewhere to put the change
-					// bits — a structural change, and one that is free on an
+					// bits - a structural change, and one that is free on an
 					// empty world and a re-shuffle on a populated one.
 					PrepareSimulation(store, systems);
 
@@ -478,7 +478,7 @@ namespace server {
 		}
 
 		ENGINE_INFO(
-			"hosting '{}' — {} world(s), serving '{}'",
+			"hosting '{}' - {} world(s), serving '{}'",
 			info.Name.IsValid() ? info.Name.Text() : "game",
 			worlds.size(),
 			Worlds().NameOf(PrimaryWorld).Text()
@@ -503,7 +503,7 @@ namespace server {
 		// authored the scene differently would be disagreeing with its own
 		// replicas once per tick, and every side would look self-consistent.
 		//
-		// What it does *not* install is the client's half — there is no camera
+		// What it does *not* install is the client's half - there is no camera
 		// and no draw list here, because a server draws nothing. That split is
 		// the reason the loader stops where it does.
 		PrepareSimulation(store, scheduler);
@@ -539,7 +539,7 @@ namespace server {
 		// **The anti-entropy audit is on for a real server and off by default in
 		// the library**, and the split is deliberate rather than timid. What it
 		// finds is a client quietly disagreeing with the world on a value
-		// nothing is moving — which no delta reports and which, on a game
+		// nothing is moving - which no delta reports and which, on a game
 		// server, nobody is standing over the logs to notice. The cost is a
 		// small message every eight ticks per client. See `Audit.hpp` for why
 		// the default cannot simply be on: it is the one thing that speaks on a
@@ -561,7 +561,7 @@ namespace server {
 
 		// **One table, and it is `replication`'s.** This was written out here,
 		// in `mono.unified_server_client` and in `mono.studio`, and D00018 said
-		// all three agreed — which was true of this one and the studio's and
+		// all three agreed - which was true of this one and the studio's and
 		// not of the harness, whose own comment claimed it was duplicated from
 		// here. Nothing in the build compared them. `DefaultReplicatedComponents`
 		// is where the pairing lives now, and it carries the argument for every
@@ -586,7 +586,7 @@ namespace server {
 		// **The priority score, and it is the first thing ever to fill this
 		// hook in.** `Authority::SetPriority` has existed since v0.4 with
 		// nothing supplying it, so the rotation has been in sole charge and the
-		// order a plain round robin — which is fine for a world that fits and
+		// order a plain round robin - which is fine for a world that fits and
 		// wrong for one that does not, because the thing a player is standing
 		// next to updates no more often than the thing across the map.
 		//
@@ -605,7 +605,7 @@ namespace server {
 
 			// **Where a client is looking from, which this server now knows.**
 			// It did not until v0.15: the comment here said the placeholder
-			// world was cubes with nobody in it, and it was right — nothing
+			// world was cubes with nobody in it, and it was right - nothing
 			// called `SetClientViewpoint`, so `DistancePriority` fell back to
 			// the round robin it was written to replace, on every connection,
 			// for three versions. `UpdateClientViewpoints` points each client at
@@ -661,11 +661,11 @@ namespace server {
 			// world it covers arrives; here it was an ordinary root with an
 			// ordinary score, so a screen in it landed somewhere in the middle
 			// of the scene it was meant to hide. The other half is the join, and
-			// no score reaches that — see `SetPreface` below.
+			// no score reaches that - see `SetPreface` below.
 			//
 			// **Above the falloff's range rather than inside it.**
 			// `DistancePriority` answers zero to one, so any number above one
-			// sorts every one of its answers below this — and the starvation
+			// sorts every one of its answers below this - and the starvation
 			// rotation still outranks *this*, which is right: a value that has
 			// waited its deadline goes first whatever it is about, or the
 			// bound `AGENTS.md` calls "a bound rather than a hope" would stop
@@ -690,7 +690,7 @@ namespace server {
 			// **And the same rule where a client actually meets it first, which
 			// is the join and not the stream.** A score orders the values a
 			// running world produces; a join is one `Save` chunked across ticks
-			// in archetype order, and the line above has never touched it — so a
+			// in archetype order, and the line above has never touched it - so a
 			// loading screen was ranked first for every tick after the moment it
 			// was needed. `D00122`, and closing it is a second snapshot rather
 			// than a cleverer score.
@@ -706,8 +706,8 @@ namespace server {
 		}
 
 		// **A `Player` per connection, which nothing in this engine was
-		// making.** `scene::AddPlayer` had no production caller at all — every
-		// world that ever ran had a `Players` service with nobody in it — and
+		// making.** `scene::AddPlayer` had no production caller at all - every
+		// world that ever ran had a `Players` service with nobody in it - and
 		// the consequence was not cosmetic: ownership is assigned to a player,
 		// so a server with no players had nobody to assign it to and
 		// `SetNetworkOwner` had no argument a script could obtain.
@@ -715,7 +715,7 @@ namespace server {
 		Replication->OnAdmitted([this](engine::replication::ClientId client) {
 			Worlds().Enter(PrimaryWorld, [this, client](engine::ecs::Store &store) {
 				// **A world with no `Players` service gets no player, quietly.**
-				// That is not a misconfiguration to warn about — it is the
+				// That is not a misconfiguration to warn about - it is the
 				// placeholder world, which is furnished by nobody and is what
 				// `--entities` builds. A game file has services and gets one.
 				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
@@ -729,12 +729,12 @@ namespace server {
 				const engine::ecs::Entity player = engine::scene::AddPlayer(store, name);
 				if (player == engine::ecs::NULL_ENTITY) {
 					// **A world at `Players.MaxPlayers` is the case worth
-					// saying out loud.** The transport admitted the socket —
+					// saying out loud.** The transport admitted the socket -
 					// `ListenerSettings::MaximumClients` is a different number
-					// and a different question — so a silent return here is a
+					// and a different question - so a silent return here is a
 					// connected client watching a world it can never enter,
 					// with nothing anywhere saying why.
-					ENGINE_WARN("server: '{}' got no player — the world is full or has no Players", name);
+					ENGINE_WARN("server: '{}' got no player - the world is full or has no Players", name);
 					return;
 				}
 
@@ -742,7 +742,7 @@ namespace server {
 
 				// **And a body, which is the other half of admitting somebody.**
 				// A `Player` with no character is a row in a service that nothing
-				// draws and nothing can move — every world this repository shipped
+				// draws and nothing can move - every world this repository shipped
 				// before now was in exactly that state, so `--listen` produced a
 				// scene a client could watch and never enter.
 				//
@@ -751,7 +751,7 @@ namespace server {
 				// nobody else's.
 				// **The player's own interface, copied from the world's
 				// template.** `StarterGui` is a template and what a player sees
-				// is their copy — see `gui::ResetPlayerGui`, which also carries
+				// is their copy - see `gui::ResetPlayerGui`, which also carries
 				// why a `ResetOnSpawn = false` collector survives a death. The
 				// copies are ordinary world content on this authority, so they
 				// replicate to exactly one client: `SetInterest` above hides
@@ -766,7 +766,7 @@ namespace server {
 				// **Unless the game says it spawns its own occupants.**
 				// `Players.CharacterAutoLoads` is what a lobby sets to false,
 				// and a host that ignored it would hand everybody a body the
-				// game then has to destroy — which is a frame of a character
+				// game then has to destroy - which is a frame of a character
 				// standing in the world before a script can stop it.
 				//
 				// The same flag is what `scene::UpdateRespawns` reads for every
@@ -775,15 +775,15 @@ namespace server {
 				const engine::scene::PlayersServiceComponent *settings =
 					store.Get<engine::scene::PlayersServiceComponent>(engine::scene::PlayersOf(store));
 				if (settings != nullptr && !settings->CharacterAutoLoads) {
-					ENGINE_INFO("server: {} joined without a body — CharacterAutoLoads is off", name);
+					ENGINE_INFO("server: {} joined without a body - CharacterAutoLoads is off", name);
 				} else if (engine::scene::LoadCharacter(store, player) == engine::ecs::NULL_ENTITY) {
-					ENGINE_WARN("server: '{}' has no character — the world has no Workspace", name);
+					ENGINE_WARN("server: '{}' has no character - the world has no Workspace", name);
 				}
 
 				// **Which player is theirs, over the user channel.** It cannot be
 				// replicated: `scene::LocalPlayer` is one resource per world and
 				// the answer differs per client, so it travels as a per-client
-				// message — `game/Join.hpp` carries the whole argument.
+				// message - `game/Join.hpp` carries the whole argument.
 				const std::vector<std::byte> notice =
 					engine::game::EncodeJoinNotice(engine::game::JoinNotice{player});
 				if (!Replication->SendTo(client, notice, PollNow)) {
@@ -814,7 +814,7 @@ namespace server {
 			// **And where they were standing, which is a second map keyed on
 			// the same slot.** A slot is reused the moment somebody else joins,
 			// and `Viewpoint::Generation` is what stops the new client
-			// inheriting it — but an entry left behind is one the next client on
+			// inheriting it - but an entry left behind is one the next client on
 			// this slot sorts by until its own first tick lands, which is a
 			// world ordered by where a stranger stood.
 			ForgetClientViewpoint(client);
@@ -830,7 +830,7 @@ namespace server {
 		// no idea what a player is, and this is the part that knows a
 		// `NetworkOwner` names one.
 		//
-		// Absent means the server owns it, so an unowned entity refuses — which
+		// Absent means the server owns it, so an unowned entity refuses - which
 		// is every entity in every world this repository ships until a script
 		// hands one over.
 		Replication->Authority().SetOwnership([this](
@@ -851,7 +851,7 @@ namespace server {
 		// **What a client may be *shown*, which until v0.15 was everything.**
 		// `ServiceComponent::Scope` had said since v0.7 that
 		// `ServerScriptService` and `ServerStorage` are the server's, it
-		// round-tripped through save files, it showed in the properties panel —
+		// round-tripped through save files, it showed in the properties panel -
 		// and nothing read it, so a game's server scripts and its unreleased
 		// content went down the wire to every client that joined.
 		//
@@ -860,7 +860,7 @@ namespace server {
 		// not depend on who is asking. Ownership of a player's own subtree is per
 		// client: `Players` is `Shared` because both halves need the list of who
 		// is connected, and what is under one player's row is that player's
-		// alone — a second client shown somebody else's `PlayerGui` gets an
+		// alone - a second client shown somebody else's `PlayerGui` gets an
 		// interface it cannot interact with.
 		//
 		// **The rules live in `scene` and the plumbing lives here**, which is the
@@ -888,7 +888,7 @@ namespace server {
 			// same reason: `Players:GetPlayers()` is how a game knows who is in
 			// it, and a client shown only its own row would think it was alone.
 			// `server.replication`'s "a client is told which player is theirs"
-			// case is what caught this — the first version of this predicate hid
+			// case is what caught this - the first version of this predicate hid
 			// every player from every other client, which reads as a lobby that
 			// never fills.
 			if (entity == owner) {
@@ -909,7 +909,7 @@ namespace server {
 
 		// A delta is the third reader of the dirty bits, so the components that
 		// travel *and change every tick* have to be observed or nothing ever
-		// looks changed. The two above are signed instead — a hash of a value
+		// looks changed. The two above are signed instead - a hash of a value
 		// that moves every tick is a pass over the world to learn what a bit
 		// already knew.
 		Worlds().Enter(PrimaryWorld, [](engine::ecs::Store &store) {
@@ -949,7 +949,7 @@ namespace server {
 	bool Server::PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) {
 		// **Not `const`, and the `const_cast` this had was the tell.** Entering
 		// a world takes it, which is a mutating operation on the universe
-		// however read-only the callback is — so a `const` here was a claim the
+		// however read-only the callback is - so a `const` here was a claim the
 		// body had to cast away, and a cast whose job is to make a signature
 		// true is a signature that is not.
 		bool found = false;
@@ -967,7 +967,7 @@ namespace server {
 
 		// **The generation is checked, not just the slot.** A slot is reused
 		// when a client leaves and another joins, so keying on the index alone
-		// would hand the new client the old one's viewpoint — and it would sort
+		// would hand the new client the old one's viewpoint - and it would sort
 		// *its* world by where somebody else had been standing.
 		if (found == Viewpoints.end() || found->second.Generation != client.Generation) {
 			return false;
@@ -988,7 +988,7 @@ namespace server {
 		const engine::ecs::Entity player = found->second.Instance;
 
 		// **The write itself is `game`'s**, because the studio applies the same
-		// move from a `PlayLink` with no socket in the middle — two copies of
+		// move from a `PlayLink` with no socket in the middle - two copies of
 		// "which field does a move touch" is the shape that drifts, and drifts
 		// first in the editor.
 		Worlds().Enter(PrimaryWorld, [player, &move](engine::ecs::Store &store) {
@@ -1010,7 +1010,7 @@ namespace server {
 			for (const engine::replication::Input &input : submission.Inputs) {
 				// **Movement first, because it is the tagged one.** A shot is
 				// seven untagged floats, so the order has to be "try the message
-				// that identifies itself, then the one that does not" — the
+				// that identifies itself, then the one that does not" - the
 				// reverse would eventually read a move as a shot at whatever
 				// three of its bytes happened to spell.
 				engine::game::MoveInput move;
@@ -1041,7 +1041,7 @@ namespace server {
 				// **A tick outside the window is resolved against the present,
 				// and the case that forces it is a client standing still.** A
 				// client stamps its input with the newest tick it has applied,
-				// and a tick only reaches it when something *changed* — so in a
+				// and a tick only reaches it when something *changed* - so in a
 				// quiet world its idea of the server's clock stops advancing
 				// while the server's does not. Left alone, `Each` is asked for a
 				// tick that fell out of the ring, answers nothing, and every
@@ -1057,7 +1057,7 @@ namespace server {
 				// **And it cannot be gamed**, which is the other half of
 				// choosing this direction. Rewinding is the favourable answer
 				// for a laggy shooter, so a client that wanted more of it would
-				// claim an older tick — and claiming one this server no longer
+				// claim an older tick - and claiming one this server no longer
 				// remembers buys the *least* favourable resolution there is,
 				// not the most. A tick inside the window is honoured exactly as
 				// before; `RewindSettings::HistoryTicks` is the bound, and that
@@ -1095,7 +1095,7 @@ namespace server {
 				// **This is the consequence `docs/retired/DEFERRED.md` D00121 was
 				// waiting for.** A hit test with no consequence did not need "dead" to
 				// mean anything; the moment one subtracts something it does, and
-				// `scene::TakeDamage` is the door — including its refusal to run
+				// `scene::TakeDamage` is the door - including its refusal to run
 				// in a replica, which is why a client running this same code
 				// against its own copy could not kill anybody.
 				Worlds().Enter(PrimaryWorld, [&hit](engine::ecs::Store &store) {
@@ -1106,7 +1106,7 @@ namespace server {
 					// **The rewind history holds parts, and a `Character` sits on
 					// the model above one.** A limb is intangible and never
 					// enters the history, so what can be struck on a person is
-					// the root — whose parent is the model. Anything else struck
+					// the root - whose parent is the model. Anything else struck
 					// is scenery and has no humanoid to lose.
 					const auto *rig = store.Get<engine::scene::Character>(store.ParentOf(hit.Entity));
 					if (rig == nullptr) {
@@ -1128,8 +1128,8 @@ namespace server {
 		}
 
 		// **One world entry for every client rather than one each.** Entering a
-		// world takes it — `PositionOf` pays that cost per candidate and says
-		// so — and this runs every tick for every connection, where the walk
+		// world takes it - `PositionOf` pays that cost per candidate and says
+		// so - and this runs every tick for every connection, where the walk
 		// inside is a component read per player.
 		Worlds().Enter(PrimaryWorld, [this](engine::ecs::Store &store) {
 			for (const auto &[slot, occupant] : Players) {
@@ -1141,7 +1141,7 @@ namespace server {
 				if (character == engine::ecs::NULL_ENTITY) {
 					// Between a join and a spawn, and between a death and a
 					// respawn. A client with no entry scores everything the
-					// same, which is the round robin and the honest answer —
+					// same, which is the round robin and the honest answer -
 					// rather than sorting its world by wherever its corpse fell.
 					ForgetClientViewpoint(engine::replication::ClientId{slot, occupant.Generation});
 					continue;
@@ -1154,7 +1154,7 @@ namespace server {
 
 				// **The root's origin and not the eye.** Where a client's
 				// *camera* is depends on its zoom and its pitch, and neither
-				// crosses the wire — `CameraController` is a resource on
+				// crosses the wire - `CameraController` is a resource on
 				// whichever host is looking. The body is what the server knows,
 				// it is within a couple of metres of the eye in every camera
 				// mode, and the score it feeds is a falloff over tens of metres.
@@ -1220,7 +1220,7 @@ namespace server {
 		Announcement.Protocol = engine::replication::PROTOCOL_VERSION;
 		// The port that was bound rather than the one that was asked for:
 		// `--listen 0` binds an ephemeral one. The address is left as the
-		// socket has it — usually the wildcard — because the browser at the
+		// socket has it - usually the wildcard - because the browser at the
 		// other end resolves that against where the datagram came from, which
 		// is the one route known to work. `network::Listing::Dial`.
 		Announcement.At = Socket->Local();
@@ -1303,7 +1303,7 @@ namespace server {
 	void Server::UpdateWorldLifecycle(double nowSeconds) {
 		// **Off is the default and the check is first**, so a server nobody
 		// asked for this costs one comparison a tick and behaves exactly as it
-		// did — which is what keeps `just determinism` and `just replay-check`
+		// did - which is what keeps `just determinism` and `just replay-check`
 		// comparing the program they were written against.
 		if (Settings.IdleCloseSeconds <= 0.0) {
 			return;
@@ -1322,14 +1322,14 @@ namespace server {
 
 			// **Occupancy is a player standing in it, and players live in the
 			// primary world.** That is the whole of what a headless server can
-			// mean by "somebody is using this" — the studio's other two answers,
+			// mean by "somebody is using this" - the studio's other two answers,
 			// the active scene and a viewport showing it, are questions only an
 			// editor can ask.
 			inputs.Occupied = world == PrimaryWorld && !Players.empty();
 
 			// **And whatever the game says is still happening.** A host can see
 			// players and nothing else, so a world of NPCs on a route looks
-			// abandoned from here — `scene::AwakeWorld` is the game's answer and
+			// abandoned from here - `scene::AwakeWorld` is the game's answer and
 			// this is the only place a server can ask it. See `scene/Awake.hpp`.
 			if (!inputs.Occupied) {
 				engine::core::Name reason;
@@ -1341,7 +1341,7 @@ namespace server {
 					inputs.Occupied = true;
 
 					// Once, on the tick the claim starts holding it up, rather
-					// than every tick — a line a second per world is a log
+					// than every tick - a line a second per world is a log
 					// nobody reads and a claim is usually long-lived.
 					if (inputs.State == engine::world::WorldState::Active && !WasHeldAwake(world)) {
 						ENGINE_INFO(
@@ -1387,7 +1387,7 @@ namespace server {
 			if (action == engine::world::LifecycleAction::Resume) {
 				Worlds().SetState(world, engine::world::WorldState::Active);
 				TouchWorld(world, nowSeconds);
-				ENGINE_INFO("server: resumed '{}' — something arrived for it", Worlds().NameOf(world).Text());
+				ENGINE_INFO("server: resumed '{}' - something arrived for it", Worlds().NameOf(world).Text());
 				continue;
 			}
 
@@ -1403,7 +1403,7 @@ namespace server {
 
 			Worlds().SetState(world, engine::world::WorldState::Suspended);
 			ENGINE_INFO(
-				"server: suspended '{}' — empty for {:.4g}s",
+				"server: suspended '{}' - empty for {:.4g}s",
 				Worlds().NameOf(world).Text(),
 				Settings.IdleCloseSeconds
 			);
@@ -1456,7 +1456,7 @@ namespace server {
 		// **Where everybody is, before the delta is built against it.** The
 		// score sorts a client's world by distance from its viewpoint, so a
 		// viewpoint refreshed *after* the publish would order every tick by
-		// where that client stood on the previous one — invisible while a
+		// where that client stood on the previous one - invisible while a
 		// player stands still and exactly wrong while they run.
 		UpdateClientViewpoints();
 
@@ -1466,7 +1466,7 @@ namespace server {
 			// from last tick's value and send the owner's own state back to it
 			// one tick stale, which is a client fighting its own echo.
 			//
-			// What gets through is `Authority::SetOwnership`'s business — see
+			// What gets through is `Authority::SetOwnership`'s business - see
 			// the predicate in `BeginListening`. A world where nothing has been
 			// handed over, which is every world this repository ships, sees an
 			// empty loop.
@@ -1483,19 +1483,19 @@ namespace server {
 			// **`RigidBody` and not `Motion`, and the difference is a bug that
 			// made a standing player unhittable.** This walked `Motion` until
 			// v0.15, on the reading that a `Motion` is what makes a placement
-			// worth remembering — and `physics` takes a row's `Motion` *away*
+			// worth remembering - and `physics` takes a row's `Motion` *away*
 			// when it puts the body to sleep, deliberately, so that the solver's
 			// query never visits a resting row. `physics/AGENTS.md` carries that
 			// decision and `physics/tests/Solver.cpp` states it in one line.
 			//
 			// So the history held whatever happened to be awake. A player
 			// standing still is asleep within a second or so, which meant they
-			// could not be shot — and nothing reported it, because a hit test
+			// could not be shot - and nothing reported it, because a hit test
 			// against an empty candidate list is an ordinary miss.
 			//
 			// `RigidBody` is the question actually being asked: an anchored part
-			// never gets one at all — `PartDesc::Anchored` decides whether to
-			// attach one — so this excludes the static geometry the old
+			// never gets one at all - `PartDesc::Anchored` decides whether to
+			// attach one - so this excludes the static geometry the old
 			// predicate was aiming at, and excludes nothing else. `Static` is
 			// skipped for the same reason one layer in: it is a body that does
 			// not move.
@@ -1515,7 +1515,7 @@ namespace server {
 			}
 
 			// Before `ClearChanges`, which the world does at the start of its
-			// next tick — the bits are the delta source and reading them after
+			// next tick - the bits are the delta source and reading them after
 			// they are cleared is how a tick's worth of movement goes missing.
 			Replication->Publish(store, store.Time().Tick, nowSeconds);
 		});
@@ -1775,7 +1775,7 @@ namespace server {
 			ControlSurface.AddUniverseTools(Worlds());
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
-					"control: listening on 127.0.0.1:{} — {} tools",
+					"control: listening on 127.0.0.1:{} - {} tools",
 					ControlServer.Port(),
 					ControlSurface.Count()
 				);
@@ -1797,7 +1797,7 @@ namespace server {
 			// Beside the control surface, and for the same reason it is here:
 			// content delivery is not part of the tick. A fetch that completes
 			// between two ticks changes nothing a recorded run would have to
-			// reproduce — CDN.md §3 — so it is pumped where the frame is
+			// reproduce - CDN.md §3 - so it is pumped where the frame is
 			// bookkept rather than where the world is simulated, and
 			// `just determinism` is unaffected by whether anyone is fetching.
 			if (ContentService) {
@@ -1865,8 +1865,8 @@ namespace server {
 
 			// Presentation is a separate call because a *client* renders one
 			// world while the rest keep simulating. A headless server has no
-			// such choice: `PreRender` is where deriving what to send lives —
-			// the same shape as deriving what to draw — so it runs every tick,
+			// such choice: `PreRender` is where deriving what to send lives -
+			// the same shape as deriving what to draw - so it runs every tick,
 			// with an alpha of zero because nothing here interpolates.
 			Worlds().Present(PrimaryWorld, delta, 0.0f);
 
@@ -1876,7 +1876,7 @@ namespace server {
 			//
 			// A replay does not serve clients: a recording reproduces a run, and
 			// a run that also streamed would depend on whether anybody was
-			// connected — which is exactly the kind of input that stops a replay
+			// connected - which is exactly the kind of input that stops a replay
 			// being byte-identical.
 			if (!Replayer_) {
 				ServeClients(static_cast<double>(tickStarted) / 1e9);

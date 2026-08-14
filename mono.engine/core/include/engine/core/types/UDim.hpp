@@ -1,6 +1,6 @@
 #pragma once
 
-// A length that is part proportion and part absolute — the unit a layout is
+// A length that is part proportion and part absolute - the unit a layout is
 // written in.
 //
 // **Why a pair and not a float.** A UI element sized "half the parent, minus
@@ -10,7 +10,7 @@
 // this engine is for already know what `UDim2.new(0.5, -8, 0, 24)` means.
 //
 // **Resolution is not here.** `Scale` needs a parent length to mean anything,
-// and a type that resolved itself would need to know what it is inside — which
+// and a type that resolved itself would need to know what it is inside - which
 // is a fact about a tree, not about a length. `Resolve` takes the parent extent
 // as an argument for exactly that reason.
 //
@@ -27,7 +27,7 @@ namespace engine::core {
 		// Fraction of the parent's extent along this axis. 1 is the whole of it.
 		float Scale = 0.0f;
 
-		// Absolute offset along this axis, in the caller's unit — pixels, for a
+		// Absolute offset along this axis, in the caller's unit - pixels, for a
 		// UI.
 		float Offset = 0.0f;
 

@@ -26,19 +26,19 @@ set_target_properties(docgen PROPERTIES
 # ---------------------------------------------------------------------------
 
 # `find_program` caches its answer and does not look again once the variable is
-# set — including when the path it cached has since stopped existing. That is an
+# set - including when the path it cached has since stopped existing. That is an
 # ordinary thing to happen rather than an exotic one: a doxygen unpacked into a
 # temporary directory, a toolchain on a removable volume, or a package upgraded
 # out from under the cache all leave an absolute path that resolves to nothing.
 #
 # The stale value is still truthy, so the check below is skipped and the failure
 # arrives much later as `doxygen -w failed (No such file or directory)` from
-# inside RunDoxygen.cmake — a message that names no program, suggests no fix,
+# inside RunDoxygen.cmake - a message that names no program, suggests no fix,
 # and reads like the docs target is broken rather than the cache being wrong.
 # Drop the entry and search again, so the check below is what decides.
 foreach(tool MONO_DOXYGEN MONO_DOT)
 	if(${tool} AND NOT EXISTS "${${tool}}")
-		message(STATUS "docs: cached ${tool} (${${tool}}) is gone — searching again")
+		message(STATUS "docs: cached ${tool} (${${tool}}) is gone - searching again")
 		unset(${tool} CACHE)
 	endif()
 endforeach()
@@ -48,7 +48,7 @@ find_program(MONO_DOT dot)
 
 # Doxygen is a documentation prerequisite, not a build one, so a machine without
 # it configures and builds and tests exactly as before. What it must not do is
-# leave `just docs` reporting "no such target" — that reads as a broken
+# leave `just docs` reporting "no such target" - that reads as a broken
 # repository rather than a missing program.
 if(NOT MONO_DOXYGEN)
 	# One command, so that the line the build system echoes back on failure is
@@ -71,11 +71,11 @@ set(MONO_DOCGEN_BINARY "${MONO_STAGE_ROOT}/tools/docgen")
 set(MONO_DOCS_INPUT "")
 #
 # The repository's prose is listed file by file rather than by pointing at the
-# root, because the root also holds mono.vendor — and a recursive walk of that
+# root, because the root also holds mono.vendor - and a recursive walk of that
 # would pull in every markdown file SDL, imgui and shaderc ship.
 #
 # The order here is the order of the sidebar. Doxygen lists pages as it meets
-# them, so the three navigation pages are named individually and first — they
+# them, so the three navigation pages are named individually and first - they
 # would otherwise be reached through the recursive `mono.tools` entry at the
 # bottom and sort alphabetically, which puts the modules above the guide to
 # reading them.
@@ -84,13 +84,13 @@ set(MONO_DOCS_INPUT "")
 # the repository is a sibling of every other one, and the sidebar is thirty
 # entries with no shape. The pages are the only place the grouping exists;
 # neither README.md nor any AGENTS.md declares a child, and none of them can be
-# asked to — several are checked in as unmodifiable.
+# asked to - several are checked in as unmodifiable.
 #
 # They reference pages by the id Doxygen derives from the file's path, because a
 # markdown file that cannot be edited cannot be given an explicit `{#id}`. Those
 # ids are stable for a Doxygen version and are not promised across one. If an
-# upgrade renames them the build says so — an unresolved `@subpage` is a warning
-# and `docs-check` fails on warnings — and the current list is:
+# upgrade renames them the build says so - an unresolved `@subpage` is a warning
+# and `docs-check` fails on warnings - and the current list is:
 #
 #   just docs && ls .cache/build/dev/docs/html/md_*.html
 foreach(root IN ITEMS
@@ -103,7 +103,7 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/RUNNING.md"
 	"${CMAKE_SOURCE_DIR}/ROADMAP.md"
 	# RUNNING.md links to this from its content-origin section, so leaving it out
-	# is a dangling link rather than a smaller site — and `docs-check` fails on
+	# is a dangling link rather than a smaller site - and `docs-check` fails on
 	# those. The design notes that used to sit beside it here were deleted in
 	# `document-cleanup`; the entry went with them, because an input that does
 	# not exist is guarded by `EXISTS` below and therefore silently does nothing,
@@ -114,7 +114,7 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/docs"
 	# The one file, not the tree. AGENTS.md and CONTRIBUTING.md both link to
 	# this README, so leaving it out means two dangling links rather than a
-	# smaller site — but the skills and commands beside it are instructions to
+	# smaller site - but the skills and commands beside it are instructions to
 	# a model, not documentation of the engine.
 	"${CMAKE_SOURCE_DIR}/.claude/README.md"
 	"${CMAKE_SOURCE_DIR}/mono.engine"
@@ -127,7 +127,7 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/mono.cdn"
 	"${CMAKE_SOURCE_DIR}/mono.tools")
 	# An input Doxygen cannot read is a warning, and `docs-check` fails on
-	# warnings — so a checkout that legitimately does not have one of these yet
+	# warnings - so a checkout that legitimately does not have one of these yet
 	# would fail a check about documentation coverage for a reason that has
 	# nothing to do with coverage.
 	if(EXISTS "${root}")
@@ -145,7 +145,7 @@ set(MONO_DOCS_MAINPAGE "${CMAKE_SOURCE_DIR}/README.md")
 # which the main page already holds. That is where
 # `multiple use of section label 'index' for main page` came from, along with the
 # index-1.html, index-2.html and index-3.html pages Doxygen invented to tell
-# them apart — a warning that reads like a defect in README.md and is nothing of
+# them apart - a warning that reads like a defect in README.md and is nothing of
 # the sort.
 #
 # The condition is emptiness, not the filename. A placeholder that somebody
@@ -175,7 +175,7 @@ endforeach()
 # this whole block exists to stop happening in the other direction.
 if(MONO_DOCS_EMPTY)
 	list(JOIN MONO_DOCS_EMPTY ", " joined)
-	message(STATUS "docs: skipping empty page(s) — ${joined}")
+	message(STATUS "docs: skipping empty page(s) - ${joined}")
 endif()
 
 # Same reason: PROJECT_LOGO naming a file that is not there is a warning.
@@ -234,7 +234,7 @@ configure_file(
 
 # The same configuration with EXTRACT_ALL off. It has to be a second pass
 # because EXTRACT_ALL disables WARN_IF_UNDOCUMENTED and reports nothing about
-# having done so — see Doxyfile.check.in.
+# having done so - see Doxyfile.check.in.
 configure_file(
 	"${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.check.in"
 	"${MONO_DOCS_OUTPUT}/Doxyfile.check"

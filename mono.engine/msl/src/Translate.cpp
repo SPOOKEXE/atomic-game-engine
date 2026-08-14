@@ -72,7 +72,7 @@ namespace engine::msl {
 			buffers.insert(buffers.end(), storageBuffers.begin(), storageBuffers.end());
 
 			// A sampler declared apart from its texture. Nothing in this engine
-			// writes one — every shader samples through a combined `sampler2D` —
+			// writes one - every shader samples through a combined `sampler2D` -
 			// so this counter continues after the combined ones and has never
 			// been exercised. Said here rather than assumed correct.
 			std::vector<Slot> samplers;
@@ -142,7 +142,7 @@ namespace engine::msl {
 
 			// One emitter for both Apple platforms. `platform` decides a handful
 			// of availability spellings and iOS is the narrower of the two, so
-			// an iOS build switches this rather than translating differently —
+			// an iOS build switches this rather than translating differently -
 			// recorded because nothing here builds for iOS yet.
 			options.platform = spirv_cross::CompilerMSL::Options::macOS;
 

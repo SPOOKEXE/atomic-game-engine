@@ -2,8 +2,8 @@
 -- Who is in this game, drawn from `Players` and held open with TAB.
 --
 -- **The first scene in this repository that reads the player list at all.**
--- `scene::AddPlayer` got its first production caller at v0.15 — before that
--- every world that ever ran had a `Players` service with nobody in it — so
+-- `scene::AddPlayer` got its first production caller at v0.15 - before that
+-- every world that ever ran had a `Players` service with nobody in it - so
 -- `GetPlayers`, `PlayerAdded` and `PlayerRemoving` were bound, declared, tested
 -- and had nothing to say. This is the scene that gives them something.
 --
@@ -16,7 +16,7 @@
 --   `PlayerGui` when a character spawns, so a row added to the template after
 --   somebody joined never reaches the copy they are looking at. A list built
 --   there is a list that is correct for exactly one instant per player.
--- - A `PlayerGui` is **private to its player on the wire** — that is what
+-- - A `PlayerGui` is **private to its player on the wire** - that is what
 --   `scene::PlayerOwning` decides, and `just check` asserts a client holds four
 --   containers of its own and zero of anybody else's. So writing into each
 --   player's copy is both live and correctly scoped, and it is the only place
@@ -29,18 +29,18 @@
 --
 -- The rows are the host's business; the *toggle* is the viewer's, and only a
 -- host that has a keyboard can answer it. `RunService:IsClient()` is the
--- question — it is about the host rather than the world, which is exactly the
+-- question - it is about the host rather than the world, which is exactly the
 -- distinction wanted here.
 --
 -- - **A studio Play run and a single-player client** have both a player and a
 --   keyboard, so TAB holds the panel open and releasing it puts it away.
 -- - **A dedicated server** has no keyboard at all. It leaves every panel
 --   *shown*, because a list that is permanently hidden is indistinguishable
---   from one that is broken — and this is stated here rather than left as a
+--   from one that is broken - and this is stated here rather than left as a
 --   silent no-op.
 --
 -- **What it would take to hold TAB on a networked client** is a script running
--- in the replica, and `mono.client` runs none — `docs/DEFERRED.md` `D00122`
+-- in the replica, and `mono.client` runs none - `docs/DEFERRED.md` `D00122`
 -- records that, and it is the same missing piece that stops `ReplicatedFirst`'s
 -- scripts running before the rest of the tree arrives. The moment a client runs
 -- scripts out of its replica, the two branches below collapse into one.
@@ -52,8 +52,8 @@
 --
 -- The server is what makes it worth looking at: four clients means four names,
 -- and each one appearing and vanishing as a process starts and stops. A
--- standalone client has a keyboard and no players — `scene::AddPlayer` is a
--- host's call and a single-player world has no host to make it — so the panel
+-- standalone client has a keyboard and no players - `scene::AddPlayer` is a
+-- host's call and a single-player world has no host to make it - so the panel
 -- opens on TAB and is empty, which is the honest picture rather than a demo
 -- with invented occupants in it.
 
@@ -79,7 +79,7 @@ local PAD = Color3.fromRGB(96, 132, 96)
 
 -- **A scene of its own rather than a panel bolted onto `Playground.luau`.** A
 -- demo that needs another scene to be useful is one nobody runs on its own, and
--- the point of this one is the *list* — so it carries the least world that lets
+-- the point of this one is the *list* - so it carries the least world that lets
 -- several people be in it at once.
 
 local function block(name: string, size: Vector3, at: Vector3, colour: Color3): Part
@@ -126,8 +126,8 @@ local function buildPanel(container: Instance): Frame
 	screen.Name = "PlayerList"
 
 	-- **False, so the panel survives a respawn.** `gui::ResetPlayerGui` does
-	-- Roblox's rule — a collector with `ResetOnSpawn` true is destroyed and
-	-- re-cloned every life — and a list that vanished every time somebody died
+	-- Roblox's rule - a collector with `ResetOnSpawn` true is destroyed and
+	-- re-cloned every life - and a list that vanished every time somebody died
 	-- would be rebuilt from scratch by the loop below, which works and is
 	-- visibly wrong for one frame each time.
 	screen.ResetOnSpawn = false
@@ -164,7 +164,7 @@ local function buildPanel(container: Instance): Frame
 
 	-- **`LayoutOrder` and not the order rows were created in.** A player
 	-- leaving is a row destroyed from the middle, so creation order stops
-	-- meaning anything after the first departure — and a list that reshuffled
+	-- meaning anything after the first departure - and a list that reshuffled
 	-- itself when somebody left is the bug a sort exists to prevent.
 	list.SortOrder = Enum.SortOrder.LayoutOrder
 	list.Parent = card
@@ -207,7 +207,7 @@ local function buildRow(rows: Frame, order: number, name: string, mine: boolean)
 	-- **This player's own row is tinted, which is the one thing a list of
 	-- names cannot say on its own.** With two clients called `Player1` and
 	-- `Player2` there is otherwise nothing on screen that tells a person which
-	-- of the two they are — and `Players.LocalPlayer` is exactly the fact that
+	-- of the two they are - and `Players.LocalPlayer` is exactly the fact that
 	-- answers it, on the client where it means something.
 	row.BackgroundColor3 = if mine then MINE else ROW
 	row.BorderSizePixel = 0
@@ -239,7 +239,7 @@ local panels: { [Instance]: Frame } = {}
 -- **Every one of these takes a `Player` and `GetPlayers` hands back
 -- `{ Instance }`, so each caller casts once at the loop.** That is the union
 -- `D00114` describes rather than a gap: the buffer narrows wherever it writes a
--- class down — `Instance.new`, `game:GetService`, `:Clone()` — and a list's
+-- class down - `Instance.new`, `game:GetService`, `:Clone()` - and a list's
 -- element type is not one of those places. A cast at the loop is one statement
 -- of a fact the engine cannot infer; a cast at every member read would be
 -- several.
@@ -267,7 +267,7 @@ end
 -- costs: a list is a handful of rows and a change happens when somebody joins
 -- or leaves, so the diff would be more code than the rebuild for something that
 -- runs approximately never. `gui::Compiled` is what stops a rebuild being a
--- repaint — the draw list is kept until its signature moves.
+-- repaint - the draw list is kept until its signature moves.
 local function refresh(player: Player)
 	local rows = panelFor(player)
 	if not rows then
@@ -320,7 +320,7 @@ Players.PlayerRemoving:Connect(function(player: Instance)
 end)
 
 -- Whoever is already here. `PlayerAdded` fires for arrivals and this scene may
--- be loaded into a world that has some — a studio Play run adds its player
+-- be loaded into a world that has some - a studio Play run adds its player
 -- before the scripts start.
 refreshEverybody()
 
@@ -342,7 +342,7 @@ end
 
 if RunService:IsClient() then
 	-- A viewer. TAB holds the list open, which is the behaviour every game with
-	-- one has trained people to expect — press-to-toggle leaves it on screen
+	-- one has trained people to expect - press-to-toggle leaves it on screen
 	-- when somebody meant to glance.
 	setShown(false)
 

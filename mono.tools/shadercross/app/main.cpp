@@ -31,7 +31,7 @@ namespace {
 
 		const std::streamoff size = file.tellg();
 		if (size <= 0 || size % 4 != 0) {
-			error = path.string() + " is not a SPIR-V module — its length is not a multiple of four";
+			error = path.string() + " is not a SPIR-V module - its length is not a multiple of four";
 			return false;
 		}
 

@@ -13,15 +13,15 @@
 // | Written by | whoever ticks the world | the renderer's own upload |
 //
 // **It has to be `shared`, and that is the whole reason it is here.** A
-// server-tier host produces one — a headless world still has a draw list, and
-// `world::ViewChannel` is how a hosted world's view reaches a client — while a
+// server-tier host produces one - a headless world still has a draw list, and
+// `world::ViewChannel` is how a hosted world's view reaches a client - while a
 // client-tier consumer reads it. A type only one of those tiers can name cannot
 // be the thing they hand between them.
 //
 // So it carries **scene data, never device data**: a `CFrame` rather than a
 // column-major `mat4`, a `core::Name` rather than a mesh handle, a `Color3`
 // rather than a packed RGBA. The conversion to whatever a GPU wants belongs in
-// the presentation module, once, at the point of upload — putting it here would
+// the presentation module, once, at the point of upload - putting it here would
 // put a device's memory layout in the type a headless server writes.
 //
 // `HalfExtent` is the one field `v02v03v04.md` does not name and it is not
@@ -61,7 +61,7 @@ namespace engine::scene {
 		// World-space placement for this frame.
 		core::CFrame Frame;
 
-		// How big it is, as a half-extent on each local axis — the same form
+		// How big it is, as a half-extent on each local axis - the same form
 		// `Bounds` carries, so the producer copies rather than converts.
 		core::Vector3 HalfExtent{0.5f, 0.5f, 0.5f};
 
@@ -77,7 +77,7 @@ namespace engine::scene {
 		// is what makes an imported model work at all: a `.pmx` character has
 		// twenty submeshes each naming its own sheet, and no single field on an
 		// instance can say that. So the mesh carries a texture per run and this
-		// replaces it for the whole instance when it is set — which is exactly
+		// replaces it for the whole instance when it is set - which is exactly
 		// what Roblox's `MeshPart.TextureID` does to an imported mesh, and
 		// exactly what a recoloured variant of one model needs.
 		//
@@ -92,7 +92,7 @@ namespace engine::scene {
 		// world walk. A field the draw path does not read is bytes moved per
 		// instance per frame to no end.
 		//
-		// Invalid means the shader's fallback — the geometric normal, and
+		// Invalid means the shader's fallback - the geometric normal, and
 		// constants for roughness and occlusion.
 		//@{
 		core::Name NormalMap;
@@ -111,7 +111,7 @@ namespace engine::scene {
 		//
 		// **Invalid is the ordinary state and costs one compare.** The draw loop
 		// breaks a run wherever this changes, so a world where nothing selects a
-		// shader holds one value throughout and never breaks on it — the rule
+		// shader holds one value throughout and never breaks on it - the rule
 		// `SeamNormal` already established for a per-instance fact expressed as
 		// a per-draw one.
 		//
@@ -124,7 +124,7 @@ namespace engine::scene {
 		// Which tag bits this instance carries, against the world's `TagTable`.
 		//
 		// **The mask travels rather than the names**, so a pass filtering by
-		// tag is an `and` per instance instead of a set lookup — see
+		// tag is an `and` per instance instead of a set lookup - see
 		// `MatchesTags`. It is on the instance rather than looked up per view
 		// because a view is drawn several times a frame and the world is walked
 		// once.
@@ -133,7 +133,7 @@ namespace engine::scene {
 		// How much of what is behind shows through, 0 to 1.
 		//
 		// **The field is cheap and the ordering is not.** A non-zero value puts
-		// this instance in a second pass, sorted back-to-front per view — which
+		// this instance in a second pass, sorted back-to-front per view - which
 		// is the first thing the renderer does that depends on *which camera is
 		// looking*, and the reason this arrived with the pass rather than ahead
 		// of it. See `SortForDrawing`.
@@ -143,7 +143,7 @@ namespace engine::scene {
 		//
 		// **A mirror, and nothing more general than that.** A surface camera
 		// renders the world into a texture and an instance carrying its index
-		// samples it with a planar projection from that camera — which is
+		// samples it with a planar projection from that camera - which is
 		// exactly right for a flat pane and exactly wrong for anything curved.
 		// The narrowness is the design: a general reflection needs a cube map
 		// or a screen-space trace, and neither belongs in a pipeline this size.
@@ -152,8 +152,8 @@ namespace engine::scene {
 		// Whether this instance is drawn into the shadow map.
 		//
 		// **Carried rather than derived, because the renderer cannot work it
-		// out.** Transparency it can — a blended fragment must not write full
-		// depth — but "this opaque thing should not occlude" is an authoring
+		// out.** Transparency it can - a blended fragment must not write full
+		// depth - but "this opaque thing should not occlude" is an authoring
 		// decision that exists nowhere in the geometry. See
 		// `Visual::CastShadow`, which is where it is authored.
 		bool CastShadow = true;
@@ -174,7 +174,7 @@ namespace engine::scene {
 		// the body **fits through the hole**, which `scene::CutOfSeam` answers
 		// from the box and the pane's own rectangle. A room does not fit through
 		// its own doorway and a person does, which is the distinction `Movable`
-		// was standing in for — and unlike `Movable` it also admits an anchored
+		// was standing in for - and unlike `Movable` it also admits an anchored
 		// crate resting in a seam, which is as much a thing standing in the hole
 		// as anything that walked there.
 		//
@@ -198,7 +198,7 @@ namespace engine::scene {
 		// picture in the hole.
 		//
 		// **A zero normal means whole**, which is every instance in an ordinary
-		// scene — the test in `opaque.frag` is behind that check, and the
+		// scene - the test in `opaque.frag` is behind that check, and the
 		// renderer breaks a draw run only where the plane changes, so a world
 		// with no portal in it pays nothing at all.
 		//
@@ -216,7 +216,7 @@ namespace engine::scene {
 		//
 		// **A copy turned by `R` has to be lit by `R · L`.** The far half of a
 		// body standing in a hole is the near half mapped through the seam, so
-		// its normals are `R · n` — and shading those with the world's own `L`
+		// its normals are `R · n` - and shading those with the world's own `L`
 		// gives a body whose two halves are lit by two suns that differ by
 		// exactly the turn between the panes. On a quarter-turn pair that is a
 		// bright face meeting an olive one down the middle of a crate, which
@@ -225,7 +225,7 @@ namespace engine::scene {
 		// `R · L` makes `dot(R n, R L)` equal `dot(n, L)` for every normal, so
 		// the two halves shade identically and the join is invisible. It is the
 		// cheapest half of light through a hole and the only one that needs
-		// nothing from the shadow pipeline — `NON-EUCLIDEAN.md` Part V.3.
+		// nothing from the shadow pipeline - `NON-EUCLIDEAN.md` Part V.3.
 		//
 		// **The ambient and the upward bounce are not turned**, and cannot be
 		// without turning the world's up as well. They are the two terms that do
@@ -239,8 +239,8 @@ namespace engine::scene {
 	// Fills the fields a collector reads straight off the world's components.
 	//
 	// **The one place that field list is spelled out.** Two collectors publish
-	// this type — `client::CollectInstances` from a world this machine ticks and
-	// `client::CollectReplicated` from one it receives — and each wrote its own
+	// this type - `client::CollectInstances` from a world this machine ticks and
+	// `client::CollectReplicated` from one it receives - and each wrote its own
 	// fourteen-member aggregate until v0.15. That is the most expensive shape a
 	// duplicate can take here, because the drift is silent: a member added to the
 	// struct above takes its default in whichever collector nobody remembered to
@@ -261,7 +261,7 @@ namespace engine::scene {
 	// @param frame      Where to draw, already interpolated by the caller.
 	// @param bounds     The row's extent.
 	// @param visual     The row's visual component.
-	// @param appearance The row's appearance, or null for the defaults — a
+	// @param appearance The row's appearance, or null for the defaults - a
 	//                   replicated row may arrive without one.
 	// @param tags       The row's tags, or null for none.
 	// @return The instance to publish.
@@ -292,7 +292,7 @@ namespace engine::scene {
 		instance.TagMask = tags != nullptr ? tags->Mask : 0u;
 
 		// Copied rather than resolved. Which pass an instance lands in is the
-		// renderer's decision, because it depends on where the camera is — and a
+		// renderer's decision, because it depends on where the camera is - and a
 		// collector runs once for a world that may be drawn from several views.
 		instance.Transparency = visual.Transparency;
 		instance.Surface = visual.Surface;
@@ -304,14 +304,14 @@ namespace engine::scene {
 	// Produces the order a draw list should be submitted in.
 	//
 	// **An order rather than a sort in place**, because the consumer holds a
-	// `std::span<const DrawInstance>` — a view published by a world it does not
+	// `std::span<const DrawInstance>` - a view published by a world it does not
 	// own, which may be another process's memory. Writing an index list also
 	// costs four bytes an instance instead of moving eighty.
 	//
 	// **Why the renderer cannot just draw them in any order.** Opaque geometry
 	// writes depth, so whatever is nearest wins whichever order it arrived in.
-	// A blended fragment does not replace what is behind it — it mixes with
-	// whatever is already in the target — so drawing a near pane before a far
+	// A blended fragment does not replace what is behind it - it mixes with
+	// whatever is already in the target - so drawing a near pane before a far
 	// one blends the far one *into* a pixel that should have hidden it. The
 	// result is a window that looks right from one side of the room and wrong
 	// from the other, which reads as a shader bug rather than an ordering one.
@@ -323,7 +323,7 @@ namespace engine::scene {
 	// **A stable sort**, so two panes at the same distance keep the order the
 	// world produced them in. An unstable one would swap them from frame to
 	// frame as the comparison fell either way, and a recording would stop
-	// replaying — which is a determinism failure arriving through a renderer.
+	// replaying - which is a determinism failure arriving through a renderer.
 	//
 	// Here rather than in `render` because it is arithmetic over a `shared`
 	// type, and a headless host publishing a view has the same reason to order
@@ -340,8 +340,8 @@ namespace engine::scene {
 	// The same, over a subset a caller already chose.
 	//
 	// **What `OrderForDrawing` became when culling moved into the graph.** A
-	// pass is handed a list of instances now rather than the whole world — see
-	// `graph::EntityFlow` — so the sort has to run over a list. This is that
+	// pass is handed a list of instances now rather than the whole world - see
+	// `graph::EntityFlow` - so the sort has to run over a list. This is that
 	// function; `OrderForDrawing` is it applied to everything.
 	//
 	// An index past the end of `instances` is kept and sorted last rather than
@@ -375,7 +375,7 @@ namespace engine::scene {
 	//
 	// **A run of one order rather than the whole of it**, because the renderer
 	// has already divided the opaque head into what a mirror may see and what it
-	// may not — and one partition cannot serve both passes. The surface pass
+	// may not - and one partition cannot serve both passes. The surface pass
 	// wants the non-surface instances contiguous from zero; the shadow pass
 	// wants the casters contiguous. So this is applied to each of those runs
 	// separately and the shadow pass draws two ranges, the second of which is
@@ -384,7 +384,7 @@ namespace engine::scene {
 	// **Stable**, for the reason every ordering in this file is: an opaque scene
 	// must come out exactly as it went in, or a recording stops replaying.
 	//
-	// Here rather than in `render` for `OrderForDrawing`'s reason — it is
+	// Here rather than in `render` for `OrderForDrawing`'s reason - it is
 	// arithmetic over a `shared` type, and it is the piece of the shadow pass
 	// that can be checked without a GPU. The pass itself is index arithmetic
 	// over what this returns, which is exactly the part that is easy to get
@@ -392,7 +392,7 @@ namespace engine::scene {
 	//
 	// Only meaningful over opaque instances. A blended fragment writing full
 	// depth would cast a solid shadow, so the renderer never offers this the
-	// transparent tail — this does not re-check that, because a caller that
+	// transparent tail - this does not re-check that, because a caller that
 	// passed the tail has already made a different mistake.
 	//
 	// @param instances The draw list the indices refer to.
@@ -408,10 +408,10 @@ namespace engine::scene {
 	// **An instance naming no mesh is kept and one naming an absent mesh is
 	// not**, and that distinction is the whole function:
 	//
-	//   - no mesh named — an ordinary `Part` — draws the renderer's default
+	//   - no mesh named - an ordinary `Part` - draws the renderer's default
 	//     cube, which is what a part *is*.
-	//   - a mesh named and not loaded — a `MeshPart` whose geometry has not
-	//     arrived — draws nothing until it has.
+	//   - a mesh named and not loaded - a `MeshPart` whose geometry has not
+	//     arrived - draws nothing until it has.
 	//
 	// Without the second, a mesh table hands back its default for a name it does
 	// not hold, and a scene of mesh parts comes up as a field of cubes that turn
@@ -452,7 +452,7 @@ namespace engine::scene {
 	// anyone has to notice.
 	//
 	// **Stable**, so a run that was sorted back-to-front stays sorted inside each
-	// half — the mirrors keep their depth order and so does everything else.
+	// half - the mirrors keep their depth order and so does everything else.
 	//
 	// **Returns without touching the order when nothing shows a surface**, which
 	// is every scene with no mirror in it. `stable_partition` allocates a
@@ -468,15 +468,15 @@ namespace engine::scene {
 	// How many surfaces may be live at once.
 	//
 	// **A cap rather than a growable set, because each index costs a texture
-	// pair on the device.** A surface is ping-ponged — written this frame,
-	// sampled next — so an index in use is two colour targets and a depth
+	// pair on the device.** A surface is ping-ponged - written this frame,
+	// sampled next - so an index in use is two colour targets and a depth
 	// buffer, and at the wide targets a wall wants that is megabytes each. A
 	// scene may name any index it likes; one at or above this is dropped from
 	// the view list with a line in the log rather than silently rendering
 	// nothing, which is the failure that reads as a broken mirror.
 	//
 	// Sixteen because a room has four walls and a hall of them has more, and
-	// because the arrays this sizes are indexed by `int8_t` — the type
+	// because the arrays this sizes are indexed by `int8_t` - the type
 	// `Visual::Surface` already is.
 	//
 	// @since v0.8
@@ -488,7 +488,7 @@ namespace engine::scene {
 	// v0.8 every pane sampled the same target, so "the mirrors" was a single
 	// range and a single sampler binding. With a texture per surface the passes
 	// have to bind and project *per index*, which means each index's instances
-	// must be contiguous — this is where that contiguity is recorded.
+	// must be contiguous - this is where that contiguity is recorded.
 	//
 	// Empty runs are the ordinary case: a scene with two mirrors leaves fourteen
 	// of these zeroed, and a zero count is a draw call not issued rather than a
@@ -523,8 +523,8 @@ namespace engine::scene {
 	// and records where each index lands.
 	//
 	// **Exported because there are two ordered lists and only one of them is
-	// `OrderScene`'s.** The scene range — what the shadow and surface passes
-	// draw — is the whole draw list. The camera range is the frustum-culled
+	// `OrderScene`'s.** The scene range - what the shadow and surface passes
+	// draw - is the whole draw list. The camera range is the frustum-culled
 	// survivors, ordered from the eye, and the renderer builds it separately
 	// because culling to the eye is exactly what the other two passes must not
 	// do. Both need their mirrors grouped by index now that each index owns a
@@ -601,8 +601,8 @@ namespace engine::scene {
 		//
 		// **The last run of the whole list, so a faded mirror still reflects.**
 		// A part with a surface used to leave the opaque head the moment its
-		// `Transparency` went above zero — which is where the mirror flag is set
-		// — so the reflection did not dim, it disappeared, and the pane fell back
+		// `Transparency` went above zero - which is where the mirror flag is set
+		// - so the reflection did not dim, it disappeared, and the pane fell back
 		// to its own tint. That reads as the surface camera having stopped rather
 		// than as an ordering rule.
 		//
@@ -610,7 +610,7 @@ namespace engine::scene {
 		// other blended instance, which is the "always draws on top" the feature
 		// asks for. **Across the two runs the depth order is therefore not
 		// strictly back-to-front**: a blended pane in front of a mirror is drawn
-		// before it. Stated rather than hidden, and the trade is deliberate —
+		// before it. Stated rather than hidden, and the trade is deliberate -
 		// one sorted run per flag is what lets the mirror flag be a uniform
 		// instead of a per-fragment branch on data the shader does not have.
 		uint32_t TransparentSurfaces = 0;
@@ -628,9 +628,9 @@ namespace engine::scene {
 		// Where each surface's instances are, indexed by surface number.
 		//
 		// **Indexed rather than packed, so a lookup is not a search.** Both
-		// passes that draw mirrors already know which index they are drawing —
+		// passes that draw mirrors already know which index they are drawing -
 		// the surface pass because it is excluding its own, the screen pass
-		// because it walks the views it was given — and a packed list would make
+		// because it walks the views it was given - and a packed list would make
 		// every one of those a linear scan for a number that is already an
 		// array subscript.
 		SurfaceRun Runs[MAX_SURFACES];
@@ -639,8 +639,8 @@ namespace engine::scene {
 	// Folds one more value into a signature.
 	//
 	// **Exported so there is one mixing function rather than two.** The renderer
-	// has to add its own terms — a surface camera's projection matrix and the
-	// opacity it composites with, neither of which is a `shared` idea — and a
+	// has to add its own terms - a surface camera's projection matrix and the
+	// opacity it composites with, neither of which is a `shared` idea - and a
 	// second mixer written beside this one would make the combined number depend
 	// on which file computed which half.
 	//
@@ -655,7 +655,7 @@ namespace engine::scene {
 	// **The question this answers is "would drawing this again produce the same
 	// image", and it is asked because nothing cheaper can be.** A draw list is
 	// written through `ecs::Store::EachBatchParallel`, which sets no dirty bit by
-	// design, so there is no record of what moved — the same hole
+	// design, so there is no record of what moved - the same hole
 	// `replication::ChangeDetection::Signature` exists to close for components,
 	// and this is that idea applied to a render target.
 	//
@@ -665,8 +665,8 @@ namespace engine::scene {
 	//
 	// **Field by field, never over the object's bytes**, and this is the one
 	// choice here worth defending because today it buys nothing. `DrawInstance`
-	// is packed as it stands — `core::Name` is a four-byte id, `Color3` ends
-	// four-aligned, nothing pads — so a byte-wise hash would agree with this one
+	// is packed as it stands - `core::Name` is a four-byte id, `Color3` ends
+	// four-aligned, nothing pads - so a byte-wise hash would agree with this one
 	// on every list anybody can currently build.
 	//
 	// It is a property of the current field order and not a guarantee. One
@@ -675,7 +675,7 @@ namespace engine::scene {
 	// last held. The consequence is not a crash: the signature simply never
 	// matches, every surface renders every frame, and the skip quietly stops
 	// working with nothing to notice. `Reserved` is the same argument already
-	// made — it exists so the object representation is deterministic across a
+	// made - it exists so the object representation is deterministic across a
 	// process boundary, and it says nothing about what is drawn, so a signature
 	// that depended on it would be depending on padding by name.
 	//
@@ -683,8 +683,8 @@ namespace engine::scene {
 	// placement, size and tint all change what another mirror sees of it and are
 	// all here. Its rendered *image* also changes what another mirror sees of it,
 	// and including that would make every surface dirty every other one every
-	// frame — A's image moves, so B must redraw, which moves B's image, so A must
-	// redraw — a cycle that never settles and skips nothing. The cost of leaving
+	// frame - A's image moves, so B must redraw, which moves B's image, so A must
+	// redraw - a cycle that never settles and skips nothing. The cost of leaving
 	// it out is that in a scene where the only thing moving is a reflection, the
 	// recursion freezes rather than propagating another bounce. Anything moving
 	// in the world thaws it on the next frame.
@@ -698,8 +698,8 @@ namespace engine::scene {
 
 	// Divides one view's draw list into the runs its passes submit.
 	//
-	// Orders the list — opaque in world order, blended back to front from `eye`
-	// — then moves mirrors to the back of the opaque head, then moves shadow
+	// Orders the list - opaque in world order, blended back to front from `eye`
+	// - then moves mirrors to the back of the opaque head, then moves shadow
 	// casters to the front of each of the two runs that leaves.
 	//
 	// **Here rather than in `render` for `OrderForDrawing`'s reason**, and with

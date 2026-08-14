@@ -5,7 +5,7 @@
 // **The audio twin of `Input.hpp`, and it exists for the identical reason.**
 // `engine::audio` owns the mixer and sits at L12 `client`; the script binding is
 // at L9 `shared` and may not name it. So `SoundService` cannot reach the module
-// that makes the noise — what a script decides has to come to rest somewhere both
+// that makes the noise - what a script decides has to come to rest somewhere both
 // can see, and that place is a resource on the world. `scene` is where a fact
 // about the world lives; who acts on it is somebody else's business.
 //
@@ -14,7 +14,7 @@
 // number kept beside the output node would have N worlds writing it and the last
 // writer of the frame winning. `client::SoundStage` folds this into each voice's
 // own fader instead, so a world's setting scales that world's sounds and nothing
-// else — which is also Roblox's arrangement, where `SoundService` is a service of
+// else - which is also Roblox's arrangement, where `SoundService` is a service of
 // one place rather than of the whole universe.
 //
 // **A server has one of these and nothing reads it, which is the point.** A world
@@ -36,8 +36,8 @@ namespace engine::scene {
 	// actually honour, and a name that mapped to nothing would offer an author
 	// completion for a setting that does nothing. `ListenerType.CFrame` and
 	// `ListenerType.ObjectCFrame` place the ear *and turn it*, and
-	// `client::SoundStage` posts a position with no facing — `audio::ListenerPose`
-	// has a forward and a right vector, and nothing sets either — so a listener
+	// `client::SoundStage` posts a position with no facing - `audio::ListenerPose`
+	// has a forward and a right vector, and nothing sets either - so a listener
 	// with a rotation would be a rotation the panning ignores.
 	//
 	// The ordinals are this file's own and are free to move; nothing serialises
@@ -73,7 +73,7 @@ namespace engine::scene {
 		// door along: a copy of where something is would be a second opinion
 		// about it, and the one that goes stale the moment the thing moves.
 		// Ignored under any other mode, and a mode naming an instance that has
-		// no `Transform` falls back to the camera rather than to the origin —
+		// no `Transform` falls back to the camera rather than to the origin -
 		// see `client::SoundStage::Sync`.
 		ecs::Entity Listener;
 
@@ -100,7 +100,7 @@ namespace engine::scene {
 	// The name a listener mode is known by.
 	//
 	// **Round-trips**, because these are the names `ecs::EnumTable` registers and
-	// a script compares against — the same contract `Describe(KeyCode)` has.
+	// a script compares against - the same contract `Describe(KeyCode)` has.
 	//
 	// @param mode The mode.
 	// @return A view valid for the lifetime of the process.

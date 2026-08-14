@@ -61,7 +61,7 @@ namespace engine::scene {
 		// `Players.LocalPlayer`.
 		//
 		// **A property, so no binding ever learns the name.** `LuauInstances.cpp`
-		// switches on `PropertyType` and nothing else — that is what makes a
+		// switches on `PropertyType` and nothing else - that is what makes a
 		// property declared here readable from Luau, from JavaScript and in the
 		// properties panel with none of them changing. A `if (name ==
 		// "LocalPlayer")` in the script layer would be the second source of
@@ -89,7 +89,7 @@ namespace engine::scene {
 
 				// **Nil on a server, and that is the feature.** A `Script` that
 				// reaches for it gets nothing rather than somebody else's
-				// player — the mistake this separation exists to make
+				// player - the mistake this separation exists to make
 				// impossible.
 				*static_cast<Entity *>(out) = local != nullptr ? local->Instance : NULL_ENTITY;
 				return true;
@@ -100,9 +100,9 @@ namespace engine::scene {
 		// One of a player's four containers, as a reference a script can name.
 		//
 		// **The containers existed and nothing could name them.** `AddPlayer`
-		// creates all four beside every player — `gui::Layout` draws a
+		// creates all four beside every player - `gui::Layout` draws a
 		// `ScreenGui` only from `StarterGui` or from a player's `PlayerGui`, and
-		// the spawn pipeline refills `Backpack` from `StarterGear` — so a script
+		// the spawn pipeline refills `Backpack` from `StarterGear` - so a script
 		// wanting to reach one had to find the child by string and hope the
 		// spelling matched the one the engine uses. The name constants are that
 		// spelling, and these are them handed over rather than retyped.
@@ -116,13 +116,13 @@ namespace engine::scene {
 		// **Read-only, all four.** Roblox does not let a script assign any of
 		// them either, and here the reason is sharper: every consumer finds the
 		// container by walking the tree, so a script pointing the property
-		// somewhere else would move nothing — the interface would still draw
+		// somewhere else would move nothing - the interface would still draw
 		// from the real container and the property would describe a place it is
 		// not.
 		//
 		// **A template over the name rather than four near-identical
 		// functions.** `PropertyDescriptor::Get` is a raw function pointer, so
-		// the conversion has to be captureless — which makes the container's
+		// the conversion has to be captureless - which makes the container's
 		// name a template argument and not a parameter. That is the same
 		// constraint `Classes::ClampedProperty` is built around.
 		//
@@ -171,7 +171,7 @@ namespace engine::scene {
 			// **Reads the row and writes nothing, and the two sets differ for
 			// once.** A `.Changed` listener should hear a `UserId` that was
 			// assigned, so `Reads` names the component it comes off; nothing may
-			// assign it, so `Writes` is empty — which is the contradiction
+			// assign it, so `Writes` is empty - which is the contradiction
 			// `mono.tools/bindings` refuses when a read-only property claims a
 			// write set, and it refused this one first.
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<PlayerIdentity>()});
@@ -194,7 +194,7 @@ namespace engine::scene {
 		// **Counted rather than kept.** A field incremented on arrival and
 		// decremented on departure is a second copy of a fact the tree already
 		// holds, and it is the copy that goes wrong the first time a script
-		// calls `player:Destroy()` — rule 2, with a scoreboard attached. A
+		// calls `player:Destroy()` - rule 2, with a scoreboard attached. A
 		// player's few siblings are a short walk.
 		//
 		// @since v0.17
@@ -223,7 +223,7 @@ namespace engine::scene {
 		// **Writable, unlike `Players.LocalPlayer` beside it.** Roblox assigns
 		// this from `Player:LoadCharacter()` and lets a game assign it directly;
 		// so does this. `SetPlayerCharacter` carries the argument for what the
-		// assignment does — it is the setter, not a field write, because
+		// assignment does - it is the setter, not a field write, because
 		// binding a model to a player is three rows and an ownership grant
 		// rather than one entity handle.
 		//
@@ -263,7 +263,7 @@ namespace engine::scene {
 		//
 		// **Writable, unlike every other reference on a `Player` but
 		// `Character`.** Which side somebody is on is a decision a game script
-		// makes and remakes — a round ends, an autobalance runs — where
+		// makes and remakes - a round ends, an autobalance runs - where
 		// `UserId`, `PlayerGui` and the rest are facts about the connection.
 		// `SetPlayerTeam` is the setter rather than a field write because it
 		// refuses anything that is not a live `Team`, which is where that
@@ -272,7 +272,7 @@ namespace engine::scene {
 		// **Computed rather than a field**, for `Character`'s reason one
 		// property up: a `Player` is registered with `PlayerIdentity` alone, so
 		// `PlayerTeam` is added to the row on the first assignment and is absent
-		// before it — which a generated field property has no way to answer nil
+		// before it - which a generated field property has no way to answer nil
 		// for.
 		//
 		// @since v0.15
@@ -349,7 +349,7 @@ namespace engine::scene {
 			//
 			// `StarterPlayerScripts` is a child of `StarterPlayer` in Roblox
 			// and it is one here. It is listed as a service rather than as an
-			// ordinary folder because that is what it is — a client asks for it
+			// ordinary folder because that is what it is - a client asks for it
 			// by name.
 			std::string_view Parent;
 		};
@@ -357,7 +357,7 @@ namespace engine::scene {
 		constexpr std::array<ServiceDesc, 13> SERVICES{{
 			// **Workspace first, and the order matters.** These are created in
 			// this order and the explorer draws roots in creation order, so
-			// this is the order an author sees — Workspace at the top, exactly
+			// this is the order an author sees - Workspace at the top, exactly
 			// as Studio has it.
 			{"Workspace", ServiceScope::Shared, {}},
 			{"Lighting", ServiceScope::Shared, {}},
@@ -369,7 +369,7 @@ namespace engine::scene {
 
 			// **The gear template, and it is copied on the join rather than on
 			// the spawn.** Roblox clones this into `Player.StarterGear` once,
-			// and refills `Backpack` from *that* on every respawn — so a tool a
+			// and refills `Backpack` from *that* on every respawn - so a tool a
 			// game grants at run time is added to `StarterGear` and survives
 			// dying, where one added to `Backpack` does not. Two containers,
 			// two lifetimes; collapsing them is how "my tool vanished when I
@@ -412,19 +412,19 @@ namespace engine::scene {
 		// **The resource is the storage and this is the only way to reach it from
 		// a script**, which is the whole design. `ActiveCamera` has named the live
 		// camera since v0.4 and there was no property projecting it, so a script
-		// could create a `Camera` and had no way to say "look through this one" —
+		// could create a `Camera` and had no way to say "look through this one" -
 		// it had to be handed one by whatever built the world.
 		//
 		// **A read resolves the resource and a write moves it.** Not a component
 		// on `Workspace`: that would be a second place the live camera is
 		// recorded, and the two would disagree the first time anything set the
-		// resource directly — which `client::InstallDefaultCamera` does.
+		// resource directly - which `client::InstallDefaultCamera` does.
 		//
 		// **`PropertyKind::Computed` and not `Structural`**, even though it writes
 		// a resource rather than a component: structural means the write moves the
 		// row to another archetype, and this moves nothing. What it does touch is
 		// outside the entity entirely, which is a case `PropertyKind` has no
-		// member for — recorded here rather than by inventing one for a single
+		// member for - recorded here rather than by inventing one for a single
 		// property.
 		PropertyDescriptor CurrentCameraProperty() {
 			PropertyDescriptor property;
@@ -437,7 +437,7 @@ namespace engine::scene {
 			// nearest honest answer: what this projects is a resource, and
 			// `Reads`/`Writes` can only name components. A `.Changed` listener on
 			// this property therefore fires when a camera row is written rather
-			// than when the live one changes — over-reporting, which is the
+			// than when the live one changes - over-reporting, which is the
 			// direction `ecs::ChangeChannel` says to err in.
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Camera>()});
 			property.Writes = property.Reads;
@@ -459,7 +459,7 @@ namespace engine::scene {
 				// **Refused for anything that is not a camera.** Assigning a part
 				// here would leave `ResolveActiveCamera` looking for a `Camera`
 				// component it will not find, so the matrices would silently stay
-				// as they were — a frame drawn from where the camera used to be,
+				// as they were - a frame drawn from where the camera used to be,
 				// which reads as a renderer fault. `ActiveCamera.hpp` describes
 				// that exact failure and this is what keeps a script from causing
 				// it.
@@ -475,8 +475,8 @@ namespace engine::scene {
 				if (const ActiveCamera *existing = store.Resource<ActiveCamera>()) {
 					// **Read-modify-write, so the aspect ratio and the matrices
 					// survive.** A fresh `ActiveCamera` would reset `AspectRatio`
-					// to 1, and the consumer that owns that number — a window, a
-					// mirror's texture — writes it once rather than every frame.
+					// to 1, and the consumer that owns that number - a window, a
+					// mirror's texture - writes it once rather than every frame.
 					// A script changing camera would have squashed the view until
 					// the next resize.
 					live = *existing;
@@ -493,8 +493,8 @@ namespace engine::scene {
 		// resolves, over the `SurfaceBounces` resource.
 		//
 		// **On `Workspace` because it is a statement about the scene**, and the
-		// scene is what is in there. The alternative reading — that it is a
-		// quality setting and belongs beside `Lighting`'s — is the one the
+		// scene is what is in there. The alternative reading - that it is a
+		// quality setting and belongs beside `Lighting`'s - is the one the
 		// command line already had and is exactly what this replaces: a corridor
 		// of facing panes needs a different number from a room with one mirror
 		// in it, and which of those a world *is* is not something a session
@@ -548,7 +548,7 @@ namespace engine::scene {
 		ClassId RegisterServiceTree() {
 			// The root of everything, and the components these classes are sets
 			// of, both through `PartClass`. A service derives from `Instance`,
-			// so registering that again here would be a second root — and
+			// so registering that again here would be a second root - and
 			// `Classes::Register` handing back the existing id for a repeated
 			// name would have hidden it rather than refused it.
 			EnsureClassTree();
@@ -561,7 +561,7 @@ namespace engine::scene {
 			// a list of names.** `Explorer.cpp` filters the palette to
 			// descendants of `Instance` and then writes out the handful of
 			// bases nobody can instantiate. Services are excluded as a
-			// *category*, so a tenth service never touches that function — a
+			// *category*, so a tenth service never touches that function - a
 			// world has exactly one of each and `InstallServices` is what puts
 			// it there.
 			const std::array serviceSet{ecs::Components::Of<ServiceComponent>()};
@@ -591,7 +591,7 @@ namespace engine::scene {
 
 			// **A `Player` is an instance, not a service.** There are many of
 			// them, they come and go, and a script reaches one through
-			// `Players` — which is exactly the shape the instance tree already
+			// `Players` - which is exactly the shape the instance tree already
 			// has. Derived from `Instance` rather than from `Service` so the
 			// class picker's service exclusion does not hide it, and so a world
 			// can hold as many as it has occupants.
@@ -606,9 +606,9 @@ namespace engine::scene {
 			const ClassId team = Classes::Register("Team", instance, teamSet);
 
 			// **The one hook a game needs to make a character walk.** Setting it
-			// is what links a model to a player, and every consumer downstream —
+			// is what links a model to a player, and every consumer downstream -
 			// the client's move submission, the host's move application, the
-			// camera — reads that link rather than being told separately.
+			// camera - reads that link rather than being told separately.
 			Classes::Computed(player, CharacterProperty());
 
 			// **The four containers a join makes**, none of which a script could
@@ -630,7 +630,7 @@ namespace engine::scene {
 
 			// **The side, and it is what decides where a respawn puts them.**
 			// `FindSpawn` reads this against every `SpawnLocation` in the
-			// workspace — see `Teams.hpp` — which is what keeps a team from
+			// workspace - see `Teams.hpp` - which is what keeps a team from
 			// being a coloured label.
 			Classes::Computed(player, TeamProperty());
 
@@ -681,7 +681,7 @@ namespace engine::scene {
 
 		Entity found = NULL_ENTITY;
 		store.EachRoot([&](Entity root) {
-			// **The first in `EachRoot`'s order**, which is creation order — the
+			// **The first in `EachRoot`'s order**, which is creation order - the
 			// same tie-break `FindFirstRoot` made, kept so a world that somehow
 			// holds two of one service resolves to the same one it always did.
 			if (found == NULL_ENTITY && store.IsA(root, klass)) {
@@ -730,8 +730,8 @@ namespace engine::scene {
 
 	ServiceScope ScopeOfInstance(const Store &store, Entity instance) {
 		// **Up to the root, and the *root* is what carries the scope.** A
-		// service is always a root — `InstallServices` parents eleven of them to
-		// nothing and `StarterPlayerScripts` to `StarterPlayer` — so walking to
+		// service is always a root - `InstallServices` parents eleven of them to
+		// nothing and `StarterPlayerScripts` to `StarterPlayer` - so walking to
 		// the top and reading there is the same answer as reading the nearest
 		// service on the way, with one lookup instead of one per level.
 		//
@@ -764,8 +764,8 @@ namespace engine::scene {
 
 	Entity PlayerOwning(const Store &store, Entity instance) {
 		// **Stops at the first `Player` on the way up**, rather than walking to
-		// the root and coming back down. A player's subtree is shallow — a
-		// `PlayerGui` and what a script puts in it — and the answer for
+		// the root and coming back down. A player's subtree is shallow - a
+		// `PlayerGui` and what a script puts in it - and the answer for
 		// everything else is found by reaching a root that is not a player,
 		// which is the ordinary case and costs the same walk either way.
 		const ClassId player = Classes::Find(core::Name("Player"));
@@ -899,7 +899,7 @@ namespace engine::scene {
 		// **The four containers, because everything under a player has to be
 		// somewhere and every consumer finds them by these names.**
 		// `gui::Layout` draws a `ScreenGui` only from `StarterGui` or from a
-		// player's `PlayerGui` — Roblox's containment rule — so a player without
+		// player's `PlayerGui` - Roblox's containment rule - so a player without
 		// one is a viewer that can never be shown an interface, and the symptom
 		// is a black overlay rather than an error. The other three are the gear
 		// pipeline and the client's own scripts.
@@ -909,8 +909,8 @@ namespace engine::scene {
 		// to create is one somebody will not, and the failure is silent.
 		//
 		// **Plain `Instance`s rather than classes of their own.** `scene` may
-		// not link `gui` — the refusal runs both ways, and `gui/AGENTS.md`
-		// states this side of it — and what every containment test reads is the
+		// not link `gui` - the refusal runs both ways, and `gui/AGENTS.md`
+		// states this side of it - and what every containment test reads is the
 		// *name*. So the spelling is what matters, and `examples/tests/Scene.cpp`
 		// pins `PlayerGui` against `gui::PLAYER_GUI` from the one place both are
 		// linked.
@@ -943,7 +943,7 @@ namespace engine::scene {
 
 		if (local) {
 			// One per world, and the last marked wins. A resource rather than a
-			// tag because there is one of it — `ecs/AGENTS.md`'s rule — and
+			// tag because there is one of it - `ecs/AGENTS.md`'s rule - and
 			// because "who am I" is a question with one answer.
 			store.SetResource(LocalPlayer{player});
 		}
@@ -958,13 +958,13 @@ namespace engine::scene {
 		for (const ServiceDesc &desc : SERVICES) {
 			// **Found before created, which is the whole of the idempotence.**
 			// A world read out of a game file already has these as ordinary
-			// instances — they were saved like everything else — so creating
+			// instances - they were saved like everything else - so creating
 			// them unconditionally would give an author two Workspaces, one of
 			// which holds their scene and one of which is empty.
 			// **Found by class, never by name, and that was a real bug.** These
 			// lookups were `FindFirstRoot(desc.Name)`, so a script that renamed
 			// the `Workspace` made this find nothing and mint a *second* one
-			// beside the scene — see `ServiceOf`. A class survives a rename by
+			// beside the scene - see `ServiceOf`. A class survives a rename by
 			// construction.
 			const ClassId klass = Classes::Find(core::Name(desc.Name));
 
@@ -1000,7 +1000,7 @@ namespace engine::scene {
 
 				// **`Fixture` finally refuses something.** The field has said
 				// since v0.7 that an author may not delete or reparent a
-				// service, and nothing read it — a script could `Destroy()`
+				// service, and nothing read it - a script could `Destroy()`
 				// `Lighting` and the editor could delete it with the Delete key,
 				// which is rule 6 in its plainest form. `Store::Protect` is the
 				// seam and this is its only filler.
@@ -1009,7 +1009,7 @@ namespace engine::scene {
 				// game file is protected too: the loop above finds those rather
 				// than making them, and protection that only applied to freshly
 				// minted services would hold in a new game and not in a saved
-				// one — which is the worst half to be missing.
+				// one - which is the worst half to be missing.
 				if (component->Fixture) {
 					store.Protect(existing);
 				}
@@ -1024,7 +1024,7 @@ namespace engine::scene {
 		// whoever is looking, not to the world: the editor makes one to show its
 		// viewport, a client makes one for its player, and several people editing
 		// one game make one each. `InstallServices` furnishes a world with what
-		// the *game* has, and a viewpoint is not that — putting one here wrote
+		// the *game* has, and a viewpoint is not that - putting one here wrote
 		// somebody's camera into every game file, which is what
 		// `TransientComponent` now exists to prevent.
 		//

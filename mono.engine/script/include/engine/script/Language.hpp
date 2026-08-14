@@ -6,7 +6,7 @@
 // `Runtime.hpp` pulls in the debugger and the host surface; `Instances.hpp` is
 // included by everything that touches a script instance and needs the enum to
 // hold a default in `CodeSourceContainerSelector`. A forward declaration is not
-// enough for that — an enumerator needs the definition — and including the
+// enough for that - an enumerator needs the definition - and including the
 // runtime from the instance header would drag the VM into every consumer.
 //
 // @tier L9 - shared
@@ -24,7 +24,7 @@ namespace engine::script {
 		Luau,
 
 		// JavaScript, from `mono.vendor/quickjs`. TypeScript is the typed
-		// authoring surface over this one — it erases its types by design, so
+		// authoring surface over this one - it erases its types by design, so
 		// there is nothing else for a "TypeScript VM" to have been.
 		JavaScript,
 	};
@@ -32,7 +32,7 @@ namespace engine::script {
 	// The language a file's extension names.
 	//
 	// `.luau` and `.lua` are Luau; `.js`, `.mjs` and `.ts` are JavaScript. A
-	// `.ts` file is expected to have been type-stripped already — nothing in
+	// `.ts` file is expected to have been type-stripped already - nothing in
 	// the C++ build compiles TypeScript, and nothing should: the engine loads
 	// what a toolchain emitted.
 	//

@@ -91,7 +91,7 @@ TEST_CASE("a document scans into tags, attributes and text", "[core][xml]") {
 TEST_CASE("a doctype is refused rather than parsed", "[core][xml]") {
 	// **Billion laughs, and every variant of it.** The attack is an entity
 	// declared in terms of itself ten times over, so a two-kilobyte document
-	// expands to gigabytes — and there is no version of "expand entities safely"
+	// expands to gigabytes - and there is no version of "expand entities safely"
 	// simpler than not having entities. Refusing the declaration removes the
 	// whole family in one line.
 	const Failure bomb = Refusal(
@@ -102,7 +102,7 @@ TEST_CASE("a doctype is refused rather than parsed", "[core][xml]") {
 	CHECK(Mentions(bomb, "DOCTYPE"));
 	CHECK(Mentions(bomb, "ENTITY"));
 
-	// An external entity is the same declaration and the same refusal — and it
+	// An external entity is the same declaration and the same refusal - and it
 	// is a file read, performed by a reader that opens nothing.
 	const Failure external = Refusal(R"(<!DOCTYPE a [<!ENTITY x SYSTEM "file:///etc/passwd">]><a/>)");
 	CHECK(external.Reason == Fault::Refused);
@@ -110,7 +110,7 @@ TEST_CASE("a doctype is refused rather than parsed", "[core][xml]") {
 
 	// **The second lock, and it has to hold on its own.** No declaration
 	// survives the scanner, so a reference to anything but the five predefines
-	// names something nobody could have declared — refused where it would have
+	// names something nobody could have declared - refused where it would have
 	// been expanded rather than dropped, because a dropped one makes a bomb look
 	// like a file with a typo in it.
 	Failure failure;
@@ -151,7 +151,7 @@ TEST_CASE("nothing here recurses, so depth is the caller's to bound", "[core][xm
 	// **Unbounded nesting is the third attack, and a parser that recursed would
 	// meet it as a stack overflow with no file named.** `NextTag` is a scan and
 	// the caller keeps the stack, so a million levels is a million tags and a
-	// count somebody bounded — this case is the proof that the scanner itself
+	// count somebody bounded - this case is the proof that the scanner itself
 	// does not care.
 	constexpr int DEEP = 100000;
 

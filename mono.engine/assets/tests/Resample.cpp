@@ -1,11 +1,11 @@
 // The box filter and the mip chain built out of it.
 //
 // **These cases were `bake`'s until v0.15 and the arithmetic did not change when
-// they moved** — only the tier it lives at, so that `assets` may build a chain
+// they moved** - only the tier it lives at, so that `assets` may build a chain
 // over pixels it generated itself. What did change is the fixtures: `bake`'s
 // suite fed the filter a decoded BMP, and a suite one tier down has no decoder
 // to reach for, so the images here are written out by hand. That is a fair trade
-// for this file — every property below is about what the filter does to bytes,
+// for this file - every property below is about what the filter does to bytes,
 // not about where the bytes came from.
 
 #include <engine/assets/Resample.hpp>
@@ -148,7 +148,7 @@ TEST_CASE("a resize keeps the flipbook it was given", "[assets][resample]") {
 	// **The failure this pins would have looked like a broken decoder.** A GIF
 	// larger than `--max-texture` goes through a resize on its way to disk, and
 	// a resize that dropped these three fields would turn every big imported
-	// animation back into an anonymous atlas — with the decoder working
+	// animation back into an anonymous atlas - with the decoder working
 	// perfectly the whole time.
 	const TextureData source = Sheet(2, 4, 3);
 
@@ -167,7 +167,7 @@ TEST_CASE("a chain halves all the way down and every level is the right size", "
 	TextureData chained = source;
 	REQUIRE(BuildMipChain(chained));
 
-	// 2x2 gives two levels, and the smallest is the mean of the four corners —
+	// 2x2 gives two levels, and the smallest is the mean of the four corners -
 	// the same number `ResizeImage` produces directly, because the chain is that
 	// filter run repeatedly rather than a second one.
 	REQUIRE(chained.LevelCount() == 2);
@@ -209,7 +209,7 @@ TEST_CASE("a flipbook's chain stops before frames bleed into each other", "[asse
 	// **The decision this case exists for.** Halving a grid of frames is only
 	// safe while every destination pixel sits inside one cell, which holds
 	// exactly while the cell size is still an even halving. One level further and
-	// a pixel averages two frames — a ghost of the next frame, at distance, that
+	// a pixel averages two frames - a ghost of the next frame, at distance, that
 	// looks like the flipbook's cell arithmetic is wrong rather than like the
 	// chain being one level too long.
 	TextureData sheet = Sheet(2, 4, 4);
@@ -234,7 +234,7 @@ TEST_CASE("a flipbook's chain stops before frames bleed into each other", "[asse
 	CHECK(MipChainLevels(still) == 4);
 
 	// **And so does a one-cell sheet**, which is what every still GIF decodes to
-	// — there is no neighbouring frame for it to bleed into. `bake::ReadGif`
+	// - there is no neighbouring frame for it to bleed into. `bake::ReadGif`
 	// gives a single frame a 1x1 grid, so without this case every imported still
 	// would lose its levels to a neighbour that does not exist.
 	TextureData single = Sheet(1, 2, 1);
@@ -244,8 +244,8 @@ TEST_CASE("a flipbook's chain stops before frames bleed into each other", "[asse
 
 TEST_CASE("a sheet whose cells cannot be halved gets no chain at all", "[assets][resample]") {
 	// **Refusing the chain rather than padding the cells.** A gutter would be a
-	// change to what a flipbook *is* — every sampler divides the sheet by
-	// `FlipbookSide` — so the honest answer for a sheet of odd cells is the
+	// change to what a flipbook *is* - every sampler divides the sheet by
+	// `FlipbookSide` - so the honest answer for a sheet of odd cells is the
 	// texture it already was.
 	TextureData odd = Sheet(2, 3, 4);
 	CHECK(MipChainLevels(odd) == 1);

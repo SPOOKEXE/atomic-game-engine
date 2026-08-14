@@ -31,7 +31,7 @@
 #include <vector>
 
 // The content attachment is held by pointer and named nowhere else in this
-// header — see `Server::~Server`.
+// header - see `Server::~Server`.
 namespace cdn {
 	class Origin;
 	class Service;
@@ -81,7 +81,7 @@ namespace server {
 		// construction rather than by the runs happening to be short.
 		//
 		// The policy is not repeated here. What a host supplies is what only it
-		// can know — whether a world is occupied — and for a server that is a
+		// can know - whether a world is occupied - and for a server that is a
 		// player standing in it.
 		//
 		// @since v0.13
@@ -91,7 +91,7 @@ namespace server {
 		//
 		// **`Never` is a real answer rather than a way of switching this off.**
 		// A world can be empty of players and full of things that have to keep
-		// happening — NPCs on a route, an economy, a countdown between rounds.
+		// happening - NPCs on a route, an economy, a countdown between rounds.
 		// `world::IdleSleep` says why that is an enum instead of a very large
 		// number.
 		//
@@ -119,7 +119,7 @@ namespace server {
 		//
 		// A recording is one snapshot plus every envelope applied since, which
 		// is complete because a world is deterministic given its state and its
-		// inbox. Reading it back reproduces the run exactly — same binary, same
+		// inbox. Reading it back reproduces the run exactly - same binary, same
 		// machine.
 		std::filesystem::path RecordPath;
 
@@ -145,7 +145,7 @@ namespace server {
 		// Names rather than ids: an id is an index into one process's registry
 		// and means something else here. Empty with `HostName` set is a host
 		// that was given nothing, which is an error rather than an idle
-		// process — a supervisor that granted nothing has a bug in its plan.
+		// process - a supervisor that granted nothing has a bug in its plan.
 		std::vector<std::string> HostWorlds;
 
 		// Worlds to place into supervised host processes rather than hold here.
@@ -156,7 +156,7 @@ namespace server {
 		// worlds in two processes are not faster than two in two threads.
 		//
 		// The driver still routes every bus operation, so a world's behaviour
-		// does not change by being moved out — which is what makes this a
+		// does not change by being moved out - which is what makes this a
 		// deployment decision.
 		std::vector<std::string> RemoteWorlds;
 
@@ -187,7 +187,7 @@ namespace server {
 		// The UDP port to serve on. Only read when `Listening`.
 		//
 		// Zero binds an ephemeral port, which is a real answer rather than a
-		// way of saying no — a test wants one so that two runs on one machine do
+		// way of saying no - a test wants one so that two runs on one machine do
 		// not collide. `Server::ListeningOn` says which was chosen. That is why
 		// there is a flag beside it rather than zero meaning off.
 		uint16_t ListenPort = 0;
@@ -210,7 +210,7 @@ namespace server {
 		// `ContentStore` is set. Zero binds an ephemeral one.
 		uint16_t ContentPort = 0;
 
-		// The secret shared with whoever issues grants — which, for an attached
+		// The secret shared with whoever issues grants - which, for an attached
 		// origin, is this same process.
 		//
 		// Empty generates an in-process-only grant key at startup.
@@ -220,7 +220,7 @@ namespace server {
 		//
 		// Off by default, and only meaningful with `Listening`: a server that
 		// announced a port it never bound would be advertising nothing. The
-		// default is off for `Listening`'s reason — a process that broadcast
+		// default is off for `Listening`'s reason - a process that broadcast
 		// because nobody said not to would be a behaviour change in every
 		// existing recipe.
 		//
@@ -257,7 +257,7 @@ namespace server {
 		// characters, or empty for none.
 		//
 		// **Without it the exchange authenticates nobody**, which is protection
-		// against a listener and not against a relay — see
+		// against a listener and not against a relay - see
 		// `Listener::SetIdentity`. The same key a publisher signs manifests
 		// with, so a deployment distributes one public key and not two.
 		std::string IdentityKey;
@@ -267,7 +267,7 @@ namespace server {
 	// assert on it.
 	struct RunSummary {
 		// Ticks simulated, read from the world's own clock rather than counted
-		// here — there is only ever one tally, so there is nothing to disagree.
+		// here - there is only ever one tally, so there is nothing to disagree.
 		uint64_t Ticks = 0;
 
 		// Wall time the run took, in seconds. Includes the pacing sleep, so
@@ -292,8 +292,8 @@ namespace server {
 	// One hosted world and the fixed-tick loop that drives it.
 	//
 	// Initialise, then Run until it returns, then Shutdown. Run blocks for the
-	// life of the world, so anything that needs to end it — a signal handler, a
-	// test — does so through Stop from another thread.
+	// life of the world, so anything that needs to end it - a signal handler, a
+	// test - does so through Stop from another thread.
 	class Server {
 	  public:
 		Server();
@@ -304,7 +304,7 @@ namespace server {
 		// Writes one client's move onto the humanoid it is allowed to move.
 		//
 		// **The lookup is the whole of the security here.** A client names
-		// nothing — it says only which way it is trying to walk — so the body
+		// nothing - it says only which way it is trying to walk - so the body
 		// the intent lands on is the one this server assigned to that
 		// connection, and a client that sent a hundred moves still moves one
 		// character.
@@ -359,8 +359,8 @@ namespace server {
 		// hook and `DistancePriority` have both existed since v0.4, and the
 		// reason nothing filled them in was written into the comment beside
 		// them: there was no per-client avatar, so the placeholder world was
-		// cubes and nobody was in it. There is one now — `scene::AddPlayer` per
-		// connection, with a character — so the honest answer stopped being
+		// cubes and nobody was in it. There is one now - `scene::AddPlayer` per
+		// connection, with a character - so the honest answer stopped being
 		// "score everything the same".
 		//
 		// Called once a tick from `ServeClients`, before the delta is built.
@@ -383,7 +383,7 @@ namespace server {
 		// Applies `options`, starts the job system and builds the world.
 		//
 		// @param options Parsed command line. Copied, not referenced.
-		// @return False if the options do not describe a runnable server — a
+		// @return False if the options do not describe a runnable server - a
 		//         tick rate of zero or less is the case that exists today. The
 		//         caller exits; nothing has been started yet at that point.
 		bool Initialise(const Options &options);
@@ -411,7 +411,7 @@ namespace server {
 		// learns nothing about who asked.
 		//
 		// Today it grants the whole publication, because there is no interest
-		// set to narrow it by — no player, no position, no entitlement. That is
+		// set to narrow it by - no player, no position, no entitlement. That is
 		// the honest scope for what exists rather than a security decision, and
 		// it is the line to change when a session knows what it needs.
 		//
@@ -439,7 +439,7 @@ namespace server {
 
 		// The universe this server drives.
 		//
-		// For a caller that needs more than the primary world — a supervisor,
+		// For a caller that needs more than the primary world - a supervisor,
 		// or a test that creates a second one.
 		//
 		// @return The universe.
@@ -471,7 +471,7 @@ namespace server {
 		// The replication endpoint, when this server is listening.
 		//
 		// For a caller that wants to declare what is replicated or read how many
-		// clients are connected — and for a test, which is the only way to prove
+		// clients are connected - and for a test, which is the only way to prove
 		// the socket was actually bound.
 		//
 		// @return The listener, or null when `--listen` was not given.
@@ -594,7 +594,7 @@ namespace server {
 		//
 		// **The decision is `world::DecideLifecycle` and none of it is repeated
 		// here.** This gathers what only a server can know and applies what came
-		// back — D00017's whole argument is that a host growing its own idle
+		// back - D00017's whole argument is that a host growing its own idle
 		// policy makes a world that closes in the editor and not on the server,
 		// with nothing reporting the difference.
 		//
@@ -603,7 +603,7 @@ namespace server {
 		// and a viewport looking at it. Nothing here has a viewport.
 		//
 		// Does nothing at all when `Options::IdleCloseSeconds` is zero, which is
-		// the default — see there for why that matters to two recipes.
+		// the default - see there for why that matters to two recipes.
 		//
 		// @param nowSeconds The current time.
 		void UpdateWorldLifecycle(double nowSeconds);
@@ -613,7 +613,7 @@ namespace server {
 		// **Only active worlds have an entry, and that is the ordering bug
 		// D00017 records from the studio's own move.** Looking the clock up for a
 		// suspended world creates an entry it has no use for and delays waking it
-		// by a frame — so the lookup happens inside the `Active` branch.
+		// by a frame - so the lookup happens inside the `Active` branch.
 		struct WorldLife {
 			engine::world::WorldId World;
 			double LastOccupied = 0.0;
@@ -644,7 +644,7 @@ namespace server {
 			"atomic-server",
 			"A dedicated server of the atomic game engine, hosting worlds headlessly. `world_list` "
 			"is worth calling first: a world is a scene and the universe is the game. This program "
-			"authors nothing — it hosts, so there is no selection and no run mode to change."
+			"authors nothing - it hosts, so there is no selection and no run mode to change."
 		};
 
 		Options Settings;
@@ -657,12 +657,12 @@ namespace server {
 		// barrier lives.
 		//
 		// Held by pointer so the header does not have to be complete before the
-		// options are read — a universe binds its driver thread on
+		// options are read - a universe binds its driver thread on
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
 
-		// How this server is found — the LAN beacon and the rendezvous
+		// How this server is found - the LAN beacon and the rendezvous
 		// registration. Null when `--advertise` and `--rendezvous` were both
 		// absent, which is every existing recipe.
 		//
@@ -678,7 +678,7 @@ namespace server {
 
 		// This tick's time, for the foreign-datagram handler. The listener's
 		// drain has no clock of its own to pass on, and reading one inside
-		// would put a wall clock in the middle of the tick — which is the thing
+		// would put a wall clock in the middle of the tick - which is the thing
 		// `net/AGENTS.md` bans.
 		double DiscoveryNow = 0.0;
 
@@ -686,7 +686,7 @@ namespace server {
 		//
 		// **Because an admission callback has no time of its own.** `Listener::
 		// OnAdmitted` fires from inside `Poll`, and the join notice it sends
-		// needs the same `nowSeconds` every other send on this link takes —
+		// needs the same `nowSeconds` every other send on this link takes -
 		// reading a clock there would be a second time source in a program whose
 		// whole tick is passed in.
 		double PollNow = 0.0;
@@ -705,7 +705,7 @@ namespace server {
 		// duplication.** CDN.md §4 splits the job in two: the server decides
 		// what a client may have and issues a token, the origin checks it and
 		// serves. Here both ends happen to be this process, and the key still
-		// exists twice because the *roles* do — collapsing them into one object
+		// exists twice because the *roles* do - collapsing them into one object
 		// would make the in-process arrangement a different code path from the
 		// deployed one, which is exactly what §16.6 forbids for the transport.
 		std::unique_ptr<engine::assets::GrantKey> ContentGrantSecret;
@@ -764,7 +764,7 @@ namespace server {
 			// **Kept beside the position and checked on every read.** A slot is
 			// reused when a client leaves and another joins, so an entry keyed
 			// on the index alone would hand the new client the old one's
-			// viewpoint — and sort its world by where somebody else stood.
+			// viewpoint - and sort its world by where somebody else stood.
 			uint32_t Generation = 0;
 		};
 
@@ -774,7 +774,7 @@ namespace server {
 
 			// Checked on every read, for the reason `Viewpoint` carries one: a
 			// slot is reused the moment a client leaves, and an entry keyed on
-			// the index alone would hand the new client the old one's player —
+			// the index alone would hand the new client the old one's player -
 			// and with it everything that player owned.
 			uint32_t Generation = 0;
 		};
@@ -805,7 +805,7 @@ namespace server {
 
 		bool Running = false;
 
-		// There is no tick counter here. The world keeps one — its own clock —
+		// There is no tick counter here. The world keeps one - its own clock -
 		// and a second copy on the host is a fact that can disagree with itself
 		// the first time one of them is advanced in a branch.
 	};

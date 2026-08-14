@@ -22,7 +22,7 @@ namespace {
 		return std::abs(value - expected) <= tolerance;
 	}
 
-	// A listener at the origin, facing -Z with +X to its right — the engine's
+	// A listener at the origin, facing -Z with +X to its right - the engine's
 	// default and the arrangement every case below reasons about.
 	ListenerPose AtOrigin() {
 		return ListenerPose{};
@@ -59,7 +59,7 @@ TEST_CASE("panning reaches each side and centres between them", "[audio][spatial
 
 	const StereoGain centre = PanGain(0.0f);
 	CHECK(Near(centre.Left, centre.Right));
-	// Not 0.5 — that is the linear answer and the one that sags.
+	// Not 0.5 - that is the linear answer and the one that sags.
 	CHECK(Near(centre.Left, 0.70710678f));
 }
 

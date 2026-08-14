@@ -11,7 +11,7 @@
 // ## Nothing here is world state
 //
 // The log lives in the editor, never enters a store, never crosses a bus and
-// never reaches a snapshot — the rule at the top of `Editor.hpp`. That is not
+// never reaches a snapshot - the rule at the top of `Editor.hpp`. That is not
 // tidiness: Stop throws the universe away and restores a snapshot, so a log that
 // travelled with the world would come back describing edits the restore has
 // already discarded. `Editor::BeginRun` clears it instead, and the transport
@@ -20,23 +20,23 @@
 // ## Why it does not hold an `ecs::Entity`
 //
 // An entity handle is an index and a generation into **one** store. Undoing a
-// delete cannot give the handle back — `ReadInstanceDocument` builds a new row
-// and the new row has a new handle — so a log holding entities would be correct
+// delete cannot give the handle back - `ReadInstanceDocument` builds a new row
+// and the new row has a new handle - so a log holding entities would be correct
 // exactly until the first undone deletion, after which every later command in
 // it would name something else. That is the failure mode where undo silently
 // edits the wrong instance, which is worse than refusing.
 //
 // So a command names an `EditId`, and the log keeps the map from that to
 // whatever entity currently carries it. Rebuilding rebinds; nothing else has to
-// know. `Editor::MoveInstanceToWorld` already had to solve this once — moving
-// across worlds changes the handle and the selection is repointed — and this is
+// know. `Editor::MoveInstanceToWorld` already had to solve this once - moving
+// across worlds changes the handle and the selection is repointed - and this is
 // that mechanism generalised rather than a second one.
 //
 // **Only the root of a rebuilt subtree is rebound, and the limit is stated
 // rather than hidden.** A document does not carry the editor's ids, so undoing
 // the deletion of a parent gives its children new handles that no id names. A
 // command recorded earlier against one of those children therefore resolves to a
-// dead handle and is dropped — which is safe, because an entity carries a
+// dead handle and is dropped - which is safe, because an entity carries a
 // generation and a recycled index does not answer `Alive`. What it is not is
 // complete: the honest reading is that undo reaches back past a restored subtree
 // for the subtree itself and not for edits *inside* it. Closing that needs the
@@ -56,7 +56,7 @@
 // None of those is something anybody asked for, and an undo that deleted the
 // camera you are looking through would be indistinguishable from a crash. They
 // are omitted by not calling the recorder, which is the only mechanism that
-// cannot be forgotten in one direction and remembered in the other — there is no
+// cannot be forgotten in one direction and remembered in the other - there is no
 // flag to get wrong.
 //
 // @tier L12 · client
@@ -126,8 +126,8 @@ namespace studio {
 	// three answers there are: keep it as its own step, throw it away, or fold
 	// it into the step before.
 	//
-	// **A closed list whose ordinal reaches a wire** — a committed waypoint is
-	// what team create replicates — so a value may be added at the end and none
+	// **A closed list whose ordinal reaches a wire** - a committed waypoint is
+	// what team create replicates - so a value may be added at the end and none
 	// may be reordered.
 	//
 	// @since v0.13
@@ -145,8 +145,8 @@ namespace studio {
 
 		// Fold it into the waypoint before it.
 		//
-		// For an edit that continues one already recorded — a drag that
-		// resumes, a property nudged again — where two steps in the history
+		// For an edit that continues one already recorded - a drag that
+		// resumes, a property nudged again - where two steps in the history
 		// would be two presses of Ctrl+Z for one action.
 		Append = 2,
 	};
@@ -195,7 +195,7 @@ namespace studio {
 		engine::game::PropertyValue Before; // What it read before the edit.
 		engine::game::PropertyValue After;	// What it reads after it.
 
-		// What to call this in the Edit menu — "Delete Part", not "Destroy".
+		// What to call this in the Edit menu - "Delete Part", not "Destroy".
 		std::string Description;
 
 		// Which waypoint this belongs to.
@@ -203,7 +203,7 @@ namespace studio {
 		// **The unit undo and redo actually move by, and the unit team create
 		// replicates.** A command recorded outside a recording gets a waypoint
 		// of its own, so a log that nobody groups behaves exactly as it did
-		// before this field existed — one command, one press of Ctrl+Z. A
+		// before this field existed - one command, one press of Ctrl+Z. A
 		// recording gives every command inside it one number, and then a
 		// plugin's "make these forty parts neon" is one step rather than forty.
 		//
@@ -277,7 +277,7 @@ namespace studio {
 		// Issues an id that names nothing yet.
 		//
 		// **What an arriving `Create` needs.** A foreign create rebuilds a
-		// subtree that does not exist here, so there is no entity to `Track` —
+		// subtree that does not exist here, so there is no entity to `Track` -
 		// the id has to exist first and `ApplyForeign` binds it to whatever the
 		// rebuild produced. Minting one for a command that is then dropped
 		// costs a number, and the numbers are 64 bits wide.
@@ -293,7 +293,7 @@ namespace studio {
 		// when it performs the destroy itself; a caller that records a delete
 		// and then performs it leaves the id pointing at a dead handle. That is
 		// safe because an entity carries a generation, so a recycled index
-		// answers `Alive` with `false` — and it is the reason every apply path
+		// answers `Alive` with `false` - and it is the reason every apply path
 		// here asks before writing.
 		//
 		// @param id The id to resolve.
@@ -376,7 +376,7 @@ namespace studio {
 		//
 		// Roblox's `ChangeHistoryService` shape, and it is the shape this log
 		// wanted anyway. A recording is a **named, atomic group of commands**:
-		// one undo reverses all of it, and — once team create exists — one
+		// one undo reverses all of it, and - once team create exists - one
 		// message carries all of it. Without grouping, "make these forty parts
 		// neon" is forty presses of Ctrl+Z locally and forty messages on the
 		// wire, and the second is worse because a peer could apply half.
@@ -394,7 +394,7 @@ namespace studio {
 		// @return The identifier to pass to `FinishRecording`, or nothing when
 		//         a recording is already in progress or the log is disabled.
 		//         **Nothing is a refusal to record, not a licence to edit
-		//         anyway** — a caller that ignores it and edits produces changes
+		//         anyway** - a caller that ignores it and edits produces changes
 		//         that land in whatever recording is already open.
 		// @since v0.13
 		std::optional<std::string> TryBeginRecording(std::string name, std::string displayName = {});
@@ -403,7 +403,7 @@ namespace studio {
 		//
 		// @param identifier What `TryBeginRecording` returned. Ignored for
 		//        `Cancel`, so a caller can abandon its own recording without
-		//        having kept the identifier — Roblox's rule, and it is the one
+		//        having kept the identifier - Roblox's rule, and it is the one
 		//        case where not knowing is the normal situation.
 		// @param operation  What to do with it.
 		// @return `false` when no recording is in progress, or when the
@@ -446,7 +446,7 @@ namespace studio {
 
 		// Collapses the whole history into one base waypoint.
 		//
-		// Nothing is left to undo or redo and nothing is reverted — this
+		// Nothing is left to undo or redo and nothing is reverted - this
 		// establishes a clean floor rather than restoring one. What it is for
 		// is the moment after a load or a save, where reaching back past the
 		// current state means reaching into a document that is no longer open.
@@ -520,8 +520,8 @@ namespace studio {
 		// **What makes a foreign command applicable at all.** An `EditId` is
 		// this log's own name for an instance, so a command that arrived from
 		// another editor names ids this log has never issued. Before applying
-		// one, whoever carries it resolves each id to a local instance — by
-		// path, which is the only identity two editors share — and says so
+		// one, whoever carries it resolves each id to a local instance - by
+		// path, which is the only identity two editors share - and says so
 		// here.
 		//
 		// A `Create` binds its own subject as a side effect of rebuilding, so
@@ -545,7 +545,7 @@ namespace studio {
 		//
 		// The ids in the commands are the sender's, so they are resolved
 		// through this log's own table by the same `Track`/`Rebind` mechanism
-		// an undo uses — a peer that has never seen the instance creates it
+		// an undo uses - a peer that has never seen the instance creates it
 		// from the document and binds the id.
 		//
 		// @param commands One waypoint's worth, in the order they were made.
@@ -589,7 +589,7 @@ namespace studio {
 		//
 		// **A waypoint rather than a command, since v0.13.** A command recorded
 		// outside a recording is a waypoint of its own, so a log nobody groups
-		// behaves exactly as it did before — and a recording is one press
+		// behaves exactly as it did before - and a recording is one press
 		// rather than one per property it touched, which is the whole reason
 		// recordings exist.
 		//
@@ -599,7 +599,7 @@ namespace studio {
 		//
 		// @return `true` when anything was reversed. `false` when there was
 		//         nothing to undo, or when every command's subject no longer
-		//         resolves — which is dropped rather than applied to whatever
+		//         resolves - which is dropped rather than applied to whatever
 		//         now occupies the row.
 		bool Undo();
 
@@ -618,8 +618,8 @@ namespace studio {
 		// Drops every command naming one scene, and forgets its ids.
 		//
 		// **What `EndRun` calls, and it is the other half of `Clear`.** A scene
-		// can be manipulated *while it runs* — the gizmo and the explorer both
-		// work during a play test, deliberately — so edits are recorded during
+		// can be manipulated *while it runs* - the gizmo and the explorer both
+		// work during a play test, deliberately - so edits are recorded during
 		// the run. Stop then destroys that world and rebuilds it from the
 		// snapshot, which gives every instance in it a new handle.
 		//
@@ -647,8 +647,8 @@ namespace studio {
 		// The commands that can be reversed, oldest first.
 		//
 		// **For the History panel, which is why this is a span and not a
-		// copy.** The panel reads it every frame — `AGENTS.md`'s rule that a
-		// panel caches nothing the model owns — and the last element is what
+		// copy.** The panel reads it every frame - `AGENTS.md`'s rule that a
+		// panel caches nothing the model owns - and the last element is what
 		// `Undo` would reverse next.
 		//
 		// @return The undo stack, valid until the next command.
@@ -696,7 +696,7 @@ namespace studio {
 		//
 		// What a cancelled recording does. Separate from `Undo` because it
 		// crosses waypoint boundaries deliberately and must not put anything on
-		// the redo stack — a cancel is "this never happened", not "step back".
+		// the redo stack - a cancel is "this never happened", not "step back".
 		//
 		// @param depth How deep the undo stack was before the recording.
 		void RollBackTo(size_t depth);
@@ -733,7 +733,7 @@ namespace studio {
 		//
 		// **The one flag in this class, and it earns its place.** Undo applies
 		// a command by performing the opposite edit, and every path that
-		// performs an edit is a path that records one — without this, undoing
+		// performs an edit is a path that records one - without this, undoing
 		// a delete records a create, which the next undo then reverses, and
 		// Ctrl+Z toggles one instance in and out of existence for ever.
 		bool Replaying = false;
@@ -744,7 +744,7 @@ namespace studio {
 		//
 		// **The world is part of the answer, not context.** An `ecs::Entity` is
 		// an index and a generation into *one* store, so the same numeric handle
-		// exists in every world at once — the first instance in one scene and
+		// exists in every world at once - the first instance in one scene and
 		// the first in another are the same number. A table keyed on the handle
 		// alone therefore hands one id to two different instances, and undo
 		// applies an edit recorded in one scene to whatever happens to share its
@@ -752,7 +752,7 @@ namespace studio {
 		//
 		// That is the failure this header's opening note describes and the
 		// reverse map walked straight into. Found by a test that recorded in two
-		// worlds — with one world it is invisible, which is why it is worth the
+		// worlds - with one world it is invisible, which is why it is worth the
 		// pair.
 		struct Bound {
 			engine::world::WorldId World;

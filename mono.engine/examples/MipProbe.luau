@@ -12,7 +12,7 @@
 -- ## What makes this measurable rather than a screenshot
 --
 -- A high-frequency texture minified past one texel per pixel aliases. Without a
--- chain the distance is speckle — neighbouring pixels land on unrelated texels,
+-- chain the distance is speckle - neighbouring pixels land on unrelated texels,
 -- so the region has **high local variance**. With a chain the sampler fetches a
 -- level whose texels are already the average, and the same region goes smooth:
 -- **low variance**, tending to the sheet's mean.
@@ -20,7 +20,7 @@
 -- So the probe is not "does it look right". It is: sample the far strip, take
 -- the mean absolute difference between neighbouring pixels, and compare the two
 -- builds. A working chain drops that number hard. A frame that merely *changed*
--- proves nothing — the number has to fall.
+-- proves nothing - the number has to fall.
 --
 -- **The floor is one long part rather than a row of them**, because a seam
 -- between parts is its own edge and would contribute variance the texture did
@@ -31,12 +31,12 @@
 --     studio --headless --frames 200 --run server --capture-world <this> --capture out.bmp
 --
 -- Headless capture pins the animation clock, so two runs of one build agree to
--- about a fifth of a percent — see `Options::FixedAnimationStep`. Anything
+-- about a fifth of a percent - see `Options::FixedAnimationStep`. Anything
 -- larger than that is the change under test.
 
 -- **A grid of small tiles rather than one long floor, and the first version of
 -- this got it wrong.** A `MeshPart` maps its texture 0..1 across a face, so one
--- part stretched nine hundred units wears a single checker — nothing tiles,
+-- part stretched nine hundred units wears a single checker - nothing tiles,
 -- nothing is minified, and the probe measured a number near zero for both
 -- builds because there was no high frequency to lose. Each tile here wears the
 -- whole sheet, so a tile a few pixels wide at the far end is the sheet squeezed
@@ -70,7 +70,7 @@ end
 
 -- Looking down the grid from above it. High enough that the floor fills the
 -- frame rather than sitting in a band, shallow enough that the far tiles are a
--- few pixels each — which is where a sampler clamped to level zero has nothing
+-- few pixels each - which is where a sampler clamped to level zero has nothing
 -- to average and picks one texel of many.
 local view = Instance.new("Camera")
 view.Name = "GrazingCamera"
@@ -79,8 +79,8 @@ view.Parent = workspace
 workspace.CurrentCamera = view
 
 -- **One marker near the camera, and it is the control.** If a change smoothed
--- the whole frame — a resolution change, a blur, a texture that stopped
--- resolving — this would smooth too. A mip chain must leave it alone.
+-- the whole frame - a resolution change, a blur, a texture that stopped
+-- resolving - this would smooth too. A mip chain must leave it alone.
 local post = Instance.new("Part")
 post.Name = "Marker"
 post.Anchored = true

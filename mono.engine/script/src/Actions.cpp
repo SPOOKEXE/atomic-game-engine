@@ -1,12 +1,12 @@
 // The bound-action stack, which both VMs write and both pumps walk.
 //
 // **Nothing here names a VM**, which is the point: `Actions.hpp` carries the
-// argument, and what is left is the ordering rules — replace by name, sort
+// argument, and what is left is the ordering rules - replace by name, sort
 // stably by priority, and walk the claims highest first so that the one that
 // answers `Pass` can hand the key down.
 //
-// The two questions a pump asks about a *frame* rather than about the stack —
-// what a report holds, and whether the interface already took the pointer — are
+// The two questions a pump asks about a *frame* rather than about the stack -
+// what a report holds, and whether the interface already took the pointer - are
 // here for the same reason. Two pumps answering either one is two answers.
 //
 // @tier L9 · shared
@@ -32,7 +32,7 @@ namespace engine::script {
 		InputReport report;
 
 		// `MouseButton` and `InputSource` share their first members by
-		// construction — see `scene/Input.hpp` — which is what makes a button
+		// construction - see `scene/Input.hpp` - which is what makes a button
 		// ordinal an `Enum.UserInputType` member without a table in between.
 		report.Source = static_cast<scene::InputSource>(button);
 		report.State = core::Name(began ? "Begin" : "End");
@@ -93,7 +93,7 @@ namespace engine::script {
 			Bound.push_back(std::move(action));
 		}
 
-		// Stable, so two actions at one priority stay in bind order — see the
+		// Stable, so two actions at one priority stay in bind order - see the
 		// declaration for why that is the only reproducible tie-break.
 		std::stable_sort(Bound.begin(), Bound.end(), [](const BoundAction &left, const BoundAction &right) {
 			return left.Priority > right.Priority;

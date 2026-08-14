@@ -83,8 +83,8 @@ TEST_CASE("a box contains its own surface", "[aabb]") {
 }
 
 TEST_CASE("ClosestPoint clamps to the face rather than to the centre", "[aabb]") {
-	// The shortcut this catches — returning the centre, or clamping only the
-	// axis that is furthest out — makes a sphere overlap test pass for spheres
+	// The shortcut this catches - returning the centre, or clamping only the
+	// axis that is furthest out - makes a sphere overlap test pass for spheres
 	// nowhere near the box.
 	const AABB box{Vector3{0.0f, 0.0f, 0.0f}, Vector3{10.0f, 10.0f, 10.0f}};
 
@@ -116,8 +116,8 @@ TEST_CASE("a union covers both boxes and nothing more", "[aabb]") {
 
 TEST_CASE("a box turned 45 degrees about Y grows by root two", "[aabb]") {
 	// The case that separates a real oriented bound from one that rotates only
-	// the centre. A centre-only version passes identity and quarter turns —
-	// both leave the extent alone — and fails only here, where the diagonal
+	// the centre. A centre-only version passes identity and quarter turns -
+	// both leave the extent alone - and fails only here, where the diagonal
 	// becomes the width.
 	constexpr float eighth = std::numbers::pi_v<float> / 4.0f;
 	const AABB bound = AABB::FromOrientedBox(CFrame::Angles(0.0f, eighth, 0.0f), Vector3{0.5f, 0.5f, 0.5f});

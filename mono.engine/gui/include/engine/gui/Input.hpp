@@ -4,7 +4,7 @@
 //
 // **Hit testing is a backwards walk of the compiled draw list, not a tree
 // walk.** The list is already in paint order, already clipped and already
-// sorted by `ZIndex` — which is precisely the front-to-back order a hit test
+// sorted by `ZIndex` - which is precisely the front-to-back order a hit test
 // wants, read from the end. A second traversal that re-derived that order would
 // be a second answer to "what is on top", and the two would disagree the first
 // time somebody changed a sort in one of them.
@@ -20,7 +20,7 @@
 //
 // ## What `Active` means, and why a button does not need it
 //
-// An element takes input when it is `Active`, or when it is a `GuiButton` —
+// An element takes input when it is `Active`, or when it is a `GuiButton` -
 // Roblox's rule. A plain `Frame` is decoration and the click goes through it to
 // whatever is behind, which is the behaviour that lets a background panel exist
 // without swallowing the interface it contains.
@@ -45,7 +45,7 @@ namespace engine::gui {
 	//
 	// **A state, not a stream of deltas.** A caller polls its device once a
 	// frame and hands over what it found; the router works out what changed.
-	// The alternative — a call per platform event — would make the order two
+	// The alternative - a call per platform event - would make the order two
 	// events arrived in part of this module's contract, and SDL does not
 	// promise one.
 	//
@@ -139,8 +139,8 @@ namespace engine::gui {
 		// for: a press releasing a box is `Router::Update`'s to report and a
 		// Return releasing one is `gui::Type`'s, and both owe a script the same
 		// `FocusLost` with Roblox's `enterPressed` telling them apart. A caller
-		// that submits a box builds the event itself — `TypeResult::Released`
-		// says when — because no press happened and no element was picked.
+		// that submits a box builds the event itself - `TypeResult::Released`
+		// says when - because no press happened and no element was picked.
 		//
 		// @since v0.15
 		bool Entered = false;
@@ -172,7 +172,7 @@ namespace engine::gui {
 	// have to be one: `Compiled::Rebuild` writes each element's paint position
 	// into its `Resolved`, so sorting by it descending *is* front to back. A
 	// world nothing has compiled has every `Order` at zero, and `Resolved::Depth`
-	// — which the layout writes — breaks the tie the way paint order would, with
+	// - which the layout writes - breaks the tie the way paint order would, with
 	// the deeper element in front.
 	//
 	// @param store The world.
@@ -189,14 +189,14 @@ namespace engine::gui {
 	// Turns a polled pointer into events, and remembers enough to do it.
 	//
 	// Long-lived, one per canvas being driven. It holds the hover and the press
-	// across frames — which is the whole of its state, and none of it belongs
+	// across frames - which is the whole of its state, and none of it belongs
 	// in the store: rule 2 is about data another module also reads, and nobody
 	// replicates where a mouse is.
 	//
 	// **The keyboard focus is the exception, and it is why `Update` takes a
-	// mutable store.** Two modules read which `TextBox` is focused — this one, to
+	// mutable store.** Two modules read which `TextBox` is focused - this one, to
 	// know whether a press changed it, and the scripting layer, for
-	// `UserInputService:GetFocusedTextBox` — and L9 has no route to a router. So
+	// `UserInputService:GetFocusedTextBox` - and L9 has no route to a router. So
 	// the fact lives in `GuiServiceState::FocusedTextBox` and this class decides
 	// it, which is rule 2 applied rather than avoided. Where a mouse is has one
 	// reader and stays here.
@@ -207,7 +207,7 @@ namespace engine::gui {
 		// Works out what changed since the last call.
 		//
 		// **Mutable, because a press moves the keyboard focus** and that fact is
-		// the world's rather than this object's — see the note above. Nothing
+		// the world's rather than this object's - see the note above. Nothing
 		// else here writes to the store, and a world with no `GuiService` is
 		// routed exactly as it was before focus existed.
 		//
@@ -215,7 +215,7 @@ namespace engine::gui {
 		// @param list    The compiled list for this frame.
 		// @param pointer Where the pointer is and whether it is down.
 		// @return The events, in the order they happened. Valid until the next
-		//         call — the vector is reused rather than reallocated, because
+		//         call - the vector is reused rather than reallocated, because
 		//         this runs every frame and produces nothing most of them.
 		std::span<const GuiEvent> Update(ecs::Store &store, const DrawList &list, const Pointer &pointer);
 
@@ -238,8 +238,8 @@ namespace engine::gui {
 
 		// Forgets the hover and the press without emitting anything.
 		//
-		// For a caller whose canvas went away — a panel closed, a world
-		// unloaded — where firing a `MouseLeave` at an element that no longer
+		// For a caller whose canvas went away - a panel closed, a world
+		// unloaded - where firing a `MouseLeave` at an element that no longer
 		// exists would be worse than firing nothing.
 		//
 		// **The keyboard focus is deliberately not forgotten here**, and it

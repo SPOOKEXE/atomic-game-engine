@@ -5,7 +5,7 @@
 // The editor cannot be that subprocess: it is a windowed program with a
 // renderer and a universe, started by a person or by `just edit`, and outliving
 // any one client. So the editor listens on loopback and this stands in front of
-// it — everything a client writes goes to the socket, everything the socket
+// it - everything a client writes goes to the socket, everything the socket
 // says goes back out.
 //
 // Because it parses nothing, there is no second copy of the protocol to keep in
@@ -40,7 +40,7 @@ namespace {
 	//
 	// **Unbuffered and unparsed.** A line-oriented copy would need a buffer big
 	// enough for the largest message anything ever sends, and the largest thing
-	// this carries is a world tree — a bound nobody can pick correctly. Bytes
+	// this carries is a world tree - a bound nobody can pick correctly. Bytes
 	// have no such limit.
 	void Pump(
 		std::atomic<bool> &running,
@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
 	// malformed JSON-RPC message and desynchronise the stream. Everything this
 	// says goes to stderr, which MCP clients capture and show as server logs.
 	engine::core::Arguments arguments(
-		"mcpbridge", "atomic — carries Model Context Protocol between stdio and a running editor."
+		"mcpbridge", "atomic - carries Model Context Protocol between stdio and a running editor."
 	);
 	arguments.Value("port", "PORT", "The editor's --mcp-port (default 8730)");
 	arguments.Value("host", "ADDRESS", "Where the editor is listening (default 127.0.0.1)");
@@ -99,7 +99,7 @@ int main(int argc, char **argv) {
 		// running, or was started without the flag that opens the port.
 		std::fprintf(
 			stderr,
-			"mcpbridge: could not reach an editor at %s:%u — %s\n"
+			"mcpbridge: could not reach an editor at %s:%u - %s\n"
 			"Start one with: just edit --mcp-port %u\n",
 			host.c_str(),
 			port,
@@ -131,7 +131,7 @@ int main(int argc, char **argv) {
 
 		// **Half-closed, not closed, and the difference is every reply still in
 		// flight.** Shutting both directions here threw away the answers to
-		// whatever had just been sent — a client that writes its last request
+		// whatever had just been sent - a client that writes its last request
 		// and closes stdin got nothing back. Closing the sending half instead
 		// tells the editor there are no more requests; it finishes the ones it
 		// has, closes its end, and *that* is what ends the read below.
@@ -142,7 +142,7 @@ int main(int argc, char **argv) {
 	// socket → stdout, and this is the direction that decides when to stop.
 	//
 	// Its own flag, because the inbound pump clears `running` the moment stdin
-	// ends — which is a normal part of shutting down and must not cut this one
+	// ends - which is a normal part of shutting down and must not cut this one
 	// short while the editor is still answering.
 	std::atomic<bool> draining{true};
 	Pump(
@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
 
 	// stdin is still blocked in fread. Detached rather than joined: there is no
 	// portable way to cancel a blocking read on stdin, and the process is on its
-	// way out — the alternative is hanging on exit for a keystroke that will
+	// way out - the alternative is hanging on exit for a keystroke that will
 	// never come.
 	inbound.detach();
 

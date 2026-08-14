@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 		"\n"
 		"  shadercheck .cache/build/dev/shaderstage\n"
 		"\n"
-		"It translates nothing itself — mono.tools/shadercross does that, and this is\n"
+		"It translates nothing itself - mono.tools/shadercross does that, and this is\n"
 		"the other end of it. It proves nothing about a Metal device either: there is\n"
 		"no Metal compiler on this platform, so the MSL is checked for structure,\n"
 		"entry point and binding indices and not for compiling.\n"
@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
 		const fs::path path(root);
 		std::error_code error;
 		if (!fs::exists(path, error)) {
-			std::cerr << "shadercheck: no such path — " << root << "\n";
+			std::cerr << "shadercheck: no such path - " << root << "\n";
 			return 2;
 		}
 		if (!fs::is_directory(path, error)) {
@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
 
 	// **An empty run is a failure, not a pass.** A check that silently succeeds
 	// when it was pointed at the wrong directory is the shape of every rule this
-	// repository has watched stop being true — `just docs-check` at v0.2 and
+	// repository has watched stop being true - `just docs-check` at v0.2 and
 	// `just preset=ci check` at v0.4 both reported green while checking nothing.
 	if (shaders.empty()) {
 		std::cerr << "shadercheck: no .spv files under the paths given. Nothing was checked.\n";
@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
 
 		// **A missing `.msl` is a failure and not a skip.** The build writes one
 		// beside every `.spv` it compiles, so its absence means either the
-		// translation step did not run or it ran and produced nothing — and a
+		// translation step did not run or it ran and produced nothing - and a
 		// check that quietly passed on that would be a translation nobody was
 		// holding to anything, which is the state `docs/DEFERRED.md` D00001 was
 		// corrected for once already.
@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
 			continue;
 		}
 
-		std::cout << display << ": ok — " << shadercheck::StageName(module.EntryStage) << " '"
+		std::cout << display << ": ok - " << shadercheck::StageName(module.EntryStage) << " '"
 				  << module.EntryPointName << "' / MSL '" << shadercheck::MSL_ENTRY_POINT << "', "
 				  << module.Resources.size() << " resource(s)\n";
 		for (size_t index = 0; index < module.Resources.size(); ++index) {
@@ -226,12 +226,12 @@ int main(int argc, char **argv) {
 	}
 
 	if (failed > 0) {
-		std::cout << "\nshadercheck FAILED — " << failed << " of " << shaders.size()
+		std::cout << "\nshadercheck FAILED - " << failed << " of " << shaders.size()
 				  << " shader(s) break the contract SDL_CreateGPUShader documents.\n";
 		return 1;
 	}
 
-	std::cout << "\nshaders ok — " << shaders.size()
+	std::cout << "\nshaders ok - " << shaders.size()
 			  << " module(s) single-entry, decorated, in the sets SDL's contract names, and translated "
 				 "to MSL on the indices that contract derives.\n";
 	return 0;

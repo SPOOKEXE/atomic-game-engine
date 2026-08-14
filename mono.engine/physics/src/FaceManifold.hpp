@@ -11,8 +11,8 @@
 //
 // So the axis is followed by a clip: take the face each shape presents to the
 // other, cut the second against the side planes of the first, and keep the
-// pieces that are actually inside. Every pair uses this — a box face against a
-// box face, a cylinder cap against a box face, two barrels lying side by side —
+// pieces that are actually inside. Every pair uses this - a box face against a
+// box face, a cylinder cap against a box face, two barrels lying side by side -
 // which is what `AGENTS.md` means by the cylinder cases being additions to the
 // box-box machinery rather than a second approach.
 
@@ -49,7 +49,7 @@ namespace engine::physics {
 		uint8_t PointCount = 0;
 
 		// Whether the two shapes touch at all. **False is the answer, not the
-		// absence of one** — a pair function that cannot decide says so by
+		// absence of one** - a pair function that cannot decide says so by
 		// leaving this false and writing no points.
 		bool Touching = false;
 	};
@@ -58,7 +58,7 @@ namespace engine::physics {
 	//
 	// A clipped point sitting a fraction of a millimetre outside is a corner of
 	// the same resting face as the three that are inside, and dropping it turns
-	// a four-point manifold into a three-point one for one tick — which is a
+	// a four-point manifold into a three-point one for one tick - which is a
 	// box that twitches at exactly the moment it should be settling. Speculative
 	// contacts are the general form of this and are not in scope at v0.4; this
 	// is the narrow version that keeps a resting face whole.
@@ -67,7 +67,7 @@ namespace engine::physics {
 	// Builds the cache key for one contact point.
 	//
 	// The two feature ids plus the point's index within the manifold. Nothing
-	// reads it as geometry — its whole job is to be the same number next tick
+	// reads it as geometry - its whole job is to be the same number next tick
 	// for the same physical contact, so the solver finds last tick's impulse.
 	//
 	// @param first  The first shape's feature id.

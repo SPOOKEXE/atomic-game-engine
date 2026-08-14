@@ -3,8 +3,8 @@
 // A handle to one connection, and never a pointer to one.
 //
 // AGENTS.md rule 3: nothing crossing a world boundary is a pointer. A connection
-// is exactly that kind of thing — a world publishes to it, a supervisor reports
-// on it, a script asks it for statistics — and the moment one of those holds a
+// is exactly that kind of thing - a world publishes to it, a supervisor reports
+// on it, a script asks it for statistics - and the moment one of those holds a
 // `Connection *`, thread-per-world and process-per-world stop being
 // interchangeable and the thing that ended it is invisible.
 //
@@ -37,7 +37,7 @@ namespace engine::net {
 		uint32_t Index = 0;
 
 		// How many times that slot has been used. Zero is never issued, so a
-		// default-constructed id is not a valid one — see IsValid.
+		// default-constructed id is not a valid one - see IsValid.
 		uint32_t Generation = 0;
 
 		// Whether this could name a live connection.

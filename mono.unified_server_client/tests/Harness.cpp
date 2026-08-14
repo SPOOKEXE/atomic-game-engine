@@ -4,7 +4,7 @@
 // `Authority::Outgoing` is `engine.replication.*`'s to test and is tested there
 // over a real loopback with real framing, real encryption and seeded loss. What
 // is this program's own is that the two halves are joined correctly and that
-// the report says which stage a failure is in — so a case here that started
+// the report says which stage a failure is in - so a case here that started
 // asserting things about deltas would be a copy of a suite that already exists.
 //
 // Headless, and one worker, so a run of this agrees with the run before it.
@@ -49,7 +49,7 @@ namespace {
 TEST_CASE("the world crosses with no network in the way", "[unified]") {
 	// **The case the program exists for.** Every entity the server holds
 	// reaches the client and is drawn, with no socket, no framing and no
-	// cipher — so a client that draws nothing against a real server and draws
+	// cipher - so a client that draws nothing against a real server and draws
 	// everything here has a problem in `net` or in the handshake, and one that
 	// draws nothing here has a problem above them.
 	Harness harness(Small());
@@ -84,7 +84,7 @@ TEST_CASE("the drawn world moves between ticks and the store does not", "[unifie
 		moved += 4 - report.FrozenFrames;
 
 		// **Presentation only.** The store holds what the server sent, to the
-		// bit, and never the interpolated value — the rule `world`'s
+		// bit, and never the interpolated value - the rule `world`'s
 		// `ViewChannel` already follows, checked here because this is the one
 		// place both numbers are in the same process at the same instant.
 		REQUIRE(report.ClientX != Approx(report.DrawnX).epsilon(0.0));
@@ -112,7 +112,7 @@ TEST_CASE("the client is behind the server, and by the delay", "[unified]") {
 	// **The two gaps are compared by sign, not by coordinate**, because "ahead"
 	// means along the direction of travel and the probe's velocity is drawn from
 	// `core::Random`. Written as `DrawnX < ClientX` this case pinned the probe
-	// happening to move in +X, and it went red the day the generator changed —
+	// happening to move in +X, and it went red the day the generator changed -
 	// which said nothing about lag. Both gaps pointing the same way is the claim
 	// that was always meant, and it holds whichever way the probe is going.
 	const float networkLag = report.ServerX - report.ClientX;
@@ -124,7 +124,7 @@ TEST_CASE("the client is behind the server, and by the delay", "[unified]") {
 TEST_CASE("a lost message is a stage the report names", "[unified]") {
 	// **What the harness is for stated as a case.** A nominated message goes
 	// missing and the authority is not told, which is loss rather than a
-	// refusal — and the report says the tick was produced, says how much of it
+	// refusal - and the report says the tick was produced, says how much of it
 	// was dropped, and shows the applied tick failing to keep up. None of those
 	// three is visible from outside a process.
 	Settings settings = Small();
@@ -153,7 +153,7 @@ TEST_CASE("a lost message is a stage the report names", "[unified]") {
 TEST_CASE("a tick would still fit in a datagram", "[unified]") {
 	// **The one thing this harness can say about the wire without having
 	// one.** There is no framing here, so a message near the limit crosses
-	// happily — and this module has had four separate bugs from messages that
+	// happily - and this module has had four separate bugs from messages that
 	// did not fit. `net::MAXIMUM_MESSAGE_BYTES` is 1159 and is what every
 	// budget above `net` is sized against; a message produced here that is
 	// larger is one a real link would refuse.
@@ -174,7 +174,7 @@ TEST_CASE("a tick would still fit in a datagram", "[unified]") {
 
 TEST_CASE("the probe is the same entity between two runs", "[unified]") {
 	// The reports follow one entity, and a diagnostic that followed a different
-	// one each run would make two runs incomparable — which is the whole point
+	// one each run would make two runs incomparable - which is the whole point
 	// of a deterministic harness.
 	Harness first(Small());
 	Harness second(Small());
@@ -260,15 +260,15 @@ TEST_CASE("the world crosses quantised and the server's copy does not", "[unifie
 //
 // **The gap these close is stated at the top of `Report::Drawn`**: `Bounds` and
 // `Visual` used to cross once, in the join snapshot, and never again. They are
-// not observed — nothing in this world resizes or recolours anything per tick,
-// so a dirty column for them would be paid for every tick and read never — and
+// not observed - nothing in this world resizes or recolours anything per tick,
+// so a dirty column for them would be paid for every tick and read never - and
 // a delta is built from those bits. So a part recoloured after the join kept its
 // old colour on every client for ever, and nothing anywhere said so.
 //
 // `replication::ChangeDetection::Signature` is what closes it: the authority
 // hashes the value itself once per `Publish` and sends what differs. These cases
 // are here rather than in `engine.replication.*` because what they check is the
-// pairing between a *world's* components and their detectors — which is this
+// pairing between a *world's* components and their detectors - which is this
 // program's seam, not the protocol's.
 
 namespace {
@@ -331,7 +331,7 @@ TEST_CASE("a colour changed after the join reaches the client", "[unified]") {
 	REQUIRE(harness.ClientWorld().Get<Visual>(probe)->Tint.R != Approx(wanted.R));
 
 	// Written the way a script writes it. `Visual` is not observed here, so
-	// this sets no dirty bit and no delta could have carried it before v0.7 —
+	// this sets no dirty bit and no delta could have carried it before v0.7 -
 	// the value is noticed because its hash differs, not because the write
 	// announced itself.
 	harness.ServerWorld().GetMutable<Visual>(probe)->Tint = wanted;
@@ -380,9 +380,9 @@ TEST_CASE("a size changed after the join reaches what is drawn", "[unified]") {
 
 TEST_CASE("a value written in bulk is noticed", "[unified]") {
 	// **The hole a dirty bit cannot cover, and the strongest reason a signature
-	// exists.** `EachBatch` hands out raw column pointers and sets no bit —
+	// exists.** `EachBatch` hands out raw column pointers and sets no bit -
 	// deliberately, because checking per row is the cost that path exists to
-	// avoid — so a system writing in bulk is invisible to `ChangeDetection::
+	// avoid - so a system writing in bulk is invisible to `ChangeDetection::
 	// Observed` however carefully it was observed. `ecs/ChangeChannel.hpp` says
 	// so in its own words, and `scene::QuickHash` is the same answer one layer
 	// up.
@@ -404,7 +404,7 @@ TEST_CASE("a value written in bulk is noticed", "[unified]") {
 	});
 	REQUIRE(arrived);
 
-	// Every row, not only the one the reports follow — a bulk write changed the
+	// Every row, not only the one the reports follow - a bulk write changed the
 	// whole column and the detector has to have seen all of it.
 	size_t matching = 0;
 	size_t total = 0;
@@ -422,7 +422,7 @@ TEST_CASE("a value written in bulk is noticed", "[unified]") {
 TEST_CASE("a component nothing wrote is not sent again", "[unified]") {
 	// **The other half of the promise, and the one a naive fix breaks.** A
 	// detector that resent every value every tick would close the gap above and
-	// cost the whole world's colours per tick to do it — so "sends what
+	// cost the whole world's colours per tick to do it - so "sends what
 	// changed" has to mean "and nothing else".
 	Harness harness(Small());
 	REQUIRE(harness.Join());
@@ -451,7 +451,7 @@ TEST_CASE("a component nothing wrote is not sent again", "[unified]") {
 	// just as well for an authority that puts every colour in every tick, which
 	// closes the gap this feature exists for and pays the whole world's
 	// bandwidth to do it. What separates the two is how much a tick grows when
-	// *every* value changes — a real detector was carrying none of them and
+	// *every* value changes - a real detector was carrying none of them and
 	// grows by all sixteen, and a resend-everything one was already carrying
 	// them and cannot grow at all.
 	harness.ServerWorld().EachBatch<Visual>([](size_t rows, Visual *visuals) {

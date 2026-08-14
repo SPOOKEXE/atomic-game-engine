@@ -4,8 +4,8 @@
 //
 // **The reflection used to be the script's arithmetic and is now the engine's,
 // and that is the whole point of this file.** `Mirrors-1-world.luau` computed
-// its own reflected position — mirror the eye through the plane, look back at
-// the pane, push the near plane out to the glass — which is correct and is also
+// its own reflected position - mirror the eye through the plane, look back at
+// the pane, push the near plane out to the glass - which is correct and is also
 // thirty lines of vector maths every author would have to get right again. Worse,
 // it has to be recomputed whenever *either* the eye or the pane moves, so a
 // mirror authored that way is only correct for the frame it was written for: the
@@ -21,16 +21,16 @@
 // The face gives a plane: its outward normal rotated into the world, and a point
 // on it at the part's half-extent along that axis. Then
 //
-//   1. the eye is mirrored through the plane — same distance behind, opposite
+//   1. the eye is mirrored through the plane - same distance behind, opposite
 //      side;
 //   2. the camera looks back along the face normal, square on to the pane rather
-//      than at its centre — see below, because the difference is not decorative;
-//   3. the near plane is skewed onto the pane's own plane — a real oblique
+//      than at its centre - see below, because the difference is not decorative;
+//   3. the near plane is skewed onto the pane's own plane - a real oblique
 //      clip, so everything between the reflected camera and the pane (the
 //      frame, the back of the pane, whatever the viewer stands behind) is
 //      dropped at any angle rather than approximately;
 //   4. an off-axis frustum is fitted to the pane's four corners, because no
-//      constant one covers it — the camera stands as far behind the glass as
+//      constant one covers it - the camera stands as far behind the glass as
 //      the viewer stands in front, so the pane subtends the same angle from the
 //      camera as from the viewer, and that grows without bound as somebody
 //      walks up to a mirror;
@@ -41,7 +41,7 @@
 // not show it.** The reflection is projected back onto the pane per fragment and
 // `opaque.frag` tests the projected coordinate against the texture's 0..1
 // rectangle, falling through to the plain lit pane outside it. So a frustum that
-// does not cover the pane does not produce a smaller or a softer image — it
+// does not cover the pane does not produce a smaller or a softer image - it
 // produces a hard-edged rectangle of reflection floating on a grey wall, which
 // moves and resizes as the viewer walks. That reads as a mirror aimed at the
 // wrong thing, and it is what a fixed 70 degree field of view did from anywhere
@@ -50,12 +50,12 @@
 // Aiming along the normal is what makes the fit possible at all. An aim at the
 // pane's centre tilts the view axis by however far the viewer stands to one
 // side, and once the viewer is close *and* off-centre the nearest corner of the
-// pane falls behind the camera — which no frustum covers. Looking along the
+// pane falls behind the camera - which no frustum covers. Looking along the
 // normal puts every point of the pane at one depth, so the corners are always in
 // front and the fit is always finite. **Leaning is the frustum's job**, which is
 // exactly what an off-axis one is for: the four edges move independently, so a
 // viewer off to one side gets the pane and not twice its width. It costs nothing
-// in correctness — the image is read back through this camera's own matrix, so
+// in correctness - the image is read back through this camera's own matrix, so
 // its orientation decides which texels the pane lands on and never which part of
 // the world it shows. The position is what makes it a reflection.
 //
@@ -80,7 +80,7 @@
 //
 // So a hole in *this* space is `render::PortalView` and a recursive render pass,
 // whose sub-camera is derived from whichever camera the recursion is currently
-// at — the warp applied to that camera's own frame, that camera's own projection
+// at - the warp applied to that camera's own frame, that camera's own projection
 // skewed onto the mapped pane. Warps then compose down the recursion by
 // construction. `NON-EUCLIDEAN.md`'s Part III is the whole argument and
 // `temp/NonEuclidean`'s `Portal.cpp` is the model.
@@ -101,7 +101,7 @@
 // source pane by projecting it through this camera's matrix, and that only lines
 // up because the camera and the rectangle moved together. Fitting to the
 // destination would be right exactly when the two panes are the same size, and
-// silently wrong — an image sliding across the hole — whenever they are not.
+// silently wrong - an image sliding across the hole - whenever they are not.
 //
 // A mirror is the same code with the map's fixed points doing the work: a
 // reflection fixes every point of the plane it reflects through, so the mapped
@@ -114,21 +114,21 @@
 // multiply. `NON-EUCLIDEAN.md` is the investigation.
 //
 // **"Scaled" is `SeamTransform`, and it was the one word that document oversold
-// for a version.** The map used to be a `CFrame` — a position and a rotation —
+// for a version.** The map used to be a `CFrame` - a position and a rotation -
 // so a pair of panes of different sizes drew a source-sized window onto a
 // full-sized room and a body walked out of it the size it went in. The map
 // carries the ratio of the two panes now, and the camera, the pane's sampling
 // matrix, a crossing body, a clone, a ghost, the camera arm and a
 // portal-crossing ray all go through it.
 //
-// `D00112` closed at v0.15 on the bounce loop, and the seam it left behind — a
+// `D00112` closed at v0.15 on the bounce loop, and the seam it left behind - a
 // hole seen through a hole, drawn from the eye rather than from the camera the
-// pass is rendering from — is the recursive portal pass'. See the section above.
+// pass is rendering from - is the recursive portal pass'. See the section above.
 //
 // **Step 5 is what makes this an instance rather than a configuration.** Setting
 // `Visual::Surface` by hand as well as parenting the camera is one fact recorded
 // twice, and the failure mode is a mirror that renders perfectly into a texture
-// nothing samples — which looks exactly like a mirror that does not work.
+// nothing samples - which looks exactly like a mirror that does not work.
 //
 // ## What it is not
 //
@@ -140,11 +140,11 @@
 // worth naming because the old text described them as permanent.** The clip was
 // a near plane pushed out *parallel* to the face, which over-clipped at a
 // grazing angle; it is a real skew onto the plane now, which a portal cannot do
-// without — its destination is set into a wall, and the wall would draw across
+// without - its destination is set into a wall, and the wall would draw across
 // the hole. And the fit was **symmetric about the face normal**, so a viewer off
 // to one side paid for the far edge of the pane on both sides and the mirror was
 // drawn at half the resolution it could be; it is off-axis now. Correctness was
-// never what the second one traded — the coverage was exact either way — only
+// never what the second one traded - the coverage was exact either way - only
 // texels.
 //
 // **What no frustum escapes** is the geometry rather than the parameterisation.
@@ -152,16 +152,16 @@
 // the glass asks for something no projection covers. For a mirror
 // `EDGE_ON_MARGIN` is what turns that into a surface that stops drawing rather
 // than a matrix full of infinities; for a portal, which is walked through on
-// purpose, the three floors that keep the matrix finite — `MINIMUM_DEPTH`,
+// purpose, the three floors that keep the matrix finite - `MINIMUM_DEPTH`,
 // `FIT_MINIMUM_SPAN` and `SurfaceProjection`'s refusal to skew against a plane
-// the camera is on — are what carry it across. An off-axis frustum has exactly
+// the camera is on - are what carry it across. An off-axis frustum has exactly
 // the same limit either way; it simply no longer has to clamp on the way there,
 // which is what used to make the fit a step function and read as the mirror
 // flashing.
 //
 // **A portal can be walked through.** Traversal is `CrossPortals`, the body's
 // half, with the eye carried by `PortalCrossing` and the yaw by `PortalTransit`
-// — and none of it knows what a `SurfaceCamera` is, which is why none of it
+// - and none of it knows what a `SurfaceCamera` is, which is why none of it
 // changed when the picture moved to a pass of its own.
 //
 // **A cross-world pane is still a frame behind, and now it is the only thing
@@ -170,7 +170,7 @@
 //
 // **A camera with no `BasePart` parent is left exactly where it was put.** That
 // is the script-authored arrangement `Mirrors-1-world.luau` used and it still
-// works — this adds a way to place a surface camera, it does not take one away.
+// works - this adds a way to place a surface camera, it does not take one away.
 //
 // @tier L7 · shared
 
@@ -192,7 +192,7 @@ namespace engine::scene {
 	//
 	// Runs in `PreRender`, beside `SyncRendered`, and for the same reason: it is
 	// presentation state derived from the tree, and a world can present without
-	// ticking — the studio suspends a world and edits it, so a mirror maintained
+	// ticking - the studio suspends a world and edits it, so a mirror maintained
 	// by the simulation would stop tracking the moment somebody pressed Stop.
 	//
 	// **Reads the live camera and writes the surface one**, so the order within
@@ -208,8 +208,8 @@ namespace engine::scene {
 	// when this ran; the *texture* that eye produced outlives the frame, so a
 	// caller drawing the world twice out of one set of surface textures gets the
 	// last panel's reflection in every panel. `render::Renderer::Render` takes a
-	// viewport slot and keeps a surface set per slot for exactly that reason —
-	// see its `targetSlot` — and `mono.studio` draws one panel per frame, aiming
+	// viewport slot and keeps a surface set per slot for exactly that reason -
+	// see its `targetSlot` - and `mono.studio` draws one panel per frame, aiming
 	// immediately before each. Nothing here can enforce that: this pass has no
 	// idea how many places its answer is about to be drawn from.
 	//
@@ -217,7 +217,7 @@ namespace engine::scene {
 	// statement about what a surface view means rather than about arithmetic.
 	// Which way along its normal a reflected camera looks depends on which side
 	// of the plane the viewer is, both answers are right, and no continuous path
-	// joins them — so crossing the plane turned the camera 180 degrees between
+	// joins them - so crossing the plane turned the camera 180 degrees between
 	// two frames, once per orbit, which is what a mirror flashing is. A pane seen
 	// edge-on covers no pixels, so the honest answer is that there is nothing to
 	// show; its camera is left where it was and its pane is taken off its slot.
@@ -240,15 +240,15 @@ namespace engine::scene {
 	// One mirror pane, as a rectangle in the world.
 	//
 	// **`PortalSeam`'s twin, and the two are deliberately not one type.** A seam
-	// describes a hole and carries what only a hole has — where the far end is,
-	// how much bigger it is, whether it crosses worlds — and a reflection has
+	// describes a hole and carries what only a hole has - where the far end is,
+	// how much bigger it is, whether it crosses worlds - and a reflection has
 	// none of that, because its map has no far end at all. What the two share is
 	// the rectangle, and sharing exactly that is what stops a mirror acquiring a
 	// destination field that is always null.
 	//
 	// **Gathered rather than read off a component**, for the reason a seam is: a
 	// pane is a `SurfaceCamera`, plus the part it is parented to, plus the face
-	// named on it — so a pass that wanted one would otherwise walk the tree and
+	// named on it - so a pass that wanted one would otherwise walk the tree and
 	// re-derive `ReachOf` and the face's two axes for itself. This file already
 	// paid for that mistake one level down, where a marker drawn on a face the
 	// camera was not projecting off is a debugging aid that lies.
@@ -260,7 +260,7 @@ namespace engine::scene {
 		//
 		// **The face's normal, not "the one pointing at the viewer".** Which
 		// side is outward is a question about the viewer, exactly as it is about
-		// the crosser in `PortalSeam` — a pane can be looked at from either side
+		// the crosser in `PortalSeam` - a pane can be looked at from either side
 		// and both answers are right. `ReflectCamera` takes the side from the
 		// viewer it is handed, which is what lets one pane answer differently at
 		// two levels of a recursion.
@@ -297,8 +297,8 @@ namespace engine::scene {
 		// all of them, from `SurfaceCamera::TagFilter`.
 		//
 		// **Carried for `PortalSeam::TagFilter`'s reason.** A recursive pass has
-		// no surface camera in its hand at the levels below the first — it has
-		// the pane it is descending into — so a filter authored on the camera
+		// no surface camera in its hand at the levels below the first - it has
+		// the pane it is descending into - so a filter authored on the camera
 		// would be silently dropped for exactly the mirrors the recursion is
 		// there to draw.
 		uint32_t TagFilter = 0;
@@ -325,7 +325,7 @@ namespace engine::scene {
 		core::CFrame Frame;
 
 		// The frustum fitted to the pane, the oblique clip on the pane's own
-		// plane, and the identity map a mirror samples through — ready for a
+		// plane, and the identity map a mirror samples through - ready for a
 		// `SurfaceLens`.
 		SurfaceLens Lens;
 
@@ -334,7 +334,7 @@ namespace engine::scene {
 		// **False when the viewer is inside the edge-on band**, where there is
 		// no continuous orientation to aim for: which way along the normal a
 		// reflected camera looks depends on which side of the plane the viewer
-		// is, both answers are right, and no path joins them — so a viewer
+		// is, both answers are right, and no path joins them - so a viewer
 		// crossing turns the camera half a turn between two frames, which is
 		// what a mirror flashing is. A pane seen edge-on covers no pixels, so
 		// the honest answer is that there is nothing to show.
@@ -359,7 +359,7 @@ namespace engine::scene {
 	// **One unit deep, which is a convention the two overloads share and must.**
 	// The fit divides each direction by its own depth along the view axis, so a
 	// corner's length cancels everywhere except against the floor that keeps a
-	// corner swinging past the camera's plane finite — and two overloads
+	// corner swinging past the camera's plane finite - and two overloads
 	// disagreeing about scale would disagree only there, which is the one place
 	// nobody would look.
 	//
@@ -385,8 +385,8 @@ namespace engine::scene {
 	// The same, for a camera whose frustum is an already-fitted off-axis lens.
 	//
 	// **Which is what every level of a mirror recursion past the first has.** A
-	// reflected camera has no field of view — its extents were fitted to a pane
-	// and possibly skewed — so the perspective overload has nothing to be handed,
+	// reflected camera has no field of view - its extents were fitted to a pane
+	// and possibly skewed - so the perspective overload has nothing to be handed,
 	// and a recursion that fell back to "no corners" would drop the clamp at
 	// precisely the levels where the pane is nearest and the texels scarcest.
 	//
@@ -407,7 +407,7 @@ namespace engine::scene {
 	// **A function of the pane and the viewer and nothing else, which is the
 	// whole point.** A mirror seen *inside* another mirror is looked at from
 	// that mirror's camera rather than from the eye, so the rule has to compose
-	// — and it can only compose if it is a function, rather than a walk over the
+	// - and it can only compose if it is a function, rather than a walk over the
 	// world's one active camera. While it was the latter, a pane appearing in
 	// another pane's picture was placed and sampled from the eye at every depth,
 	// which is `ROADMAP.md` v0.15's "mirror-in-mirror-in-mirror draws the inner
@@ -427,15 +427,15 @@ namespace engine::scene {
 	//
 	// @param pane          The rectangle and the lens to fit.
 	// @param viewer        Where the pane is being looked at from. Only its
-	//                      position decides the reflection — a mirror does not
-	//                      care which way the viewer faces — but the whole frame
+	//                      position decides the reflection - a mirror does not
+	//                      care which way the viewer faces - but the whole frame
 	//                      is taken because `viewerCorners` is measured in it
 	//                      and a caller holding one holds the other.
 	// @param viewerCorners The viewer's own frustum, as four world-space
 	//                      directions from `FrustumCorners`. Empty leaves the
 	//                      fit unclamped, which is the right answer for a viewer
 	//                      that has no frustum and the wrong one for a viewer
-	//                      that has one and did not pass it — the image is
+	//                      that has one and did not pass it - the image is
 	//                      correct either way and a close pane is drawn at a
 	//                      fraction of the resolution it could be. Anything
 	//                      other than four is treated as none, because a partial
@@ -451,8 +451,8 @@ namespace engine::scene {
 	// whose `Portal` does not name a live destination.
 	//
 	// **A linked portal is not one of these.** Its camera is a warp rather than
-	// a reflection — `SeamMapping` maps the viewer through the pair instead of
-	// mirroring it through one plane — and gathering it here would hand a
+	// a reflection - `SeamMapping` maps the viewer through the pair instead of
+	// mirroring it through one plane - and gathering it here would hand a
 	// recursion two descriptions of the same pane that disagree about where the
 	// camera goes. `GatherPortalSeams` is its half, and an *unlinked* portal is
 	// a mirror by the same rule `AimSurfaceCameras` applies: a hole leading
@@ -478,7 +478,7 @@ namespace engine::scene {
 	// from: a room with one mirror in it paid for a level that could never show
 	// anything, and the corridor of facing panes mirrors exist for was cut off
 	// one level into the effect. No constant is right for both, and picking one
-	// is not a thing most authors should have to think about — so nobody picks
+	// is not a thing most authors should have to think about - so nobody picks
 	// and the frame measures. `NextSurfaceBounces` is the rule.
 	//
 	// @since v0.15
@@ -489,8 +489,8 @@ namespace engine::scene {
 	// **What the automatic rule falls back to, because that path has nothing to
 	// measure.** A surface camera parented to the world and a cross-world pane
 	// both resolve their chain by running the whole pass again rather than by
-	// descending — nothing can reflect a camera through a pane it was never told
-	// about — so how deep the chain goes is not a function of anything the frame
+	// descending - nothing can reflect a camera through a pane it was never told
+	// about - so how deep the chain goes is not a function of anything the frame
 	// can see. Two is what that path has always iterated, kept rather than
 	// re-derived from a measurement that does not exist for it.
 	//
@@ -513,7 +513,7 @@ namespace engine::scene {
 	// opinion.
 	//
 	// **A script reaches it as `workspace.SurfaceBounces`**, which is
-	// `workspace.CurrentCamera`'s arrangement — the resource is the storage and
+	// `workspace.CurrentCamera`'s arrangement - the resource is the storage and
 	// the property is the only way in, so there is no second place the number
 	// lives.
 	//
@@ -545,7 +545,7 @@ namespace engine::scene {
 	// why it is a plain struct a caller keeps rather than a resource on the
 	// world. Next frame's depth is derived from last frame's, and a fact that
 	// crosses a tick boundary inside the world would be `AGENTS.md` rule 5 with
-	// a picture attached — a recorded run replaying on a machine that culled one
+	// a picture attached - a recorded run replaying on a machine that culled one
 	// pane differently would diverge. Nothing here reaches an `ecs::Store`.
 	//
 	// @since v0.15
@@ -557,7 +557,7 @@ namespace engine::scene {
 		// Whether one more level would have drawn something.
 		//
 		// **Exactly that, and not "a pane was visible at the bottom".** The two
-		// differ for a pane seen edge-on, which is visible and renders nothing —
+		// differ for a pane seen edge-on, which is visible and renders nothing -
 		// and reporting it would ask for a level that comes back empty, which
 		// measures as one shallower next frame and one deeper the frame after.
 		// The rule is only free of oscillation because this answers the same
@@ -604,7 +604,7 @@ namespace engine::scene {
 		//
 		// **The face's normal, not "the outward one".** Which side is outward is
 		// a question about the *crosser*, exactly as it is a question about the
-		// viewer in `AimSurfaceCameras` — a pane can be walked into from either
+		// viewer in `AimSurfaceCameras` - a pane can be walked into from either
 		// side and both answers are right. `SeamMapping` takes the side.
 		//@{
 		core::Vector3 Centre;
@@ -627,7 +627,7 @@ namespace engine::scene {
 		//
 		// **Kept so a clone pass can skip them both.** A pane straddles its own
 		// plane by definition, so cloning it through itself is a portal inside a
-		// portal — which recurses in the picture and, worse, gives the solver a
+		// portal - which recurses in the picture and, worse, gives the solver a
 		// second copy of the very surface it is deciding a crossing against.
 		//@{
 		ecs::Entity Pane = ecs::NULL_ENTITY;
@@ -649,8 +649,8 @@ namespace engine::scene {
 		// **The square root of the area ratio, which is the one definition that
 		// does not have to pick an axis.** Two rectangles of the same shape give
 		// exactly the ratio of their sides, which is what anybody would expect.
-		// Two of *different* shapes are an ill-posed pair — there is no single
-		// number that maps a tall rectangle onto a wide one — and this answers
+		// Two of *different* shapes are an ill-posed pair - there is no single
+		// number that maps a tall rectangle onto a wide one - and this answers
 		// with the one that is symmetric in the two axes rather than with
 		// whichever the face's first axis happened to be. A pair like that
 		// renders and traverses; it simply does not line up at the edges, and no
@@ -668,7 +668,7 @@ namespace engine::scene {
 		// **Carried on the seam because the recursive portal pass has no camera
 		// to read it off.** A same-world hole is drawn by `render::PortalView`
 		// rather than by a surface camera, and the seam is the only description
-		// of it that reaches the host — so a filter authored on the pane would
+		// of it that reaches the host - so a filter authored on the pane would
 		// otherwise be silently dropped for exactly the portals that stopped
 		// being surfaces.
 		//
@@ -684,8 +684,8 @@ namespace engine::scene {
 		// **A cross-world portal's `Destination` is a camera stand-in and not a
 		// place**, which is exactly the distinction `Portal::DestinationWorld`
 		// documents. Cloning or moving a body through it would put them at the
-		// stand-in — in *this* world, a metre behind the pane they were walking
-		// into — instead of handing them to whoever owns the crossing.
+		// stand-in - in *this* world, a metre behind the pane they were walking
+		// into - instead of handing them to whoever owns the crossing.
 		bool Crosses = false;
 	};
 
@@ -704,7 +704,7 @@ namespace engine::scene {
 	// or an offset rotates and scales; a unit direction only rotates, and
 	// scaling it would quietly stop it being unit; a placement is a position and
 	// a rotation. Every caller that got one of these wrong produced the same
-	// symptom — a portal that works and leads somewhere slightly wrong — so they
+	// symptom - a portal that works and leads somewhere slightly wrong - so they
 	// are named rather than left to a multiply.
 	//
 	// @since v0.15
@@ -726,14 +726,14 @@ namespace engine::scene {
 
 		// Where a direction points in the far space, keeping its length.
 		//
-		// **For anything that must stay unit** — a ray's direction, a normal.
+		// **For anything that must stay unit** - a ray's direction, a normal.
 		core::Vector3 Rotate(const core::Vector3 &of) const {
 			return Frame.VectorToWorldSpace(of);
 		}
 
 		// The same, taking the scale with it.
 		//
-		// **For anything that is a length** — a velocity, an offset, a
+		// **For anything that is a length** - a velocity, an offset, a
 		// half-extent. A body that comes out of a hole half the size it went in
 		// and keeps its old speed is a body that crosses the far room in half
 		// the time, which reads as the portal firing you out of it.
@@ -756,7 +756,7 @@ namespace engine::scene {
 	//
 	// **One map for both sides, which is what makes it a hole.** It carries this
 	// pane's front hemisphere to the far pane's back one and its back to the far
-	// pane's front, and the far pane's own map is its exact inverse — so a round
+	// pane's front, and the far pane's own map is its exact inverse - so a round
 	// trip is the identity whichever side it started from. Picking the map by
 	// the crosser's side, which this used to do, gives two maps that both land
 	// on the same side of the far pane and are therefore not inverses.
@@ -779,7 +779,7 @@ namespace engine::scene {
 	// **The rectangle and not its plane, which is the whole point.** A pane
 	// stretched across a doorway is a metre from somebody standing beside the
 	// doorway and a hair from somebody standing in it, and the plane cannot tell
-	// those apart — it says zero for both. Everything downstream of this number
+	// those apart - it says zero for both. Everything downstream of this number
 	// (`PortalNearPlane`, `PortalClipBias`) is trading precision away as the eye
 	// closes on a hole, so answering "zero" for an eye that is nowhere near one
 	// spends that precision on nothing.
@@ -821,7 +821,7 @@ namespace engine::scene {
 	//
 	// **Depth precision has to be spent somewhere and this is where.** A near
 	// plane is a floor on how close geometry can be drawn, so the pane of a hole
-	// you are walking into is sliced open by it — you see through the wall for
+	// you are walking into is sliced open by it - you see through the wall for
 	// the last hand's width of the approach, which is the one moment the whole
 	// feature is judged on.
 	constexpr float PORTAL_NEAR_MIN = 0.003f;
@@ -831,7 +831,7 @@ namespace engine::scene {
 	// **Half the distance, so the pane is never within the near plane and the
 	// depth range is never cut further than it has to be.** CodeParade's
 	// `GH_CLAMP(NearestPortalDist() * 0.5f, GH_NEAR_MIN, GH_NEAR_MAX)`, with the
-	// authored value standing in for `GH_NEAR_MAX` — a camera the scene wanted
+	// authored value standing in for `GH_NEAR_MAX` - a camera the scene wanted
 	// far-sighted keeps that until a hole is close enough to need otherwise, and
 	// gets it straight back on the way out.
 	//
@@ -851,8 +851,8 @@ namespace engine::scene {
 	//
 	// **Towards, so the plane keeps a little more and not a little less.** The
 	// oblique substitution makes that plane the near plane, and the far room's
-	// own geometry meets the mapped pane exactly — a floor that runs up to the
-	// doorway, the wall the pane is set into — so after two matrix products some
+	// own geometry meets the mapped pane exactly - a floor that runs up to the
+	// doorway, the wall the pane is set into - so after two matrix products some
 	// of it lands a float on the wrong side and is thrown away. What that looks
 	// like is a hairline of background around the inside of every hole with
 	// parts poking through it. Keeping a sliver too much costs nothing anybody
@@ -877,14 +877,14 @@ namespace engine::scene {
 	// **A point rather than a body, which is what makes it a different question
 	// from `SeamStraddled`.** A body has a size, straddles a plane and is cut by
 	// it; a point is on one side or the other and belongs wholly to whichever
-	// space that is. A particle is the case this exists for — a torch's flame
+	// space that is. A particle is the case this exists for - a torch's flame
 	// carried into a doorway has some of its sparks on this side of the plane
 	// and some past it, and the ones past it are in the far room and are drawn
 	// there.
 	//
 	// **Behind the pane's face *and* inside its rectangle**, with no widening.
 	// The widening `SeamStraddled` applies is slack for a body's reach, and a
-	// point has none — a spark a stud to the side of a doorway has not gone
+	// point has none - a spark a stud to the side of a doorway has not gone
 	// through the doorway, it is beside it.
 	//
 	// @param seam The portal.
@@ -903,7 +903,7 @@ namespace engine::scene {
 	// @param seam  The portal.
 	// @param at    The body's centre.
 	// @param reach How far the body extends from `at`. A radius, so it is
-	//              conservative for a box — a clone drawn a little early is
+	//              conservative for a box - a clone drawn a little early is
 	//              invisible and one drawn a little late is a body cut in half.
 	// @return Whether the body occupies the pane.
 	// @since v0.15
@@ -915,8 +915,8 @@ namespace engine::scene {
 	// straddler is copied to the far side of its hole so the far room has
 	// something to show; without a cut both copies are complete, and the extra
 	// halves are drawn where the hole is not. With a pane set into a thick wall
-	// the wall hides them both — which is why this went unnoticed through three
-	// scenes — and with a free-standing pane it is visibly two crates in a
+	// the wall hides them both - which is why this went unnoticed through three
+	// scenes - and with a free-standing pane it is visibly two crates in a
 	// doorway, which is what `examples/PortalShadow.luau` shows.
 	//
 	// The two half-spaces are complementary through the map, so their union is
@@ -948,7 +948,7 @@ namespace engine::scene {
 		// rectangle; anything hanging past the rim would be sliced by a plane
 		// that continues where the hole does not, and what that looks like is a
 		// crate with a flat face for no visible reason. A body that does not fit
-		// is drawn whole on both sides, exactly as it was before this existed —
+		// is drawn whole on both sides, exactly as it was before this existed -
 		// its overhang is the old artefact and is not made worse, and a hole it
 		// cannot fit through is not a hole it is walking into.
 		//
@@ -991,7 +991,7 @@ namespace engine::scene {
 	//
 	// **`D00112`, and the character controller is what it was waiting for.** A
 	// portal has drawn correctly since v0.14 and nothing could go through one,
-	// because nothing in this engine had a body to move — the deferral says so
+	// because nothing in this engine had a body to move - the deferral says so
 	// in as many words. This is the other half, and it is four lines of
 	// arithmetic because the hard part was already done: the transform that maps
 	// the source pane onto the destination is the *same* one `AimSurfaceCameras`
@@ -999,8 +999,8 @@ namespace engine::scene {
 	// the picture was.
 	//
 	// **Derived here rather than read off `SurfaceLens::Mapping`.** That
-	// component is presentation — it is fitted to the local eye and
-	// `replication::LocalToTheClient` keeps it off the wire — so a dedicated
+	// component is presentation - it is fitted to the local eye and
+	// `replication::LocalToTheClient` keeps it off the wire - so a dedicated
 	// server, which never aims a surface at all, has no lens to read. Traversal
 	// is simulation and must not depend on anything a headless host skips.
 	//
@@ -1013,14 +1013,14 @@ namespace engine::scene {
 	//
 	// **Velocity is mapped too, and forgetting it is the bug that looks like
 	// physics.** The body arrives at the far pane with the speed it had, aimed
-	// the way it was aimed — in the old frame. Without the rotation it walks out
+	// the way it was aimed - in the old frame. Without the rotation it walks out
 	// of the destination sideways, or backwards through the hole it just came
 	// out of, which reads as the portal spitting people back.
 	//
 	// **And the body is resized when the two panes are not the same size**,
 	// which is what makes a room bigger on the inside something the simulation
 	// agrees with rather than something the pane draws. A crosser's `Bounds`,
-	// its speed, and — for a character — its humanoid's height, radius, walk and
+	// its speed, and - for a character - its humanoid's height, radius, walk and
 	// jump speeds, ground tolerance and every limb's box and rest offset are all
 	// multiplied by `PortalSeam::Scale`. Go through the small end and you are
 	// small; come back the other way and the reciprocal puts you back, exactly,
@@ -1032,7 +1032,7 @@ namespace engine::scene {
 	// scale so that shrinking is imperceptible, which is right for a gag about a
 	// tunnel and wrong here: there is one world, `scene::Gravity` is its
 	// property, and a small thing in it should fall the way a small thing falls.
-	// What that looks like is the correct thing — walk into the large end and
+	// What that looks like is the correct thing - walk into the large end and
 	// the room becomes vast and your jumps become small, which is the whole
 	// point of having gone through.
 	//
@@ -1040,7 +1040,7 @@ namespace engine::scene {
 	// and that is the same bug a third time. A player's view direction is
 	// `CameraController::Angles` rather than any transform this pass moves, so
 	// a pair of panes that turns a corner used to leave the eye pointing the way
-	// it came in while the body walked the other way — the view snapping to a
+	// it came in while the body walked the other way - the view snapping to a
 	// wall on the frame you cross, and W walking you sideways afterwards,
 	// because `ReadMoveIntent` is relative to that same yaw. Only the yaw is
 	// turned, and only for `CameraController::Subject`; a headless host has no
@@ -1064,7 +1064,7 @@ namespace engine::scene {
 	// metres behind its subject, so the frame a character walks through a hole
 	// is the frame the *body* is on one side and the *eye* is still on the
 	// other. What that looks like is the character teleporting away from the
-	// camera and turning as it goes — a hole that spits people out sideways
+	// camera and turning as it goes - a hole that spits people out sideways
 	// rather than one you walk through. Putting the arm through the same map
 	// carries the eye with it, and the view that results is the one a player
 	// expects for a different reason as well: standing at a hole in third
@@ -1076,11 +1076,11 @@ namespace engine::scene {
 	// the arm is already inside. The first crossing found wins.
 	//
 	// @param store   The world.
-	// @param from    Where the line starts — for a camera, the head.
+	// @param from    Where the line starts - for a camera, the head.
 	// @param to      Where it would end without a portal in the way.
 	// @param through The map from this side to the far side, written only when
 	//                the answer is true. Apply it to *both* the far end and the
-	//                direction, exactly as a body's placement and velocity are —
+	//                direction, exactly as a body's placement and velocity are -
 	//                and mind which of `SeamTransform`'s four applications each
 	//                of those is, because a hole may change size as well as
 	//                place.
@@ -1095,7 +1095,7 @@ namespace engine::scene {
 	// **What a ray needs and a body does not.** A body is teleported whole and
 	// wants only the map; a ray has a length it must not exceed, has to know how
 	// much of it was spent reaching the glass, and has to know *which* pane so
-	// it can decline to stop on it — see `physics::RaycastThroughPortals`.
+	// it can decline to stop on it - see `physics::RaycastThroughPortals`.
 	//
 	// @since v0.15
 	struct PortalHop {
@@ -1108,8 +1108,8 @@ namespace engine::scene {
 		// The pane that was met.
 		//
 		// **Because a portal's own pane is the one thing a ray through it must
-		// look past.** `OpenPortals` leaves the collider in place as a trigger —
-		// contacts are still reported and `Raycast` still answers with it — so
+		// look past.** `OpenPortals` leaves the collider in place as a trigger -
+		// contacts are still reported and `Raycast` still answers with it - so
 		// the nearest thing in front of every hole is the hole.
 		ecs::Entity Pane = ecs::NULL_ENTITY;
 
@@ -1140,8 +1140,8 @@ namespace engine::scene {
 	//
 	// **A viewpoint may be on either side of a hole and never in it**, which is
 	// the rule a body already follows and an eye did not. `CrossPortals` puts a
-	// crosser down a stated distance clear of the plane it crossed — see the
-	// landing clearance in the source — so nothing can come to rest in the seam.
+	// crosser down a stated distance clear of the plane it crossed - see the
+	// landing clearance in the source - so nothing can come to rest in the seam.
 	// A camera had no such rule: a third-person arm swung into a pane, or a
 	// first-person eye walked into one, could land *within* the pane's own
 	// thickness.
@@ -1149,7 +1149,7 @@ namespace engine::scene {
 	// What that looks like is worth naming because it does not read as a camera
 	// bug. The surface camera's oblique clip has no half-space left to keep, the
 	// fit's extents run away, and the pane fills the screen with a vertical
-	// smear of stretched texels — which looks like a corrupt texture or a broken
+	// smear of stretched texels - which looks like a corrupt texture or a broken
 	// projection rather than like an eye standing somewhere it should not.
 	//
 	// **Pushed to the nearer side rather than always outward.** Which side a
@@ -1177,12 +1177,12 @@ namespace engine::scene {
 	// then never fired: it tests whether the segment between where a body started
 	// the tick and where it finished changes sign through the pane, and a body
 	// the solver parked *on* the plane never changes sign. Traversal was
-	// implemented, tested and unreachable — the wall in front of it was the pane
+	// implemented, tested and unreachable - the wall in front of it was the pane
 	// itself.
 	//
 	// What that looks like is the thing to recognise: walking into a portal
 	// stops you at the picture, and the far room stays a painting on a wall. An
-	// immersive portal has to let the body straddle the plane — half in each
+	// immersive portal has to let the body straddle the plane - half in each
 	// space, which is the frame everybody screenshots.
 	//
 	// **`Collider::Trigger` rather than removing the collider**, which is
@@ -1190,7 +1190,7 @@ namespace engine::scene {
 	// reported, so a script can know somebody is in the hole, and no impulse is
 	// solved, so nothing pushes them out of it. Removing the collider outright
 	// would also take the pane out of `Raycast`, and `physics::GroundCharacters`
-	// casts through the world — a portal that stopped answering queries is a
+	// casts through the world - a portal that stopped answering queries is a
 	// portal you fall through the floor beside.
 	//
 	// **A rule and not an authoring note.** It would be one line in each scene
@@ -1217,8 +1217,8 @@ namespace engine::scene {
 	// in a doorway. `NON-EUCLIDEAN.md` Part V.1.
 	//
 	// So: one body, cut at the plane. Each half keeps the front of its own pane
-	// — `CutOfSeam` is where the two planes come from and why they are
-	// complementary by construction — and what fills the half each has lost is
+	// - `CutOfSeam` is where the two planes come from and why they are
+	// complementary by construction - and what fills the half each has lost is
 	// the picture in the hole.
 	//
 	// **What may be cut is what fits through the hole.** There is no test here
@@ -1228,7 +1228,7 @@ namespace engine::scene {
 	// `Motion` and `CharacterLimb` an anchored crate resting in a seam showed
 	// nothing on the far side, though it is as much a thing standing in the hole
 	// as anything that walked there. `CutOfSeam::Fits` is the physical statement
-	// instead — a body wider than the hole is not standing in the hole — and it
+	// instead - a body wider than the hole is not standing in the hole - and it
 	// excludes the room the pane is cut into without having to know that is what
 	// it is doing.
 	//
@@ -1237,13 +1237,13 @@ namespace engine::scene {
 	// two of them on the far side, z-fighting; worse, the list walk read the
 	// list the entity walk had just appended to and ghosted the ghosts. Only a
 	// list walk can cut, because only it holds the row the original is in, so
-	// the list walk is the one that survived — and it reads the *interpolated*
+	// the list walk is the one that survived - and it reads the *interpolated*
 	// frame a client actually drew rather than a tick position, which matters
 	// because a far half a frame behind its own body is a seam that opens and
 	// closes as you walk.
 	//
 	// A pane is a hole and a
-	// body may straddle it — `OpenPortals` exists to allow exactly that — but
+	// body may straddle it - `OpenPortals` exists to allow exactly that - but
 	// the body is one set of parts in one place, so the far room draws nothing
 	// and the near room draws all of it. Standing in the seam, you are whole on
 	// the side you came from and absent on the side you are walking into, which
@@ -1256,18 +1256,18 @@ namespace engine::scene {
 	// reason and more of it: a clone lives for one frame, must never be
 	// selected, saved, found by a script or simulated, and there is one per body
 	// per pane per frame. `physics::GhostPortalBodies` is the collision half and
-	// is deliberately a different mechanism — a picture and a contact have
+	// is deliberately a different mechanism - a picture and a contact have
 	// nothing to share but the seam.
 	//
 	// **Drawn by every pass, which is right rather than tolerated.** A clone is
 	// visible through the pane, and it is also visible to somebody standing in
-	// the far room looking at the far pane — which is what a body sticking out
+	// the far room looking at the far pane - which is what a body sticking out
 	// of a portal looks like, and is what the original does at the near pane.
 	//
 	// **A cross-world pane gets the cut and not the copy.** Its
 	// `Destination` is a camera stand-in in *this* world, so a clone through one
 	// would appear a metre behind the pane the body is walking into rather than
-	// in the world it is walking to — that copy is `AppendPortalClones`' job,
+	// in the world it is walking to - that copy is `AppendPortalClones`' job,
 	// from a host holding both worlds. The *cut* is this pass's either way: the
 	// body poking out of the back of the glass is a row right here, and leaving
 	// it whole draws the body twice over, whole in the room it is leaving and
@@ -1286,22 +1286,22 @@ namespace engine::scene {
 	//
 	// **What a host calls once it has the far world's draw list in its hands.**
 	// A cross-world pane's copy does not belong in the list its body is drawn
-	// from — it belongs beside the *other* world's, which only something holding
+	// from - it belongs beside the *other* world's, which only something holding
 	// the universe can assemble. `client::AttachForeignSurfaces` is that caller,
 	// and it appends the copy straight after the far world's rows so the two are
 	// one range.
 	//
 	// **A draw list in and a draw list out**, which is what keeps this and
 	// `CutAndCloneSeams` answering the same question. It was an entity walk over
-	// bodies carrying `Motion` or `CharacterLimb` — "what goes through a portal
-	// is what can move" — and that rule was already retired on the same-world
+	// bodies carrying `Motion` or `CharacterLimb` - "what goes through a portal
+	// is what can move" - and that rule was already retired on the same-world
 	// side, where an anchored crate resting in a seam is as much a thing
 	// standing in the hole as anything that walked there. Reading rows also
 	// takes the interpolated frame the frame is actually drawn with, rather than
 	// re-deriving it and landing a half-body a tick away from its other half.
 	//
 	// **And the copy is cut.** A cross-world pane used to be argued as a window
-	// rather than a hole — nothing straddles a window — which drew a body in the
+	// rather than a hole - nothing straddles a window - which drew a body in the
 	// doorway whole on this side and whole again on the far one, joined nowhere.
 	// The two halves now get the same complementary planes a same-world pair
 	// gets. The *original* is cut by `CutAndCloneSeams`, in the list it lives
@@ -1326,7 +1326,7 @@ namespace engine::scene {
 	// **Because "which face" is the one thing about a mirror you cannot see.**
 	// Everything else this file computes shows up in the image: a camera aimed
 	// wrongly reflects the wrong thing, a near plane set wrongly clips. `Face`
-	// is different — the wrong one gives a pane that reflects what is *behind*
+	// is different - the wrong one gives a pane that reflects what is *behind*
 	// it, which looks exactly like a pane that reflects nothing, and the only
 	// way to tell those apart was to read the script. The bar marks the side the
 	// projection comes off, so the answer is in the frame.
@@ -1341,7 +1341,7 @@ namespace engine::scene {
 	// Translucent and un-shadowed for the same reason: it must not change what
 	// it is there to show you. **The translucency also keeps it out of the
 	// mirrors**, which is load-bearing rather than incidental: the surface pass
-	// draws `ScenePlan::Reflected` — the opaque head — so a blended instance
+	// draws `ScenePlan::Reflected` - the opaque head - so a blended instance
 	// never reaches a surface texture, and a bar drawn opaque would appear
 	// across the glass in the reflection of every other mirror in the scene.
 	//

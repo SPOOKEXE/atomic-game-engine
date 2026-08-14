@@ -1,4 +1,4 @@
-# mono.client — a library plus a thin executable.
+# mono.client - a library plus a thin executable.
 #
 # The split is not cosmetic. A test binary needs something to link, and
 # single-player needs the client to be able to link a server library and host
@@ -29,7 +29,7 @@ mono_add_library(client
 
 		# L8, `shared`. The particle pool and the ribbon builder. A client
 		# installs the three systems that run them and turns the pool into
-		# `render::ParticleBatch`es — see `client/Scene.hpp`, which explains why
+		# `render::ParticleBatch`es - see `client/Scene.hpp`, which explains why
 		# that conversion is here rather than in `effects`.
 		Engine::effects
 
@@ -40,14 +40,14 @@ mono_add_library(client
 		# **It linked before this line existed, which is the problem.** The
 		# symbols arrived transitively through `Engine::examples → Engine::script
 		# → Engine::physics`, so a client built and ran while depending on an
-		# edge nobody had declared — and the day `script` stops needing physics,
+		# edge nobody had declared - and the day `script` stops needing physics,
 		# the break lands here rather than where the change was made. Both other
 		# repos document having already closed the same hole for themselves.
 		Engine::physics
 
 		# `--connect` makes one of this client's worlds somebody else's
 		# authority. Both are `shared` tier, so neither widens what a client is
-		# allowed to link — the tier rule already permits `shared` here.
+		# allowed to link - the tier rule already permits `shared` here.
 		Engine::net
 		Engine::replication
 
@@ -59,7 +59,7 @@ mono_add_library(client
 
 		# L10, `shared`. `--script` builds the scene by running a Luau file
 		# instead of the C++ loop in Demo.cpp. The VM itself is private to that
-		# module — nothing here compiles against Luau — so this row says "the
+		# module - nothing here compiles against Luau - so this row says "the
 		# client can run a game file" and nothing about which language it is in.
 		Engine::examples
 
@@ -70,12 +70,12 @@ mono_add_library(client
 		Engine::game
 
 		# L12, `client`. The mixer graph, spatialisation and the device. A game
-		# that makes no sound never opens one — `OpenDevice` answers null on a
-		# machine with no output and the client runs quietly — so this is a
+		# that makes no sound never opens one - `OpenDevice` answers null on a
+		# machine with no output and the client runs quietly - so this is a
 		# dependency rather than a start-up requirement.
 		Engine::audio
 
-		# L11, `shared`. Fetching content from an origin — a local directory, a
+		# L11, `shared`. Fetching content from an origin - a local directory, a
 		# server serving its own disk, or a delivery service. `--cdn` points it
 		# somewhere and the default is this machine. A game whose content ships
 		# inside its game file never builds one, which is why this is a
@@ -98,7 +98,7 @@ mono_add_program(client
 		# is `ROADMAP.md` v0.10's "hook up all cdn behavior to this by default".
 		#
 		# Keeping it out of `Mono::client` matters: a host that embeds the client
-		# library — the studio, the unified harness — chooses its own content
+		# library - the studio, the unified harness - chooses its own content
 		# sources, and inheriting a default from a library it links would be a
 		# decision made somewhere it cannot see.
 		Mono::cdn
@@ -110,7 +110,7 @@ mono_add_program(client
 	#   ALLOW_TIER_ESCAPE Mono::server   # single-player hosts in-process
 	#
 	# Naming it keeps it a decision rather than a precedent. Not declared yet,
-	# because nothing here hosts a server — and an escape that is not currently
+	# because nothing here hosts a server - and an escape that is not currently
 	# needed is an escape somebody will eventually use for something else.
 	# repo_layout.md §8.
 )

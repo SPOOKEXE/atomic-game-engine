@@ -210,7 +210,7 @@ namespace engine::assets {
 
 		// The counter that matters most in this module. A client rejecting a
 		// manifest means the publisher's key does not match the content it was
-		// handed, and that is either a misconfiguration or an attack — never
+		// handed, and that is either a misconfiguration or an attack - never
 		// something to let pass quietly.
 		core::Metrics::Count(passed ? "assets.manifest.verified" : "assets.manifest.rejected", 1.0);
 		return passed;

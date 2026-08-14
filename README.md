@@ -28,7 +28,7 @@
 |---|---|
 | **[RUNNING.md](RUNNING.md)** | **every way to build and run the client, the server, a single test and the tools** |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | building from a fresh clone, and what is expected of a pull request |
-| [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist — run it before opening one |
+| [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist - run it before opening one |
 | [docs/CODE_FORMAT.md](docs/CODE_FORMAT.md) | naming, includes, and what a comment is for |
 | [docs/CODE_DOCUMENTING.md](docs/CODE_DOCUMENTING.md) | where a comment ends up in the generated reference, and the tags |
 | [AGENTS.md](AGENTS.md) | the four rules, and how AI is used here |

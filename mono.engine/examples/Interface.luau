@@ -29,14 +29,14 @@
 --   differently and this engine keeps its numbering.
 -- - The **text box** catches a press that never lands on one. A `TextBox` is not
 --   a `GuiButton`, so the hit test walked past it until the keyboard needed
---   somewhere to go — clicking one reached whatever was behind, which reads as a
+--   somewhere to go - clicking one reached whatever was behind, which reads as a
 --   text field that ignores the mouse. It also catches the half after that: a
 --   window never asked for text sees no keystrokes at all, and the box then
 --   focuses, reports, and accumulates nothing.
 --
 -- ## Why it does not animate
 --
--- The compiled list is kept until its signature moves — see `gui/Compile.hpp` —
+-- The compiled list is kept until its signature moves - see `gui/Compile.hpp` -
 -- and a scene that changed every frame would rebuild every frame and prove
 -- nothing about the cache. The one moving part is deliberate and is the *only*
 -- thing that should cause a rebuild.
@@ -68,7 +68,7 @@ screen.Name = "InterfaceExample"
 -- **Parented into `StarterGui`, which is what makes it draw at all.**
 --
 -- A `ScreenGui` is only laid out when it sits under `StarterGui` or under a
--- player's `PlayerGui` — Roblox's containment rule, and `gui::Layout` enforces
+-- player's `PlayerGui` - Roblox's containment rule, and `gui::Layout` enforces
 -- it. This file left it unparented for a version and drew anyway, which was the
 -- engine being more permissive than the thing it is modelled on: an author
 -- could have shipped an interface that appeared in the studio and was missing
@@ -81,7 +81,7 @@ screen.Name = "InterfaceExample"
 screen.Parent = game:GetService("StarterGui")
 
 -- The card everything else sits in. Anchored at its own centre and placed at
--- the screen's centre, so it stays centred at any window size — which is the
+-- the screen's centre, so it stays centred at any window size - which is the
 -- assertion, not the decoration.
 local card = Instance.new("Frame")
 card.Name = "Card"
@@ -90,7 +90,7 @@ card.Position = UDim2.new(0.5, 0, 0.5, 0)
 -- **Tall enough for the sections plus the list's gaps and the padding**, added
 -- up rather than eyeballed: 44 + 96 + 56 + 52 + 74 of section, four 12-pixel
 -- gaps and 16 of padding at each end is 402. `AutomaticSize` is the property
--- that would derive it and it is declared and not implemented — `D00021`.
+-- that would derive it and it is declared and not implemented - `D00021`.
 card.Size = UDim2.new(0, 520, 0, 412)
 card.BackgroundColor3 = PANEL
 card.BorderSizePixel = 0
@@ -204,9 +204,9 @@ for index, colour in SWATCHES do
 	corner.Parent = swatch
 
 	-- **A swatch says it was clicked and changes nothing.** The panel above
-	-- explains why this scene does not animate — the compiled list is kept until
+	-- explains why this scene does not animate - the compiled list is kept until
 	-- its signature moves, and a scene that rebuilt every frame would prove
-	-- nothing about the cache — so recolouring on a click would undo that. A log
+	-- nothing about the cache - so recolouring on a click would undo that. A log
 	-- line is the whole of the response, and it is the line `just client-smoke`
 	-- reads back: an `Activated` that fires in the editor and not in a shipped
 	-- client is the bug `just client-smoke` exists to catch, and until v0.15
@@ -353,15 +353,15 @@ end)
 --
 -- **Click it and type, which is the point of the section.** The client asks SDL
 -- for text only while a box holds the keyboard, hands `input::Translator::
--- TypedText` to `gui::Type` once a frame, and that writes `Label::Text` — so
+-- TypedText` to `gui::Type` once a frame, and that writes `Label::Text` - so
 -- what appears in the box is the world's own text and not a copy anybody kept.
 -- Backspace removes a *character*, which matters the first time somebody types
 -- in a language with accents in it, and Return releases the focus because this
 -- box is not `MultiLine`.
 --
 -- **The status line is a second element rather than the box's own text**, and
--- that is the interesting half. A handler that wrote into `box.Text` on focus —
--- which this file did while nothing could be typed — replaces the string a
+-- that is the interesting half. A handler that wrote into `box.Text` on focus -
+-- which this file did while nothing could be typed - replaces the string a
 -- person is editing out from under their caret. `gui::Type` clamps for exactly
 -- that reason and nothing breaks, but what they typed is still gone, so the
 -- report goes somewhere it cannot do that.
@@ -414,8 +414,8 @@ end)
 -- --- the close button ---------------------------------------------------------
 --
 -- **`Enabled` on the collector, not `Visible` on the card.** A `ScreenGui` that
--- is disabled is not laid out at all — `gui::Layout` skips it before it asks how
--- big anything is — so closing this way costs nothing per frame afterwards.
+-- is disabled is not laid out at all - `gui::Layout` skips it before it asks how
+-- big anything is - so closing this way costs nothing per frame afterwards.
 -- Hiding the card instead would leave the whole subtree being measured and
 -- compiled for something nobody can see, which is the difference between a
 -- closed panel and an invisible one.

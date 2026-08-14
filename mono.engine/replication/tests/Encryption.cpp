@@ -1,7 +1,7 @@
 // What a sealed stream does, and what it refuses.
 //
-// `EndToEnd.cpp` and `Loss.cpp` both run over the encrypted stream already —
-// `Wire.hpp` hands both sessions real keys from a real `net::Handshake` — so
+// `EndToEnd.cpp` and `Loss.cpp` both run over the encrypted stream already -
+// `Wire.hpp` hands both sessions real keys from a real `net::Handshake` - so
 // those files are the proof that sealing every payload did not break
 // replication. This file is the proof that the sealing is real: that the
 // plaintext is not on the wire, that a byte changed anywhere in the packet is
@@ -12,8 +12,8 @@
 // asserts on every datagram every case in these suites sends. A test that
 // sampled a few counters would pass over the one that repeated; the whole point
 // of putting the counter on the wire is that a witness can check all of them.
-// What this file adds is the assertion that the check has something to check —
-// that the run really did produce resends and hundreds of packets — because a
+// What this file adds is the assertion that the check has something to check -
+// that the run really did produce resends and hundreds of packets - because a
 // witness nothing goes past passes for the wrong reason.
 
 #include "Wire.hpp"
@@ -183,7 +183,7 @@ TEST_CASE("a tampered packet is refused and moves nothing", "[replication][encry
 TEST_CASE("a peer cannot ask for the clear path", "[replication][encryption]") {
 	// **The downgrade, and why there is nothing to negotiate.** There is no
 	// field on the wire saying whether a packet is sealed, so a peer cannot
-	// request the plaintext path — it can only send plaintext and be refused.
+	// request the plaintext path - it can only send plaintext and be refused.
 	// A receiver that accepted it "because it parsed" would have no encryption
 	// at all, whatever the handshake did.
 	Wire wire;
@@ -270,8 +270,8 @@ TEST_CASE("a session takes keys once", "[replication][encryption]") {
 TEST_CASE("a resend is sealed again rather than replayed", "[replication][encryption]") {
 	// **The resend decision, asserted.** `ReliableSender` holds the plaintext and
 	// `Session::Flush` seals it again under a fresh counter, so the same reliable
-	// sequence goes out twice under two different nonces. The alternative —
-	// keeping the sealed bytes and sending them verbatim — would also never
+	// sequence goes out twice under two different nonces. The alternative -
+	// keeping the sealed bytes and sending them verbatim - would also never
 	// repeat a nonce, and would have to either freeze the acknowledgement the
 	// resend is carrying or stop covering the header with the tag. This case
 	// pins which of the two was chosen.
@@ -320,7 +320,7 @@ TEST_CASE("the stream converges under loss, duplication and reordering", "[repli
 	// **The combination that breaks encryption.** A dropped packet leaves a gap
 	// in the counter, a duplicate presents the same counter twice and a reorder
 	// presents a lower one after a higher one. An opener that kept any state
-	// about the counter — a window, a last-seen, a replay set — would refuse
+	// about the counter - a window, a last-seen, a replay set - would refuse
 	// genuine traffic on all three, and the symptom would be a stream that
 	// converges everywhere except on a bad network.
 	LossSettings toClient;
@@ -377,8 +377,8 @@ TEST_CASE("the stream converges under loss, duplication and reordering", "[repli
 TEST_CASE("the nonce witness had something to witness", "[replication][encryption]") {
 	// `Wire.hpp`'s `Tap` asserts on every datagram in every case in these files,
 	// which is worth exactly as much as the number of datagrams that went past
-	// it. This is that number, so that a change which stopped the traffic — or
-	// stopped the tap seeing it — fails here rather than passing everywhere.
+	// it. This is that number, so that a change which stopped the traffic - or
+	// stopped the tap seeing it - fails here rather than passing everywhere.
 	LossSettings toClient;
 	toClient.Drop = {6, 12, 18};
 
@@ -410,7 +410,7 @@ TEST_CASE("the nonce witness had something to witness", "[replication][encryptio
 
 TEST_CASE("a chunk larger than a sealed datagram is capped", "[replication][encryption]") {
 	// **The failure this change was most likely to cause.** Sixteen bytes came
-	// out of the payload limit, so a chunk size that fitted before may not now —
+	// out of the payload limit, so a chunk size that fitted before may not now -
 	// and a message that can never fit is refused by `Link::Reserve`, which is
 	// also what an ordinary busy link looks like. The symptom is a client that
 	// joins and watches a frozen world, and this module has found it three times
@@ -422,7 +422,7 @@ TEST_CASE("a chunk larger than a sealed datagram is capped", "[replication][encr
 
 	// **Enough of a world that a chunk is a full one.** A snapshot smaller than
 	// `ChunkBytes` fits in one short chunk whatever the setting says, so a
-	// handful of entities would pass with the cap taken out — which is a case
+	// handful of entities would pass with the cap taken out - which is a case
 	// that cannot fail. Six hundred rows is several full chunks.
 	std::vector<Entity> all;
 	for (int index = 0; index < 600; index++) {
@@ -459,7 +459,7 @@ TEST_CASE("the round trip reaches the link with its variance", "[replication]") 
 	// there.
 	//
 	// RFC 6298 seeds the variance at half the first sample, so this is non-zero
-	// after a single measured trip and does not need jitter arranged for it —
+	// after a single measured trip and does not need jitter arranged for it -
 	// which is the point, since a case needing an unstable link to see a field
 	// arrive would be measuring the link.
 	Wire wire;

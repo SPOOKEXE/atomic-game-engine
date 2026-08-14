@@ -2,9 +2,9 @@
 // discovery enabled" branch.
 //
 // **This is the one suite here that opens real sockets**, because it is the one
-// class whose whole job is opening them. It stays off the well-known port —
+// class whose whole job is opening them. It stays off the well-known port -
 // two suites running at once on one machine must not fight over 47600, and a
-// developer with the studio open must not fail the build — so what it checks is
+// developer with the studio open must not fail the build - so what it checks is
 // the composition rather than a live subnet. `network.beacon` and
 // `network.directory` cover what crosses the wire, over a loopback, with real
 // encoding.
@@ -103,7 +103,7 @@ TEST_CASE("announcing opens an ephemeral socket rather than the well-known one",
 	CHECK(presence->AnnouncingFrom().Port != QUIET_PORT);
 	CHECK(presence->AnnouncingFrom().Port != 0);
 
-	// The settings decide the protocol and the purpose, in both directions —
+	// The settings decide the protocol and the purpose, in both directions -
 	// so a studio cannot announce one thing and collect another.
 	CHECK(presence->Advertised().Protocol == 12);
 	CHECK(presence->Advertised().Use == Purpose::Studio);
@@ -123,7 +123,7 @@ TEST_CASE("two processes on one machine can both listen", "[network][presence]")
 	REQUIRE(second != nullptr);
 
 	// The reason `TransportSettings::ReuseAddress` exists. Without it the
-	// second one binds nothing and silently discovers nothing — a client and
+	// second one binds nothing and silently discovers nothing - a client and
 	// the studio open at once is ordinary, and so is two clients under test.
 	if (first->Fault() == PresenceFault::NoDiscoverySocket) {
 		// A platform that will not share the port at all. Said out loud rather

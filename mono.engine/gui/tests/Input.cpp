@@ -34,8 +34,8 @@ namespace {
 
 			// **The `GuiService`, because that is where the keyboard focus
 			// lives.** A world without one routes the pointer exactly as it did
-			// before focus existed and takes none at all — `gui::Focus`'s stated
-			// answer — so a fixture that skipped this would pass every focus
+			// before focus existed and takes none at all - `gui::Focus`'s stated
+			// answer - so a fixture that skipped this would pass every focus
 			// case below by never focusing anything.
 			InstallGuiServices(Data);
 
@@ -55,7 +55,7 @@ namespace {
 		//
 		// **Made by the fixture rather than by each case.** Containment is a
 		// rule every case is now subject to, and parenting by hand in thirty of
-		// them would be thirty chances to forget — and a forgotten one lays out
+		// them would be thirty chances to forget - and a forgotten one lays out
 		// to nothing, which reads as the case being wrong rather than the
 		// fixture being incomplete.
 		//
@@ -175,8 +175,8 @@ TEST_CASE("a clipped element is not hit where it would have been", "[gui][input]
 	CHECK(Pick(world.Data, world.List.Commands(), Vector2{50.0f, 50.0f}) == button);
 
 	// **Inside its rectangle and outside its clip.** The rectangle survives
-	// deliberately — `Resolved` keeps it so "scrolled away" is
-	// distinguishable from "never laid out" — so the clip test is what stops
+	// deliberately - `Resolved` keeps it so "scrolled away" is
+	// distinguishable from "never laid out" - so the clip test is what stops
 	// the hit.
 	CHECK(Pick(world.Data, world.List.Commands(), Vector2{250.0f, 250.0f}) == NULL_ENTITY);
 }
@@ -213,7 +213,7 @@ TEST_CASE("the first update does not invent a move", "[gui][input]") {
 	world.Box(corner, 0.0f, 0.0f, 50.0f, 50.0f);
 
 	// A router that has never seen a pointer must not report a move from the
-	// origin, which would fire at whatever happens to be under (0, 0) — here,
+	// origin, which would fire at whatever happens to be under (0, 0) - here,
 	// deliberately, a button.
 	const std::vector<GuiEvent> events = world.Move(0.0f, 0.0f);
 	CHECK_FALSE(world.Has(events, EventKind::MouseMoved, corner));
@@ -319,7 +319,7 @@ TEST_CASE("every element under a point comes back front to back", "[gui][input]"
 	//
 	// Two overlapping frames, so the order is actually asserted rather than
 	// "something came back", and the assertion is made twice with the `ZIndex`
-	// swapped — a walk that happened to return tree order would pass the first
+	// swapped - a walk that happened to return tree order would pass the first
 	// half and fail the second.
 	World world("gui_input.elements");
 
@@ -330,7 +330,7 @@ TEST_CASE("every element under a point comes back front to back", "[gui][input]"
 
 	// **A second container, which is a player's own `PlayerGui` beside the
 	// `StarterGui` template the fixture makes.** The layout resolves every
-	// collector in the world — `Layout.hpp` names both containers — so an
+	// collector in the world - `Layout.hpp` names both containers - so an
 	// unscoped answer would hand one player the rectangles of the template and of
 	// everybody else's copy, which is the failure `ResetPlayerGui` exists one door
 	// along to prevent.
@@ -353,7 +353,7 @@ TEST_CASE("every element under a point comes back front to back", "[gui][input]"
 	CHECK(ElementsAt(world.Data, mine, Vector2{50.0f, 50.0f}, found) == 2);
 	REQUIRE(found.size() == 2);
 
-	// Front to back, so the higher `ZIndex` leads — and neither answer is the
+	// Front to back, so the higher `ZIndex` leads - and neither answer is the
 	// frame in the other container or the one nowhere near the point.
 	CHECK(found[0] == over);
 	CHECK(found[1] == under);
@@ -416,7 +416,7 @@ TEST_CASE("a hidden or clipped element is not under the point either", "[gui][in
 	CHECK(found[1] == window);
 
 	// Inside the child's rectangle and outside its clip. The rectangle survives
-	// deliberately, so the clip test is what stops it — and the invisible frame
+	// deliberately, so the clip test is what stops it - and the invisible frame
 	// covering the same point is absent for the other reason.
 	CHECK(ElementsAt(world.Data, screen, Vector2{250.0f, 250.0f}, found) == 0);
 }
@@ -425,7 +425,7 @@ TEST_CASE("a rotated element is clickable where it is drawn", "[gui][input]") {
 	// **`D00025`, closed, and it is the half no backend could fix.** `Pick`
 	// tested `DrawCommand::Bounds` as an axis-aligned rectangle and ignored
 	// `Rotation` beside it, so a rotated button drew in one place and answered a
-	// pointer in another — the kind of bug people file twice, once against the
+	// pointer in another - the kind of bug people file twice, once against the
 	// drawing and once against the input.
 	//
 	// A wide, short button turned a quarter turn is tall and narrow. The two
@@ -444,7 +444,7 @@ TEST_CASE("a rotated element is clickable where it is drawn", "[gui][input]") {
 
 	world.Compile();
 
-	// The unrotated box spans x 100..300, y 190..210 — centred at (200, 200).
+	// The unrotated box spans x 100..300, y 190..210 - centred at (200, 200).
 	// Turned, it spans x 190..210, y 100..300.
 	const Vector2 alongTurned{200.0f, 120.0f}; // inside turned, outside flat
 	const Vector2 alongFlat{280.0f, 200.0f};   // inside flat, outside turned
@@ -453,7 +453,7 @@ TEST_CASE("a rotated element is clickable where it is drawn", "[gui][input]") {
 	CHECK(Pick(world.Data, world.List.Commands(), alongFlat) == NULL_ENTITY);
 
 	// **The centre is in both**, so it is asserted separately rather than being
-	// allowed to stand in for either — a test that only checked the middle would
+	// allowed to stand in for either - a test that only checked the middle would
 	// pass against a hit test that ignored rotation entirely.
 	CHECK(Pick(world.Data, world.List.Commands(), Vector2{200.0f, 200.0f}) == button);
 }
@@ -557,8 +557,8 @@ TEST_CASE("the focus moves between two boxes as one pair of events", "[gui][inpu
 
 TEST_CASE("a destroyed focused box releases nothing and blocks nothing", "[gui][input]") {
 	// **The dangling case from the router's side.** `FocusReleased` names an
-	// element and a dead element has nothing to fire at — `Router::Forget`'s
-	// argument — so the event is not emitted; what must still be true is that the
+	// element and a dead element has nothing to fire at - `Router::Forget`'s
+	// argument - so the event is not emitted; what must still be true is that the
 	// next press focuses, which a stale handle compared against itself would
 	// refuse.
 	World world("gui_input.focus_destroyed");

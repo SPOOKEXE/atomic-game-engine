@@ -18,7 +18,7 @@
 // **What this deliberately does not claim.** It does not translate anything, it
 // does not prove MSL exists, and it proves nothing about a Metal device. It
 // proves that the modules are well-formed, single-entry, decorated, and laid
-// out the way every backend's translation reads — which is the part of D00001
+// out the way every backend's translation reads - which is the part of D00001
 // that does not need a Mac.
 //
 // @tier L0 · shared
@@ -39,7 +39,7 @@ namespace shadercheck {
 	//
 	// **MSL reserves `main`, so SPIRV-Cross emits `main0`.** The name a caller
 	// hands SDL therefore depends on the format the device took, which is one
-	// fact with two spellings — kept here together so that whoever changes
+	// fact with two spellings - kept here together so that whoever changes
 	// either finds the other, rather than finding a black window.
 	inline constexpr std::string_view MSL_ENTRY_POINT = "main0";
 
@@ -51,7 +51,7 @@ namespace shadercheck {
 		std::string Message;
 	};
 
-	// `expected` is the stage the file's name claims — `opaque.vert.spv` is a
+	// `expected` is the stage the file's name claims - `opaque.vert.spv` is a
 	// vertex shader. A module whose entry point disagrees with its own filename
 	// is loaded under the wrong stage by every caller that trusts the name, and
 	// `render::Renderer` is one of them.
@@ -63,7 +63,7 @@ namespace shadercheck {
 	// the texture it belongs to.
 	//
 	// Parallel to `module.Resources`. Derived from SDL's documented ordering and
-	// nothing else — this is what a Mac will look for, not evidence that a Mac
+	// nothing else - this is what a Mac will look for, not evidence that a Mac
 	// found it. It is worth having because the assignment is a property of the
 	// SPIR-V, so it can be read, printed and diffed here rather than guessed at
 	// from the far side of a platform nobody in this repository has.

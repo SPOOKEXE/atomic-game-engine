@@ -6,7 +6,7 @@
 // put right; a peer that answers by claiming the whole world is wrong has to be
 // refused, by the server, without the server having to trust a number the peer
 // chose. Everything else here exists to show that a replica in *agreement* is
-// never disturbed — a false mismatch is worse than no audit, because it is a
+// never disturbed - a false mismatch is worse than no audit, because it is a
 // repair loop nobody asked for.
 //
 // No transport, for `Replication.cpp`'s reason: `Authority` produces messages
@@ -49,8 +49,8 @@ namespace audit_test {
 	// A unit direction, crossing as smallest-two.
 	//
 	// **Modelled on `scene::Transform`'s rotation rather than on a plain
-	// scale, and that is the whole point of it.** A scalar grid is idempotent —
-	// re-encoding a decoded value gives the code back — so it cannot tell an
+	// scale, and that is the whole point of it.** A scalar grid is idempotent -
+	// re-encoding a decoded value gives the code back - so it cannot tell an
 	// authority that hashes its own value from one that hashes what the far
 	// side holds. Dropping the largest component and recovering it from unit
 	// length is not idempotent: the recovered component can come back a hair
@@ -214,7 +214,7 @@ namespace audit_test {
 		// Ticks until an audit goes out, and answers the tick it went out on.
 		//
 		// `Statistics::Audits` is what the last `Publish` did, so this is the
-		// tick number rather than a guess at the cadence — a case that guessed
+		// tick number rather than a guess at the cadence - a case that guessed
 		// would be answering an audit the server never asked.
 		uint64_t Audit(int limit = 32) {
 			for (int attempt = 0; attempt < limit; attempt++) {
@@ -269,7 +269,7 @@ TEST_CASE("a deliberately diverged replica is found and repaired", "[replication
 
 	// The divergence. Written straight into the replica's store, which is
 	// exactly what a lost value, a stranded row or a half-applied tick leaves
-	// behind — and none of those move a dirty bit on the server.
+	// behind - and none of those move a dirty bit on the server.
 	pair.Client.GetMutable<Spot>(entities[3])->X = -1.0f;
 
 	pair.Run(24);
@@ -350,7 +350,7 @@ TEST_CASE("a replica in agreement is never disturbed", "[replication][audit]") {
 TEST_CASE("a value still in flight is not a disagreement", "[replication][audit]") {
 	// **The audit only ever catches *stale* divergence, and this is where that
 	// stops being a slogan.** A value the delta path has not landed yet is not
-	// a value the two ends should agree on — the server is simply ahead. An
+	// a value the two ends should agree on - the server is simply ahead. An
 	// audit that hashed it would report a mismatch every time the byte budget
 	// deferred something, on exactly the servers the budget exists for, and the
 	// repair would ask for the value that was already on its way.
@@ -381,7 +381,7 @@ TEST_CASE("a value still in flight is not a disagreement", "[replication][audit]
 TEST_CASE("a quantised value is hashed as the far side holds it", "[replication][audit]") {
 	// **An authority hashing its own value would disagree with a replica for
 	// ever here**, on a world nothing is touching, because this codec does not
-	// encode its own decoding back to the same bytes — see `Facing`. The
+	// encode its own decoding back to the same bytes - see `Facing`. The
 	// authority puts its value through the same encode-and-decode a join
 	// snapshot goes through, so both ends hash one expression over one buffer
 	// and agreement is by construction rather than by the quantiser happening
@@ -402,7 +402,7 @@ TEST_CASE("a quantised value is hashed as the far side holds it", "[replication]
 
 TEST_CASE("an entity the receiver derives for itself is not audited", "[replication][audit]") {
 	// `SuppressWhenTagged` stops a component's *deltas* for a tagged entity
-	// because the receiver recomputes that row — so the two ends are meant to
+	// because the receiver recomputes that row - so the two ends are meant to
 	// disagree about it, and an audit that hashed it would report every
 	// character in the world as a mismatch on every sweep.
 	//

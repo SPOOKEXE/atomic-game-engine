@@ -4,7 +4,7 @@
 //
 // **This module exists so that `Engine::game` can read a pipeline document
 // without linking a JPEG decoder.** `bake` carries the PNG, JPEG, GIF, BMP, OBJ,
-// glTF and PMX readers — it is the only thing in the engine that parses a
+// glTF and PMX readers - it is the only thing in the engine that parses a
 // foreign format, and `bake/CMakeLists.txt` states at length that nothing a
 // shipped game links may link it. A save format that named `bake` to parse a
 // *text document* would put every one of those decoders into `server`, which has
@@ -76,7 +76,7 @@ namespace engine::bake {
 		// **A separate kind rather than a parameter on `Import`, because it is
 		// the one import that cannot be decided from the bytes.** An SVG states
 		// a coordinate system and no pixels, so the size is the pipeline's
-		// decision — and a `Resize` afterwards is not the same picture, because
+		// decision - and a `Resize` afterwards is not the same picture, because
 		// it resamples a rasterisation that was never the right sharpness. An
 		// `Import` handed an SVG says so and names this node.
 		//

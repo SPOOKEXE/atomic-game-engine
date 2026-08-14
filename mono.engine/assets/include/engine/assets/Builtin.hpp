@@ -6,7 +6,7 @@
 // **Generated rather than shipped as files**, which is the decision worth
 // keeping. A checked-in `.amesh` of the same cube would be a second copy of
 // geometry this file already describes, free to drift from it, needing a
-// content store to reach and a fetch to arrive — and the whole point of a
+// content store to reach and a fetch to arrive - and the whole point of a
 // built-in is that it is there before any of that is. `resources/AGENTS.md`
 // carries the same rule from the other side.
 //
@@ -48,7 +48,7 @@ namespace engine::assets {
 	//
 	// @since v0.14
 	enum class BuiltinTexture : uint8_t {
-		// Pink and grey checkerboard — the sheet somebody puts on a wall while
+		// Pink and grey checkerboard - the sheet somebody puts on a wall while
 		// they are still deciding where the wall goes.
 		//
 		// **A different thing from `render::MissingTexture` and it must stay

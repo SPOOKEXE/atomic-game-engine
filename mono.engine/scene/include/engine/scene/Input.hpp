@@ -5,7 +5,7 @@
 // **This exists because `input` is `client` and `script` is `shared`.**
 // `engine::input` owns the SDL event pump and sits at L12; a script binding is at
 // L9 and may not name it. So `UserInputService` cannot read the module that
-// produces its data — the state has to come to rest somewhere both can see, and
+// produces its data - the state has to come to rest somewhere both can see, and
 // that place is a resource on the world.
 //
 // The shape follows from that. **This module holds no SDL type and pumps
@@ -14,7 +14,7 @@
 // the world lives; who produced it is somebody else's business.
 //
 // **Keys are named, never scancoded.** `KeyCode` is Roblox's `Enum.KeyCode` in
-// spelling and its ordinals are this file's own — a script says
+// spelling and its ordinals are this file's own - a script says
 // `Enum.KeyCode.Space` and never a number, and the number is free to move because
 // nothing writes it down. The one thing that *would* pin it is a saved keybinding
 // file, and there is not one; when there is, it saves names.
@@ -41,7 +41,7 @@ namespace engine::scene {
 	// is one the client's translation layer can produce; a name that mapped to
 	// nothing would be offering an author completion for a key that never fires.
 	//
-	// The ordinals are this file's own and are free to move — nothing serialises
+	// The ordinals are this file's own and are free to move - nothing serialises
 	// one. Scripts say `Enum.KeyCode.Space`.
 	//
 	// @since v0.10
@@ -147,7 +147,7 @@ namespace engine::scene {
 	//
 	// The three that are not buttons exist because an `InputObject` has to be able
 	// to say where an event came from, and `MouseButton1..3` can only describe a
-	// click — a key press, a pointer move and a wheel notch had no spelling at
+	// click - a key press, a pointer move and a wheel notch had no spelling at
 	// all. Roblox's `Enum.UserInputType` is longer than this; every member absent
 	// here is one nothing in this engine can produce, which is `KeyCode`'s own
 	// rule about offering completion for a key that never fires.
@@ -261,7 +261,7 @@ namespace engine::scene {
 		// outnumber ticks, so a key tapped and released between two ticks was
 		// pressed on a frame no tick ever looked at. A jump read that way is
 		// dropped about two times in three, and both hosts had independently
-		// grown the same private latch to hide it — `PlayLink::PendingJump` and
+		// grown the same private latch to hide it - `PlayLink::PendingJump` and
 		// `client::Client::PendingJump`, each bypassing `InputState` entirely
 		// and each having to be wired to its own character by hand.
 		//
@@ -270,7 +270,7 @@ namespace engine::scene {
 		// here, and the tick that acts on it clears it. Nothing is read twice
 		// and nothing is missed.
 		//
-		// `WasKeyPressed` deliberately does *not* consult this — a script's
+		// `WasKeyPressed` deliberately does *not* consult this - a script's
 		// `InputBegan` is a per-frame event and must stay one. `WasKeyTapped`
 		// is the tick-shaped question.
 		KeyBits Pressed;
@@ -281,7 +281,7 @@ namespace engine::scene {
 		// How far it moved since the last frame, in pixels.
 		//
 		// **Carried rather than derived from two positions**, because under
-		// `LockCenter` the position does not change — the pointer is held at the
+		// `LockCenter` the position does not change - the pointer is held at the
 		// centre and only the motion is real. A camera that differenced positions
 		// would stop turning the moment it locked, which is exactly when it needs
 		// to turn.
@@ -305,7 +305,7 @@ namespace engine::scene {
 		// ticks, so a click that began and ended between two ticks happened on
 		// a frame no tick ever looked at, and roughly two clicks in three are
 		// lost. Nothing noticed because nothing in this engine fired a shot
-		// until v0.15 — `examples::EncodeShot` had no caller anywhere in the
+		// until v0.15 - `examples::EncodeShot` had no caller anywhere in the
 		// tree.
 		//
 		// **Taken out of `Reserved` rather than added to the end**, so `sizeof`
@@ -320,7 +320,7 @@ namespace engine::scene {
 		// **Written by a script and read by the client**, which is one of the two
 		// fields here that travel in that direction.
 		// `UserInputService.MouseBehavior` is a property an author sets, and the
-		// client applies it to the window on the next frame — so this resource is
+		// client applies it to the window on the next frame - so this resource is
 		// the seam in both directions rather than a one-way report.
 		MouseBehavior Behaviour = MouseBehavior::Default;
 
@@ -334,7 +334,7 @@ namespace engine::scene {
 		// pointer moves.
 		//
 		// **`LockCenter` hides it regardless**, because a pointer held at the
-		// centre of the window is not a pointer any more — see the client's
+		// centre of the window is not a pointer any more - see the client's
 		// `SDL_SetWindowRelativeMouseMode` call, where relative mode owns the
 		// cursor and this is the request that applies to every other mode.
 		bool MouseIconEnabled = true;
@@ -350,8 +350,8 @@ namespace engine::scene {
 		// **`Keyboard` on a world nobody has touched**, rather than a fourth
 		// "None" member nothing else in the engine can produce. Roblox answers
 		// `Enum.UserInputType.None` there and this engine has no such member for
-		// the reason `InputSource` gives — every member is one something can
-		// produce — so the honest default is the device a headless world would
+		// the reason `InputSource` gives - every member is one something can
+		// produce - so the honest default is the device a headless world would
 		// have if it had one, and the *edge* is what a script watches anyway.
 		//@{
 		InputSource LastSource = InputSource::Keyboard;
@@ -384,7 +384,7 @@ namespace engine::scene {
 		//
 		// **It has to reach the end or it is not doing the job it is here for.**
 		// The members above end at 52 and the type aligns to 8, so four declared
-		// bytes are what stops the compiler inserting four nobody named — and
+		// bytes are what stops the compiler inserting four nobody named - and
 		// those would be written to a save file by `Column::Write`, which sends
 		// `sizeof(T)` bytes and does not know which of them a member claimed.
 		// This is the only component in the module where that was got wrong
@@ -437,7 +437,7 @@ namespace engine::scene {
 			// **The buttons in the same call, because they are the same
 			// mistake.** Two calls would be two things a writer has to remember
 			// and one of them would be forgotten the first time somebody added a
-			// second input path — which is precisely how `PlayLink::PendingJump`
+			// second input path - which is precisely how `PlayLink::PendingJump`
 			// and the client's own latch came to exist side by side.
 			PressedButtons |= static_cast<uint8_t>(Buttons & ~PreviousButtons);
 		}
@@ -477,7 +477,7 @@ namespace engine::scene {
 		// **Two halves under one name, because a client sends two messages and
 		// either can fail on its own.** `Client::SubmitMove` puts the jump in a
 		// `game::MoveInput` and the click in an `examples::Shot`, and clears
-		// each latch only once *that* message is on the wire — a shot refused by
+		// each latch only once *that* message is on the wire - a shot refused by
 		// the send budget while the move went through would otherwise forget a
 		// click nobody was told about. `ConsumeTaps` is still the whole
 		// question, for the one caller that asks it whole.
@@ -500,7 +500,7 @@ namespace engine::scene {
 		// the reason `WasKeyTapped` gives one field up: a click that began and
 		// ended between two ticks is invisible to the frame-shaped question.
 		//
-		// The latch alone, deliberately, exactly as `WasKeyTapped` is — a host
+		// The latch alone, deliberately, exactly as `WasKeyTapped` is - a host
 		// catching up runs several ticks between two writes, and folding the
 		// live frame edge in here would let the second read the same click the
 		// first had just consumed. One click, two shots.
@@ -573,7 +573,7 @@ namespace engine::scene {
 
 	// The name a key is known by.
 	//
-	// **Round-trips**, unlike `Describe(BodyKind)` — these are the names
+	// **Round-trips**, unlike `Describe(BodyKind)` - these are the names
 	// `ecs::EnumTable` registers and a script compares against, so they are the
 	// surface rather than a diagnostic.
 	//

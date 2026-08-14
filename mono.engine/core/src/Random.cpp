@@ -9,12 +9,12 @@ namespace engine::core {
 		// Generators* (OOPSLA 2014), where it is `mix64variant13`; the spelling
 		// below is Vigna's public-domain `splitmix64.c` and it is what Java's
 		// `SplittableRandom` draws through. Three constants and four shifts, all
-		// of them published — which is the same property SHA-256 was here for
+		// of them published - which is the same property SHA-256 was here for
 		// and the whole reason a hand-rolled mixer was not acceptable.
 		//
 		// The golden-gamma addition is part of the algorithm, not decoration.
-		// Without it the finaliser maps zero to zero, and `Bits(0, 0)` — the
-		// most-called pair in the engine — would be zero rather than a number.
+		// Without it the finaliser maps zero to zero, and `Bits(0, 0)` - the
+		// most-called pair in the engine - would be zero rather than a number.
 		uint32_t SplitMix64(uint64_t state) {
 			uint64_t z = state + 0x9E3779B97F4A7C15ull;
 			z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;

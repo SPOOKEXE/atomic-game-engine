@@ -10,7 +10,7 @@
 // **Every mode this changes is changed back in one place.** A terminal left in
 // raw mode with the cursor hidden is a shell the operator has to reset by hand,
 // and the ways out of this program are more numerous than they look: `q`, a
-// closed socket, an exception on the way up, and Ctrl-C — which raw mode
+// closed socket, an exception on the way up, and Ctrl-C - which raw mode
 // delivers as a byte precisely so that the destructor still runs.
 
 namespace cdn {

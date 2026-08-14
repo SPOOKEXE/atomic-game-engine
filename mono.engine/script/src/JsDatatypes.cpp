@@ -6,8 +6,8 @@
 // `core/types/` and `physics::Raycast` rather than against the class table.
 //
 // **The two store services used to be here too, and are not any more.** They are
-// `ServiceSurface`s in `BusServices.cpp` now — one description both languages
-// install — which is what `ScriptCall::Await` was added for: the promise this
+// `ServiceSurface`s in `BusServices.cpp` now - one description both languages
+// install - which is what `ScriptCall::Await` was added for: the promise this
 // file used to build is what the JavaScript adapter answers a suspension with.
 //
 // **Every type here is the same C++ value the Luau side wraps.** `Region3` is a
@@ -116,7 +116,7 @@ namespace engine::script {
 			return Wrap(context, JsOf(context).Vector2Class, value->Unit());
 		}
 
-		// `a.add(b)`, `a.mul(2)` — **methods, because JavaScript has no operator
+		// `a.add(b)`, `a.mul(2)` - **methods, because JavaScript has no operator
 		// overloading**. Luau writes `a + b` because Luau can, and neither
 		// language is made to pretend it is the other.
 		JSValue Vector2Add(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
@@ -601,7 +601,7 @@ namespace engine::script {
 		//
 		// The **direction carries the distance**, as Roblox's does:
 		// `Raycast(origin, direction.mul(500))` is what an author writes, and
-		// `core::Ray` needs a unit direction — so the split happens here rather
+		// `core::Ray` needs a unit direction - so the split happens here rather
 		// than being lost.
 		JSValue WorkspaceRaycast(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			if (argc < 2) {
@@ -806,7 +806,7 @@ namespace engine::script {
 			);
 		}
 
-		// On the world, because `workspace.Raycast` is where Roblox puts it — a
+		// On the world, because `workspace.Raycast` is where Roblox puts it - a
 		// query is against a world and not against a part.
 		JS_SetPropertyStr(
 			context, workspace, "Raycast", JS_NewCFunction(context, WorkspaceRaycast, "Raycast", 3)

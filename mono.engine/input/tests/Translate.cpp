@@ -3,7 +3,7 @@
 // **The suite `Translate.hpp` did not have.** Every other public header in the
 // engine is covered by one and this was the gap: the keycode table is ninety-odd
 // entries where one wrong line is a key that silently does nothing, and the
-// frame shape — roll the four `Previous` fields, clear the two deltas — is the
+// frame shape - roll the four `Previous` fields, clear the two deltas - is the
 // half every edge a script sees is derived from.
 //
 // A `Translator` needs no window and no SDL subsystem: `HandleEvent` takes a
@@ -37,7 +37,7 @@ namespace {
 	//
 	// **The pointer is into the caller's literal, which is what SDL does too.**
 	// `SDL_TextInputEvent::text` is borrowed for the duration of the handler and
-	// the translator copies out of it — a test that owned the storage would be
+	// the translator copies out of it - a test that owned the storage would be
 	// testing a contract the platform does not offer.
 	SDL_Event TextEvent(const char *text) {
 		SDL_Event event{};
@@ -137,7 +137,7 @@ TEST_CASE("a frame's edges are the difference between two frames", "[input]") {
 	CHECK(translator.State().WasKeyPressed(KeyCode::W));
 	CHECK_FALSE(translator.State().WasKeyReleased(KeyCode::W));
 
-	// Held. Down, and no longer an edge — which is what makes `InputBegan` fire
+	// Held. Down, and no longer an edge - which is what makes `InputBegan` fire
 	// once rather than every frame a key is held.
 	translator.BeginFrame();
 	CHECK(translator.State().IsKeyDown(KeyCode::W));
@@ -166,7 +166,7 @@ TEST_CASE("the pointer accumulates within a frame and starts each one at zero", 
 	REQUIRE(translator.HandleEvent(WheelEvent(2.0f)));
 
 	// **Summed and not assigned**, because several motion events arrive per frame
-	// and a camera wants all of the movement — assigning would make the turn
+	// and a camera wants all of the movement - assigning would make the turn
 	// depend on how the compositor happened to batch.
 	CHECK(translator.State().MousePosition.X == 14.0f);
 	CHECK(translator.State().MouseDelta.X == 7.0f);
@@ -202,7 +202,7 @@ TEST_CASE("losing focus releases everything and says so", "[input]") {
 	REQUIRE(translator.HandleEvent(WindowEvent(false)));
 
 	// **Alt-tabbing while holding W must not leave a character walking**, and SDL
-	// sends no key-up for a key let go in another window — so the release is
+	// sends no key-up for a key let go in another window - so the release is
 	// manufactured here and has to read as a release rather than as never having
 	// happened. `Previous` is what makes the difference, so both halves are
 	// checked.
@@ -222,7 +222,7 @@ TEST_CASE("the last device is stamped by whoever spoke and is an edge", "[input]
 	// **Two frames and a compare, not one frame and a value.**
 	// `LastInputTypeChanged` is the edge a place watches to swap "press E" for
 	// "click here", and a translator that stamped the source but never rolled the
-	// previous one would report a change on every frame — which passes any test
+	// previous one would report a change on every frame - which passes any test
 	// that only looks at `LastSource`.
 	Translator translator;
 
@@ -268,13 +268,13 @@ TEST_CASE("the last device is stamped by whoever spoke and is an edge", "[input]
 TEST_CASE("typed text arrives as UTF-8 and is a frame delta", "[input][translate]") {
 	// **The half of the keyboard that is not a keycode.** A key event says which
 	// key moved; this says what it spelled, and the two are different questions
-	// — the layout, the modifiers and any composition the platform ran all sit
+	// - the layout, the modifiers and any composition the platform ran all sit
 	// between them, so `Shift` plus `1` is two key bits there and `!` here.
 	//
 	// **The assertion that matters is byte-exact.** `SDL_TextInputEvent` carries
 	// UTF-8, and anything that took a byte at a time or assumed one event was one
 	// letter would cut a codepoint in half the first time somebody typed in their
-	// own language — which is the failure this case exists to catch and which no
+	// own language - which is the failure this case exists to catch and which no
 	// ASCII-only check would.
 	Translator translator;
 	translator.BeginFrame();
@@ -290,7 +290,7 @@ TEST_CASE("typed text arrives as UTF-8 and is a frame delta", "[input][translate
 	CHECK(translator.TypedText() == "H\xC3\xA9\xF0\x9F\x98\x80");
 	CHECK(translator.TypedText().size() == 7);
 
-	// **Typing is the keyboard speaking**, exactly as a press and a release are —
+	// **Typing is the keyboard speaking**, exactly as a press and a release are -
 	// a place that swapped its prompts on a key edge and not on a character
 	// would report the wrong device for anybody using an input method.
 	CHECK(translator.State().LastSource == InputSource::Keyboard);

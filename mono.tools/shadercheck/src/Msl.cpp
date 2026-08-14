@@ -105,7 +105,7 @@ namespace shadercheck {
 		// This is the whole of what "syntactically valid" can mean here. A Metal
 		// compiler is the thing that would say more and there is none on this
 		// platform, so the check is the one that catches a truncated write, a
-		// translator that gave up half way, and nothing else — stated rather than
+		// translator that gave up half way, and nothing else - stated rather than
 		// dressed up.
 		bool Balanced(std::string_view code, std::string_view original, std::string &error) {
 			std::vector<std::pair<char, size_t>> open;
@@ -263,7 +263,7 @@ namespace shadercheck {
 
 		std::string imbalance;
 		if (!Balanced(code, msl, imbalance)) {
-			report("the translated MSL does not parse — " + imbalance);
+			report("the translated MSL does not parse - " + imbalance);
 			return findings;
 		}
 
@@ -328,7 +328,7 @@ namespace shadercheck {
 		// **Checked from the emitted side, which is the direction that catches a
 		// rename.** Asking "does every resource appear" would pass a translation
 		// that dropped one, because SPIRV-Cross legitimately drops a resource the
-		// shader declares and never reads — `unlit.frag` declares four textures
+		// shader declares and never reads - `unlit.frag` declares four textures
 		// and samples one. Asking "is every attribute in the file claimed by a
 		// resource at that index" has no such hole.
 		for (const Attribute &attribute : AttributesIn(parameters)) {

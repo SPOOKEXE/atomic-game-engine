@@ -28,13 +28,13 @@ namespace engine::assets {
 		};
 
 		// The canonical name first for each form, so `Describe` can take the
-		// first row it finds — `.jpg` and `.jpeg` are one form and a setting is
+		// first row it finds - `.jpg` and `.jpeg` are one form and a setting is
 		// written with one of them.
 		//
 		// **The size is deduced and never written down.** A declared count that
 		// is one too large leaves a value-initialised row on the end whose form
 		// is `Unknown` and whose name is a null pointer, so `Describe(Unknown)`
-		// finds it and hands `strlen` a null — which is how this table
+		// finds it and hands `strlen` a null - which is how this table
 		// segfaulted the first time it was written.
 		constexpr Row ROWS[] = {
 			{ContentForm::AMesh, "amesh", AssetKind::Mesh, false},
@@ -59,7 +59,7 @@ namespace engine::assets {
 
 			// **A texture, because that is what one becomes.** `bake` lays a
 			// GIF's frames out as a grid in a single image and records the side,
-			// the count and the rate — see `assets::TextureData::FlipbookSide` —
+			// the count and the rate - see `assets::TextureData::FlipbookSide` -
 			// so everything downstream of the decoder handles it as the one
 			// image it now is. Naming a separate kind would need a second route
 			// through the client's content pump to arrive at the same table.
@@ -68,7 +68,7 @@ namespace engine::assets {
 			// **A texture, for the same reason `.gif` is one**: `bake`
 			// rasterises the drawing at a size the pipeline names and what
 			// arrives is an ordinary `.atex`. Nothing downstream knows it was
-			// ever a vector, which is the point — a runtime holds no rasteriser
+			// ever a vector, which is the point - a runtime holds no rasteriser
 			// any more than it holds a PNG decoder.
 			{ContentForm::Svg, "svg", AssetKind::Texture, true},
 
@@ -97,7 +97,7 @@ namespace engine::assets {
 			// **Source and compiled both route to `Shader`.** What somebody
 			// publishes is what they wrote; `bake` turns one into the other, the
 			// way it does for a mesh. A renderer is handed a compiled module and
-			// holds no compiler — see `Renderer::AddShader` — so GLSL reaching a
+			// holds no compiler - see `Renderer::AddShader` - so GLSL reaching a
 			// runtime is a mistake that has to be caught by the source column
 			// rather than at the draw.
 			{ContentForm::Spv, "spv", AssetKind::Shader, false},

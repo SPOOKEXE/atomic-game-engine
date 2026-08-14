@@ -4,7 +4,7 @@
 // together for exactly that reason.** Sealing is paid per packet, so a
 // nanosecond here is six thousand nanoseconds a second on a hundred-player
 // server. A handshake is paid per connection, so a *millisecond* there is
-// invisible until a hundred players reconnect at once after a server restart —
+// invisible until a hundred players reconnect at once after a server restart -
 // at which point it is the thundering-herd cost that decides whether the
 // server comes back or falls over.
 //
@@ -19,7 +19,7 @@
 // must cost the same. Poly1305 verification is constant-time by construction;
 // a refusal that returned early on the first bad byte would be both faster and
 // a timing oracle on the tag. So a *faster* refusal row here is a bug report,
-// not good news — which is the opposite of how every other refusal row in this
+// not good news - which is the opposite of how every other refusal row in this
 // repository reads, and the reason it is spelled out.
 
 #include <engine/net/Cipher.hpp>
@@ -64,7 +64,7 @@ namespace crypto_bench {
 	}
 
 	// Plaintexts at three sizes, because ChaCha20 is a stream cipher and its
-	// cost is very nearly linear in the bytes — so a suite that measured only
+	// cost is very nearly linear in the bytes - so a suite that measured only
 	// full-size frames would say nothing about the many small ones a reliable
 	// channel sends.
 	const std::vector<std::byte> &Plaintext(size_t bytes) {
@@ -84,8 +84,8 @@ namespace crypto_bench {
 
 	// Both ends of one completed agreement.
 	//
-	// A `Sealer` has no constructor taking a key — that absence is load-bearing,
-	// per `Cipher.hpp` — so every sealing row starts from a real handshake. It
+	// A `Sealer` has no constructor taking a key - that absence is load-bearing,
+	// per `Cipher.hpp` - so every sealing row starts from a real handshake. It
 	// is driven from fixed secrets rather than OS entropy so that two runs of
 	// this suite seal under the same keys and a difference between them is the
 	// code.
@@ -151,14 +151,14 @@ namespace crypto_bench {
 		Frame frame;
 		frame.Counter = sealed->Counter;
 		// Copied, because `Sealed::Bytes` is a view into the Sealer and only
-		// valid until its next Seal — and every row below seals again.
+		// valid until its next Seal - and every row below seals again.
 		frame.Bytes.assign(sealed->Bytes.begin(), sealed->Bytes.end());
 		built.emplace_back(plaintextBytes, std::move(frame));
 		return built.back().second;
 	}
 
 	// The same frame with one ciphertext byte flipped. Authentic length, wrong
-	// tag — which is what a forgery attempt looks like and what an on-path
+	// tag - which is what a forgery attempt looks like and what an on-path
 	// bit-flip looks like too.
 	const Frame &ForgedOf(size_t plaintextBytes) {
 		static std::vector<std::pair<size_t, Frame>> built;
@@ -260,7 +260,7 @@ BENCH("Open · 10k forged full-size frames", FRAMES) {
 }
 
 BENCH("Open · 10k frames with rewritten associated data", FRAMES) {
-	// The header changed in flight — a rewritten channel or sequence. Same
+	// The header changed in flight - a rewritten channel or sequence. Same
 	// answer as a forged tag, deliberately, because which check failed is
 	// information about the key and is not owed to whoever sent the bytes. It
 	// should also cost the same, for the same reason.
@@ -308,7 +308,7 @@ BENCH("Open · 10k frames shorter than the tag", FRAMES) {
 
 // --- the handshake ------------------------------------------------------------
 //
-// **Per connection, not per packet — and that is what makes it dangerous.** A
+// **Per connection, not per packet - and that is what makes it dangerous.** A
 // figure here is invisible in a steady-state server and decisive in the second
 // after a restart, when everybody reconnects at once. It is also the amount of
 // work an unauthenticated peer can ask a server to do by sending 32 bytes,
@@ -339,7 +339,7 @@ BENCH("Handshake::BeginFromSecret · 500", 500) {
 }
 
 BENCH("Cipher::Opener::FromKey · 10k", FRAMES) {
-	// Cheap by design — an `Opener` chooses no nonce, so building one from key
+	// Cheap by design - an `Opener` chooses no nonce, so building one from key
 	// material is safe and is just a copy. If this ever becomes expensive,
 	// something has started deriving per-Opener state that the handshake should
 	// have derived once.

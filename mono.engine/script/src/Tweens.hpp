@@ -3,8 +3,8 @@
 // Every tween in one VM, and the clock they all step on.
 //
 // **The shared half of `TweenService`, for the reason `Signals.hpp` and
-// `Tasks.hpp` are shared halves.** What a tween *is* — a target, a curve, a set
-// of goals and how far through it is — names no VM, and everything about
+// `Tasks.hpp` are shared halves.** What a tween *is* - a target, a curve, a set
+// of goals and how far through it is - names no VM, and everything about
 // *ordering* has to be one implementation or the two languages would disagree
 // about a thing a recording depends on. What each binding supplies is the
 // handle a script holds and the callables its `Completed` signal fires.
@@ -13,13 +13,13 @@
 //
 // **The entity is the identity, and that is all it is for.** A tween needs a
 // name that is unique in a world, survives a stale handle without naming
-// something else, and can be the *subject* of a `SignalTable` entry — which is
+// something else, and can be the *subject* of a `SignalTable` entry - which is
 // keyed on `ecs::Entity` and on nothing else. `Store::Create("")` answers all
 // three for the price of one row, so `Completed` is an ordinary
 // `RBXScriptSignal` in both languages with no second connection table anywhere.
 //
 // **It carries no class and no components, so it is not in the tree.** A tween
-// is not parented, is never drawn, is not saved and is not replicated —
+// is not parented, is never drawn, is not saved and is not replicated -
 // registering a `Tween` class with `ecs::Classes::Register` would have put it in
 // all four, made `Instance.new("Tween")` mint a tween with no target and no
 // goals, and added a row to the class table every consumer of that table then
@@ -31,7 +31,7 @@
 // instance handle**, and the reason is the method table rather than taste: the
 // neutral instance methods in `ScriptMethods.cpp` are installed flat on *every*
 // instance, so putting `Play` there would claim that name for every part,
-// folder and sound in the engine — and `Play` is a name Roblox puts on three
+// folder and sound in the engine - and `Play` is a name Roblox puts on three
 // classes. Three small methods written twice is the cheaper of the two, and it
 // is what `RBXScriptConnection` already pays.
 //
@@ -67,7 +67,7 @@ namespace engine::script {
 	//
 	// **`Completed` and `Cancelled` are two states rather than one "stopped"**,
 	// because `Play` means different things from each: a completed tween starts
-	// again from the beginning, and a cancelled one does too — but only the
+	// again from the beginning, and a cancelled one does too - but only the
 	// first fired its signal, and a caller reading the state to decide whether
 	// to fire is exactly the caller that must not confuse them.
 	//
@@ -93,7 +93,7 @@ namespace engine::script {
 	// One property a tween drives, and the two ends it drives it between.
 	//
 	// **The bytes are a fixed buffer rather than a variant**, because the type
-	// is already carried and every interpolable value fits in a `CFrame` — the
+	// is already carried and every interpolable value fits in a `CFrame` - the
 	// widest of them. A variant would be a second list of the types this file
 	// supports, kept in step with `Interpolable` by hand.
 	//
@@ -126,8 +126,8 @@ namespace engine::script {
 	//
 	// `TweenInfo` holds a `core::EasingStyle` and a script names one, so something
 	// has to join the two. Here rather than in `core` because the *names* are
-	// userland vocabulary — `core/types/TweenInfo.hpp` is L1 and knows nothing
-	// about a script — and here rather than in either binding because both need
+	// userland vocabulary - `core/types/TweenInfo.hpp` is L1 and knows nothing
+	// about a script - and here rather than in either binding because both need
 	// them: each header declared all four until v0.18, on the grounds that neither
 	// may include the other's VM. Neither has to.
 	//
@@ -147,7 +147,7 @@ namespace engine::script {
 	// pointed at a `Bool`, a `Name` or an `Instance` reference and would then
 	// have to invent what half way between two of them means. Roblox's answer
 	// for those is to snap at the end, which is a tween that does nothing for
-	// its whole duration and then jumps — indistinguishable from a broken one.
+	// its whole duration and then jumps - indistinguishable from a broken one.
 	//
 	// @param type What the property holds.
 	// @return `true` when `Interpolate` can blend two of them.
@@ -157,7 +157,7 @@ namespace engine::script {
 	// Blends two values of one type.
 	//
 	// **Unclamped alpha, deliberately.** `Back` and `Elastic` overshoot past one
-	// and below zero by design — `core::TweenInfo` says so — and clamping here
+	// and below zero by design - `core::TweenInfo` says so - and clamping here
 	// would quietly flatten both curves into their neighbours.
 	//
 	// @param type  What the bytes mean. Must be `Interpolable`.
@@ -201,7 +201,7 @@ namespace engine::script {
 		//        in it.
 		// @param target  The instance whose properties this drives.
 		// @param info    The curve.
-		// @param goals   What to drive, **sorted by property name** — see
+		// @param goals   What to drive, **sorted by property name** - see
 		//        `Advance`, which writes them in this order.
 		// @param dropped Appended with a reclaimed tween's entity, if the table
 		//        was full. The caller drops its connections and destroys it,
@@ -256,7 +256,7 @@ namespace engine::script {
 		// **The pair below is `GuiObject:TweenPosition`'s `override` argument and
 		// nothing else asks.** Roblox's flag means "replace whatever is already
 		// running on this object", and answering it needs the two halves of one
-		// question — is there one, and stop it — which a caller cannot ask of
+		// question - is there one, and stop it - which a caller cannot ask of
 		// `Cancel` because it names a tween rather than a target.
 		//
 		// `Playing` only: a finished or cancelled record has already done what it
@@ -269,7 +269,7 @@ namespace engine::script {
 		// Stops everything currently animating an instance.
 		//
 		// `Cancel`'s rule per record, so the properties are left where they are
-		// and no `Completed` fires — a script asking for an override is asking for
+		// and no `Completed` fires - a script asking for an override is asking for
 		// the new motion, not to be told the old one arrived.
 		//
 		// @param target The instance whose tweens stop.
@@ -280,14 +280,14 @@ namespace engine::script {
 		//
 		// @param tween The tween's entity.
 		// @return The state, or `Cancelled` for a tween this table has taken
-		//         back — which is what a handle to a reclaimed tween is.
+		//         back - which is what a handle to a reclaimed tween is.
 		TweenState StateOf(ecs::Entity tween) const;
 
 		// Advances every playing tween by one tick.
 		//
 		// **In creation order, and each tween writes its goals in name order.**
-		// Two properties of one instance may project onto one component —
-		// `Position` and `CFrame` both write `Transform` — so the order two
+		// Two properties of one instance may project onto one component -
+		// `Position` and `CFrame` both write `Transform` - so the order two
 		// goals are written in is observable, and it has to be stated rather
 		// than left to however a script's table happened to be walked.
 		//
@@ -312,7 +312,7 @@ namespace engine::script {
 		// **There is no `Clear`, and a runtime being torn down needs none.** The
 		// entities belong to the store, which is destroyed after the VM that
 		// built them, and the connections belong to a `SignalTable` whose
-		// callables the VM releases when it closes — the same reason
+		// callables the VM releases when it closes - the same reason
 		// `LuauRuntime::~LuauRuntime` empties neither `Tasks` nor `Signals`.
 
 	  private:
@@ -327,7 +327,7 @@ namespace engine::script {
 
 			core::TweenInfo Info;
 
-			// Sorted by property name — see `Create`.
+			// Sorted by property name - see `Create`.
 			std::vector<TweenGoal> Goals;
 
 			TweenState State = TweenState::Idle;

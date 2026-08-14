@@ -2,7 +2,7 @@
 #
 # A thin executable over `Tool::testrunner` and nothing else. Discovery, the
 # cascading signature and the skip cache are that library's and are used here
-# unchanged — a second implementation of "what could this change have affected"
+# unchanged - a second implementation of "what could this change have affected"
 # would be a second thing to keep correct, and the neglected one would be the
 # one that silently stopped re-running.
 #

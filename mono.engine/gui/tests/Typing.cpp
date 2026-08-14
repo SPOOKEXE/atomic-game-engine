@@ -129,7 +129,7 @@ TEST_CASE("nothing is typed into a world where nothing has focus", "[gui][typing
 
 TEST_CASE("a multi-byte character arrives whole", "[gui][typing]") {
 	// **The failure this pins is one byte of a letter.** `Translator::TypedText`
-	// hands over composed UTF-8 — two bytes for `é` and four for an emoji — and
+	// hands over composed UTF-8 - two bytes for `é` and four for an emoji - and
 	// anything on this path that measured the string in bytes would place the
 	// next character inside the previous one.
 	World world("gui_typing.utf8");
@@ -193,7 +193,7 @@ TEST_CASE("a script setting shorter text does not walk the caret off the end", "
 	// **The crash nobody writes a test for.** `TextBox.Text` is a plain property
 	// write with no setter to hook, so a handler that replaces the text while a
 	// person is typing leaves the caret pointing past the end of a string that is
-	// now shorter — and every insertion point derived from it is out of range.
+	// now shorter - and every insertion point derived from it is out of range.
 	// `Type` clamps at the reader, which is the only place that indexes by it.
 	World world("gui_typing.shrunk", "a long piece of text");
 	REQUIRE(world.Cursor() == 21);
@@ -207,7 +207,7 @@ TEST_CASE("a script setting shorter text does not walk the caret off the end", "
 	CHECK(world.Cursor() == 4);
 
 	// The same from the other side: a selection left pointing past the end.
-	// Both ends clamp onto the last position, which collapses the selection —
+	// Both ends clamp onto the last position, which collapses the selection -
 	// so the backspace deletes one character rather than a range of nothing.
 	world.Data.GetMutable<Label>(world.Box)->Text = "ab";
 	world.PlaceCaret(40, 30);
@@ -229,7 +229,7 @@ TEST_CASE("a script setting shorter text does not walk the caret off the end", "
 TEST_CASE("a selection is replaced by what is typed and removed by backspace", "[gui][typing]") {
 	World world("gui_typing.selection", "hello");
 
-	// Characters 2 to 4 — `el` — with the anchor before the moving end.
+	// Characters 2 to 4 - `el` - with the anchor before the moving end.
 	world.PlaceCaret(4, 2);
 	world.Send("i");
 	CHECK(world.Text() == "hilo");
@@ -350,7 +350,7 @@ TEST_CASE("a locked box takes no text and still moves and releases", "[gui][typi
 }
 
 TEST_CASE("one frame's keystrokes are applied in the order a person meant", "[gui][typing]") {
-	// A frame carries a state rather than a stream — `Typing`'s own note — so
+	// A frame carries a state rather than a stream - `Typing`'s own note - so
 	// the order is this module's to state: characters, then Backspace, then the
 	// caret, then Return. A frame that typed a letter and pressed Backspace ends
 	// where it started rather than one character short of it.

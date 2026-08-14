@@ -54,7 +54,7 @@ namespace {
 
 	// An ephemeral port on each end, so two runs of the suite at once do not
 	// collide. Returns an unusable pair rather than failing when no socket can
-	// be created — a build machine with no network should skip this, not fail.
+	// be created - a build machine with no network should skip this, not fail.
 	Pair Udp(const TransportSettings &settings = {}) {
 		Pair pair{engine::net::MakeUdpTransport(0, settings), engine::net::MakeUdpTransport(0, settings)};
 		if (!pair.Usable()) {
@@ -251,7 +251,7 @@ TEST_CASE("a udp socket carries the same datagrams", "[net][transport]") {
 
 TEST_CASE("a bound receive queue refuses rather than blocking", "[net][transport]") {
 	// Small enough that a handful of datagrams fill it. The socket's buffer size
-	// is advisory — a kernel rounds it — so this is stated on the loopback,
+	// is advisory - a kernel rounds it - so this is stated on the loopback,
 	// where the cap is exact.
 	TransportSettings settings;
 	settings.ReceiveQueueBytes = 64;

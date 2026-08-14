@@ -4,9 +4,9 @@
 //
 // **Split out of `BusServices.cpp` at v0.18, because this is a system and that
 // file is a description.** `AdmitTeleports` runs as an `ecs::Scheduler` system
-// on *every* world — `Runtime.hpp` carries the argument, and the short version
+// on *every* world - `Runtime.hpp` carries the argument, and the short version
 // is that a world can be a teleport destination without containing a single line
-// of script — so compiling it in a translation unit that includes `<lua.h>` for
+// of script - so compiling it in a translation unit that includes `<lua.h>` for
 // four service surfaces' benefit was the exact shape rule 6 asks about: nothing
 // checked that the admitter did not need a VM, and it never did.
 //
@@ -26,7 +26,7 @@ namespace engine::script {
 	// data is an arbitrary script value; a component holding one would need a
 	// type, a serialiser and a wire form for something the engine never reads. A
 	// `StringValue` is authored content that already round-trips, already
-	// replicates, and is already something a script can see in the explorer —
+	// replicates, and is already something a script can see in the explorer -
 	// which is worth more here than tidiness.
 	//
 	// **Shared because the write and the read are in different files.**

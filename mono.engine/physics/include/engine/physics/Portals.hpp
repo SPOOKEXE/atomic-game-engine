@@ -13,9 +13,9 @@
 // The arrangement everybody reaches for first is a **kinematic twin**: place a
 // copy of the body at `M(body)` on the far side, let the solver resolve it
 // against the far room, and map every contact back through `M⁻¹` as an impulse
-// on the original. It works, and it needs a second solver path — an impulse
+// on the original. It works, and it needs a second solver path - an impulse
 // mapped by a rotation and a scale, applied to a body the contact was not
-// generated for — in a module whose whole design is that there is one.
+// generated for - in a module whose whole design is that there is one.
 //
 // **Mapping the other way needs none of it.** Copy the *far room's colliders*
 // into the near room through the inverse seam. There they are ordinary static
@@ -30,7 +30,7 @@
 //
 // One overlap query per straddling body per tick, and a handful of entities
 // created and destroyed inside the same tick. Both are zero on every tick where
-// nothing is standing in a hole, which is nearly all of them — the pass returns
+// nothing is standing in a hole, which is nearly all of them - the pass returns
 // at the first line in a world with no portal in it.
 //
 // **Created and destroyed rather than pooled**, which is the one thing here that
@@ -55,7 +55,7 @@ namespace engine::physics {
 	// **`PreSimulation`, before the broadphase syncs**, so a proxy is indexed on
 	// the tick it exists for. `RegisterCharacterSystems` installs it beside
 	// `scene::OpenPortals`, which is the pass that lets a body be in a pane at
-	// all — without that one there is never anything to hold up.
+	// all - without that one there is never anything to hold up.
 	//
 	// @param store The world.
 	// @return How many proxies were placed. Zero on nearly every tick.
@@ -66,7 +66,7 @@ namespace engine::physics {
 	//
 	// **`PostSimulation`, and unconditionally.** A proxy that outlived its tick
 	// would be a piece of another room standing invisibly in this one, and the
-	// body it was made for may have walked out of the seam — or through it — in
+	// body it was made for may have walked out of the seam - or through it - in
 	// the tick that just ran. Rebuilding costs an overlap query; leaving one
 	// costs a wall nobody can see.
 	//

@@ -4,7 +4,7 @@
 //
 // **`Instances.hpp` predicted this field and named the version that would need
 // it.** `Source::Path` is a `core::Name` because a component must be trivially
-// copyable to be a column, so it cannot hold an unbounded string — and until
+// copyable to be a column, so it cannot hold an unbounded string - and until
 // v0.7 the path was resolved straight against the filesystem. That was correct
 // for `--script Rings.luau` and wrong for everything a studio does: an editor
 // that saved to a file per keystroke would be an editor whose undo history is
@@ -14,8 +14,8 @@
 // So the text is a **world resource** rather than a component: one table per
 // world, keyed by the same path the `Source` component names, consulted before
 // the filesystem. That is the arrangement `scene::SurfaceTable` already uses
-// for the same reason — a fact shared by many rows belongs once per world, not
-// once per row — and it is why this is serialisable with an explicit writer
+// for the same reason - a fact shared by many rows belongs once per world, not
+// once per row - and it is why this is serialisable with an explicit writer
 // rather than by its object representation.
 //
 // **The path is still the identity, and the cache is an override rather than a
@@ -52,7 +52,7 @@ namespace engine::script {
 	//
 	// A flat vector searched linearly, for `SurfaceTable`'s reasons rather than
 	// out of imitation: a world holds tens of scripts, a `core::Name` compare
-	// is an integer compare, and insertion order is program order — so two
+	// is an integer compare, and insertion order is program order - so two
 	// loads of one game file hold an identical table and a snapshot of it is
 	// byte-identical. A hash map would give the second property up to improve a
 	// lookup nobody has measured.

@@ -7,13 +7,13 @@
 //
 // **Down: which `Player` is yours.** `scene::LocalPlayer` has existed since
 // v0.10 with a comment explaining that it is empty on a server and holds this
-// viewer's player on a client — and it had no writer anywhere in the
+// viewer's player on a client - and it had no writer anywhere in the
 // repository. So `Players.LocalPlayer` was nil on every client that ever ran,
 // and with two clients in one world neither could tell which of the two
 // characters was its own. It cannot be replicated, and that is not an oversight
 // in `replication::LocalToTheClient`: a resource is one row in one world and
 // the answer differs for every client watching it. Per-client state travels as
-// a per-client message, over `replication::MessageKind::User` — which is
+// a per-client message, over `replication::MessageKind::User` - which is
 // exactly what that seam was reserved for.
 //
 // **Up: which way you are trying to walk.** The alternative was for a client to
@@ -22,12 +22,12 @@
 // controller: it puts a physics step on both ends, makes every disagreement a
 // reconciliation problem, and hands a client the ability to state where its
 // body is. Sending the *intent* keeps one simulation, and it is the same
-// division `Server::ApplyInputs` already states for shooting — a client says
+// division `Server::ApplyInputs` already states for shooting - a client says
 // where it aimed, never what it hit.
 //
 // **Here rather than in `replication`, because `replication` must not learn
 // what a player is.** `game` is the highest module a client and a server both
-// link, which makes it the only place one definition can serve both — and a
+// link, which makes it the only place one definition can serve both - and a
 // second definition of a wire format is the class of bug rule 4 is about.
 //
 // @tier L10 · shared
@@ -70,8 +70,8 @@ namespace engine::game {
 		//
 		// **The authority's handle is the client's handle**, which is a fact
 		// about this engine's replication rather than an assumption: a replica
-		// applies structure with the entity ids it was sent —
-		// `replication::Replica` calls `SetParent` with the arriving handles —
+		// applies structure with the entity ids it was sent -
+		// `replication::Replica` calls `SetParent` with the arriving handles -
 		// so the two ends agree on numbering by construction. An engine that
 		// remapped would need a lookup here instead.
 		ecs::Entity Player;
@@ -86,7 +86,7 @@ namespace engine::game {
 		//
 		// **A direction and never a velocity**, so how fast the character walks
 		// stays the server's `WalkSpeed` and is not something a client states.
-		// The host normalises anyway — a client is not trusted to.
+		// The host normalises anyway - a client is not trusted to.
 		core::Vector3 Direction;
 
 		// Whether the jump key went down since the last submission.
@@ -116,8 +116,8 @@ namespace engine::game {
 
 	// Writes a move onto the character a player is allowed to move.
 	//
-	// **The lookup is the whole of the security.** A client names nothing — it
-	// says only which way it is trying to walk — so the body the intent lands on
+	// **The lookup is the whole of the security.** A client names nothing - it
+	// says only which way it is trying to walk - so the body the intent lands on
 	// is the one the host assigned to that connection, and a client that sent a
 	// hundred moves still moves one character.
 	//
@@ -153,7 +153,7 @@ namespace engine::game {
 	// **The direction is not trusted.** A client may send any three floats; the
 	// host normalises what arrives and drops anything that is not finite, so
 	// the worst a bad client achieves is walking at its own `WalkSpeed` in a
-	// direction of its choosing — which is what a good one does too.
+	// direction of its choosing - which is what a good one does too.
 	//
 	// @param bytes The payload.
 	// @param out   Filled on success.

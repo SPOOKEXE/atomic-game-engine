@@ -1,7 +1,7 @@
 // What a script may decide about how a world is heard.
 //
 // **The half of the seam a script can see.** `SoundService` writes
-// `scene::AudioState` and nothing else — `engine::audio` is L12 `client` and this
+// `scene::AudioState` and nothing else - `engine::audio` is L12 `client` and this
 // module is L9 `shared`, so the binding cannot reach a mixer and does not try.
 // `client.sounds` is the other half: it pins that the client acts on exactly
 // these fields, and between the two suites the whole path is covered without
@@ -108,7 +108,7 @@ TEST_CASE("Volume is live and reaches the resource", "[scripting][sound]") {
 	)");
 
 	// The write reached the world rather than a copy. **This is the whole seam**
-	// — the client reads this field and nothing else tells it what to do.
+	// - the client reads this field and nothing else tells it what to do.
 	const AudioState *settings = store.Resource<AudioState>();
 	REQUIRE(settings != nullptr);
 	CHECK(settings->MasterVolume == 2.0f);
@@ -169,7 +169,7 @@ TEST_CASE("the listener refuses the two mistakes it can tell apart", "[scripting
 
 	// **The two Roblox modes this engine cannot honour fail where they are
 	// named**, because they are absent from the enum rather than refused by the
-	// method — `scene/Audio.hpp` gives the reason, which is that the mixer is
+	// method - `scene/Audio.hpp` gives the reason, which is that the mixer is
 	// posted a position and never a facing.
 	CHECK(MustFail(*runtime, "return Enum.ListenerType.CFrame").find("CFrame") != std::string::npos);
 
@@ -201,7 +201,7 @@ TEST_CASE("what SoundService deliberately does not have", "[scripting][sound]") 
 	// **Absent rather than present-and-refusing**, which is `HttpService`'s
 	// argument and applies here eleven times over: a member that exists and does
 	// nothing looks decided, so the next reader assumes somebody thought about
-	// it. `SoundService.cpp` says what each of these would need first — a filter
+	// it. `SoundService.cpp` says what each of these would need first - a filter
 	// node, a Doppler node, a shape in the emitter, a rolloff curve, a
 	// client-to-server sound path, a signal that a sound has finished.
 	//

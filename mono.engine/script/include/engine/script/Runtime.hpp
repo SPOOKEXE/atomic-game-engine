@@ -3,7 +3,7 @@
 // Running a script against a world, in either language.
 //
 // Scripts reach the world through the property surface `scene` declares and
-// `ecs::Classes` holds — `Instance.new`, then properties by name — so this
+// `ecs::Classes` holds - `Instance.new`, then properties by name - so this
 // module adds a **calling convention and not a second mechanism**.
 //
 // **An instance is an entity. A class is a set of components. A property is a
@@ -14,7 +14,7 @@
 //
 // **Two languages, two VMs, one binding surface.** Luau and JavaScript are
 // independent choices rather than one transpiled into the other, and both come
-// through this interface. What is shared is everything that matters — one class
+// through this interface. What is shared is everything that matters - one class
 // table, one property surface, one marshalling rule (switch on `PropertyType`,
 // never on a name). What differs is a file each.
 //
@@ -23,8 +23,8 @@
 // what a script could otherwise rewrite. A game loads scripts it did not write.
 //
 // **A script may yield, and only from something that will resume it.**
-// `docs/retired/SCRIPT_CONCURRENCY.md` §1 settles what a yield must mean — a script may
-// only resume from something the barrier delivers in a deterministic order —
+// `docs/retired/SCRIPT_CONCURRENCY.md` §1 settles what a yield must mean - a script may
+// only resume from something the barrier delivers in a deterministic order -
 // and v0.6 built the three sources it names: a `Ticket` reply, a `Deliveries()`
 // entry, and a tick boundary through `task`. So a suspended thread with a
 // scheduled resume is legal, and one without is refused. That is a lookup rather
@@ -92,7 +92,7 @@ namespace engine::script {
 			return HostRole{false, true, false};
 		}
 
-		// The role a host that is both has — single-player, and
+		// The role a host that is both has - single-player, and
 		// `mono.unified_server_client`.
 		static constexpr HostRole OfBoth() {
 			return HostRole{true, true, false};
@@ -156,7 +156,7 @@ namespace engine::script {
 		// Compiles and runs a chunk of source.
 		//
 		// @param source The script text.
-		// @param name   What errors call it — a path, usually.
+		// @param name   What errors call it - a path, usually.
 		// @return `true` when it compiled and ran without error.
 		virtual bool Run(std::string_view source, std::string_view name = "script") = 0;
 
@@ -170,7 +170,7 @@ namespace engine::script {
 		//
 		// **The difference from `RunFile` is the global.** A chunk run this way
 		// knows which instance it is, so it can reach its own parent, its own
-		// siblings and its own properties — which is what makes a game of many
+		// siblings and its own properties - which is what makes a game of many
 		// scripts possible rather than one file that happens to build a world.
 		//
 		// The program is read from `script::Source::Path`, relative to the
@@ -186,7 +186,7 @@ namespace engine::script {
 		//
 		// **This is what makes a world own its scripts.** `--script PATH` runs
 		// one file; a game has many, each parented somewhere, and this is the
-		// call that starts them — in creation order, skipping disabled ones, and
+		// call that starts them - in creation order, skipping disabled ones, and
 		// filtered by `RuntimeLimits::Role` so a `LocalScript` does not run on a
 		// dedicated server.
 		//
@@ -214,7 +214,7 @@ namespace engine::script {
 		// that decided for itself would have to know it was in a replica.
 		//
 		// Every script runs even when one fails, and the first failure is in
-		// `LastError` — `RunWorldScripts`' reason exactly.
+		// `LastError` - `RunWorldScripts`' reason exactly.
 		//
 		// @param wanted The instances to consider, in the order to run them.
 		// @return How many started on this call.
@@ -227,12 +227,12 @@ namespace engine::script {
 		// step.** A Roblox author writes behaviour by connecting to a signal
 		// and moving instances on each beat; without it, the only thing a
 		// script can do is describe a world and hand it to a C++ system to
-		// animate — which is a scene format, not a scripting layer.
+		// animate - which is a scene format, not a scripting layer.
 		//
 		// `delta` is the world's **fixed tick delta**, never wall time. A
 		// script that integrated against a real clock would put the scene in a
 		// different place on a busy machine, and the recording would stop
-		// replaying — the desync rule 5 names, arriving through the one call a
+		// replaying - the desync rule 5 names, arriving through the one call a
 		// script uses most.
 		//
 		// @param delta Seconds of simulated time since the last beat.
@@ -247,13 +247,13 @@ namespace engine::script {
 		// events; this module is L9 and owns every path into a VM. A host that
 		// turned a `gui::GuiEvent` into a call itself would be the second such
 		// path, and the two would disagree about ordering the first time one was
-		// fixed — which is the same argument `Signals.hpp` makes about two
+		// fixed - which is the same argument `Signals.hpp` makes about two
 		// hand-written copies of the connection rules.
 		//
 		// **Queued, not dispatched.** The events are held until the next
 		// `Heartbeat`, where they are delivered alongside the tree signals and
 		// the property changes. Firing them on arrival would call a script from
-		// inside the caller's walk of its own compiled draw list — and a handler
+		// inside the caller's walk of its own compiled draw list - and a handler
 		// that destroys the element it was called about would then invalidate
 		// the list the caller is still reading. The barrier is where every other
 		// resume happens and this is not worth making an exception of.
@@ -292,7 +292,7 @@ namespace engine::script {
 		// the argument and the two bugs that paid for it.
 		//
 		// **Call it on a runtime that has not run anything.** JavaScript's
-		// chunks share one global object — `JavaScriptRuntime` says why — so a
+		// chunks share one global object - `JavaScriptRuntime` says why - so a
 		// script that had assigned a global would appear in the answer as though
 		// the engine installed it.
 		//
@@ -339,7 +339,7 @@ namespace engine::script {
 		// **Before the first `Run`, because the global is built from
 		// `HostSurface::Names`.** A host installed afterwards is a `host` table
 		// a chunk already captured, and `luaL_sandbox` makes that capture
-		// permanent — see `D00030`, which is the same mechanism biting a
+		// permanent - see `D00030`, which is the same mechanism biting a
 		// different surface.
 		//
 		// The surface must outlive this runtime. A null one removes the global.
@@ -354,7 +354,7 @@ namespace engine::script {
 		//
 		// **The other direction of the seam.** A button's handler lives in the
 		// script's VM and the press happens in the host's frame, so this is what
-		// joins the two — and it is a method here rather than a callable the
+		// joins the two - and it is a method here rather than a callable the
 		// host holds, because the reference behind a `HostCallback` is a VM
 		// concept that does not leave this module.
 		//
@@ -376,7 +376,7 @@ namespace engine::script {
 
 		// Lets go of a function a script handed the host.
 		//
-		// **Called when whatever held it goes away** — a button removed, a panel
+		// **Called when whatever held it goes away** - a button removed, a panel
 		// closed. A host that never releases holds a closure for the life of the
 		// runtime, which is survivable and still wrong for a panel somebody
 		// opens and closes a hundred times.
@@ -395,7 +395,7 @@ namespace engine::script {
 		// disagree about it. A step is the same on every machine.
 		//
 		// Zero from a VM with no equivalent counter, which is honest rather than
-		// approximate — a fabricated number here would be compared against a
+		// approximate - a fabricated number here would be compared against a
 		// real one in the same table.
 		//
 		// @return The cumulative step count.
@@ -423,7 +423,7 @@ namespace engine::script {
 		// two runtimes over two worlds must not share them, and a file-static
 		// would have made that mistake available.
 		//
-		// A VM that cannot honour a breakpoint still hands one back — the
+		// A VM that cannot honour a breakpoint still hands one back - the
 		// breakpoints are then a list nothing consults, which is visible in the
 		// panel rather than silently ignored.
 		//
@@ -465,7 +465,7 @@ namespace engine::script {
 		// produced them.
 		//
 		// **In the base rather than in either VM's context, because it holds
-		// nothing either VM owns** — a kind, an entity and two points. Both
+		// nothing either VM owns** - a kind, an entity and two points. Both
 		// runtimes drain it from their own `Heartbeat`, which is the same split
 		// `SignalTable` uses: the ordering lives once, the calling lives twice.
 		//
@@ -511,15 +511,15 @@ namespace engine::script {
 	// **A world that is not running scripts still has to accept people.** This
 	// used to happen inside the Luau runtime's own delivery pump, which meant a
 	// teleport was only ever admitted by a world with a *Luau* script actually
-	// executing — so a destination the studio was not playing, a world whose
+	// executing - so a destination the studio was not playing, a world whose
 	// scripts are JavaScript, or a scene furnished entirely by C++ took the
 	// payload into its inbox and left it there. The player was destroyed in the
 	// world they left, never built in the world they went to, and the host that
 	// followed them searched every world and found nobody.
 	//
 	// That is what an immersive cross-world portal looks like when it goes
-	// wrong: the far room draws, live, through the pane — because a picture is a
-	// draw list and needs no runtime — and walking into it deletes you.
+	// wrong: the far room draws, live, through the pane - because a picture is a
+	// draw list and needs no runtime - and walking into it deletes you.
 	//
 	// **Here rather than in `world`, because admitting is a `scene` act.** What
 	// arrives is a name and a payload; what is built is a `Player`, a character
@@ -540,12 +540,12 @@ namespace engine::script {
 	// Installs `AdmitTeleports` as a system on a world.
 	//
 	// **`PreSimulation`, so somebody who arrived this tick is simulated this
-	// tick** rather than standing still for one — which at sixty ticks is
+	// tick** rather than standing still for one - which at sixty ticks is
 	// invisible and at a low tick rate is a body that appears already falling.
 	//
 	// **Every world, whether or not it runs scripts.** A destination is chosen
 	// by a script in *another* world, so a world can be a destination without
-	// containing a single line of code — which is exactly the case that was
+	// containing a single line of code - which is exactly the case that was
 	// broken.
 	//
 	// @param scheduler The world's scheduler.

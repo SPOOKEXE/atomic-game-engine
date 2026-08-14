@@ -79,7 +79,7 @@ namespace engine::assets {
 		}
 		// **1, 2 and 3 are all read.** A v1 file is a still image and a v2 file
 		// is a one-level texture, which is what their zeroes and their absent
-		// count already mean — see `VERSION`.
+		// count already mean - see `VERSION`.
 		const uint16_t version = reader.ReadUInt16();
 		if (version == 0 || version > VERSION) {
 			return false;
@@ -182,7 +182,7 @@ namespace engine::assets {
 										 ));
 
 		// A negative or non-finite rate reads as "unknown" rather than being
-		// refused, for the reason above — and because a consumer already has to
+		// refused, for the reason above - and because a consumer already has to
 		// handle zero.
 		out.FlipbookFrameRate = frameRate > 0.0f && frameRate < 1000.0f ? frameRate : 0.0f;
 

@@ -21,8 +21,8 @@ using engine::scene::MouseBehavior;
 using engine::scene::MouseButton;
 
 // **The invariant `scene/AGENTS.md` states and nothing checked.** A component is
-// serialised as its object representation — `Column::Write` sends `sizeof(T)`
-// bytes and does not know which of them a member claimed — so a byte the
+// serialised as its object representation - `Column::Write` sends `sizeof(T)`
+// bytes and does not know which of them a member claimed - so a byte the
 // compiler inserted and nobody declared reaches a save file uninitialised. Every
 // other component in the module names its padding; this one stopped six bytes
 // short, which is what this case exists to keep from happening again.
@@ -84,7 +84,7 @@ TEST_CASE("a key edge is the difference between the two frames", "[scene][input]
 	CHECK(state.WasKeyPressed(KeyCode::Space));
 	CHECK_FALSE(state.WasKeyReleased(KeyCode::Space));
 
-	// Frame two: still held. **Held is not pressed** — a bound action fires on
+	// Frame two: still held. **Held is not pressed** - a bound action fires on
 	// the edge, and a held key reporting a press every frame is what turns one
 	// jump into a flight.
 	state.Previous = state.Down;
@@ -161,7 +161,7 @@ TEST_CASE("a fresh state reports nothing down", "[scene][input]") {
 
 TEST_CASE("the device change is an edge and not a value", "[scene][input]") {
 	// **`LastInputTypeChanged` is the difference between two frames**, exactly as
-	// the focus pair is — a place swaps "press E" for "click here" on the moment
+	// the focus pair is - a place swaps "press E" for "click here" on the moment
 	// the answer changed, not on the answer. A state that reported a change while
 	// the two agreed would fire it every frame.
 	InputState state;
@@ -177,7 +177,7 @@ TEST_CASE("the device change is an edge and not a value", "[scene][input]") {
 }
 
 TEST_CASE("every key name round-trips", "[scene][input]") {
-	// `Describe` and `KeyFromName` are inverses, and the table is one list — a
+	// `Describe` and `KeyFromName` are inverses, and the table is one list - a
 	// key inserted in the middle of the enum without a name beside it shifts
 	// every name after it by one, so `Enum.KeyCode.W` resolves to V.
 	for (size_t ordinal = 0; ordinal < static_cast<size_t>(KeyCode::Count); ordinal++) {
@@ -221,7 +221,7 @@ TEST_CASE("an input source names every button and the three that are not", "[sce
 	// **The overlap is what `IsMouseButtonPressed` casts through.** It resolves
 	// an `Enum.UserInputType` member to an ordinal and hands it to
 	// `IsButtonDown`, so a source inserted ahead of the buttons would make "is
-	// the left button down" answer about the right one — with nothing failing,
+	// the left button down" answer about the right one - with nothing failing,
 	// because the arithmetic still lands on a valid bit.
 	CHECK(std::string_view(Describe(InputSource::MouseButton1)) == Describe(MouseButton::Left));
 	CHECK(std::string_view(Describe(InputSource::MouseButton2)) == Describe(MouseButton::Right));
@@ -242,7 +242,7 @@ TEST_CASE("an input source names every button and the three that are not", "[sce
 TEST_CASE("focus is an edge and not a level", "[scene][input]") {
 	// **`WindowFocused` and `WindowFocusReleased` are edges**, so the state has
 	// to remember last frame's focus the way it remembers last frame's keys. A
-	// fresh state has focus and had it, which reports neither edge — otherwise
+	// fresh state has focus and had it, which reports neither edge - otherwise
 	// the first pump of every world would fire a focus event nobody caused.
 	InputState state;
 	CHECK_FALSE(state.WasFocusGained());
@@ -250,7 +250,7 @@ TEST_CASE("focus is an edge and not a level", "[scene][input]") {
 
 	// Losing it. The frame this happens on is also the frame every held key
 	// reports released, because the translator clears `Down` and leaves
-	// `Previous` alone — so both are observable from one state.
+	// `Previous` alone - so both are observable from one state.
 	state.Previous = state.Down;
 	state.Down.Set(KeyCode::W, true);
 	state.PreviousFocused = state.Focused;

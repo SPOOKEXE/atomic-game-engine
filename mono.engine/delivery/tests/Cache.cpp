@@ -41,7 +41,7 @@ namespace {
 	//
 	// **Deliberately multi-chunk in most cases below.** An asset root is a tree
 	// over chunk hashes, so a single-chunk asset is the one shape where a hash
-	// of the whole happens to look right — and a suite built only out of those
+	// of the whole happens to look right - and a suite built only out of those
 	// would pass against a cache that verified the wrong thing.
 	struct Content {
 		Manifest Catalogue;
@@ -110,7 +110,7 @@ TEST_CASE("content round-trips through the cache", "[delivery][cache]") {
 TEST_CASE("a multi-chunk asset caches, and that is the regression", "[delivery][cache]") {
 	// **This is the bug the end-to-end run caught.** An asset root is a tree
 	// over chunk hashes, so a cache that compared `Hasher::Of(bytes)` against
-	// the root refused every asset cut into more than one chunk — silently, as
+	// the root refused every asset cut into more than one chunk - silently, as
 	// a cache miss, so every fetch went to the network for ever and nothing
 	// said why. A single-chunk asset would have passed that broken check.
 	Tree tree;
@@ -161,7 +161,7 @@ TEST_CASE("a corrupted entry is dropped rather than returned", "[delivery][cache
 	}
 
 	CHECK_FALSE(cache.Find(content.Entry()).has_value());
-	// Deleted, not merely refused — leaving it would make every later run pay
+	// Deleted, not merely refused - leaving it would make every later run pay
 	// the same failed read.
 	CHECK_FALSE(cache.Contains(content.Entry().Root));
 }

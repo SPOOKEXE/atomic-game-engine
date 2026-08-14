@@ -2,13 +2,13 @@
 //
 // **The handle and never the service.** `TweenService.cpp` describes `GetValue`
 // and `Create` once and both VMs install them; what is here is the object
-// `Create` answers with — a registered class whose payload is the entity that
+// `Create` answers with - a registered class whose payload is the entity that
 // names the tween, and the four members on its prototype. `LuauTween.cpp` is the
 // same thing said in the other language, and `Tweens.hpp` says why this half is
 // per language at all.
 //
 // **`tween.Completed` is an accessor and `tween.Play()` is a method**, which is
-// the same split the instance surface makes — a signal is a value, and a method
+// the same split the instance surface makes - a signal is a value, and a method
 // call in this language is a dot rather than a colon.
 //
 // @tier L9 · shared

@@ -56,7 +56,7 @@ namespace engine::render {
 		// **`Size` is a box the mesh is stretched into, not a multiplier.** The
 		// mesh's own bounding box is mapped exactly onto the part's, so
 		// `MeshPart.Size` means metres for every mesh in the world regardless of
-		// the scale it was authored at — Roblox's `MeshPart` semantic, and the
+		// the scale it was authored at - Roblox's `MeshPart` semantic, and the
 		// thing that makes `scene::Bounds` describe the geometry rather than
 		// approximate it.
 		//
@@ -69,7 +69,7 @@ namespace engine::render {
 		// the content happened to be baked correctly.
 		//
 		// A built-in is a unit shape about its own origin, so its `Extent` is a
-		// half on every axis and this is `HalfExtent * 2` — byte for byte what
+		// half on every axis and this is `HalfExtent * 2` - byte for byte what
 		// this function did before.
 		//
 		// @param instance What to draw.
@@ -81,7 +81,7 @@ namespace engine::render {
 			//
 			// **A degenerate axis keeps the old rule rather than dividing.** The
 			// built-in plane is a quad with no thickness, so its Y extent is
-			// exactly zero — and a flat mesh is an ordinary thing to author. The
+			// exactly zero - and a flat mesh is an ordinary thing to author. The
 			// fallback is `HalfExtent * 2`, which is what a zero-thickness mesh
 			// got before and does nothing to geometry that has no extent on that
 			// axis anyway.
@@ -104,7 +104,7 @@ namespace engine::render {
 
 			// **Centred after scaling, in the part's own space.** A model
 			// authored off its origin would otherwise hang away from the part by
-			// however far its box is offset — and because the offset scales with
+			// however far its box is offset - and because the offset scales with
 			// the part, it would grow as somebody resized it. Written into the
 			// translation column rather than composed as a second matrix: this
 			// runs once per instance per frame over the whole draw list.
@@ -194,7 +194,7 @@ namespace engine::render {
 			// Where the current animation cell sits: x the scale, yz the offset.
 			//
 			// **A transform rather than a cell index**, so a still image is the
-			// identity and the shader needs no branch per fragment —
+			// identity and the shader needs no branch per fragment -
 			// `render::FlipbookCell` carries the argument. A GIF is an ordinary
 			// texture in every other respect, which is what makes one usable on
 			// a part at all.
@@ -208,7 +208,7 @@ namespace engine::render {
 			// **A field of its own rather than the spare lanes in `Surface` or
 			// `Flipbook`.** Both of those are rewritten wholesale per submesh by
 			// `DrawSlots`, so anything parked in their unused components would
-			// be silently zeroed by the next draw — a bug that presents as "the
+			// be silently zeroed by the next draw - a bug that presents as "the
 			// effect only works on some parts".
 			glm::vec4 Mirror{0.0f, 0.0f, 0.0f, 0.0f};
 
@@ -217,13 +217,13 @@ namespace engine::render {
 			//
 			// **Because a pane is a box and a hole is a rectangle.** The image is
 			// chosen per draw and a draw is a whole instance, so a pane's four
-			// edge faces read the sub-render as well — a hole comes out as wide
+			// edge faces read the sub-render as well - a hole comes out as wide
 			// as the slab it is cut in, with a band of the far room running round
 			// its rim at a parallax nothing else in the frame has. A thin pane
 			// hides that in a fraction of a stud; a portal set in a wall does not.
 			//
 			// So the rim falls through to the pane's own material, which is what
-			// a frame is, and the front and back faces show the picture — both of
+			// a frame is, and the front and back faces show the picture - both of
 			// them, because a hole is a hole from either side and the warp already
 			// answers which.
 			glm::vec4 PaneNormal{0.0f, 0.0f, 0.0f, 0.0f};
@@ -234,7 +234,7 @@ namespace engine::render {
 			//
 			// **Written by `DrawSlots` from the slot's own plane**, like the flipbook
 			// cell and unlike the fields the caller sets, because the run it belongs
-			// to is chosen by that plane — a caller passing one here would be
+			// to is chosen by that plane - a caller passing one here would be
 			// overwritten by the slot's.
 			glm::vec4 SeamPlane{0.0f, 0.0f, 0.0f, 0.0f};
 		};
@@ -245,7 +245,7 @@ namespace engine::render {
 		// Every fragment tests every beam, so the count is a cost per pixel and
 		// not per hole; four is what a corridor needs and is two matrix products
 		// and a tap each. Anything past it is logged rather than dropped
-		// silently — a shadow that stops crossing when a fifth pane comes on
+		// silently - a shadow that stops crossing when a fifth pane comes on
 		// screen reads as the feature not working.
 		constexpr uint32_t MAX_PORTAL_BEAMS = 4;
 
@@ -253,7 +253,7 @@ namespace engine::render {
 		//
 		// **Two matrices and a plane per beam, and the second matrix is the
 		// surprising one.** The casters are left in the near room and the
-		// *receiver* is mapped back to it — see `NON-EUCLIDEAN.md` Part V.3 —
+		// *receiver* is mapped back to it - see `NON-EUCLIDEAN.md` Part V.3 -
 		// so a far-side fragment goes through `Back` before it goes through
 		// `Light`, and the plane is what says it was on the far side to begin
 		// with.
@@ -290,8 +290,8 @@ namespace engine::render {
 		// "no".** A rate of zero is the documented way to ask for every frame; a
 		// negative one is a script that computed something silly, and answering
 		// "never draw again" to that would be a surface that goes black for a
-		// mistake nothing reports; and a clock that has not advanced — a host
-		// that never calls `SetAnimationTime`, or a paused one — would otherwise
+		// mistake nothing reports; and a clock that has not advanced - a host
+		// that never calls `SetAnimationTime`, or a paused one - would otherwise
 		// freeze every capped surface in the world after its first frame.
 		//
 		// The bias is the same one culling takes: when the answer is not
@@ -321,8 +321,8 @@ namespace engine::render {
 		//
 		// One directional light; shadow fitting and shading share its direction.
 		// **`scene::SUN_DIRECTION`, converted rather than repeated.** The number
-		// moved to `scene` when `CutAndCloneSeams` had to map it through a seam —
-		// the far half of a body in a hole is lit by `R · L` — and a second
+		// moved to `scene` when `CutAndCloneSeams` had to map it through a seam -
+		// the far half of a body in a hole is lit by `R · L` - and a second
 		// spelling here would be two suns that agree until somebody edits one.
 		//
 		// **The default, and no longer the answer.** `Renderer::SetSun` is what a
@@ -424,8 +424,8 @@ namespace engine::render {
 		// --- shader variants --------------------------------------------------
 		//
 		// **A pipeline per named shader, per family, and no more general than
-		// that.** `scene::MaterialRef::Shader` selects a *fragment* shader —
-		// `scene::ShaderSource` says why only that stage — so a variant is the
+		// that.** `scene::MaterialRef::Shader` selects a *fragment* shader -
+		// `scene::ShaderSource` says why only that stage - so a variant is the
 		// opaque and transparent pipelines with one shader object swapped and
 		// everything else identical. The vertex layout, the depth state and the
 		// blend state are the renderer's and stay the renderer's.
@@ -441,7 +441,7 @@ namespace engine::render {
 		//
 		// This is a table of *substitutions*, not the beginning of a render
 		// graph. When the node system arrives it is what says which shader a
-		// pass wants, and this table becomes the backend that answers — so do
+		// pass wants, and this table becomes the backend that answers - so do
 		// not grow a second way to describe a frame here in the meantime.
 		struct ShaderVariant {
 			SDL_GPUShader *Fragment = nullptr;
@@ -466,7 +466,7 @@ namespace engine::render {
 		//
 		// **Members rather than the locals `CreatePipelines` builds**, because a
 		// `SDL_GPUGraphicsPipelineCreateInfo` is a struct of *pointers* into
-		// arrays the caller owns — so keeping the info and letting the arrays go
+		// arrays the caller owns - so keeping the info and letting the arrays go
 		// out of scope is a dangling read at the next `AddShader`. The arrays
 		// live here and the infos point at them.
 		//@{
@@ -513,10 +513,10 @@ namespace engine::render {
 		// naming an absent mesh is dropped rather than drawn as a cube.
 		//
 		// Kept on the state rather than made per frame, so a steady scene stops
-		// allocating after its first one — the rule every buffer here follows.
+		// allocating after its first one - the rule every buffer here follows.
 		std::vector<scene::DrawInstance> Drawable;
 
-		// The same, for the rows belonging to *other* worlds — see `Render`'s
+		// The same, for the rows belonging to *other* worlds - see `Render`'s
 		// `foreign` argument. A separate buffer rather than a tail on `Drawable`
 		// because every pass but the surface pass must not see these, and a
 		// shared buffer is one `.size()` away from them all seeing them.
@@ -541,7 +541,7 @@ namespace engine::render {
 		//
 		// **Zero by default, which is `scene::AUTOMATIC_SURFACE_BOUNCES`.** This
 		// was welded at two for two versions and every scene resolved exactly
-		// two levels whatever it was built from — a room with one mirror paying
+		// two levels whatever it was built from - a room with one mirror paying
 		// for a level that could never show anything, and a corridor of facing
 		// panes cut off one level into the effect. No constant is right for
 		// both, and since the levels became a recursion the cost of guessing
@@ -549,7 +549,7 @@ namespace engine::render {
 		// where the old iteration went as `panes × levels`.
 		//
 		// So the ordinary case is that nobody states one and each viewport's
-		// bank measures what the frame it just drew actually reached — see
+		// bank measures what the frame it just drew actually reached - see
 		// `SurfaceBank::Bounces` and `scene::NextSurfaceBounces`. A world that
 		// does state one (`workspace.SurfaceBounces`) or a run that does
 		// (`--surface-bounces`) overrides the measurement outright, because an
@@ -559,8 +559,8 @@ namespace engine::render {
 		// How many levels the recursive portal pass goes to.
 		//
 		// **One, and it is a backend limit rather than a taste.** Two is what the
-		// pass is for — a hole through a hole, resolved inside the frame from the
-		// right viewpoint at each level — and it draws correctly. What it also
+		// pass is for - a hole through a hole, resolved inside the frame from the
+		// right viewpoint at each level - and it draws correctly. What it also
 		// does, on SDL's Vulkan backend, is hang the device: at two levels a
 		// level-zero target is rendered into once per level-one hole, so within
 		// one command buffer the same texture is written, sampled, written again
@@ -569,8 +569,8 @@ namespace engine::render {
 		//
 		// Measured rather than suspected, on `Portals-1-world.luau` at twenty
 		// frames: twenty of twenty runs hang at depth two and none of thirteen at
-		// depth one. Forcing the nested pane to draw flat — the same recursion,
-		// the same pass count, nothing sampled — is clean, which is what pins it
+		// depth one. Forcing the nested pane to draw flat - the same recursion,
+		// the same pass count, nothing sampled - is clean, which is what pins it
 		// to the write-after-read rather than to the volume of work. Cycling the
 		// colour target halves it and does not close it.
 		//
@@ -602,7 +602,7 @@ namespace engine::render {
 		// Which shader each slot asks for, or an invalid name for the engine's.
 		//
 		// **A name per slot rather than a resolved pipeline**, because the run
-		// loop compares consecutive entries far more often than it uses one —
+		// loop compares consecutive entries far more often than it uses one -
 		// the same reason every array here is parallel rather than a struct. The
 		// lookup happens once per run, where the pipeline is bound.
 		std::vector<core::Name> SlotShader;
@@ -616,7 +616,7 @@ namespace engine::render {
 		// **A per-slot plane rather than a run of its own in the plan.** A body
 		// standing in a portal is cut at the pane and its far half is drawn in the
 		// room beyond; the cut is per instance and every uniform here is per frame
-		// or per draw, so it is carried the way the tag mask is — the run breaks
+		// or per draw, so it is carried the way the tag mask is - the run breaks
 		// where the plane changes, exactly as it breaks where the mesh does. A
 		// world with no hole in it holds one value throughout and pays one compare
 		// per instance for it. See `scene::DrawInstance::SeamNormal`.
@@ -633,7 +633,7 @@ namespace engine::render {
 		// --- particles --------------------------------------------------------
 		//
 		// **Two pipelines and one buffer.** The two differ only in their blend
-		// state — one mixes into the target and one adds to it — and blend state
+		// state - one mixes into the target and one adds to it - and blend state
 		// is baked into a pipeline on every modern API, which is the same reason
 		// `TransparentPipeline` is a second object rather than a uniform on the
 		// first.
@@ -646,8 +646,8 @@ namespace engine::render {
 
 		// One instance buffer for every particle in the frame.
 		//
-		// Separate from `InstanceBuffer` because the strides differ — 28 bytes
-		// against 96 — and a shared buffer would mean either padding a particle to
+		// Separate from `InstanceBuffer` because the strides differ - 28 bytes
+		// against 96 - and a shared buffer would mean either padding a particle to
 		// a mesh instance's width or rebinding the vertex layout mid-pass.
 		SDL_GPUBuffer *ParticleBuffer = nullptr;
 		SDL_GPUTransferBuffer *ParticleTransfer = nullptr;
@@ -680,7 +680,7 @@ namespace engine::render {
 		// The primitive differs. A particle is a quad expanded from its vertex
 		// index; a ribbon is a real vertex stream, because its geometry is a
 		// function of where its endpoints are and that is resolved on the CPU
-		// where a test can reach it — `ribbon.vert` carries the argument.
+		// where a test can reach it - `ribbon.vert` carries the argument.
 		SDL_GPUGraphicsPipeline *RibbonPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *AdditiveRibbonPipeline = nullptr;
 
@@ -702,7 +702,7 @@ namespace engine::render {
 		// particle path and is right for the opposite reason: a run is already a
 		// whole beam or a whole trail, so a scene has tens of them where it has
 		// tens of thousands of emitters. Grouping would save a bind on a count
-		// that does not need saving, and it cannot merge two runs anyway — they
+		// that does not need saving, and it cannot merge two runs anyway - they
 		// are separate strips, and a strip drawn as one primitive would connect
 		// the end of one to the start of the next.
 		//
@@ -717,7 +717,7 @@ namespace engine::render {
 
 		// This frame's groups, and the batch order they were built from.
 		//
-		// Members rather than locals, so the capacity survives the frame — the
+		// Members rather than locals, so the capacity survives the frame - the
 		// same argument `DrawOrder` makes one screen up.
 		std::vector<ParticleGroup> ParticleGroups;
 		std::vector<uint32_t> ParticleOrder;
@@ -736,7 +736,7 @@ namespace engine::render {
 		// copy that follows it is a copy pass and a copy pass cannot be started
 		// while a render pass is open. The first version of this did the memcpy
 		// inside the draw and never issued the copy at all, so the vertex buffer
-		// held whatever the previous frame left — which draws *something*, which
+		// held whatever the previous frame left - which draws *something*, which
 		// is why it took a capture rather than a crash to find.
 		//
 		// @return How many particles were packed.
@@ -769,7 +769,7 @@ namespace engine::render {
 		// **A vector rather than a single texture, and the editor is why.** Two
 		// viewports are two different sizes, so one shared target would be
 		// destroyed and recreated twice a frame as each panel asked for its
-		// own — a colour and a depth texture per frame, which is exactly the
+		// own - a colour and a depth texture per frame, which is exactly the
 		// cost `RetiredScenes` exists to avoid paying even once.
 		struct SceneSlot {
 			SDL_GPUTexture *Texture = nullptr;
@@ -868,7 +868,7 @@ namespace engine::render {
 		// two frames in flight consumed for one presented, which reads as the
 		// frame rate halving for no reason a profile can show.
 		//
-		// @return `false` when there was nothing to acquire — minimised or
+		// @return `false` when there was nothing to acquire - minimised or
 		//         mid-resize, which is not an error.
 		bool BeginFrame() {
 			if (FrameClaimed) {
@@ -886,7 +886,7 @@ namespace engine::render {
 			// previous frame retired is unreferenced now: its draw lists have
 			// been replayed and thrown away, and nothing has yet recorded a bind
 			// for this frame. Doing it here rather than in `Render` is what keeps
-			// that true once the wait moved ahead of the interface — an editor
+			// that true once the wait moved ahead of the interface - an editor
 			// records its draw lists between the two calls.
 			DrainRetiredScenes();
 
@@ -925,10 +925,10 @@ namespace engine::render {
 				// anything above this can do anything about.
 				//
 				// A frame that looks slow with everything else on the panel
-				// adding up to nothing is a frame that is waiting here — which
+				// adding up to nothing is a frame that is waiting here - which
 				// means the GPU is the limit, not the code above it.
 				//
-				// Idle, not Render. Nothing is being rendered here — the thread
+				// Idle, not Render. Nothing is being rendered here - the thread
 				// is asleep until the display is ready for another image, and
 				// counting that as rendering work makes the renderer look like
 				// the most expensive thing in a frame it spent waiting.
@@ -939,7 +939,7 @@ namespace engine::render {
 
 			if (!acquired || swapchain == nullptr) {
 				// Minimised, or mid-resize. Not an error, and not a reason to
-				// stop ticking — the simulation carries on and the next frame
+				// stop ticking - the simulation carries on and the next frame
 				// presents.
 				//
 				// **Cancelled rather than submitted, which is what SDL's own
@@ -947,7 +947,7 @@ namespace engine::render {
 				// there is nothing to present and nothing recorded worth
 				// executing; submitting an empty buffer sends it through the
 				// whole submit path and consumes a frame in flight for no work.
-				// Cancel is only legal *because* the acquire failed —
+				// Cancel is only legal *because* the acquire failed -
 				// `SDL_CancelGPUCommandBuffer` is documented as an error once a
 				// swapchain texture has been acquired, which is why every later
 				// bail-out submits instead.
@@ -1080,7 +1080,7 @@ namespace engine::render {
 			// `scene::SurfaceLens::Mapping`.
 			glm::mat4 Sampling{1.0f};
 
-			// The pair again, for the frame before — which is the one another
+			// The pair again, for the frame before - which is the one another
 			// surface pass samples, and it must be projected with the matrix
 			// that *rendered* it. Projecting last frame's texture with this
 			// frame's camera is a reflection that slides as the viewer moves,
@@ -1098,7 +1098,7 @@ namespace engine::render {
 			// **Not part of the signature**, unlike the matrix beside it: the
 			// effect changes no texel of the texture, only how the screen pass
 			// reads it. A mirror switched to thermal has to change this frame
-			// rather than on whichever later frame something happens to move —
+			// rather than on whichever later frame something happens to move -
 			// the same argument `ImageOpacity` makes one line up.
 			scene::SurfaceEffect Effect = scene::SurfaceEffect::None;
 
@@ -1109,7 +1109,7 @@ namespace engine::render {
 			// announces nothing. A match means this pass would redraw the
 			// texture it already holds, so it is not run.
 			//
-			// Meaningless while `Ready` is false — a slot that has never
+			// Meaningless while `Ready` is false - a slot that has never
 			// rendered refreshes on the signature it happens to hold, which is
 			// why the two are always tested together.
 			uint64_t Signature = 0;
@@ -1133,12 +1133,12 @@ namespace engine::render {
 		// its neighbours' textures while they read its, so a pair is the only way
 		// to stop a pass sampling what another pass is writing in the same
 		// bounce. A portal level is written by the recursion and read exactly
-		// once, by the level above it, after that write has finished — depth-first
+		// once, by the level above it, after that write has finished - depth-first
 		// order is the ordering, so there is nothing to alternate between.
 		//
 		// **No signature, no rate cap and no `Ready` either.** All three are ways
 		// of keeping a texture across frames, and a level's contents are only
-		// meaningful for the camera that produced them — which is this frame's.
+		// meaningful for the camera that produced them - which is this frame's.
 		struct PortalTarget {
 			SDL_GPUTexture *Colour = nullptr;
 			SDL_GPUTexture *Depth = nullptr;
@@ -1149,7 +1149,7 @@ namespace engine::render {
 		// The pool, indexed by level and then by slot.
 		//
 		// **Per level per slot, and both indices are needed.** Per level alone
-		// would be enough if a level were consumed the instant it was written —
+		// would be enough if a level were consumed the instant it was written -
 		// which it is not: level `L` renders the scene and *then* draws every
 		// hole visible from it, so all of level `L-1` has to survive until the
 		// last of them is drawn. Per slot alone would have two levels of one hole
@@ -1170,13 +1170,13 @@ namespace engine::render {
 		// skewed, so its target is the screen's size and the pane reads the texel
 		// it is standing on. A mirror's is fitted to its pane, so its target is
 		// the pane's authored size and the pane reads it by projecting its own
-		// world position — which is why this carries a matrix and a portal level
+		// world position - which is why this carries a matrix and a portal level
 		// does not.
 		//
 		// **`Sampling` is the whole point of the type.** It is the matrix that
 		// *rendered* this texture, and the level above binds it to project the
 		// pane with. Before the recursion existed the pass had only the matrix
-		// fitted to the eye available to it — so a pane inside another pane's
+		// fitted to the eye available to it - so a pane inside another pane's
 		// picture was projected from a viewpoint nobody was looking from, the
 		// coordinate left 0..1, and `opaque.frag` fell back to the flat lit pane.
 		// That flat slab in a mirror's reflection is the defect this exists to
@@ -1186,7 +1186,7 @@ namespace engine::render {
 		// level is written by the recursion and read exactly once, by the level
 		// above it, after that write has finished. Depth-first order *is* the
 		// ordering, so there is nothing to alternate between and nothing worth
-		// keeping across a frame — the contents are only meaningful for the
+		// keeping across a frame - the contents are only meaningful for the
 		// camera that produced them, which is this frame's.
 		struct MirrorTarget {
 			SDL_GPUTexture *Colour = nullptr;
@@ -1197,8 +1197,8 @@ namespace engine::render {
 			// World to this level's camera clip space. What the pane above
 			// projects its own world position through.
 			//
-			// A mirror's map is the identity — a reflection fixes every point of
-			// the plane it reflects through — so this is the camera's
+			// A mirror's map is the identity - a reflection fixes every point of
+			// the plane it reflects through - so this is the camera's
 			// `ViewProjection` and nothing else. `scene::SurfaceLens::Mapping`
 			// carries the general case for the pane path.
 			glm::mat4 Sampling{1.0f};
@@ -1208,7 +1208,7 @@ namespace engine::render {
 			// **Cleared at the top of every frame rather than trusted.** A pane
 			// that went off screen, or edge-on, or whose texture could not be
 			// made, leaves a target holding last frame's picture taken from a
-			// camera that no longer exists — and sampling it would slide a
+			// camera that no longer exists - and sampling it would slide a
 			// reflection across a pane nothing in the scene is moving, which is
 			// the hardest possible version of this bug to attribute.
 			bool Ready = false;
@@ -1226,7 +1226,7 @@ namespace engine::render {
 			std::vector<PortalLevel> Portals;
 
 			// The same, for mirrors. Two pools rather than one, because the two
-			// passes size their targets differently — see `MirrorTarget`.
+			// passes size their targets differently - see `MirrorTarget`.
 			std::vector<MirrorLevel> Mirrors;
 
 			// What the last frame drawn into this bank reached, which is what an
@@ -1235,7 +1235,7 @@ namespace engine::render {
 			// **Per viewport and not per renderer, for the reason the textures
 			// are.** The studio's four panels look at one world from four
 			// places, and how deep a corridor telescopes is a fact about where
-			// somebody is standing — one shared number would let the panel with
+			// somebody is standing - one shared number would let the panel with
 			// the deepest view pay for every other panel's frame, and would
 			// oscillate as the panels took turns.
 			scene::SurfaceBounceProbe Bounces;
@@ -1245,15 +1245,15 @@ namespace engine::render {
 		// a world is on screen twice.** A reflection is of the viewer: `scene::
 		// AimSurfaceCameras` mirrors the world's `ActiveCamera` through each
 		// pane, so two panels looking at one world want two different images out
-		// of the same `SurfaceCamera`. With one shared bank they got one — the
+		// of the same `SurfaceCamera`. With one shared bank they got one - the
 		// panel that drew most recently wrote every surface texture, and the
 		// other panel then composited its panes from a reflection computed for
 		// somebody else's eye. Flying either camera moved the mirrors in both
 		// windows, at half the frame rate, which reads as a projection fault
 		// rather than as one texture with two authors.
 		//
-		// The aim is still world state and still per frame — one panel draws per
-		// frame and re-aims before it does — so what has to be per viewport is
+		// The aim is still world state and still per frame - one panel draws per
+		// frame and re-aims before it does - so what has to be per viewport is
 		// the *texture*, which outlives the frame that drew it. A panel that is
 		// not this frame's shows its own last image rather than another panel's
 		// current one.
@@ -1278,7 +1278,7 @@ namespace engine::render {
 		// The beam atlas, made on the frame a hole first transports a shadow.
 		//
 		// **Shares `ShadowSampler`**, because it is the same kind of map read the
-		// same way — a depth texture clamped at the edge, with the fragment
+		// same way - a depth texture clamped at the edge, with the fragment
 		// shader range-checking anyway.
 		bool EnsureBeams();
 
@@ -1286,7 +1286,7 @@ namespace engine::render {
 		//
 		// **Its own call because two passes need it and only one of them used to
 		// create it.** It was made inside `EnsureSurface`, which a world of
-		// nothing but portals never reaches — so the portal pass captured a null
+		// nothing but portals never reaches - so the portal pass captured a null
 		// sampler and handed it to `SDL_BindGPUFragmentSamplers`, which
 		// dereferences it. A scene with a single mirror in it hid that
 		// completely.
@@ -1331,14 +1331,14 @@ namespace engine::render {
 		// **The pipelines declare two fragment samplers and a draw must bind
 		// both.** An unbound sampler is undefined behaviour on several backends
 		// where a wrongly bound one is merely ignored, and the uniform flag is
-		// what stops the result being read — so any valid texture will do, and
+		// what stops the result being read - so any valid texture will do, and
 		// what matters is that there is always one.
 		//
 		// This used to be `OverlayTexture`, which is created only when a debug
 		// panel has something in it, standing in for `ShadowTexture`, which is
 		// created only when something casts. Both are absent together in an
-		// ordinary case — a scene of nothing but transparent geometry, with the
-		// panels closed — and the screen pass then bound no samplers at all and
+		// ordinary case - a scene of nothing but transparent geometry, with the
+		// panels closed - and the screen pass then bound no samplers at all and
 		// drew anyway. Owning a texture for the job costs four bytes of device
 		// memory and removes the case rather than making it rarer.
 		SDL_GPUTexture *FallbackTexture = nullptr;
@@ -1372,7 +1372,7 @@ namespace engine::render {
 		// `DrawSlots` may substitute a variant for a run and has to know what to
 		// put back. A pass that called `SDL_BindGPUGraphicsPipeline` directly
 		// would leave the record saying something false, and the next run would
-		// restore the wrong pipeline — a draw with somebody else's blend state,
+		// restore the wrong pipeline - a draw with somebody else's blend state,
 		// which reads as a sorting bug.
 		void BindPipeline(SDL_GPURenderPass *pass, SDL_GPUGraphicsPipeline *pipeline, PipelineFamily family);
 
@@ -1382,7 +1382,7 @@ namespace engine::render {
 		//
 		// @param name  What a material names it.
 		// @param spirv The module. Must declare the sampler and uniform slots
-		//              `opaque.frag` does — see `Renderer::AddShader`.
+		//              `opaque.frag` does - see `Renderer::AddShader`.
 		// @return `false` when the shader or either pipeline could not be built.
 		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv);
 
@@ -1404,7 +1404,7 @@ namespace engine::render {
 		// one cube; now a run may hold several meshes and each mesh several
 		// material submeshes, so this splits the run wherever the mesh or the
 		// instance's texture override changes and issues a call per resulting
-		// piece. The instances themselves never move — the split is entirely in
+		// piece. The instances themselves never move - the split is entirely in
 		// `first_instance` and a count.
 		//
 		// **Consecutive-run splitting rather than grouping.** Sorting the run by
@@ -1468,7 +1468,7 @@ namespace engine::render {
 		// against.
 		//
 		// **One answer, asked in five places.** Headless has no swapchain to
-		// ask, so it takes a fixed format — and the format has to be the *same*
+		// ask, so it takes a fixed format - and the format has to be the *same*
 		// fixed one everywhere, or a pipeline is built for one target and bound
 		// to another. That is the whole reason this is a function rather than a
 		// call to SDL at each use.
@@ -1524,7 +1524,7 @@ namespace engine::render {
 			// **Two uniform buffers now, not one.** The count is part of the
 			// shader object rather than of the pipeline, so a mismatch with the
 			// `layout(set = 3, binding = n)` declarations is a push that lands
-			// nowhere rather than a validation error — the same trap the sampler
+			// nowhere rather than a validation error - the same trap the sampler
 			// count above records.
 			"opaque.frag",
 			SDL_GPU_SHADERSTAGE_FRAGMENT,
@@ -1592,7 +1592,7 @@ namespace engine::render {
 		//
 		// For a portal it is the whole feature failing. The oblique clip works
 		// by skewing the near plane onto the destination's pane, so *everything
-		// the hole should not show is behind the near plane* — the wall the
+		// the hole should not show is behind the near plane* - the wall the
 		// destination is set into, its back face, and the room behind it.
 		// Clamped, all of it draws at depth zero and fills the hole with the
 		// wall it leads through. The matrix was right, the placement was right,
@@ -1644,7 +1644,7 @@ namespace engine::render {
 		// - **Depth writes off, depth *test* on.** A transparent pane must be
 		//   hidden by an opaque wall in front of it, so the test stays; but it
 		//   must not stop the pane behind it from being drawn, so the write
-		//   goes. Leaving the write on is the classic version of this bug — the
+		//   goes. Leaving the write on is the classic version of this bug - the
 		//   nearest pane silently erases everything behind it and the scene
 		//   looks like the sort failed.
 		SDL_GPUColorTargetDescription blendedTarget{};
@@ -1677,7 +1677,7 @@ namespace engine::render {
 		// arriving later builds a pipeline that differs from these in exactly
 		// one field. Copied rather than rebuilt: a second description of the
 		// vertex layout is a second thing to keep in step, and the one that
-		// would be missed is this one — it is only read when somebody selects a
+		// would be missed is this one - it is only read when somebody selects a
 		// custom shader.
 		std::memcpy(VariantBuffers, vertexBuffers, sizeof(VariantBuffers));
 		std::memcpy(VariantAttributes, attributes, sizeof(VariantAttributes));
@@ -1703,7 +1703,7 @@ namespace engine::render {
 		//
 		// **No vertex buffer for the quad and no index buffer at all.** The
 		// billboard's four corners come out of `gl_VertexIndex` in the shader, and
-		// the primitive is a triangle strip — so one particle is one instance of
+		// the primitive is a triangle strip - so one particle is one instance of
 		// four vertices with nothing fetched. At half a million particles that is
 		// half a million cache lines never read.
 		//
@@ -1721,7 +1721,7 @@ namespace engine::render {
 			// **Three of the four are unsigned integers rather than floats**,
 			// because that is what they are: a packed size, a packed rotation and
 			// cell, and an RGBA8 colour. Declaring them as floats would make the
-			// driver convert bits that are not a float, which is not a slow path —
+			// driver convert bits that are not a float, which is not a slow path -
 			// it is a different number.
 			const SDL_GPUVertexAttribute particleAttributes[] = {
 				{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(effects::ParticleInstance, Position)},
@@ -1755,7 +1755,7 @@ namespace engine::render {
 			particle.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 
 			// **Nothing is culled.** A billboard is a flat quad turned to face the
-			// eye, so which way it winds depends on where the camera is — and a
+			// eye, so which way it winds depends on where the camera is - and a
 			// cull mode would make half the particles in a scene vanish depending
 			// on which side of the emitter you stood.
 			particle.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
@@ -1779,7 +1779,7 @@ namespace engine::render {
 
 			// The additive twin. **One destination factor apart**, and that one
 			// factor is what makes the blend commutative and therefore
-			// order-independent — which is why an additive emitter needs no sort.
+			// order-independent - which is why an additive emitter needs no sort.
 			SDL_GPUColorTargetDescription additiveTarget = particleTarget;
 			additiveTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
 			additiveTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
@@ -1900,7 +1900,7 @@ namespace engine::render {
 
 		// The pipelines hold what they need; the shader objects do not have to
 		// outlive their creation. **`opaqueVertex` is the exception and is
-		// released in `Shutdown` instead** — see `OpaqueVertexShader`.
+		// released in `Shutdown` instead** - see `OpaqueVertexShader`.
 		SDL_ReleaseGPUShader(Device, opaqueFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
@@ -1933,7 +1933,7 @@ namespace engine::render {
 		// **The same counts `opaque.frag` declares, and they are the interface.**
 		// A shader object carries its sampler and uniform-buffer counts rather
 		// than the pipeline doing so, so a module declaring different ones binds
-		// and silently reads nothing — the trap `CreatePipelines` already records
+		// and silently reads nothing - the trap `CreatePipelines` already records
 		// for the built-in fragment shader. That is why a `ShaderScript` is a
 		// fragment shader written against `opaque.frag`'s slots and not against
 		// a blank page.
@@ -2113,7 +2113,7 @@ namespace engine::render {
 			if (lighting != nullptr) {
 				// **The default, not the fallback texel, and not "do not
 				// sample".** A drawable naming no texture is not a drawable with
-				// nothing to draw — it is one made of the engine's default
+				// nothing to draw - it is one made of the engine's default
 				// material, which `DefaultTexture.hpp` says is a real sheet of
 				// white plastic. So the slot always has content and the shader
 				// always samples it; what used to be the "no texture" branch is
@@ -2142,7 +2142,7 @@ namespace engine::render {
 
 				// **The fallback texel is bound rather than the binding being
 				// skipped** for the other two, because a sampler a pipeline
-				// declares must have something in it — an unbound one is
+				// declares must have something in it - an unbound one is
 				// undefined behaviour on some backends and a validation error on
 				// others. Those two are genuinely absent features rather than
 				// defaulted ones, and their uniform flags still say so.
@@ -2164,7 +2164,7 @@ namespace engine::render {
 				// **The marker arrives as itself, so the base colour stops
 				// applying to it.** Every other texture here is modulated by the
 				// material's colour, which is what makes one grey sheet serve a
-				// whole palette — but a magenta check multiplied by a dark red
+				// whole palette - but a magenta check multiplied by a dark red
 				// part is a dark pattern that reads as somebody's intent. A
 				// marker that can be tinted into looking deliberate is not a
 				// marker.
@@ -2177,7 +2177,7 @@ namespace engine::render {
 				// simplification: a sheet plays on the clock rather than on
 				// anything an entity carries, so every part showing one GIF shows
 				// the same frame. A per-instance phase is a real feature and is a
-				// different one — `effects::FlipbookLayout` already has it for
+				// different one - `effects::FlipbookLayout` already has it for
 				// particles, where the cell is a function of a particle's age.
 				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
@@ -2194,7 +2194,7 @@ namespace engine::render {
 
 				// **The slot's own plane, and the run above guarantees they agree.**
 				// A run is broken wherever the plane changes, so every instance in
-				// this draw is cut the same way — which is what makes a per-instance
+				// this draw is cut the same way - which is what makes a per-instance
 				// fact expressible in a per-draw uniform.
 				uniforms.SeamPlane = SlotSeam[slot];
 
@@ -2202,7 +2202,7 @@ namespace engine::render {
 				// the body was.** Its normals are the near half's rotated by the
 				// seam, so the world's own direction would shade one body with two
 				// suns a quarter apart. Set per draw for the same reason the plane is,
-				// and only where the row asked for it — a zero vector is every
+				// and only where the row asked for it - a zero vector is every
 				// instance that is not half of something.
 				const glm::vec3 mapped{SlotSeamLight[slot]};
 				if (glm::dot(mapped, mapped) > 0.0f) {
@@ -2248,7 +2248,7 @@ namespace engine::render {
 
 			// **The shader joins what ends a run, because it is a pipeline.** A
 			// pipeline bind is per draw at best, so two instances drawn through
-			// different fragment shaders cannot share one — the same reason the
+			// different fragment shaders cannot share one - the same reason the
 			// seam plane breaks a run, one level up from a uniform. A world
 			// where nothing selects a shader holds one invalid name throughout
 			// and never breaks on it.
@@ -2280,7 +2280,7 @@ namespace engine::render {
 			}
 
 			if (mesh->Runs.empty()) {
-				// A mesh with no materials of its own — every built-in.
+				// A mesh with no materials of its own - every built-in.
 				emit(mesh->Whole, texture, {1.0f, 1.0f, 1.0f, 1.0f}, slot, run);
 			} else {
 				for (size_t index = 0; index < mesh->Runs.size(); index++) {
@@ -2301,7 +2301,7 @@ namespace engine::render {
 			slot += run;
 		}
 
-		// Put the pass's own pipeline back — see `base` above.
+		// Put the pass's own pipeline back - see `base` above.
 		if (bound != base && base != nullptr) {
 			SDL_BindGPUGraphicsPipeline(pass, base);
 		}
@@ -2349,8 +2349,8 @@ namespace engine::render {
 			return false;
 		}
 
-		// Opaque white for the fallback texel. Nothing reads it — the uniform
-		// flag sees to that — but a texture whose contents were never written
+		// Opaque white for the fallback texel. Nothing reads it - the uniform
+		// flag sees to that - but a texture whose contents were never written
 		// is uninitialised device memory, and "nothing reads it" is a claim
 		// about the shaders of the day rather than a property of the resource.
 		constexpr uint8_t FALLBACK_TEXEL[OverlayImage::BYTES_PER_PIXEL] = {255, 255, 255, 255};
@@ -2434,7 +2434,7 @@ namespace engine::render {
 		// ramp.
 		//
 		// **Starting at 4096 rather than at 256**, because an emitter that is
-		// emitting at all has hundreds of particles — the smallest useful scene is
+		// emitting at all has hundreds of particles - the smallest useful scene is
 		// already past the mesh path's starting size, so starting there would be
 		// four reallocations on the first frame anything is drawn.
 		uint32_t capacity = ParticleCapacity == 0 ? 4096 : ParticleCapacity;
@@ -2499,7 +2499,7 @@ namespace engine::render {
 		// a binding and a binding cannot change inside a draw.
 		//
 		// `ZOffset` and `FlipbookSide` are uniforms rather than bindings and could
-		// have been moved onto the instance instead — four more bytes a particle,
+		// have been moved onto the instance instead - four more bytes a particle,
 		// which is two megabytes a frame at the target count against a handful of
 		// extra draw calls. The draw calls are cheaper.
 		bool SameParticleState(const render::ParticleBatch &left, const render::ParticleBatch &right) {
@@ -2518,13 +2518,13 @@ namespace engine::render {
 		// **Grouped by state, and this is the difference between a scene that
 		// draws and one that does not.** The first version issued one draw call
 		// per emitter, which at the roadmap's hundred thousand emitters is a
-		// hundred thousand draw calls a frame — an order of magnitude past what
+		// hundred thousand draw calls a frame - an order of magnitude past what
 		// any driver will do at sixty hertz. Measured at 1,600 emitters it was
 		// 1,608 draw calls; grouped, the same scene is **three**, because every
 		// emitter in the grid shares a texture and a blend mode.
 		//
 		// **A stable sort into an index list rather than sorting the batches**,
-		// because the caller owns them — the same reason `scene::OrderForDrawing`
+		// because the caller owns them - the same reason `scene::OrderForDrawing`
 		// produces an order instead of reordering a draw list.
 		ParticleOrder.resize(batches.size());
 		for (size_t index = 0; index < batches.size(); index++) {
@@ -2618,7 +2618,7 @@ namespace engine::render {
 		uniforms.CameraUp = axis(0.0f, 1.0f, 0.0f);
 
 		// **The forward the shader wants points from the eye into the scene**, and
-		// `CFrame`'s own forward is -Z — the engine's camera convention, which
+		// `CFrame`'s own forward is -Z - the engine's camera convention, which
 		// `scene::NormalOf` states. Taken here rather than negated in the shader,
 		// so the convention lives in one place.
 		uniforms.CameraForward = axis(0.0f, 0.0f, -1.0f);
@@ -2738,7 +2738,7 @@ namespace engine::render {
 		}
 
 		// **Copied whole rather than run by run**, because `RibbonRun::First` is
-		// already an index into this stream — `BuildRibbons` packed the runs
+		// already an index into this stream - `BuildRibbons` packed the runs
 		// contiguously in the order it produced them, so the buffer and the runs
 		// agree with no repacking.
 		auto *mapped =
@@ -2790,7 +2790,7 @@ namespace engine::render {
 
 		// **Two passes over the runs rather than one**, so each pipeline is bound
 		// once. `BuildRibbons` produces beams then trails in world order and does
-		// not group by blend mode — grouping there would be a shared module
+		// not group by blend mode - grouping there would be a shared module
 		// ordering work for a pipeline it cannot name.
 		for (int additive = 0; additive < 2; additive++) {
 			for (const effects::RibbonRun &run : runs) {
@@ -2843,7 +2843,7 @@ namespace engine::render {
 		// **Recorded before anything decides whether to allocate.** This is the
 		// rectangle the pass draws and the rectangle `SceneTextureExtent`
 		// reports, and it is the panel's size whether or not the texture under
-		// it changed — which is the whole point of keeping the two apart.
+		// it changed - which is the whole point of keeping the two apart.
 		target.DrawnWidth = width;
 		target.DrawnHeight = height;
 
@@ -2857,7 +2857,7 @@ namespace engine::render {
 			}
 
 			// **Released outright rather than retired.** Nothing samples a depth
-			// buffer — no interface hook can have recorded a bind of it — so the
+			// buffer - no interface hook can have recorded a bind of it - so the
 			// grace period the colour target needs does not apply, and a closed
 			// panel should not go on holding a megabyte of it.
 			if (target.Depth) {
@@ -2876,8 +2876,8 @@ namespace engine::render {
 		const uint32_t wantHeight = BlockUp(height);
 
 		// **Kept when it is big enough, and only replaced when it is far too
-		// big.** Growing is forced — a texture smaller than the rectangle would
-		// clip the world — but shrinking is not, and refusing to shrink for a
+		// big.** Growing is forced - a texture smaller than the rectangle would
+		// clip the world - but shrinking is not, and refusing to shrink for a
 		// factor of two is what stops a drag from reallocating on the way back
 		// down as well as on the way up. See `SCENE_TARGET_BLOCK`.
 		if (target.Texture && wantWidth <= target.Width && wantHeight <= target.Height) {
@@ -2889,8 +2889,8 @@ namespace engine::render {
 
 		if (target.Texture) {
 			// **Retired rather than released.** An interface hook has already
-			// recorded a bind of this texture for the frame in progress — that
-			// is what "the image is last frame's texture" means — so freeing it
+			// recorded a bind of this texture for the frame in progress - that
+			// is what "the image is last frame's texture" means - so freeing it
 			// here is a use-after-free that lands inside SDL's Vulkan backend.
 			// `DrainRetiredScenes` frees it at the top of the next frame.
 			RetiredScenes.push_back(target.Texture);
@@ -2979,7 +2979,7 @@ namespace engine::render {
 		}
 
 		// The shadow map's own sampler and format, so the two are read the same
-		// way — and `EnsureShadow` is what makes both.
+		// way - and `EnsureShadow` is what makes both.
 		if (!EnsureShadow()) {
 			return false;
 		}
@@ -3429,7 +3429,7 @@ namespace engine::render {
 
 		// VSYNC is the only mode required to exist. Asking for IMMEDIATE on a
 		// backend without it fails rather than silently staying synchronised,
-		// so check before asking for it — an unsupported mode would otherwise
+		// so check before asking for it - an unsupported mode would otherwise
 		// leave the swapchain in whatever state the failed call left it.
 		//
 		// **The query is the half that is safe to do now**, which is what lets
@@ -3471,7 +3471,7 @@ namespace engine::render {
 		// Abort rather than return, for `ecs::Store::RequireOwningThread`'s
 		// reason and one of this module's own. By the time a second thread is
 		// inside here it has already recorded into a command buffer another
-		// thread is filling, so there is nothing left to decline — and the
+		// thread is filling, so there is nothing left to decline - and the
 		// symptom on the far side is a driver validation error or a frame of
 		// somebody else's geometry, neither of which points back here. The stack
 		// at the violation is the whole value.
@@ -3488,8 +3488,8 @@ namespace engine::render {
 	bool Renderer::Initialise(SDL_Window *window, uint32_t framesInFlight) {
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
-		// whoever owns the object and initialised by whoever owns the window —
-		// it is the device, not the C++ object, that the contract is about — so
+		// whoever owns the object and initialised by whoever owns the window -
+		// it is the device, not the C++ object, that the contract is about - so
 		// this is the authoritative claim and the constructor's is a default
 		// that costs nothing to be wrong about, because being wrong about it
 		// means nothing has been created yet.
@@ -3505,7 +3505,7 @@ namespace engine::render {
 		// **Every format the build produces, which is now two.** `glslc`
 		// compiles the built-in GLSL to SPIR-V and `mono.tools/shadercross`
 		// translates each module to MSL beside it, so a Metal device has
-		// something to be given. D3D12 needs DXIL, which is still not built —
+		// something to be given. D3D12 needs DXIL, which is still not built -
 		// asking for a format we cannot supply would find a device and then fail
 		// at pipeline creation, which is a worse error than being refused here.
 		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, false, nullptr);
@@ -3528,7 +3528,7 @@ namespace engine::render {
 		// **One frame queued rather than SDL's two, and the frame rate is not
 		// what this buys.** The default lets the CPU submit a second frame
 		// before the GPU has finished the first, so what a display is showing is
-		// up to two frames behind the input that produced it — 33 ms at 60 Hz
+		// up to two frames behind the input that produced it - 33 ms at 60 Hz
 		// before the compositor takes its turn. SDL's own wording is that higher
 		// values "increase throughput at the expense of visual latency", and an
 		// editor is the case where that trade is backwards: nobody drags a
@@ -3536,12 +3536,12 @@ namespace engine::render {
 		// mouse and the picture is felt by the hand holding it.
 		//
 		// What it costs is the throughput it was buying. A frame that would have
-		// overlapped now waits, so a GPU-bound scene loses some of its rate —
+		// overlapped now waits, so a GPU-bound scene loses some of its rate -
 		// which is why the measurement that matters here is the one taken by
 		// hand, not the one the profiler reports.
 		// **Clamped rather than trusted.** SDL takes 1 to 3 and answers false
 		// for anything else, which would leave the device at its default with
-		// only a warning to say so — a number nobody chose deciding the feel of
+		// only a warning to say so - a number nobody chose deciding the feel of
 		// the editor.
 		const uint32_t queued = std::clamp<uint32_t>(framesInFlight, 1, 3);
 
@@ -3560,7 +3560,7 @@ namespace engine::render {
 		{
 			// **Both usages, because one format serves both kinds of depth
 			// texture.** The viewport's buffer is only ever a target, but the
-			// shadow map is sampled as well — and a second format for the shadow
+			// shadow map is sampled as well - and a second format for the shadow
 			// map would be a second thing that has to agree with the shadow
 			// pipeline. Asking for the intersection once is cheaper than keeping
 			// two in step.
@@ -3574,7 +3574,7 @@ namespace engine::render {
 			};
 
 			// Most precision first. The shadow pass compares depths across a
-			// whole scene, so the extra bits are worth asking for — and
+			// whole scene, so the extra bits are worth asking for - and
 			// D16_UNORM is the fallback rather than the preference because a
 			// sixteen-bit shadow map stair-steps on a large world.
 			if (supports(SDL_GPU_TEXTUREFORMAT_D32_FLOAT)) {
@@ -3614,8 +3614,8 @@ namespace engine::render {
 
 		// **A frame waited for and never drawn, which is what quitting during
 		// the event pump produces.** The loop's usual shape makes this
-		// unreachable — pump, simulate, present, and only then test whether to
-		// stop — but "usual" is not a guarantee, and a swapchain image held past
+		// unreachable - pump, simulate, present, and only then test whether to
+		// stop - but "usual" is not a guarantee, and a swapchain image held past
 		// the device's destruction is a crash inside the backend rather than an
 		// error here. See `Impl::AbandonFrame` for why it submits.
 		State->AbandonFrame();
@@ -3741,7 +3741,7 @@ namespace engine::render {
 
 		// **Rebuilt in place rather than assigned from a fresh one.** The two
 		// tables own device resources and are deliberately not copyable, so
-		// `*State = Impl{}` no longer compiles — and it should not: an
+		// `*State = Impl{}` no longer compiles - and it should not: an
 		// assignment would have released their buffers a second time, after
 		// `Shutdown` above already did.
 		State = std::make_unique<Impl>();
@@ -3762,8 +3762,8 @@ namespace engine::render {
 
 		// Uploaded on the spot rather than at the next frame's barrier.
 		// Registration happens when content arrives, which a caller has already
-		// arranged to be a moment it controls — `delivery::Client::Pump` is the
-		// whole design of that — so deferring would add a second barrier for a
+		// arranged to be a moment it controls - `delivery::Client::Pump` is the
+		// whole design of that - so deferring would add a second barrier for a
 		// caller that already had one.
 		return State->Meshes.Add(name, mesh) && State->Meshes.Flush();
 	}
@@ -3806,7 +3806,7 @@ namespace engine::render {
 			// stated number still floors at one for the original reason.
 			//
 			// **Capped**, which it did not need to be while this counted
-			// iterations of one pass. It counts levels of a recursion — see
+			// iterations of one pass. It counts levels of a recursion - see
 			// `MAX_SURFACE_DEPTH` for why that turns a large number from
 			// wasteful into unfinishable.
 			State->SurfaceBounces = bounces == 0 ? 0u : std::clamp<uint32_t>(bounces, 1u, MAX_SURFACE_DEPTH);
@@ -3821,8 +3821,8 @@ namespace engine::render {
 		if (State != nullptr) {
 			// **Clamped rather than floored**, which is the opposite of the
 			// bounce knob above and is right for the opposite reason: zero here
-			// is a meaningful setting — every hole draws flat and nothing
-			// recurses — while the ceiling exists because the pool is full-screen
+			// is a meaningful setting - every hole draws flat and nothing
+			// recurses - while the ceiling exists because the pool is full-screen
 			// targets per level per slot.
 			State->PortalDepth = std::min(depth, MAX_PORTAL_DEPTH);
 		}
@@ -3835,7 +3835,7 @@ namespace engine::render {
 
 		// **Normalised by the caller and checked here.** `scene::SunOf` already
 		// does it, and a direction of zero arriving from anywhere else would
-		// shade every surface by `dot(n, 0)` — a world that goes flat grey with
+		// shade every surface by `dot(n, 0)` - a world that goes flat grey with
 		// nothing in the log to say why.
 		const float length = direction.Magnitude();
 		if (length > 0.0f) {
@@ -3884,8 +3884,8 @@ namespace engine::render {
 
 		// **Built on the spot rather than at the next frame's barrier**, which
 		// is `AddMesh`'s rule and its reason: a caller has already arranged for
-		// this to be a moment it controls — a content pump or a
-		// `ShaderLibrary::Refresh` — so deferring would add a second
+		// this to be a moment it controls - a content pump or a
+		// `ShaderLibrary::Refresh` - so deferring would add a second
 		// synchronisation point for a caller that already had one.
 		//
 		// **A frame is waited for first, because replacing releases.** An author
@@ -3923,7 +3923,7 @@ namespace engine::render {
 		}
 
 		// The swapchain's format decides the channel order, and getting it
-		// wrong writes a picture with red and blue swapped — which looks like a
+		// wrong writes a picture with red and blue swapped - which looks like a
 		// shader bug rather than like a file-writing bug, so it is worth
 		// asking rather than assuming.
 		const SDL_GPUTextureFormat format = ColourFormat();
@@ -3961,7 +3961,7 @@ namespace engine::render {
 			SDL_DestroySurface(surface);
 		} else {
 			// Every other failure here says so, and this one used to return
-			// false in silence — a capture that produced no file and no reason
+			// false in silence - a capture that produced no file and no reason
 			// reads as the request having been ignored.
 			ENGINE_ERROR("capture: SDL_CreateSurfaceFrom: {}", SDL_GetError());
 		}
@@ -3998,7 +3998,7 @@ namespace engine::render {
 
 		// **The drawn rectangle and not the whole target.** A scene target is
 		// allocated in 64-pixel blocks with hysteresis, so most of it is border
-		// the pass never wrote — `SceneTextureExtent` exists because of exactly
+		// the pass never wrote - `SceneTextureExtent` exists because of exactly
 		// that. Copying the allocation would keep a picture with an unwritten
 		// margin down two edges, and every consumer would then need the extent
 		// as well as the handle, which is the coupling this call is meant to end.
@@ -4043,7 +4043,7 @@ namespace engine::render {
 		blit.destination.h = source.DrawnHeight;
 
 		// Nothing is preserved, because every texel of the destination is
-		// written — saying so lets a tiler skip loading it.
+		// written - saying so lets a tiler skip loading it.
 		blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
 		blit.filter = SDL_GPU_FILTER_NEAREST;
 
@@ -4056,7 +4056,7 @@ namespace engine::render {
 		const size_t bytes = static_cast<size_t>(source.DrawnWidth) * source.DrawnHeight * 4;
 
 		if (!State->Textures.Adopt(name, copy, source.DrawnWidth, source.DrawnHeight, bytes)) {
-			// Refused, so the texture is still ours to release — `Adopt` says so.
+			// Refused, so the texture is still ours to release - `Adopt` says so.
 			SDL_ReleaseGPUTexture(State->Device, copy);
 			return false;
 		}
@@ -4136,7 +4136,7 @@ namespace engine::render {
 		// approach is the whole illusion: an authored near plane slices the pane
 		// open there and the wall beside it disappears. `scene::PortalNearPlane`
 		// trades depth precision for that, and only while a hole is close enough
-		// to need it — CodeParade's `GH_CLAMP(NearestPortalDist() * 0.5f, ...)`,
+		// to need it - CodeParade's `GH_CLAMP(NearestPortalDist() * 0.5f, ...)`,
 		// which the demo applies to its one and only camera.
 		//
 		// **Measured off the panes this frame was handed rather than off the
@@ -4173,7 +4173,7 @@ namespace engine::render {
 		uint32_t height = 0;
 		State->TakeFrame(command, swapchain, width, height);
 
-		// **Headless has no swapchain, so its size comes from the target** —
+		// **Headless has no swapchain, so its size comes from the target** -
 		// nothing else has an opinion about it.
 		if (State->Headless()) {
 			if (sceneTarget == nullptr || !sceneTarget->IsValid()) {
@@ -4237,14 +4237,14 @@ namespace engine::render {
 			//
 			// **Sized to the attachment rather than to the world.** SDL wants a
 			// depth target whose dimensions match the colour target it is bound
-			// beside, and the colour target is the block-rounded allocation —
+			// beside, and the colour target is the block-rounded allocation -
 			// not the rectangle the world is drawn into. Sizing this to the
 			// world instead is a validation failure on the frames where the two
 			// differ, which is nearly all of them.
 			//
 			// **The slot's own depth when drawing offscreen.** Two viewports of
 			// different sizes sharing one depth texture made every frame
-			// reallocate it twice — see `SceneSlot::Depth`.
+			// reallocate it twice - see `SceneSlot::Depth`.
 			ENGINE_PROFILE_CAT("ensure depth", core::ProfileCategory::Render);
 
 			bool depthReady = false;
@@ -4269,10 +4269,10 @@ namespace engine::render {
 		// all**, and the distinction from an instance naming *no* mesh is the
 		// whole of it:
 		//
-		//   - no mesh named — an ordinary `Part` — draws the default cube, which
+		//   - no mesh named - an ordinary `Part` - draws the default cube, which
 		//     is what a part is.
-		//   - a mesh named and not resident — a `MeshPart` whose geometry has
-		//     not arrived — draws nothing.
+		//   - a mesh named and not resident - a `MeshPart` whose geometry has
+		//     not arrived - draws nothing.
 		//
 		// Without the second, `MeshTable::Resolve` hands back the default and a
 		// scene of mesh parts comes up as a field of cubes that turn into models
@@ -4282,7 +4282,7 @@ namespace engine::render {
 		//
 		// **Filtered once here rather than inside the cull and the scene gather
 		// separately.** Both read this span, and a test written into each would
-		// be two places to keep in step — the exact duplication that made the
+		// be two places to keep in step - the exact duplication that made the
 		// mirror pass and the camera pass disagree about `Transparency` before
 		// `OrderScene` was one function.
 		//
@@ -4298,7 +4298,7 @@ namespace engine::render {
 
 			// **The other worlds pay the same toll.** A destination whose meshes
 			// have not arrived here would otherwise come up as the field of
-			// cubes described above — seen through a portal, which is the one
+			// cubes described above - seen through a portal, which is the one
 			// place a viewer cannot walk over and check.
 			scene::KeepLoaded(
 				foreign,
@@ -4315,7 +4315,7 @@ namespace engine::render {
 		bool haveInstances = false;
 		bool haveOverlay = false;
 
-		// **Culled, then ordered, then uploaded** — and the sequence is the
+		// **Culled, then ordered, then uploaded** - and the sequence is the
 		// point. Culling first means the sort runs over what survives rather
 		// than over the world, and the upload carries only what is drawn.
 		//
@@ -4325,8 +4325,8 @@ namespace engine::render {
 		// pops geometry at the screen edge on one machine and not another.
 
 		// **Every surface camera's view, resolved before any pass runs.** Each
-		// is used twice: to render into its own texture now, and — one frame
-		// later, as `PreviousViewProjection` — to project that texture back onto
+		// is used twice: to render into its own texture now, and - one frame
+		// later, as `PreviousViewProjection` - to project that texture back onto
 		// whatever samples it, including another mirror.
 		//
 		// The accepted views are gathered here rather than filtered at each use,
@@ -4341,7 +4341,7 @@ namespace engine::render {
 			// **Held here rather than written straight to the slot**, because
 			// whether it may be written is not known yet. A slot's
 			// `ViewProjection` has to keep describing the camera that rendered
-			// the texture the slot holds — so a surface that turns out to be
+			// the texture the slot holds - so a surface that turns out to be
 			// unchanged, and therefore does not re-render, must not take this
 			// frame's matrix. See the refresh decision below.
 			glm::mat4 ViewProjection{1.0f};
@@ -4375,7 +4375,7 @@ namespace engine::render {
 		// both goes to the recursive pass. That order is the answer rather than a
 		// tie-break: a same-world portal handed to the surface path draws from the
 		// wrong viewpoint the moment it is seen through another hole, which is the
-		// whole reason this pass exists — whereas a portal drawn recursively and
+		// whole reason this pass exists - whereas a portal drawn recursively and
 		// *also* given a surface camera merely wastes a scene pass on a texture
 		// nothing samples.
 		const PortalView *portalOf[scene::MAX_SURFACES] = {};
@@ -4448,7 +4448,7 @@ namespace engine::render {
 		}
 
 		// **The panes, by slot, for the levels below the first.** A surface
-		// camera arrives here already placed — from the eye — and that is the one
+		// camera arrives here already placed - from the eye - and that is the one
 		// viewpoint a recursion cannot use: a pane appearing inside another pane's
 		// picture is looked at from *that* pane's camera. `scene::ReflectCamera`
 		// will place it for any viewer, and what it needs is the rectangle, which
@@ -4497,7 +4497,7 @@ namespace engine::render {
 		// **What the light has to see, out of the walk the culler was making
 		// anyway.** Deriving an instance's world box is three quaternion
 		// rotations and nine abs-mul-adds, and this frame used to pay for it
-		// twice over the same span — once to fit the light and once to test the
+		// twice over the same span - once to fit the light and once to test the
 		// frustum. `graph::CullAndBound` is those two passes fused; the union is
 		// six comparisons on a box that already exists. See its comment for why
 		// this is not a cache.
@@ -4523,7 +4523,7 @@ namespace engine::render {
 
 		// **Fitted to the whole draw list, not to what survived culling.** A
 		// caster outside the camera's frustum still shadows into it, so the
-		// light has to see everything — and fitting to the culled set is the
+		// light has to see everything - and fitting to the culled set is the
 		// classic version of this bug: shadows that vanish as their casters
 		// leave the screen. That is why `sceneBounds` is the union over
 		// `instances` and not over `State->Visible`.
@@ -4551,8 +4551,8 @@ namespace engine::render {
 		const auto transparentCount = static_cast<uint32_t>(visibleCount - opaqueCount);
 
 		// **Surface instances moved to the back of the opaque head**, so the
-		// camera range is three contiguous runs — plain opaque, then mirrors,
-		// then transparent — and each is one draw with one `first_instance`.
+		// camera range is three contiguous runs - plain opaque, then mirrors,
+		// then transparent - and each is one draw with one `first_instance`.
 		// Whether an instance samples the surface is per instance and the
 		// uniform that says so is per draw, so the alternative is a branch on
 		// data the fragment shader does not have.
@@ -4565,7 +4565,7 @@ namespace engine::render {
 
 			// **`scene::PartitionSurfaces`, not a fourth copy of it.** The
 			// comment forty lines down insists the mirror partition lives in
-			// `scene` "where a headless suite can get at them" — and this file
+			// `scene` "where a headless suite can get at them" - and this file
 			// had two hand-rolled copies of it, which is what that sentence
 			// exists to prevent. They are one function now, and it is the tested
 			// one.
@@ -4578,7 +4578,7 @@ namespace engine::render {
 		// **Grouped by index within that run, because each index owns a
 		// texture.** The screen pass binds a sampler and pushes a projection per
 		// surface, so what used to be one draw over "the mirrors" is one draw
-		// per surface — and each has to be contiguous for that to be an offset
+		// per surface - and each has to be contiguous for that to be an offset
 		// and a count rather than a per-instance branch.
 		//
 		// `scene::GroupSurfaces`, not a second copy of it: the scene range is
@@ -4597,14 +4597,14 @@ namespace engine::render {
 
 		// **And the same split at the end of the blended tail, which is what
 		// makes a faded mirror still a mirror.** A part leaves the opaque head
-		// the moment its `Transparency` goes above zero — and the head is where
+		// the moment its `Transparency` goes above zero - and the head is where
 		// the mirror flag was set, so the reflection did not dim, it vanished.
 		// That reads as the surface camera having stopped rather than as an
 		// ordering rule, and it is the bug this run exists to fix.
 		//
 		// They go *last* of everything, so they draw over the blended geometry
 		// as well as the opaque. Stable, so the back-to-front sort survives
-		// inside each run — see `scene::ScenePlan::TransparentSurfaces` for what
+		// inside each run - see `scene::ScenePlan::TransparentSurfaces` for what
 		// is given up across the two.
 		uint32_t transparentSurfaces = 0;
 		if (transparentCount > 0) {
@@ -4635,13 +4635,13 @@ namespace engine::render {
 
 		// **A second range holding everything, for the two passes that are not
 		// the camera's.** A caster outside the camera's frustum still shadows
-		// into it, and a mirror shows what is behind the viewer — so culling to
+		// into it, and a mirror shows what is behind the viewer - so culling to
 		// the eye would give shadows that vanish as their casters leave the
 		// screen and a mirror that reflects only what is already on screen.
 		// Both are the classic version of this mistake.
 		//
 		// Ordered from the surface camera when there is one, because the surface
-		// pass is the only consumer that needs an order at all — a depth-only
+		// pass is the only consumer that needs an order at all - a depth-only
 		// pass does not care.
 		// **Allocated for every accepted view before anything is ordered**, so
 		// a view whose texture cannot be made drops out of the frame here rather
@@ -4650,13 +4650,13 @@ namespace engine::render {
 		// refresh decision and the half this pass did not have.** The signature
 		// answers "did the image change"; nothing answered "is the image
 		// looked at", so a room of mirrors redrew every one of them on every
-		// frame anything moved — including the ones behind the viewer and the
+		// frame anything moved - including the ones behind the viewer and the
 		// ones a wall stands in front of. That cost is per pane and the scenes
 		// this exists for are the ones with several.
 		//
 		// **Two sweeps and deliberately not a fixed point.** A pane visible only
-		// *inside another mirror* is a real case — two facing panes, or a portal
-		// seen through a portal — so main-camera visibility alone would freeze
+		// *inside another mirror* is a real case - two facing panes, or a portal
+		// seen through a portal - so main-camera visibility alone would freeze
 		// it. The union with the other surfaces' own frusta covers it in one
 		// pass: a pane seen inside a surface that is itself on screen refreshes
 		// now, and one buried two bounces deep refreshes a frame later. That is
@@ -4676,7 +4676,7 @@ namespace engine::render {
 		// what to draw now.
 		//
 		// **And a frame with no pane rectangle keeps the old constant**, because
-		// the iterating path is not the thing being measured — a cross-world pane
+		// the iterating path is not the thing being measured - a cross-world pane
 		// shows a second simulation and a camera parented to the world has no
 		// face, so neither can be descended into and neither reports a depth.
 		const uint32_t surfaceBounces =
@@ -4704,14 +4704,14 @@ namespace engine::render {
 			// **In `graph` rather than here, and that is the seam rather than
 			// tidiness.** The decision is boxes against frusta over a draw list,
 			// which is what that module is, and a rule this pass held privately
-			// would be a rule no suite could reach — `Renderer::Render` needs a
+			// would be a rule no suite could reach - `Renderer::Render` needs a
 			// device and the answer does not.
 			// **`surfaceBounces` and not a constant.** The pass below resolves
 			// that many levels of surface-seen-in-surface, so a level this marks
 			// invisible is a level that is *culled* rather than one frame late.
 			// The two numbers were allowed to disagree when `D00112` made the
 			// pass recursive, and the result was a mirror's deeper reflections
-			// vanishing as the viewer turned — the moment a pane left the
+			// vanishing as the viewer turned - the moment a pane left the
 			// frustum, everything it had been revealing dropped past the single
 			// level this used to follow.
 			//
@@ -4757,7 +4757,7 @@ namespace engine::render {
 
 		// **Ordered from the first surface camera when there is one.** The
 		// blended sort is per view and there is only one scene range, so several
-		// surfaces cannot each have the tail sorted for them — the first is the
+		// surfaces cannot each have the tail sorted for them - the first is the
 		// one that gets it, and every other surface draws that order. Blended
 		// geometry inside a reflection of a reflection is therefore sorted for
 		// the wrong eye, which is a compositing error confined to the second
@@ -4768,7 +4768,7 @@ namespace engine::render {
 		// **One signature shared by every surface, and that is not a shortcut.**
 		// Each camera's matrix is in it because a surface pass draws the *other*
 		// mirrors, projecting each one's texture with the camera that rendered
-		// it — so a camera that moves changes how it appears inside every other
+		// it - so a camera that moves changes how it appears inside every other
 		// one. Every input to any surface is therefore an input to all of them,
 		// and computing several separately would only be several chances for
 		// them to disagree.
@@ -4794,7 +4794,7 @@ namespace engine::render {
 			// **And how deep the mirrors are being drawn, which is an input to
 			// every one of them.** A surface pass draws the *other* panes, so a
 			// level added or taken away changes what is inside each picture as
-			// surely as moving something does — and without this the automatic
+			// surely as moving something does - and without this the automatic
 			// depth could not climb at all in a still scene. It measures one
 			// deeper, nothing else in the frame moves, no surface refreshes, the
 			// deeper level is never drawn, and the next frame measures the same
@@ -4814,9 +4814,9 @@ namespace engine::render {
 
 				// **The foreign range, because moving it is a change nothing
 				// else here would notice.** `SignatureOf(instances)` already
-				// covers the *contents* of the appended tail — the far world
+				// covers the *contents* of the appended tail - the far world
 				// moving redraws the pane, which is the whole point of a live
-				// destination — but a host that reordered two foreign ranges
+				// destination - but a host that reordered two foreign ranges
 				// without changing either world would leave the signature
 				// identical while each surface now names the other's instances.
 				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].View->InstanceFirst);
@@ -4843,7 +4843,7 @@ namespace engine::render {
 				//
 				// **Visibility overrides the never-rendered case.** A slot that
 				// has never drawn has nothing to compare a signature against,
-				// but it also has nothing looking at it — and `Ready` staying
+				// but it also has nothing looking at it - and `Ready` staying
 				// false is exactly right for that: the pane draws as its own
 				// tint until the frame something can see it.
 				//
@@ -4860,7 +4860,7 @@ namespace engine::render {
 			}
 		}
 
-		// **This world's rows, then the other worlds' — one buffer, two halves
+		// **This world's rows, then the other worlds' - one buffer, two halves
 		// that never mix.** The head is what every pass in this frame partitions
 		// and submits; the tail exists only so a surface can name a range of it.
 		// Joining them before the plan is what drew two rooms on top of each
@@ -4871,14 +4871,14 @@ namespace engine::render {
 
 		// **Every range the three scene passes submit, from one call.** The
 		// ordering, the mirror partition and the caster partition are arithmetic
-		// over a `shared` type and they live in `scene::OrderScene` — where a
+		// over a `shared` type and they live in `scene::OrderScene` - where a
 		// headless suite can get at them. A renderer is the one module a test
 		// cannot exercise, so the counts it hands to a draw call are the last
 		// place they should be computed. See `scene::ScenePlan` for the runs.
 		//
 		// **Given the head alone.** A plan over the tail as well would sort
 		// another world's parts into this one's opaque run, its mirror partition
-		// and its shadow casters — and the ordering it returns is a permutation,
+		// and its shadow casters - and the ordering it returns is a permutation,
 		// so it would also move the very rows a surface has already named.
 		scene::ScenePlan plan;
 		{
@@ -4902,12 +4902,12 @@ namespace engine::render {
 			// Zero on every other frame, which is what makes a reading here
 			// worth looking at rather than background noise.
 			// HasContent, not IsDirty. The texture keeps the last thing uploaded
-			// to it, so a frame that redraws nothing still has a panel to show —
+			// to it, so a frame that redraws nothing still has a panel to show -
 			// which is the whole point of the image living on the GPU rather
 			// than being pushed there again every frame.
 			// **Headless first, because nothing headless can show it.** The
 			// overlay pass is the window's, so a headless frame allocated a
-			// texture, copied the panels into it and drew none of them — and
+			// texture, copied the panels into it and drew none of them - and
 			// `MarkUploaded` then told the image the GPU matched it, which was
 			// a claim about a texture nothing would ever sample. Now the whole
 			// overlay is one question answered once.
@@ -4923,7 +4923,7 @@ namespace engine::render {
 		result.Culled = totalCount - instanceCount;
 
 		// **One buffer, two ranges.** The scene range first so its offset is
-		// zero and the camera range starts where it ends — which is what makes
+		// zero and the camera range starts where it ends - which is what makes
 		// each pass one `first_instance` rather than a second buffer and a
 		// second bind.
 		const uint32_t uploadCount = sceneCount + instanceCount;
@@ -4952,7 +4952,7 @@ namespace engine::render {
 					// Converted straight into the mapped buffer rather than
 					// into a vector that is then memcpy'd. Eighty bytes an
 					// entity go into write-combined memory either way, and the
-					// staging copy would be that traffic paid a third time —
+					// staging copy would be that traffic paid a third time -
 					// once by the world filling its draw list, once here, and
 					// once again on the way out.
 					//
@@ -4967,7 +4967,7 @@ namespace engine::render {
 					// **What is in each slot, recorded in the same pass that
 					// fills it.** The draw loop needs the mesh and the texture
 					// of every slot to find its runs, and the only place that
-					// mapping exists is here — after this loop the order is a
+					// mapping exists is here - after this loop the order is a
 					// buffer offset and the instance it came from is gone.
 					State->SlotMesh.resize(uploadCount);
 					State->SlotTexture.resize(uploadCount);
@@ -5005,7 +5005,7 @@ namespace engine::render {
 					// **The other worlds, in the order they were handed over.**
 					// Nothing sorts them: they are drawn as one plain run by one
 					// surface, so there is no partition to build and no eye to
-					// sort towards — the pane's camera is not this frame's.
+					// sort towards - the pane's camera is not this frame's.
 					//
 					// Slot `ownCount + k` therefore holds `foreign[k]`, which is
 					// what lets `SurfaceView::InstanceFirst` survive a plan that
@@ -5031,7 +5031,7 @@ namespace engine::render {
 		// The particles, packed and grouped before any render pass opens.
 		//
 		// **Here rather than inside the draw**, because what follows is a copy
-		// pass and a copy pass cannot be started while a render pass is open —
+		// pass and a copy pass cannot be started while a render pass is open -
 		// the same constraint `FrameOverlayHook`'s `Prepare`/`Record` split
 		// exists for, stated in that header in the same words.
 		// The local lights, packed once for the frame.
@@ -5105,7 +5105,7 @@ namespace engine::render {
 				// The image is the size of the window and the panels are a
 				// corner of it, so sending all of it meant megabytes of
 				// transparent pixels per frame that had not changed since the
-				// program started — measured as the largest single cost in the
+				// program started - measured as the largest single cost in the
 				// frame. The region covers what was drawn this frame and what
 				// was drawn last frame, the second being how the pixels a
 				// shrinking panel vacates get told they are transparent now.
@@ -5164,7 +5164,7 @@ namespace engine::render {
 
 				// False, not true. Cycling hands back a *fresh* texture, and a
 				// fresh texture is uninitialised everywhere this upload does not
-				// reach — which is now everywhere outside the panels.
+				// reach - which is now everywhere outside the panels.
 				SDL_UploadToGPUTexture(copy, &source, &destination, false);
 
 				// The GPU matches the image now, so nothing is pending until
@@ -5184,7 +5184,7 @@ namespace engine::render {
 		// Every caster casts, whether or not the eye can see it.
 		//
 		// A scene whose opaque geometry all opted out of casting skips the pass
-		// rather than clearing a depth target nothing writes to — and the
+		// rather than clearing a depth target nothing writes to - and the
 		// colour pass then samples a shadow map that was never rendered, which
 		// is what `FrameResult::Ran` exists to make visible.
 		const bool haveShadow = haveInstances && sceneCount > 0 &&
@@ -5227,10 +5227,10 @@ namespace engine::render {
 			// should not occlude is the case the author decides, and it arrives
 			// here as the caster runs `partition casters` produced.
 			//
-			// Two draws because the two runs are not adjacent — the surface
+			// Two draws because the two runs are not adjacent - the surface
 			// partition sits between them. The second is empty in every scene
 			// with no mirror in it, which is almost all of them.
-			// Depth only, so no samplers and no fragment uniforms — the null
+			// Depth only, so no samplers and no fragment uniforms - the null
 			// lighting pointer is what says so.
 			uint64_t shadowTriangles = 0;
 			if (reflectedCasters > 0) {
@@ -5311,7 +5311,7 @@ namespace engine::render {
 				}
 
 				// **A pane with no partner in this frame's set carries nothing**,
-				// because the map back is the partner's own warp — one map per
+				// because the map back is the partner's own warp - one map per
 				// pane, and a pair's two are each other's inverse. Deriving an
 				// inverse here would be a second arithmetic to get wrong.
 				const PortalView *const partner = portalOf[static_cast<uint8_t>(portal->Partner)];
@@ -5380,7 +5380,7 @@ namespace engine::render {
 
 				// **The first beam clears the whole atlas and the rest load it.**
 				// A clear is not confined by the viewport, so clearing per beam
-				// would wipe the ones already drawn — and a quadrant nobody wrote
+				// would wipe the ones already drawn - and a quadrant nobody wrote
 				// stays at the far plane, which the lookup reads as lit.
 				beamTarget.load_op = index == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 				beamTarget.store_op = SDL_GPU_STOREOP_STORE;
@@ -5463,7 +5463,7 @@ namespace engine::render {
 
 		// --- what a scene pass is, wherever it is opened ----------------------
 		//
-		// The three passes below stay separate on purpose — a mirror reflects its
+		// The three passes below stay separate on purpose - a mirror reflects its
 		// viewer through one plane and a hole carries it onto a second pane, and
 		// the two panes read their pictures back by different lookups, which is
 		// the whole of `PortalView`'s header comment. What was never a difference
@@ -5473,7 +5473,7 @@ namespace engine::render {
 
 		// The shadow map and the sampler that reads it, or the stand-ins bound
 		// where the real ones do not exist. The pipelines declare both slots
-		// and a draw must bind both — an unbound sampler is undefined behaviour
+		// and a draw must bind both - an unbound sampler is undefined behaviour
 		// on several backends where a wrongly bound one is merely ignored.
 		struct ShadowBinding {
 			SDL_GPUTexture *Texture;
@@ -5500,7 +5500,7 @@ namespace engine::render {
 		// **`cycle` is the one thing the callers disagree about.** A surface
 		// slot is written and sampled inside the same frame, so it cycles; a
 		// portal target is written once and sampled once, by the pass above it,
-		// in that order — and asking for a fresh allocation there made the
+		// in that order - and asking for a fresh allocation there made the
 		// device hang more often rather than less.
 		//
 		// `viewport` is the rectangle of the target the world fills, or null for
@@ -5543,14 +5543,14 @@ namespace engine::render {
 
 			// **The light set, pushed once for the whole pass.** Uniform state
 			// on a command buffer persists until it is replaced, so one push
-			// before the draws serves every one of them — which is the whole
+			// before the draws serves every one of them - which is the whole
 			// reason this is a second buffer rather than fields on the per-draw
 			// `LightingUniforms`.
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 
 			// **The beams, beside the lights and for the same reason.** Which
 			// holes carry a shadow is a fact about the frame, so it is pushed
-			// once per pass rather than per draw — and it is pushed even when
+			// once per pass rather than per draw - and it is pushed even when
 			// there are none, because a stale block from a previous frame would
 			// shadow through a hole that is no longer there.
 			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
@@ -5570,7 +5570,7 @@ namespace engine::render {
 
 		// The world minus every pane, drawn into whatever pass is open.
 		//
-		// **`plan.Reflected` is exactly that run** — the opaque head with every
+		// **`plan.Reflected` is exactly that run** - the opaque head with every
 		// instance that samples a slot taken out of it, and a mirror and a hole
 		// are the same exclusion. The panes are put back by the caller, each
 		// with its own texture: a mirror may not appear in its own reflection
@@ -5648,7 +5648,7 @@ namespace engine::render {
 		// picture is being looked at from that pane's camera, several studs and a
 		// reflection away from the eye. Projecting it with the eye's matrix put
 		// the coordinate outside the texture's 0..1 rectangle, and `opaque.frag`
-		// falls back to the plain lit pane there — which is the flat slab a mirror
+		// falls back to the plain lit pane there - which is the flat slab a mirror
 		// seen in a mirror used to be, and which reads as culling rather than as a
 		// projection fault.
 		//
@@ -5665,14 +5665,14 @@ namespace engine::render {
 		// `drawBlendedInto` and keep their own entry points.
 		//
 		// **Depth first, and every level's targets survive until the level above
-		// has drawn all of its panes** — `Impl::MirrorLevel` is indexed by level
+		// has drawn all of its panes** - `Impl::MirrorLevel` is indexed by level
 		// and slot for that reason, which is `Impl::PortalLevel`'s reason.
 		//
 		// **One fewer than the bounce count, because the surface pass is the top
 		// level.** `SetSurfaceBounces(2)` has always meant "two levels of
 		// mirror-in-mirror", and it still does: the pane's own texture is one and
-		// the recursion supplies the rest. Zero here is one bounce — no
-		// recursion, every inner pane drawn flat — which is exactly what one
+		// the recursion supplies the rest. Zero here is one bounce - no
+		// recursion, every inner pane drawn flat - which is exactly what one
 		// bounce drew before and is the honest floor rather than a special case.
 		//
 		// **The subtraction cannot underflow because every path to
@@ -5683,7 +5683,7 @@ namespace engine::render {
 		// **Cleared for the whole bank before anything descends.** A target holds
 		// last frame's picture from a camera that no longer exists, and a level
 		// that is not reached this frame must read as absent rather than as stale
-		// — see `Impl::MirrorTarget::Ready`.
+		// - see `Impl::MirrorTarget::Ready`.
 		for (Impl::MirrorLevel &level : bank.Mirrors) {
 			for (Impl::MirrorTarget &target : level.Targets) {
 				target.Ready = false;
@@ -5694,8 +5694,8 @@ namespace engine::render {
 		//
 		// **The whole of the automatic depth's measurement, and it asks the
 		// descent's own two questions rather than an approximation of them.** A
-		// pane in the draw list is not enough — most of them are behind this
-		// level's camera — and a pane in the frustum is not enough either, since
+		// pane in the draw list is not enough - most of them are behind this
+		// level's camera - and a pane in the frustum is not enough either, since
 		// one seen edge-on has no continuous orientation to reflect through and
 		// renders nothing. Answering either of those looser questions would ask
 		// for a level that comes back empty, measure one shallower for it, and
@@ -5749,7 +5749,7 @@ namespace engine::render {
 				// **Per pane per level, which is what stops the cost being
 				// `panes ^ depth`.** A mirror behind this level's camera costs
 				// nothing, and in a room most of them are. `graph::VisiblePane` is
-				// the portal pass's test unchanged — the question is the same one.
+				// the portal pass's test unchanged - the question is the same one.
 				if (!graph::VisiblePane(from, pane.Centre, pane.First, pane.Second)) {
 					continue;
 				}
@@ -5793,7 +5793,7 @@ namespace engine::render {
 
 				// **The authored size, with no screen-coverage scaling.** A pane's
 				// footprint on screen decides how sharp the *top* level has to be
-				// — `SurfaceScale` — and these are levels inside that one, where a
+				// - `SurfaceScale` - and these are levels inside that one, where a
 				// pane covers a fraction of a fraction. Scaling them by the top
 				// pane's coverage would allocate the deepest, smallest images at
 				// the highest resolution in the frame.
@@ -5804,7 +5804,7 @@ namespace engine::render {
 				}
 
 				// **Not cycled, unlike a surface slot.** A level is written once
-				// and sampled once, by the pass above it, in that order — see
+				// and sampled once, by the pass above it, in that order - see
 				// `Impl::PortalTarget`, where cycling anyway made the device hang
 				// more often rather than less.
 				SDL_GPURenderPass *const pass = openScenePass(target->Colour, target->Depth, false, nullptr);
@@ -5827,8 +5827,8 @@ namespace engine::render {
 				drawWorldInto(pass, levelLighting, pane.TagFilter);
 
 				// The other panes, put back one at a time, each sampling the level
-				// below. A pane whose level below was not reached — off screen,
-				// edge-on, or at the bottom of the recursion — draws as its own lit
+				// below. A pane whose level below was not reached - off screen,
+				// edge-on, or at the bottom of the recursion - draws as its own lit
 				// material, which is what a mirror at the end of a chain looks
 				// like and is deliberately not the portal pass's ambient terminus:
 				// a hole with nothing behind it is a hole, and a mirror with
@@ -5836,7 +5836,7 @@ namespace engine::render {
 				//
 				// **The opaque runs only, exactly as the portal pass does it.** A
 				// pane that went transparent left the opaque head, and
-				// `drawBlendedInto` excludes the panes in the tail — so a *faded*
+				// `drawBlendedInto` excludes the panes in the tail - so a *faded*
 				// mirror inside a deep reflection shows as glass rather than as a
 				// reflection. The top level still composites it, which is where
 				// anybody would notice; paying a level of recursion for the second
@@ -5861,7 +5861,7 @@ namespace engine::render {
 					SDL_GPUTexture *paneTexture = nullptr;
 
 					if (below != nullptr && below->Ready) {
-						// 1 is the projected-image branch — see `opaque.frag`.
+						// 1 is the projected-image branch - see `opaque.frag`.
 						paneLighting.Flags.z = 1.0f;
 						paneLighting.Flags.w = 1.0f;
 
@@ -5903,8 +5903,8 @@ namespace engine::render {
 				result.SurfacePasses++;
 
 				// **Counted from the eye rather than from the pool.** The pool
-				// index runs the other way — `mirrorLevels - 1` is the level
-				// nearest the screen and zero is the deepest — and what the next
+				// index runs the other way - `mirrorLevels - 1` is the level
+				// nearest the screen and zero is the deepest - and what the next
 				// frame's arithmetic needs is a depth, with the surface pass
 				// itself as one.
 				surfaceDepth.Resolved = std::max(surfaceDepth.Resolved, mirrorLevels + 1u - level);
@@ -5914,7 +5914,7 @@ namespace engine::render {
 		// --- surface pass ----------------------------------------------------
 		//
 		// The same scene range, from each surface camera, into that surface's
-		// own texture. What a mirror shows next frame — the one-frame staleness
+		// own texture. What a mirror shows next frame - the one-frame staleness
 		// `ViewChannel` already assumed, and what breaks the dependency cycle
 		// between a mirror and what it reflects.
 		//
@@ -5922,7 +5922,7 @@ namespace engine::render {
 		// mirror still may not appear in its own reflection: it sits between its
 		// camera and the world and would fill the texture with itself. Every
 		// *other* mirror is drawn, from the half of its pair this frame is not
-		// writing — so what you see in a mirror of a mirror is one frame old per
+		// writing - so what you see in a mirror of a mirror is one frame old per
 		// bounce. There is no order that would avoid that, because each surface
 		// is being rendered for the others.
 		//
@@ -5937,7 +5937,7 @@ namespace engine::render {
 			passes.Enter(Pass::Surface);
 
 			// **The whole pass, run once per bounce, which is how depth used to be
-			// had — and is not how it is had any more where a pane carries its
+			// had - and is not how it is had any more where a pane carries its
 			// rectangle.** `D00112`'s remaining half was that a surface samples the
 			// *other* surfaces from the textures they had last frame, so a chain
 			// resolved over frames rather than within one. Iterating fixed that:
@@ -5953,19 +5953,19 @@ namespace engine::render {
 			// So: **one run when the panes carry rectangles**, because the depth is
 			// the recursion's now and running the whole pass again would only
 			// redraw the same answer at the same viewpoints. A view with no
-			// rectangle — a camera parented to the world, or a cross-world pane —
+			// rectangle - a camera parented to the world, or a cross-world pane -
 			// still resolves its chain by iterating, which is what it always did
 			// and is still the best available for it: nothing here can reflect a
 			// camera through a pane it was never told about.
 			//
 			// **The ping-pong stays either way.** With the recursion nothing
 			// samples a slot being written, so the pair is not load-bearing for
-			// mirrors — but the screen pass and the iterating path both still read
+			// mirrors - but the screen pass and the iterating path both still read
 			// `Slot ^ 1`, and a surface skipped this frame must keep the matrices
 			// that drew what it holds.
 			//
 			// **`graph::VisibleSurfaces` is given `surfaceBounces` regardless**,
-			// above, where `cullRounds` is computed — and it must be. That decides
+			// above, where `cullRounds` is computed - and it must be. That decides
 			// how many levels of surface-seen-in-surface are *marked visible*, and
 			// a level the recursion draws without being marked is a level culled,
 			// which is what made a mirror's deeper reflections vanish as the viewer
@@ -5977,7 +5977,7 @@ namespace engine::render {
 				// **Flipped for every refreshing surface before the first pass runs,
 				// not inside the loop.** A surface pass samples the other surfaces'
 				// read slots, so every slot has to have finished flipping before any
-				// of them is read — flipping inside the loop would have the second
+				// of them is read - flipping inside the loop would have the second
 				// pass sample the first surface's *new* texture, which is this
 				// frame's half-drawn image and the exact self-reference the pair
 				// exists to make impossible.
@@ -5987,7 +5987,7 @@ namespace engine::render {
 				// held, so `ViewProjection` must still be the camera that drew it and
 				// `PreviousViewProjection` the one before. Advancing either for a
 				// surface that did not render would project a texture with a camera
-				// that never took it — a reflection sliding across a pane that
+				// that never took it - a reflection sliding across a pane that
 				// nothing in the scene is moving, which is the hardest possible
 				// version of this bug to attribute.
 				for (size_t index = 0; index < acceptedCount; index++) {
@@ -6011,7 +6011,7 @@ namespace engine::render {
 					const uint8_t self = accepted[index].Index;
 
 					// **Taken here rather than at each draw**, because `drawMirrors`
-					// below shadows `index` with its own loop over surfaces — so
+					// below shadows `index` with its own loop over surfaces - so
 					// `accepted[index]` inside it would name a different view
 					// entirely, and the filter would silently be another surface's.
 					const uint32_t surfaceFilter = accepted[index].View->TagFilter;
@@ -6049,7 +6049,7 @@ namespace engine::render {
 					}
 
 					// **Cycled**, because this half of the pair is written here and
-					// read by the screen pass in the same frame — see
+					// read by the screen pass in the same frame - see
 					// `openScenePass` for what the other caller does instead. The
 					// whole target is the pass, so there is no viewport to set.
 					SDL_GPURenderPass *const pass =
@@ -6064,7 +6064,7 @@ namespace engine::render {
 					// and it is set below for exactly the mirror runs. Setting it for
 					// the whole pass is what made the floor sample the previous
 					// frame's reflection and come out as the clear colour wherever
-					// that projection landed on untouched texels — a black wedge in
+					// that projection landed on untouched texels - a black wedge in
 					// the mirror that survived deleting every caster, the frame and
 					// the near-plane hack, and moved when the camera was re-aimed but
 					// not when the floor was.
@@ -6079,7 +6079,7 @@ namespace engine::render {
 					const ShadowBinding shadow = shadowBinding();
 
 					// **The samplers are bound per draw now rather than per run**,
-					// because the third one — the colour map — changes with the
+					// because the third one - the colour map - changes with the
 					// mesh being drawn and the other two do not. `DrawSlots` binds
 					// all three together; what is left here is remembering which
 					// surface texture the next draws should sample.
@@ -6141,7 +6141,7 @@ namespace engine::render {
 					drawWorldInto(pass, surfaceLighting, surfaceFilter);
 
 					// **Every mirror except this one, one draw each.** `self` is
-					// skipped because nothing sees itself in its own reflection —
+					// skipped because nothing sees itself in its own reflection -
 					// drawing it would fill this texture with the pane it belongs
 					// to, and the mirror would show itself rather than the room.
 					//
@@ -6153,8 +6153,8 @@ namespace engine::render {
 					// flat pane rather than as a hole in the geometry.
 					//
 					// Sampled draws project with the matrix that *rendered* the
-					// texture being read — `PreviousViewProjection`, not the one
-					// just resolved — because the image is a frame old and
+					// texture being read - `PreviousViewProjection`, not the one
+					// just resolved - because the image is a frame old and
 					// projecting it with a fresh camera slides it across the pane.
 					//
 					// **And the recursion's level is preferred to the slot's own
@@ -6162,8 +6162,8 @@ namespace engine::render {
 					// the *eye* sees it; the level holds it as this camera sees it,
 					// which is the only one of the two that belongs in this
 					// picture. The slot is still the fallback for a pane the
-					// recursion could not reach — off screen from here, edge-on, or
-					// a camera with no rectangle at all — because a stale
+					// recursion could not reach - off screen from here, edge-on, or
+					// a camera with no rectangle at all - because a stale
 					// reflection of a reflection is a better answer than a blank
 					// one.
 					const auto drawMirrors = [&](bool blended) {
@@ -6285,7 +6285,7 @@ namespace engine::render {
 					drawMirrors(false);
 
 					// **`panesFollow` is true here**, because the blended mirrors
-					// below go onto the same pipeline — so a tail of nothing but
+					// below go onto the same pipeline - so a tail of nothing but
 					// mirrors still has to have it bound.
 					drawBlendedInto(pass, worldFrame, surfaceLighting, surfaceFilter, true);
 
@@ -6336,7 +6336,7 @@ namespace engine::render {
 			// **Written back only where the pass actually ran**, which is the
 			// half that is easy to get wrong and was. A surface whose signature
 			// has not moved is deliberately not redrawn, so on a still scene most
-			// frames draw no surface at all — and a measurement written on those
+			// frames draw no surface at all - and a measurement written on those
 			// frames says "nothing was resolved", which reads back as one level
 			// and throws away a depth the frames that did draw had worked out. A
 			// skipped pass has measured nothing rather than measured zero.
@@ -6352,12 +6352,12 @@ namespace engine::render {
 		// --- the portal pass -------------------------------------------------
 		//
 		// **The same recursion as `fillMirror`, by a different map.** Both derive
-		// each level's camera from the level above — that is what makes either one
+		// each level's camera from the level above - that is what makes either one
 		// compose, and the mirror pass was an iteration until v0.15 and wrong at
 		// every level past the first for exactly the want of it.
 		//
 		// Here the derivation is the warp applied to *that* camera's frame, and
-		// that camera's own projection skewed onto the mapped pane — exactly as
+		// that camera's own projection skewed onto the mapped pane - exactly as
 		// `Portal::Draw` composes `portalCam.worldView *= warp->delta`.
 		// `NON-EUCLIDEAN.md`'s Part III is the whole argument.
 		//
@@ -6377,7 +6377,7 @@ namespace engine::render {
 
 			// **The unskewed screen projection, kept and re-skewed at every
 			// level.** `scene::ObliqueProjection` substitutes the whole depth row,
-			// reading two of the entries it is about to overwrite — so skewing an
+			// reading two of the entries it is about to overwrite - so skewing an
 			// already-skewed matrix is not the same as skewing the original
 			// against the new plane, which is the arrangement `Camera::ClipOblique`
 			// gets for free by writing the row from the untouched half of the
@@ -6391,7 +6391,7 @@ namespace engine::render {
 			// **Made before anything is captured, because a world of nothing but
 			// holes never reaches `EnsureSurface`.** The sampler used to be
 			// created there, so a portal-only scene took a null one into
-			// `SDL_BindGPUFragmentSamplers` and died inside the backend — and a
+			// `SDL_BindGPUFragmentSamplers` and died inside the backend - and a
 			// scene with one mirror in it hid that completely.
 			(void)State->EnsureSurfaceSampler();
 
@@ -6434,7 +6434,7 @@ namespace engine::render {
 				// **Moved back towards this camera by a sliver, so the plane
 				// keeps a little more rather than a little less.** The oblique
 				// substitution makes this plane the near plane, so everything
-				// between the sub-camera and it is thrown away — and the far
+				// between the sub-camera and it is thrown away - and the far
 				// room's own geometry meets the mapped pane exactly, which after
 				// two matrix products means some of it lands a float either side.
 				// The half that lands short is clipped, and what that looks like
@@ -6444,7 +6444,7 @@ namespace engine::render {
 				// **The sign is the whole of it and it is worth deriving rather
 				// than trying.** `clipNormal` is the way this camera looks, so
 				// adding along it pushes the plane deeper into the far room and
-				// removes a slab of whatever is standing in the hole — a body
+				// removes a slab of whatever is standing in the hole - a body
 				// straddling the seam loses its far half and reads as a character
 				// cut in two. CodeParade's `extra_clip` subtracts for this
 				// reason: `pos - normal*extra_clip` with `normal` pointing away
@@ -6514,7 +6514,7 @@ namespace engine::render {
 
 					// **The same rectangle as the level above draws into.** The
 					// target is the attachment's size, and the world fills the
-					// viewport's corner of it — so a pane in the level above reads
+					// viewport's corner of it - so a pane in the level above reads
 					// the texel it is standing on. Setting a different one here is
 					// the whole of what would make the picture slide.
 					const SDL_GPUViewport portalViewport{
@@ -6529,7 +6529,7 @@ namespace engine::render {
 					// **Not cycled, unlike a surface slot, and it was measured
 					// rather than reasoned.** Cycling hands back a fresh allocation
 					// per write, which is the right answer when two passes in one
-					// frame share a texture — and at one level nothing does: a
+					// frame share a texture - and at one level nothing does: a
 					// target is written once and sampled once, by the pass above it,
 					// in that order. Asking for a fresh allocation anyway made the
 					// device hang more often rather than less. `Impl::PortalDepth`
@@ -6557,7 +6557,7 @@ namespace engine::render {
 
 					// The holes this level can see, put back one at a time. Their
 					// targets are `level - 1`, filled by the call above and still
-					// untouched — which is why the pool is per level per slot.
+					// untouched - which is why the pool is per level per slot.
 					for (uint8_t seenSlot = 0; seenSlot < scene::MAX_SURFACES; seenSlot++) {
 						if (portalOf[seenSlot] == nullptr || portalOf[seenSlot]->Index == portal.Partner) {
 							continue;
@@ -6583,7 +6583,7 @@ namespace engine::render {
 						SDL_GPUTexture *paneTexture = nullptr;
 
 						if (seen != nullptr && seen->Colour != nullptr) {
-							// 2 is the screen-position lookup — see `opaque.frag`.
+							// 2 is the screen-position lookup - see `opaque.frag`.
 							paneLighting.Flags.z = 2.0f;
 							paneTexture = seen->Colour;
 							paneLighting.PaneNormal =
@@ -6592,7 +6592,7 @@ namespace engine::render {
 							// **The terminus, and it is a shade rather than the
 							// pane's own material.** This is the deepest level the
 							// recursion goes to, so a hole seen here has nothing
-							// behind it — and a lit grey slab at the end of a
+							// behind it - and a lit grey slab at the end of a
 							// corridor of holes reads as a wall somebody built,
 							// which is the one thing the corridor is trying not to
 							// look like. CodeParade draws pink here, deliberately
@@ -6601,7 +6601,7 @@ namespace engine::render {
 							//
 							// The ambient is what it fades to, which is the far
 							// room's own unlit tone and needs no second uniform to
-							// say — 3 is the flat branch in `opaque.frag`.
+							// say - 3 is the flat branch in `opaque.frag`.
 							paneLighting.Flags.z = 3.0f;
 						}
 
@@ -6621,7 +6621,7 @@ namespace engine::render {
 					}
 
 					// **`panesFollow` is false here**, because this level's panes
-					// were drawn with the opaque head above — nothing follows that
+					// were drawn with the opaque head above - nothing follows that
 					// needs the transparent pipeline bound for it.
 					drawBlendedInto(pass, subFrameUniforms, subLighting, portal.TagFilter, false);
 
@@ -6642,7 +6642,7 @@ namespace engine::render {
 		//
 		// **Here, and not beside the pass that draws them.** Dear ImGui's
 		// backend copies its vertex and index buffers through a copy pass, and
-		// SDL refuses to open one while a render pass is in flight — so an
+		// SDL refuses to open one while a render pass is in flight - so an
 		// upload issued from `Record` works right up until the first frame with
 		// enough widgets to grow a buffer, which is a bug that arrives months
 		// after the code that caused it. The split is `FrameOverlayHook`'s
@@ -6653,9 +6653,9 @@ namespace engine::render {
 		// --- opaque pass ----------------------------------------------------
 
 		// **The world's target, which is the offscreen texture or the window.**
-		// Everything after this pass draws onto the *window* regardless — the
+		// Everything after this pass draws onto the *window* regardless - the
 		// debug overlay is in window pixels and the editor's chrome is the
-		// window — so this is the one target that moves.
+		// window - so this is the one target that moves.
 		SDL_GPUColorTargetInfo colourTarget{};
 		colourTarget.texture = offscreen ? State->SlotAt(targetSlot).Texture : swapchain;
 		colourTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
@@ -6664,7 +6664,7 @@ namespace engine::render {
 
 		// What the overlay and the interface draw onto. When the world went
 		// offscreen the window has never been touched this frame, so the first
-		// pass to reach it clears — otherwise it is whatever the driver handed
+		// pass to reach it clears - otherwise it is whatever the driver handed
 		// back, which is last frame's image or uninitialised memory.
 		SDL_GPUColorTargetInfo windowTarget{};
 		windowTarget.texture = swapchain;
@@ -6691,7 +6691,7 @@ namespace engine::render {
 
 			// Entered unconditionally, and that is the honest reading rather
 			// than a convenience: the stage clears colour and depth, so a frame
-			// with nothing in it still ran this pass — the background is what it
+			// with nothing in it still ran this pass - the background is what it
 			// drew. `Validate` sees the same thing, because the stage's writes
 			// are marked `Clear`.
 			passes.Enter(Pass::Opaque);
@@ -6699,14 +6699,14 @@ namespace engine::render {
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 			// **The light set, pushed once for the whole pass.** Uniform state
 			// on a command buffer persists until it is replaced, so one push
-			// before the draws serves every one of them — which is the whole
+			// before the draws serves every one of them - which is the whole
 			// reason this is a second buffer rather than fields on the
 			// per-draw `LightingUniforms`.
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 
 			// **The beams, beside the lights and for the same reason.**
 			// Which holes carry a shadow is a fact about the frame, so it
-			// is pushed once per pass rather than per draw — and it is
+			// is pushed once per pass rather than per draw - and it is
 			// pushed even when there are none, because a stale block from
 			// a previous frame would shadow through a hole that is no
 			// longer there.
@@ -6715,7 +6715,7 @@ namespace engine::render {
 			// **The world's rectangle inside an attachment that is larger than
 			// it.** Without this the pass inherits a viewport covering the whole
 			// texture, and a block-rounded target would draw the world into
-			// 1600x960 while the panel shows the 1600x900 corner — the image
+			// 1600x960 while the panel shows the 1600x900 corner - the image
 			// squashed by the rounding. Set once here and inherited by the
 			// transparent draws in the same pass. See `SCENE_TARGET_BLOCK`.
 			//
@@ -6749,7 +6749,7 @@ namespace engine::render {
 				// `scene::ResolveCamera`, not a projection built here. It is the
 				// one place the engine decides what a camera's matrices are, and
 				// a second copy is a second chance to disagree about handedness,
-				// clip depth or the order of the product — a disagreement that
+				// clip depth or the order of the product - a disagreement that
 				// reads as z-fighting rather than as a matrix mistake.
 				//
 				// The Y convention that used to need a comment here lives there
@@ -6798,7 +6798,7 @@ namespace engine::render {
 				// stopped vanishing, the blended ones at the very end of the
 				// tail. `Flags.w` is the image's own opacity and was unused
 				// until a mirror had to be legible on a pane that is itself
-				// transparent — see `SurfaceView::ImageOpacity`.
+				// transparent - see `SurfaceView::ImageOpacity`.
 				// Both samplers, every draw. A shadow map that was not rendered
 				// binds another texture in its place rather than nothing: the
 				// flag above is what stops it being read, and an unbound sampler
@@ -6808,7 +6808,7 @@ namespace engine::render {
 				// **`FallbackTexture` rather than `OverlayTexture`**, which only
 				// exists while a debug panel has something in it. A scene of
 				// nothing but transparent geometry casts nothing, so the shadow
-				// map is absent too — and with the panels closed both were null
+				// map is absent too - and with the panels closed both were null
 				// and the guard below skipped the bind and drew anyway. See
 				// `Impl::FallbackTexture`.
 				SDL_GPUTexture *const shadow =
@@ -6849,7 +6849,7 @@ namespace engine::render {
 
 				// **The surface draws, one per index rather than one for "the
 				// mirrors".** Each index owns a texture and a projection, so
-				// what used to be a single run is a run each — grouped by
+				// what used to be a single run is a run each - grouped by
 				// `scene::GroupSurfaces` into `cameraRuns` so every one of them
 				// is still an offset and a count rather than a per-instance
 				// branch.
@@ -6873,7 +6873,7 @@ namespace engine::render {
 						// **A hole rather than a mirror, and it reads its picture
 						// by screen position.** The recursive pass has already
 						// filled the top level of the pool from *this* camera, and
-						// the target is the size of this attachment — so the pane
+						// the target is the size of this attachment - so the pane
 						// samples the texel it is standing on and the image is
 						// pixel-exact at every distance. That is what removes the
 						// pixelation the fitted path could only mitigate.
@@ -6896,7 +6896,7 @@ namespace engine::render {
 							} else {
 								LightingUniforms holed = lighting;
 
-								// 2 is the screen-position lookup — see
+								// 2 is the screen-position lookup - see
 								// `opaque.frag`.
 								holed.Flags.z = 2.0f;
 								holed.Flags.w = 1.0f;
@@ -6999,7 +6999,7 @@ namespace engine::render {
 				}
 
 				if (transparentCount > 0) {
-					// Same pass, same depth attachment, different pipeline —
+					// Same pass, same depth attachment, different pipeline -
 					// blending on and depth writes off. A separate render pass
 					// would have to reload the depth buffer, and the whole point
 					// is that these fragments are tested against what the opaque
@@ -7109,8 +7109,8 @@ namespace engine::render {
 
 		// --- interface pass -------------------------------------------------
 
-		// `drawInterface` already requires a window — the hook is not asked to
-		// prepare anything headless — so there is no second test here.
+		// `drawInterface` already requires a window - the hook is not asked to
+		// prepare anything headless - so there is no second test here.
 		if (drawInterface) {
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Interface);
@@ -7124,7 +7124,7 @@ namespace engine::render {
 			SDL_EndGPURenderPass(pass);
 
 			// One, whatever the interface submitted. What this counter is for is
-			// the frame's shape — the panel that reads it is trying to answer
+			// the frame's shape - the panel that reads it is trying to answer
 			// "what did the engine draw", and a widget count is the editor's
 			// business rather than the renderer's.
 			result.DrawCalls++;
@@ -7139,7 +7139,7 @@ namespace engine::render {
 		SDL_GPUTransferBuffer *capture = nullptr;
 		// **And only this viewport's, when one was named.** A request for a
 		// panel that is not drawing this call is left pending rather than
-		// served with the wrong picture — its turn comes round within as many
+		// served with the wrong picture - its turn comes round within as many
 		// frames as there are panels.
 		const bool captureWantsThis =
 			State->CaptureSlot == Renderer::ANY_VIEWPORT || State->CaptureSlot == targetSlot;
@@ -7173,7 +7173,7 @@ namespace engine::render {
 
 		// **The window, when nothing else touched it.** With the world drawn
 		// offscreen and neither the overlay nor the interface open, no pass has
-		// reached the swapchain — and presenting a texture the driver handed
+		// reached the swapchain - and presenting a texture the driver handed
 		// back without writing to it shows last frame's image or uninitialised
 		// memory. One clear costs nothing and removes the whole case.
 		if (!State->Headless() && windowTarget.load_op == SDL_GPU_LOADOP_CLEAR) {
@@ -7188,7 +7188,7 @@ namespace engine::render {
 		{
 			// Hands the whole buffer over and queues the present. The passes
 			// above only *record* commands, so almost nothing that happens in
-			// them is measured by their spans — this is where the driver gets
+			// them is measured by their spans - this is where the driver gets
 			// the work, and where any cost of building it lands.
 			ENGINE_PROFILE_CAT("submit", core::ProfileCategory::Render);
 
@@ -7227,7 +7227,7 @@ namespace engine::render {
 
 		// **Not presented, because there is nowhere to present to.** A caller
 		// counting presented frames gets zero from a headless renderer, which is
-		// the honest answer — what it should count instead is captures, or its
+		// the honest answer - what it should count instead is captures, or its
 		// own loop.
 		result.Presented = !State->Headless();
 		return result;

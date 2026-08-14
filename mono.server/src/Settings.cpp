@@ -32,7 +32,7 @@ namespace server {
 				built.Text(
 					"server.idle-sleep",
 					"timeout",
-					"timeout, never or immediate — what happens to a world that empties"
+					"timeout, never or immediate - what happens to a world that empties"
 				);
 				built.Number(
 					"server.idle-close-seconds",
@@ -69,7 +69,7 @@ namespace server {
 				built.Text(
 					"server.identity-key",
 					defaults.IdentityKey,
-					"64 hex characters — the Ed25519 seed this server proves its identity with"
+					"64 hex characters - the Ed25519 seed this server proves its identity with"
 				);
 
 				built.Integer(
@@ -89,7 +89,7 @@ namespace server {
 				built.Text(
 					"server.content-grant-key",
 					defaults.ContentGrantKey,
-					"64 hex characters — the secret grants are issued and checked with"
+					"64 hex characters - the secret grants are issued and checked with"
 				);
 
 				built.Integer(

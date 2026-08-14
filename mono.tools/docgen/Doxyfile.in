@@ -1,5 +1,5 @@
 # Configured by mono.tools/docgen/CMakeLists.txt. Edit the .in, not the copy in
-# the build directory — that one is overwritten on every configure.
+# the build directory - that one is overwritten on every configure.
 #
 # Only the settings that are a decision are here. Everything else is Doxygen's
 # default, because a Doxyfile carrying all three hundred options is one nobody
@@ -17,8 +17,8 @@ OUTPUT_DIRECTORY       = "@MONO_DOCS_OUTPUT@"
 FULL_PATH_NAMES        = YES
 STRIP_FROM_PATH        = "@CMAKE_SOURCE_DIR@"
 
-# So that a page says `#include <engine/core/Name.hpp>` — the line a caller
-# would actually write — rather than the path the file happens to sit at.
+# So that a page says `#include <engine/core/Name.hpp>` - the line a caller
+# would actually write - rather than the path the file happens to sit at.
 STRIP_FROM_INC_PATH    = @MONO_DOCS_INCLUDE_ROOTS@
 
 # ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ STRIP_FROM_INC_PATH    = @MONO_DOCS_INCLUDE_ROOTS@
 # ---------------------------------------------------------------------------
 #
 # Public headers only. `src/` is the private include directory and `app/` is a
-# thin main — documenting either would put the module's insides on a page that
+# thin main - documenting either would put the module's insides on a page that
 # says "API reference", and the tier system exists precisely so that what a
 # caller may see is a decided question rather than a discovered one.
 
@@ -48,7 +48,7 @@ MARKDOWN_ID_STYLE      = GITHUB
 # How deep a markdown heading is still turned into a numbered section.
 #
 # Doxygen's default is 5, and at that depth it converts `###` into a
-# subsubsection — which is an error whenever the heading above it was a `#`,
+# subsubsection - which is an error whenever the heading above it was a `#`,
 # because a section cannot contain a subsubsection without the subsection in
 # between. That is the ordinary shape of the prose here: RUNNING.md uses `#` for
 # a part and `###` for a heading inside it, which is what GitHub renders well,
@@ -59,11 +59,11 @@ MARKDOWN_ID_STYLE      = GITHUB
 # sections and still get ids, so the intra-document links the setting above
 # exists for keep resolving. 0 would silence the same three warnings by removing
 # the ids entirely, and RUNNING.md's own `#running-from-somewhere-else` link
-# starts dangling the moment it does — measured, not assumed.
+# starts dangling the moment it does - measured, not assumed.
 TOC_INCLUDE_HEADINGS   = 2
 
 # `AGENTS.md` is in, and that is deliberate. README.md and CONTRIBUTING.md both
-# link to it, so leaving it out does not produce a tidier site — it produces the
+# link to it, so leaving it out does not produce a tidier site - it produces the
 # same site with broken links in it, which is worse and quieter.
 #
 # CLAUDE.md is one line pointing at AGENTS.md, so it is the one page that would
@@ -88,7 +88,7 @@ EXCLUDE_PATTERNS       = */tests/* \
 # past, so the sources on disk stay prose. See mono.tools/docgen/AGENTS.md.
 
 # FILTER_PATTERNS, not INPUT_FILTER. INPUT_FILTER runs on every input file, and
-# the input includes markdown — so docgen would be handed README.md and apply
+# the input includes markdown - so docgen would be handed README.md and apply
 # C++ rules to it. It did, before this line existed: the `//` in a URL became a
 # comment marker, and the paragraph in AGENTS.md *about* comment style was
 # rewritten by the thing it describes. A filter is a language tool and the
@@ -97,7 +97,7 @@ FILTER_PATTERNS        = *.hpp="@MONO_DOCGEN_BINARY@"
 
 # The listing behind "go to the source code of this file" is generated from the
 # filtered text, and every link into it is by line number. This is safe only
-# because docgen preserves the line count exactly — that is what its first test
+# because docgen preserves the line count exactly - that is what its first test
 # is about, and it is the reason to be careful about changing the filter.
 FILTER_SOURCE_FILES    = YES
 SOURCE_BROWSER         = YES
@@ -115,8 +115,8 @@ MARKDOWN_SUPPORT       = YES
 #
 # **This is not a way of requiring less.** The author still writes the comment
 # and still marks the group by hand; what it changes is that a family of fields
-# which are one idea — `ecs::AttributeValue`'s fifteen payload cases, where a
-# per-field comment could only ever say "the `float` case" — is documented once
+# which are one idea - `ecs::AttributeValue`'s fifteen payload cases, where a
+# per-field comment could only ever say "the `float` case" - is documented once
 # instead of fifteen times. Documentation written to satisfy a check is the thing
 # `docs/CODE_DOCUMENTING.md` is against.
 #
@@ -125,7 +125,7 @@ MARKDOWN_SUPPORT       = YES
 DISTRIBUTE_GROUP_DOC   = YES
 
 # The public surface is listed whether or not somebody documented it. A gap
-# should be visible on the page rather than absent from it — an undocumented
+# should be visible on the page rather than absent from it - an undocumented
 # method that simply does not appear reads as a method that does not exist.
 EXTRACT_ALL            = YES
 EXTRACT_STATIC         = YES
@@ -154,7 +154,7 @@ QUIET                  = YES
 # ---------------------------------------------------------------------------
 #
 # Moonwave has `@within` and `@server`; this is the same idea. A tier is already
-# in most file comments as prose — `L3 ·`, `L12 [client] ·`, `L1.` — in three
+# in most file comments as prose - `L3 ·`, `L12 [client] ·`, `L1.` - in three
 # different spellings. As a command it is one spelling, and it collects into a
 # page you can read down.
 
@@ -196,7 +196,7 @@ INCLUDE_GRAPH          = NO
 INCLUDED_BY_GRAPH      = NO
 
 # Above the largest class in this repository rather than at Doxygen's default of
-# 50, which `studio::Editor` passes with 55 collaborators — and passing it draws
+# 50, which `studio::Editor` passes with 55 collaborators - and passing it draws
 # *no graph at all* and emits a warning, so the default turns the one class whose
 # relationships are hardest to hold in a head into the one class with no picture.
 #
@@ -205,7 +205,7 @@ INCLUDED_BY_GRAPH      = NO
 # this is a class to split, and the warning coming back is a reasonable way to
 # hear about it.
 # `studio::Editor` collaborates with 76 types, so the default 64 dropped its
-# graph silently — a page that is missing the one diagram somebody opened it
+# graph silently - a page that is missing the one diagram somebody opened it
 # for, with the reason only in a build log nobody reads. 128 covers the largest
 # type here with room to grow; a graph past that is unreadable anyway and the
 # warning is the right answer again.

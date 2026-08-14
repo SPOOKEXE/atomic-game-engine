@@ -2,7 +2,7 @@
 //
 // **The only part of this program a headless test can reach**, and it happens to
 // be the part with a real algorithm in it. Everything else here needs a window,
-// a device and an imgui frame — which is why `mono.studio/AGENTS.md` carries the
+// a device and an imgui frame - which is why `mono.studio/AGENTS.md` carries the
 // invariants that a test cannot, and why the run cycle is tested one layer down
 // in `mono.client/tests/Presentation.cpp` where no GPU is involved.
 

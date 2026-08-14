@@ -9,7 +9,7 @@
 // **Two trampolines rather than one closure per method**, and they differ only
 // in where the row comes from. An instance method's table is one table, so its
 // closure carries a row *index*; a service has a table of its own, so its closure
-// carries the row's *address* — which is safe because a `ServiceMethod` lives in
+// carries the row's *address* - which is safe because a `ServiceMethod` lives in
 // a `static constexpr` array for the life of the program. Adding a method of
 // either kind costs a row in its own file and nothing here.
 //
@@ -23,7 +23,7 @@
 // reason rather than beside `InstallService`: a getter and a setter are
 // `ScriptMethod`s, so reaching one means building a `LuauCall`, and this file is
 // where the neutral layer meets the VM. What is different about them is that the
-// key sits in the slot the first argument would — see `DropPropertyKey`.
+// key sits in the slot the first argument would - see `DropPropertyKey`.
 //
 // @tier L9 · shared
 
@@ -54,14 +54,14 @@ namespace engine::script {
 		// a descriptor said it should be.
 		//
 		// **Userdata is checked by tag, in the order the vocabulary was added.** A
-		// tag check is exact — `Vector2` and `UDim` are both two floats and only
-		// the tag tells them apart — so the order here is legibility and not
+		// tag check is exact - `Vector2` and `UDim` are both two floats and only
+		// the tag tells them apart - so the order here is legibility and not
 		// correctness.
 		//
 		// **The scalars are checked by exact type and not by `lua_isnumber`.**
 		// That predicate is true for a numeric *string*, so `SetAttribute("n",
 		// "5")` used to store a `Double` where JavaScript stores a `String` and
-		// where Roblox stores a string — a silent divergence between the two VMs
+		// where Roblox stores a string - a silent divergence between the two VMs
 		// in the one method whose whole job is to hold what an author gave it.
 		//
 		// Leaves `Opaque` for anything with no attribute form, which the caller
@@ -85,7 +85,7 @@ namespace engine::script {
 				return value;
 			case LUA_TSTRING: {
 				// **`String` and never `Name`.** An attribute's value is something
-				// a game computes — a title, a state, a message — and `core::Name`
+				// a game computes - a title, a state, a message - and `core::Name`
 				// is a registry that never releases. `ecs::PropertyType::String`
 				// carries the whole argument, and this is the surface it was added
 				// for.
@@ -137,7 +137,7 @@ namespace engine::script {
 		// Pushes a stored attribute.
 		//
 		// Returns `false` for a type with no Luau form, which cannot happen for a
-		// value this binding stored and can for one a future build wrote — so it
+		// value this binding stored and can for one a future build wrote - so it
 		// is a refusal rather than an assert.
 		bool PushLuauAttribute(lua_State *state, const AttributeValue &value) {
 			switch (value.Type) {
@@ -220,7 +220,7 @@ namespace engine::script {
 			// **A tag rather than a flag**, so the two are told apart at the call
 			// site: a service method's `Subject()` is `NULL_ENTITY` and nothing
 			// checks slot one, because `ContentService:GetMeshes()` passes a
-			// table there and `ContentService.GetMeshes()` passes nothing — and
+			// table there and `ContentService.GetMeshes()` passes nothing - and
 			// neither is a mistake this layer can report better than the method
 			// reading its first argument will.
 			struct OnService {};
@@ -277,7 +277,7 @@ namespace engine::script {
 			//
 			// **Read by both trampolines and by nothing else.** `lua_yield` takes
 			// its results from the stack top at the moment the C function returns,
-			// so the yield has to *be* the return — see `Await`. The service
+			// so the yield has to *be* the return - see `Await`. The service
 			// trampoline has asked since the store services suspended; the
 			// instance one asks because `WaitForChild` does.
 			bool Suspended() const {
@@ -290,7 +290,7 @@ namespace engine::script {
 
 			size_t Arguments() const override {
 				// The receiver's slot is not an argument, and a stack shorter
-				// than it cannot happen — the trampolines are what put the
+				// than it cannot happen - the trampolines are what put the
 				// receiver there.
 				const int top = lua_gettop(State);
 				return top <= RECEIVER ? 0u : static_cast<size_t>(top - RECEIVER);
@@ -313,7 +313,7 @@ namespace engine::script {
 			double AsNumber(size_t index) override {
 				// **By exact type and not `luaL_checknumber`, which accepts a
 				// numeric *string*.** That leniency is Lua's and the JavaScript
-				// adapter has no equivalent — `JS_IsNumber` is false for `"5"` —
+				// adapter has no equivalent - `JS_IsNumber` is false for `"5"` -
 				// so leaving it in place would mean `BindActionAtPriority(...,
 				// "5", ...)` binding at priority five in one language and
 				// throwing in the other. The same call, twice, with two answers.
@@ -330,7 +330,7 @@ namespace engine::script {
 
 			bool OptionalBoolean(size_t index, bool fallback) override {
 				// `lua_toboolean` and not a type check, which is Luau's own
-				// truthiness — see the interface for why the two languages are
+				// truthiness - see the interface for why the two languages are
 				// allowed to disagree about `0` here.
 				return lua_isnoneornil(State, Slot(index)) ? fallback
 														   : lua_toboolean(State, Slot(index)) != 0;
@@ -367,7 +367,7 @@ namespace engine::script {
 
 				// **The key is tested rather than converted.** `lua_tostring` on a
 				// number key rewrites the value on the stack, which is exactly
-				// what `lua_next` is documented to break on — a record with a
+				// what `lua_next` is documented to break on - a record with a
 				// numeric key would otherwise end the walk somewhere arbitrary.
 				lua_pushnil(State);
 				while (lua_next(State, table) != 0) {
@@ -440,7 +440,7 @@ namespace engine::script {
 				// **Never a null pointer, even for a length of zero.**
 				// `lua_pushlstring` traps on one rather than treating it as
 				// empty, and a default-constructed `string_view` is exactly that
-				// — which is what an invalid `core::Name::Text()` hands back.
+				// - which is what an invalid `core::Name::Text()` hands back.
 				lua_pushlstring(State, value.empty() ? "" : value.data(), value.size());
 				Pushed++;
 			}
@@ -526,7 +526,7 @@ namespace engine::script {
 				// handed, so a null entity came out as an instance handle to
 				// nothing and `if player then` was true for a player who does
 				// not exist. `LuauInstances.cpp` has always had a separate
-				// `PushFound` for exactly this, and every Luau lookup uses it —
+				// `PushFound` for exactly this, and every Luau lookup uses it -
 				// which is precisely why the first version of this line looked
 				// right and was not.
 				//
@@ -594,8 +594,8 @@ namespace engine::script {
 			void AwaitChild(uint64_t waiter) override {
 				// **The same suspension under a different key, which is the whole
 				// of what a second resume source costs this adapter.** What
-				// differs is only who comes back for the thread —
-				// `PumpChildWaiters` rather than `PumpDeliveries` — and what it
+				// differs is only who comes back for the thread -
+				// `PumpChildWaiters` rather than `PumpDeliveries` - and what it
 				// resumes with.
 				Suspend(Context.AwaitedChildren, waiter);
 			}
@@ -617,7 +617,7 @@ namespace engine::script {
 			//
 			// **`insert_or_assign`, not `emplace`.** A resumed script that
 			// suspends again does so on the same thread, and `emplace` would keep
-			// the *old* reference — so the fresh one would leak and the next
+			// the *old* reference - so the fresh one would leak and the next
 			// resume would find a thread nothing was holding.
 			//
 			// @param waiting Which table the resume will look in.
@@ -638,7 +638,7 @@ namespace engine::script {
 			// Roblox's four fields, and the two it does not have are absent from
 			// the *binding* rather than from the record: `title` and
 			// `description` come from `SetTitle` and `SetDescription`, which
-			// decorate a touch button, and there is no touch surface — so
+			// decorate a touch button, and there is no touch surface - so
 			// reporting them as empty strings would claim they had been set to
 			// nothing.
 			void PushBoundAction(const BoundActionReport &report) {
@@ -715,7 +715,7 @@ namespace engine::script {
 			// **A yield is the return and cannot be anything else.** `lua_yield`
 			// takes the results from the stack top as it is called and hands back
 			// the sentinel a C function must return, so the branch is here rather
-			// than inside `Await` — which returns to a method body that then
+			// than inside `Await` - which returns to a method body that then
 			// returns to this line. The store services are the callers; every
 			// other method leaves this false.
 			if (call.Suspended()) {
@@ -748,7 +748,7 @@ namespace engine::script {
 
 		// Leaves the receiver and the arguments where `LuauCall` expects them.
 		//
-		// **The key is not an argument, and a metamethod puts it in slot two** —
+		// **The key is not an argument, and a metamethod puts it in slot two** -
 		// which is where the first argument lives. Dropping it makes a getter's
 		// call a zero-argument one and a setter's a one-argument one, so a
 		// `ServiceProperty` reads argument **zero** the way every other neutral
@@ -776,7 +776,7 @@ namespace engine::script {
 		// The methods and the signals, from the shared table.
 		//
 		// **A userdata has no fields**, so `InstallService` stashes the table it
-		// built — signals first, then methods — in the registry under
+		// built - signals first, then methods - in the registry under
 		// `MethodsKey`, and this reads it back. One key on the surface, two
 		// readers, so the install and the lookup cannot name different ones.
 		lua_getfield(state, LUA_REGISTRYINDEX, surface.MethodsKey);
@@ -816,7 +816,7 @@ namespace engine::script {
 		LuauContext &context = ContextOf(state);
 
 		for (const ServiceMethod &method : methods) {
-			// **The context as upvalue 1, on every method, without exception** —
+			// **The context as upvalue 1, on every method, without exception** -
 			// `InstallService` states why, and this loop is bound by the same
 			// rule because `UpvalueContext` reads index 1 either way.
 			lua_pushlightuserdata(state, &context);

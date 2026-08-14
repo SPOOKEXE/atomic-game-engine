@@ -3,11 +3,11 @@
 // **Three independent things have to agree before a picker button appears**, and
 // none of them is in the panel's drawing code:
 //
-//   * `game::ReadProperty` has to answer — a row it cannot read is drawn as `—`
+//   * `game::ReadProperty` has to answer - a row it cannot read is drawn as `-`
 //     with no field and no button at all;
-//   * `PropertyDescriptor::Writable` has to be true — the row is inside a
+//   * `PropertyDescriptor::Writable` has to be true - the row is inside a
 //     `BeginDisabled(!Writable)` and the button is `&& !locked`;
-//   * `studio::ContentKindOfProperty` has to recognise the spelling — a miss is
+//   * `studio::ContentKindOfProperty` has to recognise the spelling - a miss is
 //     a plain text field, which is the "there is no picker" symptom exactly.
 //
 // A failure in any one of them looks identical from the outside: you click and
@@ -64,7 +64,7 @@ namespace {
 			row.Readable = engine::game::ReadProperty(store, instance, descriptor, value);
 
 			// **`Spelling` and not `Name.Text()`**, because that is what the
-			// panel passes — and if the two ever stopped agreeing, the picker
+			// panel passes - and if the two ever stopped agreeing, the picker
 			// would vanish from every content property at once.
 			row.Kind = ContentKindOfProperty(descriptor.Spelling);
 			return row;
@@ -82,7 +82,7 @@ TEST_CASE("a mesh part's content rows all get a picker", "[studio][properties]")
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
 
 	// `MeshId` and `TextureID` are Roblox's names and, since v0.10, the only
-	// ones — the `BasePart` aliases `Mesh` and `ColorMap` are gone, because
+	// ones - the `BasePart` aliases `Mesh` and `ColorMap` are gone, because
 	// geometry loaded from a file is not something a plain `Part` has.
 	for (const auto &[property, kind] : {
 			 std::pair<std::string_view, AssetKind>{"MeshId", AssetKind::Mesh},
@@ -95,7 +95,7 @@ TEST_CASE("a mesh part's content rows all get a picker", "[studio][properties]")
 		// picker with it and the row simply is not there.
 		CHECK(row.Found);
 
-		// Readable, or the panel draws `—` and returns before any widget.
+		// Readable, or the panel draws `-` and returns before any widget.
 		CHECK(row.Readable);
 
 		// Writable, or the row is disabled and the `...` button is `&& !locked`.
@@ -130,14 +130,14 @@ TEST_CASE("a plain part offers neither row", "[studio][properties]") {
 // whether the row *offers* a picker. This asks whether confirming one writes
 // anything, and for five properties across four classes the answer was no: the
 // panel built a `PropertyValue` from nothing, set `Name` on it, and left `Type`
-// at its default of `Opaque` — which `game::WriteProperty` refuses on its first
+// at its default of `Opaque` - which `game::WriteProperty` refuses on its first
 // line, before it has looked at the store.
 //
 // Nothing reported it. `WriteProperty` returns `false` and the caller uses that
 // only to decide whether to record an undo entry, so a refused write and a write
 // that changed nothing are the same non-event. The symptom was a `MeshId` that
 // stayed blank, a `MeshPart` that kept drawing `MeshTable`'s fallback cube, and a
-// `TextureID` that never tinted it — three bugs with one cause, and all three
+// `TextureID` that never tinted it - three bugs with one cause, and all three
 // looked like content that had failed to arrive.
 // **The tests call `studio::ChosenContentValue`, which is the function the panel
 // calls.** A helper written out here instead would be a second copy of the thing
@@ -185,8 +185,8 @@ TEST_CASE("confirming a picker writes the property", "[studio][properties]") {
 
 TEST_CASE("a picker value with no type is refused", "[studio][properties]") {
 	// **The bug itself, pinned rather than described.** This is what the panel
-	// used to send, and it must keep being refused — `WriteProperty`'s type check
-	// is what stops a `Name` landing in a `float` — so the fix belongs in the
+	// used to send, and it must keep being refused - `WriteProperty`'s type check
+	// is what stops a `Name` landing in a `float` - so the fix belongs in the
 	// caller and this case exists to stop somebody "fixing" it by loosening the
 	// check instead.
 	engine::scene::RegisterSceneComponents();
@@ -210,7 +210,7 @@ TEST_CASE("a picker value with no type is refused", "[studio][properties]") {
 TEST_CASE("every content row the picker serves round-trips", "[studio][properties]") {
 	// **All five, because the failure was per-property and looked per-class.**
 	// One test on `MeshId` would have passed the day somebody fixed meshes and
-	// left `Image` on an `ImageLabel` doing nothing — which is how the aliases
+	// left `Image` on an `ImageLabel` doing nothing - which is how the aliases
 	// this file's first case describes went wrong the first time.
 	engine::scene::RegisterSceneComponents();
 	engine::scene::RegisterSceneClasses();
@@ -246,7 +246,7 @@ TEST_CASE("every content row the picker serves round-trips", "[studio][propertie
 		CHECK(read.Name == Name("chosen.asset"));
 
 		// **"Clear" is the same path with an empty string**, and it has to reach
-		// the store too — a part with no mesh is a plain part, and a Clear that
+		// the store too - a part with no mesh is a plain part, and a Clear that
 		// silently did nothing would be indistinguishable from one that worked.
 		CHECK(engine::game::WriteProperty(store, instance, *descriptor, studio::ChosenContentValue(descriptor->Type, "")));
 		REQUIRE(engine::game::ReadProperty(store, instance, *descriptor, read));

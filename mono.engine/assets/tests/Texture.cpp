@@ -2,7 +2,7 @@
 //
 // **The gap was never a missing decoder**, which is worth stating because it
 // was diagnosed as one twice. `ImageLabel` drew the missing-texture marker
-// because the kind was named and the format was not — so there was nothing for
+// because the kind was named and the format was not - so there was nothing for
 // a backend to sample even once the bytes arrived. Vendoring a PNG reader would
 // have answered how to read somebody else's format, when what was needed was to
 // have one.
@@ -44,7 +44,7 @@ namespace {
 	}
 
 	// Fills `data` with a full chain of the right shape, without filtering
-	// anything — the pixel values are irrelevant to the format's job.
+	// anything - the pixel values are irrelevant to the format's job.
 	void GiveChain(TextureData &data) {
 		data.Mips.clear();
 		for (uint32_t level = 1; level < MipLevelCount(data.Width, data.Height); level++) {
@@ -79,8 +79,8 @@ TEST_CASE("a texture round-trips", "[assets][texture]") {
 }
 
 TEST_CASE("the single-channel format round-trips at its own stride", "[assets][texture]") {
-	// **A stride bug is invisible in a square RGBA image** — the same byte count
-	// either way — so the case that catches one is a non-square image in the
+	// **A stride bug is invisible in a square RGBA image** - the same byte count
+	// either way - so the case that catches one is a non-square image in the
 	// other format.
 	const TextureData source = Made(5, 2, TextureFormat::R8);
 	CHECK(source.Pixels.size() == 10);
@@ -142,7 +142,7 @@ TEST_CASE("a dimension past the bound is refused", "[assets][texture]") {
 }
 
 TEST_CASE("a zero dimension is refused rather than read as empty", "[assets][texture]") {
-	// An image of no width is not a small image, it is a corrupt header — and
+	// An image of no width is not a small image, it is a corrupt header - and
 	// accepting one would put a zero-sized texture into a backend that has to
 	// special-case it forever after.
 	ByteWriter writer;
@@ -264,7 +264,7 @@ TEST_CASE("a still image writes zeroes and reads back a still", "[assets][textur
 }
 
 TEST_CASE("a version 1 file still reads, as a still image", "[assets][texture]") {
-	// **Not compatibility for its own sake** — this is pre-release and a format
+	// **Not compatibility for its own sake** - this is pre-release and a format
 	// break is acceptable. The absent case has an obviously right answer: a v1
 	// file is a still image, which is what zeroes already mean, so refusing one
 	// would make every baked texture on disk unreadable to buy nothing.
@@ -374,7 +374,7 @@ TEST_CASE("a mip chain round-trips", "[assets][texture]") {
 	CHECK(read.Mips == source.Mips);
 
 	// **The levels are the tail of the payload and have no length of their
-	// own**, so anything written after them would be unreachable — the same
+	// own**, so anything written after them would be unreachable - the same
 	// property the flipbook triple is placed before the pixels to preserve.
 	CHECK(reader.AtEnd());
 }
@@ -446,7 +446,7 @@ TEST_CASE("a chain claiming more bytes than the file holds is refused", "[assets
 
 TEST_CASE("a version 2 file reads as a single level", "[assets][texture]") {
 	// The v1 argument, one version on: the absent case has an obviously right
-	// answer, and a file with no chain is a texture with one level — which is
+	// answer, and a file with no chain is a texture with one level - which is
 	// what every texture baked before v0.14 is.
 	ByteWriter writer;
 	writer.WriteUInt32(Texture::MAGIC);

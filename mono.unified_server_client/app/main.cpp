@@ -3,7 +3,7 @@
 //
 // The output is one line per tick and a summary, both meant to be read by a
 // person looking for the stage that lost the world. The columns are the four
-// stages in order — produced, sent, applied, drawn — so the first one that goes
+// stages in order - produced, sent, applied, drawn - so the first one that goes
 // wrong is the first one whose column stops making sense.
 
 #include <engine/core/Arguments.hpp>
@@ -59,14 +59,14 @@ int main(int argc, char **argv) {
 	engine::core::Log::Initialise("unified");
 
 	// **The engine's settings and no `unified.*` table.** This is a diagnostic
-	// harness whose every option describes one run — how many ticks, which
-	// ordinals to drop — and a run's shape is not a deployment's decision.
+	// harness whose every option describes one run - how many ticks, which
+	// ordinals to drop - and a run's shape is not a deployment's decision.
 	engine::core::Config::DeclareEngineFlags();
 	engine::parallel::DeclareFlags();
 
 	engine::core::Arguments arguments(
 		"unified_server_client",
-		"atomic — a server and a client in one process, with no network between them."
+		"atomic - a server and a client in one process, with no network between them."
 	);
 	engine::core::Config::DeclareOptions(arguments);
 
@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
 
 	// **Before anything starts a world or a job.** The flag is read on every
 	// dispatch, so setting it late would leave the frames before it with the
-	// shape it exists to remove — and those are the frames somebody was
+	// shape it exists to remove - and those are the frames somebody was
 	// watching while the program came up.
 	//
 	// It makes the program slower on purpose. See `parallel::SetForceSerialCompute`:
@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
 	if (!harness.Join()) {
 		// **The first thing this program is for.** A join that never completes
 		// with no network in the way is a snapshot the replica refused, and the
-		// replica's own counters say which kind — not a lost datagram, because
+		// replica's own counters say which kind - not a lost datagram, because
 		// there are none.
 		ENGINE_ERROR(
 			"the client never joined: {} snapshot(s), {} malformed, {} stale",

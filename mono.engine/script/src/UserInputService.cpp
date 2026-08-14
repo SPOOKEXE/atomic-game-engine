@@ -2,7 +2,7 @@
 //
 // **Split out of `InputServices.cpp` at v0.18, which held three jobs.** That
 // file was this service, `ContextActionService` and the Luau input pump in one
-// translation unit — so a surface that names no VM was compiled against
+// translation unit - so a surface that names no VM was compiled against
 // `<lua.h>`, and the pump that fires its signals sat under a heading rather than
 // behind a file name. `LuauInput.cpp` is the pump and `JsInput.cpp` is its twin;
 // what is left here is the eight methods, the ten properties and the six signal
@@ -10,7 +10,7 @@
 //
 // **The tag is the single Luau fact still in the file, and it is a number.**
 // `ServiceProperty` makes the service a userdata in Luau to defeat `safeenv`'s
-// `GETIMPORT` caching — `LuauTags.hpp` carries that argument — so this names
+// `GETIMPORT` caching - `LuauTags.hpp` carries that argument - so this names
 // `TAG_INPUT_SERVICE` and includes nothing else of that VM's.
 //
 // @tier L9 · shared
@@ -46,14 +46,14 @@ namespace engine::script {
 		// **One constant on the surface, read by the generic `__index`.**
 		// `UserInputServiceSurface` sets it and `LuauServiceIndex` reads it back
 		// off the same surface, so the install and the lookup cannot name
-		// different keys — which they could while each service wrote its own
+		// different keys - which they could while each service wrote its own
 		// metamethod.
 		constexpr const char *INPUT_METHODS_KEY = "engine.userinput.methods";
 
 		// **Written once since v0.16, which is what a property list bought.**
 		// Every method below is a `ScriptMethod` and every property a
 		// `ServiceProperty`, so both VMs install this service from the one
-		// description in `UserInputServiceSurface` — where Luau built it from six
+		// description in `UserInputServiceSurface` - where Luau built it from six
 		// `lua_CFunction`s and a chain of `if (field == ...)` and JavaScript could
 		// not build it at all. See `ServiceProperty`.
 
@@ -102,13 +102,13 @@ namespace engine::script {
 			);
 		}
 
-		// `UserInputService:GetMouseLocation()` — a `Vector2` in pixels.
+		// `UserInputService:GetMouseLocation()` - a `Vector2` in pixels.
 		void GetMouseLocation(ScriptCall &call) {
 			const InputState *input = InputOf(call);
 			call.ReturnVector2(input == nullptr ? core::Vector2{} : input->MousePosition);
 		}
 
-		// `UserInputService:GetMouseDelta()` — how far it moved this frame.
+		// `UserInputService:GetMouseDelta()` - how far it moved this frame.
 		//
 		// **Roblox's spelling, and the value a locked pointer needs.** See
 		// `InputState::MouseDelta`: under `LockCenter` the position does not
@@ -118,7 +118,7 @@ namespace engine::script {
 			call.ReturnVector2(input == nullptr ? core::Vector2{} : input->MouseDelta);
 		}
 
-		// `UserInputService:GetLastInputType()` — which device spoke last.
+		// `UserInputService:GetLastInputType()` - which device spoke last.
 		//
 		// **The poll beside `LastInputTypeChanged`'s edge**, which is the pair
 		// Roblox offers and the pair a place actually needs: the signal is when to
@@ -126,7 +126,7 @@ namespace engine::script {
 		// opens, where no edge is coming.
 		//
 		// **`Keyboard` on a world with no input state**, which is the same answer
-		// a world that has one but has never been touched gives — see
+		// a world that has one but has never been touched gives - see
 		// `InputState::LastSource` for why there is no `None` member to report
 		// instead.
 		void GetLastInputType(ScriptCall &call) {
@@ -136,7 +136,7 @@ namespace engine::script {
 			call.ReturnEnum(core::Name("UserInputType"), core::Name(scene::Describe(source)));
 		}
 
-		// `UserInputService:GetKeysPressed()` — every key down now.
+		// `UserInputService:GetKeysPressed()` - every key down now.
 		//
 		// **A list of `EnumItem`s rather than of strings**, so what comes out is
 		// what `IsKeyDown` takes. A surface whose getter and setter disagree about
@@ -148,7 +148,7 @@ namespace engine::script {
 				return;
 			}
 
-			// In `KeyCode` order, which is the order both pumps walk — so what a
+			// In `KeyCode` order, which is the order both pumps walk - so what a
 			// script polls and what it is delivered agree about sequence.
 			std::vector<core::Name> pressed;
 			for (size_t index = 0; index < static_cast<size_t>(KeyCode::Count); index++) {
@@ -160,13 +160,13 @@ namespace engine::script {
 			call.ReturnEnums(core::Name("KeyCode"), pressed);
 		}
 
-		// `UserInputService:GetMouseButtonsPressed()` — every button down now.
+		// `UserInputService:GetMouseButtonsPressed()` - every button down now.
 		//
 		// **A list of `InputObject`s and not of `EnumItem`s**, which is Roblox's
 		// shape and is the useful one: the object carries where the pointer was
 		// as well as which button it is, so a handler that wants both does not
 		// have to ask twice and risk the two disagreeing. It is also why this is
-		// not simply `GetKeysPressed` with a different loop — that one answers
+		// not simply `GetKeysPressed` with a different loop - that one answers
 		// with what `IsKeyDown` takes, and this one answers with what
 		// `InputBegan` delivers.
 		void GetMouseButtonsPressed(ScriptCall &call) {
@@ -195,7 +195,7 @@ namespace engine::script {
 		// `UserInputService.MouseBehavior`, read and written.
 		//
 		// **The one member here that travels towards the client.** A script sets
-		// it, the client applies it to the window on the next frame — which is why
+		// it, the client applies it to the window on the next frame - which is why
 		// `InputState` is the seam in both directions rather than a report.
 		void GetMouseBehavior(ScriptCall &call) {
 			const InputState *input = InputOf(call);
@@ -221,7 +221,7 @@ namespace engine::script {
 			// one**, which is the opposite of `SoundService.Volume` and is right
 			// for the opposite reason: an `InputState` is written every frame by
 			// whoever owns the window, so a resource minted here would be one the
-			// device layer immediately overwrites — where an `AudioState` is only
+			// device layer immediately overwrites - where an `AudioState` is only
 			// ever written by a script.
 			if (auto *input = call.World().ResourceMutable<InputState>()) {
 				input->Behaviour = static_cast<MouseBehavior>(ordinal);
@@ -255,7 +255,7 @@ namespace engine::script {
 		// What a `MouseDeltaSensitivity` of one means, in radians per pixel.
 		//
 		// **The same literal `scene::CameraController::Sensitivity` defaults to**,
-		// which is what makes a world nobody has configured answer exactly 1 —
+		// which is what makes a world nobody has configured answer exactly 1 -
 		// and it is a named constant because the getter and the setter both need
 		// it and a property whose two halves disagree by a digit is a round trip
 		// that does not close.
@@ -287,7 +287,7 @@ namespace engine::script {
 			}
 		}
 
-		// `UserInputService:GetFocusedTextBox()` — the box being typed into, or
+		// `UserInputService:GetFocusedTextBox()` - the box being typed into, or
 		// nil.
 		//
 		// **Read from the world rather than counted from the focus signals**,
@@ -297,7 +297,7 @@ namespace engine::script {
 		// lookup rather than a tally a missed event could put out of step.
 		//
 		// Nil for a world with no `GuiService`, for a box that has since been
-		// destroyed, and for the ordinary case of nobody typing — see
+		// destroyed, and for the ordinary case of nobody typing - see
 		// `gui::FocusedTextBox`, which validates the handle rather than trusting
 		// it.
 		void GetFocusedTextBox(ScriptCall &call) {
@@ -317,8 +317,8 @@ namespace engine::script {
 		// and `GyroscopeEnabled`.
 		//
 		// **Present and false, which is better than absent.** Roblox scripts
-		// branch on these — `if UserInputService.TouchEnabled then` is how a place
-		// picks its control scheme — and a missing property raises where a false
+		// branch on these - `if UserInputService.TouchEnabled then` is how a place
+		// picks its control scheme - and a missing property raises where a false
 		// one takes the other branch. There is no gamepad, touch, headset or
 		// sensor anywhere in `input::Translator`, so the answer is a constant and
 		// saying so is the honest version of not having one.
@@ -333,7 +333,7 @@ namespace engine::script {
 		// along: a member that exists looks decided, so a script author writes
 		// against it and finds out later that it was never going to work. A
 		// property that answers a *constant* is the exception and the five above
-		// are it — a place branches on `TouchEnabled` to pick a control scheme, and
+		// are it - a place branches on `TouchEnabled` to pick a control scheme, and
 		// a false answer is true.
 		//
 		// What is missing, and what each would need first:
@@ -341,7 +341,7 @@ namespace engine::script {
 		// - **`GetConnectedGamepads`, `GetGamepadState`, `GetSupportedGamepadKeyCodes`,
 		//   `IsGamepadButtonDown`, `GamepadConnected`, `GamepadDisconnected`.**
 		//   `input::Translator` handles five SDL event types and none of them is a
-		//   gamepad, so there is no device to enumerate — `GetConnectedGamepads`
+		//   gamepad, so there is no device to enumerate - `GetConnectedGamepads`
 		//   would be an empty list forever and `GetGamepadState` a list of nothing.
 		//   Closing it is `SDL_Gamepad` in the translator plus the `Gamepad1..8`
 		//   and `Button*`/`Thumbstick*` members in `scene::InputSource` and
@@ -354,7 +354,7 @@ namespace engine::script {
 		//
 		// - **`TextBoxFocused` and `TextBoxFocusReleased`**, which are the
 		//   service-wide twins of the pair a `TextBox` now carries. Not absent
-		//   for want of the fact — `gui::EventKind::Focused` is exactly it — but
+		//   for want of the fact - `gui::EventKind::Focused` is exactly it - but
 		//   because these two are `SignalKind::PropertyChanged` rows fired by
 		//   `PumpInput` from `scene::InputState`, and a focus change arrives at
 		//   the *other* pump, through `DeliverGuiEvents`, carrying the element it
@@ -368,7 +368,7 @@ namespace engine::script {
 		//   `MouseIconEnabled` is here because hiding a cursor needs no image.
 		//
 		// - **`GetStringForKeyCode`, `GetKeyCodeFromString`.** What is printed on
-		//   a key is a keyboard *layout* question — `SDL_GetKeyName` answers it and
+		//   a key is a keyboard *layout* question - `SDL_GetKeyName` answers it and
 		//   lives at L12 where this is L9, so the answer would have to come to rest
 		//   in `scene::InputState` as a table that changes when the player switches
 		//   layout. Worth doing when something asks; nothing has.
@@ -407,7 +407,7 @@ namespace engine::script {
 		}};
 
 		// **One `SignalKind` told apart by name**, exactly as
-		// `GetAttributeChangedSignal` reuses `PropertyChanged` — see
+		// `GetAttributeChangedSignal` reuses `PropertyChanged` - see
 		// `ServiceSignal::Property`. The subject is `NULL_ENTITY` because these
 		// are the world's edges and not any instance's, and both pumps fire the
 		// row whose name matches.

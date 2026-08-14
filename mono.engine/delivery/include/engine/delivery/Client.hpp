@@ -1,6 +1,6 @@
 #pragma once
 
-// Asking for content by name or by kind, and getting bytes back — the client
+// Asking for content by name or by kind, and getting bytes back - the client
 // half CDN.md §7 listed as not started.
 //
 // **The completion becomes visible when the caller pumps, and at no other
@@ -12,7 +12,7 @@
 // background thread that could deliver at a moment scheduling decided. There is
 // `Pump`, and a world calls it at the barrier.
 //
-// **The client trusts the manifest, not the origin** — CDN.md §1. Everything
+// **The client trusts the manifest, not the origin** - CDN.md §1. Everything
 // that arrives is verified against a root the publisher signed, so an origin
 // that is compromised, misconfigured or stale can withhold content but cannot
 // substitute it. That property is what makes it safe to fetch from a delivery
@@ -23,7 +23,7 @@
 // - the asset root, against the bundle root the manifest signed
 //
 // **Sources are walked in order and a failure falls through to the next.** The
-// cache first — content already verified — then each enabled source. A source
+// cache first - content already verified - then each enabled source. A source
 // that refuses, times out or serves something that does not verify is passed
 // over, and only when every one has been tried does a request fail. That is
 // what makes "local first, then the origin next door, then the one across the
@@ -33,7 +33,7 @@
 // CDN.md §5: a group is the thing that is compressed, streamed and cancelled,
 // because per-asset requests are thousands of round trips. So asking for one
 // asset fetches the bundle that carries it, and the other assets in that
-// bundle land in the cache as a consequence — which is the whole of "the game
+// bundle land in the cache as a consequence - which is the whole of "the game
 // progressively builds" seen from this end.
 //
 // @tier L11 · shared
@@ -137,7 +137,7 @@ namespace engine::delivery {
 		uint64_t CacheMisses = 0;
 
 		// Bytes that actually crossed a socket or came off a disk, **as they
-		// travelled** — compressed.
+		// travelled** - compressed.
 		uint64_t TransferredBytes = 0;
 
 		// Bytes those became once expanded.
@@ -158,7 +158,7 @@ namespace engine::delivery {
 		// **Counted apart from an ordinary failure.** A source that is down is
 		// an operational event; a source serving bytes that do not match a
 		// signed root is either corruption or an attack, and one counter for
-		// both buries the second in the first — `assets::Grant`'s rule.
+		// both buries the second in the first - `assets::Grant`'s rule.
 		uint64_t VerificationFailures = 0;
 	};
 
@@ -173,7 +173,7 @@ namespace engine::delivery {
 
 		// Hands over the grant a server issued.
 		//
-		// The origin admits a request against this and nothing else — it holds
+		// The origin admits a request against this and nothing else - it holds
 		// no accounts and no sessions, and CDN.md §4 keeps it that way. A
 		// client with no grant can still read a `Directory` source, because
 		// there is no origin in that path to admit anything.
@@ -211,7 +211,7 @@ namespace engine::delivery {
 		// Asks for every asset of one kind.
 		//
 		// What "connect and get assets of types" is at this layer. Requires a
-		// manifest, since the kinds are in it — an empty result before `Ready`
+		// manifest, since the kinds are in it - an empty result before `Ready`
 		// means "not yet" rather than "none".
 		//
 		// @param kind The kind to fetch.
@@ -241,7 +241,7 @@ namespace engine::delivery {
 		// `Take` answers with an `Asset` and an `Asset` has a `Name`, so a
 		// request that succeeded tells you what it was; one that failed answers
 		// nothing at all. A caller that has to undo something it did at request
-		// time — mark a texture as expected, count a fetch, show a row — could
+		// time - mark a texture as expected, count a fetch, show a row - could
 		// only do it by keeping its own handle-to-name map, which is bookkeeping
 		// duplicated in every host and wrong in the one that forgets.
 		//
@@ -249,7 +249,7 @@ namespace engine::delivery {
 		// one that has been taken or cancelled.
 		//
 		// **A view into the client**, valid until the next call that changes its
-		// request list — `Pump`, `Take`, `Cancel` or another `Request`. A caller
+		// request list - `Pump`, `Take`, `Cancel` or another `Request`. A caller
 		// keeping it across one of those is keeping a dangling view.
 		//
 		// @param id The request.
@@ -276,7 +276,7 @@ namespace engine::delivery {
 	// Builds a delivery client.
 	//
 	// @param settings Where to fetch from and what to trust. Invalid settings
-	//        are refused rather than half-applied — a client with no publisher
+	//        are refused rather than half-applied - a client with no publisher
 	//        key would verify nothing, and one with no source would fetch
 	//        nothing, and neither should look like a working client.
 	// @return The client, or nothing when the settings are not usable.

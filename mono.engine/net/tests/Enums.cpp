@@ -20,7 +20,7 @@ using engine::net::Describe;
 using engine::net::DisconnectReason;
 
 TEST_CASE("every state has a name", "[net][enums]") {
-	// Names are the format and numbers are not, so every value has to have one —
+	// Names are the format and numbers are not, so every value has to have one -
 	// a `?` in a log is a value somebody has to trace back to a switch.
 	for (const ConnectionState state :
 		 {ConnectionState::Connecting,

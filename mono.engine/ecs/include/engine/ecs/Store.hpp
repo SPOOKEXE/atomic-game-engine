@@ -2,7 +2,7 @@
 
 // L3 · the storage for one world.
 //
-// One Store is one world's data — every entity, every component, and every
+// One Store is one world's data - every entity, every component, and every
 // piece of world-scoped state. There is no global store and no way to reach
 // another one from here: `world` at L4 hands out identifiers, never stores, and
 // this is the type it is refusing to hand out.
@@ -14,7 +14,7 @@
 // check, not visible to the profiler, and not there when a world is serialised
 // or replayed.
 //
-// The storage underneath is the engine's own — `ComponentSet` names an
+// The storage underneath is the engine's own - `ComponentSet` names an
 // archetype, `Column` holds one component's values contiguously, and
 // `SparseSet` maps an entity to its row. That is what makes a property
 // reachable by name at runtime, a column serialisable without knowing its type,
@@ -22,7 +22,7 @@
 //
 // Thread affinity is checked rather than trusted. A store belongs to the
 // thread that bound it, every mutation aborts unless it is on that thread, and
-// the check is on in every build — a data race that only shows up under load on
+// the check is on in every build - a data race that only shows up under load on
 // a player's machine costs far more than a branch.
 //
 // @tier L3 · shared
@@ -100,7 +100,7 @@ namespace engine::ecs {
 		//
 		// Rebinding every tick is expected rather than exceptional: a world is
 		// picked up by whichever job worker claims it, so the owner is a
-		// different thread most ticks. That is why the owner is atomic — the
+		// different thread most ticks. That is why the owner is atomic - the
 		// handoff races the affinity check of any thread still holding a stale
 		// belief about who owns this store, and a plain read of a plain
 		// `std::thread::id` there is a data race by the letter of the standard
@@ -127,7 +127,7 @@ namespace engine::ecs {
 		//
 		// **Authoritative**: the index comes from the low half of the index
 		// space, which is the half a replica never mints from. Refused, and
-		// `NULL_ENTITY`, in an adopt-only store — see `SetAdoptOnly` — and also
+		// `NULL_ENTITY`, in an adopt-only store - see `SetAdoptOnly` - and also
 		// when the authoritative range has issued all 2³¹ of its indices, which
 		// is a refusal rather than a wrap into the predicted range.
 		//
@@ -139,7 +139,7 @@ namespace engine::ecs {
 		// **The safe way for a replica to own something the server has not
 		// confirmed.** An index minted here is 2³¹ or higher and the authority
 		// never allocates one, so a predicted projectile cannot collide with an
-		// entity the server made — which is what `SetAdoptOnly` had to forbid
+		// entity the server made - which is what `SetAdoptOnly` had to forbid
 		// minting outright to avoid.
 		//
 		// Legal in an adopt-only store, and that is the whole difference between
@@ -160,7 +160,7 @@ namespace engine::ecs {
 		// The named counterpart of `CreatePredicted`, with `Create`'s name
 		// semantics: an empty name creates an unnamed entity, and a name already
 		// in use hands back the entity holding it. Present so that the two mint
-		// paths have the same shape — a predicted entity that could not be named
+		// paths have the same shape - a predicted entity that could not be named
 		// would make `Promote`'s name fix-up a branch nothing could reach, and a
 		// branch nothing reaches is one that is wrong by the time it is needed.
 		//
@@ -190,7 +190,7 @@ namespace engine::ecs {
 		// **This is the primitive, and the policy is deliberately not here.**
 		// *When* to promote, which authoritative handle to promote to, and what
 		// to do with a prediction the server never confirms belong to whatever
-		// predicts — and nothing does yet, because that wants a projectile,
+		// predicts - and nothing does yet, because that wants a projectile,
 		// which wants v0.4's physics and `Part`. Guessing the rule before its
 		// consumer exists is what `ROADMAP.md` says not to do here, so this
 		// operation exists and no caller decides for a future one. See
@@ -201,8 +201,8 @@ namespace engine::ecs {
 		// instance hierarchy around it all follow the new handle; a handle in
 		// some other component does not, because nothing in `TypeDescriptor`
 		// says which of a component's bytes are entity handles. Those keep the
-		// predicted value and read as **dead** — the predicted index's
-		// generation is bumped as it is freed — rather than as a different
+		// predicted value and read as **dead** - the predicted index's
+		// generation is bumped as it is freed - rather than as a different
 		// entity. A caller holding such a field rewrites it itself, since it is
 		// the layer that knows the field is a handle.
 		//
@@ -221,7 +221,7 @@ namespace engine::ecs {
 		//
 		// **For a replica.** An entity is an index plus a generation, and the
 		// authoritative half of the index space belongs to whoever owns the
-		// simulation — so an authoritative entity a replica minted for itself
+		// simulation - so an authoritative entity a replica minted for itself
 		// would collide *exactly* with one the authority minted, and `Apply`
 		// would be right to treat them as the same entity because nothing tells
 		// them apart. The failure is not a crash: it is two different things
@@ -235,7 +235,7 @@ namespace engine::ecs {
 		//     one. That is the difference this flag now draws, and it is drawn
 		//     at the call site rather than by a mode somewhere else.
 		//   - **`CreateAt`**, because adopting a handle somebody else issued is
-		//     the whole point — this refuses *minting*, not receiving. Which is
+		//     the whole point - this refuses *minting*, not receiving. Which is
 		//     the same shape `world::Postbox` enforces for a replica's bus
 		//     writes: an operation a client wants performed goes up as an input
 		//     and comes back as state.
@@ -294,7 +294,7 @@ namespace engine::ecs {
 		// **For a replica applying authoritative state, and nothing else.**
 		// Ordinary creation allocates the next free index; this takes the one
 		// it is given, because a replicated handle has to mean the same thing
-		// on both machines — an entity stored inside a component is only still
+		// on both machines - an entity stored inside a component is only still
 		// the same entity if the directory agrees.
 		//
 		// `Save`/`Load` and `Apply` already do this internally for a whole
@@ -305,7 +305,7 @@ namespace engine::ecs {
 		// **Receiving, not minting**, so `SetAdoptOnly` does not apply. A world
 		// that mints authoritative entities of its own *and* adopts them from
 		// somebody else will still eventually be told to adopt one it already
-		// has — the index ranges separate an authority from a replica, not two
+		// has - the index ranges separate an authority from a replica, not two
 		// authorities from each other. A replica mints from the predicted range
 		// and adopts everything else, and that pair does not collide.
 		//
@@ -320,7 +320,7 @@ namespace engine::ecs {
 		// cannot express because a query is defined by the components it names.
 		//
 		// Not a `Count()` in disguise. It is a walk, and a caller that wants a
-		// number should still count what it can name — this exists for the
+		// number should still count what it can name - this exists for the
 		// callers that have to look at each one.
 		//
 		// Index order rather than creation order, and deterministic: two runs
@@ -386,7 +386,7 @@ namespace engine::ecs {
 		// Mutable access that deliberately does **not** count as a write.
 		//
 		// `GetMutable` cannot know whether the caller used the pointer it
-		// handed back, so it reports the write unconditionally — a change
+		// handed back, so it reports the write unconditionally - a change
 		// reported that did not happen costs a consumer one wasted rebuild,
 		// where a change missed costs it correctness. That is the right
 		// default. This is the one documented exception to it, and it exists
@@ -395,8 +395,8 @@ namespace engine::ecs {
 		// table carrying `DirtyBits`, not only for an observed one. So writing
 		// a derived per-frame tag through `GetMutable` advances the world's
 		// change counter every frame, and every gate built on "an unchanged
-		// counter means nothing authored has happened" — `physics`'s static
-		// broadphase and `gui`'s compile are the two — is falsified for good.
+		// counter means nothing authored has happened" - `physics`'s static
+		// broadphase and `gui`'s compile are the two - is falsified for good.
 		//
 		// **Legitimate only for a component nothing may observe**, which means
 		// all three of these hold and a reviewer should check all three:
@@ -454,7 +454,7 @@ namespace engine::ecs {
 		//
 		// Resources live outside the table space entirely, so no query can
 		// reach one. A type used as a component *and* as a resource therefore
-		// cannot silently gain a row in `Each<T>` — not because something
+		// cannot silently gain a row in `Each<T>` - not because something
 		// remembered to hide it, but because there is nowhere for it to appear.
 		//
 		// WorldTime is reserved for the dedicated clock API. Do not set, mutate,
@@ -510,7 +510,7 @@ namespace engine::ecs {
 		// assumes it remains present, and systems receive a copy to read.
 
 		// By value, not by reference. It is 32 bytes, read once per system, and
-		// returning a copy makes two hazards impossible at once — a reference
+		// returning a copy makes two hazards impossible at once - a reference
 		// left dangling by a later resource change, and a system quietly
 		// writing to the clock instead of reading it.
 		//
@@ -536,8 +536,8 @@ namespace engine::ecs {
 		// and one reference per component, with the requested const qualification
 		// and in the order named.
 		//
-		// Structural changes during iteration — Create, Destroy, adding a
-		// component — are deferred until the loop ends. They are therefore
+		// Structural changes during iteration - Create, Destroy, adding a
+		// component - are deferred until the loop ends. They are therefore
 		// safe, and not visible to the loop that made them.
 		//
 		// Writes *through* a component reference are direct memory writes and
@@ -558,7 +558,7 @@ namespace engine::ecs {
 		// Each, one call per contiguous run of rows instead of one per entity.
 		//
 		// The body is handed a row count and one array pointer per component,
-		// which is what the storage already holds — a table is columns of
+		// which is what the storage already holds - a table is columns of
 		// contiguous rows, and Each spends its time turning that back into one
 		// call per row. A system that writes a packed output array wants the
 		// columns, not the rows: the loop is then something the compiler can
@@ -566,7 +566,7 @@ namespace engine::ecs {
 		//
 		// Use it when the body is uniform across rows and the output is an
 		// array. Use Each when the body branches per entity, needs the Entity,
-		// or is doing something structural — this one hands out raw pointers
+		// or is doing something structural - this one hands out raw pointers
 		// into live tables and gives up all three:
 		//
 		//   - **No structural changes.** Not deferred, for the same reason
@@ -636,7 +636,7 @@ namespace engine::ecs {
 		// Parallel *within* a tick, not asynchronous across ticks: this blocks
 		// until every entity has been visited, so the tick is still one thing
 		// that starts and finishes. That is what keeps a recorded run
-		// replayable — a result that lands a tick later on a slower machine
+		// replayable - a result that lands a tick later on a slower machine
 		// would not.
 		//
 		// The body runs on many threads at once. It may read and write the
@@ -655,7 +655,7 @@ namespace engine::ecs {
 		// more than a short loop.
 		//
 		// Rows are partitioned within a table, and tables are walked in order.
-		// A scene of one archetype — the common case — parallelises completely;
+		// A scene of one archetype - the common case - parallelises completely;
 		// a scene of a thousand tiny archetypes parallelises hardly at all, and
 		// that is a storage-layout problem rather than something more threads
 		// would fix.
@@ -663,7 +663,7 @@ namespace engine::ecs {
 		// **This is slower than Each below a crossover, and the crossover is far
 		// higher than it looks.** Re-measured by `engine.ecs.bench.iteration` in
 		// the `bench` preset at `-O3`, on a 24-thread machine, over three float
-		// adds per row — the cheapest body there is:
+		// adds per row - the cheapest body there is:
 		//
 		//     entities       Each   EachParallel
 		//        8 192    1.45 us      25.9 us     18x slower
@@ -676,8 +676,8 @@ namespace engine::ecs {
 		// it be made from 32,768.** Two things moved it there and only one of
 		// them is this module's: the serial loop halved when the build went to
 		// `-O3`, and it had already fallen by half again with the chunked
-		// storage. The pool's handover did not move — about 31 us, measured
-		// empty by `engine.parallel.bench.dispatch` — so the row count that
+		// storage. The pool's handover did not move - about 31 us, measured
+		// empty by `engine.parallel.bench.dispatch` - so the row count that
 		// repays it went up by the same factor the loop came down.
 		//
 		// The ceiling past the crossover is about 1.3x rather than the core
@@ -732,7 +732,7 @@ namespace engine::ecs {
 		//
 		// This is what a script's query is: a list of component names, resolved
 		// once, and the entities carrying all of them. An empty list matches
-		// nothing rather than everything — a query is defined by what it names,
+		// nothing rather than everything - a query is defined by what it names,
 		// and `EachEntity` is the walk that answers "everything".
 		//
 		// Tables are walked in id order and rows in row order, so two runs of
@@ -776,7 +776,7 @@ namespace engine::ecs {
 		// Mints an **authoritative** entity, so an adopt-only store refuses it
 		// exactly as it refuses `Create`. That check used to be missing here,
 		// and `scene::MakePart` carried a copy of it because this path walked
-		// straight past the flag — one minting path honouring the rule and one
+		// straight past the flag - one minting path honouring the rule and one
 		// not is worse than neither, because the one that does makes the other
 		// look covered.
 		//
@@ -791,7 +791,7 @@ namespace engine::ecs {
 		// Mints an authoritative entity, so an adopt-only store refuses it for
 		// the same reason it refuses `Create`.
 		//
-		// The copy is parented nowhere, exactly as `:Clone()` leaves it — a
+		// The copy is parented nowhere, exactly as `:Clone()` leaves it - a
 		// clone that appeared in the world at the moment it was made would run
 		// its scripts before the caller had finished configuring it.
 		//
@@ -855,7 +855,7 @@ namespace engine::ecs {
 		//
 		// **This is the first write into the storage that does not go through a
 		// typed `Set<T>`**, so every safety property the typed path gets from
-		// the compiler — right component, right size, right world — this one has
+		// the compiler - right component, right size, right world - this one has
 		// to get from a check. The change mark is the exception and comes for
 		// free: a conversion reaches its component through `GetMutable`, which
 		// already counts as a write.
@@ -878,7 +878,7 @@ namespace engine::ecs {
 
 		// Writes one property of an instance by name.
 		//
-		// A structural property — `Anchored` — moves the row to another
+		// A structural property - `Anchored` - moves the row to another
 		// archetype, so inside iteration it is deferred by the same queue every
 		// other structural change uses.
 		//
@@ -903,7 +903,7 @@ namespace engine::ecs {
 		// already done that.** A script write goes `__newindex` → find the
 		// property by name → marshal the value → `SetProperty(name)` → find the
 		// property by name *again*. Each of those finds is a `Classes::Describe`
-		// — which takes the class table's lock — plus a linear scan of the
+		// - which takes the class table's lock - plus a linear scan of the
 		// class's merged property list.
 		//
 		// So the by-name pair are for a caller holding a string, and these are
@@ -948,7 +948,7 @@ namespace engine::ecs {
 		// Moves an instance under a new parent, or to no parent.
 		//
 		// Appends to the end of the sibling list, so `EachChild` yields
-		// insertion order — which replication and replay both depend on.
+		// insertion order - which replication and replay both depend on.
 		//
 		// **Assigning the parent it already has is a no-op**, exactly as it is
 		// in Roblox. Without that it was an unlink and an append, which moved
@@ -976,17 +976,17 @@ namespace engine::ecs {
 		//
 		// **A set of entities rather than a flag on a component, because the
 		// fact lives above `ecs` and this is L2.** `scene::ServiceComponent::
-		// Fixture` is what decides — a world with no `Workspace` is not a world
+		// Fixture` is what decides - a world with no `Workspace` is not a world
 		// an author meant to build, and deleting one turns every
 		// `game:GetService` in the place into a runtime error a long way from
-		// the delete that caused it — and `scene` is L7. A mirrored flag on an
+		// the delete that caused it - and `scene` is L7. A mirrored flag on an
 		// `ecs` row would be the second copy of one fact rule 2 exists to
 		// refuse, so the store holds identity and nothing else.
 		//
 		// **Filled by `scene::InstallServices` and by nothing else**, which is
 		// what keeps it from being configuration somebody forgets. That function
 		// is the one door a service arrives through, it is idempotent, and it
-		// runs on a world loaded from a file as well as on a fresh one — so a
+		// runs on a world loaded from a file as well as on a fresh one - so a
 		// world that has services has this, by construction rather than by
 		// somebody remembering. `SetAdoptOnly` is the shape *not* to copy: it is
 		// set by exactly one caller and nothing checks that it was.
@@ -1019,7 +1019,7 @@ namespace engine::ecs {
 		// Visits everything under an instance, nearest first.
 		//
 		// **Depth first, in the order a recursive walk written by hand would
-		// produce** — a child, then everything under that child, then the next
+		// produce** - a child, then everything under that child, then the next
 		// child. That is Roblox's `GetDescendants` order, and scripts index
 		// into the result, so it is a contract rather than a detail.
 		//
@@ -1100,7 +1100,7 @@ namespace engine::ecs {
 		// **Opt in, exactly as observing a component is.** A world nobody is
 		// watching stores nothing and pays one branch per `SetParent`; the
 		// alternative is a list that grows for the life of every world with no
-		// script draining it. Idempotent, and there is no way back off — the
+		// script draining it. Idempotent, and there is no way back off - the
 		// same shape `Observe` has, for the same reason: a second listener
 		// connecting must not be able to switch the first one off.
 		void ObserveTree();
@@ -1126,7 +1126,7 @@ namespace engine::ecs {
 		// **The only synchronous signal in the engine, and the only one that
 		// has to be.** Everything else is recorded and delivered at the next
 		// barrier, because a handler re-entering from inside a write would see
-		// a half-written row — `script/Changes.hpp` sets out that rule. This
+		// a half-written row - `script/Changes.hpp` sets out that rule. This
 		// one is called at the *top* of the operation, before a single link
 		// moves, so the tree it is handed is entirely consistent. That is also
 		// the only position from which its contract can hold at all: a handler
@@ -1157,8 +1157,8 @@ namespace engine::ecs {
 		// The dotted path from the root of the tree down to an instance.
 		//
 		// **From the world's root, and there is no `game.` in front of it.** A
-		// world's roots *are* the services — `scene::InstallServices` puts
-		// `Workspace` and the rest in as ordinary instances — so a part inside
+		// world's roots *are* the services - `scene::InstallServices` puts
+		// `Workspace` and the rest in as ordinary instances - so a part inside
 		// a model comes out as `Workspace.Model.Part`, which is what Roblox
 		// prints for the same thing.
 		//
@@ -1170,7 +1170,7 @@ namespace engine::ecs {
 		//
 		// **O(1), which `EachChild` is not.** A tree view asks this per row to
 		// decide whether to draw an expander, and answering it with `EachChild`
-		// walks the entire sibling list to set a bool — free on a leaf, and two
+		// walks the entire sibling list to set a bool - free on a leaf, and two
 		// hundred steps on the root of a two-hundred-part scene, every frame.
 		// `Hierarchy::FirstChild` is the answer already.
 		//
@@ -1181,7 +1181,7 @@ namespace engine::ecs {
 		// Visits every instance with no parent.
 		//
 		// **The world's own children.** `SetParent(instance, NULL_ENTITY)` means
-		// "a root of this world", and `script`'s `workspace` is the world — so
+		// "a root of this world", and `script`'s `workspace` is the world - so
 		// `workspace:GetChildren()` is this. `EachChild` cannot answer it,
 		// because the null entity carries no `Hierarchy` and therefore heads no
 		// sibling list.
@@ -1191,7 +1191,7 @@ namespace engine::ecs {
 		// child list is threaded in insertion order, so reparenting moves an
 		// instance to the end of its new siblings; a root that was detached and
 		// reattached keeps its original place here. Deterministic either way,
-		// which is what a recording needs — an archetype walk would not have
+		// which is what a recording needs - an archetype walk would not have
 		// been, because a row moves when its archetype does.
 		//
 		// The cost is a scan of every instance in the world. That is why this is
@@ -1229,7 +1229,7 @@ namespace engine::ecs {
 		// neither can be a template parameter.
 		//
 		// The value is raw, so a caller writes and reads it through the
-		// component's own `TypeDescriptor` — which is what makes a type with a
+		// component's own `TypeDescriptor` - which is what makes a type with a
 		// custom serialiser behave correctly instead of crossing as its object
 		// representation.
 
@@ -1264,7 +1264,7 @@ namespace engine::ecs {
 		//
 		// **The question a query cannot ask.** `EachMatching` answers "who has
 		// these", and an editor row, a debug view and a script inspecting an
-		// entity it did not build all need the other direction — and the only
+		// entity it did not build all need the other direction - and the only
 		// way to get it before this was to test every registered id in turn.
 		//
 		// The span is the entity's archetype's own id list, so it is valid until
@@ -1355,7 +1355,7 @@ namespace engine::ecs {
 		// **For a system that swept the world through `Each` and wrote through
 		// the reference it was handed.** Dirty bits are set by `Set` and by
 		// nothing else, because a mutable reference handed out by an iteration
-		// is a pointer the store never sees written through — so an integrator
+		// is a pointer the store never sees written through - so an integrator
 		// that does `position.Value = position.Value + ...` marks nothing, and a
 		// replication delta built from the bits carries none of it. That is the
 		// fast path the whole storage layout exists to make fast, so "write
@@ -1364,7 +1364,7 @@ namespace engine::ecs {
 		// The claim it makes is the honest one for that case and not for
 		// others: *everything holding this component changed.* A system that
 		// wrote some rows and not others and calls this has over-reported, and
-		// over-reporting costs bandwidth rather than correctness — a delta
+		// over-reporting costs bandwidth rather than correctness - a delta
 		// carrying an unchanged value writes the same value at the other end.
 		// Under-reporting is the failure that cannot be recovered from, which is
 		// why this is the primitive rather than a per-row one nobody would call
@@ -1377,7 +1377,7 @@ namespace engine::ecs {
 		// **For the writer that cannot report its own writes**, and there is
 		// exactly one shape of those: a parallel pass. `Store::EachParallel`
 		// hands out raw references from worker threads, so it cannot mark
-		// anything — marking is a write to a shared bitset and that is the one
+		// anything - marking is a write to a shared bitset and that is the one
 		// thing a parallel body may not do. `physics::IntegrateMotion` is the
 		// pass in question and its comment has said since v0.4 that a consumer
 		// needing a delta out of an integrated world "marks it in its own
@@ -1385,7 +1385,7 @@ namespace engine::ecs {
 		//
 		// **Not `MarkAllChanged`, and the difference is the whole point.** That
 		// one claims every row carrying the component moved, including anchored
-		// geometry — which defeats `physics::SyncBroadphase`'s outer gate and
+		// geometry - which defeats `physics::SyncBroadphase`'s outer gate and
 		// rebuilds the static index every tick, for ever. This claims one row.
 		//
 		// `GetMutable` would also mark it, and calling that for the side effect
@@ -1449,8 +1449,8 @@ namespace engine::ecs {
 		//
 		// The shape a replication delta wants. `EachChanged` hands over one row
 		// at a time, which is right for a signal and wrong for a delta: rows
-		// that changed together are usually adjacent — a system walks a table in
-		// order and writes as it goes — so a delta over runs is a memcpy per
+		// that changed together are usually adjacent - a system walks a table in
+		// order and writes as it goes - so a delta over runs is a memcpy per
 		// run instead of a copy per entity.
 		//
 		// A run never crosses a table, so the entities and values in one call
@@ -1473,7 +1473,7 @@ namespace engine::ecs {
 		// `EachChangedBatch`, for a component named at runtime.
 		//
 		// The shape replication needs. It resolves component *names* at startup
-		// — an id means something else in the process it is talking to — so it
+		// - an id means something else in the process it is talking to - so it
 		// cannot name a type at compile time, and templating it on one would
 		// mean the set of replicated components had to be a template parameter
 		// list rather than a table read from a game file.
@@ -1539,12 +1539,12 @@ namespace engine::ecs {
 		}
 
 		// Calls `body` at the next phase boundary for every entity whose
-		// component — named at runtime — was written.
+		// component - named at runtime - was written.
 		//
 		// The runtime counterpart of `OnChanged<T>`, and `script`'s `.Changed`
 		// is the caller. A property is a projection of one or more components,
 		// so a listener that wants "did this instance's `Position` move" has to
-		// subscribe to whatever `PropertyDescriptor::Reads` names — which is a
+		// subscribe to whatever `PropertyDescriptor::Reads` names - which is a
 		// `ComponentId` read out of a descriptor, not a type it can write down.
 		//
 		// The value arrives as raw bytes for the same reason: the subscriber
@@ -1612,13 +1612,13 @@ namespace engine::ecs {
 		//
 		// **Component types are recorded by name**, never by id, so a snapshot
 		// written by one process restores into another that assigned different
-		// ids — which is the entire point, since the consumers are a restart
+		// ids - which is the entire point, since the consumers are a restart
 		// after a crash, a world moving between host processes, and a recording
 		// replayed by a later build.
 		//
 		// The entity directory is reproduced exactly, index and generation
-		// alike. A component may hold an `Entity` — a parent, a target, an
-		// owner — and those handles are only still valid if the directory comes
+		// alike. A component may hold an `Entity` - a parent, a target, an
+		// owner - and those handles are only still valid if the directory comes
 		// back unchanged rather than being re-allocated in order.
 		//
 		// @param writer The writer to append the snapshot to.
@@ -1631,7 +1631,7 @@ namespace engine::ecs {
 		//
 		// On any failure the store is left **empty** rather than half-restored,
 		// because a world that is partly one snapshot and partly another is
-		// worse than no world at all — it looks like it works.
+		// worse than no world at all - it looks like it works.
 		//
 		// @param reader The reader to consume.
 		// @return `false` on a corrupt, truncated, or wrong-version snapshot,
@@ -1643,8 +1643,8 @@ namespace engine::ecs {
 		// **The capability the replication seam exists to reserve.** `Load`
 		// replaces a world; this one merges into it. A client holding a replica
 		// receives authoritative state every tick and has to reconcile against
-		// what it already has — same entity, new values, no destroy-and-recreate
-		// — because destroying and recreating would reset everything the client
+		// what it already has - same entity, new values, no destroy-and-recreate
+		// - because destroying and recreating would reset everything the client
 		// predicted and make every correction a visible pop.
 		//
 		// Cheap to allow for now and expensive to retrofit, which is why it is
@@ -1655,13 +1655,13 @@ namespace engine::ecs {
 		// than the old one wearing new values.
 		//
 		// **A locally predicted entity survives `Authoritative` mode.** "The
-		// sender did not mention it" is the definition of a prediction — the
+		// sender did not mention it" is the definition of a prediction - the
 		// authority allocates nothing from the predicted range and so cannot
-		// mention one — and destroying them here would delete every prediction
+		// mention one - and destroying them here would delete every prediction
 		// on the first correction. Retiring a prediction is `Promote`, or a
 		// destroy the predicting layer makes on purpose.
 		//
-		// On failure the live world is **left as it was** — not cleared, and not
+		// On failure the live world is **left as it was** - not cleared, and not
 		// half-merged. A replica that lost its world to a corrupt packet would
 		// be worse off than one that ignored it.
 		//
@@ -1682,7 +1682,7 @@ namespace engine::ecs {
 		// tolerant of versions it has never seen is one that restores a world
 		// nobody can reason about.
 		//
-		// **2 — the entity directory is two runs rather than one.** The
+		// **2 - the entity directory is two runs rather than one.** The
 		// directory is written as a run of `Capacity()` entries, and the index
 		// space now has two regions with 2³¹ indices between them, so a version
 		// 1 reader handed a version 2 stream would read the predicted run's
@@ -1690,13 +1690,13 @@ namespace engine::ecs {
 		// entities nothing named. Bumped rather than sniffed, because the two
 		// layouts are indistinguishable from the bytes alone.
 		//
-		// **3 — `ecs.InstanceClass` is written as the class's name.** It was the
+		// **3 - `ecs.InstanceClass` is written as the class's name.** It was the
 		// registration index, which is `AGENTS.md` rule 4 in a file: nothing
 		// restores the class table the way `Load` restores the directory, so a
 		// world reloaded by a build that registered its classes in another order
 		// came back with every instance the wrong class. The bump is here rather
 		// than left to the reader because a length prefix read as a `ClassId`
-		// does not fail on that field — it consumes the bytes of the values
+		// does not fail on that field - it consumes the bytes of the values
 		// behind it, and the load dies somewhere unrelated with nothing naming
 		// the cause.
 		//
@@ -1719,7 +1719,7 @@ namespace engine::ecs {
 		//
 		// **The number the chunked-storage item is about.** A column never gives
 		// capacity back, so a world that peaked at ten thousand entities and
-		// settled at a hundred still holds the peak — invisible with one world
+		// settled at a hundred still holds the peak - invisible with one world
 		// and the entire footprint with a thousand of them in one host. A
 		// diagnostic: nothing acts on it at runtime, and it is here so that a fee
 		// is pinned by a test rather than described in a comment, exactly as
@@ -1740,7 +1740,7 @@ namespace engine::ecs {
 		// the pool from `slice.Rows`, and `Jobs::For` refuses anything below
 		// `MINIMUM_GRAINS` grains. A slice that was one chunk would put every
 		// dispatch under the floor, and a 500k parallel iteration would quietly
-		// become a serial one — a measured 3.5x, lost with nothing failing. The
+		// become a serial one - a measured 3.5x, lost with nothing failing. The
 		// chunk division happens *inside* the visitors and inside the worker
 		// body, where it cannot reach the dispatch decision.
 		struct TableSlice {
@@ -1769,7 +1769,7 @@ namespace engine::ecs {
 		// One row of a run, given the run's base pointer.
 		//
 		// A component with no data has no bytes to point at, so every instance
-		// of it is the same instance — which is exactly true, since an empty
+		// of it is the same instance - which is exactly true, since an empty
 		// type has no state to tell two of them apart. Handing back a shared
 		// object keeps a tag usable as a query term without giving a column of
 		// nothing a pointer nobody could dereference.
@@ -1786,7 +1786,7 @@ namespace engine::ecs {
 		// **The bases are parameters, not looked up in the loop.** Resolving
 		// `chunks[chunk]` per row per term costs two extra loads on the hottest
 		// path in the engine, and the compiler cannot hoist them because the
-		// body may alias the directory — measured at **+92% on `Each` over 10k
+		// body may alias the directory - measured at **+92% on `Each` over 10k
 		// rows** before the lookup was pulled out here.
 		template <class... Ts, class Body>
 		static void RunRows(const Entity *entities, size_t rows, Body &body, Ts *...bases) {
@@ -1841,8 +1841,8 @@ namespace engine::ecs {
 		template <class... Ts, class Body, size_t... Indices>
 		void VisitBatch(const TableSlice &slice, Body &body, std::index_sequence<Indices...>) {
 			// One call per chunk. `EachBatch` promises nothing about where a
-			// batch ends, and the constraint the other way — that rows inside
-			// one batch are adjacent — is exactly what a chunk boundary is.
+			// batch ends, and the constraint the other way - that rows inside
+			// one batch are adjacent - is exactly what a chunk boundary is.
 			size_t row = 0;
 			while (row < slice.Rows) {
 				const size_t chunk = Column::ChunkOf(row);

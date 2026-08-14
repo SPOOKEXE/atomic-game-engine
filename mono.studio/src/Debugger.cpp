@@ -2,7 +2,7 @@
 //
 // **This is a capture debugger and the panel says so.** `script/Debugger.hpp`
 // carries the argument: a paused world is not a replayable one, and the editor's
-// frame loop is the thread the VM runs on — so holding a script inside a line
+// frame loop is the thread the VM runs on - so holding a script inside a line
 // would freeze the window that was going to show you the answer. What this does
 // instead is record the stack and every local at the moment the line ran.
 //
@@ -42,7 +42,7 @@ namespace studio {
 		// --- adding one --------------------------------------------------------
 
 		ImGui::SetNextItemWidth(180.0f * Settings.Scale);
-		TextField("##break-source", BreakSource, "script path — enemy.luau");
+		TextField("##break-source", BreakSource, "script path - enemy.luau");
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(70.0f * Settings.Scale);
 		ImGui::InputInt("##break-line", &BreakLine, 0, 0);
@@ -70,7 +70,7 @@ namespace studio {
 				Breakpoints.Add(BreakSource, BreakLine, action);
 
 				// Every running world, because a breakpoint is a thing about a
-				// *script* and the same script may be running in several —
+				// *script* and the same script may be running in several -
 				// asking which one somebody meant would be a question with no
 				// answer they could give.
 				for (WorldRun &run : Runs) {
@@ -102,11 +102,11 @@ namespace studio {
 		}
 
 		// The thing somebody has to know before they trust this panel.
-		ImGui::TextDisabled("captures the stack — it does not pause the world");
+		ImGui::TextDisabled("captures the stack - it does not pause the world");
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
 				"A held tick is work crossing a tick boundary, which is what makes\n"
-				"a recording stop replaying — and the editor's frame loop is the\n"
+				"a recording stop replaying - and the editor's frame loop is the\n"
 				"thread the VM runs on, so a pause would freeze this window too."
 			);
 		}
@@ -114,7 +114,7 @@ namespace studio {
 		ImGui::Separator();
 
 		if (Runs.empty()) {
-			ImGui::TextDisabled("nothing is running — press Play or Run");
+			ImGui::TextDisabled("nothing is running - press Play or Run");
 			ImGui::End();
 			return;
 		}
@@ -202,7 +202,7 @@ namespace studio {
 			std::snprintf(
 				header,
 				sizeof(header),
-				"%s — %zu breakpoint%s, %zu caught###%u",
+				"%s - %zu breakpoint%s, %zu caught###%u",
 				world.c_str(),
 				debug.Breakpoints().size(),
 				debug.Breakpoints().size() == 1 ? "" : "s",
@@ -236,14 +236,14 @@ namespace studio {
 				// The old shape put every frame of every hit inside nested
 				// nodes, so reading one local meant opening three things and
 				// the panel was mostly disclosure triangles. A capture has two
-				// axes — which hit, and which frame of it — and two lists is
+				// axes - which hit, and which frame of it - and two lists is
 				// what that is.
 				const float side = 220.0f * Settings.Scale;
 				ImGui::BeginChild("##hits", ImVec2(side, 180.0f * Settings.Scale), true);
 
 				// **Newest first.** The log keeps the most recent hits and drops
 				// the oldest, so somebody watching a loop is reading the end of
-				// it — and making them scroll there every time would be an
+				// it - and making them scroll there every time would be an
 				// interface arguing with its own data.
 				for (size_t index = hits.size(); index-- > 0;) {
 					const DebugHit &hit = hits[index];
@@ -276,7 +276,7 @@ namespace studio {
 					const DebugHit &hit = hits[SelectedHit];
 
 					if (hit.Instance != engine::ecs::NULL_ENTITY) {
-						// Which script was running, when the runtime knew — a
+						// Which script was running, when the runtime knew - a
 						// path alone does not say which of two instances
 						// sharing a module was the one that got here.
 						ImGui::TextDisabled("script #%llu", static_cast<unsigned long long>(hit.Instance.Id));
@@ -313,7 +313,7 @@ namespace studio {
 
 						// **Locals and upvalues are two tabs, not one list.** A
 						// local is a value this frame made and an upvalue is one
-						// it captured from an enclosing scope — so "why did this
+						// it captured from an enclosing scope - so "why did this
 						// change when nothing here touched it" is a question
 						// only the second answers, and merging them loses it.
 						if (ImGui::BeginTabItem("Locals")) {
@@ -323,7 +323,7 @@ namespace studio {
 						if (ImGui::BeginTabItem("Upvalues")) {
 							DrawDebugValues(
 								frame == nullptr ? nullptr : &frame->Upvalues,
-								"nothing captured — a chunk's own frame closes over nothing in Luau"
+								"nothing captured - a chunk's own frame closes over nothing in Luau"
 							);
 							ImGui::EndTabItem();
 						}

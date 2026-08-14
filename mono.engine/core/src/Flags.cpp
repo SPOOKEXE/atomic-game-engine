@@ -46,7 +46,7 @@ namespace engine::core {
 
 			// Guards declaration and `Set`, which happen during startup and may
 			// come from more than one thread in a program that opens a service
-			// while parsing. Reads after `Freeze` take nothing — that is what
+			// while parsing. Reads after `Freeze` take nothing - that is what
 			// the freeze buys.
 			std::mutex Lock;
 		};
@@ -57,7 +57,7 @@ namespace engine::core {
 		}
 
 		// Lowercases in place, ASCII only. Flag names and boolean spellings are
-		// both ASCII by construction — a name is declared in this repository and
+		// both ASCII by construction - a name is declared in this repository and
 		// a boolean is one of eight words.
 		std::string Lowered(std::string_view text) {
 			std::string lowered(text);
@@ -326,7 +326,7 @@ namespace engine::core {
 		// `--content-gif` on one command line is the same person saying it
 		// twice, and the second is what they meant; a config file and a command
 		// line disagreeing is not. A `List` reads the same comparison as
-		// "append rather than replace" — see `Apply`.
+		// "append rather than replace" - see `Apply`.
 		if (found->Source > source) {
 			return FlagStatus::Outranked;
 		}
@@ -428,7 +428,7 @@ namespace engine::core {
 	FlagTableBuilder &
 	FlagTableBuilder::Number(std::string_view name, double value, std::string_view description) {
 		// **Not `std::to_string`**, which is `%f` and turns 1e-7 into `0.000000`
-		// — a default that reads back as zero. Sixteen significant digits is
+		// - a default that reads back as zero. Sixteen significant digits is
 		// what round-trips a double.
 		std::array<char, 32> text{};
 		const int written = std::snprintf(text.data(), text.size(), "%.17g", value);

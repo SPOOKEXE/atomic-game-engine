@@ -5,7 +5,7 @@
 // A benchmark binary is discovered, signed and selected by exactly the
 // machinery that selects tests: it declares `TEST_SUITE_ID`, answers
 // `--mono-suites`, and gets a cascading signature over its own source and every
-// header it includes. That is the "shim and rename" the roadmap asks for — a
+// header it includes. That is the "shim and rename" the roadmap asks for - a
 // second discovery mechanism would be a second thing to keep correct, and the
 // one that got neglected would be the one that silently stopped re-running.
 //
@@ -29,7 +29,7 @@
 //
 // **The minimum sample is reported, not the mean.** A benchmark is bounded
 // below by the work and unbounded above by whatever else the machine felt like
-// doing — a scheduler preemption, a turbo clock stepping down, another suite
+// doing - a scheduler preemption, a turbo clock stepping down, another suite
 // building. The mean of that distribution measures the machine's mood; the
 // minimum measures the code. The spread is reported alongside so that a
 // suspiciously wide one is visible rather than averaged in.
@@ -123,7 +123,7 @@ namespace engine::testing {
 	// Stops the optimiser deleting work whose result nothing reads.
 	//
 	// A benchmark's body usually computes something and throws it away, which
-	// is exactly the shape a compiler is entitled to remove entirely — and a
+	// is exactly the shape a compiler is entitled to remove entirely - and a
 	// benchmark measuring nothing reports a very good number. Passing the
 	// result through here makes the compiler assume something might read it.
 	//
@@ -160,7 +160,7 @@ namespace engine::testing {
 // Declares a benchmark whose body runs `iterations` times per sample.
 //
 // The suite identifier comes from the file's `TEST_SUITE_ID`, the same way
-// `TEST_DEPENDS` takes it — repeating it here is the version that drifts.
+// `TEST_DEPENDS` takes it - repeating it here is the version that drifts.
 #define BENCH(name, iterations)                                                                              \
 	static void ENGINE_BENCH_CONCAT(MonoBenchBody, __LINE__)();                                              \
 	namespace {                                                                                              \

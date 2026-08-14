@@ -29,8 +29,8 @@
 //
 // **No delivery client here on purpose.** This suite is the answer to "create a
 // cdn and request directly to it": it speaks the HTTP surface by hand, so what
-// is being checked is the *protocol* — the routes, the statuses, the refusals
-// and the compression — rather than whether two pieces of our own code agree
+// is being checked is the *protocol* - the routes, the statuses, the refusals
+// and the compression - rather than whether two pieces of our own code agree
 // with each other. `Delivery.cpp` is the other half and uses the real client.
 
 TEST_SUITE_ID("cdn.service")
@@ -90,7 +90,7 @@ namespace {
 		return std::move(*key);
 	}
 
-	// Records that share a shape and differ in their numbers — compressible for
+	// Records that share a shape and differ in their numbers - compressible for
 	// the reason real content is, rather than because every byte is the same.
 	std::string Structured(std::string_view label, size_t records) {
 		std::string text;
@@ -136,7 +136,7 @@ namespace {
 			// **Repetitive but varied, the way cooked content actually is.** A
 			// buffer of one repeated byte compresses to about forty bytes,
 			// which makes "the frame was smaller than the payload" true for a
-			// reason that has nothing to do with the codec working — and it
+			// reason that has nothing to do with the codec working - and it
 			// leaves nothing for a range request to slice. Structured records
 			// with changing numbers in them compress well and not absurdly.
 			Write("meshes/rock.mesh", Structured("vert", 3000));
@@ -229,7 +229,7 @@ TEST_CASE("health says what is being served", "[cdn][service]") {
 
 TEST_CASE("the manifest is served with its signature and verifies", "[cdn][service]") {
 	// The published file verbatim, not a re-serialisation that is *supposed* to
-	// be identical — so a client verifies what the publisher actually signed.
+	// be identical - so a client verifies what the publisher actually signed.
 	Deployment origin;
 	const auto answer = origin.Ask(origin.Get("/manifest"));
 	REQUIRE(answer.has_value());
@@ -253,7 +253,7 @@ TEST_CASE("the manifest is served with its signature and verifies", "[cdn][servi
 TEST_CASE("a group is served compressed and expands to what the manifest says", "[cdn][service]") {
 	// **The compression check, at the wire.** The frame that crossed the socket
 	// must be smaller than the payload it expands to, and it must expand to
-	// exactly the length the *signed manifest* records — never to whatever the
+	// exactly the length the *signed manifest* records - never to whatever the
 	// frame header claims.
 	Deployment origin;
 	REQUIRE(origin.Catalogue->Bundles().size() >= 1);
@@ -274,7 +274,7 @@ TEST_CASE("a group is served compressed and expands to what the manifest says", 
 	REQUIRE(payload.has_value());
 	CHECK(payload->size() == bundle.TotalBytes);
 
-	// And the bytes are the ones the store holds — the round trip is lossless.
+	// And the bytes are the ones the store holds - the round trip is lossless.
 	auto store = ChunkStore::Open(origin.Root / "store", false);
 	REQUIRE(store.has_value());
 	const auto direct = store->ReadBundle(*origin.Catalogue, bundle);
@@ -349,7 +349,7 @@ TEST_CASE("a grant for one bundle does not admit another", "[cdn][service]") {
 
 TEST_CASE("a bundle target that is not a hash is refused", "[cdn][service]") {
 	// There is no route that takes a name, so there is nothing to walk out of a
-	// directory — CDN.md §8.
+	// directory - CDN.md §8.
 	Deployment origin;
 
 	for (const std::string &target : {
@@ -456,7 +456,7 @@ TEST_CASE("a head request answers the size without the bytes", "[cdn][service]")
 
 TEST_CASE("a prepared group is served from the cache the second time", "[cdn][service]") {
 	// Preparing per request would make an origin's cost scale with its
-	// popularity rather than with its content — exactly backwards.
+	// popularity rather than with its content - exactly backwards.
 	Deployment origin;
 	const auto &bundle = origin.Catalogue->Bundles()[0];
 

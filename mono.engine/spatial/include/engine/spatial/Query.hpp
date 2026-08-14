@@ -13,7 +13,7 @@
 // **There will be two functions called `Raycast`.** This one hits proxy boxes
 // in an index. The one `physics` will grow hits colliders, and will call this
 // one to find the candidates it then tests exactly. Reaching for the wrong one
-// does not fail to compile and does not obviously fail at runtime — it returns
+// does not fail to compile and does not obviously fail at runtime - it returns
 // a plausible answer that is a box away from the right one.
 //
 // **The storage is the caller's.** Every query but one writes into a span the
@@ -22,7 +22,7 @@
 // parameter "where a return value works", and here it does not work: the
 // container has to be the caller's, and `QueryResult` is the struct return that
 // carries the rest. `Raycast` is the exception because there is at most one
-// answer and it fits in the return — the same shape as `assets::Grant::Open`.
+// answer and it fits in the return - the same shape as `assets::Grant::Open`.
 //
 // @tier L6 · shared
 
@@ -126,7 +126,7 @@ namespace engine::spatial {
 	// Sweeps an axis-aligned box along `motion` and finds what it would meet.
 	//
 	// **An axis-aligned box and only that.** A shape-typed sweep needs
-	// `scene::ShapeKind`, which is L7, and this module is L6 — so the sweep
+	// `scene::ShapeKind`, which is L7, and this module is L6 - so the sweep
 	// that knows about spheres and cylinders belongs to `physics`, layered on
 	// top of this one. Nothing here holds a rotation either, so there is no
 	// oriented sweep to be had at this layer even in principle.

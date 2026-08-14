@@ -1,7 +1,7 @@
 // The four services that reach out of a world, in neither language.
 //
 // **`MessagingService` fans out, `TeleportService` addresses, and the two stores
-// answer a key.** All four sit on `world::Postbox`, which is the only crossing —
+// answer a key.** All four sit on `world::Postbox`, which is the only crossing -
 // rule 3 expressed as an API rather than as a convention: nothing crossing a
 // world boundary is a pointer, so what goes is bytes and the far side gets a
 // copy.
@@ -9,7 +9,7 @@
 // **Written twice until v0.16, and one of the two copies was missing a
 // method.** A retired `Services.cpp` held the Luau half and `JsBindings.cpp` and
 // `JsDatatypes.cpp` held the JavaScript one, so `TeleportService.GetTeleportData`
-// existed in one language and not the other — the per-service gap
+// existed in one language and not the other - the per-service gap
 // `ServiceSurface::LuauMethods` was invented to make visible and which the
 // catalogue's row could not express. Describing the four once closes it: the
 // method is a `ServiceMethod` row, both VMs install every row, and a JavaScript
@@ -17,13 +17,13 @@
 //
 // **What made the stores describable is `ScriptCall::Await`.** A `Get` returns a
 // `Ticket`, the reply lands at a later barrier applied in sorted order, and the
-// two languages suspend on it completely differently — a yielded coroutine and a
+// two languages suspend on it completely differently - a yielded coroutine and a
 // `Promise`. That is one member on the interface rather than four methods
 // written twice, and it is the last thing about these services that a VM
 // decides.
 //
-// **Four descriptions and no system, since v0.18.** `AdmitTeleports` — the pass
-// that takes in the people a teleport sent here — ran on every world whether or
+// **Four descriptions and no system, since v0.18.** `AdmitTeleports` - the pass
+// that takes in the people a teleport sent here - ran on every world whether or
 // not it had a script, and compiling it beside these four meant it was built
 // against `<lua.h>`. It is `Teleport.cpp` now, and what the two still share is
 // one child name.
@@ -61,7 +61,7 @@ namespace engine::script {
 		//
 		// **Two flags, and checking one would have been checking half.**
 		// `Postbox::IsReplica` reads the bus's own `Replica` resource, and
-		// `Store::AdoptOnly` is what `SetProperty` refuses on — the same fact
+		// `Store::AdoptOnly` is what `SetProperty` refuses on - the same fact
 		// recorded in two places, which is a rule-2 smell in `world` rather than
 		// here. A script guard that consulted only one would let a write through
 		// on a world the other had already disowned, so this consults both and
@@ -132,13 +132,13 @@ namespace engine::script {
 		// `MessagingService:SubscribeAsync(topic, callback)`
 		//
 		// The callback fires when the barrier delivers, which is a deterministic
-		// point in a deterministic order — so this needs no suspension and is
+		// point in a deterministic order - so this needs no suspension and is
 		// legal under `docs/retired/SCRIPT_CONCURRENCY.md` §1.
 		//
 		// **The handler is read before the bus is told, and released if the bus
 		// refuses.** `RetainCallback` is what checks the argument is a function
 		// at all, so subscribing first would register this world's interest in a
-		// topic on the way to raising about the second argument — a subscription
+		// topic on the way to raising about the second argument - a subscription
 		// nothing can ever withdraw. Retaining first costs one release on the
 		// budget path and nothing on the ordinary one.
 		void SubscribeAsync(ScriptCall &call) {
@@ -163,13 +163,13 @@ namespace engine::script {
 		// **These are the calls a script genuinely suspends on, and they are the
 		// reason `task` had to come first.** A `Get` returns a `Ticket`; the reply
 		// lands in the inbox at a later tick, applied sorted at the barrier. So
-		// the resume source is §1's *first* legal case — a `Ticket` reply the
+		// the resume source is §1's *first* legal case - a `Ticket` reply the
 		// barrier applied.
 		//
 		// §5's three refusals are part of the contract rather than an
 		// afterthought: `OverBudget` when the world has spent its allowance, a
 		// replica refusing a write, and `NotFound` / `Conflict` from the bus
-		// itself. Each arrives as a value the script can test — see
+		// itself. Each arrives as a value the script can test - see
 		// `DescribeStatus`.
 
 		// Both stores' `GetAsync`, `SetAsync` and `RemoveAsync`.
@@ -209,7 +209,7 @@ namespace engine::script {
 		// **The compare-and-swap, which is the cross-world lock.**
 		// `docs/retired/SCRIPT_CONCURRENCY.md` §4: a lock in the shape an author
 		// expects cannot exist here, because rule 3 leaves no shared memory to
-		// guard. What they actually want is this — the version the caller read
+		// guard. What they actually want is this - the version the caller read
 		// goes in, and `Conflict` comes back when it has moved on.
 		void MemoryStoreUpdateAsync(ScriptCall &call) {
 			const std::string key = call.AsString(0);
@@ -239,7 +239,7 @@ namespace engine::script {
 		// **The one bus operation that names a world, and no script could reach
 		// it until v0.15.** `world::BusKind::Teleport` and `Postbox::Teleport`
 		// have existed since v0.2 with a router that delivers and an inbox that
-		// receives — and the delivery pump dropped every arrival on the floor,
+		// receives - and the delivery pump dropped every arrival on the floor,
 		// because it only ever looked for `Messaging`. So the crossing worked and
 		// nothing could ask for one or notice one.
 		//
@@ -247,7 +247,7 @@ namespace engine::script {
 		// 3 and it is also what makes the feature work: the destination rebuilds
 		// the player from its *own* class definitions, so two worlds never have to
 		// agree about what a `Player` is made of. Roblox works the same way and
-		// for the same reason — the far side is another server.
+		// for the same reason - the far side is another server.
 
 		// The data a player is carrying, as the language's own value, or nil.
 		//
@@ -289,7 +289,7 @@ namespace engine::script {
 
 			if (WritesBelongElsewhere(box, store)) {
 				// **A replica may not move anybody.** A client asking a server
-				// to teleport somebody is a request, not an act — and there is
+				// to teleport somebody is a request, not an act - and there is
 				// no request channel for it yet, so the honest answer is a
 				// refusal a script can see rather than a silent no-op.
 				call.Raise("Teleport: this world is a replica and does not decide who is in it");
@@ -326,7 +326,7 @@ namespace engine::script {
 			// **A ticket rather than a bool, and the reply is deliberately not
 			// awaited.** `NONE` means the world spent its allowance this tick;
 			// anything else means the envelope is queued, and the only thing a
-			// reply could say is that the destination does not exist — which is
+			// reply could say is that the destination does not exist - which is
 			// a delivery this world will never see the far side of anyway.
 			if (box.Teleport(place.c_str(), payload).Value == Ticket::NONE) {
 				call.Raise(("Teleport: over this world's budget for '" + place + "'").c_str());
@@ -334,7 +334,7 @@ namespace engine::script {
 
 			// **Removed here rather than when the arrival lands**, because the
 			// two happen in different worlds and only this one can do it. A
-			// player left behind would be in both places at once — and the
+			// player left behind would be in both places at once - and the
 			// destination has no way to reach back and tidy up, which is
 			// exactly the cross-world reference rule 3 forbids.
 			//
@@ -365,7 +365,7 @@ namespace engine::script {
 		//
 		// **The server's half of the call above, and the reason it exists is that
 		// the payload had no reader on the side that can act on it.**
-		// `GetLocalPlayerTeleportData` is Roblox's and is a *client* call — it
+		// `GetLocalPlayerTeleportData` is Roblox's and is a *client* call - it
 		// answers for `LocalPlayer` and nobody else, deliberately, so a script
 		// cannot read somebody else's data. But the machine that decides where an
 		// arriving character stands is the authority, and it had no way to see

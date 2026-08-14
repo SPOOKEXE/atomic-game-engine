@@ -7,7 +7,7 @@
 // no network at all. Somebody still has to open the real sockets and decide
 // which of the three exist, and doing that in `mono.server`, `mono.client`,
 // `mono.studio` and `mono.cdn` separately would be the same forty lines four
-// times — and four places for the discovery port to be got wrong.
+// times - and four places for the discovery port to be got wrong.
 //
 // So this is the composition, and it is deliberately the only thing in this
 // module that opens a socket.
@@ -15,9 +15,9 @@
 // ## Two sockets, and why not one
 //
 // A host announces from an **ephemeral** port and a browser listens on the
-// **well-known** one. A process that does both — the studio, which hosts team
+// **well-known** one. A process that does both - the studio, which hosts team
 // create and lists other people's; a client that hosts a session for its
-// friends and still browses — needs both, because one socket cannot be both
+// friends and still browses - needs both, because one socket cannot be both
 // ephemeral and well-known.
 //
 // The rendezvous client shares the announcing socket rather than opening a
@@ -30,7 +30,7 @@
 // A dedicated server with no LAN worth announcing on opens no sockets at all
 // and `Pump` does nothing. A client that only ever types an address in gets a
 // `Directory` with no transport behind it, which still holds the rows it was
-// offered — so the code that walks a session list is the same code whether
+// offered - so the code that walks a session list is the same code whether
 // discovery is on or off. That is the property worth having: no caller has an
 // "is discovery enabled" branch.
 //
@@ -67,7 +67,7 @@ namespace network {
 		//
 		// Text rather than an `Endpoint` because that is what a command line
 		// and a config file hold, and `Endpoint::Parse` refuses a host name for
-		// a reason `net` gives at length — resolving one blocks. An operator
+		// a reason `net` gives at length - resolving one blocks. An operator
 		// with a name rather than an address resolves it themselves and passes
 		// the result.
 		std::string RendezvousAddress;
@@ -79,7 +79,7 @@ namespace network {
 		// what is listed.
 		uint32_t Protocol = 0;
 
-		// What this process is, and what it collects. Both halves again — a
+		// What this process is, and what it collects. Both halves again - a
 		// studio announces `Studio` and lists `Studio`.
 		Purpose Use = Purpose::Game;
 
@@ -117,7 +117,7 @@ namespace network {
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(PresenceFault fault);
 
-	// Being findable, and finding — over whichever of the three reaches are
+	// Being findable, and finding - over whichever of the three reaches are
 	// configured.
 	//
 	// @since v0.13
@@ -129,7 +129,7 @@ namespace network {
 		// subnet broadcast address still wants its rendezvous registration, and
 		// a discovery port already held by another program still leaves an
 		// announcement worth making. So a socket that could not be opened turns
-		// off the half that needed it, records a `Fault`, and the rest runs —
+		// off the half that needed it, records a `Fault`, and the rest runs -
 		// the alternative is a program that refuses to start over a feature
 		// nobody asked to be essential.
 		//
@@ -138,7 +138,7 @@ namespace network {
 		// @param key      The session key, for a `Private` advert. Moved in.
 		// @param session  The transport this process's session traffic uses, or
 		//        null. **Given one, the rendezvous runs over it rather than
-		//        over the announcing socket** — which is the only arrangement
+		//        over the announcing socket** - which is the only arrangement
 		//        in which a punched hole is worth anything, because a router's
 		//        mapping belongs to a port. It is borrowed and never drained
 		//        here: its owner drains it and routes through `Deliver`. See
@@ -290,7 +290,7 @@ namespace network {
 		std::unique_ptr<RendezvousClient> Meeting;
 
 		// Whether the rendezvous shares somebody else's transport. When it
-		// does, `Pump` must not drain it — its owner does, and routes here.
+		// does, `Pump` must not drain it - its owner does, and routes here.
 		bool Sharing = false;
 
 		// Held by value and always present, so a caller walking sessions has

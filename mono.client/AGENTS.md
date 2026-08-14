@@ -1,4 +1,4 @@
-# mono.client — module invariants
+# mono.client - module invariants
 
 The client program: a `client`-tier library and a thin main over it.
 
@@ -16,7 +16,7 @@ The frame loop's *shape* would; `Client::Step` itself would not.
 `mono.client` is a library plus a thin executable, and the split is not
 cosmetic. Single-player links `Mono::server` into this process and hosts a
 server over a loopback transport. That is impossible when the program is one
-executable's worth of globbed sources — there is nothing to link.
+executable's worth of globbed sources - there is nothing to link.
 
 When that edge is added it goes in `CMakeLists.txt` as an explicit
 `ALLOW_TIER_ESCAPE Mono::server` with a comment saying why. It is the one edge
@@ -28,8 +28,8 @@ it a decision instead of a precedent.
 `mono.server/include/server/` is invisible here, and it stays that way.
 
 **The components are shared now, and the sharing is `mono.engine/scene` at
-L7** — an engine module both programs link, not an include across two programs.
-`Scene.hpp` — `Demo.hpp` as was — used to declare a `Transform`, a
+L7** - an engine module both programs link, not an include across two programs.
+`Scene.hpp` - `Demo.hpp` as was - used to declare a `Transform`, a
 `PreviousTransform`, a `Visual`, a
 `SceneBounds` and an `ActiveCamera`, and `Replicated.hpp` used to declare the
 server's two components a second time under the server's wire names so a
@@ -40,11 +40,11 @@ translation layer.
 So **a component declared in this directory that means something a `scene`
 component already means is the change to refuse.** `DrawList` is what is left,
 and it is not a duplicate: it is what one world hands its compositor. `Spin` and
-`Orbit` are gone with the C++ demo — a scripted scene writes `CFrame` directly
+`Orbit` are gone with the C++ demo - a scripted scene writes `CFrame` directly
 and needs neither.
 
 `Replicated.hpp` survives its own reason for existing because it acquired a
-better one — a replicated world still has to be *drawn*, nothing about drawing
+better one - a replicated world still has to be *drawn*, nothing about drawing
 it crosses a wire, and that is neither the demo's job nor the engine's.
 
 ## The world holds the world. This directory holds the program
@@ -52,18 +52,18 @@ it crosses a wire, and that is neither the demo's job nor the engine's.
 The line is worth stating precisely, because it moved once already.
 
 **In the store:** every component, the clock, the camera, the world bounds, the
-draw list. Anything a system reads or writes. The camera is a *row* — a
+draw list. Anything a system reads or writes. The camera is a *row* - a
 `scene::Camera` and a `scene::Transform` on an entity, with the
-`scene::ActiveCamera` resource naming which one is live — because a world may
+`scene::ActiveCamera` resource naming which one is live - because a world may
 hold several and exactly one is in charge. There is no `DemoScene` object
-and there must not be one again — it held exactly that state as members and
+and there must not be one again - it held exactly that state as members and
 handed systems a `this`, which put the half of the world the renderer reads
 outside the affinity check, outside the profiler, and out of reach of a second
 world. `mono.engine/ecs/AGENTS.md` has the full account.
 
 **On `Client`:** the window, the swapchain, the frame budget, the panel scroll,
 the parsed options. None of it is world state and none of it belongs in the
-store. The test is whether a second world in this process would want its own —
+store. The test is whether a second world in this process would want its own -
 a draw list yes, a window no.
 
 ## The demo scene is gone, and what replaced it
@@ -72,19 +72,19 @@ a draw list yes, a window no.
 scene from. **There is one now**: `mono.engine/examples/Rings.luau` builds the
 ring scene through the same class table `Instance.new("Part")` resolves against,
 and `--script` loads it. The C++ `BuildDemoWorld` is deleted and the files are
-`Scene.hpp` and `Scene.cpp`, which is what they now hold — the client's own half
+`Scene.hpp` and `Scene.cpp`, which is what they now hold - the client's own half
 of loading a world, and no scene of their own.
 
 **There is one path, and that is the point.** Keeping the C++ scene beside the
 Luau one would have been two ways to do one job, which is the most expensive
-kind of debt in a monorepo because both accumulate callers — and only one of
+kind of debt in a monorepo because both accumulate callers - and only one of
 them exercises the bindings. `--script` with no argument falls back to the
 example rather than to a second implementation.
 
 What survives here is the client's half and nothing more:
 
 - `DrawList`, which is what one world hands its compositor.
-- `MoveCamera`, which is a placeholder and says so — a script can make and aim a
+- `MoveCamera`, which is a placeholder and says so - a script can make and aim a
   camera at v0.6, so this exists only until an example does.
 - `CollectInstances`, which turns simulation state into a draw list. Not a
   demo's job: every world a client draws needs it.
@@ -112,21 +112,21 @@ Four things about it are deliberate and each hides a real failure:
 - **Nor is dead-reckoning a body that the buffer has run out of ticks for**, and
   `CollectReplicated` is where the second exception that is not one lives.
   `SnapshotBuffer::DeadReckonSeconds` says how long the clock has been unable to
-  interpolate; this file decides who gets that time spent on them — a row with a
+  interpolate; this file decides who gets that time spent on them - a row with a
   `scene::Motion` and no `scene::NetworkOwner`, because the first is a function
   the authority already sent and the second says somebody else already simulates
   it. The result is a pose in a `DrawInstance` and nothing else, which is why
   this advances no world: no system runs, no phase is added, no component is
   written, and `physics::Advanced` is the whole of what is called.
   `replication/AGENTS.md` carries the amended invariant and `D00015(c)` is the
-  decision. **Bounded twice** — by `InterpolationSettings::ExtrapolateSeconds`
+  decision. **Bounded twice** - by `InterpolationSettings::ExtrapolateSeconds`
   in time, and by `RECKON_HALF_EXTENTS` of the body's own size in distance,
   because nothing here runs a broad phase to ask what it is about to pass
   through.
 - **It is interpolated, and not by a `PreviousTransform`.** The demo
   interpolates between `PreviousTransform` and `Transform` because it owns both
   ends of its own tick. A replica owns neither, so the two states worth
-  interpolating between are two *received* ticks — held in
+  interpolating between are two *received* ticks - held in
   `replication::SnapshotBuffer`, which decides where between them the world is
   drawn. `Replicated.cpp` only asks. **Nothing interpolated reaches a
   component**: the pose goes into a `DrawInstance` and nowhere else, because a
@@ -135,7 +135,7 @@ Four things about it are deliberate and each hides a real failure:
   `D00010`.
 - **It has no camera of its own and is looked at through the demo's.** A camera
   is an entity, and an entity minted in a replica collides exactly with one the
-  authority minted — the collision `Store::SetAdoptOnly` refuses. A local row in
+  authority minted - the collision `Store::SetAdoptOnly` refuses. A local row in
   a replicated world is safe once the predicted-entity index range exists, and
   not before.
 
@@ -166,7 +166,7 @@ build:
 - **Which scripts run is a class rule and a container rule.** The class half is
   Roblox's and `script::ScriptsIn` has always had it: a `Script` is the
   server's. The container half is `script::ClientScriptsIn` and is what a
-  *replica* needs on top — a `LocalScript` runs when it is under this viewer's
+  *replica* needs on top - a `LocalScript` runs when it is under this viewer's
   own `Player` or under `ReplicatedFirst`, so somebody else's player and the
   `StarterPlayerScripts` template are excluded by where they are. A single-player
   host is deliberately not filtered that way; it owns the world it is in.
@@ -175,8 +175,8 @@ build:
   runtime opens, so `replica-scripts` asks each tick what has arrived and
   `Runtime::RunNewScripts` starts each instance exactly once.
 - **The refusals are `ecs::Store`'s and this directory adds none.** A client
-  script cannot write a property — `Store::SetProperty` refuses in an adopt-only
-  store — and cannot mint an instance, and both refusals reach the author as a
+  script cannot write a property - `Store::SetProperty` refuses in an adopt-only
+  store - and cannot mint an instance, and both refusals reach the author as a
   raised error rather than a silent no-op. What it may write is what is not a
   row the authority owns: an attribute, a world resource, and the client-only
   surfaces the engine hands it.
@@ -189,8 +189,8 @@ build:
 ## The interface belongs to the world the player is standing in
 
 `Client::InterfaceWorld` answers the replica once the join has completed and the
-drawn world otherwise, and everything in `Client::Draw`'s interface block —
-layout, compile, the router, `gui::Type`, `DeliverGuiEvents` — uses it.
+drawn world otherwise, and everything in `Client::Draw`'s interface block -
+layout, compile, the router, `gui::Type`, `DeliverGuiEvents` - uses it.
 
 A connected client draws its local scene *and* the server's, and a person's
 `PlayerGui` is a subtree of their own `Player`, which is a row in the replica.
@@ -201,8 +201,8 @@ produced the right event, and handed it to a VM that was not the button's.
 ## Simulation and rendering tick separately
 
 `Client::Step` advances a `FixedTimestep` by the frame time and runs the
-simulation phases that many times — usually zero on a fast machine, several
-after a stall — then the `PreRender` phase once. `RENDER_PIPELINE.md` §14.
+simulation phases that many times - usually zero on a fast machine, several
+after a stall - then the `PreRender` phase once. `RENDER_PIPELINE.md` §14.
 
 Three rules follow. The first two used to be conventions and are now structural:
 
@@ -220,7 +220,7 @@ Three rules follow. The first two used to be conventions and are now structural:
   rather than the last of three rows.
 
 **Rendering interpolates, and is therefore up to one tick behind.** That is
-inherent — you can only draw between two states you already have — and it is
+inherent - you can only draw between two states you already have - and it is
 what buys smooth motion at any frame rate. At alpha 0 the drawn position is
 exactly the previous tick; at 1 it is the current one.
 
@@ -230,7 +230,7 @@ it later and you interpolate from a place nothing was ever at.
 ## Panels read last frame
 
 `Client::Step` draws the debug panels from the frame graph's *published* frame,
-which is the previous one — this frame has not finished being measured. That is
+which is the previous one - this frame has not finished being measured. That is
 correct and intended. Do not "fix" it by calling `EndFrame` before the panels
 are drawn; the render pass would then be missing from every graph, which is the
 part you most want to see.
@@ -242,7 +242,7 @@ event pump, not after. Clearing afterwards discards actions fired during the
 frame before anything reads them.
 
 `PumpSounds` runs **after the tick and the replica's apply, and before
-presentation** — so a `Sound` a script started this frame is heard this frame
+presentation** - so a `Sound` a script started this frame is heard this frame
 rather than next, and the state it reads has stopped moving.
 
 ## The keyboard reaches the interface through the world, not through a member
@@ -251,9 +251,9 @@ Three steps, all in `Client::Draw`'s interface block, and each is a hop that
 was missing once:
 
 - **`SDL_StartTextInput` is asked for only while `gui::FocusedTextBox` answers
-  something**, and compared before it is called. It is not a subscription — it
+  something**, and compared before it is called. It is not a subscription - it
   raises an on-screen keyboard on a phone and opens an input method's window on
-  a desktop — so a client that started it once and left it on would put a
+  a desktop - so a client that started it once and left it on would put a
   keyboard over the game. Headless has no window and therefore never calls it.
 - **`Translator::TypedText()` goes straight to `gui::Type`**, which writes
   `Label::Text` in the store. Nothing here keeps the string: `input/AGENTS.md`
@@ -265,7 +265,7 @@ was missing once:
 
 `--type TEXT` synthesises the SDL event so that the second and third steps are
 checkable with no keyboard attached. It needs `--click NAME` to have focused a
-box first, and it cannot check the first step at all — the log line the toggle
+box first, and it cannot check the first step at all - the log line the toggle
 writes is what says that call was made.
 
 ## Sound is a seam, and it holds the state neither side can
@@ -280,7 +280,7 @@ only unique inside its own store, so one stage across two worlds collides on
 both counts.
 
 **Post only what changed.** The command queue is bounded and a full one drops
-rather than blocks — right, because the consumer has a deadline — so a pass that
+rather than blocks - right, because the consumer has a deadline - so a pass that
 reposted its whole state every frame would fill it with no-ops and start
 dropping the commands that were real changes. That is what the last-posted
 values on `Voice` are for, and they are the values the *mixer* was told rather
@@ -290,7 +290,7 @@ than the values the world holds.
 device thread, and a buffer converted per voice would pay for it again for every
 part playing one footstep. `DecodeAudio` picks its decoder from the **bytes**
 rather than from the manifest's name, because a name is what a publisher typed
-and the content is what arrived — and a decoder handed the wrong format produces
+and the content is what arrived - and a decoder handed the wrong format produces
 noise at full volume rather than nothing.
 
 **Nothing distinguishes a replicated `Sound` from a locally created one**, and

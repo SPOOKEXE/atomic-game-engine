@@ -10,7 +10,7 @@ namespace engine::core {
 		// A shift loop rather than a memcpy of the object representation. The
 		// memcpy would be one instruction on the machines anybody is building
 		// on today and would silently produce a different file on one that is
-		// not — and "the format is whatever this compiler emitted" is the thing
+		// not - and "the format is whatever this compiler emitted" is the thing
 		// this file exists to prevent. The optimiser recognises the loop.
 		template <class T> void AppendLittleEndian(std::vector<std::byte> &buffer, T value, size_t width) {
 			for (size_t index = 0; index < width; index++) {
@@ -208,7 +208,7 @@ namespace engine::core {
 		const size_t at = Cursor;
 		if (!Take(length)) {
 			// The length was longer than the buffer. Nothing was allocated and
-			// nothing was read — this is the whole reason the length is checked
+			// nothing was read - this is the whole reason the length is checked
 			// against what remains rather than trusted.
 			return {};
 		}

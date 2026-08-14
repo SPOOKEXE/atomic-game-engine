@@ -1,4 +1,4 @@
-# input — module invariants
+# input - module invariants
 
 L12, `client` tier. Absent from the server binary entirely, and from a
 server-only configure altogether.
@@ -23,8 +23,8 @@ that looks like an input bug.
 
 ## Edges and levels are different questions
 
-`Fired` is edge-triggered and lasts exactly one frame — "the player pressed
-F5". `Held` is level-triggered — "the player is holding forward". A toggle read
+`Fired` is edge-triggered and lasts exactly one frame - "the player pressed
+F5". `Held` is level-triggered - "the player is holding forward". A toggle read
 through `Held` fires every frame it is down, which reads as the panel
 flickering rather than as a wrong API.
 
@@ -35,12 +35,12 @@ not the player expressing an intent many times.
 
 `Translator::BeginFrame` copies `Down`, `Buttons`, `Focused` and `LastSource`
 into their `Previous` twins and clears the two deltas. That is not four
-housekeeping lines — it is the whole of `InputBegan`, `InputEnded`,
+housekeeping lines - it is the whole of `InputBegan`, `InputEnded`,
 `WindowFocused`, `WindowFocusReleased` and `LastInputTypeChanged`, because every
 one of those is `scene::InputState` comparing a pair.
 
 **A fifth field read as an edge needs a fifth roll here**, and forgetting it
-produces a signal that fires on every frame the player is doing anything —
+produces a signal that fires on every frame the player is doing anything -
 which reads as a broken engine rather than as an unfinished one.
 `engine.input.translate` presses twice and compares, because a suite that only
 looks at the live half passes either way.
@@ -80,7 +80,7 @@ Two conventions the build cannot check:
 **SDL sends none of these until a host calls `SDL_StartTextInput`**, which is
 the platform's rule and not this module's: text input raises an on-screen
 keyboard and starts composition, so it is off until something asks. The client
-asks while a `TextBox` has the keyboard and stops when it does not — that call
+asks while a `TextBox` has the keyboard and stops when it does not - that call
 belongs where the window is, and this module has no window.
 
 ## Every action needs a binding and a name

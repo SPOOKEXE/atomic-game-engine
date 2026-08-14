@@ -1,14 +1,14 @@
 # SPIR-V to Metal Shading Language, one module at a time.
 #
 # **A bare executable and no library**, because the translation is
-# `Engine::msl` — `render` needs the same one while the engine runs, and one
+# `Engine::msl` - `render` needs the same one while the engine runs, and one
 # implementation is what stops a `ShaderScript` and a built-in shader from
 # landing on different Metal indices. What is left here is a file to read and a
 # path to write, which is a main.cpp's worth of program.
 #
 # **What checks the output is not this.** `shadercheck` reads the emitted `.msl`
 # back and holds it against the `.spv` it came from, deriving the same indices
-# from SDL's documentation independently — a translator grading its own homework
+# from SDL's documentation independently - a translator grading its own homework
 # would not be a check.
 #
 # Invisible to `expected_graph.json`, for `contentimport`'s reason: the graph
@@ -16,7 +16,7 @@
 # `add_executable` is neither. `Engine::msl` is in it.
 #
 # Client-gated by `mono.tools/CMakeLists.txt`, because `MonoVendor.cmake`
-# configures SPIRV-Cross only when `MONO_BUILD_CLIENT` is on — the same shape as
+# configures SPIRV-Cross only when `MONO_BUILD_CLIENT` is on - the same shape as
 # `contentimport` and shaderc.
 
 add_executable(shadercross app/main.cpp)

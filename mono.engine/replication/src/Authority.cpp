@@ -103,7 +103,7 @@ namespace engine::replication {
 		// **Only a component already declared can be filtered.** The alternative
 		// is remembering a filter for a name nothing sends, which would apply
 		// silently the day somebody replicated that component for an unrelated
-		// reason — a row going missing with nothing in this file naming it.
+		// reason - a row going missing with nothing in this file naming it.
 		const auto at = std::find(Components.begin(), Components.end(), component);
 		if (at == Components.end()) {
 			return;
@@ -207,7 +207,7 @@ namespace engine::replication {
 		// **`Resolved` and `ResolvedNames` are one list in two spellings, filled
 		// in one pass.** The audit puts an *ordinal* in every leaf and the names
 		// on the wire, so the two ends agree only while both spellings skip the
-		// same unregistered slots — and two loops is two chances for them not
+		// same unregistered slots - and two loops is two chances for them not
 		// to. See `Audit.hpp`.
 		Resolved.clear();
 		ResolvedNames.clear();
@@ -219,8 +219,8 @@ namespace engine::replication {
 		}
 
 		// **Indexed by slot, so it is filled for every slot including the ones
-		// that resolve to nothing.** `Resolved` above is a compacted list — it
-		// skips a component this process has not registered — and using its
+		// that resolve to nothing.** `Resolved` above is a compacted list - it
+		// skips a component this process has not registered - and using its
 		// indices for anything slot-shaped is how the wrong component gets
 		// filtered. See `SuppressWhenTagged`.
 		ResolvedSuppressors.assign(Components.size(), ecs::ComponentId{});
@@ -369,7 +369,7 @@ namespace engine::replication {
 
 	void Authority::BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick) {
 		// **Both blobs are taken at one tick, from one world, in one call.** The
-		// alternative — build the world's only once the preface has gone — would
+		// alternative - build the world's only once the preface has gone - would
 		// give the two halves of a join two different ticks and a window in
 		// which the world moved between them, which is a client whose first
 		// complete view never existed.
@@ -418,7 +418,7 @@ namespace engine::replication {
 	void Authority::StreamSnapshot(Client &client) {
 		// **One blob per tick, and that is what makes the ordering a rule rather
 		// than a likelihood.** Chunks go out in the order this list is built,
-		// but a refusal is per message — so a preface chunk the link turned away
+		// but a refusal is per message - so a preface chunk the link turned away
 		// beside a world chunk it took would be resent *behind* bytes it was
 		// supposed to precede. Two blobs never share an outgoing list, so no
 		// refusal can reorder them, and the whole cost is one tick at the seam
@@ -501,7 +501,7 @@ namespace engine::replication {
 
 		// **The lower of what the path will carry and what this module is
 		// willing to produce.** `SetAllowance` carries the argument; the shape
-		// worth noting here is that it is a `min` and not a replacement — a host
+		// worth noting here is that it is a `min` and not a replacement - a host
 		// that never wires a link keeps `SIZE_MAX` and the configured number
 		// alone decides, and a host that does still cannot be talked past its
 		// own ceiling by a controller that has read the path optimistically.
@@ -687,7 +687,7 @@ namespace engine::replication {
 		// that is why nothing about suppression crosses.** `SuppressWhenTagged`
 		// stops a component's deltas for a tagged row precisely because the far
 		// side recomputes it, so the two ends are *meant* to disagree about it
-		// — and a receiver told to skip it would need the tag replicated to it
+		// - and a receiver told to skip it would need the tag replicated to it
 		// and would report every character in the world as a mismatch on the
 		// day somebody forgot. Membership is on the wire, so the cheap answer
 		// is simply not to name the entity.
@@ -783,7 +783,7 @@ namespace engine::replication {
 
 		if (signatures.Groups.empty()) {
 			// Switched off rather than retried, because the next attempt would
-			// be the same arithmetic against the same settings — a warning every
+			// be the same arithmetic against the same settings - a warning every
 			// `EveryTicks` for the life of the process, saying the same thing.
 			Settings_.Audit.Enabled = false;
 			ENGINE_WARN(
@@ -813,7 +813,7 @@ namespace engine::replication {
 		// an answer: to the one audit this server issued, once, naming groups
 		// out of the slice this server chose. A client claiming everything
 		// mismatches can therefore ask for exactly the repair the slice it was
-		// asked about would have cost — which the server was already prepared
+		// asked about would have cost - which the server was already prepared
 		// to pay, and which the cadence bounds to once every `EveryTicks`.
 		if (!Settings_.Audit.Enabled || into.Audit.Tick == 0 || disputed.Tick != into.Audit.Tick) {
 			Stats_.DisputesRefused++;
@@ -832,7 +832,7 @@ namespace engine::replication {
 
 		// **In the slice, and strictly ascending.** Those two together are what
 		// bound the answer to the question: every label names a group this
-		// server hashed, and no label can be named twice — so the most an
+		// server hashed, and no label can be named twice - so the most an
 		// answer can ask for is the repair of exactly the slice the server had
 		// already chosen to look at. A list naming one group a hundred times is
 		// the cheapest way to ask for a hundred repairs, and it is refused
@@ -878,7 +878,7 @@ namespace engine::replication {
 
 			// **The repair is the recovery walk, not a second way to resend.**
 			// An audit that disagreed says nothing about *which* value is
-			// wrong, only that something in the group is — so what it does is
+			// wrong, only that something in the group is - so what it does is
 			// put every value of that group back into the unconfirmed set the
 			// walk below already reads. `emplace` leaves an entry that is
 			// already there alone, so a repair cannot restart the clock on
@@ -928,9 +928,9 @@ namespace engine::replication {
 
 			// **The value is written here rather than beside each call, so that
 			// one place records where it landed.** A row's encoded length is
-			// only known once it has been written — `scene.Visual` and
+			// only known once it has been written - `scene.Visual` and
 			// `ecs.InstanceName` both write names, and a name is as long as its
-			// text — and `Pack` has to be able to slice any one row back out
+			// text - and `Pack` has to be able to slice any one row back out
 			// after the priority sort has reordered them.
 			const auto offer = [&](ecs::Entity entity, const void *value) {
 				Outstanding &pending = unconfirmed[entity.Id];
@@ -958,14 +958,14 @@ namespace engine::replication {
 			};
 
 			// The tag that takes this component's rows off the wire per entity,
-			// or invalid when this slot has none — which is every slot by
+			// or invalid when this slot has none - which is every slot by
 			// default. Read once rather than per row. See `SuppressWhenTagged`.
 			const ecs::ComponentId suppressor =
 				slot < ResolvedSuppressors.size() ? ResolvedSuppressors[slot] : ecs::ComponentId{};
 
 			// A row the receiver derives for itself. Skipped *after* the
 			// interest check and before `offer`, so a suppressed row costs no
-			// acknowledgement slot either — an outstanding entry for a row that
+			// acknowledgement slot either - an outstanding entry for a row that
 			// is never sent is one the recovery pass would chase for ever.
 			const auto derivedThere = [&](const ecs::Entity entity) {
 				return suppressor.IsValid() && store.HasComponent(entity, suppressor);
@@ -1318,7 +1318,7 @@ namespace engine::replication {
 			// A client does not audit a server. The digests say what the
 			// authority believes this client holds, and a client sending them
 			// back up would be a client telling the authority what its own
-			// world is — the same line a snapshot is refused on.
+			// world is - the same line a snapshot is refused on.
 			Stats_.Refused++;
 			return false;
 
@@ -1333,7 +1333,7 @@ namespace engine::replication {
 
 		case MessageKind::User:
 			// Opaque to this module by design, so whoever owns the link peels
-			// one off before here — `Replica::Receive` refuses it for the same
+			// one off before here - `Replica::Receive` refuses it for the same
 			// reason. Reaching this is a routing mistake, and counting it is how
 			// it becomes visible.
 			Stats_.Refused++;
@@ -1346,7 +1346,7 @@ namespace engine::replication {
 
 	bool Authority::Submit(Client &into, Delta &&delta) {
 		// **Nothing may be written until somebody has said who owns what.** The
-		// alternative default — accept, and restrict later — makes the insecure
+		// alternative default - accept, and restrict later - makes the insecure
 		// state the one a host gets by forgetting, which is the shape of most of
 		// the bugs this module's `AGENTS.md` is about.
 		//
@@ -1362,7 +1362,7 @@ namespace engine::replication {
 
 		// **Older than what this client has already said is refused.** A
 		// submission is the client's whole answer for the entities it owns, so
-		// an out-of-order one is not a partial update to merge — it is last
+		// an out-of-order one is not a partial update to merge - it is last
 		// tick's position arriving after this tick's, and applying it drags the
 		// entity backwards on every machine that is watching.
 		//

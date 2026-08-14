@@ -55,7 +55,7 @@ namespace engine::script {
 	//
 	// **One runtime, one world.** Two runtimes over two worlds must not be able
 	// to reach each other's storage, and a file-static would have made that
-	// mistake available — the sort that works until the second world exists.
+	// mistake available - the sort that works until the second world exists.
 	// Every bound function reaches this through a light-userdata upvalue.
 	//
 	// @since v0.6
@@ -78,8 +78,8 @@ namespace engine::script {
 		// What `ContextActionService` has bound, highest priority first.
 		//
 		// **Shared machinery since v0.16, beside `Signals` and `Changes` and for
-		// their reason.** The stack's rules — replace by name, stable sort by
-		// priority, first claim wins — decide which handler a press reaches, and
+		// their reason.** The stack's rules - replace by name, stable sort by
+		// priority, first claim wins - decide which handler a press reaches, and
 		// two copies of that would agree until one was fixed. See `Actions.hpp`;
 		// the callables stay this VM's, as registry refs inside a `CallbackRef`.
 		ActionStack Actions;
@@ -100,7 +100,7 @@ namespace engine::script {
 		// Whether `Store::OnDescendantRemoving` already holds this VM's hook.
 		//
 		// The store keeps one listener, so a second install would replace the
-		// first with an identical one — harmless, and still worth not doing
+		// first with an identical one - harmless, and still worth not doing
 		// once per connection.
 		bool RemovingHooked = false;
 
@@ -115,7 +115,7 @@ namespace engine::script {
 		//
 		// **A registry ref per module, and the module runs once.** Roblox's rule:
 		// every `require` of one module hands back the same value, so a module
-		// with a side effect at its top level has that side effect once — on
+		// with a side effect at its top level has that side effect once - on
 		// whichever script required it first. A map that re-ran would make
 		// module order something an author had to reason about.
 		//
@@ -136,14 +136,14 @@ namespace engine::script {
 		// say which one it came from.
 		//
 		// Set around one run and cleared after it. Null during a heartbeat,
-		// which is honest — the connection that is running was made by a script
+		// which is honest - the connection that is running was made by a script
 		// and nothing records which, so naming one would be a guess.
 		ecs::Entity RunningScript;
 
 		// The script instance the next chunk belongs to.
 		//
 		// **Set before `Run` and consumed by it**, rather than assigned as a
-		// global here — `luaL_sandboxthread` gives each chunk its own global
+		// global here - `luaL_sandboxthread` gives each chunk its own global
 		// table, so `script` has to be written onto the thread after it is
 		// sandboxed and not onto the state before. That per-chunk scoping is the
 		// point: one script's `script` is invisible to the next.
@@ -196,7 +196,7 @@ namespace engine::script {
 		// **The second resume source, and it is a second map rather than a
 		// widened first one.** A bus reply is named by a `world::Ticket` that the
 		// world hands out; a `WaitForChild` is named by an id this VM's own table
-		// hands out, and the two counters know nothing about each other — so one
+		// hands out, and the two counters know nothing about each other - so one
 		// map would be two number spaces sharing a key. What resumes each is
 		// different too: `PumpDeliveries` pushes `(value, status, version)` and
 		// `PumpChildWaiters` pushes one instance or nil.
@@ -208,7 +208,7 @@ namespace engine::script {
 		// makes a GUID replayable.** `HttpService.cpp` carries the whole
 		// argument; what it needs from here is a draw number that advances the
 		// same way on every run of the same script. On the context rather than a
-		// file-static for this file's own reason — two runtimes over two worlds
+		// file-static for this file's own reason - two runtimes over two worlds
 		// must not share one.
 		uint64_t NextGuid = 0;
 
@@ -217,7 +217,7 @@ namespace engine::script {
 		// **Beside `Signals`, `Changes` and `Tasks`, and for their reason.**
 		// Both step on the fixed tick delta at the barrier and both drain in a
 		// stated order, so both are shared machinery the two languages must not
-		// have two copies of — see `Tweens.hpp` and `Debris.hpp`.
+		// have two copies of - see `Tweens.hpp` and `Debris.hpp`.
 		//@{
 		TweenTable Tweens;
 		DebrisQueue Debris;
@@ -263,7 +263,7 @@ namespace engine::script {
 	//
 	// **This was `sizeof(core::CFrame)` until v0.10 added the sequences.** A
 	// `core::ColorSequence` is twenty keypoints and does not fit in twenty-eight
-	// bytes, and every guard is `size > sizeof(bytes)` — so an emitter's `Color`
+	// bytes, and every guard is `size > sizeof(bytes)` - so an emitter's `Color`
 	// failed its read with "could not read 'Color'", naming a property that is
 	// declared and readable and whose only problem was a buffer one file away.
 	//
@@ -295,7 +295,7 @@ namespace engine::script {
 	// Reads a Luau value into a buffer of that type's size.
 	//
 	// Raises a Luau type error for a value of the wrong shape, exactly as the
-	// `Check*` helpers below do — so a caller checks the return for "this type
+	// `Check*` helpers below do - so a caller checks the return for "this type
 	// cannot cross" and never for "the script passed the wrong thing".
 	//
 	// @param state    The VM.
@@ -364,7 +364,7 @@ namespace engine::script {
 	//
 	// The same split again: the metatables are `LuauDatatypes.cpp`'s and these
 	// hand a property's bytes across. See `LuauValues.cpp` for what makes these three
-	// different from the seven above — they are hundreds of bytes rather than a
+	// different from the seven above - they are hundreds of bytes rather than a
 	// handful of floats.
 
 	core::NumberRange *PushNumberRange(lua_State *state);
@@ -389,7 +389,7 @@ namespace engine::script {
 	// Reads a Luau value at `index` into a `ScriptValue`.
 	//
 	// **The sort is not here**: this walks a table in whatever order Luau offers
-	// and the writer sorts, which is the arrangement `Codec.hpp` argues for — a
+	// and the writer sorts, which is the arrangement `Codec.hpp` argues for - a
 	// caller that had to remember to sort would be a second place the
 	// determinism guarantee could be lost.
 	//
@@ -454,7 +454,7 @@ namespace engine::script {
 	// --- services -------------------------------------------------------------
 	//
 	// **A surface service is a global table, and there is one way to build one.**
-	// `scene/Services.hpp` states the other kind — a *container* service is an
+	// `scene/Services.hpp` states the other kind - a *container* service is an
 	// instance in the tree with children, properties and a row in the save file,
 	// and `scene::InstallServices` builds those ten from one table. This is the
 	// half that had no such table: nine engine surfaces spread over five files,
@@ -481,7 +481,7 @@ namespace engine::script {
 	//
 	// **Two phases, because they install at different moments.**
 	// `ServiceAvailability::Always` runs early, with the rest of the vocabulary.
-	// `Studio` runs late — `BreakpointService` reads `LuauContext::Breakpoints`
+	// `Studio` runs late - `BreakpointService` reads `LuauContext::Breakpoints`
 	// to decide whether to install at all, so it cannot run before that pointer
 	// is set, and it writes a global, so it cannot run once `luaL_sandbox` has
 	// frozen the table.
@@ -497,7 +497,7 @@ namespace engine::script {
 	// Installs the `InputObject` metatable, and pushes one.
 	//
 	// **The datatype before anything that produces one**, so a metatable is never
-	// looked up before it is registered — which is why `LuauRuntime` calls the
+	// looked up before it is registered - which is why `LuauRuntime` calls the
 	// first of these beside the other value types rather than leaving it to
 	// whichever service happens to install earliest. Here rather than in
 	// `LuauValues.cpp` because `LuauInput.cpp` is the only file that makes one: an
@@ -516,7 +516,7 @@ namespace engine::script {
 	// **A surface rather than an installer, which is the whole of what made
 	// these five reachable from JavaScript.** An `Open*` function can only build
 	// the VM it was written against; a `ServiceSurface` is data, so
-	// `ServiceCatalogue.cpp` — the one file that has met both VMs — reads it
+	// `ServiceCatalogue.cpp` - the one file that has met both VMs - reads it
 	// twice and builds a Luau table and a JavaScript object from one
 	// description.
 	//
@@ -529,13 +529,13 @@ namespace engine::script {
 	// **All six methods are neutral**, and the last two to get there are the ones
 	// worth naming: `GetBoundActionInfo` and `GetAllBoundActionInfo` answer a
 	// record holding a list of `Enum.KeyCode` members, and an `EnumItem` has no
-	// neutral return — `ScriptValue` has no tag for one, and inventing a record
+	// neutral return - `ScriptValue` has no tag for one, and inventing a record
 	// return for one service's shape is what `ScriptCall.hpp` says the interface
 	// is not for. `ScriptCall::ReturnBoundAction` over a `BoundActionReport` is
 	// what closed it, which is the split `ReturnInputObjects` was already on.
 	//
 	// **The stack is a walk and not a lookup**, because a handler answers
-	// `Enum.ContextActionResult` — see `ActionStack::ClaimingFrom`.
+	// `Enum.ContextActionResult` - see `ActionStack::ClaimingFrom`.
 	const ServiceSurface &ContextActionServiceSurface();
 
 	// `ContentService`, which answers what content this world holds.
@@ -561,13 +561,13 @@ namespace engine::script {
 	// @since v0.15
 	const ServiceSurface &CollectionServiceSurface();
 
-	// `HttpService` — **the half of it that observes nothing**.
+	// `HttpService` - **the half of it that observes nothing**.
 	//
 	// `JSONEncode`, `JSONDecode`, `GenerateGUID` and `UrlEncode`, and no
 	// `RequestAsync`, `GetAsync` or `PostAsync`. Arbitrary outbound HTTP from a
 	// game script is a security decision nobody has taken, and this engine's one
 	// existing route to the network is a signed manifest verified against a
-	// publisher key — a different thing, not a smaller one. `HttpService.cpp`
+	// publisher key - a different thing, not a smaller one. `HttpService.cpp`
 	// carries the argument and the note asking the next reader not to add the
 	// three by reflex.
 	//
@@ -599,13 +599,13 @@ namespace engine::script {
 	// **The last service to cross, and a property is what held it.**
 	// `MouseBehavior` and `MouseDeltaSensitivity` are live values, so the Luau
 	// half is a *userdata* that defeats `safeenv`'s `GETIMPORT` caching where the
-	// JavaScript half is a plain object with an accessor per name — see
+	// JavaScript half is a plain object with an accessor per name - see
 	// `ServiceSurface::Properties`. Both build from this one description.
 	//
 	// @since v0.16
 	const ServiceSurface &UserInputServiceSurface();
 
-	// `SoundService` — **the part of it that is not the mixer**.
+	// `SoundService` - **the part of it that is not the mixer**.
 	//
 	// A `Volume` and a listener, over `scene::AudioState`. `engine::audio` is L12
 	// `client` and this module is L9 `shared`, so nothing here can name a mixer:
@@ -619,7 +619,7 @@ namespace engine::script {
 
 	// `Debris`, whose one method destroys an instance later.
 	//
-	// **The queue is per VM and everything about it is shared** — the tick
+	// **The queue is per VM and everything about it is shared** - the tick
 	// arithmetic, the drain order and the cap that evicts rather than refusing.
 	// See `Debris.hpp`; `PumpDebris` is the other half.
 	//
@@ -636,7 +636,7 @@ namespace engine::script {
 	//
 	// **The `Tween` handle's three methods stay per language on purpose.** The
 	// neutral instance methods are installed flat on *every* instance, and `Play`
-	// is a name Roblox puts on three classes — claiming it there would take it
+	// is a name Roblox puts on three classes - claiming it there would take it
 	// from every part and sound in the engine. `ScriptCall::ReturnTween` is where
 	// the two halves meet.
 	//
@@ -653,11 +653,11 @@ namespace engine::script {
 	// @since v0.16
 	const ServiceSurface &RunServiceSurface();
 
-	// The Universe's services — the only route out of a world.
+	// The Universe's services - the only route out of a world.
 	//
 	// `MessagingService` fans out to a topic, `TeleportService` moves a person to
 	// a named world, and the two stores answer a key. The last two want a reply,
-	// and a reply arrives at a later barrier, so a script **suspends** on one —
+	// and a reply arrives at a later barrier, so a script **suspends** on one -
 	// which is legal under `docs/retired/SCRIPT_CONCURRENCY.md` §1 precisely
 	// because the barrier applies replies in a deterministic order, and which is
 	// what `ScriptCall::Await` is for.
@@ -678,7 +678,7 @@ namespace engine::script {
 	// it.
 	//
 	// **Six things now and one until v0.16**: the focus edges, the device change,
-	// key edges, mouse button edges, pointer motion and the wheel — in that
+	// key edges, mouse button edges, pointer motion and the wheel - in that
 	// order, so a listener sees `WindowFocusReleased` before the releases losing
 	// focus caused and hears which device is live before the press that proves
 	// it. Every signal but the focus pair is handed an argument;
@@ -702,7 +702,7 @@ namespace engine::script {
 
 	// Installs the `Tween` metatable and the three methods on a tween handle.
 	//
-	// **The handle and not the service**, which is a `ServiceSurface` —
+	// **The handle and not the service**, which is a `ServiceSurface` -
 	// `TweenServiceSurface` says why `Play`, `Pause` and `Cancel` are the one
 	// place this module deliberately did not use `ScriptCall`.
 	//
@@ -719,7 +719,7 @@ namespace engine::script {
 
 	// Advances every tween by one tick and fires what completed.
 	//
-	// **Called at the head of the barrier, before the input pump** — see
+	// **Called at the head of the barrier, before the input pump** - see
 	// `LuauRuntime::Heartbeat`, which states the whole order and why the world's
 	// own timed work goes first.
 	//
@@ -734,7 +734,7 @@ namespace engine::script {
 	// Installs `require`, which is the only route to a `ModuleScript`.
 	//
 	// **Defined beside the compiler rather than with the other globals**, because
-	// evaluating a module is loading a chunk — the same compile, the same
+	// evaluating a module is loading a chunk - the same compile, the same
 	// sandboxed thread and the same `script` global that a `Script` gets. A
 	// second loader here would be a second answer to what running a program
 	// means.
@@ -756,8 +756,8 @@ namespace engine::script {
 	// Installs `World`, and the component methods every instance gains.
 	//
 	// **The storage named directly, underneath the Roblox vocabulary the rest of
-	// this file installs.** A game's own data — a health, a cooldown, an
-	// inventory slot — has been an attribute or a C++ component until now, and
+	// this file installs.** A game's own data - a health, a cooldown, an
+	// inventory slot - has been an attribute or a C++ component until now, and
 	// neither is a component a query can reach without a rebuild.
 	//
 	// Called after `OpenInstances`, because the instance half of the surface adds
@@ -781,7 +781,7 @@ namespace engine::script {
 	// Installs `host`, when the runtime has one.
 	//
 	// **One closure per `HostSurface::Names` entry**, so a name the host does
-	// not list is not a member — which turns a typo into "attempt to call a nil
+	// not list is not a member - which turns a typo into "attempt to call a nil
 	// value" at the call site rather than a refusal from inside a program the
 	// author cannot see.
 	//
@@ -831,8 +831,8 @@ namespace engine::script {
 	// to expect.
 	//
 	// **What `HostSurface` needs and `ReadEnumValue` cannot give it.** A host
-	// call is a generic bridge — it converts whatever a script passed without
-	// knowing what the host will do with it — so it has no enum name to check
+	// call is a generic bridge - it converts whatever a script passed without
+	// knowing what the host will do with it - so it has no enum name to check
 	// against. This answers "is this an EnumItem, and which member" and leaves
 	// the checking to whoever asked.
 	//
@@ -867,8 +867,8 @@ namespace engine::script {
 	// Delivers everything the tree recorded since the last barrier.
 	//
 	// **Beside `PumpChanges` and for the same reason.** A reparent cannot fire
-	// a signal from inside `SetParent` — the handler would re-enter the VM with
-	// the sibling list half-relinked — so the store writes it down and this
+	// a signal from inside `SetParent` - the handler would re-enter the VM with
+	// the sibling list half-relinked - so the store writes it down and this
 	// hands it over one tick later. See `ecs::TreeChange`.
 	//
 	// @param state The VM to deliver into.
@@ -881,7 +881,7 @@ namespace engine::script {
 	// **The second resume source at the barrier, and the first that is not a bus
 	// reply.** `PumpDeliveries` resumes a thread with what a `Ticket` answered;
 	// this one resumes it with an instance or with nil, which is a value a
-	// delivery may never carry — rule 3 keeps a handle off a bus, and that is
+	// delivery may never carry - rule 3 keeps a handle off a bus, and that is
 	// exactly why `WaitForChild` could not be built on the mechanism that
 	// already existed.
 	//
@@ -924,13 +924,13 @@ namespace engine::script {
 	// `(x, y)` in canvas pixels, which is Roblox's signature exactly.
 	// `Activated`, `InputBegan` and `InputEnded` are called with **nothing**:
 	// Roblox passes an `InputObject`, and an argument nobody can rely on is worse
-	// than an argument that is not there — the same trade `VideoFrame` and
+	// than an argument that is not there - the same trade `VideoFrame` and
 	// `AutomaticSize` were decided on.
 	//
 	// **The datatype exists since v0.16 and this still passes nothing**, which is
 	// a narrower gap than it was and worth stating rather than closing by reflex.
-	// `gui::GuiEvent` carries a kind, an entity and two points — no key, no
-	// button, no `Enum.UserInputType` — so an `InputObject` built here would have
+	// `gui::GuiEvent` carries a kind, an entity and two points - no key, no
+	// button, no `Enum.UserInputType` - so an `InputObject` built here would have
 	// to *invent* the field a handler reads it for. What closing this needs is
 	// `gui::Router` recording which button produced an event, which is a change
 	// in `gui` and not one here.
@@ -945,14 +945,14 @@ namespace engine::script {
 	// @return An error message when a resumed thread raised, or empty.
 	std::string PumpTasks(lua_State *state);
 
-	// Installs `workspace` — **this world's `Workspace` service**.
+	// Installs `workspace` - **this world's `Workspace` service**.
 	//
 	//     game      -> the universe
 	//     workspace -> the `Workspace` instance in the world this script runs on
 	//
 	// **It is an instance, and until v0.7 it was not.** The old mapping made
 	// `workspace` stand for the world itself, so `part.Parent = workspace` meant
-	// `SetParent(part, NULL_ENTITY)` — "a root of this world" — and reading
+	// `SetParent(part, NULL_ENTITY)` - "a root of this world" - and reading
 	// `.Parent` back on a root handed `workspace` over. That was the honest
 	// shape while a world had no `Workspace` in it. `scene::InstallServices`
 	// changed that: a world now has a real `Workspace` instance, and keeping
@@ -962,7 +962,7 @@ namespace engine::script {
 	// Collapsing them is what lets a null parent mean **nil**. An instance with
 	// no parent is now an orphan rather than a root: nothing draws it, no walk
 	// of the tree reaches it, and it becomes visible when a script says where it
-	// goes. `scene/Visibility.hpp` is the other half — it is what makes
+	// goes. `scene/Visibility.hpp` is the other half - it is what makes
 	// "under `Workspace`" the thing the renderer actually tests.
 	//
 	// Calls `InstallServices`, so a world that has none gets them here. That is
@@ -1012,7 +1012,7 @@ namespace engine::script {
 	// **The Luau half of `ScriptCall.hpp`.** A method that is written once is
 	// installed by both VMs from one table, so a row added in
 	// `ScriptMethods.cpp` is reachable from Luau and from JavaScript in the same
-	// commit — which is what the thirty-against-twenty-one drift cost when a
+	// commit - which is what the thirty-against-twenty-one drift cost when a
 	// method was a `lua_CFunction` and a `JSCFunction` written separately.
 	//
 	// Called after `OpenInstances`, whose registry table this adds to.

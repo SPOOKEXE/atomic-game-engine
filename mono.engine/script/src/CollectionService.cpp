@@ -2,7 +2,7 @@
 //
 // **`Instance:AddTag` answers "what does this thing carry"; nothing answered
 // "what carries this".** `scene::Tagging` has held both halves of the data
-// since v0.9 — a `Tags` mask per row and one `TagTable` per world — and the
+// since v0.9 - a `Tags` mask per row and one `TagTable` per world - and the
 // render pipeline reads it with a mask test. A script could not: it had the
 // three per-instance methods and no way to reach an instance it was not
 // already holding, so a scene that wanted "every door" kept its own table of
@@ -18,17 +18,17 @@
 // **Neutral since v0.16, and nothing in this file names a VM.** The three
 // per-instance calls it mirrors moved to `ScriptMethods.cpp` at the same
 // version, so the two spellings of `AddTag` are now literally one call reached
-// two ways — which is what the file header claimed before there was a layer
+// two ways - which is what the file header claimed before there was a layer
 // that could make it true in both languages.
 //
 // **`Tags` is a `BasePart` component**, so tagging a bare container answers
-// `false` rather than raising — the same answer `Instance:AddTag` gives, for
+// `false` rather than raising - the same answer `Instance:AddTag` gives, for
 // the same reason it gives it. Which classes can be tagged is `scene`'s
 // decision and this service does not get a vote.
 //
 // **Every list is sorted, and the two orders are different because the two
 // questions are.** Names sort by text. Instances sort by entity id, which is a
-// pure function of the order a world was built in — where the order
+// pure function of the order a world was built in - where the order
 // `Store::Each` hands rows over is a function of which *archetypes* exist, so
 // adding an unrelated component to one tagged part would reorder a list the
 // scene laying itself out from had no reason to expect to move.
@@ -36,13 +36,13 @@
 // --- why there is no `GetInstanceAddedSignal` -------------------------------
 //
 // **Because nothing can fire it honestly, and a signal that never fires reads
-// as a broken engine rather than as a missing feature** — the trade `v0.5`
+// as a broken engine rather than as a missing feature** - the trade `v0.5`
 // records for `Heartbeat` and `PumpGuiEvents` for `InputObject`.
 //
 // `SignalTable` could carry it: the key is a kind and a subject, and the tag
 // name would ride on `Connection::Property` exactly as `PropertyChanged`'s
 // does. What is missing is the other end. A tag is added by writing a bit into
-// a `Tags` mask, and `scene::AddTag` records nothing — there is no queue like
+// a `Tags` mask, and `scene::AddTag` records nothing - there is no queue like
 // `ecs::TreeChange` for the barrier to drain, and `Store::OnChanged<Tags>`,
 // which `AddTag`'s `GetMutable` write would trip once something observed the
 // component, says an instance's tags changed without saying *which* tag
@@ -53,7 +53,7 @@
 // So closing it is a `scene` change: `AddTag`/`RemoveTag` record a
 // `(entity, tag, added)` row the way `ObserveTree` records a reparent, and a
 // `PumpTags` beside `PumpTree` delivers them at the barrier. That also fixes
-// the hole a diff here could never see — a system writing `Tags::Mask`
+// the hole a diff here could never see - a system writing `Tags::Mask`
 // directly, which is what `Part.cpp`'s tag-list property does.
 //
 // @tier L9 · shared
@@ -77,7 +77,7 @@ namespace engine::script {
 		// Answers names sorted by text.
 		//
 		// **By `Text()` and never by `Name::operator<`**, which orders by
-		// interning order — the order names were first constructed in this
+		// interning order - the order names were first constructed in this
 		// *process*. Two runs that load scenes in a different order would sort
 		// the same tags differently, which is the whole failure sorting is here
 		// to prevent.
@@ -98,7 +98,7 @@ namespace engine::script {
 		// spells it from cannot change what happens.
 		//
 		// Answers `false` for an instance with no `Tags` component and for a
-		// world whose thirty-two tags are spoken for, rather than raising —
+		// world whose thirty-two tags are spoken for, rather than raising -
 		// `ScriptMethods.cpp` argues that one out: a full tag table is a scene
 		// mistake and not a script one. Roblox returns nothing here; a boolean
 		// is a superset, and a script that ignores it reads identically.
@@ -109,8 +109,8 @@ namespace engine::script {
 
 		// `CollectionService:RemoveTag(instance, tag)`
 		//
-		// The name stays in the world's table — see `scene::RemoveTag` for why
-		// a bit is never freed — so `GetAllTags` still lists a tag nothing
+		// The name stays in the world's table - see `scene::RemoveTag` for why
+		// a bit is never freed - so `GetAllTags` still lists a tag nothing
 		// carries any more.
 		void ServiceRemoveTag(ScriptCall &call) {
 			const ecs::Entity instance = call.AsInstance(0);
@@ -138,7 +138,7 @@ namespace engine::script {
 		// from the ECS surface's rule that a query naming an undeclared
 		// component raises. The two look alike and are not: a component is
 		// declared by C++ and a typo can never become valid, where a tag is
-		// created by whichever `AddTag` names it first — so "nothing carries
+		// created by whichever `AddTag` names it first - so "nothing carries
 		// this yet" is an ordinary state a script polling on `Heartbeat` sits
 		// in until another script has run. Raising there would make a correct
 		// script fail on the frame ordering.

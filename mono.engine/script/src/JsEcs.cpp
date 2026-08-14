@@ -8,7 +8,7 @@
 //   the world object is not passed as a first argument and the terms start at
 //   `argv[0]`.
 // - **A plain object rather than a table** for a component's fields, which is
-//   the same thing under a different spelling — `JS_GetOwnPropertyNames` walks
+//   the same thing under a different spelling - `JS_GetOwnPropertyNames` walks
 //   it where `lua_next` walks the other.
 // - **An array for a query result**, which is what both return; a JavaScript
 //   array is an object with a length and the Luau one is a sequence, and
@@ -16,7 +16,7 @@
 //
 // The important property is that neither runtime has storage of its own. A
 // component declared in one is queried by the other and iterated by a C++
-// system that never heard of either — `engine.script.ecs` has the case.
+// system that never heard of either - `engine.script.ecs` has the case.
 
 #include "JsBindings.hpp"
 
@@ -53,7 +53,7 @@ namespace engine::script {
 		// `String` field owns an allocation that a memcpy would leak.
 		//
 		// **Not shared between the two files**, because the two bindings share
-		// rules rather than code — and a holder is four lines of RAII around a
+		// rules rather than code - and a holder is four lines of RAII around a
 		// `TypeDescriptor` either side of a VM boundary neither may name.
 		class ComponentValue {
 		  public:
@@ -104,7 +104,7 @@ namespace engine::script {
 		// A JavaScript string argument, owned for the length of a call.
 		//
 		// QuickJS hands back a pointer the context owns and every path has to
-		// give it back — including the ones that throw. A holder is what stops
+		// give it back - including the ones that throw. A holder is what stops
 		// an early `return JS_Throw...` from leaking the string it was
 		// complaining about.
 		class Argument {
@@ -145,7 +145,7 @@ namespace engine::script {
 			const ComponentId id = Components::Find(Name(name));
 			if (!id.IsValid()) {
 				error = JS_ThrowReferenceError(
-					context, "no component named '%s' — declare it with World.DefineComponent first", name
+					context, "no component named '%s' - declare it with World.DefineComponent first", name
 				);
 				return nullptr;
 			}

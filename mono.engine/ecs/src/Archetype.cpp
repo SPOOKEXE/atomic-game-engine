@@ -14,7 +14,7 @@ namespace engine::ecs {
 
 	Column *Archetype::Find(ComponentId id) {
 		// A binary search over the set's sorted ids gives the position, and the
-		// column at that position is the one — the two arrays are built
+		// column at that position is the one - the two arrays are built
 		// together and stay parallel for the table's whole life.
 		const std::span<const ComponentId> ids = Members->Ids();
 		const auto found = std::lower_bound(ids.begin(), ids.end(), id);
@@ -59,7 +59,7 @@ namespace engine::ecs {
 			// The entity that used to be in the last row now lives in `row`,
 			// and its directory entry still says otherwise. Returning it is
 			// what makes that the caller's problem rather than a silent
-			// inconsistency — there is no way for the store to work it out
+			// inconsistency - there is no way for the store to work it out
 			// afterwards.
 			moved = Ids[last];
 			Ids[row] = moved;
@@ -79,7 +79,7 @@ namespace engine::ecs {
 		//
 		// Rebuilt rather than chunked. `VisitChangedRuns` hands a callback
 		// `entities + start` beside a value pointer, and one contiguous array is
-		// what keeps that a single addition — worth more than the bytes a second
+		// what keeps that a single addition - worth more than the bytes a second
 		// chunk directory would save.
 		//
 		// A quarter full before it shrinks, and it shrinks to half: a population
@@ -109,7 +109,7 @@ namespace engine::ecs {
 
 		// Walk both sorted id lists together rather than searching one for each
 		// member of the other. Both are sorted by component id, so this is a
-		// merge — linear in the wider of the two rather than n log n.
+		// merge - linear in the wider of the two rather than n log n.
 		const std::span<const ComponentId> theirs = source.Members->Ids();
 		const std::span<const ComponentId> ours = Members->Ids();
 
@@ -193,7 +193,7 @@ namespace engine::ecs {
 		// be found.** An id in `order` this table does not hold would mean the
 		// caller interned a different set from the one it is reading, and there
 		// is no way to skip a column whose length is only knowable by reading
-		// it — so the whole table is refused rather than read halfway.
+		// it - so the whole table is refused rather than read halfway.
 		for (const ComponentId id : order) {
 			Column *column = Find(id);
 			if (column == nullptr) {

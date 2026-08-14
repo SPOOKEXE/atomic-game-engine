@@ -5,8 +5,8 @@
 //
 // **Deltas are the fast path and this is the audit, and they are not two ways
 // to do one job.** A delta says what moved. Nothing in a delta can say what
-// quietly failed to move — a creation rolled back by a refused message, a value
-// confirmed and never written, a tick that never completed — and every one of
+// quietly failed to move - a creation rolled back by a refused message, a value
+// confirmed and never written, a tick that never completed - and every one of
 // those was chased one cause at a time. The audit finds the whole class
 // generically: the server hashes a group of the state a client has already
 // acknowledged, sends the digest, and takes back the groups that disagreed.
@@ -20,7 +20,7 @@
 //
 // **The hash is `assets::HashTree`'s rather than a third one.** Its interiors
 // are tagged and its leaf count is sealed into the root, which is what makes a
-// *missing* entity a different digest rather than a matching prefix — and a
+// *missing* entity a different digest rather than a matching prefix - and a
 // missing entity is half of what this exists to find.
 //
 // @tier L12 · shared
@@ -40,7 +40,7 @@ namespace engine::replication {
 	// **A rotating slice, because that bounds three costs with one number.**
 	// The hashing, the wire and the repair are all proportional to how much is
 	// audited at once, so a slice small enough for a datagram is small enough
-	// for the other two — and it is the same rotation the priority ordering
+	// for the other two - and it is the same rotation the priority ordering
 	// already uses. A world twice the size is audited half as often rather than
 	// twice as expensively.
 	//
@@ -55,7 +55,7 @@ namespace engine::replication {
 		// **Off by default, and the reason is a property rather than caution
 		// about the code.** `replication/AGENTS.md` says a quiet world sends
 		// nothing, and anti-entropy is exactly the thing that has to speak on a
-		// world at rest — a value stranded on a still world is what no delta
+		// world at rest - a value stranded on a still world is what no delta
 		// would ever report. Those two cannot both hold, and which one a host
 		// wants is the host's to say: `mono.server` turns this on, and a caller
 		// measuring its own traffic against a world it knows is idle should
@@ -91,7 +91,7 @@ namespace engine::replication {
 	// component with a compact wire form. The authority puts its value through
 	// the same encode-and-decode `Authority::Capture` puts a join snapshot
 	// through, and both ends then hash the encoding of the value a replica
-	// holds — one expression over one input, so agreement is by construction
+	// holds - one expression over one input, so agreement is by construction
 	// rather than by the quantiser happening to be idempotent.
 	//
 	// @since v0.15
@@ -107,7 +107,7 @@ namespace engine::replication {
 	// The digest of one group's replicated state.
 	//
 	// One leaf per `(entity, component)` pair present, in the order the
-	// arguments give — so a component missing at one end, an entity missing at
+	// arguments give - so a component missing at one end, an entity missing at
 	// one end and a value differing at one end are three different roots.
 	//
 	// @param store      The world to read.

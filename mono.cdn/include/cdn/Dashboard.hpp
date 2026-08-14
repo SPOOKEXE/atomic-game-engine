@@ -8,7 +8,7 @@
 // lines of text; `Terminal.hpp` is the half that owns a file descriptor, raw
 // mode and an escape sequence. The split is what lets the whole of the layout,
 // the rates and the history be exercised by a suite that opens no tty and waits
-// for nothing — the same split `net`'s `Message.hpp` has against its `Server`,
+// for nothing - the same split `net`'s `Message.hpp` has against its `Server`,
 // and for the same reason.
 //
 // **A dashboard is built against one publication and does not outlive it.** A
@@ -55,7 +55,7 @@ namespace cdn {
 		// The numbers under a heading.
 		Row,
 
-		// A row worth finding at a glance — a live rate, a total.
+		// A row worth finding at a glance - a live rate, a total.
 		Emphasis,
 	};
 
@@ -86,7 +86,7 @@ namespace cdn {
 	// What the origin's disk holds.
 	//
 	// Passed in rather than read here, because reading it walks every chunk
-	// directory in the store — once at start-up is a cost worth paying and once
+	// directory in the store - once at start-up is a cost worth paying and once
 	// a redraw is a dashboard that pins a disk.
 	//
 	// @since v0.9
@@ -112,7 +112,7 @@ namespace cdn {
 		uint64_t CapacityBytes = 0;
 	};
 
-	// Formats a byte count the way an operator reads one — `4.1 GB`.
+	// Formats a byte count the way an operator reads one - `4.1 GB`.
 	//
 	// **Powers of 1024 under decimal names**, which is what every tool an
 	// operator already has in front of them does. Being right about the prefix
@@ -123,7 +123,7 @@ namespace cdn {
 	// @since v0.9
 	std::string FormatBytes(uint64_t bytes);
 
-	// Formats a rate — `4.2 MB/s`, `12.4 KB/s`, `0 B/s`.
+	// Formats a rate - `4.2 MB/s`, `12.4 KB/s`, `0 B/s`.
 	//
 	// The unit is chosen from the value, which is what "in MB/s or KB/s
 	// depending on load" means: a scale fixed at either one is unreadable at the
@@ -145,7 +145,7 @@ namespace cdn {
 	// What is published, what it weighs and what is moving.
 	//
 	// The document is two parts and only one of them is rebuilt: the live
-	// section — rates, history, request counts — is rewritten on every
+	// section - rates, history, request counts - is rewritten on every
 	// `Sample`, and the content section is written once in the constructor
 	// because a publication cannot change under it. That is what keeps a redraw
 	// O(the visible rows) on a store with a hundred thousand assets, which is
@@ -162,7 +162,7 @@ namespace cdn {
 		// How long a rate is measured over before it is published.
 		//
 		// A rate taken between two samples ten milliseconds apart is mostly
-		// noise — one 16 KB read lands in one sample and nothing lands in the
+		// noise - one 16 KB read lands in one sample and nothing lands in the
 		// next, and the number swings by a factor of a hundred between redraws.
 		// A second is long enough to be steady and short enough that a burst is
 		// still visible as one.
@@ -181,7 +181,7 @@ namespace cdn {
 		//
 		// Called every pump rather than every redraw. The history is built out
 		// of differences between readings, so a sample skipped is traffic that
-		// lands in whichever minute the next reading arrives in — and at a
+		// lands in whichever minute the next reading arrives in - and at a
 		// redraw rate that is one bucket in four wrong.
 		//
 		// @param counters What the service has answered so far. Totals, not
@@ -197,7 +197,7 @@ namespace cdn {
 		// One line.
 		//
 		// @param index The line, from zero.
-		// @return The line, or an empty one past the end — a viewport that
+		// @return The line, or an empty one past the end - a viewport that
 		//         scrolled past the bottom asks for these, and a bounds check
 		//         at every call site is a bounds check one of them will forget.
 		DashboardLine LineAt(size_t index) const;

@@ -19,7 +19,7 @@ namespace engine::replication {
 		  Prediction_(settings.Prediction), Settings(settings) {
 		if (!Settings.ServerIdentity.has_value()) {
 			ENGINE_WARN(
-				"replication: no server identity pinned — the exchange is encrypted but "
+				"replication: no server identity pinned - the exchange is encrypted but "
 				"authenticates nobody, so a relay in the path can read everything."
 			);
 		}
@@ -171,7 +171,7 @@ namespace engine::replication {
 
 				if (!assets::VerifySessionTranscript(transcript, signature, *Settings.ServerIdentity)) {
 					ENGINE_ERROR(
-						"replication: this is not the server that was pinned — refusing to connect. "
+						"replication: this is not the server that was pinned - refusing to connect. "
 						"An unsigned or wrongly signed welcome is what a relay in the path looks like."
 					);
 					Stats_.Refused++;
@@ -199,7 +199,7 @@ namespace engine::replication {
 				core::ByteWriter writer;
 				WriteMessage(writer, claim);
 				if (!Wire.Send(writer.Bytes(), nowSeconds)) {
-					ENGINE_WARN("replication: the identity claim did not fit — the server may refuse us.");
+					ENGINE_WARN("replication: the identity claim did not fit - the server may refuse us.");
 				}
 			}
 			return;
@@ -325,7 +325,7 @@ namespace engine::replication {
 		// the whole reason this is four lines: a delta is a delta, and the
 		// direction is carried by which end is reading it rather than by the
 		// format. What differs is that the server checks the sender's right to
-		// say it — see `Authority::SetOwnership` — and the client does not,
+		// say it - see `Authority::SetOwnership` - and the client does not,
 		// because the server has no right to check.
 		core::ByteWriter writer;
 		WriteMessage(writer, delta);

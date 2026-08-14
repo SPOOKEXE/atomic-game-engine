@@ -38,7 +38,7 @@ namespace {
 		}
 
 		std::vector<std::string> Names() const override {
-			// A dotted name is a service — see `OpenHost`. Both shapes are
+			// A dotted name is a service - see `OpenHost`. Both shapes are
 			// listed here so one case can check that they do not interfere.
 			return {
 				"Echo", "Remember", "Refuse", "Instances", "Table", "Thing.Get", "Thing.Set", "Other.Get"
@@ -323,7 +323,7 @@ TEST_CASE("a service method takes a colon or a dot", "[script][host]") {
 	runtime->SetHost(&host);
 
 	// **`Thing:Get()` is what a Roblox script writes**, and it passes the
-	// service table as the first argument — which the host has no use for.
+	// service table as the first argument - which the host has no use for.
 	REQUIRE(runtime->Run("assert(Thing:Get() == 'Thing.Get', 'the colon form did not work')"));
 
 	// The dot form is the same call with no self.
@@ -360,7 +360,7 @@ TEST_CASE("an empty table crosses as an array", "[script][host]") {
 
 	// **`{}` is the same Luau value whichever way it is read**, and the binding
 	// has to pick one. A host expecting a map finds no entries under either tag;
-	// a host expecting a *list* gets a tag it refuses — so the ambiguity is
+	// a host expecting a *list* gets a tag it refuses - so the ambiguity is
 	// harmless in one direction and not in the other.
 	//
 	// `Selection:Set({})` is the call this exists for: it is how a plugin
@@ -370,7 +370,7 @@ TEST_CASE("an empty table crosses as an array", "[script][host]") {
 	CHECK(host.Seen.Items.empty());
 
 	// A table with named keys is still a map, and one with a first element is
-	// still an array — the empty case is the only one that moved.
+	// still an array - the empty case is the only one that moved.
 	REQUIRE(runtime->Run("test.Echo({ a = 1 })"));
 	CHECK(host.Seen.Tag == HostTag::Map);
 

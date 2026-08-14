@@ -41,13 +41,13 @@ namespace engine::parallel {
 		// **Windows has no signals, so the hard-fault case has to be read out
 		// of the exit code.** A process that died of a fault exits with the
 		// NTSTATUS that killed it, and every one of those carries the two
-		// severity bits set — 0xC0000005 for an access violation, 0xC0000409
+		// severity bits set - 0xC0000005 for an access violation, 0xC0000409
 		// for a stack buffer overrun, 0xC0000017 for out of memory. A program
 		// that returned a number from main cannot collide with them: `main`
 		// returns an `int` and the CRT truncates it to the low bits.
 		//
-		// So `Signalled` here means exactly what it means on POSIX — the child
-		// did not get to choose how it ended — and `Faulted()` reads the same
+		// So `Signalled` here means exactly what it means on POSIX - the child
+		// did not get to choose how it ended - and `Faulted()` reads the same
 		// on both.
 		ProcessStatus Classify(DWORD code) {
 			ProcessStatus status;
@@ -209,8 +209,8 @@ namespace engine::parallel {
 		// **Console handles must not go in an inherit list.** A child that
 		// shares its parent's console gets the console's handles by attaching
 		// to it, and naming one in `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` makes
-		// `CreateProcessW` fail outright. A handle that is a file or a pipe —
-		// a supervisor whose output was redirected to a log — has to be listed,
+		// `CreateProcessW` fail outright. A handle that is a file or a pipe -
+		// a supervisor whose output was redirected to a log - has to be listed,
 		// or the child's output goes nowhere.
 		//
 		// Only ever asked about a handle that exists; an absent stream is
@@ -278,7 +278,7 @@ namespace engine::parallel {
 		// Which handles the child is allowed to have, and only those. Without a
 		// list, inheritance is all-or-nothing: the child would receive every
 		// inheritable handle this process holds, including the driver's own end
-		// of the channel being handed over — and while it held a copy, neither
+		// of the channel being handed over - and while it held a copy, neither
 		// side would ever see the other go away.
 		std::vector<HANDLE> inherited;
 
@@ -418,7 +418,7 @@ namespace engine::parallel {
 				// Refused rather than started without the list. Spawning anyway
 				// would mean turning inheritance on with nothing restricting
 				// it, which hands the child every inheritable handle this
-				// process holds — including the driver's own end of this very
+				// process holds - including the driver's own end of this very
 				// channel, whose whole job is to notice when one side goes
 				// away.
 				ENGINE_ERROR("could not restrict what '{}' inherits: {}", program.string(), GetLastError());
@@ -463,7 +463,7 @@ namespace engine::parallel {
 
 		// Closed here, on every path. While this process holds a copy the child
 		// can never see the channel end, because a socket is counted by
-		// references rather than by intentions — and the child's copy is one of
+		// references rather than by intentions - and the child's copy is one of
 		// its own, made by the handover rather than shared with this one.
 		endpoint.Close();
 
@@ -521,7 +521,7 @@ namespace engine::parallel {
 
 		// **Windows has no signal a process is obliged to notice.** The closest
 		// thing is a console control event, which reaches the child because it
-		// was started in a process group of its own — and which a host handles
+		// was started in a process group of its own - and which a host handles
 		// the way it would handle SIGTERM: flush a snapshot, close the channel,
 		// exit.
 		//

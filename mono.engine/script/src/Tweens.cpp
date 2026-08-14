@@ -1,13 +1,13 @@
 // Stepping every tween in one world, on the tick's own clock.
 //
 // Nothing here names a VM. `LuauTween.cpp` and `JsTween.cpp` are what meet one
-// on this file's behalf — the *handle* is per language and the service is not,
+// on this file's behalf - the *handle* is per language and the service is not,
 // which is the split `ScriptCall::ReturnTween` sits on.
 //
 // **The easing name conversions are at the foot of this file rather than in a
 // binding**, and moving them there closed a duplicate: `LuauBindings.hpp` and
 // `JsBindings.hpp` each declared all four, on the stated grounds that neither
-// header may include the other's VM. Neither has to — a name and an enum member
+// header may include the other's VM. Neither has to - a name and an enum member
 // are what a tween is made of and this is the tween file.
 //
 // @tier L9 · shared
@@ -67,7 +67,7 @@ namespace engine::script {
 		//
 		// **Everything `TweenInfo` says, read once and in one place.** The delay,
 		// the repeats and the reversal are three fields that interact, and the
-		// interaction is the only part of a tween that is not obvious — so it is
+		// interaction is the only part of a tween that is not obvious - so it is
 		// a pure function of the info and a number of seconds, which is a thing
 		// a test can sweep.
 		Phase PhaseOf(const core::TweenInfo &info, double elapsed) {
@@ -97,7 +97,7 @@ namespace engine::script {
 			const double index = std::floor(elapsed / cycle);
 
 			// Past the last cycle the tween is finished, and it holds at the end
-			// of its last pass — which is the start again when it reverses.
+			// of its last pass - which is the start again when it reverses.
 			if (!endless && index >= cycles) {
 				phase.Alpha = info.Reverses ? 0.0f : 1.0f;
 				phase.Finished = true;
@@ -120,8 +120,8 @@ namespace engine::script {
 
 	bool Interpolable(ecs::PropertyType type) {
 		// The numbers, and the value types that are numbers in a trench coat.
-		// Everything else — `Bool`, `Name`, `Enum`, `String`, `Reference`, the
-		// two sequences, `NumberRange` and `Opaque` — has no midpoint, and the
+		// Everything else - `Bool`, `Name`, `Enum`, `String`, `Reference`, the
+		// two sequences, `NumberRange` and `Opaque` - has no midpoint, and the
 		// caller refuses it by name.
 		switch (type) {
 		case ecs::PropertyType::Int32:
@@ -236,7 +236,7 @@ namespace engine::script {
 		std::vector<ecs::Entity> &dropped
 	) {
 		if (Records.size() >= MAXIMUM) {
-			// At the cap, the oldest *finished* record is reclaimed — see
+			// At the cap, the oldest *finished* record is reclaimed - see
 			// `MAXIMUM` for why a finished one, and why refusing is the right
 			// answer when every record is still live.
 			const auto stale = std::find_if(Records.begin(), Records.end(), [](const Record &record) {
@@ -255,7 +255,7 @@ namespace engine::script {
 		//
 		// **Predicted on a replica and authoritative anywhere else.** A tween's
 		// entity carries no component, is never sent and never crosses a world,
-		// so which range it comes from is invisible — but a replica *refuses* an
+		// so which range it comes from is invisible - but a replica *refuses* an
 		// authoritative mint, and a client animating its own interface is the
 		// ordinary case rather than an edge one. The reserved range is exactly
 		// what it is for.
@@ -271,7 +271,7 @@ namespace engine::script {
 		record.Info = info;
 		record.Goals = std::move(goals);
 
-		// Appended, so the vector stays in creation order — which is the order
+		// Appended, so the vector stays in creation order - which is the order
 		// `Advance` walks and therefore the order two `Completed` handlers run
 		// in.
 		Records.push_back(std::move(record));
@@ -285,7 +285,7 @@ namespace engine::script {
 		}
 
 		// A paused tween resumes where it stopped. Anything else starts from the
-		// beginning, which means capturing the start values now — see the header
+		// beginning, which means capturing the start values now - see the header
 		// for why that is at `Play` and not at `Create`.
 		if (record->State != TweenState::Paused) {
 			record->Elapsed = 0.0;
@@ -320,7 +320,7 @@ namespace engine::script {
 			return false;
 		}
 
-		// Stopped and rewound, and the properties left where they are — see the
+		// Stopped and rewound, and the properties left where they are - see the
 		// header. `Completed` does not fire: a script that asked for a stop is
 		// not asking to be told the tween arrived.
 		record->State = TweenState::Cancelled;
@@ -366,7 +366,7 @@ namespace engine::script {
 		ecs::Store &store, float delta, std::vector<ecs::Entity> &completed, std::vector<ecs::Entity> &dropped
 	) {
 		// **One pass in creation order**, and both out-lists are appended in
-		// that order too — which is what makes two tweens finishing on one tick
+		// that order too - which is what makes two tweens finishing on one tick
 		// fire in the order the scripts made them.
 		size_t kept = 0;
 		for (size_t index = 0; index < Records.size(); index++) {
@@ -389,7 +389,7 @@ namespace engine::script {
 
 				if (phase.Finished) {
 					// Kept rather than dropped, so the handle can play it again
-					// — which is what `MAXIMUM` reclaims when it has to.
+					// - which is what `MAXIMUM` reclaims when it has to.
 					record.State = TweenState::Completed;
 					completed.push_back(record.Tween);
 				}
@@ -423,7 +423,7 @@ namespace engine::script {
 	}
 
 	void TweenTable::Apply(ecs::Store &store, const Record &record, float alpha) {
-		// Each goal, in the name order `Create` sorted them into — see
+		// Each goal, in the name order `Create` sorted them into - see
 		// `Advance`, which states why the order between two goals is observable.
 		for (const TweenGoal &goal : record.Goals) {
 			alignas(alignof(core::CFrame)) std::byte bytes[sizeof(core::CFrame)];

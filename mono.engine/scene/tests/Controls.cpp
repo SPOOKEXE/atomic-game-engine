@@ -105,7 +105,7 @@ TEST_CASE("a locked pointer turns without a button", "[scene][controls]") {
 TEST_CASE("pitch clamps short of straight up and straight down", "[scene][controls]") {
 	// **The gimbal-lock guard.** At exactly a right angle the look direction is
 	// parallel to world up and `LookAt` cannot choose a roll, so the view spins
-	// about its own axis — which reads as the camera flipping over.
+	// about its own axis - which reads as the camera flipping over.
 	World world;
 	HoldTurn(world.Input());
 
@@ -230,7 +230,7 @@ TEST_CASE("first person puts the eye at the head and third person behind it", "[
 }
 
 TEST_CASE("a camera with no subject is left where it is", "[scene][controls]") {
-	// No subject is a free camera, which is what an editor has — moving it to
+	// No subject is a free camera, which is what an editor has - moving it to
 	// the origin would yank an author's viewpoint away.
 	World world;
 	const Entity eye = world.Store_.CreateInstance(engine::scene::CameraClass(), "Eye");
@@ -280,7 +280,7 @@ TEST_CASE("opposed keys cancel to a standstill rather than a NaN", "[scene][cont
 
 TEST_CASE("an unfocused window walks nobody", "[scene][controls]") {
 	// Alt-tabbing away while holding W must not leave a character walking for
-	// ever, and this is the second belt — the client also clears the keys, and
+	// ever, and this is the second belt - the client also clears the keys, and
 	// a recording replayed into an unfocused world should behave the same way.
 	World world;
 	const Entity character = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
@@ -312,7 +312,7 @@ TEST_CASE("a dead humanoid keeps its momentum and is driven no further", "[scene
 	// **What "the body stays where it fell" has to mean when nothing ragdolls.**
 	// `StepCharacters` *replaces* horizontal velocity every tick, so a corpse it
 	// still visited would walk on at `WalkSpeed` in whatever direction its owner
-	// was last holding — for the whole of `Player.RespawnTime`, in front of
+	// was last holding - for the whole of `Player.RespawnTime`, in front of
 	// everybody. The gate is on this pass rather than on the intent because this
 	// is the half that reaches a `Motion`.
 	World world;
@@ -324,7 +324,7 @@ TEST_CASE("a dead humanoid keeps its momentum and is driven no further", "[scene
 	world.Store_.Set(character, humanoid);
 	world.Store_.Set(character, Motion{Vector3{3.0f, -25.0f, 0.0f}, Vector3{}});
 
-	// Alive, so the step drives it — the control against which the next half
+	// Alive, so the step drives it - the control against which the next half
 	// means something.
 	REQUIRE(StepCharacters(world.Store_, 1.0f / 60.0f) == 1);
 	CHECK(world.Store_.Get<Motion>(character)->Linear.X == Approx(16.0f));
@@ -382,7 +382,7 @@ TEST_CASE("a jump needs the ground and is spent once", "[scene][controls]") {
 	world.Store_.Set(character, Motion{});
 
 	// Airborne: the request is cleared rather than held, so it does not fire
-	// the moment the character lands — which reads as input arriving late.
+	// the moment the character lands - which reads as input arriving late.
 	REQUIRE(StepCharacters(world.Store_, 1.0f / 60.0f) == 1);
 	CHECK(world.Store_.Get<Motion>(character)->Linear.Y == Approx(0.0f));
 	CHECK_FALSE(world.Store_.Get<Humanoid>(character)->JumpRequested);
@@ -406,7 +406,7 @@ TEST_CASE("a jump pressed between two ticks is latched, not lost", "[scene][cont
 	world.Store_.Set(character, Humanoid{});
 
 	// **Through `LatchPresses`, which is what a writer does.** A press only
-	// becomes a tap once the thing filling `Down` has recorded the edge — see
+	// becomes a tap once the thing filling `Down` has recorded the edge - see
 	// `InputState::Pressed`. Setting the bit alone is a frame nobody wrote.
 	world.Input().Down.Set(KeyCode::Space, true);
 	world.Input().LatchPresses();
@@ -427,7 +427,7 @@ TEST_CASE("an aim is the live camera's ray and the click is a latched edge", "[s
 	// says where it was looking, the host decides what that struck.
 	World world;
 
-	// No camera, no aim — and `Aimed` is separate from `Fired` because the two
+	// No camera, no aim - and `Aimed` is separate from `Fired` because the two
 	// fail differently. "No live camera" is a bug; "the player did not click" is
 	// a Tuesday.
 	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Aimed);
@@ -472,7 +472,7 @@ TEST_CASE("an aim is the live camera's ray and the click is a latched edge", "[s
 	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
 
 	// **Read twice is fired twice until a tick consumes it**, and consuming is
-	// the caller's — exactly as it is for a jump. One click must not become two
+	// the caller's - exactly as it is for a jump. One click must not become two
 	// shots when a host catching up runs two ticks between two frames.
 	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
 	world.Input().ConsumeButtonTaps();
@@ -481,7 +481,7 @@ TEST_CASE("an aim is the live camera's ray and the click is a latched edge", "[s
 	// An unfocused window fires nothing. Alt-tabbing away mid-click must not
 	// shoot, which is the same belt `ReadMoveIntent` wears.
 	// `PreviousButtons` cleared first, because `LatchPresses` records an *edge*
-	// and the button was left down by the case above — a latch against a button
+	// and the button was left down by the case above - a latch against a button
 	// that was already held records nothing, which is the rule working.
 	world.Input().PreviousButtons = 0;
 	world.Input().Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
@@ -495,7 +495,7 @@ TEST_CASE("an aim is the live camera's ray and the click is a latched edge", "[s
 TEST_CASE("the button latch keeps InputState the size a save file expects", "[scene][controls][aim]") {
 	// **`PressedButtons` came out of `Reserved`, not off the end.** A field
 	// appended would grow the object and rewrite the layout `Column::Write`
-	// sends — `SIZE_IS_PINNED` in `Input.cpp` is the check, and this is the
+	// sends - `SIZE_IS_PINNED` in `Input.cpp` is the check, and this is the
 	// statement of why it matters that a *reader* can find.
 	CHECK(sizeof(InputState) == 56);
 

@@ -20,7 +20,7 @@ namespace engine::scene {
 	//
 	// **Runs in `Phase::PreSimulation`, before anything moves.** Rendering
 	// interpolates from here, so this has to be the position at the start of
-	// *this* tick — capturing it afterwards would interpolate from a place
+	// *this* tick - capturing it afterwards would interpolate from a place
 	// nothing was ever at, which reads as a scene that stutters at exactly one
 	// frame of delay and is invisible in a screenshot.
 	//

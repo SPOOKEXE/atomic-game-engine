@@ -1,6 +1,6 @@
 // A supervised host, as an actual second process.
 //
-// Everything below this runs in one process by design — `world`'s tests drive
+// Everything below this runs in one process by design - `world`'s tests drive
 // the protocol over a local channel because that is where the protocol lives.
 // What only a real spawn can show is the join between them: the supervisor
 // creating a channel, the child inheriting it across an exec, `--host` finding
@@ -176,7 +176,7 @@ TEST_CASE("a host whose driver goes away exits rather than orphaning itself", "[
 		// child is checked for having gone on its own below.
 	}
 
-	// Nothing to assert on directly once the supervisor is gone — the process
+	// Nothing to assert on directly once the supervisor is gone - the process
 	// is reaped by its destructor. The case earns its place by not hanging: a
 	// host that failed to notice would still be running, and `StopAll` in the
 	// destructor would have had to kill it.
@@ -269,7 +269,7 @@ TEST_CASE("a host's traffic is refused if it names a world the host does not hol
 	}
 
 	// The honest version of this check runs against a spawned host that is
-	// behaving, so what is asserted is the *absence* of refusals — a driver
+	// behaving, so what is asserted is the *absence* of refusals - a driver
 	// counting refusals against its own hosts would mean its directory and
 	// theirs disagree, which is a bug rather than a load figure.
 	server::Options options;

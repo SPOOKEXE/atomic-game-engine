@@ -17,7 +17,7 @@ layout(set = 2, binding = 2) uniform sampler2D colourMap;
 // The beams: up to four holes' worth of shadow, in one 2x2 atlas.
 //
 // **A hole carries occlusion and not light.** Both rooms already have the
-// world's sun, so what crosses a portal is the *absence* of it — a caster in
+// world's sun, so what crosses a portal is the *absence* of it - a caster in
 // front of a hole darkens the floor beyond it. Taking the darker of the two is
 // what makes that coherent with one global sun; adding a second contribution
 // would double-light every floor near a doorway.
@@ -49,7 +49,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 
 	// Where the current animation cell sits in its sheet: x the scale, yz the
 	// offset. The identity (1, 0, 0) for a texture that is not a sheet, so this
-	// is applied unconditionally rather than behind a branch — a divergent
+	// is applied unconditionally rather than behind a branch - a divergent
 	// branch per fragment to avoid a multiply and an add is the wrong trade.
 	vec4 Flipbook;
 
@@ -73,7 +73,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 	//
 	// **A body standing in a hole is one body cut at the plane.** Its far half
 	// is drawn as a second instance in the room beyond, and without the cut both
-	// are drawn whole — the original hanging out of the back of the pane and the
+	// are drawn whole - the original hanging out of the back of the pane and the
 	// copy out of the far one. See `scene::DrawInstance::SeamNormal`.
 	vec4 SeamPlane;
 } lighting;
@@ -100,7 +100,7 @@ float MirrorNoise(vec2 at) {
 // Where a fragment reads the surface texture, once the effect has had its say.
 //
 // **Only `Swirl` moves texels**, so this is a branch that almost always falls
-// through — and it has to be separate from the grade below because a warp
+// through - and it has to be separate from the grade below because a warp
 // happens before the fetch and a grade happens after it.
 vec2 MirrorLookup(vec2 uv, float effect, float seconds) {
 	if (effect < float(EFFECT_SWIRL) - 0.5) {
@@ -125,7 +125,7 @@ vec2 MirrorLookup(vec2 uv, float effect, float seconds) {
 
 // The heat ramp `Thermal` reads luminance through.
 //
-// Five stops, black through blue, magenta, red and yellow to white — the ramp
+// Five stops, black through blue, magenta, red and yellow to white - the ramp
 // every thermal camera ships with, because it is the one that keeps its
 // ordering legible to somebody who has never seen one before.
 vec3 ThermalRamp(float level) {
@@ -153,7 +153,7 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 	if (effect < float(EFFECT_NIGHT_VISION) + 0.5) {
 		// Night vision: an intensifier, so the gain comes first and the tint
 		// second. Lifted, because the point of one is that a dark scene stops
-		// being dark — but not as hard as an intensifier really does. A gain
+		// being dark - but not as hard as an intensifier really does. A gain
 		// that saturated the mid-tones made a lit room a flat green rectangle,
 		// which is a filter rather than a picture: what makes this read as a
 		// scope is that the shapes survive it.
@@ -170,7 +170,7 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 
 	if (effect < float(EFFECT_THERMAL) + 0.5) {
 		// Thermal: luminance stands in for temperature, which is a lie an
-		// engine with no thermal model cannot avoid — `scene::SurfaceEffect`
+		// engine with no thermal model cannot avoid - `scene::SurfaceEffect`
 		// says so rather than implying otherwise. It reads right because bright
 		// things in a lit scene usually are the hot ones.
 		return ThermalRamp(clamp(level * 1.25, 0.0, 1.0));
@@ -204,14 +204,14 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 // **Sixteen, and it is a forward renderer's simplest form**, which is what
 // `RENDER_PIPELINE.md` puts a clustered pass at v0.11 to replace. Every fragment
 // tests every light in the buffer, so this is a cost paid per pixel per light
-// whether the light reaches it or not — the range check below is a branch, not a
+// whether the light reaches it or not - the range check below is a branch, not a
 // skip, because the loop bound is uniform.
 //
 // Sixteen because a room has a handful of lamps and because a fourth `vec4` per
 // light would put the buffer past what some drivers keep in fast memory.
 //
 // **The number is not spelled here.** The build passes `-DMAX_LIGHTS` read out
-// of `render::MAX_SCENE_LIGHTS`, which sizes `LightUniforms` on the C++ side —
+// of `render::MAX_SCENE_LIGHTS`, which sizes `LightUniforms` on the C++ side -
 // so the array below and the buffer it is fed from cannot disagree. A cap
 // smaller than the uniform silently ignores the tail of the set; a larger one
 // reads past it. Both look like "that lamp does not work", which is why this is
@@ -238,7 +238,7 @@ layout(set = 3, binding = 1) uniform Lights {
 	vec4 Colour[MAX_LIGHTS];
 
 	// xyz: which way a spot points. w: the cosine of its half-angle, or -1 for a
-	// point light — **a cosine rather than the angle**, because the test is a dot
+	// point light - **a cosine rather than the angle**, because the test is a dot
 	// product and converting per fragment per light would be sixteen `acos` calls
 	// a pixel.
 	vec4 Direction[MAX_LIGHTS];
@@ -258,7 +258,7 @@ layout(set = 3, binding = 1) uniform Lights {
 // copy of the world. `Back` carries a fragment from the far side of a hole to
 // the near side; `Plane` is what says it was on the far side to begin with; and
 // `Light` is the beam's own matrix, fitted to the pane's rectangle so that the
-// frustum *is* the aperture — a fragment the beam does not reach projects
+// frustum *is* the aperture - a fragment the beam does not reach projects
 // outside `0..1`, which the range check below already reads as lit.
 layout(set = 3, binding = 2) uniform Beams {
 	mat4 Light[MAX_BEAMS];
@@ -277,7 +277,7 @@ layout(set = 3, binding = 2) uniform Beams {
 // How much of the sun reaches this fragment through the holes in the world.
 //
 // One, meaning unshadowed, for every fragment in every scene with no portal in
-// it — the loop ends at its first test.
+// it - the loop ends at its first test.
 float BeamFactor() {
 	float lit = 1.0;
 
@@ -314,7 +314,7 @@ float BeamFactor() {
 		vec2 atlas = uv * beams.Region[index].xy + beams.Region[index].zw;
 
 		// **One tap, where the world map takes four.** A beam's edge is the
-		// hole's own rim, which is a hard edge in the geometry as well — a soft
+		// hole's own rim, which is a hard edge in the geometry as well - a soft
 		// one there would read as the hole being out of focus.
 		float closest = texture(beamMap, atlas).r;
 		lit = min(lit, (projected.z - 0.0025) <= closest ? 1.0 : 0.0);
@@ -326,7 +326,7 @@ float BeamFactor() {
 // What the local lights add at this fragment.
 //
 // **Added to the directional term rather than replacing it**, so a scene with no
-// lamps in it looks exactly as it did before v0.10 — which is the property that
+// lamps in it looks exactly as it did before v0.10 - which is the property that
 // makes this safe to turn on for every existing world.
 vec3 LocalLight(vec3 normal) {
 	vec3 total = vec3(0.0);
@@ -429,7 +429,7 @@ void main() {
 
 	// **The three colour sources multiply rather than one winning.** The
 	// texture is what the artist painted, the base colour is what the *material*
-	// says that run is — which is the whole of an untextured import — and the
+	// says that run is - which is the whole of an untextured import - and the
 	// instance tint is what the scene says this copy of it is. A pipeline that
 	// let any of them replace the others would lose a different thing in each
 	// of the three cases.
@@ -444,7 +444,7 @@ void main() {
 
 	// Cut-out before anything else is computed. A hair card is authored as a
 	// plane with a mask, and discarding is what keeps it opaque and out of the
-	// sorted pass — see `scene::AlphaMode`.
+	// sorted pass - see `scene::AlphaMode`.
 	float alpha = inColour.a * sampled.a * lighting.BaseColour.a;
 	if (lighting.Surface.y > 0.0 && alpha < lighting.Surface.y) {
 		discard;
@@ -456,7 +456,7 @@ void main() {
 	//
 	// **A discard rather than a clip plane**, because this pipeline declares no
 	// clip-distance slot and the draws this applies to are a handful of
-	// instances a frame — the run breaks wherever the plane changes, so it is
+	// instances a frame - the run breaks wherever the plane changes, so it is
 	// only ever the halves that pay for the branch. It does defeat early-Z on
 	// those draws, which is why what may be cut is bounded by what fits through
 	// the hole.
@@ -480,7 +480,7 @@ void main() {
 	// be pixel-exact where the surface path cannot. The sub-view is rendered
 	// with the screen's own projection into a target the size of this
 	// attachment, so this fragment's own position in the target *is* the texel
-	// it wants — one texel per pixel at every distance, with nothing fitted and
+	// it wants - one texel per pixel at every distance, with nothing fitted and
 	// nothing to go coarse when you walk into the hole.
 	//
 	// `gl_FragCoord.xy` is already in the target's pixels and already points the
@@ -489,13 +489,13 @@ void main() {
 	// which this pipeline does not need because the rasteriser hands it over.
 	//
 	// **Never rejected for being outside 0..1**, unlike the mirror below. It
-	// cannot be — the target covers the same rectangle as the frame this
-	// fragment is in — and a bounds test would only be a way to fail on a
+	// cannot be - the target covers the same rectangle as the frame this
+	// fragment is in - and a bounds test would only be a way to fail on a
 	// rounding error at the very edge of the pane.
 	// **The end of the chain, which is a shade and not a wall.** A hole at the
 	// deepest level the recursion goes to has no sub-render to sample, and
 	// drawing its own lit material there puts a grey slab at the end of a
-	// corridor of holes — the one thing a corridor of holes must not look like.
+	// corridor of holes - the one thing a corridor of holes must not look like.
 	// The ambient is the far room's own unlit tone, so the chain fades into it
 	// rather than stopping against something.
 	if (lighting.Flags.z > 2.5) {
@@ -503,8 +503,8 @@ void main() {
 		return;
 	}
 
-	// **Both faces and neither rim.** A hole is a hole from either side — the
-	// warp already answers which — so the test is on the axis rather than on the
+	// **Both faces and neither rim.** A hole is a hole from either side - the
+	// warp already answers which - so the test is on the axis rather than on the
 	// sign, and a face square to the pane's own normal shows the picture while
 	// one across it does not. A zero normal is every draw that is not a portal
 	// pane, and it accepts everything.
@@ -532,7 +532,7 @@ void main() {
 	// **The surface texture, projected from the camera that rendered it.** A
 	// planar projection is exactly right for a flat mirror and exactly wrong
 	// for anything else, which is why this is a mirror feature rather than a
-	// general one — see `SurfaceCamera` on the C++ side.
+	// general one - see `SurfaceCamera` on the C++ side.
 	if (lighting.Flags.z > 0.5) {
 		vec3 surface = inSurfacePosition.xyz / max(inSurfacePosition.w, 1e-6);
 

@@ -30,7 +30,7 @@ TEST_SUITE_ID("engine.physics.pipeline")
 TEST_DEPENDS("engine.physics.integrate")
 TEST_DEPENDS("engine.physics.broadphase")
 // Phases, and the fact that two systems in one phase have no order between
-// them — which is why the steps are composed rather than registered separately.
+// them - which is why the steps are composed rather than registered separately.
 TEST_DEPENDS("engine.ecs.scheduler")
 // The resource is registered under an explicit name with its own writer, and a
 // snapshot is what proves the name and the writer are both real.
@@ -92,7 +92,7 @@ namespace {
 TEST_CASE("the resource is registered under an explicit name", "[physics][pipeline]") {
 	// A resource is keyed by a component id too, so one that is never
 	// registered is minted by the first `SetResource` under the compiler's
-	// spelling of the type — a name that differs between compilers and reaches
+	// spelling of the type - a name that differs between compilers and reaches
 	// a snapshot.
 	RegisterPhysicsComponents();
 
@@ -114,7 +114,7 @@ TEST_CASE("reading an unprepared world registers nothing", "[physics][pipeline]"
 	// **The rule the explicit name exists to protect, checked from the side it
 	// gets broken from.** `Store::Resource<T>()` registers `T` under the
 	// compiler's spelling in order to tell a caller that it is missing. Do that
-	// once — one query against a world nobody prepared — and the registration
+	// once - one query against a world nobody prepared - and the registration
 	// below is a second name for one type, which `Components::Adopt` refuses by
 	// aborting the process.
 	//
@@ -154,7 +154,7 @@ TEST_CASE("preparing a world installs the resource and the change tracking", "[p
 	REQUIRE(store.HasResource<PhysicsWorld>());
 
 	// Without these two, `Store::Changed` is always false and the sync decides
-	// static geometry never moved — an index describing where the world used to
+	// static geometry never moved - an index describing where the world used to
 	// be, with nothing to say it.
 	CHECK(store.Observed<Transform>());
 	CHECK(store.Observed<Collider>());
@@ -186,7 +186,7 @@ TEST_CASE("a scheduled tick integrates before it indexes", "[physics][pipeline]"
 	// The reason the steps are composed into one system rather than registered
 	// as two in the same phase: the boxes handed to the index have to describe
 	// where things ended the tick. If the order inverted, the pair list would
-	// lag the world by exactly one tick — which looks like tuning and is not.
+	// lag the world by exactly one tick - which looks like tuning and is not.
 	Store store("pipeline.order");
 	BuildScene(store);
 
@@ -214,7 +214,7 @@ TEST_CASE("a scheduled tick integrates before it indexes", "[physics][pipeline]"
 }
 
 TEST_CASE("two runs of one scene tick to identical bytes", "[physics][pipeline]") {
-	// Same binary, same platform, same result — `v02v03v04.md` §2.4 and §3.5.
+	// Same binary, same platform, same result - `v02v03v04.md` §2.4 and §3.5.
 	// A snapshot rather than a field-by-field comparison, because the snapshot
 	// is what `just determinism` compares and it also catches a component whose
 	// padding reached the file uninitialised.
@@ -285,7 +285,7 @@ TEST_CASE("a part authored the way a script authors one falls", "[physics][pipel
 	//
 	// The module was complete, tested, benchmarked and connected to nothing for
 	// four versions. Nobody noticed because every world this engine shipped was
-	// anchored throughout — so this asserts the join rather than either side.
+	// anchored throughout - so this asserts the join rather than either side.
 	engine::scene::RegisterSceneClasses();
 	RegisterPhysicsComponents();
 
@@ -294,7 +294,7 @@ TEST_CASE("a part authored the way a script authors one falls", "[physics][pipel
 	const engine::ecs::ClassId partClass = engine::ecs::Classes::Find(Name("Part"));
 	REQUIRE(partClass.IsValid());
 
-	// The floor, anchored — which is what an author writes and is why every
+	// The floor, anchored - which is what an author writes and is why every
 	// existing example simulates nothing.
 	const Entity floor = store.CreateInstance(partClass);
 	REQUIRE(floor != engine::ecs::NULL_ENTITY);
@@ -310,7 +310,7 @@ TEST_CASE("a part authored the way a script authors one falls", "[physics][pipel
 	}
 
 	// And a block above it, unanchored. **Setting this false is what gives a
-	// part a rigid body** — `scene::Part` refuses one to an anchored part — so
+	// part a rigid body** - `scene::Part` refuses one to an anchored part - so
 	// this single line is the difference between a scene that simulates and
 	// every scene this repository shipped before v0.13.
 	const Entity block = store.CreateInstance(partClass);
@@ -333,7 +333,7 @@ TEST_CASE("a part authored the way a script authors one falls", "[physics][pipel
 	RegisterPhysicsSystems(scheduler);
 
 	// **And the weight, which is a separate feature.** This module deliberately
-	// has no gravity — a top-down game should not have to switch one off — so
+	// has no gravity - a top-down game should not have to switch one off - so
 	// the pipeline alone integrates every body at zero acceleration for ever.
 	// That is not a hypothetical: this case failed exactly that way when it was
 	// first written against the pipeline alone, which is how the missing half
@@ -355,13 +355,13 @@ TEST_CASE("a part authored the way a script authors one falls", "[physics][pipel
 
 	// **It fell**, which is the whole claim. A block that is still at twelve
 	// metres after four seconds is a world whose bodies are not being
-	// integrated — the state this engine was in until something called the two
+	// integrated - the state this engine was in until something called the two
 	// functions above.
 	CHECK(heightOf(block) < started - 1.0f);
 
 	// **And it stopped**, which is the other half and is the harder one. A
 	// block that has fallen through the floor is not simulation working, it is
-	// the narrow phase missing — and it looks identical to success in any test
+	// the narrow phase missing - and it looks identical to success in any test
 	// that only asserts the fall.
 	CHECK(heightOf(block) > -2.0f);
 
@@ -373,7 +373,7 @@ TEST_CASE("a part authored the way a script authors one falls", "[physics][pipel
 	// **The world's own index is deliberately not asserted here.** The counts
 	// move as a body comes to rest, and what this case is about is the join
 	// between the class table and the pipeline rather than the pipeline's
-	// bookkeeping — which the cases above already pin against a scene they
+	// bookkeeping - which the cases above already pin against a scene they
 	// build themselves. Asserting an internal from here would be a second
 	// opinion about something this file is not the authority on.
 	CHECK(store.Resource<PhysicsWorld>() != nullptr);

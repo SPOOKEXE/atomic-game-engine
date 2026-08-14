@@ -27,7 +27,7 @@ namespace engine::gui {
 
 		// **Everything below counts characters and the string holds bytes**, so
 		// the count is taken once and maintained rather than recomputed after each
-		// edit — a walk of the whole string per keystroke would be the same answer
+		// edit - a walk of the whole string per keystroke would be the same answer
 		// for more work, and the two would then have to agree.
 		auto characters = static_cast<int32_t>(Characters(label->Text));
 
@@ -120,7 +120,7 @@ namespace engine::gui {
 
 		if (typing.Submit) {
 			// **A `MultiLine` box takes a line break and a single-line one is
-			// done.** Roblox's rule, and the only one that leaves both usable —
+			// done.** Roblox's rule, and the only one that leaves both usable -
 			// see `Type`.
 			if (!entry->MultiLine) {
 				result.Released = true;

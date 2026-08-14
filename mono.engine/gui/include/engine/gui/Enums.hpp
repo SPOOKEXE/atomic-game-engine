@@ -7,7 +7,7 @@
 // trivially-copied component, so the *number* is the format: an `Alignment` of
 // 2 has to mean `Right` in a game file this engine wrote and in one it did not.
 // Reordering any of these is a format change, and there is nothing at load time
-// that could catch it — a wrongly-ordered set loads cleanly and lays everything
+// that could catch it - a wrongly-ordered set loads cleanly and lays everything
 // out somewhere plausible.
 //
 // That is why the values are written out below rather than left to the
@@ -17,8 +17,8 @@
 //
 // **They live here rather than beside the component that holds them**, which is
 // `scene/Enums.hpp`'s rule restated: an enum next to one struct reads as that
-// struct's private business, and the moment a second thing needs an alignment —
-// a list layout, a grid layout, a text label — it is either included through a
+// struct's private business, and the moment a second thing needs an alignment -
+// a list layout, a grid layout, a text label - it is either included through a
 // component header that has nothing to do with it, or copied.
 //
 // @tier L7 · shared
@@ -29,7 +29,7 @@ namespace engine::gui {
 
 	// Which axis a `UDim2`'s scale resolves against.
 	//
-	// The default is the obvious one — X against the parent's width, Y against
+	// The default is the obvious one - X against the parent's width, Y against
 	// its height. The other two exist so a square element stays square as its
 	// parent changes shape, which is what `RelativeXX` on a size means: both
 	// axes resolve against the parent's *width*.
@@ -67,7 +67,7 @@ namespace engine::gui {
 	// How an image fills the rectangle it is drawn into.
 	//
 	// `Slice` is nine-slice: the four corners keep their size, the four edges
-	// stretch along one axis and the middle stretches along both — which is the
+	// stretch along one axis and the middle stretches along both - which is the
 	// only one of these that needs a second rectangle (`SliceCenter`) to mean
 	// anything.
 	//
@@ -93,7 +93,7 @@ namespace engine::gui {
 	//
 	// **`Top` is 0 and `Center` is 1**, which is not the same order as
 	// `TextXAlignment`'s. That is Roblox's numbering and it is kept rather than
-	// tidied, because the ordinal is the format — see this file's opening.
+	// tidied, because the ordinal is the format - see this file's opening.
 	//
 	// @since v0.8
 	enum class TextYAlignment : uint8_t {
@@ -115,7 +115,7 @@ namespace engine::gui {
 	// **By role and not by family**, which is `ui/Fonts.hpp`'s rule one module
 	// over: swapping what `Code` looks like is a line in one table rather than a
 	// search. The four here are the four faces already vendored for Dear ImGui,
-	// because the atlas is shared — a second rasteriser over the same four files
+	// because the atlas is shared - a second rasteriser over the same four files
 	// would be two answers to what a glyph looks like.
 	//
 	// @since v0.8
@@ -228,7 +228,7 @@ namespace engine::gui {
 	//
 	// `ecs::EnumTable` takes a second declaration of an existing member as
 	// agreement rather than conflict, so both modules registering `NormalId`
-	// is legal — and it is legal precisely as long as the *orders* match, since
+	// is legal - and it is legal precisely as long as the *orders* match, since
 	// the ordinal is what a game file carries. `gui/tests/Enums.cpp` pins this
 	// list; `scene/tests/Enums.cpp` pins the other. Two tests holding one order
 	// is the arrangement this repository already uses for `DefaultMaterial`.

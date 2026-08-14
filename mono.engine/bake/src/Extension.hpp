@@ -2,9 +2,9 @@
 
 // The one place this module decides what a name's extension is.
 //
-// Both halves of the importer need the answer — `ModelFormatOfName` because OBJ
+// Both halves of the importer need the answer - `ModelFormatOfName` because OBJ
 // has no signature and a `.gltf` is JSON, `ImageFormatOfName` because SVG is XML
-// — and two copies of a rule about where a dot counts is exactly the drift
+// - and two copies of a rule about where a dot counts is exactly the drift
 // `assets::KindOfName` is one function for.
 
 #include <algorithm>

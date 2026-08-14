@@ -22,7 +22,7 @@ namespace engine::bake {
 
 		// A `.gltf` is JSON, and JSON starting with `{` is the only thing that
 		// distinguishes it from any other text file. Accepted here because the
-		// parse itself is the real check — a text file that is not glTF fails on
+		// parse itself is the real check - a text file that is not glTF fails on
 		// "no nodes" with a message that says so.
 		for (const std::byte byte : bytes) {
 			const char character = static_cast<char>(byte);
@@ -93,7 +93,7 @@ namespace engine::bake {
 		const float longest = std::max({extent[0], extent[1], extent[2]});
 		if (longest <= 0.0f) {
 			// Every vertex at one point. Scaled by `size / 0` it would become
-			// infinities, which `MeshData::IsValid` would then refuse — with
+			// infinities, which `MeshData::IsValid` would then refuse - with
 			// nothing to say that the *input* was the degenerate thing.
 			return false;
 		}

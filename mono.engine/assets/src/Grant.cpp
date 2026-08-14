@@ -56,7 +56,7 @@ namespace engine::assets {
 	bool GrantScope::IsValid() const {
 		// An empty bundle list is refused rather than read as "everything". A
 		// grant that permits nothing and a grant that permits all of it must
-		// never be one value — that mistake is only ever discovered by somebody
+		// never be one value - that mistake is only ever discovered by somebody
 		// receiving content they should not have.
 		return Session != 0 && !Bundles.empty() && Bundles.size() <= MAXIMUM_BUNDLES &&
 			   ExpiresAtSeconds != 0 && ByteBudget != 0;
@@ -166,7 +166,7 @@ namespace engine::assets {
 		}
 
 		// **The MAC first, and in constant time.** Nothing above this line has
-		// been acted on — the fields were read into a local and no decision was
+		// been acted on - the fields were read into a local and no decision was
 		// taken from them. Rejecting on an unverified expiry would leak, by
 		// timing and by which counter moved, what an attacker's forged token
 		// contained.
@@ -186,7 +186,7 @@ namespace engine::assets {
 
 		if (grant.HasExpired(nowSeconds)) {
 			// Counted apart from a forgery. An expired grant is an ordinary
-			// event — a session that ran long — and a forged one is not. A
+			// event - a session that ran long - and a forged one is not. A
 			// single counter for both would bury the alarm in the noise.
 			return refuse("assets.grant.expired");
 		}

@@ -74,7 +74,7 @@ TEST_CASE("a snapshot chunk the link refuses is sent again", "[replication]") {
 TEST_CASE("a refused chunk rewinds its own cursor and not the other one", "[replication]") {
 	// **`D00122`'s second cursor, re-earning the lesson the first one taught.**
 	// A refused snapshot chunk is a permanent hole unless the sender is told,
-	// because the cursor moves when the chunk is *built* — `applied=184
+	// because the cursor moves when the chunk is *built* - `applied=184
 	// refused=17865`, which read like a protocol error and was a cursor. With a
 	// join in two blobs there are two of them, and a refusal that rewound the
 	// wrong one would leave the same hole with a second way to reach it.
@@ -90,7 +90,7 @@ TEST_CASE("a refused chunk rewinds its own cursor and not the other one", "[repl
 
 	Wire wire(session, authority);
 
-	// A preface of two hundred rows, which is many chunks at 256 bytes — a
+	// A preface of two hundred rows, which is many chunks at 256 bytes - a
 	// preface that fits inside one tick's packet budget could not have a
 	// refusal land inside it at all.
 	std::vector<Entity> front;
@@ -176,8 +176,8 @@ namespace {
 	// bytes the authority *produced* on the busiest steady-state tick.
 	//
 	// **Produced rather than sent, which is the whole question.** A packer that
-	// ignores what the path will carry does not send more — `Link::Reserve`
-	// refuses the excess and `Unsent` rolls it back — it spends the encode and
+	// ignores what the path will carry does not send more - `Link::Reserve`
+	// refuses the excess and `Unsent` rolls it back - it spends the encode and
 	// then hands the shortfall to the transport instead of to the priority
 	// scheduler. So what tells the two apart is what came out of `Publish`, and
 	// `Authority::Statistics::Bytes` is reset per `Publish` for that reason.
@@ -249,7 +249,7 @@ TEST_CASE("a link that says it will carry less makes the authority build less", 
 	// measured, and packing past the second buys nothing: `Link::Reserve` turns
 	// the excess away and `Unsent` rebuilds it next tick, so the encode is spent
 	// and the shortfall reaches the transport rather than the priority
-	// scheduler — which is the thing that exists to choose what a client sees
+	// scheduler - which is the thing that exists to choose what a client sees
 	// when not all of it fits.
 	//
 	// **Asserted as a comparison rather than against a constant**, because a
@@ -265,8 +265,8 @@ TEST_CASE("a link that says it will carry less makes the authority build less", 
 	REQUIRE(narrow < wide);
 
 	// And it respects the number rather than merely noticing it. The link's cap
-	// bounds the allowance — `Link::ResetBudget` takes the lower of it and what
-	// the controller worked out — so nothing may be built past it.
+	// bounds the allowance - `Link::ResetBudget` takes the lower of it and what
+	// the controller worked out - so nothing may be built past it.
 	REQUIRE(narrow <= 2 * 1024);
 
 	// The wide run is genuinely over the narrow cap, or the comparison above is

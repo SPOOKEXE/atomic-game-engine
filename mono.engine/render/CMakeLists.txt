@@ -16,7 +16,7 @@ mono_add_library(render
 		# `render::ParticleBatch` carries a span of `effects::ParticleInstance`,
 		# which is the whole point of the type: the particle stream crosses from
 		# simulation to presentation without being copied or converted. That makes
-		# it a public dependency in the same way `assets` is — the payload type has
+		# it a public dependency in the same way `assets` is - the payload type has
 		# to propagate to whoever fills a batch.
 		#
 		# L8 is below L12 and `effects` is `shared`, so the edge goes downward and

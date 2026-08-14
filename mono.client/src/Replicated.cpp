@@ -53,7 +53,7 @@ namespace client {
 		// Nothing here runs a broad phase, a narrow phase or a solver: a replica
 		// holds whichever colliders interest management let it see, so a swept
 		// stop would be right about the geometry that arrived and confidently
-		// wrong about the geometry that did not — and building the index to ask
+		// wrong about the geometry that did not - and building the index to ask
 		// with is a per-tick pass over the whole replicated world, which is the
 		// simulation `mono.client/AGENTS.md` says this process does not run.
 		//
@@ -134,8 +134,8 @@ namespace client {
 
 					// **Only a pose the buffer produced is guessed forward.**
 					// Falling back to the live row already means this client has
-					// no history for the entity — a row that arrived this frame,
-					// or the predicted range — and neither is something to
+					// no history for the entity - a row that arrived this frame,
+					// or the predicted range - and neither is something to
 					// extrapolate.
 					if (reckonSeconds > 0.0 && interpolated.has_value()) {
 						interpolated = DeadReckon(store, entity, *interpolated, bounds, reckonSeconds);
@@ -145,7 +145,7 @@ namespace client {
 					const Tags *tags = store.Get<Tags>(entity);
 
 					// Every replicated visual field, through the builder both
-					// collectors share — see `scene::MakeDrawInstance`. The
+					// collectors share - see `scene::MakeDrawInstance`. The
 					// optional components stay optional here: a replicated row
 					// may arrive without an appearance, which is the difference
 					// from the local collector that made these two drift.
@@ -163,7 +163,7 @@ namespace client {
 
 			// **A client sees itself in the hole too, and this is where.** The
 			// ghost is built from the list above, which holds interpolated
-			// frames — the ones this machine actually draws — so the far half of
+			// frames - the ones this machine actually draws - so the far half of
 			// a body lines up with the near half rather than trailing it by
 			// however far the character walked since the last tick. After the
 			// metric for the reason `client::CollectInstances` gives.
@@ -191,7 +191,7 @@ namespace client {
 		// **And the replication module's own, which nothing was doing.** A
 		// `SnapshotBuffer` is a resource, a resource is keyed by a component id,
 		// and one minted from the compiler's spelling is a world `Store::Save`
-		// refuses — so a replica could not be snapshotted, which is what the
+		// refuses - so a replica could not be snapshotted, which is what the
 		// studio does every time Play is pressed. `client::DrawList` two lines
 		// down is the same fix for the same reason, one version earlier.
 		engine::replication::RegisterReplicationComponents();
@@ -204,7 +204,7 @@ namespace client {
 		// **The two resources that make a replica somewhere a player stands
 		// rather than somewhere they watch.** Both are on
 		// `replication::LocalToTheClient`'s list, so nothing arriving from the
-		// server ever overwrites them — which is precisely what makes it safe
+		// server ever overwrites them - which is precisely what makes it safe
 		// to keep this machine's keyboard and this machine's camera in a world
 		// whose every other row is somebody else's answer.
 		store.SetResource(engine::scene::InputState{});
@@ -215,7 +215,7 @@ namespace client {
 		// **The camera is the one thing here that is driven and not derived**,
 		// and it is not a simulation: turning the view moves no row the server
 		// owns. `FollowOwnCharacter` between the two halves is what points it at
-		// the body that arrived over the wire — a client never calls
+		// the body that arrived over the wire - a client never calls
 		// `LoadCharacter`, so there is no spawn moment for it to hook.
 		scheduler.Add("replica-camera", Phase::PreRender, [](Store &store) {
 			(void)engine::scene::UpdateCameraControl(store);
@@ -246,7 +246,7 @@ namespace client {
 		});
 
 		// **A client's VM, over a world it does not own.** The role is what
-		// decides which scripts it may run at all — a `Script` is the server's —
+		// decides which scripts it may run at all - a `Script` is the server's -
 		// and `ClientScriptsIn` adds the container half below.
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfClient();
@@ -256,7 +256,7 @@ namespace client {
 			engine::game::StartWorldScripts(store, scheduler, limits, failure);
 
 		// Reported rather than returned. A replica is empty at this point, so
-		// there is nothing here to fail — but the parameter is filled in by the
+		// there is nothing here to fail - but the parameter is filled in by the
 		// same call three other hosts make, and swallowing it would make this the
 		// one that hides a start-up error.
 		if (!failure.empty()) {
@@ -266,7 +266,7 @@ namespace client {
 		// **The one thing about a replica's scripts that is not a host's.** A
 		// host starts a world's scripts once because the world is already built;
 		// this one fills from the wire, so what has to be asked every tick is
-		// what arrived — and `RunNewScripts` is what makes asking repeatedly
+		// what arrived - and `RunNewScripts` is what makes asking repeatedly
 		// cost one binary search per script rather than a second run of it.
 		//
 		// Before the heartbeat, because `StartWorldScripts` installs that in

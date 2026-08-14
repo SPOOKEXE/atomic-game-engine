@@ -81,7 +81,7 @@ TEST_CASE("SoundId names a published asset", "[scene][sound]") {
 	const Entity sound = NewSound(store);
 
 	// The manifest's spelling, extension included, exactly as `MeshId` carries
-	// a mesh — the lookup is a string compare and a spelling is the one place
+	// a mesh - the lookup is a string compare and a spelling is the one place
 	// the two ends could diverge.
 	const Name track("audio/lilium-lainu.mp3");
 	REQUIRE(Write(store, sound, "SoundId", track));
@@ -107,7 +107,7 @@ TEST_CASE("Volume clamps at ten rather than at one", "[scene][sound]") {
 	Store store("sound_test.volume");
 	const Entity sound = NewSound(store);
 
-	// Over full scale is legal and is clamped once at the device — `Sample.hpp`
+	// Over full scale is legal and is clamped once at the device - `Sample.hpp`
 	// keeps floats precisely so the graph does not attenuate defensively at
 	// every stage. Refusing above 1 would make a quietly authored sound
 	// impossible to bring up.
@@ -137,8 +137,8 @@ TEST_CASE("the roll-off distances are the sound's own", "[scene][sound]") {
 TEST_CASE("a sound is heard from whatever it is parented to", "[scene][sound]") {
 	// The whole of the positional rule, and it is a hierarchy fact rather than
 	// a field: a sound inside a part is that part's, and one under a service
-	// is heard everywhere. Nothing here plays anything — the client walks these
-	// rows — but the shape a walker reads has to be this one.
+	// is heard everywhere. Nothing here plays anything - the client walks these
+	// rows - but the shape a walker reads has to be this one.
 	Store store("sound_test.parent");
 
 	const Entity part = MakePart(store, PartDesc{});

@@ -6,7 +6,7 @@
 // UTF-8 bytes, so every caret operation crosses between the two. Both halves
 // live here rather than beside either caller: `gui::Focus` places a caret at the
 // end of the text and `gui::Type` inserts at one, and a second copy of this
-// arithmetic would be a second answer to where the caret is — one place too far
+// arithmetic would be a second answer to where the caret is - one place too far
 // for an accented letter and three for an emoji.
 //
 // Private, because nothing outside this module holds a caret. A public UTF-8
@@ -21,8 +21,8 @@ namespace engine::gui {
 	// Whether a byte continues the character before it rather than starting one.
 	//
 	// **The whole of UTF-8 for this purpose.** A continuation byte is the only
-	// one whose top two bits are `10`; everything else — ASCII, and the lead byte
-	// of a two-, three- or four-byte sequence — begins a character.
+	// one whose top two bits are `10`; everything else - ASCII, and the lead byte
+	// of a two-, three- or four-byte sequence - begins a character.
 	inline bool Continuation(char byte) {
 		return (static_cast<unsigned char>(byte) & 0xC0) == 0x80;
 	}

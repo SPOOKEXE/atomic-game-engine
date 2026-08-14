@@ -5,7 +5,7 @@
 // **This is the class `render/ShaderCompiler.hpp` was written for and that did
 // not exist.** That header names "a `ShaderScript` whose revision changed" as
 // the reason a *runtime* compiler ships at all, and `render/AGENTS.md` repeats
-// it — and until this file there was no class, no property and no path from a
+// it - and until this file there was no class, no property and no path from a
 // world to a compile. `docs/retired/DEFERRED.md` D00110 is the entry that says so, and
 // it also says why the shaders came second: a shader reaches the GPU only by
 // being named, so the thing that names one has to exist first.
@@ -23,7 +23,7 @@
 //
 // ## How one is selected
 //
-// `Material.Shader` names it — a string, rule 4, so it survives a save file and
+// `Material.Shader` names it - a string, rule 4, so it survives a save file and
 // a wire. The name is resolved twice over, and the order is the whole design:
 //
 // 1. a `ShaderScript` in this world with that instance name, whose GLSL is
@@ -67,7 +67,7 @@ namespace engine::scene {
 	// **A revision beside the code rather than a hash of it.** A library
 	// deciding whether to recompile compares an integer per script per frame;
 	// hashing the source would read every byte of every shader in the world to
-	// answer the same question, and the answer is one nobody disputes — the
+	// answer the same question, and the answer is one nobody disputes - the
 	// setter is the only thing that writes either field.
 	//
 	// @since v0.15
@@ -95,7 +95,7 @@ namespace engine::scene {
 	// The shader script in this world with that instance name.
 	//
 	// **Names are not unique in an instance tree**, so the first one found in
-	// entity order wins and that order is stable — the same rule `ScriptsIn`
+	// entity order wins and that order is stable - the same rule `ScriptsIn`
 	// applies to its own walk. Two shader scripts sharing a name is an authoring
 	// mistake this does not try to diagnose.
 	//

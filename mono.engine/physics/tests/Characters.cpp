@@ -3,7 +3,7 @@
 //
 // **Both failures look like "the character is fine" from every other angle.** A
 // humanoid with a perfect `MoveDirection`, a body the solver is holding on a
-// floor, a rig whose parts add up — and it cannot jump, because `Grounded` is
+// floor, a rig whose parts add up - and it cannot jump, because `Grounded` is
 // false; or it holds still for a second and then cannot walk at all, because a
 // sleeping body has no `scene::Motion` to write a velocity into. Neither is
 // visible in `scene`, which is why neither had a suite: `scene` may not link
@@ -89,7 +89,7 @@ namespace {
 TEST_CASE("a character standing on a floor is grounded", "[physics][characters]") {
 	// **The ray starts inside the character's own feet, deliberately.** A ray
 	// that begins exactly on a face is a coin flip about whether it hits it, and
-	// the coin lands differently on two machines — so the origin is a tenth of a
+	// the coin lands differently on two machines - so the origin is a tenth of a
 	// metre up. With a root collider the full height of the character that
 	// origin is inside its own box, and the nearest hit is therefore always the
 	// character.
@@ -104,7 +104,7 @@ TEST_CASE("a character standing on a floor is grounded", "[physics][characters]"
 	CHECK(world.Body().Grounded);
 
 	// And a character with the floor taken away is not. The same pass, the same
-	// tick, one row removed — so a false positive from the ignore would show
+	// tick, one row removed - so a false positive from the ignore would show
 	// here as a character standing on nothing.
 	world.World.DestroyInstance(world.Floor);
 	engine::physics::SyncBroadphase(world.World);
@@ -116,7 +116,7 @@ TEST_CASE("a character standing on a floor is grounded", "[physics][characters]"
 
 TEST_CASE("a sleeping character is woken by intent and by falling", "[physics][characters]") {
 	// **A sleeping body has no `scene::Motion`, and that is what sleeping *is*
-	// here** — `physics::Publish` removes the component so the row leaves the
+	// here** - `physics::Publish` removes the component so the row leaves the
 	// dynamic archetype entirely. Until v0.14 the only thing that ever gave it
 	// back was a contact with an awake neighbour, so a character that stood
 	// still settled and could never be walked again: `scene::StepCharacters` had
@@ -143,7 +143,7 @@ TEST_CASE("a sleeping character is woken by intent and by falling", "[physics][c
 
 	// **And the case with no other answer: the floor goes away.** A sleeping
 	// body is never integrated, and `physics`' own wake pass fires on a
-	// *contact* — there is no contact when the support simply stops existing, so
+	// *contact* - there is no contact when the support simply stops existing, so
 	// without this the character hangs in the air for ever.
 	world.World.GetMutable<Humanoid>(world.Steering)->MoveDirection = Vector3{};
 	world.World.Remove<Motion>(world.Root);

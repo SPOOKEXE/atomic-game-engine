@@ -89,7 +89,7 @@ TEST_CASE("a catalogue refuses what it cannot key or hold", "[client][sounds]") 
 	CHECK(catalogue.Find(Name("audio/track.mp3")) != nullptr);
 
 	// A miss is the ordinary state while content is still streaming, not an
-	// error — which is what lets a script set `Playing` before the asset has
+	// error - which is what lets a script set `Playing` before the asset has
 	// arrived and still have it start when it does.
 	CHECK(catalogue.Find(Name("audio/other.mp3")) == nullptr);
 }
@@ -122,7 +122,7 @@ TEST_CASE("a sound whose asset has not arrived waits", "[client][sounds]") {
 	const Entity sound = NewSound(store, "audio/track.mp3");
 
 	// An empty catalogue: the content is still streaming. Not an error and not
-	// a refusal — the row keeps asking, and the frame the asset lands is the
+	// a refusal - the row keeps asking, and the frame the asset lands is the
 	// frame it starts.
 	const SoundCatalogue nothing;
 	stage.Sync(store, mixer, nothing, EAR, mixer.Format().SampleRate);
@@ -188,7 +188,7 @@ TEST_CASE("reparenting between a service and a part rebuilds the chain", "[clien
 	REQUIRE(store.SetParent(sound, part));
 	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
 
-	// A different chain shape, so a rebuild rather than a repoint — the
+	// A different chain shape, so a rebuild rather than a repoint - the
 	// emitter has to sit between the fader and the output and there is no
 	// command that inserts one.
 	REQUIRE(stage.Find(sound) != nullptr);
@@ -233,7 +233,7 @@ TEST_CASE("a destroyed sound takes its voice with it", "[client][sounds]") {
 	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
 
 	// Otherwise the mixer accumulates players walking buffers nothing
-	// references — a leak that is inaudible right up until it is not.
+	// references - a leak that is inaudible right up until it is not.
 	CHECK(stage.Count() == 0);
 	CHECK(stage.Find(sound) == nullptr);
 }
@@ -269,9 +269,9 @@ TEST_CASE("a pass that changed nothing posts nothing", "[client][sounds]") {
 TEST_CASE("what the stage built actually mixes", "[client][sounds]") {
 	// **The case that proves the chain rather than the bookkeeping.** Every
 	// test above checks that the right nodes exist; this one renders past the
-	// scheduled start and asks whether anything came out. A wiring mistake —
+	// scheduled start and asks whether anything came out. A wiring mistake -
 	// the fader connected to nothing, the player never told to play, the start
-	// scheduled at a deadline that never arrives — passes all of them and
+	// scheduled at a deadline that never arrives - passes all of them and
 	// produces silence.
 	Store store("sounds_test.audible");
 	AudioMixer mixer;
@@ -297,7 +297,7 @@ TEST_CASE("what the stage built actually mixes", "[client][sounds]") {
 TEST_CASE("nothing is mixed before the scheduled start", "[client][sounds]") {
 	// The other half of the same property. A `Play` carries a sample deadline
 	// and `audio/AGENTS.md` names this as the one place "close enough to the
-	// frame" is wrong — so a block rendered before the deadline must be silent
+	// frame" is wrong - so a block rendered before the deadline must be silent
 	// rather than nearly so.
 	Store store("sounds_test.deadline");
 	AudioMixer mixer;
@@ -333,7 +333,7 @@ TEST_CASE("clearing a stage releases every voice", "[client][sounds]") {
 // --- what a script decided, arriving through `scene::AudioState` -------------
 //
 // **The tier seam, from the acting end.** `engine::audio` is `client` and the
-// script layer is `shared`, so `SoundService` cannot reach a mixer — it writes a
+// script layer is `shared`, so `SoundService` cannot reach a mixer - it writes a
 // resource and this file is what reads it. These cases are the client half of
 // `engine.script.soundservice`.
 
@@ -403,8 +403,8 @@ TEST_CASE("a world may move the ear off the camera", "[client][sounds]") {
 	CHECK(mixer.Graph().Listener().X == 40.0f);
 
 	// **A listener that has gone away falls back rather than teleporting the ear
-	// to the origin.** The setting outlives the instance — a script sets it once
-	// and something else destroys the part — and a scene that went quiet with
+	// to the origin.** The setting outlives the instance - a script sets it once
+	// and something else destroys the part - and a scene that went quiet with
 	// nothing said would be the harder of the two to explain.
 	store.Destroy(ear);
 	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);

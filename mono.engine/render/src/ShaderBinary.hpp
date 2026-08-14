@@ -11,7 +11,7 @@
 // afterwards.
 //
 // Three facts move together and are therefore one type: the format enumerator
-// SDL takes, which of the two staged files to open, and the entry point name —
+// SDL takes, which of the two staged files to open, and the entry point name -
 // MSL reserves `main`, so a translated module's entry point is `main0`.
 //
 // Private to `render`. Nothing outside this module has to know which of the two

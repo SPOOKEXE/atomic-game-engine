@@ -183,7 +183,7 @@ TEST_CASE("EachBatch covers every row exactly once", "[ecs]") {
 	}
 
 	// Batches may divide any way the storage likes. What must hold is that
-	// their concatenation is the whole set, with nothing seen twice — which is
+	// their concatenation is the whole set, with nothing seen twice - which is
 	// the only promise a caller writing into a packed array can rely on.
 	std::vector<int> found;
 	store.EachBatch<Tag>([&](size_t rows, Tag *tags) {
@@ -232,7 +232,7 @@ TEST_CASE("EachBatch spans more than one table", "[ecs]") {
 	Store store("test");
 
 	// Two archetypes: Tag alone, and Tag with Position. A batch is a run of
-	// rows in one table, so this cannot be delivered as a single call — and a
+	// rows in one table, so this cannot be delivered as a single call - and a
 	// caller must not assume it was.
 	for (int index = 0; index < 10; index++) {
 		const Entity entity = store.Create();
@@ -357,7 +357,7 @@ TEST_CASE("a store survives being rebound every tick", "[ecs]") {
 	// What a world does once it is a range in a job batch: a different worker
 	// picks it up each tick, so the handoff is the common path rather than a
 	// setup step. Each thread must see its own bind, and the entity count must
-	// be exactly the number of ticks — a lost handoff shows up as an abort, a
+	// be exactly the number of ticks - a lost handoff shows up as an abort, a
 	// torn read as a miscount.
 	constexpr int TICKS = 64;
 
@@ -380,7 +380,7 @@ TEST_CASE("a store survives being rebound every tick", "[ecs]") {
 
 TEST_CASE("every live entity can be walked, components or not", "[ecs]") {
 	// The primitive an interest filter wants. A query cannot express "every
-	// entity" — a query is defined by the components it names — and an entity
+	// entity" - a query is defined by the components it names - and an entity
 	// carrying none is in no table and is still an entity.
 	Store store("walk");
 

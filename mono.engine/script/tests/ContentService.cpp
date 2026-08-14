@@ -2,7 +2,7 @@
 //
 // **The failure this closes was invisible in exactly the way that matters.** A
 // scene named a mesh with a string literal; an unregistered name draws a cube,
-// and so does a mesh that has not streamed in yet — so a demo written against a
+// and so does a mesh that has not streamed in yet - so a demo written against a
 // store nobody else had looked identical to one that was still loading.
 // `MeshGrid.luau` carried nine of those literals.
 //
@@ -107,7 +107,7 @@ TEST_CASE("registered meshes are reported by name", "[scripting][content]") {
 TEST_CASE("a texture's flipbook facts reach a script", "[scripting][content]") {
 	// **The number a scene would otherwise hardcode.** A GIF states a delay per
 	// frame and how many of its grid's cells hold one; a script that wrote `24`
-	// in is wrong the moment somebody re-exports with a frame added — which is
+	// in is wrong the moment somebody re-exports with a frame added - which is
 	// exactly what happened with `fox_dance.gif`, whose 48 frames were being
 	// played as 24.
 	Store store = Fresh("content_flipbook");
@@ -144,7 +144,7 @@ TEST_CASE("a texture's flipbook facts reach a script", "[scripting][content]") {
 
 TEST_CASE("a mesh registered after the runtime started is still seen", "[scripting][content]") {
 	// **The case the demos actually live in.** Delivery spans frames, so the
-	// catalogue is empty when a scene chunk runs and fills as bundles verify —
+	// catalogue is empty when a scene chunk runs and fills as bundles verify -
 	// which is why `MeshGrid.luau` polls on `Heartbeat` instead of reading once.
 	// A service that cached its answer would make that poll useless.
 	Store store = Fresh("content_late");
@@ -168,7 +168,7 @@ TEST_CASE("a script can ask what the store published", "[scripting][content]") {
 	// **The two lists answer different questions and the difference is the
 	// whole reason this one exists.** `GetMeshes` is what arrived; this is what
 	// there is. They were the same set until v0.10, because content was fetched
-	// by kind — so a scene reading the first saw the store whether it had asked
+	// by kind - so a scene reading the first saw the store whether it had asked
 	// for any of it or not. Nothing is fetched by kind now, and the consequence
 	// is that a scene reading only the first can never discover anything: it
 	// sees what it has already named, which on a fresh place is nothing.
@@ -207,7 +207,7 @@ TEST_CASE("a script can ask what the store published", "[scripting][content]") {
 TEST_CASE("a republish replaces the offered list", "[scripting][content]") {
 	// **Replaces rather than appends.** A manifest is a whole answer, and a name
 	// left behind from a previous one is a mesh a scene would set, fetch and
-	// never resolve — which draws the fallback cube with nothing to say why.
+	// never resolve - which draws the fallback cube with nothing to say why.
 	Store store = Fresh("content_republish");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 	REQUIRE(runtime != nullptr);
@@ -238,15 +238,15 @@ TEST_CASE("an invalid published name is dropped", "[scripting][content]") {
 TEST_CASE("a script can read what a mesh is wearing", "[scripting][content]") {
 	// **The handle an outfit swap needs.** A `MeshPart` naming no `TextureID`
 	// shows whatever each submesh recorded at bake time, and those names live
-	// inside the mesh file — so without this a script has no way to learn the
+	// inside the mesh file - so without this a script has no way to learn the
 	// current sheet and no name to put back.
 	Store store = Fresh("content_mesh_textures");
 
 	const std::array<Name, 3> worn{Name("skins/body.atex"), Name("skins/eyes.atex"), Name("skins/body.atex")};
 	REQUIRE(engine::scene::RecordMesh(store, Name("props/hero.amesh"), 4200, worn));
 
-	// A submesh that names nothing is an ordinary thing — a model with one
-	// untextured run — and it crosses as an empty string rather than as a hole,
+	// A submesh that names nothing is an ordinary thing - a model with one
+	// untextured run - and it crosses as an empty string rather than as a hole,
 	// so the index keeps meaning "submesh number".
 	const std::array<Name, 2> partly{Name("skins/only.atex"), Name()};
 	REQUIRE(engine::scene::RecordMesh(store, Name("props/half.amesh"), 12, partly));

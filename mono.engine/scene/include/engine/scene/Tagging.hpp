@@ -2,7 +2,7 @@
 
 // Tags: a name outside the process, a bit inside it.
 //
-// `ROADMAP.md` v0.9 asks for tagging so the render pipeline can filter — "a
+// `ROADMAP.md` v0.9 asks for tagging so the render pipeline can filter - "a
 // redirected pipeline for tagged objects". This is that mechanism, and it is
 // `SurfaceTable`'s shape almost exactly: the world holds a table mapping names
 // to rows, a component holds the row, and the hot path never sees a string.
@@ -14,7 +14,7 @@
 // for it with a hash lookup; this is a rendering filter rather than a general
 // grouping service, and thirty-two is far past what a scene divides itself
 // into. Registering a thirty-third fails rather than silently aliasing onto an
-// existing bit — an alias would mean one tag's objects appearing in another's
+// existing bit - an alias would mean one tag's objects appearing in another's
 // pass, which is invisible until somebody notices the wrong thing reflected.
 //
 // @tier L7 · shared
@@ -65,7 +65,7 @@ namespace engine::scene {
 
 		// Every registered name whose bit is set in a mask.
 		//
-		// For a save file and a properties panel — the two places a mask has to
+		// For a save file and a properties panel - the two places a mask has to
 		// become text again.
 		//
 		// @param mask The mask.
@@ -94,7 +94,7 @@ namespace engine::scene {
 	//
 	// **The name stays in the table.** Removing it would free a bit and
 	// renumber nothing, so a mask stored on another row would keep a bit whose
-	// meaning had changed — the alias failure this file exists to avoid,
+	// meaning had changed - the alias failure this file exists to avoid,
 	// arriving through the back door.
 	//
 	// @param store  The world.

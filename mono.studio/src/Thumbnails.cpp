@@ -10,14 +10,14 @@
 //
 // **`raw/`, by name, and that works because the two halves of the store agree
 // about names.** `cdn::Publish` walks `raw/` and uses each file's path relative
-// to it as the asset's name — so a published `abc123.png` *is* `raw/abc123.png`,
+// to it as the asset's name - so a published `abc123.png` *is* `raw/abc123.png`,
 // and a preview needs no chunk reassembly, no manifest walk and no delivery
 // client. Both tabs of the assets panel and every picker therefore resolve a
 // thumbnail the same way.
 //
 // The one thing that costs: an asset published from somewhere other than this
-// machine's `raw/` has no local file, so it has no preview. That is honest —
-// there are no pixels here to show — and it draws the kind glyph instead.
+// machine's `raw/` has no local file, so it has no preview. That is honest -
+// there are no pixels here to show - and it draws the kind glyph instead.
 //
 // ## What is previewable
 //
@@ -25,10 +25,10 @@
 // draws an `.svg` straight into the thumbnail's square, and `assets::Texture`
 // reads a baked `.atex`.
 //
-// **A mesh gets no *thumbnail*, and that is still true — it gets a live view
+// **A mesh gets no *thumbnail*, and that is still true - it gets a live view
 // instead.** A picture of a mesh is a render: a camera, a pass and a target, one
 // per row, for a list of hundreds. `explorer-plus` reaches the same conclusion
-// and lands in the same place — its table rows carry class icons, and the 3D
+// and lands in the same place - its table rows carry class icons, and the 3D
 // preview is a `ViewportFrame` that exists only for the *hovered* row. So a mesh
 // resolves here to `Unavailable` for the inline case, and `MeshPreview.cpp`
 // renders the hovered one into a viewport slot.
@@ -87,7 +87,7 @@ namespace studio {
 		// screenful in well under a second and never drops a frame.
 		constexpr size_t THUMBNAILS_PER_FRAME = 1;
 
-		// Why a read did not produce bytes. The two are answered differently —
+		// Why a read did not produce bytes. The two are answered differently -
 		// `Preview.hpp` carries the argument.
 		enum class ReadOutcome : uint8_t { Ok, TooLarge, Unreadable };
 
@@ -147,7 +147,7 @@ namespace studio {
 
 			// The source's chain describes the source's size. Left in place it
 			// would be levels larger than the thumbnail they claim to be under,
-			// which `IsValid` refuses — and a preview is small enough that a
+			// which `IsValid` refuses - and a preview is small enough that a
 			// chain buys nothing anyway.
 			out.Mips.clear();
 
@@ -201,7 +201,7 @@ namespace studio {
 
 		// **Requested, not built.** Building here would decode inside whichever
 		// row imgui happened to be drawing, so a screenful of new rows would be
-		// a screenful of decodes in one frame — the stall this file exists to
+		// a screenful of decodes in one frame - the stall this file exists to
 		// avoid. `PumpThumbnails` does a bounded number of them between frames.
 		if (std::find(ThumbnailQueue.begin(), ThumbnailQueue.end(), name) == ThumbnailQueue.end()) {
 			ThumbnailQueue.push_back(name);
@@ -224,7 +224,7 @@ namespace studio {
 
 			// **Recorded whether or not it worked, and *why* it did not.** A
 			// file that cannot be decoded must be remembered, or its row would
-			// queue a decode on every frame it is drawn — and remembering the
+			// queue a decode on every frame it is drawn - and remembering the
 			// reason is what lets the empty box say something useful instead of
 			// being one blank square for four different situations.
 			Entry entry;
@@ -241,7 +241,7 @@ namespace studio {
 
 		// **Least recently drawn goes first.** Somebody scrolling downward
 		// evicts what is above them, which is what they are least likely to
-		// scroll back to in the next second — and if they do, it costs one
+		// scroll back to in the next second - and if they do, it costs one
 		// frame's decode.
 		std::vector<std::pair<uint64_t, std::string>> byAge;
 		byAge.reserve(Thumbnails.size());
@@ -267,13 +267,13 @@ namespace studio {
 		// **Prefixed, so a thumbnail can never be sampled as content.** The
 		// renderer resolves a `SurfaceAppearance`'s texture by name out of the
 		// same table, and a 64-pixel preview registered under the asset's real
-		// name would replace the real one — a part would quietly start drawing
+		// name would replace the real one - a part would quietly start drawing
 		// its own thumbnail.
 		return "studio.thumbnail/" + name;
 	}
 
 	void *Editor::BuildThumbnail(const std::string &name, PreviewState &state) {
-		// `raw/<name>`, which is the same file the publisher read — see the
+		// `raw/<name>`, which is the same file the publisher read - see the
 		// header on why that identity holds.
 		// **`cdn::FindInStore` and not a folder spelled here.** This read
 		// `raw/<name>` and was right for as long as the publisher walked `raw/`;
@@ -292,7 +292,7 @@ namespace studio {
 		switch (ReadWholeFile(source, bytes)) {
 		case ReadOutcome::TooLarge:
 			// **The one refusal a person can act on.** Named rather than folded
-			// into "unavailable" — `Preview.hpp` carries why.
+			// into "unavailable" - `Preview.hpp` carries why.
 			state = PreviewState::TooLarge;
 			return nullptr;
 		case ReadOutcome::Unreadable:
@@ -306,22 +306,22 @@ namespace studio {
 
 		// A baked texture reads through its own format; everything else goes to
 		// the importer, which picks its decoder from the bytes rather than from
-		// the extension — so a `.png` that is really a JPEG still previews.
+		// the extension - so a `.png` that is really a JPEG still previews.
 		engine::core::ByteReader reader(bytes);
 		if (!engine::assets::Texture::Read(reader, decoded)) {
 			std::string ignored;
 
 			// **A drawing is rasterised straight into the thumbnail's square**,
 			// rather than at whatever size it declares and then fitted. The
-			// rasteriser already letterboxes a mismatched target — a `viewBox` is
-			// fitted uniformly and centred — so this is the same picture with none
+			// rasteriser already letterboxes a mismatched target - a `viewBox` is
+			// fitted uniformly and centred - so this is the same picture with none
 			// of the resampling, and a 4096-pixel icon costs a 64-pixel canvas.
 			const bool drawing = engine::bake::ImageFormatOfName(name) == engine::bake::ImageFormat::Svg;
 			const bool read =
 				drawing ? engine::bake::RasterizeSvg(bytes, THUMBNAIL_SIDE, THUMBNAIL_SIDE, decoded, ignored)
 						: engine::bake::ReadImage(bytes, decoded, ignored);
 			if (!read) {
-				// Not an image, or not one this reads — a mesh, an archive, a
+				// Not an image, or not one this reads - a mesh, an archive, a
 				// script. **Silent**: a store holds all three, and warning about
 				// each one every time its row is drawn would bury the log.
 				state = PreviewState::Unavailable;

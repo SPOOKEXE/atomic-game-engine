@@ -4,9 +4,9 @@
 // tree `Codec.hpp` already walks, and the two failure modes of a second
 // traversal are that it disagrees with the first about what a Lua table is, and
 // that it loses something on the way out that nothing notices until the way
-// back. So the first case here encodes one value carrying every shape at once —
+// back. So the first case here encodes one value carrying every shape at once -
 // nesting, an array, an object, a float, a negative, an empty table and a string
-// needing every escape — and asserts the decoded tree equals the original.
+// needing every escape - and asserts the decoded tree equals the original.
 //
 // The rest pin the decisions that are *choices* rather than consequences: a
 // cycle refused, a mixed table as an object, a NaN refused, a number outside a
@@ -14,7 +14,7 @@
 // does not repeat.
 //
 // **And the three that are not here.** `RequestAsync`, `GetAsync` and
-// `PostAsync` are absent on purpose — see `script/src/HttpService.cpp` — so a
+// `PostAsync` are absent on purpose - see `script/src/HttpService.cpp` - so a
 // test asserts they are nil. That is the one assertion in this file whose job is
 // to fail if somebody adds them without taking the decision first.
 
@@ -55,7 +55,7 @@ namespace {
 
 TEST_CASE("a value survives an encode and a decode", "[scripting][http]") {
 	// **One value carrying every shape**, because the failure this catches is a
-	// writer and a reader that disagree about one of them — and a suite with a
+	// writer and a reader that disagree about one of them - and a suite with a
 	// case per shape tests each half against itself rather than against the
 	// other.
 	Store store = Fresh("http_roundtrip");
@@ -109,7 +109,7 @@ TEST_CASE("a value survives an encode and a decode", "[scripting][http]") {
 TEST_CASE("one table encodes to one document", "[scripting][http]") {
 	// **The determinism guarantee, which is why map keys are sorted.** A Lua
 	// table is a hash map, so writing entries in iteration order would make the
-	// *string* depend on insertion history — and that string may be stored in a
+	// *string* depend on insertion history - and that string may be stored in a
 	// property and replicated. `Codec.hpp` §1 is the argument; this is the check.
 	Store store = Fresh("http_stable");
 	const auto runtime = MakeRuntime(store, Language::Luau);
@@ -118,7 +118,7 @@ TEST_CASE("one table encodes to one document", "[scripting][http]") {
 	MustRun(*runtime, R"(
 		-- **These five keys are chosen, not arbitrary.** Luau walks them in hash
 		-- order, which for this set is neither the order they were written in
-		-- nor sorted — so an encoder that followed iteration order fails the
+		-- nor sorted - so an encoder that followed iteration order fails the
 		-- line below, where a set whose hash order happened to be alphabetical
 		-- would have let one through. The second assertion is what keeps that
 		-- true if the VM's hashing ever changes.
@@ -139,7 +139,7 @@ TEST_CASE("one table encodes to one document", "[scripting][http]") {
 
 TEST_CASE("what a Lua table becomes is decided, not incidental", "[scripting][http]") {
 	// Every one of these is a choice `HttpService.cpp` states a reason for, and
-	// each is inherited from the codec rather than invented — which is the point:
+	// each is inherited from the codec rather than invented - which is the point:
 	// a value crossing a bus and the same value written as JSON must be the same
 	// shape.
 	Store store = Fresh("http_shapes");
@@ -283,7 +283,7 @@ TEST_CASE("a GUID is shaped like one and does not repeat", "[scripting][http]") 
 
 		-- Version 4 and the RFC 4122 variant, so the string parses as a UUID for
 		-- anything that reads it as one. A statement about the shape, not a
-		-- claim about the entropy — see `HttpService.cpp`.
+		-- claim about the entropy - see `HttpService.cpp`.
 		assert(bare:sub(15, 15) == "4", "version nibble: " .. bare:sub(15, 15))
 		assert(bare:sub(20, 20):match("[89AB]"), "variant nibble: " .. bare:sub(20, 20))
 
@@ -301,7 +301,7 @@ TEST_CASE("a GUID is shaped like one and does not repeat", "[scripting][http]") 
 
 TEST_CASE("two runs of one world draw the same GUIDs", "[scripting][http]") {
 	// **The reason this service could exist at all.** `script/AGENTS.md` sets one
-	// test for anything added to this VM — what can it observe that a recording
+	// test for anything added to this VM - what can it observe that a recording
 	// cannot reproduce? A GUID from system entropy fails it, and neither
 	// `just determinism` nor `just replay-check` would have said so: both drive
 	// the server with no `--game`, so neither has a script runtime in it.
@@ -309,7 +309,7 @@ TEST_CASE("two runs of one world draw the same GUIDs", "[scripting][http]") {
 	// chunk runs on its own sandboxed thread with its own globals, so a global
 	// written by one is invisible to the next and there is no binding that reads
 	// one out. `error(text)` puts the string somewhere C++ can see it, and the
-	// chunk name and line are identical between two runs of one source — so
+	// chunk name and line are identical between two runs of one source - so
 	// comparing the whole message compares the GUIDs.
 	static constexpr const char *DRAW = R"(
 		local drawn = {}
@@ -357,7 +357,7 @@ TEST_CASE("a URL escape is RFC 3986's and not a form body's", "[scripting][http]
 		assert(HttpService:UrlEncode("a b") == "a%20b", HttpService:UrlEncode("a b"))
 
 		-- The unreserved set goes through untouched, and everything else does
-		-- not — including the characters a lazy encoder leaves alone.
+		-- not - including the characters a lazy encoder leaves alone.
 		assert(HttpService:UrlEncode("aZ0-_.~") == "aZ0-_.~")
 		assert(HttpService:UrlEncode("a/b?c=d&e") == "a%2Fb%3Fc%3Dd%26e", HttpService:UrlEncode("a/b?c=d&e"))
 		assert(HttpService:UrlEncode("+") == "%2B")
@@ -370,7 +370,7 @@ TEST_CASE("a URL escape is RFC 3986's and not a form body's", "[scripting][http]
 
 TEST_CASE("the request methods are absent", "[scripting][http]") {
 	// **The assertion whose job is to fail.** If somebody adds `RequestAsync` by
-	// reflex, this is what says so — and `script/src/HttpService.cpp` is what
+	// reflex, this is what says so - and `script/src/HttpService.cpp` is what
 	// says why the decision has to come first. An absent method refuses at the
 	// call site in the script that asked, which is how every other unprovided
 	// service member behaves.
@@ -384,7 +384,7 @@ TEST_CASE("the request methods are absent", "[scripting][http]") {
 		assert(HttpService.PostAsync == nil, "PostAsync is a decision nobody has taken")
 
 		-- And the service itself is one object, whichever way a script reaches
-		-- it — `GetService` resolves a global rather than building a second
+		-- it - `GetService` resolves a global rather than building a second
 		-- table that behaves alike.
 		assert(game:GetService("HttpService") == HttpService)
 	)");

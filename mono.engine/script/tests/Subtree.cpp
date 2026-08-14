@@ -1,6 +1,6 @@
 // The subtree walk both VMs destroy and enumerate through.
 //
-// Tested here rather than through a VM because it is pure C++ over a `Store` —
+// Tested here rather than through a VM because it is pure C++ over a `Store` -
 // the same reason `Signals.cpp` tests the connection table directly. What a
 // script sees on top of this is covered in `Scripting.cpp`, once per language.
 
@@ -83,7 +83,7 @@ TEST_CASE("EachDescendant visits nothing under a leaf", "[script][subtree]") {
 TEST_CASE("ForgetSubtree drops a grandchild's connections, not only a child's", "[script][subtree]") {
 	// **The regression this file exists for.** `Store::DestroyInstance` takes
 	// the whole subtree, and both bindings used to forget only the direct
-	// children — so a connection on a grandchild outlived the row it watched,
+	// children - so a connection on a grandchild outlived the row it watched,
 	// holding its VM's callable alive for the rest of the world's life.
 	engine::scene::EnsureClassTree();
 	Store store("subtree_test");

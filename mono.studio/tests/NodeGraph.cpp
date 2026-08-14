@@ -11,7 +11,7 @@
 //
 // - **A picture is pixels in an agreed order.** `PreviewImage` promises red
 //   first and the top row first at four bytes a pixel and `TextureFormat::RGBA8`
-//   means the same thing, so `NodePreviewTexture` is a copy — until one side
+//   means the same thing, so `NodePreviewTexture` is a copy - until one side
 //   changes its mind, and then it is a thumbnail with its channels swapped,
 //   which still draws.
 // - **The library draws chrome with this editor's theme.** Nothing fails if
@@ -43,7 +43,7 @@
 TEST_SUITE_ID("studio.nodegraph")
 
 namespace {
-	// A bare imgui context around one case — `studio.assetrow` carries why this
+	// A bare imgui context around one case - `studio.assetrow` carries why this
 	// is per case and not shared. `ApplyEditorTheme` writes into `ImGui::
 	// GetStyle()`, so there has to be one for it to write into.
 	class Context {
@@ -87,7 +87,7 @@ namespace {
 	//
 	// **What makes the byte-for-byte comparison mean anything.** A height field
 	// draws as a grey ramp, and a picture where every pixel is `r == g == b`
-	// survives having its channels swapped — so a case that took the first
+	// survives having its channels swapped - so a case that took the first
 	// picture it found would assert the seam and prove nothing about it.
 	bool Coloured(const nodegraph::PreviewImage &image) {
 		for (size_t index = 0; index + 3 < image.Rgba.size(); index += 4) {

@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
 	client::DeclareFlags();
 
-	engine::core::Arguments arguments("client", "atomic — runs a game.");
+	engine::core::Arguments arguments("client", "atomic - runs a game.");
 	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("stats", "Open the F3 statistics panel at startup");
@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("browse", "Look for a server announcing itself on this subnet instead of naming one");
 	arguments.Value("browse-seconds", "N", "How long to look before giving up (default 3)");
 	arguments.Value("session-name", "NAME", "Join the session with this name rather than the first found");
-	arguments.Value("session-id", "HEX", "Join the session with this id — 32 hex characters");
+	arguments.Value("session-id", "HEX", "Join the session with this id - 32 hex characters");
 	arguments.Value(
 		"session-key", "SECRET", "The secret for a private session: 64 hex characters, or a passphrase"
 	);
@@ -95,15 +95,15 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"server-key",
 		"HEX",
-		"64 hex characters — the server identity to pin. Without it a relay in the path can read "
+		"64 hex characters - the server identity to pin. Without it a relay in the path can read "
 		"everything"
 	);
 	arguments.Value(
 		"cdn", "HOST:PORT", "A content origin, in priority order. 'dir:PATH' for a local store. Repeatable"
 	);
 	arguments.Value("content-cache", "DIR", "Keep verified content here between runs");
-	arguments.Value("publisher-key", "HEX", "64 hex characters — the key whose manifests this client trusts");
-	arguments.Value("sound", "PATH", "Play this .wav or .mp3 on a loop — proves audio runs in-game");
+	arguments.Value("publisher-key", "HEX", "64 hex characters - the key whose manifests this client trusts");
+	arguments.Value("sound", "PATH", "Play this .wav or .mp3 on a loop - proves audio runs in-game");
 	arguments.Value(
 		"click",
 		"NAME",
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
 
 	// **The settings first, the command line over the top.** Every `Get*` below
 	// takes what the flags produced as its fallback, so the precedence a person
-	// expects — built-in, config file, environment, then what they typed —
+	// expects - built-in, config file, environment, then what they typed -
 	// falls out of one rule rather than being re-derived per option.
 	client::Options options = client::OptionsFromFlags();
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
@@ -234,7 +234,7 @@ int main(int argc, char **argv) {
 
 	// **Prepended, so a named origin outranks a configured one.** The list is
 	// priority order and the first that answers wins, so what somebody typed has
-	// to sit in front of what their config file already held — which is the same
+	// to sit in front of what their config file already held - which is the same
 	// precedence every other setting here follows, expressed as position.
 	if (const std::vector<std::string_view> named = arguments.GetAll("cdn"); !named.empty()) {
 		std::vector<std::string> sources(named.begin(), named.end());
@@ -289,8 +289,8 @@ int main(int argc, char **argv) {
 		//
 		// **The condition is the whole safety of it.** This fires only when
 		// nobody named a source *and* the only source is the default local
-		// store's own directory. Naming any origin — `--cdn`, a remote, even
-		// another directory — leaves the key required, because a key that
+		// store's own directory. Naming any origin - `--cdn`, a remote, even
+		// another directory - leaves the key required, because a key that
 		// everybody knows is not a trust boundary and must never become one for
 		// content somebody else served. `cdn::DevelopmentSigningKey` carries the
 		// same argument from the publishing end.

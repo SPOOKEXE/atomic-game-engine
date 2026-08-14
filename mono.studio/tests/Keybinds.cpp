@@ -5,7 +5,7 @@
 // conflict resolution and the whole save/load path are ordinary functions over
 // ordinary data. What is *not* here is `Fired` and `Pressed`: both read
 // `ImGuiIO` and a frame's key state, which needs a context, a display size and
-// two `NewFrame` calls to mean anything — that is a backend test wearing a unit
+// two `NewFrame` calls to mean anything - that is a backend test wearing a unit
 // test's clothes, and `mono.studio/AGENTS.md` carries the invariant instead.
 //
 // The scope *decision* is still covered here, because the part that can be
@@ -32,7 +32,7 @@ using studio::Scope;
 
 namespace {
 	// **Every case resets first**, because the table is process-wide by design
-	// — `input::Actions` made the same choice — and a suite whose cases had to
+	// - `input::Actions` made the same choice - and a suite whose cases had to
 	// run in one order would pass alone and fail together.
 	struct Fixture {
 		Fixture() {
@@ -89,7 +89,7 @@ TEST_CASE("a chord belongs to exactly one action", "[studio][keybinds]") {
 
 	// **The one that was already there loses it.** Two actions on one key is a
 	// key that does two things at once, and the one somebody notices is
-	// whichever happens to be checked first — a bug that reads as the editor
+	// whichever happens to be checked first - a bug that reads as the editor
 	// being haunted.
 	Keybinds::Set(Action::SaveAs, save);
 
@@ -190,8 +190,8 @@ TEST_CASE("a file naming an unknown command leaves the rest alone", "[studio][ke
 		out << "\n";
 		out << "run.play = F5\n";
 
-		// A command from a later build. Not corruption — a file from a later
-		// version — so it is skipped rather than refusing the whole table.
+		// A command from a later build. Not corruption - a file from a later
+		// version - so it is skipped rather than refusing the whole table.
 		out << "some.command.from.the.future = Ctrl+K\n";
 		out << "run.server = F6\n";
 	}
@@ -228,7 +228,7 @@ TEST_CASE("the scope a binding claims survives being read back", "[studio][keybi
 	const Fixture fixture;
 
 	// Scope is a property of the command rather than of the binding, so it is
-	// not written to the file — which means a build may change it and every
+	// not written to the file - which means a build may change it and every
 	// saved key still means what it meant. What must hold is that the table
 	// actually assigns one, and that editing keys never moves it.
 	for (const Keybind &binding : Keybinds::All()) {

@@ -4,7 +4,7 @@
 //
 // **A plugin is a script against the world, and that is the whole design.** The
 // engine already has a scripting surface with a sandbox, a step budget, a memory
-// ceiling and two languages — `script/Runtime.hpp` — and a plugin is that surface
+// ceiling and two languages - `script/Runtime.hpp` - and a plugin is that surface
 // pointed at the world an author is editing rather than at one a game is running.
 // Inventing a second scripting model for tools would be two sandboxes to keep
 // safe and two vocabularies to learn.
@@ -17,7 +17,7 @@
 // ## What a plugin can reach, and why it needs no new surface for it
 //
 // Everything a game script can: `Instance`, `workspace`, `game`, the datatypes,
-// and — since v0.12 — `World`, the ECS underneath. That last one is what makes a
+// and - since v0.12 - `World`, the ECS underneath. That last one is what makes a
 // tool possible without an editor API: a plugin declares a component, queries
 // for entities carrying one, and writes values back, all through the same
 // storage the editor is looking at.
@@ -29,7 +29,7 @@
 // reads it back the same frame.
 //
 // That is deliberate rather than a shortcut around a missing API. A selection
-// *is* per-entity state about the world, which is what a component is for — and
+// *is* per-entity state about the world, which is what a component is for - and
 // putting it in the store means a plugin, a C++ system and the properties panel
 // are three readers of one fact rather than three copies of it. `ecs/AGENTS.md`
 // rule 2 is the argument, and it applies to the editor's own state as much as to
@@ -38,8 +38,8 @@
 // ## What a plugin reaches of the editor
 //
 // Everything above is the *world*. The editor itself arrives through
-// `script::HostSurface` — one seam, a value tree, no `lua_State` crossing a
-// module boundary — as a `plugin` global:
+// `script::HostSurface` - one seam, a value tree, no `lua_State` crossing a
+// module boundary - as a `plugin` global:
 //
 //     local Selection = game:GetService("Selection")
 //     local bar = plugin.CreateToolbar("My Tools")
@@ -69,21 +69,21 @@
 // split rather than an inconsistency: a selection is a thing the editor *has*,
 // so it is reached with `game:GetService` like every other service, and the
 // plugin table is what this plugin is doing. A dotted host name is what builds
-// it — `script/Host.hpp` — so `Selection:Get()`, `Selection.Get()` and
+// it - `script/Host.hpp` - so `Selection:Get()`, `Selection.Get()` and
 // `game:GetService("Selection")` are one object reached three ways.
 //
 // **`:Set`, `:Add` and `:Remove` take an array of `Instance`**, and the two ways
 // that can go wrong get two different answers.
 //
 // **The argument being the wrong shape is refused.** Not a bare instance, not
-// nil, not a table of named keys — each is a near-miss somebody types before
+// nil, not a table of named keys - each is a near-miss somebody types before
 // reading anything, and accepting one would make their mistake read as "nothing
 // happened". The refusal names what was given and, for the two common ones, what
 // to write instead.
 //
 // **An item that is not selectable is skipped, with one warning per call.** A
 // value of the wrong type is one case and an `Instance` that has been destroyed
-// is the other, and the warning says which — the first means the plugin's code
+// is the other, and the warning says which - the first means the plugin's code
 // is wrong and the second means the world moved under it. Neither fails the
 // call: a plugin selecting the results of a query it ran three frames ago should
 // end up with the ones that are still there rather than an error it can do
@@ -94,10 +94,10 @@
 // one line.
 //
 // **`Selection:Set({})` deselects everything**, which is the whole of what an
-// empty array means and needs no case of its own — as does a `Set` whose every
+// empty array means and needs no case of its own - as does a `Set` whose every
 // item was skipped, which is the honest reading: the plugin asked for a
 // selection of things that are not there. It is also why the binding
-// reads an empty Luau table as an array rather than as a map — `{}` is one
+// reads an empty Luau table as an array rather than as a map - `{}` is one
 // value and the reader has to pick, and this is the call that would otherwise
 // have been refused.
 //
@@ -108,7 +108,7 @@
 //
 // **Ids rather than objects, because the seam carries values.** A `HostValue`
 // has no userdata to hang a toolbar on, so `CreateToolbar` answers a number and
-// `CreateButton` takes it back — the one place this reads differently from
+// `CreateButton` takes it back - the one place this reads differently from
 // Roblox's, and it is stated rather than smoothed over.
 //
 // **The panel calls are only legal while a panel is drawing.** They are
@@ -132,7 +132,7 @@
 // makes per world.
 //
 // **A plugin that fails is switched off and named.** It does not stop the load,
-// it does not stop the beat, and the reason is kept where somebody can read it —
+// it does not stop the beat, and the reason is kept where somebody can read it -
 // the same rule the universe sync follows one file over, for the same reason: an
 // author with five plugins and one mistake has to be told which.
 //
@@ -155,7 +155,7 @@ namespace studio {
 
 	// The component the editor's selection is published as.
 	//
-	// **A tag — no fields — because the fact is binary.** Whether an instance is
+	// **A tag - no fields - because the fact is binary.** Whether an instance is
 	// selected is the whole of it; anything else about the selection is a
 	// property of the *editor*, not of the instance, and belongs where the rest
 	// of the editor's state does.
@@ -202,7 +202,7 @@ namespace studio {
 	//
 	// **Flat ids rather than objects, because the seam carries values.** A
 	// `HostValue` has no userdata tag to hang a toolbar on, so a plugin holds
-	// the number it was given and passes it back — which is the same shape every
+	// the number it was given and passes it back - which is the same shape every
 	// immediate-mode API in this editor already has.
 	//
 	// @since v0.12
@@ -232,7 +232,7 @@ namespace studio {
 	// A docked panel a plugin asked for.
 	//
 	// **Immediate mode, which is how the rest of this editor works.** The
-	// contents are not a retained tree the plugin builds and the editor walks —
+	// contents are not a retained tree the plugin builds and the editor walks -
 	// the editor calls `Render` while its window is open and the plugin issues
 	// widget calls from inside it, exactly as `DrawExplorer` and every other panel
 	// here does. A retained tree would be a second widget model beside ImGui,
@@ -261,7 +261,7 @@ namespace studio {
 		//
 		// Resolved over the editor's theme rather than instead of it, so a
 		// widget that sets one colour keeps every other colour in step with the
-		// palette around it — see `engine::ui::ScopedColours`.
+		// palette around it - see `engine::ui::ScopedColours`.
 		//
 		// @since v0.13
 		// Defaulted rather than left to the aggregate, so a `PluginWidget`
@@ -320,7 +320,7 @@ namespace studio {
 		// Its half of the seam, kept alive as long as its runtime is.
 		//
 		// **A `unique_ptr` because `HostSurface` is not copyable and the plugin
-		// list is**, and because the runtime holds a raw pointer to it — so it
+		// list is**, and because the runtime holds a raw pointer to it - so it
 		// has to sit still while the vector it lives beside grows.
 		std::unique_ptr<engine::script::HostSurface> Surface;
 	};
@@ -339,7 +339,7 @@ namespace studio {
 	//
 	// **One per plugin rather than one shared**, because every call has to know
 	// which plugin made it: a toolbar belongs to whoever created it, and a
-	// shared surface would need the caller's identity on every call — which the
+	// shared surface would need the caller's identity on every call - which the
 	// seam cannot supply and a plugin could forge.
 	//
 	// @param editor The editor answering.
@@ -385,7 +385,7 @@ namespace studio {
 	// that changed between sessions would be a scene that came up differently
 	// depending on the filesystem.
 	//
-	// A folder with no manifest is skipped in silence — it is somebody's notes,
+	// A folder with no manifest is skipped in silence - it is somebody's notes,
 	// not a broken plugin. One with a manifest that does not parse is returned
 	// with its `Error` set, because that one *is* broken and saying so is the
 	// point.
@@ -402,7 +402,7 @@ namespace studio {
 	// left with `Running` clear and its error kept; the rest still start.
 	//
 	// **The surface is installed before the entry script runs**, because a
-	// plugin's top level is where it creates its toolbar — a host set afterwards
+	// plugin's top level is where it creates its toolbar - a host set afterwards
 	// would be a global the chunk had already failed to find.
 	//
 	// @param plugins What `DiscoverPlugins` found, updated in place.
@@ -420,7 +420,7 @@ namespace studio {
 	//
 	// **One frame's delta, and a plugin that raises is counted rather than
 	// stopped.** Past `PLUGIN_FAULT_LIMIT` it is switched off with its last
-	// error kept — a plugin throwing sixty times a second is a log nobody can
+	// error kept - a plugin throwing sixty times a second is a log nobody can
 	// read and a frame nobody can profile.
 	//
 	// @param plugins What `StartPlugins` started.

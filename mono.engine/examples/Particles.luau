@@ -3,7 +3,7 @@
 --
 -- **`ROADMAP.md` v0.10 asks for 100,000 emitters at five particles each**, and
 -- this is the scene that puts that number on screen rather than in a benchmark.
--- `engine.effects.bench.particles` measures the simulation half headless — 389
+-- `engine.effects.bench.particles` measures the simulation half headless - 389
 -- microseconds a frame for the pair of passes; this is the other half, which is
 -- what the upload and the draw cost when somebody is looking at it.
 --
@@ -16,12 +16,12 @@
 -- | 6,400 | ~32,000 | 285 | 4 |
 -- | **102,400** | **~500,000** | **170** | **5** |
 --
--- The 102,400 row read 287 FPS before the default pool was raised — and that
+-- The 102,400 row read 287 FPS before the default pool was raised - and that
 -- figure was a *starved* scene rather than a fast one. At the old 250,000-slot
 -- default only about 41,000 of the grid's emitters ever got a block, so the
 -- number being reported was the cost of drawing 40 per cent of the scene. 170 is
 -- the whole of it. `ParticleStatistics::EmittersRefused` is what tells the two
--- apart, and nothing else does — a starved emitter is silent.
+-- apart, and nothing else does - a starved emitter is silent.
 --
 -- **The roadmap's number holds.** Five draw calls at a hundred thousand emitters
 -- is what the state grouping in `Renderer::Impl::PrepareParticles` buys: the
@@ -34,13 +34,13 @@
 -- - The grid's host parts were authored `Transparency = 1`, which *submits* them
 --   into the sorted blended pass. A hundred thousand invisible cubes, sorted
 --   back-to-front every frame: 1,228,920 triangles and 4 FPS. `Visible = false`
---   submits nothing — see the comment on the grid loop below.
+--   submits nothing - see the comment on the grid loop below.
 -- - The particle upload memcpy'd into the transfer buffer and never issued the
 --   copy to the vertex buffer. It drew *something*, because the buffer held the
 --   previous frame, so only a capture found it.
 --
 -- **`dev` is `-O0` and this is not a scene to judge there.** The same scene runs
--- at 4 FPS unoptimised, which is the engine's stated default — `AGENTS.md` says a
+-- at 4 FPS unoptimised, which is the engine's stated default - `AGENTS.md` says a
 -- profile should measure what the engine does rather than what the optimiser
 -- rescued, and the corollary is that a frame-rate claim has to name its preset.
 --
@@ -51,18 +51,18 @@
 --
 -- **Read `render.particles` on the F3 panel, not the frame time alone.** A scene
 -- that is slow and looks fine is almost always an emitter whose rate ran away,
--- and the particle count is the number that says so — the frame time only says
+-- and the particle count is the number that says so - the frame time only says
 -- that something is wrong.
 --
 -- ## What the scene is
 --
 -- Three things, in increasing order of how much they are meant to hurt:
 --
--- 1. **A demonstration row** — one emitter per authored feature, spaced out and
+-- 1. **A demonstration row** - one emitter per authored feature, spaced out and
 --    large enough to look at. This is the half that is a *test* rather than a
 --    stress: if a flipbook is playing backwards or a squash is inverted, it is
 --    visible here and invisible in the grid.
--- 2. **The grid** — `GRID x GRID` emitters at a low rate, which is the roadmap's
+-- 2. **The grid** - `GRID x GRID` emitters at a low rate, which is the roadmap's
 --    hundred thousand. Deliberately boring: every one of them is the same, so
 --    what is being measured is the count and nothing else.
 -- 3. **A beam and a trail**, because they share `Attachment` with the emitters
@@ -78,7 +78,7 @@
 local GRID = 320
 
 -- **Two metres and not four.** At four the grid is 1,280 metres across and its
--- particles are sub-pixel from any camera that can see the whole of it — a
+-- particles are sub-pixel from any camera that can see the whole of it - a
 -- stress scene that costs everything and shows nothing. Two puts the far edge at
 -- 640 m, which still overflows the frustum and gives the near half enough
 -- overdraw to be the thing being measured.
@@ -139,7 +139,7 @@ do
 end
 
 -- An explosion shell: a sphere emitting from its surface, outward, additive.
--- **Additive is the visible difference** — these overlap and add up rather than
+-- **Additive is the visible difference** - these overlap and add up rather than
 -- averaging, which is what makes a spark look hot.
 do
 	local host = pedestal(-10, -40, Color3.new(0.2, 0.2, 0.6))
@@ -213,7 +213,7 @@ end
 -- `Attachment` rather than to the part.
 --
 -- Two features in one row on purpose. The flipbook is what v0.10 adds to the
--- texture path, and the attachment is what beams and trails share with emitters —
+-- texture path, and the attachment is what beams and trails share with emitters -
 -- so a scene where the attachment resolve is broken shows it here, as an effect
 -- emitting from the world origin instead of from its pedestal.
 --
@@ -223,15 +223,15 @@ end
 --     cdn --publish content --store store --signing-key HEX
 --     client --cdn dir:store --publisher-key PUB --script Particles.luau
 --
--- `bake` decodes the GIF into **one flipbook sheet** — 48 frames of a 420x420
--- animation laid out as an 8x8 grid — so by the time it reaches here it is an
+-- `bake` decodes the GIF into **one flipbook sheet** - 48 frames of a 420x420
+-- animation laid out as an 8x8 grid - so by the time it reaches here it is an
 -- ordinary texture and nothing downstream knows it animates.
 --
 -- ## Why the numbers are these numbers
 --
 -- **The frame count is not written here at all, and that is a fix.** It used to
 -- say 24; the GIF has 48. Half the dance never played, and nothing looked broken
--- — a flipbook that stops early is just a shorter animation, which is the whole
+-- - a flipbook that stops early is just a shorter animation, which is the whole
 -- reason the number should never have been copied. The bake puts it on the
 -- texture, the client records it into the world, and an emitter that leaves
 -- `FlipbookFrames` at zero adopts it.
@@ -242,7 +242,7 @@ end
 --
 -- **`Lifetime = 5` with `OneShot`.** A one-shot flipbook is stretched over the
 -- particle's whole life, so five seconds of life is five seconds of dance at
--- about 9.6 frames a second — the whole loop, once, per particle. The GIF's own
+-- about 9.6 frames a second - the whole loop, once, per particle. The GIF's own
 -- rate is 24fps and is deliberately not used here: `OneShot` paces itself off
 -- the lifetime, which is what makes "it lasts five seconds and plays the whole
 -- thing" true regardless of how many frames the source has.
@@ -263,7 +263,7 @@ do
 	emitter.Name = "DancingFox"
 
 	-- The manifest name, extension included, exactly as the publisher wrote it.
-	-- There is no table anywhere mapping one to the other — the manifest's name
+	-- There is no table anywhere mapping one to the other - the manifest's name
 	-- *is* the texture's name.
 	emitter.Texture = "effects/fox_dance.atex"
 
@@ -272,7 +272,7 @@ do
 
 	-- **The frame count is not stated here, and that is the fix.** It used to say
 	-- 24 and the GIF has 48, so half the dance never played and nothing looked
-	-- broken — a flipbook that stops early is just a shorter animation. The
+	-- broken - a flipbook that stops early is just a shorter animation. The
 	-- number is in the baked texture, the client records it into the world, and
 	-- an emitter that leaves `FlipbookFrames` at zero adopts it. Writing it down
 	-- here would be a second copy of a fact, which is the thing that was wrong.
@@ -290,7 +290,7 @@ do
 	emitter.RotSpeed = NumberRange.new(0, 0)
 
 	-- **`FacingCamera`, which is what the roadmap's orientation default already
-	-- is** — set here anyway, because a demo that relies on a default is one that
+	-- is** - set here anyway, because a demo that relies on a default is one that
 	-- silently stops demonstrating when the default changes.
 	emitter.Orientation = Enum.ParticleOrientation.FacingCamera
 
@@ -370,7 +370,7 @@ end
 -- any one of them is doing. The five-particle floor comes out of the rate and the
 -- lifetime: five a second over one second is five alive.
 --
--- The parts are one metre and unanchored-free — anchored, so the physics step
+-- The parts are one metre and unanchored-free - anchored, so the physics step
 -- does not become what is being measured.
 
 local half = GRID * SPACING * 0.5
@@ -384,14 +384,14 @@ for row = 0, GRID - 1 do
 
 		-- **`Visible = false` and not `Transparency = 1`, and at this count the
 		-- difference is the whole scene.** They look identical and they are three
-		-- different questions — `scene/Components.hpp` says so under
+		-- different questions - `scene/Components.hpp` says so under
 		-- `Visual::CastShadow`. A part at full transparency is *submitted*, and
 		-- because it is blended it lands in the pass that is sorted back-to-front
 		-- from the eye every frame. A hundred thousand of those is a hundred
 		-- thousand instances sorted and drawn to produce nothing.
 		--
 		-- Measured: authored with `Transparency = 1` this scene ran at **4 FPS**
-		-- with 1,228,920 triangles a frame — twelve per host cube, none of them
+		-- with 1,228,920 triangles a frame - twelve per host cube, none of them
 		-- visible. `Visible = false` submits nothing at all.
 		host.Visible = false
 		host.CFrame = CFrame.new(Vector3.new(

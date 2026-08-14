@@ -1,7 +1,7 @@
 // What the value types and the deterministic generator cost in bulk.
 //
 // **The `Random` rows are here because they used to be the alarming ones.**
-// Every function on it was a full SHA-256 compression until v0.15 — around 47 ns
+// Every function on it was a full SHA-256 compression until v0.15 - around 47 ns
 // a call, which made a three-salt position dearer than iterating the whole
 // world and made "is this call site per-frame or per-spawn?" a question somebody
 // had to answer before writing it. It is SplitMix64's finaliser now and the rows
@@ -39,8 +39,8 @@ namespace values_bench {
 
 	// The population every bulk row walks.
 	//
-	// 100k is a world's worth of parts — the same order the `ecs` iteration
-	// suite uses — so a figure here divides into a per-part cost that can be
+	// 100k is a world's worth of parts - the same order the `ecs` iteration
+	// suite uses - so a figure here divides into a per-part cost that can be
 	// compared against the `Each` rows directly.
 	constexpr size_t COUNT = 100'000;
 
@@ -155,7 +155,7 @@ BENCH("Random · one Vector3 each, 100k", COUNT) {
 
 BENCH("control · xorshift32, 100k", COUNT) {
 	// The copy-pasted mixer `Random` replaced, at the same call count. **Not a
-	// proposal to go back** — that one is neither specified nor portable, which
+	// proposal to go back** - that one is neither specified nor portable, which
 	// is the whole reason it went. It is the floor: whatever the rows above cost
 	// over this one is what a *specified* generator is charging, and for two
 	// versions that was fifty times and is now roughly nothing.
@@ -207,7 +207,7 @@ BENCH("CFrame · Inverse 100k", COUNT) {
 
 BENCH("CFrame · LookAt 100k", COUNT) {
 	// Builds a basis from two points, which is a cross product, two
-	// normalisations and a quaternion conversion — much the dearest thing on
+	// normalisations and a quaternion conversion - much the dearest thing on
 	// `CFrame`. A camera does it once a frame and a billboarding system does it
 	// per part, and those are very different bills.
 	const std::vector<CFrame> &frames = Frames();

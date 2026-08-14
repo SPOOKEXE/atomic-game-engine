@@ -3,18 +3,18 @@
 // One barrier over worlds here and worlds elsewhere.
 //
 // `Universe` routes buses. `Supervisor` starts hosts and watches them. Neither
-// knows about the other, and this is the twenty lines that join them — kept as
+// knows about the other, and this is the twenty lines that join them - kept as
 // its own type rather than folded into either, because a `Universe` that knew
 // how to spawn a process would be a simulation layer that knew about processes,
 // and a `Supervisor` that knew about envelopes would be a second router.
 //
 // **The order in a tick is the whole design.**
 //
-//     1. pump the links      — what hosts said since the last barrier
-//     2. ingest their traffic — checked against the host that sent it
-//     3. tick the universe   — one barrier, local and remote worlds together
-//     4. dispatch outward    — what the barrier decided for remote worlds
-//     5. poll the hosts      — restart what died
+//     1. pump the links      - what hosts said since the last barrier
+//     2. ingest their traffic - checked against the host that sent it
+//     3. tick the universe   - one barrier, local and remote worlds together
+//     4. dispatch outward    - what the barrier decided for remote worlds
+//     5. poll the hosts      - restart what died
 //
 // Step 3 is the claim: a world's bus behaviour does not depend on which process
 // holds it, because there is one router and it runs once. Step 2 before it and
@@ -129,7 +129,7 @@ namespace engine::world {
 
 		// Places worlds into hosts, starts them, and records them.
 		//
-		// The grouping is `PlanHosts`', which is deterministic — the same
+		// The grouping is `PlanHosts`', which is deterministic - the same
 		// worlds in the same order produce the same plan, so a restarted driver
 		// rebuilds what was there.
 		//

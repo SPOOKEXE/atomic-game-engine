@@ -1,22 +1,22 @@
 // Choosing a mesh or a texture from what the content store actually holds.
 //
 // **The panel this replaces was a text field, and the failure mode was
-// silence.** `MeshPart.Mesh` takes the name a publisher wrote — rule 4, an id
-// does not cross — so authoring one meant knowing the string, spelling it
+// silence.** `MeshPart.Mesh` takes the name a publisher wrote - rule 4, an id
+// does not cross - so authoring one meant knowing the string, spelling it
 // exactly, and finding out it was wrong by looking at a part that had not
 // changed. Nothing warns: an unknown mesh name is a part the renderer draws with
 // the missing-mesh marker, which is also what a mesh that has not streamed in
 // yet looks like.
 //
 // **The list is the store's published manifest and nothing else.** Not the
-// world's `MeshCatalogue` — that holds what this session happened to load, so
+// world's `MeshCatalogue` - that holds what this session happened to load, so
 // the list would grow as you played and be empty on a fresh editor. Not a
-// directory walk of `raw/` — those are hash-named and cannot say what anything
+// directory walk of `raw/` - those are hash-named and cannot say what anything
 // is called. The manifest is the one thing that knows both the name and the
 // kind, which is exactly the pair a picker needs.
 //
 // **And it only ever lists `~/Documents/atomic-game-engine/cdn`.** One store,
-// the one every program in this repo agrees on — `cdn::DefaultLocalPaths`. A
+// the one every program in this repo agrees on - `cdn::DefaultLocalPaths`. A
 // picker that browsed the filesystem would offer paths that mean nothing to a
 // manifest, and a name that is not in one is a name no client can fetch.
 
@@ -52,8 +52,8 @@ namespace studio {
 		};
 
 		// **Both spellings of every aliased property, and the aliases are why
-		// this list was wrong the first time.** `Visual::Mesh` is bound twice —
-		// as `BasePart.Mesh` and as `MeshPart.MeshId`, Roblox's name — and
+		// this list was wrong the first time.** `Visual::Mesh` is bound twice -
+		// as `BasePart.Mesh` and as `MeshPart.MeshId`, Roblox's name - and
 		// `SurfaceAppearance::ColourMap` is bound twice as `BasePart.ColorMap`
 		// and `MeshPart.TextureID`. The first version of this table had one of
 		// each pair, so selecting a `MeshPart` showed a picker on the two
@@ -69,21 +69,21 @@ namespace studio {
 			// and the pair of spellings is what made this table's own warning
 			// come true: the first version had one of each, so selecting a
 			// `MeshPart` showed a plain text field on the two names it displays.
-			// v0.10 removed the aliases — geometry from a file is not something
-			// a plain `Part` has — so there is one name for each and no way for
+			// v0.10 removed the aliases - geometry from a file is not something
+			// a plain `Part` has - so there is one name for each and no way for
 			// the halves to drift.
 			{"MeshId", AssetKind::Mesh},
 			{"TextureID", AssetKind::Texture},
 
 			// `ParticleEmitter`, `Beam` and `Trail` all spell it this way, and
-			// all three mean the same thing — which is why the key is the
+			// all three mean the same thing - which is why the key is the
 			// property and not the class.
 			{"Texture", AssetKind::Texture},
 
 			// `Material.MaterialId`, the one property of the instance that
 			// replaced `Enum.Material`. **The only row naming an
 			// `AssetKind::Material`**, and the reason the kind stopped being one
-			// nothing wrote — `scene/Materials.hpp`.
+			// nothing wrote - `scene/Materials.hpp`.
 			{"MaterialId", AssetKind::Material},
 
 			// `Sound.SoundId`.
@@ -123,7 +123,7 @@ namespace studio {
 
 		// **Read when the popup opens, not every frame.** Reading a manifest is
 		// opening a file and parsing it, and doing that sixty times a second
-		// while somebody reads a list would pin a disk for no benefit — the
+		// while somebody reads a list would pin a disk for no benefit - the
 		// store cannot change while a modal is up unless somebody publishes
 		// from another process, and the Refresh button below is for them.
 		if (ImGui::IsWindowAppearing()) {
@@ -150,7 +150,7 @@ namespace studio {
 		ImGui::Separator();
 
 		// The rows that survive the kind and the filter, scored so that an
-		// exact match sorts above something that merely contains the letters —
+		// exact match sorts above something that merely contains the letters -
 		// `FuzzyMatch`'s reason: typing "fox" should not put `foxglove_bark`
 		// above `fox_dance`.
 		struct Candidate {
@@ -162,7 +162,7 @@ namespace studio {
 		// **The engine's own meshes first, and they are not published.** See
 		// `RefreshPickerContents`: six meshes exist in every process before any
 		// content is fetched, and leaving them out left this list empty on a
-		// machine with no store — a picker that appears not to work rather than
+		// machine with no store - a picker that appears not to work rather than
 		// a store that is not there. Sorted with everything else below, so a
 		// filter still finds what it matches.
 		for (const cdn::PublishedEntry &entry : PickerBuiltins) {
@@ -186,7 +186,7 @@ namespace studio {
 
 			// **Source forms are not offered, because choosing one does
 			// nothing.** A `.pmx` and a `.amesh` are both `AssetKind::Mesh`, and
-			// only the second is something a runtime reads — so a picker
+			// only the second is something a runtime reads - so a picker
 			// listing both offered a choice that silently left the part looking
 			// exactly as it did. Until v0.10 the local store published `raw/`
 			// straight through, so *most* of this list was that.
@@ -224,7 +224,7 @@ namespace studio {
 		// what a runtime reads; `raw/` is what somebody dragged in five seconds
 		// ago and has not been through a baker. Before this the second was simply
 		// invisible, so a file you had just imported could not be chosen until
-		// the whole store had been republished — which on this repository's own
+		// the whole store had been republished - which on this repository's own
 		// store is four minutes.
 		if (ImGui::BeginTabBar("##halves")) {
 			if (ImGui::BeginTabItem("Published")) {
@@ -254,7 +254,7 @@ namespace studio {
 				// place.
 				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 				ImGui::TextWrapped(
-					"nothing published — import files below and press Publish in the Assets panel"
+					"nothing published - import files below and press Publish in the Assets panel"
 				);
 				ImGui::PopStyleColor();
 			} else if (shown.empty()) {
@@ -270,8 +270,8 @@ namespace studio {
 			}
 
 			// **Rows are a picture and a name, and the row is as tall as the
-			// picture.** A store's names are hashes — a person importing
-			// `diffuse.png` gets `<64 hex>.png` — so a list of names alone is a
+			// picture.** A store's names are hashes - a person importing
+			// `diffuse.png` gets `<64 hex>.png` - so a list of names alone is a
 			// list of identifiers nobody can choose between. The thumbnail is
 			// what makes this a picker rather than a lookup table.
 			//
@@ -282,7 +282,7 @@ namespace studio {
 			const float spacing = ImGui::GetStyle().ItemSpacing.x;
 
 			// **Clipped, and the absence of this was three separate bugs.** The
-			// list is every texture in the store — 1,637 of them here — and
+			// list is every texture in the store - 1,637 of them here - and
 			// without a clipper every one submitted a `Selectable` and asked for
 			// a thumbnail on every frame the modal was open. That is a visible
 			// stall on a list nobody can read all of, and it is why the previews
@@ -295,7 +295,7 @@ namespace studio {
 			// written; the picker was small when it was written and stopped
 			// being small when the store filled up.
 			//
-			// **Uniform row height is what makes it exact** — every row is
+			// **Uniform row height is what makes it exact** - every row is
 			// `side` tall by construction, so the clipper needs no measuring
 			// pass and scrolling lands where the scrollbar says.
 			ImGuiListClipper clipper;
@@ -328,7 +328,7 @@ namespace studio {
 					// **The big preview, on the row rather than as a tooltip.** A
 					// picker is exactly where somebody needs to see the thing before
 					// choosing it, and 48 pixels is not enough to recognise art.
-					// Reads `IsItemHovered()`, which is still the row's — see
+					// Reads `IsItemHovered()`, which is still the row's - see
 					// `DrawAssetRow`.
 					HoverPreview(entry.Name, entry.Kind);
 
@@ -360,7 +360,7 @@ namespace studio {
 		ImGui::SameLine();
 
 		// **"Clear" and not an empty row in the list.** Emptying the property is
-		// a legitimate thing to want — a part with no mesh is a plain part — and
+		// a legitimate thing to want - a part with no mesh is a plain part - and
 		// a blank `Selectable` at the top of a list is a row people click by
 		// accident.
 		if (ImGui::Button("Clear", button)) {
@@ -387,7 +387,7 @@ namespace studio {
 
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		ImGui::TextWrapped(
-			"unbaked sources — choosing one bakes it now. Publish before a client can fetch it."
+			"unbaked sources - choosing one bakes it now. Publish before a client can fetch it."
 		);
 		ImGui::PopStyleColor();
 
@@ -434,7 +434,7 @@ namespace studio {
 
 				if (action != RowAction::None) {
 					// **Baked here and not on confirm**, so the name written into
-					// the property is one that exists — a picker that handed back a
+					// the property is one that exists - a picker that handed back a
 					// raw name would put a `.png` on a `ColorMap`, which is the
 					// exact thing this store spent four versions doing.
 					if (std::string baked; BakeRawAsset(relative, baked)) {
@@ -468,20 +468,20 @@ namespace studio {
 		PickerRaw = cdn::RawContents(paths);
 
 		// **The engine's own assets, at the top, and they are not in any
-		// manifest.** `assets::MakeBuiltin` generates them in every process —
-		// six shapes and the checker sheet — and `MeshTable::Initialise` and
+		// manifest.** `assets::MakeBuiltin` generates them in every process -
+		// six shapes and the checker sheet - and `MeshTable::Initialise` and
 		// `TextureTable::Initialise` register them before a single byte of
 		// content has been fetched. They are the only names an editor is
 		// guaranteed to be able to resolve.
 		//
 		// Leaving them out made the mesh picker *empty* on a machine with no
 		// published store, which reads as a picker that does not work rather
-		// than as a store that is not there — and it made the six meshes every
+		// than as a store that is not there - and it made the six meshes every
 		// `Part` in the engine is already drawn with unreachable from the one
 		// panel whose job is to choose geometry.
 		//
 		// **Kept apart from `PickerContents` rather than mixed into it**, because
-		// that vector answers "what has this store published" — the empty-state
+		// that vector answers "what has this store published" - the empty-state
 		// message reads it, and rows that are always there would make "nothing
 		// published" a sentence that could never be shown.
 		//

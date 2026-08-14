@@ -104,7 +104,7 @@ TEST_CASE("every form has a flag under both verbs and it is declared once", "[co
 	}
 
 	// Everything is off now, both ways, which also proves the bitset reaches
-	// every ordinal the table can produce — a form past what `ContentPolicy`
+	// every ordinal the table can produce - a form past what `ContentPolicy`
 	// holds would still read `false` from its flag and answer `true` here.
 	const ContentPolicy handled = ContentPolicy::FromFlags(ContentVerb::Handle);
 	for (const ContentForm form : AllForms()) {

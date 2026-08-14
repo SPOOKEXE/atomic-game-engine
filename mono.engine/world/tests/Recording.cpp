@@ -300,7 +300,7 @@ TEST_CASE("a recording replays to the same final state", "[world]") {
 
 	// Systems are re-registered on restore. A snapshot carries state, never
 	// code, so a restored world ticks and does nothing until somebody says
-	// what it does — exactly as a respawned host does by running the same
+	// what it does - exactly as a respawned host does by running the same
 	// program.
 	Universe replayed;
 	REQUIRE(replayer.Restore(replayed, [](Universe &into, WorldId id) { Rebuild(into, id, "rec.topic"); }));

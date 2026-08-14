@@ -33,7 +33,7 @@ namespace engine::script {
 		// Rebuilds an arriving player in this world.
 		//
 		// **The engine admits them, not a script.** Who is in a game is the
-		// host's business — `scene::AddPlayer` says so — and a teleport that
+		// host's business - `scene::AddPlayer` says so - and a teleport that
 		// only worked in games whose author had written an arrival handler
 		// would be a feature with a footnote. `Players.PlayerAdded` fires from
 		// the parenting, so a game that *wants* to react already can.
@@ -97,7 +97,7 @@ namespace engine::script {
 		// and a host installing this system twice is not a hypothetical: the
 		// studio's `Editor::BuildWorld` calls `client::InstallPresentation`,
 		// which registers it, and then registered it again beside the physics
-		// and gravity systems. Every arrival was therefore admitted twice — two
+		// and gravity systems. Every arrival was therefore admitted twice - two
 		// `Player` rows, two characters, one of them adopted by the play link
 		// and the other an orphan nobody drives, standing in the world for ever
 		// and one more of them per teleport.
@@ -107,7 +107,7 @@ namespace engine::script {
 		// costs nothing and one somebody has to photograph to find.
 		//
 		// **Only teleports are taken.** A subscriber's message has to still be
-		// there when a runtime pumps — the delivery pump reads the same list —
+		// there when a runtime pumps - the delivery pump reads the same list -
 		// so everything else is left exactly where the driver put it.
 		// **The inbox is re-read every time round and nothing is held across an
 		// admission.** Admitting creates instances, and a store that moves its
@@ -123,7 +123,7 @@ namespace engine::script {
 			// apart.** `Postbox::Teleport` asks for one, so the *sender's* inbox
 			// holds a `BusKind::Teleport` delivery carrying a ticket and no
 			// payload. Taken as an arrival it decodes to nothing and builds
-			// nobody — but it was still erased from the inbox, so a ticket
+			// nobody - but it was still erased from the inbox, so a ticket
 			// nothing could then await, and it was counted as an admission in any
 			// world that has a `Players` service. `Ticket::Expected` is the field
 			// that distinguishes them, exactly as it does in both delivery pumps.
@@ -140,8 +140,8 @@ namespace engine::script {
 
 			AdmitArrival(store, taken);
 
-			// `AdmitArrival` is quiet about a world with no `Players` service —
-			// that is the placeholder scene and it takes nobody — so what is
+			// `AdmitArrival` is quiet about a world with no `Players` service -
+			// that is the placeholder scene and it takes nobody - so what is
 			// counted is what it built rather than what arrived.
 			admitted += scene::PlayersOf(store) == ecs::NULL_ENTITY ? 0u : 1u;
 		}

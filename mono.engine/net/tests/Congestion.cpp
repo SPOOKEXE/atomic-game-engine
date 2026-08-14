@@ -32,7 +32,7 @@ namespace {
 	//
 	// **The only way to prove a congestion controller converges is to give it
 	// something to converge on**, and a fixed reply of "the round trip is 40 ms"
-	// proves nothing at all — the whole question is what happens when the round
+	// proves nothing at all - the whole question is what happens when the round
 	// trip is a function of what the controller just did. So this is the smallest
 	// honest path model: bytes offered above the drain rate queue up, the queue
 	// is what the round trip is made of, and a queue past the buffer is loss.
@@ -102,7 +102,7 @@ namespace {
 			// **What a `Link` reports, and reporting it every tick instead would
 			// make every case here a lie.** The period closes when what was
 			// outstanding at its start has been acknowledged, which is one round
-			// trip on this path — so the controller sees roughly twenty ticks
+			// trip on this path - so the controller sees roughly twenty ticks
 			// between decisions here and one tick on a loopback.
 			const bool answered = now - answeredAt >= trip;
 			if (answered) {
@@ -127,7 +127,7 @@ TEST_CASE("a cold start opens at the initial window and not at the cap", "[net][
 	CongestionControl control;
 
 	// **The whole cold-start decision in two assertions.** The opening tick is
-	// RFC 6928's initial window and nothing more — ten datagrams, once, which is
+	// RFC 6928's initial window and nothing more - ten datagrams, once, which is
 	// what every TCP connection on the internet opens with and enough that the
 	// first snapshot chunks of a join move immediately.
 	CHECK(control.AllowanceBytes() == 10 * 1200);
@@ -136,7 +136,7 @@ TEST_CASE("a cold start opens at the initial window and not at the cap", "[net][
 	CHECK(control.InSlowStart());
 
 	// And the tick after it is paced, because by then there is a round trip to
-	// pace against — assumed until measured. Ten datagrams *every* tick until
+	// pace against - assumed until measured. Ten datagrams *every* tick until
 	// the first acknowledgement would be sixty times the window it opened with.
 	control.Advance(TICK, CAP, false);
 	CHECK(control.AllowanceBytes() < 10 * 1200);
@@ -159,7 +159,7 @@ TEST_CASE("slow start doubles each answered period and stops at the cap", "[net]
 		control.Advance(TICK, CAP, true);
 	}
 
-	// It stops at the cap and it leaves slow start there — staying in it would
+	// It stops at the cap and it leaves slow start there - staying in it would
 	// mean answering the first sign of a queue by halving from a rate the link
 	// was never allowed to spend.
 	CHECK(control.AllowanceBytes() <= CAP);
@@ -189,7 +189,7 @@ TEST_CASE("the rate backs off when the path starts queueing", "[net][congestion]
 	const Run run = Drive(control, path, 600);
 
 	// **It found the path.** Within a factor of two of the bottleneck in both
-	// directions, which is the band a delay-based controller settles in — it
+	// directions, which is the band a delay-based controller settles in - it
 	// deliberately runs a little under capacity, which is what keeps the queue
 	// empty.
 	CHECK(run.FinalRateBytesPerSecond > path.CapacityBytesPerSecond * 0.5);
@@ -235,7 +235,7 @@ TEST_CASE("it converges rather than oscillating", "[net][congestion]") {
 
 	// Over the last two seconds the rate must sit inside a band rather than
 	// hunting across one. **The velocity parameter reset on a direction change
-	// is what buys this** — a controller that kept its momentum through a
+	// is what buys this** - a controller that kept its momentum through a
 	// reversal overshoots by as much as it had accelerated, and then overshoots
 	// the other way.
 	double lowest = run.Rates[run.Rates.size() - 120];
@@ -339,7 +339,7 @@ TEST_CASE("it opens up again once the path clears", "[net][congestion]") {
 	CHECK(narrow < path.CapacityBytesPerSecond * 1.5);
 
 	// The same connection, on a path that is now ten times wider. Nothing tells
-	// the controller — it has to find out.
+	// the controller - it has to find out.
 	path.CapacityBytesPerSecond = 600'000.0;
 	Drive(control, path, 1800, 15.0);
 
@@ -357,7 +357,7 @@ namespace {
 	// holds it there, answering with the least it allowed after the rise.
 	//
 	// The least rather than the last, because a round trip held at a fixed
-	// number for four seconds is a path whose delay does not answer the window —
+	// number for four seconds is a path whose delay does not answer the window -
 	// which the controller eventually and correctly reads as somebody else
 	// holding the bottleneck. What this asks about is the response to the rise.
 	uint32_t LeastAllowanceAfterRise(double varianceSeconds) {
@@ -418,7 +418,7 @@ TEST_CASE("a queue that never drains switches the mode", "[net][congestion]") {
 	REQUIRE_FALSE(control.Competing());
 	const double polite = control.TargetQueuePackets();
 
-	// The neighbour arrives and parks 200 ms of queue on the path — and holds
+	// The neighbour arrives and parks 200 ms of queue on the path - and holds
 	// it there however far this end backs off, which is the whole of what makes
 	// it a buffer-filler.
 	for (int tick = 0; tick < 300; tick++) {

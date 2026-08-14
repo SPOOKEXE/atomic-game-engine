@@ -47,7 +47,7 @@ namespace engine::physics {
 				if (std::abs(step[axis]) < PARALLEL_EPSILON) {
 					// Answered without arithmetic, because the numerator can be
 					// zero too and zero times infinity is a NaN that compares
-					// false in both directions — the miss goes undetected and
+					// false in both directions - the miss goes undetected and
 					// so does the hit.
 					if (start[axis] < -extent[axis] || start[axis] > extent[axis]) {
 						return ShapeHit{};

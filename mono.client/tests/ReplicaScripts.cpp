@@ -4,13 +4,13 @@
 // different world up.** That suite is the presentation seam: a bare store, a
 // draw list and a snapshot buffer, and no class tree at all. This one needs the
 // scene classes, the gui classes, the services, an occupant and two VMs' worth
-// of registration — so sharing a file would make every interpolation case pay
+// of registration - so sharing a file would make every interpolation case pay
 // for a class table it never reads, which is the granularity `AGENTS.md` asks
 // suites to be split at.
 //
 // **The order the cases build in is the order a client experiences.** The
 // replica is created and its VM opened while the world is still empty, the tree
-// arrives afterwards, and only then is the store adopt-only — which is exactly
+// arrives afterwards, and only then is the store adopt-only - which is exactly
 // `Client::BeginConnecting` followed by the first snapshot. A fixture that
 // populated the world before `BuildReplicatedWorld` would be testing
 // `RunWorldScripts`, which is the host path and not this one.
@@ -108,7 +108,7 @@ namespace {
 
 		// What the authority sent: the fixtures, two occupants and their
 		// containers. Written straight into the store because a snapshot is what
-		// this stands in for — `gui.` components do not cross a wire today, so
+		// this stands in for - `gui.` components do not cross a wire today, so
 		// the arriving interface cannot be built by replicating one.
 		void Arrive() {
 			REQUIRE(engine::scene::InstallServices(World) != NULL_ENTITY);
@@ -382,7 +382,7 @@ TEST_CASE(
 	CHECK(visual->Transparency == 0.0f);
 
 	// `Instance.new` answers a null entity in an adopt-only store, which the
-	// binding turns into an error of its own — a client script cannot mint a row
+	// binding turns into an error of its own - a client script cannot mint a row
 	// the authority is also handing indices out for.
 	CHECK(replica.Read("minted") == "false");
 }
@@ -405,7 +405,7 @@ TEST_CASE("tearing a replica down leaves no runtime alive", "[client][replicatio
 	}
 
 	// **`world::World` declares its store before its scheduler**, so the
-	// scheduler — and every runtime its lambdas hold — is destroyed first and the
+	// scheduler - and every runtime its lambdas hold - is destroyed first and the
 	// VM never outlives the storage it was opened over. This orders its locals
 	// the same way on purpose: a runtime that survived its store would be a
 	// use-after-free on the next beat.

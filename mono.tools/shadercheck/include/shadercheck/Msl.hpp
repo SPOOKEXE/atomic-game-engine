@@ -21,7 +21,7 @@
 //
 // **What it cannot claim.** It is not a Metal compiler and there is none on
 // Linux, so "structurally well-formed" means balanced and prefaced and no more
-// — a type error inside a function body passes here. `Apple`'s `metal` is the
+// - a type error inside a function body passes here. `Apple`'s `metal` is the
 // only thing that settles that, and D00001 says so rather than this file
 // pretending otherwise.
 //

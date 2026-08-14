@@ -2,8 +2,8 @@
 
 // Which camera a world is looked at from, and the matrices that follow from it.
 //
-// `Camera` is a component because a world may hold several of them — a
-// spectator, a cutscene, a security monitor — and under the instance model a
+// `Camera` is a component because a world may hold several of them - a
+// spectator, a cutscene, a security monitor - and under the instance model a
 // camera is an instance, which is a row. This is the other half: a resource
 // naming the live one, so "where is the camera" is a lookup rather than a walk
 // over every camera row asking which is in charge.
@@ -12,7 +12,7 @@
 // `client` tier: a server-tier host resolves a view for a hosted world and
 // cannot name it, and reaching for it would put presentation in the type a
 // headless world writes. What crosses is a `CFrame`, three floats and the
-// matrices below — all of which are arithmetic, not device state.
+// matrices below - all of which are arithmetic, not device state.
 //
 // The matrices are cached rather than derived at every read because the
 // consumers are a culling pass, a draw-list build and an overlay, and three
@@ -73,8 +73,8 @@ namespace engine::scene {
 
 		// Width over height of whatever this world is being drawn into.
 		//
-		// Written by the consumer — a window, an offscreen target, a mirror's
-		// texture — because a world has no idea how big anybody's screen is.
+		// Written by the consumer - a window, an offscreen target, a mirror's
+		// texture - because a world has no idea how big anybody's screen is.
 		// Kept here rather than passed to `ResolveActiveCamera` so that
 		// resolving stays a plain `void(Store &)` the scheduler can register.
 		float AspectRatio = 1.0f;
@@ -87,8 +87,8 @@ namespace engine::scene {
 		//
 		// Braced rather than left bare so that "identity until it runs" is what
 		// the type says and not only what this comment says. An aggregate
-		// initialiser naming the entity and the aspect ratio — which is every
-		// caller — leaves this member behind, and a member with no default is
+		// initialiser naming the entity and the aspect ratio - which is every
+		// caller - leaves this member behind, and a member with no default is
 		// one `-Wmissing-field-initializers` is right to call out.
 		CameraMatrices Matrices{};
 	};
@@ -113,7 +113,7 @@ namespace engine::scene {
 	//
 	// **Lengyel's oblique frustum, applied to a projection somebody else
 	// built.** Everything in front of the plane survives clipping and everything
-	// behind it does not, at any angle — which is what a mirror wants for its own
+	// behind it does not, at any angle - which is what a mirror wants for its own
 	// pane, so the frame and the back of the glass cannot occlude the reflection,
 	// and what a portal cannot work without: its destination is set into a wall,
 	// and the wall would otherwise draw across the hole it leads through.
@@ -127,7 +127,7 @@ namespace engine::scene {
 	// **Written for `0..1` depth, and the difference is not cosmetic.**
 	// Lengyel's published derivation maps the near plane to `-1`, so it
 	// substitutes `C·2/(C·Q)` and subtracts the `w` row. `GLM_FORCE_DEPTH_ZERO_TO_ONE`
-	// is pinned engine-wide in `core`'s build, where near is `0` — so the
+	// is pinned engine-wide in `core`'s build, where near is `0` - so the
 	// substitution is `C/(C·Q)` and nothing is subtracted. Using the other form
 	// here would put the near plane half a unit into the scene and read as
 	// z-fighting rather than as a matrix mistake, which is the trap
@@ -154,7 +154,7 @@ namespace engine::scene {
 	//
 	// **Off-axis, so it is a window rather than a cone.** The four extents are
 	// independent, so a frustum fitted to a pane from off to one side leans
-	// instead of widening symmetrically about the view axis — which is the same
+	// instead of widening symmetrically about the view axis - which is the same
 	// coverage at twice the texel density, and what `SurfaceCameras.hpp` named
 	// as the change it was waiting for.
 	//
@@ -190,7 +190,7 @@ namespace engine::scene {
 	//
 	// **The same product `SeamTransform::Point` applies, written once as four
 	// multiplies rather than per point.** A shader cannot call a method, and the
-	// beam shadow a hole transports needs the map on the fragment side — see
+	// beam shadow a hole transports needs the map on the fragment side - see
 	// `NON-EUCLIDEAN.md` Part V.3, where a far-side fragment is carried back into
 	// the near room before it is looked up.
 	//
@@ -206,7 +206,7 @@ namespace engine::scene {
 	// Builds the matrices for a camera whose projection is already decided.
 	//
 	// **The surface path's `ResolveCamera`.** A surface camera's frustum is not
-	// a field of view — it is fitted to a pane and possibly skewed — so there is
+	// a field of view - it is fitted to a pane and possibly skewed - so there is
 	// nothing for `ResolveCamera` to derive it from. This exists so the one
 	// convention that still has to be shared, `View = inverse(frame)` and
 	// `ViewProjection = Projection * View`, stays in this file rather than being
@@ -221,7 +221,7 @@ namespace engine::scene {
 	// Refreshes the world's `ActiveCamera` matrices from the row it names.
 	//
 	// A `void(Store &)` and nothing else, so it registers as an ordinary
-	// system — which is the reason `AspectRatio` is a field above rather than a
+	// system - which is the reason `AspectRatio` is a field above rather than a
 	// second argument here.
 	//
 	// Leaves the matrices exactly as they were when there is no `ActiveCamera`

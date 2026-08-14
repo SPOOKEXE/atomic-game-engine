@@ -22,7 +22,7 @@ namespace engine::scene {
 		// **Scratch and only scratch**: it is cleared on entry and carries no
 		// meaning across calls, so reusing it cannot make one tick depend on the
 		// last. `thread_local` rather than a member because a world is ticked by
-		// whichever worker claimed it — two worlds syncing at once must not share
+		// whichever worker claimed it - two worlds syncing at once must not share
 		// one buffer, and which worker runs which world is not this function's to
 		// know.
 		std::vector<Entity> &Stack() {
@@ -45,8 +45,8 @@ namespace engine::scene {
 		//
 		// **Not `std::hash`.** The standard says nothing about what it
 		// produces, so two builds of this program may disagree. Nothing here
-		// crosses a process — the comparison is this frame against the last,
-		// in one store — but a hash whose value is a property of the compiler
+		// crosses a process - the comparison is this frame against the last,
+		// in one store - but a hash whose value is a property of the compiler
 		// is one nobody can write a test for, and the test is what keeps the
 		// field list honest.
 		constexpr uint64_t Scramble(uint64_t value) {
@@ -62,7 +62,7 @@ namespace engine::scene {
 		//
 		// **Order-dependent deliberately.** Two archetypes that swap their rows
 		// hold the same instances and would walk to the same answer, so an
-		// order-independent fold would be the more accurate one — and would
+		// order-independent fold would be the more accurate one - and would
 		// also collide far more readily, because commutative folds do. A
 		// reshuffle costs one walk nobody sees; a collision is a hidden part
 		// still drawing.
@@ -79,7 +79,7 @@ namespace engine::scene {
 		// **No store address folded in, unlike `gui` and `studio`.** Both of
 		// those keep their stamp in an object a caller can point at either
 		// world, so they have to tell the worlds apart. This one lives on the
-		// world it describes, so there is no second world to confuse it with —
+		// world it describes, so there is no second world to confuse it with -
 		// and an address is precisely the term that differs between two runs of
 		// one scene, which is what `just determinism` compares. Folding one in
 		// would buy nothing and make the *decision* run-dependent.
@@ -106,7 +106,7 @@ namespace engine::scene {
 			//
 			// **Destruction needs nothing of its own.** A destroyed instance's
 			// row leaves this pass, so the count moves whether or not the
-			// links around it were tidied — and `DestroyInstance` does unparent
+			// links around it were tidied - and `DestroyInstance` does unparent
 			// on the way out, so both halves move.
 			size_t nodes = 0;
 			store.Each<const Hierarchy>([&stamp, &nodes](Entity entity, const Hierarchy &node) {
@@ -132,7 +132,7 @@ namespace engine::scene {
 
 				// **1 and 2, not 1 and 0.** A zero term folds to a value that
 				// depends only on the running total, so a `false` beside a
-				// missing row would be indistinguishable — and telling those
+				// missing row would be indistinguishable - and telling those
 				// apart is the whole job here.
 				stamp = Fold(stamp, static_cast<uint64_t>(visual.Visible ? 1 : 2));
 			});
@@ -164,7 +164,7 @@ namespace engine::scene {
 		// The resource is created here rather than by `InstallServices`,
 		// because this function is the only thing that reads or writes it and
 		// a fixture nobody could explain is worse than a lazy one. It is
-		// registered explicitly in `RegisterSceneComponents` — an unregistered
+		// registered explicitly in `RegisterSceneComponents` - an unregistered
 		// resource type is minted under the compiler's spelling and
 		// `Store::Save` then refuses the world.
 		if (!store.HasResource<RenderedSignature>()) {
@@ -192,7 +192,7 @@ namespace engine::scene {
 		//
 		// Depth first over an explicit stack. Recursion would put the depth of
 		// the scene onto the C stack, and a scene's depth is the author's to
-		// choose — the same reason `InstanceGetDescendants` spells its walk out
+		// choose - the same reason `InstanceGetDescendants` spells its walk out
 		// in the bindings.
 		//
 		// A world with no Workspace marks nothing and the sweep below then
@@ -213,8 +213,8 @@ namespace engine::scene {
 				// here may outlive it.
 				store.EachChild(current, [&pending](Entity child) { pending.push_back(child); });
 
-				// **The Workspace itself is not drawn.** It is a service — a
-				// container with a place in the tree and nothing to render —
+				// **The Workspace itself is not drawn.** It is a service - a
+				// container with a place in the tree and nothing to render -
 				// and it carries no `Visual` anyway. Skipped explicitly because
 				// "is a descendant of" is the rule, and a thing is not a
 				// descendant of itself.
@@ -225,8 +225,8 @@ namespace engine::scene {
 				// Not every descendant is drawable, and that is ordinary rather
 				// than exceptional: a `Folder`, a `Script`, a `Camera` and a
 				// model's own node all sit in `Workspace` and none of them has a
-				// `Visual`. They are walked *through* — their children may well
-				// be parts — and not marked.
+				// `Visual`. They are walked *through* - their children may well
+				// be parts - and not marked.
 				const Visual *visual = store.Get<Visual>(current);
 				if (visual == nullptr || !visual->Visible) {
 					continue;
@@ -235,7 +235,7 @@ namespace engine::scene {
 				// **`GetUnobserved` and not `GetMutable`, and the difference is
 				// not a micro-optimisation.** A mutable pointer handed out by
 				// `GetMutable` counts as a write, and a write marks a dirty bit
-				// in any table carrying a `DirtyBits` column — which in the
+				// in any table carrying a `DirtyBits` column - which in the
 				// studio is every table holding a `Transform`, because that one
 				// is watched. So this line used to do `state.Changes++` once per
 				// rendered entity per `PreRender` frame, setting a bit nothing
@@ -261,7 +261,7 @@ namespace engine::scene {
 				// and the draw list has to be told.** `client::BuildDrawList`
 				// interpolates `PreviousTransform` towards `Transform`, and a
 				// row that has only just arrived carries whatever previous frame
-				// it was *created* with — the identity, for anything
+				// it was *created* with - the identity, for anything
 				// `Instance.new` made and a script then placed. Drawing that
 				// interpolation is a part flying in from the origin for as long
 				// as it takes the next tick's `capture-previous` to run: at 300
@@ -272,7 +272,7 @@ namespace engine::scene {
 				// deliberately does not touch it.** An authored write to a part
 				// already on screen *is* motion, and clearing the previous frame
 				// there turns every scripted animation in the engine into
-				// stepped motion at the tick rate — `Part.cpp` carries that
+				// stepped motion at the tick rate - `Part.cpp` carries that
 				// refutation and it still stands. The difference is *appearing*
 				// versus *moving*, and this branch is the one place that knows
 				// which of the two happened.
@@ -286,7 +286,7 @@ namespace engine::scene {
 				//
 				// **Before the `Set`, because that is structural.** A row may
 				// move when a component is added, and a pointer read before it
-				// does not survive — the same rule the child walk above obeys.
+				// does not survive - the same rule the child walk above obeys.
 				//
 				// `GetUnobserved` for the reason the `Rendered` write above
 				// gives: this is presentation state derived by this pass, and

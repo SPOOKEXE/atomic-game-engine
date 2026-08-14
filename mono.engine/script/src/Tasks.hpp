@@ -51,7 +51,7 @@ namespace engine::script {
 	//
 	// **One function, where there were three.** `task.wait` had a copy per VM and
 	// `Debris:AddItem` had a third, each with the same `ceil(seconds / delta)` in
-	// it and each taking a different handle to the same world — which is three
+	// it and each taking a different handle to the same world - which is three
 	// places for the answer to "how long is half a second" to be edited
 	// separately. `script/AGENTS.md` states that a debris deadline is computed by
 	// the same arithmetic `task.wait` uses; this is what makes that true rather

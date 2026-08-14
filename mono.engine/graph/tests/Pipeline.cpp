@@ -44,7 +44,7 @@ TEST_CASE("the standard pipeline is the six stages v0.7 ships", "[graph][pipelin
 	CHECK(stages[4].Name == Name("overlay"));
 
 	// The editor's, added at v0.7. **Last, and the position is the assertion
-	// worth making** — `interface` before `overlay` would put the debug panels
+	// worth making** - `interface` before `overlay` would put the debug panels
 	// on top of the studio's own windows, which is the one arrangement in which
 	// the profiler you opened to explain a slow frame is the thing you cannot
 	// see.
@@ -53,7 +53,7 @@ TEST_CASE("the standard pipeline is the six stages v0.7 ships", "[graph][pipelin
 
 TEST_CASE("the surface pass reads the shadow map and the opaque pass reads both", "[graph][pipeline]") {
 	// **The ordering `Validate` is here to protect.** A mirror shows a lit
-	// world, so its own pass needs the shadow map — and the screen pass needs
+	// world, so its own pass needs the shadow map - and the screen pass needs
 	// the surface, so moving it earlier would sample a texture nothing had
 	// rendered. On a GPU that is not a crash, it is a mirror showing whatever
 	// was in that memory.
@@ -109,7 +109,7 @@ TEST_CASE("the opaque pass clears and the transparent one loads", "[graph][pipel
 }
 
 TEST_CASE("reordering the shadow pass after the colour pass is an error", "[graph][pipeline]") {
-	// **The mistake this check exists for.** On a GPU it is not a crash — it is
+	// **The mistake this check exists for.** On a GPU it is not a crash - it is
 	// a frame lit by whatever was in that memory, which reads as a lighting bug
 	// rather than as an ordering one.
 	Pipeline pipeline;
@@ -123,7 +123,7 @@ TEST_CASE("reordering the shadow pass after the colour pass is an error", "[grap
 
 TEST_CASE("a stage cannot satisfy its own read", "[graph][pipeline]") {
 	// Reads are checked before writes are recorded, so a pass that samples what
-	// it also writes has to name an *earlier* stage — which is what makes
+	// it also writes has to name an *earlier* stage - which is what makes
 	// moving it an error rather than a silence.
 	Pipeline pipeline;
 	pipeline.Add(Reading("self", "colour", "colour"));
@@ -144,7 +144,7 @@ TEST_CASE("two stages cannot share a name", "[graph][pipeline]") {
 }
 
 TEST_CASE("a stage that writes nothing is refused", "[graph][pipeline]") {
-	// Nothing can observe it, so it is either dead or a mistake — and both are
+	// Nothing can observe it, so it is either dead or a mistake - and both are
 	// worth an error at construction.
 	Pipeline pipeline;
 	pipeline.Add(Stage{Name("silent"), {}, {}, true, false});

@@ -20,8 +20,8 @@
 // that drifted.
 //
 // **Both sessions hold real keys, from a real `net::Handshake`.** A
-// `Cipher::Sealer` has no constructor taking key material — that absence is the
-// point of the type — so the only way a suite gets one is the way a connection
+// `Cipher::Sealer` has no constructor taking key material - that absence is the
+// point of the type - so the only way a suite gets one is the way a connection
 // does, and the consequence is that every case in these files runs over the
 // encrypted stream rather than beside it.
 
@@ -59,7 +59,7 @@ namespace replication_wire {
 	// **This is what makes "a nonce is never used twice" a checked property
 	// rather than a sampled one.** One direction of one connection is one key
 	// and one `net::Cipher::Sealer`, so "the counter on the wire strictly
-	// increases in this direction" *is* "no nonce repeats under this key" — and
+	// increases in this direction" *is* "no nonce repeats under this key" - and
 	// asserting it here applies it to every datagram every case in these files
 	// produces, resends and all, rather than to whichever few a case remembered
 	// to look at. A sampling test would pass over the one packet that repeated.

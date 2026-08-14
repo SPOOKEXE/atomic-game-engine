@@ -3,8 +3,8 @@
 # A library plus a thin executable, the same shape as linecount and for the same
 # reason: the interesting half is a pure function from a module's bytes to a list
 # of findings, and a function inside a main.cpp is one nothing can test. Its
-# suites build SPIR-V word by word, so the negative cases — a missing binding, a
-# gap in a set, a fragment shader in a vertex shader's sets — exist as inputs
+# suites build SPIR-V word by word, so the negative cases - a missing binding, a
+# gap in a set, a fragment shader in a vertex shader's sets - exist as inputs
 # rather than as sentences in a comment.
 #
 # **The library links nothing at all, and that is deliberate.** It reads a byte

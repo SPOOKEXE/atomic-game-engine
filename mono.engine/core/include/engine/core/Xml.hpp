@@ -4,7 +4,7 @@
 // everything a document type declaration can do.
 //
 // **This is markup, not a document model.** There is no tree here, no
-// namespaces, no schema and no entity table — a caller drives `NextTag` and
+// namespaces, no schema and no entity table - a caller drives `NextTag` and
 // keeps whatever stack its own format needs. That is enough for the three
 // formats in this engine that are XML and is deliberately not enough for
 // anything else.
@@ -12,14 +12,14 @@
 // ## Why this is at L1, and why that is the whole point
 //
 // **The scanner sits at the bottom because it needs nothing.** It opens no
-// file, links no vendor, allocates no global and names no other module's type —
+// file, links no vendor, allocates no global and names no other module's type -
 // a `std::string_view` goes in and a `std::string_view` comes out. A module's
 // height is the height of what it needs, and this needs the standard library.
 //
 // It was written three times before it was written here, and the tier is why:
 // `game::ParseXml` reads the save format at L10, `Svg.cpp` scanned drawings at
 // L9 from v0.13, and `bake/src/Xml.hpp` was extracted from that copy at v0.15
-// when `.rbxmx` wanted markup too. `bake` cannot call `game` — `game` is L10 —
+// when `.rbxmx` wanted markup too. `bake` cannot call `game` - `game` is L10 -
 // so each of the three was a place the same refusals had to be kept true, and
 // the second one to be edited is the one that gets forgotten. `D00128` closed
 // by moving the reader *down* rather than by vendoring one, which is the move
@@ -37,8 +37,8 @@
 // `mono.vendor/AGENTS.md` prefers a submodule and puts the burden of proof on
 // the alternative, so this is the argument. Three things carry it:
 //
-// - **A document is a thing a player can be sent.** The famous XML attacks —
-//   entity expansion, external entities, quadratic blowup — are all attacks on
+// - **A document is a thing a player can be sent.** The famous XML attacks -
+//   entity expansion, external entities, quadratic blowup - are all attacks on
 //   features a save file, a drawing and a model do not need. A parser that has
 //   them and turns them off is safe by configuration, and safety that is a
 //   default is safety somebody has to keep right for ever.
@@ -46,7 +46,7 @@
 //   not parsed at all here: there is no code that could expand an entity, so
 //   there is no option that could switch it on.
 // - **Vendoring would not have removed a hand-written parser**, it would have
-//   added a library beside one — this engine had three of its own before it had
+//   added a library beside one - this engine had three of its own before it had
 //   one. Consolidating deletes code; vendoring would have added a dependency
 //   and left the code.
 //
@@ -59,8 +59,8 @@
 // ## The three attacks, and where each is stopped
 //
 // - **Entity expansion**, the billion laughs: a kilobyte of declarations that
-//   unfolds into gigabytes while it is parsed. Stopped at the declaration —
-//   `<!` is refused, so no entity can be defined — and again at the reference,
+//   unfolds into gigabytes while it is parsed. Stopped at the declaration -
+//   `<!` is refused, so no entity can be defined - and again at the reference,
 //   where anything but the five predefined names and a numeric character
 //   reference is refused. Two locks on one door, because a reference that was
 //   silently dropped instead would make a bomb look like a file with a typo in
@@ -68,8 +68,8 @@
 // - **External entities**, which are a file read performed by a reader that
 //   never opens one. The same refusal: a `SYSTEM` identifier can only appear
 //   inside a declaration, and there are none.
-// - **Unbounded nesting.** Nothing here recurses — `NextTag` is a scan over a
-//   `std::string_view` and the caller keeps the stack — so depth is the
+// - **Unbounded nesting.** Nothing here recurses - `NextTag` is a scan over a
+//   `std::string_view` and the caller keeps the stack - so depth is the
 //   caller's count to bound, and every caller bounds it. A parser that recursed
 //   per element would put that bound on the C stack, where exceeding it is a
 //   crash with no file named.
@@ -151,7 +151,7 @@ namespace engine::core::xml {
 		// Whether `<svg:rect>` is read as `<rect>`.
 		//
 		// **Off by default, because dropping a prefix is a claim about the
-		// document.** A format with one vocabulary — a drawing, a model — means
+		// document.** A format with one vocabulary - a drawing, a model - means
 		// nothing by a prefix and is easier to read without one. A format that
 		// might mean something by it has to see it, so the default is the name
 		// as written.
@@ -214,7 +214,7 @@ namespace engine::core::xml {
 	// processing instructions and CDATA sections.
 	//
 	// **A `<!DOCTYPE` or `<!ENTITY` is an error and not a skip**, which is this
-	// file's whole security position — see the header comment. `<![CDATA[` is
+	// file's whole security position - see the header comment. `<![CDATA[` is
 	// the one `<!` that is not a declaration and is stepped over as the
 	// character data it is.
 	//
@@ -252,7 +252,7 @@ namespace engine::core::xml {
 	// uses attribute values as written, so a reference has to be refused by a
 	// sweep rather than at the point it would have been expanded. A caller that
 	// runs `Unescape` over everything it reads has the same protection from
-	// that, and does not want this — see `ReadContent` on why a sweep is wrong
+	// that, and does not want this - see `ReadContent` on why a sweep is wrong
 	// once a document may hold CDATA.
 	//
 	// @param      text    The whole document, or as much of it as is text.

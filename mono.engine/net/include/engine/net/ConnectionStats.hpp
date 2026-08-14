@@ -3,7 +3,7 @@
 // What a connection cost, and what it lost.
 //
 // This is a userland-visible datatype: `Player:GetConnectionStats()` returns one
-// — three layers for one call, which is what keeps `net` free of Luau. So the
+// - three layers for one call, which is what keeps `net` free of Luau. So the
 // field names here are the ones a game developer reads, and renaming one is a
 // breaking change to a scripting surface rather than an internal tidy-up.
 //
@@ -35,7 +35,7 @@ namespace engine::net {
 		// Packets handed to the transport.
 		uint64_t PacketsSent = 0;
 
-		// Packets refused because they were not this protocol — a bad magic, an
+		// Packets refused because they were not this protocol - a bad magic, an
 		// unknown version, a length that contradicted the frame.
 		//
 		// Counted apart from loss. A rate that climbs here is somebody probing
@@ -62,7 +62,7 @@ namespace engine::net {
 		// it, an enforced budget and a congested link look identical from a
 		// game's point of view.
 		//
-		// The byte budget, the packet budget and a payload too large to frame —
+		// The byte budget, the packet budget and a payload too large to frame -
 		// every reason that is a number somebody chose, and therefore every
 		// reason a caller can answer by choosing differently. Congestion is
 		// `SendsOverAllowance` and is not counted here.
@@ -129,7 +129,7 @@ namespace engine::net {
 		// @since v0.15
 		float RoundTripVarianceMilliseconds = 0.0f;
 
-		// Gaps in the far side's sequence numbers — packets that never arrived.
+		// Gaps in the far side's sequence numbers - packets that never arrived.
 		//
 		// An estimate rather than a count, because a packet that is merely late
 		// is indistinguishable from one that is lost until it either turns up or

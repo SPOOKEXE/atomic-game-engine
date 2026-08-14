@@ -97,7 +97,7 @@ TEST_CASE("size is halved once, into bounds and collider", "[scene][part]") {
 TEST_CASE("MakePart with Anchored adds no Motion", "[scene][part]") {
 	// Named in `v02v03v04.md` §3.7. `Anchored` decides presence and not a flag,
 	// so an anchored part is in a different archetype and the dynamic queries
-	// never visit it — which is the whole reason static geometry costs nothing
+	// never visit it - which is the whole reason static geometry costs nothing
 	// per tick.
 	Store store("part_test.anchored");
 
@@ -183,15 +183,15 @@ TEST_CASE("what the description does not name keeps its prototype default", "[sc
 	CHECK(visual->Tint.R == 1.0f);
 
 	// **`PartDesc::Material` is what a part *feels* like and lands in `Surface`
-	// alone.** What it looks like is not on a part at all any more — a `Material`
-	// instance under one names an asset, and `MakePart` creates no children — so
+	// alone.** What it looks like is not on a part at all any more - a `Material`
+	// instance under one names an asset, and `MakePart` creates no children - so
 	// a fresh part is drawn with `render::DefaultTexture` until somebody adds one.
 	CHECK_FALSE(store.Get<engine::scene::MaterialRef>(part) != nullptr);
 }
 
 TEST_CASE("a replica refuses to mint a part", "[scene][part]") {
-	// `Store::CreateInstance` used to walk straight past `SetAdoptOnly` — only
-	// `Store::Create` checked it — so `MakePart` carried a guard of its own. The
+	// `Store::CreateInstance` used to walk straight past `SetAdoptOnly` - only
+	// `Store::Create` checked it - so `MakePart` carried a guard of its own. The
 	// guard is gone and the storage covers it now, which is the right place for
 	// it; this case stays because the behaviour a caller depends on is unchanged
 	// and the *reason* it holds is exactly what moved.
@@ -203,7 +203,7 @@ TEST_CASE("a replica refuses to mint a part", "[scene][part]") {
 
 // --- the property surface ---------------------------------------------------
 //
-// `v05.md` §5.5's tests. The interesting ones are not "does a setter set" —
+// `v05.md` §5.5's tests. The interesting ones are not "does a setter set" -
 // they are the four ways a property write can look like it worked and not have.
 
 namespace {
@@ -306,7 +306,7 @@ TEST_CASE("a size that disagrees with the property is refused", "[scene][part]")
 	CFrame value;
 	CHECK_FALSE(store.GetProperty(part, Name("CFrame"), &value, sizeof(Vector3)));
 
-	// And a name nothing declares. Not `Transparency` any more — that is a real
+	// And a name nothing declares. Not `Transparency` any more - that is a real
 	// property at v0.6, and a test asserting a gap that has been closed is a
 	// test that outlived what it was checking.
 	CHECK_FALSE(Write(store, part, "Reflectance", 0.5f));
@@ -365,8 +365,8 @@ TEST_CASE("Transparency stores what a script wrote, out of range included", "[sc
 	const Entity part = MakePart(store, PartDesc{});
 
 	// **Not clamped, and this is an assertion rather than an absence.** It was
-	// clamped for one commit. Roblox does not clamp this — `part.Transparency =
-	// 2` reads back as 2 — and matching that is not fidelity for its own sake: a
+	// clamped for one commit. Roblox does not clamp this - `part.Transparency =
+	// 2` reads back as 2 - and matching that is not fidelity for its own sake: a
 	// script that drives a fade by arithmetic and reads the value back expects
 	// what it wrote, and a property that silently rewrites its input is one an
 	// author debugs by disbelieving their own assignment.
@@ -435,7 +435,7 @@ TEST_CASE("Face is an enum, so a misspelling is refused where it was written", "
 
 	// **Refused rather than defaulted.** A face nobody chose is a mirror
 	// projecting off the wrong side of a pane, which looks like a broken
-	// reflection rather than like a typo — the same argument `Material` makes
+	// reflection rather than like a typo - the same argument `Material` makes
 	// about `"Plsatic"`.
 	CHECK_FALSE(Write(store, camera, "Face", Name("Frnot")));
 	CHECK(Read<Name>(store, camera, "Face") == Name("Top"));
@@ -479,7 +479,7 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	// **One spelling and not two.** `Mesh` and `ColorMap` were aliases of these
 	// on `BasePart` and are gone: two names for one field is the duplication
 	// `AGENTS.md` calls the most expensive kind, and it had already cost the
-	// asset picker a bug — an alias missing from its table gave a plain text
+	// asset picker a bug - an alias missing from its table gave a plain text
 	// field on the name people actually use.
 	Name unused;
 	CHECK_FALSE(store.GetProperty(part, Name("Mesh"), &unused, sizeof(unused)));
@@ -488,7 +488,7 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 
 TEST_CASE("a plain Part names no mesh and no texture", "[scene][part]") {
 	// **The point of the split.** A `Part` is one of six built-in shapes, and a
-	// mesh reference on it is a property that does nothing — an author sets it,
+	// mesh reference on it is a property that does nothing - an author sets it,
 	// the part does not change, and nothing says the class was the wrong one.
 	// Offering it is worse than not having it.
 	//
@@ -571,7 +571,7 @@ TEST_CASE("a pivot offset moves the handle and not the part", "[scene][part]") {
 
 	CHECK(engine::scene::PivotOf(store, door).Position.X == Catch::Approx(-2.0f));
 
-	// The placement itself is untouched — a pivot describes a handle, not a
+	// The placement itself is untouched - a pivot describes a handle, not a
 	// move.
 	CHECK(Read<Vector3>(store, door, "Position").X == Catch::Approx(0.0f));
 }
@@ -579,7 +579,7 @@ TEST_CASE("a pivot offset moves the handle and not the part", "[scene][part]") {
 TEST_CASE("PivotTo puts the handle where it was asked for", "[scene][part]") {
 	// **The inverse, and it is the whole of `PivotTo`.** Setting the transform
 	// to the target and hoping is what "PivotTo ignores the offset" bugs are:
-	// the placement that puts the *pivot* at the target is `target * Offset` —
+	// the placement that puts the *pivot* at the target is `target * Offset` -
 	// inverted.
 	Store store("pivot_to");
 	RegisterSceneClasses();
@@ -617,7 +617,7 @@ TEST_CASE("PivotTo with no offset is a plain move", "[scene][part]") {
 TEST_CASE("something with no placement has no pivot to move", "[scene][part]") {
 	// A `Folder` is not a `PVInstance`. Answering the identity rather than
 	// raising is what lets a script ask any instance without a class check
-	// first — the same rule `IsA` follows for a class nobody registered.
+	// first - the same rule `IsA` follows for a class nobody registered.
 	Store store("pivot_absent");
 	RegisterSceneClasses();
 
@@ -642,7 +642,7 @@ TEST_CASE("a part weighs its density times its volume, when it has one", "[scene
 	box.Shape = ShapeKind::Box;
 	box.Extent = Vector3{1.0f, 0.5f, 2.0f};
 
-	// Half-extents, as every other consumer of `Collider::Extent` reads them —
+	// Half-extents, as every other consumer of `Collider::Extent` reads them -
 	// a two-by-one-by-four metre box.
 	CHECK(VolumeOf(box) == Catch::Approx(8.0f));
 
@@ -666,7 +666,7 @@ TEST_CASE("a part weighs its density times its volume, when it has one", "[scene
 	CHECK(MassOf(box, body, &properties) == Catch::Approx(32.0f));
 
 	// A shape with no volume, or no density, keeps the authored mass rather
-	// than becoming weightless — a zero mass is what the solver reads as
+	// than becoming weightless - a zero mass is what the solver reads as
 	// immovable, which is the opposite of nearly nothing.
 	Collider flat = box;
 	flat.Extent = Vector3{0.0f, 0.5f, 2.0f};
@@ -727,7 +727,7 @@ TEST_CASE("the physical properties are on every part and readable by name", "[sc
 	CHECK(stored->Elasticity == Catch::Approx(0.25f));
 
 	// **A part made by `Instance.new` is anchored here**, because `RigidBody`
-	// and `Motion` are not class components — `MakePart` says whether a part has
+	// and `Motion` are not class components - `MakePart` says whether a part has
 	// them and a bare `CreateInstance` says no. So it has to be unanchored
 	// before it has a mass at all, which is also what a script does.
 	float mass = 0.0f;

@@ -4,7 +4,7 @@
 //
 // **Almost nothing happens here, and that is the design.** A beam's curve, its
 // width taper and its camera-facing turn are all resolved on the CPU, in
-// `shared`, where they can be wrong in a test rather than on somebody's screen —
+// `shared`, where they can be wrong in a test rather than on somebody's screen -
 // `scene::OrderScene`'s argument, applied to a ribbon. What is left for the
 // vertex stage is a matrix multiply and an unpack.
 //

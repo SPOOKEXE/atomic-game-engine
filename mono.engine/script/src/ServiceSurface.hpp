@@ -5,15 +5,15 @@
 // **`ServiceCatalogue.hpp` answers "which services exist" and this answers "what
 // is on one".** Both were VM-shaped once and both cost the same thing: a service
 // described in `lua_CFunction`s can only be built by Luau, so every JavaScript
-// service was hand-written and five of them were simply never written —
+// service was hand-written and five of them were simply never written -
 // `ContentService`, `CollectionService`, `HttpService`, `CrossWorldService` and
 // `ContextActionService` were reachable from one language and not the other,
 // with the catalogue naming the gap and nothing able to close it.
 //
 // So a service becomes data the same way a method did: a name, a list of
 // `ServiceMethod` rows, a list of `ServiceProperty` rows and a list of signals.
-// `ServiceCatalogue.cpp` reads one of these twice — `InstallService` builds the
-// Luau table, `InstallJsService` the JavaScript object — and a member added to a
+// `ServiceCatalogue.cpp` reads one of these twice - `InstallService` builds the
+// Luau table, `InstallJsService` the JavaScript object - and a member added to a
 // surface is a member in both languages in the same commit.
 //
 // **The property list is what closed the last two**, and it closed them because
@@ -21,13 +21,13 @@
 // defeat `safeenv`'s `GETIMPORT` caching but could get by with one catch-all
 // `__index` string-comparing a field name; JavaScript has native accessors that
 // run on every read and no caching problem at all, but registers one *per name*
-// — so the names had to become data before either language could stop being the
+// - so the names had to become data before either language could stop being the
 // only one. See `ServiceProperty`.
 //
 // **`lua_State` is forward-declared and Luau is not included**, which is what
 // lets a service file include this and stay free of a VM. `lua_CFunction` is
 // `int (*)(lua_State *)` and nothing more, so the Luau-shaped rows below cost a
-// forward declaration rather than a dependency — the same trick `Runtime.hpp`
+// forward declaration rather than a dependency - the same trick `Runtime.hpp`
 // uses to keep the VM out of a public header.
 //
 // @tier L9 · shared
@@ -62,7 +62,7 @@ namespace engine::script {
 	//
 	// **`BreakpointService` is what is left, and it is not a debt.** Its methods
 	// read the runtime's `Debugger` and arm `lua_callbacks()->debugstep`, and
-	// `Debugger::Add` refuses a JavaScript chunk outright — so there is no
+	// `Debugger::Add` refuses a JavaScript chunk outright - so there is no
 	// JavaScript half to write, which is why its catalogue row says
 	// `ServiceLanguages::Luau` and why this span is the honest place for its four
 	// methods. See `DEFERRED.md` D00106.
@@ -80,7 +80,7 @@ namespace engine::script {
 	// its own list: `RunService.Heartbeat:Connect(f)` reads a value and calls a
 	// method *on that value*, where `RunService:IsServer()` calls a method on the
 	// service. The two cannot share a list because they are not built the same
-	// way — a signal is a handle onto `SignalTable` and carries no context.
+	// way - a signal is a handle onto `SignalTable` and carries no context.
 	//
 	// **These crossed languages before the methods did**, which is why
 	// `ServiceSignal` needed no change: each VM already had one way to build a
@@ -107,13 +107,13 @@ namespace engine::script {
 	// table of rows: what varies between services is a name and three lists, and
 	// the code that turns those into a global is the same code every time. A
 	// service that needs something genuinely new adds a field here, once, where
-	// every service can see it — rather than a private copy of the loop that
+	// every service can see it - rather than a private copy of the loop that
 	// nothing else can learn from.
 	struct ServiceSurface {
 		// What the global is called, and therefore what
 		// `game:GetService(name)` finds. `RunService::GetService` looks in the
 		// globals before it looks at the tree, so naming it here is the whole of
-		// making it resolvable — and it is why the global and the service are
+		// making it resolvable - and it is why the global and the service are
 		// **one** table rather than two objects a script could tell apart.
 		const char *Name = nullptr;
 
@@ -126,7 +126,7 @@ namespace engine::script {
 		// The methods only Luau has, which is `BreakpointService`'s four.
 		//
 		// **A second span rather than a second surface**, so a service that is
-		// part way across is one description with a visible remainder — and so
+		// part way across is one description with a visible remainder - and so
 		// the catalogue's language mask stays a statement about the *service*
 		// while a per-method gap is stated where the methods are.
 		// `TeleportService::GetTeleportData` was exactly that gap with no way to
@@ -150,21 +150,21 @@ namespace engine::script {
 		// **A service with properties *is* a userdata, and that is forced rather
 		// than stylistic.** `luaL_sandbox` enables Luau's `safeenv`, which lets
 		// the compiler turn a constant global and a constant field into a
-		// `GETIMPORT` — resolved **once** and cached in the closure. On a table,
+		// `GETIMPORT` - resolved **once** and cached in the closure. On a table,
 		// the first read of a property wins forever, so a property that changes
 		// reads as one that does not. It was found by watching `__index` fire for
 		// the first read of `UserInputService.MouseBehavior` and not for the
 		// second, with no raw key on the table to explain it.
 		//
 		// A userdata's field access is never an import, so every read through a
-		// local goes to `__index` — which is the form a Roblox script is written
+		// local goes to `__index` - which is the form a Roblox script is written
 		// in anyway, since `game:GetService` is a method call and cannot be an
 		// import. `DEFERRED.md` D00030 records the edge that remains: the same
 		// property read off a *bare global* still caches.
 		//
 		// **JavaScript has the opposite shape and none of that problem.**
 		// `JS_DefinePropertyGetSet` runs on every read, so the service stays a
-		// plain object with an accessor per row — which is exactly why the names
+		// plain object with an accessor per row - which is exactly why the names
 		// had to become data: an accessor is registered per name, and a single
 		// catch-all could not supply them.
 		//
@@ -185,7 +185,7 @@ namespace engine::script {
 	// Builds one surface service and sets it as a Luau global.
 	//
 	// **Every method gets the runtime's `LuauContext` as upvalue 1**, which is
-	// how any of them reach the store, the world and the universe — see
+	// how any of them reach the store, the world and the universe - see
 	// `UpvalueContext`. That was the one invariant the five hand-rolled copies
 	// each had to remember separately, and it is the one a further copy would
 	// have been most likely to forget: a method installed with
@@ -197,7 +197,7 @@ namespace engine::script {
 	//
 	// **`surface` must outlive the VM**, because a property-bearing service puts
 	// its address on the metamethods' upvalue rather than copying the lists. Every
-	// caller hands over a `static const` built once — which is what the
+	// caller hands over a `static const` built once - which is what the
 	// `...Surface()` accessor shape in `LuauBindings.hpp` is for, and why a
 	// `ServiceSurface` built as a local would compile and then read freed memory
 	// on the first property access.
@@ -208,7 +208,7 @@ namespace engine::script {
 
 	// The two metamethods a property-bearing service's userdata carries.
 	//
-	// **`LuauCall.cpp`'s, for `InstallLuauServiceMethods`' reason** — a getter and
+	// **`LuauCall.cpp`'s, for `InstallLuauServiceMethods`' reason** - a getter and
 	// a setter are `ScriptMethod`s, so reaching them means meeting the VM on the
 	// neutral layer's behalf, and that file is where this module does that.
 	//
@@ -227,7 +227,7 @@ namespace engine::script {
 	// the stack.
 	//
 	// **`LuauCall.cpp`'s, because that is the file that has met the VM on the
-	// neutral layer's behalf** — one trampoline, the row's address on an upvalue,
+	// neutral layer's behalf** - one trampoline, the row's address on an upvalue,
 	// and the receiver deliberately unchecked because a service's is its own
 	// table.
 	//

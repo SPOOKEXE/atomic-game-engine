@@ -2,8 +2,8 @@
 
 // What a `scene::Collider` is, geometrically.
 //
-// `scene` owns the *data* — `ShapeKind` names the three shapes and `Collider`
-// carries an `Extent` — and deliberately owns no arithmetic over it. This file
+// `scene` owns the *data* - `ShapeKind` names the three shapes and `Collider`
+// carries an `Extent` - and deliberately owns no arithmetic over it. This file
 // is that arithmetic, and it is the only place in the engine that decides what
 // `Collider::Extent` means.
 //
@@ -19,18 +19,18 @@
 // which is what `scene::Bounds::HalfExtent` stores and what `PartDesc::Size`
 // gets halved into. Reading it as a full extent produces a world that is exactly
 // twice too big and reads as a physics tuning problem rather than as a units
-// mistake — which is why the same rule is stated in the AABB derivation below
+// mistake - which is why the same rule is stated in the AABB derivation below
 // and pinned by a test that fails if the two ever disagree.
 //
 // **"Not read" means not read.** A sphere's `Extent.Y` and `Extent.Z` are
 // whatever the author left there and nothing here looks at them. They are not
 // required to equal `Extent.X`, and a caller must not start deriving anything
-// from them — a sphere that became an ellipsoid because somebody read three
+// from them - a sphere that became an ellipsoid because somebody read three
 // components is a change to `ShapeKind`, not to this file.
 //
 // **Nothing here sanitises a negative extent.** A negative radius produces a box
 // whose minimum exceeds its maximum, which `core::AABB` documents as overlapping
-// nothing — the answer that makes the mistake visible at the first test rather
+// nothing - the answer that makes the mistake visible at the first test rather
 // than at the tenth. Clamping would turn an authoring error into a shape that is
 // silently the wrong size.
 //
@@ -60,7 +60,7 @@ namespace engine::physics {
 	//
 	// **Exact per shape, not one oriented-box bound for all three.** A sphere
 	// does not grow when it turns, and a cylinder turned 45 degrees is narrower
-	// than the box around it — deriving all three from
+	// than the box around it - deriving all three from
 	// `core::AABB::FromOrientedBox` would be conservative and therefore correct,
 	// and it would also hand the broad phase a sphere 73 per cent too wide and a
 	// candidate list to match. The looseness is not free: it is paid once per

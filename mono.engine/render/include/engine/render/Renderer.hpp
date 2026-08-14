@@ -53,7 +53,7 @@ namespace engine::render {
 		// The overlay texture, loaded over the frame rather than clearing it.
 		Overlay,
 
-		// Whatever a `FrameOverlayHook` records — the editor's chrome, and
+		// Whatever a `FrameOverlayHook` records - the editor's chrome, and
 		// nothing a game ships with.
 		//
 		// Last, so interface content stays above the world.
@@ -106,12 +106,12 @@ namespace engine::render {
 		// **What lets the surface pass descend, and the whole of what it was
 		// missing.** `Frame` and `Projection` are a camera *already placed from
 		// the eye*, so a pane appearing inside another pane's picture was drawn
-		// and sampled from a viewpoint nobody was looking from — the coordinate
+		// and sampled from a viewpoint nobody was looking from - the coordinate
 		// leaves the texture's rectangle and `opaque.frag` falls back to the flat
 		// lit pane, which is what "a mirror in a mirror shows a blank slab" was.
 		//
-		// A mirror's camera is a function of the pane and the viewer —
-		// `scene::ReflectCamera` — so a pass holding the *rectangle* can place
+		// A mirror's camera is a function of the pane and the viewer -
+		// `scene::ReflectCamera` - so a pass holding the *rectangle* can place
 		// that camera for a viewer that is not the eye, which is exactly what the
 		// level below a mirror needs. `PortalView` carries the same four vectors
 		// for the same reason, and neither type reads them off a component,
@@ -138,7 +138,7 @@ namespace engine::render {
 		//
 		// **Carried rather than read back out of `Projection`.** The near plane is
 		// recoverable from a projection matrix and the far plane is recoverable
-		// badly, and both are already known where the pane was measured — so a
+		// badly, and both are already known where the pane was measured - so a
 		// recursion that recovered them would be deriving, once per level, two
 		// numbers that were handed over for free.
 		//
@@ -152,7 +152,7 @@ namespace engine::render {
 		//
 		// **A projection handed in rather than a field of view derived here**,
 		// and the change is what a portal rests on. A surface frustum is fitted
-		// to a pane's four corners and is therefore **off-axis** — the four
+		// to a pane's four corners and is therefore **off-axis** - the four
 		// edges lean independently, so a viewer standing to one side gets
 		// exactly the pane instead of twice its width; and for a portal it is
 		// also **obliquely clipped**, with the near plane skewed onto the
@@ -176,7 +176,7 @@ namespace engine::render {
 		// where the two are argued out.
 		//
 		// Identity is a mirror, and is what a host that has never heard of a
-		// portal leaves it as — including one filling this struct by hand.
+		// portal leaves it as - including one filling this struct by hand.
 		//
 		// @since v0.14
 		glm::mat4 Mapping{1.0f};
@@ -237,7 +237,7 @@ namespace engine::render {
 		// **Needs `Renderer::SetAnimationTime`**, which is the frame clock this
 		// class already has. A host that never sets one leaves it at zero, and
 		// a surface capped against a clock that never advances would render once
-		// and freeze — so a non-advancing clock is treated as uncapped.
+		// and freeze - so a non-advancing clock is treated as uncapped.
 		//
 		// @since v0.15
 		float FPS = 0.0f;
@@ -257,8 +257,8 @@ namespace engine::render {
 		// ordering that would otherwise have invalidated it.
 		//
 		// **`Count == 0` means "this world", which is every mirror and every
-		// same-world portal.** Those draw the `scene::ScenePlan`'s own runs —
-		// the world minus the pane being rendered, plus every other pane — which
+		// same-world portal.** Those draw the `scene::ScenePlan`'s own runs -
+		// the world minus the pane being rendered, plus every other pane - which
 		// is the arrangement that makes a mirror of a mirror work and is not
 		// something a foreign range can participate in: the plan describes this
 		// world's partitioning and knows nothing about the appended tail.
@@ -266,7 +266,7 @@ namespace engine::render {
 		// So a foreign surface is drawn **plainly and in one run**. A pane in
 		// the far world shows as a flat pane rather than as a recursive image,
 		// which is the same fallback a surface with no frame yet already gets
-		// and is right for the same reason — a hole through a hole into a third
+		// and is right for the same reason - a hole through a hole into a third
 		// world is a feature nobody has asked for and would need a plan per
 		// world per frame to serve.
 		//
@@ -281,7 +281,7 @@ namespace engine::render {
 	//
 	// **Beside `surfaces` and never one of them, because a hole and a mirror are
 	// not the same map.** Both passes are recursions now and both derive each
-	// level's camera from the level above — that much stopped being a difference
+	// level's camera from the level above - that much stopped being a difference
 	// in v0.15, and the machinery for opening a pass and drawing the world into
 	// it is shared between them. What is left is the rule itself, and it is not
 	// close to the same: a mirror reflects the viewer through one plane, and a
@@ -309,7 +309,7 @@ namespace engine::render {
 		//
 		// **How the pass finds the pane's geometry, and it draws no geometry of
 		// its own.** The quad is the pane part already in the draw list, which
-		// `scene::PartitionSurfaces` has already grouped into a run of its own —
+		// `scene::PartitionSurfaces` has already grouped into a run of its own -
 		// so there is no second mesh, no vertex buffer, and nothing coplanar with
 		// the pane to fight it for depth.
 		int8_t Index = 0;
@@ -344,7 +344,7 @@ namespace engine::render {
 		// **One map and not one per side, which is the point.** It carries this
 		// pane's front hemisphere to the far pane's back one and its back to the
 		// far pane's front, so it is right at the top level and right at every
-		// level below where the sub-camera has stepped through — and it is the
+		// level below where the sub-camera has stepped through - and it is the
 		// exact map `scene::CrossPortals` moves a body by, so what the hole shows
 		// and where walking into it puts you cannot come apart. CodeParade's
 		// `Portal::Warp::delta`, which is likewise one matrix for both sides.
@@ -371,8 +371,8 @@ namespace engine::render {
 	// **A ceiling for the same reason `MAX_PORTAL_DEPTH` is one, and it arrived
 	// with the same change.** While the surface pass resolved a chain by running
 	// itself again, depth cost one extra pass per visible pane per level and an
-	// ambitious number merely wasted time. It is a recursion now — each level
-	// descends into every *other* pane it can see — so the passes go as
+	// ambitious number merely wasted time. It is a recursion now - each level
+	// descends into every *other* pane it can see - so the passes go as
 	// `panes × (panes - 1) ^ (depth - 1)` before the per-level visibility test
 	// takes them back down, and a scene that asked for eight would ask the device
 	// for something it cannot finish inside a frame.
@@ -398,7 +398,7 @@ namespace engine::render {
 	// **This is the one home of the number, and `opaque.frag` is told it.**
 	// `mono.engine/render/CMakeLists.txt` reads the value out of this
 	// declaration and passes `-DMAX_LIGHTS` to glslc, so the shader's loop bound
-	// and the uniform buffer this sizes cannot disagree — there is no second
+	// and the uniform buffer this sizes cannot disagree - there is no second
 	// literal left to drift. Changing it here changes both.
 	//
 	// It was spelled twice until v0.10 and nothing checked it, which `AGENTS.md`
@@ -408,7 +408,7 @@ namespace engine::render {
 	// folded away by then.
 	//
 	// A mismatch was never a validation error. It is a light set that silently
-	// reads past its own count or stops short of it — which looks like one lamp
+	// reads past its own count or stops short of it - which looks like one lamp
 	// not working.
 	//
 	// **Keep this a plain integer literal on one line.** The configure step
@@ -437,7 +437,7 @@ namespace engine::render {
 		// Its colour, already multiplied by brightness.
 		//
 		// **Multiplied here rather than in the shader**, because brightness is a
-		// scalar an author sets and the shader wants a colour — folding them at
+		// scalar an author sets and the shader wants a colour - folding them at
 		// the boundary is one multiply per light per frame against one per light
 		// per *fragment*.
 		core::Color3 Colour{1.0f, 1.0f, 1.0f};
@@ -471,7 +471,7 @@ namespace engine::render {
 		// This emitter's live particles, contiguous.
 		//
 		// The pool's blocks are contiguous per emitter with the live ones a
-		// prefix — `effects::ParticleSystem` — so a batch is that prefix and
+		// prefix - `effects::ParticleSystem` - so a batch is that prefix and
 		// nothing has to be copied to produce one.
 		std::span<const effects::ParticleInstance> Particles;
 
@@ -482,7 +482,7 @@ namespace engine::render {
 		// How many cells the flipbook has on each side. One is not a flipbook.
 		//
 		// **A side rather than a layout enum**, because that is what the shader
-		// divides by — converting an enum to a side in the renderer would be
+		// divides by - converting an enum to a side in the renderer would be
 		// doing per emitter what `effects::FlipbookSide` already does at compile
 		// time on the other side of the boundary.
 		float FlipbookSide = 1.0f;
@@ -511,8 +511,8 @@ namespace engine::render {
 	//
 	// **The editor's requirement, and the transparent-window trick it replaced
 	// could not work.** A studio wants the world inside a dockable panel, and
-	// the obvious cheap answer — draw the world to the swapchain and put a
-	// background-less imgui window over it — fails the moment that window is
+	// the obvious cheap answer - draw the world to the swapchain and put a
+	// background-less imgui window over it - fails the moment that window is
 	// actually docked. `imgui.cpp`'s `central_node_hole` is only punched while
 	// the central node is *empty*, so docking a panel into it makes the
 	// dockspace fill its whole rectangle with `ImGuiCol_WindowBg` and paint over
@@ -549,7 +549,7 @@ namespace engine::render {
 	// **The texture is bigger than the panel on purpose, and this is how a
 	// caller finds the part that is the picture.** A target allocated to the
 	// panel's exact size has to be destroyed and created again on every frame
-	// of a drag — and worse than the allocation, the *new* texture is not the
+	// of a drag - and worse than the allocation, the *new* texture is not the
 	// one the interface already recorded a bind of, so the panel spends the
 	// whole drag showing the previous frame's image stretched to a rectangle it
 	// was never drawn for. Rounding the allocation up to a block keeps one
@@ -572,7 +572,7 @@ namespace engine::render {
 	// The backend handles a hook needs to build its own pipelines.
 	//
 	// **Opaque on purpose.** `Device` is an `SDL_GPUDevice *` and `ColourFormat`
-	// is an `SDL_GPUTextureFormat`, and neither name appears here — this header
+	// is an `SDL_GPUTextureFormat`, and neither name appears here - this header
 	// says it holds no SDL GPU type and that sentence is load-bearing. A hook
 	// casts them back, which is a cast a caller writes once in a file that
 	// already includes SDL, rather than SDL appearing on the include line of
@@ -594,9 +594,9 @@ namespace engine::render {
 	// A layer that records into this renderer's frame.
 	//
 	// **This exists so that Dear ImGui is not in the engine.** An editor needs
-	// its chrome inside the same command buffer as the world — SDL's GPU API
+	// its chrome inside the same command buffer as the world - SDL's GPU API
 	// acquires a swapchain texture once per command buffer, so a second pass in
-	// a second buffer is not an option — and the two ways to arrange that are
+	// a second buffer is not an option - and the two ways to arrange that are
 	// both worse than this one. Putting imgui in `render` puts it on every
 	// shipping client's link line to draw nothing. Exposing `SDL_GPUCommandBuffer`
 	// on `Render` breaks the rule at the top of this file.
@@ -621,7 +621,7 @@ namespace engine::render {
 		// Uploads whatever this frame needs, before any render pass is open.
 		//
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
-		// @return `false` to skip `Record` — nothing to draw, which is not an
+		// @return `false` to skip `Record` - nothing to draw, which is not an
 		//         error and not a reason to fail the frame.
 		virtual bool Prepare(void *commandBuffer) = 0;
 
@@ -660,8 +660,8 @@ namespace engine::render {
 		// has and runs no pass, so a room with four mirrors in it costs four
 		// passes on the frames something moves and none on the frames nothing
 		// does. Those two frames are indistinguishable from the draw-call count
-		// — a skipped surface pass and one that ran and changed nothing look
-		// identical from there — and this is the number that tells them apart.
+		// - a skipped surface pass and one that ran and changed nothing look
+		// identical from there - and this is the number that tells them apart.
 		//
 		// Zero with mirrors on screen is the ordinary case for a still scene and
 		// is not a failure. Equal to the mirror count on every frame means the
@@ -676,7 +676,7 @@ namespace engine::render {
 		// **Reported separately from `SurfacePasses` because it is the number
 		// that goes up fastest.** A level is a whole scene rendered from a
 		// camera that did not exist a moment ago, and the count is holes times
-		// levels in the worst case — so this is where a corridor of portals
+		// levels in the worst case - so this is where a corridor of portals
 		// shows up, and where `graph::VisiblePane` doing its job shows up as the
 		// same corridor costing two.
 		//
@@ -695,8 +695,8 @@ namespace engine::render {
 		// How many particles were submitted this frame.
 		//
 		// **Reported because the number is the whole diagnosis for a scene that
-		// is slow and looks fine.** An emitter whose rate ran away is invisible —
-		// the particles are small and transparent — and shows up here as a count
+		// is slow and looks fine.** An emitter whose rate ran away is invisible -
+		// the particles are small and transparent - and shows up here as a count
 		// an order of magnitude above what the scene should have.
 		//
 		// @since v0.10
@@ -705,7 +705,7 @@ namespace engine::render {
 		// How many instances the frustum rejected.
 		//
 		// **Reported rather than inferred**, because the interesting number is
-		// the ratio and the denominator is the caller's draw list — which the
+		// the ratio and the denominator is the caller's draw list - which the
 		// caller has and this does not need to repeat. A camera framing its own
 		// scene culls almost nothing and a camera inside a large world culls
 		// almost everything; a reading that never moves means the frustum is
@@ -717,7 +717,7 @@ namespace engine::render {
 		// **Every pass is skippable and most of them usually are**, so "the
 		// shadow pass exists" and "the shadow pass ran" are different questions,
 		// and only the second one explains a frame with no shadows in it. The
-		// draw-call count cannot answer it — the shadow pass and the overlay
+		// draw-call count cannot answer it - the shadow pass and the overlay
 		// pass are one draw each and look identical from there.
 		//
 		// @since v0.6
@@ -758,7 +758,7 @@ namespace engine::render {
 		//
 		// **A null window is headless, and is not an error.** There is then no
 		// swapchain, nothing is presented, and the overlay and interface passes
-		// do not run — but the world is still drawn, into the `SceneTarget` a
+		// do not run - but the world is still drawn, into the `SceneTarget` a
 		// caller passes to `Render`. That is what makes a build server, a golden
 		// image comparison and a scripted editor possible without a display,
 		// and a headless `Render` with no scene target draws nothing rather than
@@ -766,7 +766,7 @@ namespace engine::render {
 		//
 		// **How many frames the CPU may queue ahead of the GPU is a policy, and
 		// the caller owns it.** One means `SDL_SubmitGPUCommandBuffer` blocks
-		// until the GPU has finished the previous frame — the CPU and the GPU
+		// until the GPU has finished the previous frame - the CPU and the GPU
 		// take turns, the picture is as close to the input as this engine can
 		// make it, and a GPU-bound scene loses the rate the overlap was buying.
 		// Two or three let the CPU run ahead and cost a frame or two of latency
@@ -803,7 +803,7 @@ namespace engine::render {
 		// over; nothing about the device reaches them.
 		//
 		// Registering a name twice replaces it. The old geometry stays in the
-		// buffer as dead space — nothing evicts yet, and `MeshTable`'s header
+		// buffer as dead space - nothing evicts yet, and `MeshTable`'s header
 		// says so.
 		//
 		// @param name The name to publish it under.
@@ -815,7 +815,7 @@ namespace engine::render {
 		//
 		// **So an editor can make `Size` mean the mesh's proportions.** Since
 		// `Size` is a box the mesh is stretched into, a part whose box has the
-		// wrong shape distorts whatever is put in it — and the only thing that
+		// wrong shape distorts whatever is put in it - and the only thing that
 		// knows the right shape is the geometry. `render::MeshEntry::Extent`
 		// carries the whole argument.
 		//
@@ -839,7 +839,7 @@ namespace engine::render {
 		// **The fact the renderer cannot learn for itself.** It knows what it
 		// holds; what is in flight belongs to the content pump, which is a layer
 		// above. Between these two calls a drawable naming that texture draws as
-		// the default material rather than as the purple marker — so a scene
+		// the default material rather than as the purple marker - so a scene
 		// load looks like untextured parts becoming textured, instead of a
 		// purple shimmer indistinguishable from forty misspellings.
 		//
@@ -864,7 +864,7 @@ namespace engine::render {
 
 		// How long animation has been running, for anything played on a clock.
 		//
-		// **The caller's clock, because this module holds none** — the rule the
+		// **The caller's clock, because this module holds none** - the rule the
 		// whole engine keeps. A client passes its own accumulated seconds and so
 		// does the studio; a paused editor simply stops advancing it, which is
 		// what makes a paused world's GIFs hold their frame with no second
@@ -884,7 +884,7 @@ namespace engine::render {
 		// which is the blank slab a mirror seen in a mirror used to show.
 		//
 		// This used to be a count of times to run the pass again, which fixed the
-		// staleness `D00112` was about and could never fix the viewpoint —
+		// staleness `D00112` was about and could never fix the viewpoint -
 		// iterating refreshes textures and never moves a camera. It is now the
 		// number of levels of a depth-first recursion, each level's camera being
 		// `scene::ReflectCamera` applied to the level above, so reflections
@@ -898,15 +898,15 @@ namespace engine::render {
 		// **Superlinear in visible panes**, which the iterating version was not: a
 		// level descends into every *other* pane it can see, so the passes go as
 		// `panes × (panes - 1) ^ (levels - 1)` before `graph::VisiblePane` takes
-		// them back down. That is why there is a ceiling now — see
+		// them back down. That is why there is a ceiling now - see
 		// `MAX_SURFACE_DEPTH`.
 		//
 		// **Zero is `scene::AUTOMATIC_SURFACE_BOUNCES` and is the default.** It
 		// used to mean "no surface pass at all", which nobody ever wanted and
 		// which has a clearer spelling. What it means now is that each viewport
-		// measures the frame it just drew — how deep the chain of panes actually
+		// measures the frame it just drew - how deep the chain of panes actually
 		// went, and whether the deepest level still had a pane in view it was not
-		// allowed to descend into — and draws one level deeper next frame when
+		// allowed to descend into - and draws one level deeper next frame when
 		// there was and one shallower when the depth was not being used. So a
 		// corridor of facing panes deepens itself to the ceiling and a room with
 		// one mirror in it costs one level, with nobody having stated anything.
@@ -923,7 +923,7 @@ namespace engine::render {
 		// **A pane with no rectangle keeps the old behaviour**, because nothing
 		// can reflect a camera through a pane it was never told about: a surface
 		// camera parented to the world, or one showing a second world, still
-		// resolves whatever chain it has by iterating —
+		// resolves whatever chain it has by iterating -
 		// `scene::DEFAULT_SURFACE_BOUNCES` of them, since there is nothing there
 		// to measure. See `SurfaceView::PaneNormal`.
 		//
@@ -958,7 +958,7 @@ namespace engine::render {
 		//
 		// **One by default, and that is a backend limit rather than a budget.**
 		// Above one, a level's target is rendered into once per hole at the level
-		// above — so within one command buffer the same texture is written,
+		// above - so within one command buffer the same texture is written,
 		// sampled, and written again, and SDL's Vulkan backend hangs the device on
 		// it. The default's comment in the source carries the measurement. Raising
 		// this draws correctly and is not currently safe to ship at.
@@ -985,7 +985,7 @@ namespace engine::render {
 		//
 		// A renderer that is never told draws with `scene::SUN_DIRECTION` and
 		// `scene::SUN_AMBIENT`, which are the numbers this engine has always
-		// drawn with — so a host that does not care is not made to care.
+		// drawn with - so a host that does not care is not made to care.
 		//
 		// **The direction is what the shadow map is fitted along as well as what
 		// the shader shades with**, so setting it moves both together. That is
@@ -1004,7 +1004,7 @@ namespace engine::render {
 		// header must not name an `SDL_GPUTexture`, because that would put the
 		// backend's type in the interface every consumer of this header
 		// compiles against. A caller that draws it already knows which backend
-		// it is talking to — `ImGui::Image` takes the same opaque handle.
+		// it is talking to - `ImGui::Image` takes the same opaque handle.
 		//
 		// **For an editor's thumbnail and not for the draw path.** The renderer
 		// resolves its own textures by name inside the frame; this exists so a
@@ -1033,7 +1033,7 @@ namespace engine::render {
 		//
 		// **Handed out with the handle, because an interface painter needs
 		// both.** A nine-sliced or tiled `ImageLabel` is laid out in source
-		// pixels — its slice insets are in them — so a resolver returning a
+		// pixels - its slice insets are in them - so a resolver returning a
 		// handle alone makes every slice the wrong size, which reads as a
 		// corrupt image rather than as a missing measurement.
 		//
@@ -1062,18 +1062,18 @@ namespace engine::render {
 		// **The words are already SPIR-V.** Where they came from is the caller's
 		// business and there are two answers: `render::ShaderLibrary` compiled a
 		// `ShaderScript`'s GLSL, or it read a built-in `glslc` produced during
-		// the build. Neither is this class's concern — it builds the pipelines a
+		// the build. Neither is this class's concern - it builds the pipelines a
 		// `scene::DrawInstance::Shader` naming this resolves to.
 		//
 		// **The module must declare what `opaque.frag` declares**: four fragment
 		// samplers and three uniform buffers, in those slots. A shader object
 		// carries those counts rather than the pipeline doing so, so a module
-		// that declares different ones binds and silently samples nothing — the
+		// that declares different ones binds and silently samples nothing - the
 		// same trap the built-in pipeline's own comments record. That interface
 		// is what a `ShaderScript` is written against.
 		//
 		// **Only the fragment stage, deliberately.** The vertex stage owns the
-		// instance layout, which `AGENTS.md` says is private and stays private —
+		// instance layout, which `AGENTS.md` says is private and stays private -
 		// a caller able to replace it would be authoring against a struct nobody
 		// promised to keep.
 		//
@@ -1096,7 +1096,7 @@ namespace engine::render {
 		// Forgets a registered shader and frees its pipelines.
 		//
 		// Instances still naming it fall back to the engine's own shader rather
-		// than vanishing — `MeshTable::Resolve`'s rule, and its reason.
+		// than vanishing - `MeshTable::Resolve`'s rule, and its reason.
 		//
 		// @param name The name to drop.
 		// @return `false` for a name this renderer does not hold.
@@ -1118,7 +1118,7 @@ namespace engine::render {
 		// called, so an existing loop is correct without it and measures the same.
 		// What it cannot be is *responsive*: the wait is the better part of a
 		// frame with vertical sync on, and a loop that pumps events and then
-		// waits has already read its input by the time it starts waiting — so
+		// waits has already read its input by the time it starts waiting - so
 		// every frame is drawn from input one frame old, no matter how fast the
 		// code between them is. Calling this first moves the dead time to before
 		// the input is read.
@@ -1132,7 +1132,7 @@ namespace engine::render {
 		// buffer, and the wait is the acquisition. There is no ordering inside
 		// one call that puts it after the caller's input.
 		//
-		// @return `false` when there was nothing to acquire — minimised or
+		// @return `false` when there was nothing to acquire - minimised or
 		//         mid-resize, which is not an error and not a reason to stop
 		//         ticking. Headless always succeeds; it waits for nothing.
 		bool WaitForFrame();
@@ -1168,12 +1168,12 @@ namespace engine::render {
 		bool SetVerticalSync(bool enabled);
 
 		// Draws one frame and presents it. Returns false in Presented when the
-		// swapchain had no texture — minimised, or resizing — which is not an
+		// swapchain had no texture - minimised, or resizing - which is not an
 		// error and not a reason to stop ticking. It is also false if SDL rejects
 		// command submission.
 		//
 		// `overlay` is uploaded only when it has something pending, and drawn
-		// whenever it has content — the texture holds the last thing sent to it,
+		// whenever it has content - the texture holds the last thing sent to it,
 		// so a caller may redraw the overlay far less often than it presents.
 		// The renderer marks the overlay uploaded once it has recorded the copy,
 		// which is the only reason it is not a const reference; nothing else
@@ -1200,7 +1200,7 @@ namespace engine::render {
 		// @param sceneTarget Draw the world into an offscreen texture of this
 		//                    size instead of into the window, or null for the
 		//                    window. Decides the aspect ratio and the cull
-		//                    frustum as well as the target — see `SceneTarget`.
+		//                    frustum as well as the target - see `SceneTarget`.
 		// @param targetSlot  Which viewport this call is drawing. A game draws
 		//                    one view and never passes this; a studio keeps a
 		//                    slot per viewport so two panels of different sizes
@@ -1229,7 +1229,7 @@ namespace engine::render {
 		// @param ribbonRuns  Where each ribbon sits in that stream.
 		//
 		//                    **Drawn after the particles**, which is one more
-		//                    fixed ordering in a pass that has several — see the
+		//                    fixed ordering in a pass that has several - see the
 		//                    `particles` note above. A beam is usually the thing
 		//                    an author wants on top of its own sparks, so the
 		//                    order is the useful one rather than an accident, and
@@ -1238,7 +1238,7 @@ namespace engine::render {
 		// @param lights     The point and spot lights near this view, at most
 		//                    `MAX_SCENE_LIGHTS`. **Added to the directional term
 		//                    rather than replacing it**, so a scene with no lamps
-		//                    looks exactly as it did before v0.10 — which is what
+		//                    looks exactly as it did before v0.10 - which is what
 		//                    makes this safe to switch on for every existing world.
 		//
 		//                    Anything past the cap is dropped, and the caller is
@@ -1253,7 +1253,7 @@ namespace engine::render {
 		//                    call does to `instances` is wrong for these.** They
 		//                    are not culled against this camera, not sorted into
 		//                    this view's plan, and never submitted by the screen
-		//                    pass or the shadow pass — a second world is not
+		//                    pass or the shadow pass - a second world is not
 		//                    part of this world's frame, it is a picture hanging
 		//                    in it. They were appended to `instances` by the host
 		//                    until v0.14, and the two rooms drew on top of each
@@ -1269,7 +1269,7 @@ namespace engine::render {
 		//                    is the whole of `PortalView`: a surface's camera is
 		//                    a function of the eye and cannot compose down a
 		//                    recursion, and a portal's has to. A slot named here
-		//                    must not also be named in `surfaces` — the pane
+		//                    must not also be named in `surfaces` - the pane
 		//                    would be drawn twice, once by each pass, and the
 		//                    renderer drops the surface with a line in the log
 		//                    rather than choosing silently.
@@ -1295,7 +1295,7 @@ namespace engine::render {
 		//
 		// **Slots exist because an editor has more than one viewport.** A game
 		// draws one view of one world and only ever uses slot 0. A studio
-		// showing a server's world beside a client's keeps a target per panel —
+		// showing a server's world beside a client's keeps a target per panel -
 		// and they must be *separate* targets, because the panels are different
 		// sizes and a single shared one would be reallocated twice a frame as
 		// each panel asked for its own dimensions. That reallocation is
@@ -1304,7 +1304,7 @@ namespace engine::render {
 		//
 		// **Valid until the next `Render` into that slot with a different
 		// size**, which is when the target is reallocated. An interface layer hands it straight to
-		// whatever draws it — for Dear ImGui's SDL_GPU backend that is an
+		// whatever draws it - for Dear ImGui's SDL_GPU backend that is an
 		// `ImTextureID`, which is an `SDL_GPUTexture *` and therefore this
 		// pointer unchanged.
 		//
@@ -1318,14 +1318,14 @@ namespace engine::render {
 		//
 		// **A slot is scratch and this is how a picture outlives it.** There are
 		// a handful of slots and they are drawn into on rotation, so whatever is
-		// in one is gone within a few frames — which is why the studio's mesh
+		// in one is gone within a few frames - which is why the studio's mesh
 		// preview could only ever show the row under the cursor. A captured copy
 		// is an ordinary entry in the texture table: `TextureHandle` returns it,
 		// `DropTexture` releases it, and a list can draw a hundred of them.
 		//
 		// **The drawn rectangle, not the allocation.** A target is rounded up to
 		// a block, so the copy is `SceneTextureExtent`'s rectangle and samples
-		// whole — a consumer needs the handle and nothing else, which is the
+		// whole - a consumer needs the handle and nothing else, which is the
 		// coupling this exists to end.
 		//
 		// **Costs device memory that nothing reclaims on its own.** Each capture
@@ -1344,14 +1344,14 @@ namespace engine::render {
 		// Which corner of that slot's texture the world is in.
 		//
 		// **It describes the texture `SceneTexture` returns right now**, which
-		// is the one an interface recording a bind right now will sample — so
+		// is the one an interface recording a bind right now will sample - so
 		// the two are read together and stay a matched pair through a resize.
 		// On the frame a target is reallocated the interface binds the outgoing
 		// texture, and this reports the outgoing texture's rectangle with it.
 		//
 		// While a panel is merely being dragged the allocation does not change,
 		// so this trails the rectangle the frame is about to draw by one frame's
-		// worth of drag — under a pixel of scale, against a whole stale frame
+		// worth of drag - under a pixel of scale, against a whole stale frame
 		// stretched to the wrong shape before targets were allocated in blocks.
 		// See `SceneExtent`.
 		//
@@ -1376,13 +1376,13 @@ namespace engine::render {
 		// **Which viewport, because a host with two draws them in turn.** The
 		// request is made after one panel's `Render` returns and consumed by the
 		// *next* one, so a caller that asked while panel A was showing got
-		// panel B's picture — and with a scene per panel that is a photograph of
+		// panel B's picture - and with a scene per panel that is a photograph of
 		// a world nobody named. Naming the slot makes the request wait for that
 		// panel's turn instead of taking whichever came next.
 		//
 		// @param path Where to write a BMP. Empty cancels a pending request.
 		// @param slot Which viewport's scene to photograph, or `ANY_VIEWPORT`
-		//             for whichever draws next — which is the old behaviour and
+		//             for whichever draws next - which is the old behaviour and
 		//             is right for a host with one panel.
 		void RequestSceneCapture(std::filesystem::path path, size_t slot = ANY_VIEWPORT);
 
@@ -1410,7 +1410,7 @@ namespace engine::render {
 		// Not atomic, unlike `ecs::Store::Owner`, and the difference is the
 		// point: a store's owner is written every tick by whichever worker
 		// picked the world up, so that write races other threads' reads. This is
-		// written by the constructor and again by `Initialise`, then only read —
+		// written by the constructor and again by `Initialise`, then only read -
 		// so any thread that could observe a torn value is a thread already
 		// violating the contract this exists to state.
 		std::thread::id Owner;

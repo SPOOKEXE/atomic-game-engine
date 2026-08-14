@@ -5,7 +5,7 @@
 // **Free functions over text, because this is the half that can be silently
 // wrong.** A completion list that quietly offers nothing looks exactly like an
 // engine with no API, and one that offers a name the VM does not have is worse
-// than offering nothing at all — an author picks it out of a list, writes it,
+// than offering nothing at all - an author picks it out of a list, writes it,
 // and finds out at run time in whatever scene reaches that line first. Both
 // failures need a window, a device and an imgui frame to see, and neither needs
 // one to happen. `mono.studio/AGENTS.md` names `MatchesQuery` and `DiffText`
@@ -14,8 +14,8 @@
 // **Nothing here is a parser.** `ScanBackwards` walks left from the caret over
 // identifier characters, dots and colons and stops at the first thing that is
 // neither. That resolves a caret sitting after the dot in `part` or
-// `Enum.Material`, and after the opening quote of an `Instance.new` call —
-// what an author is doing when they want a list — and it resolves nothing about
+// `Enum.Material`, and after the opening quote of an `Instance.new` call -
+// what an author is doing when they want a list - and it resolves nothing about
 // a call like `f()` on purpose. A real parse would need the language's
 // grammar twice over, and this file covers two languages.
 //
@@ -29,7 +29,7 @@
 // `Instance.new` and then from something unreadable is not a `Part` any more.
 //
 // Everything else answers nothing and falls back to the union of every
-// scriptable property — a longer list, never a wrong one. `FindFirstChild` and
+// scriptable property - a longer list, never a wrong one. `FindFirstChild` and
 // `WaitForChild` are the ones worth naming, because following them to their
 // receiver is the obvious next step and it is wrong: a child of a `Model` is not
 // a `Model`, so that narrowing would offer `Model`'s properties for a `Part`.
@@ -102,13 +102,13 @@ namespace studio {
 		// class's parent, what a global is. Empty when the name says
 		// everything.
 		//
-		// A property's detail names the class it is being claimed for —
-		// `bool on Part` — or says `bool on some class` when the list is the
+		// A property's detail names the class it is being claimed for -
+		// `bool on Part` - or says `bool on some class` when the list is the
 		// union, which is the only thing distinguishing a narrowed list from a
 		// broad one on screen.
 		std::string Detail;
 
-		// Which list this row came out of — a class, a property, an enum, a
+		// Which list this row came out of - a class, a property, an enum, a
 		// keyword, a global or a local. The popup groups by it, so a row whose
 		// kind is wrong is a row filed under the wrong heading rather than a
 		// missing one.
@@ -131,7 +131,7 @@ namespace studio {
 		// after a dot, which is the common case and not an error.
 		std::string_view Prefix;
 
-		// The expression the separator hangs off — `part` in `part.Anch`,
+		// The expression the separator hangs off - `part` in `part.Anch`,
 		// `Enum.Material` in `Enum.Material.Pl`. Empty when there is no
 		// separator, or when what precedes it is not a plain dotted chain.
 		std::string_view Subject;
@@ -148,7 +148,7 @@ namespace studio {
 		bool InString = false;
 
 		// The dotted name being called, when the caret is inside its first
-		// string argument — `Instance.new`, `game:GetService`, `IsA`. This is
+		// string argument - `Instance.new`, `game:GetService`, `IsA`. This is
 		// what turns a quote into a list of class names.
 		std::string_view Call;
 	};
@@ -202,9 +202,9 @@ namespace studio {
 	// place; `mono.tools/bindings` says copying that list into a second place is
 	// how the two would disagree later. So the explorer and this call here.
 	//
-	// Everything under `Instance`, minus the services — a world has exactly one
+	// Everything under `Instance`, minus the services - a world has exactly one
 	// of each and `scene::InstallServices` puts it there, so offering one is
-	// offering a second that nothing resolves — and minus the abstract bases,
+	// offering a second that nothing resolves - and minus the abstract bases,
 	// which the run time would happily mint into rows nothing knows how to draw.
 	//
 	// @return The class ids, in registration order.

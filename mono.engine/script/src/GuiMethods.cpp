@@ -26,7 +26,7 @@
 // The three `Tween*` methods are Roblox's shorthand for a tween somebody would
 // otherwise build with `TweenService:Create`, and that is exactly what they are
 // here: a `TweenGoal` per property, `TweenTable::Create`, `TweenTable::Play`.
-// There is no second interpolator, no second easing table and no second drain —
+// There is no second interpolator, no second easing table and no second drain -
 // `TweenTable::Advance` steps these at the head of the barrier with everything
 // else, so a scene animating a panel and a part stays in one clock.
 //
@@ -87,7 +87,7 @@ namespace engine::script {
 		// Where each of Roblox's trailing five arguments sits, per method.
 		//
 		// **A record rather than five literals per body**, because the only thing
-		// that differs between the three is how many goals come first — and three
+		// that differs between the three is how many goals come first - and three
 		// copies of "the callback is argument five, unless it is argument six" is
 		// exactly the pair that gets edited singly.
 		struct TweenArguments {
@@ -182,7 +182,7 @@ namespace engine::script {
 		// **`override` decides, and it decides before anything is built.** Roblox
 		// answers `false` for a call that was refused because something else is
 		// already animating the object, and a caller reading that answer is the
-		// whole reason the flag exists — so a refusal must not leave a record in
+		// whole reason the flag exists - so a refusal must not leave a record in
 		// the table for the cap to reclaim later.
 		//
 		// **The callback is a `:Once` on the tween's `Completed`**, and it is
@@ -217,7 +217,7 @@ namespace engine::script {
 			std::vector<Entity> dropped;
 			const Entity tween = table.Create(call.World(), target, info, std::move(goals), dropped);
 
-			// The connections go before the row does — only a VM knows what a
+			// The connections go before the row does - only a VM knows what a
 			// `CallbackRef` means, which is why the release is a request.
 			for (const Entity stale : dropped) {
 				call.ForgetSubject(stale);
@@ -269,7 +269,7 @@ namespace engine::script {
 
 		// **`SetTopbarTransparency` and `GetTopbarTransparency` are deliberately
 		// absent, and the reason is that there is no topbar.** `gui::Screen::
-		// TopInset` is zero and its comment says why — this engine reserves no
+		// TopInset` is zero and its comment says why - this engine reserves no
 		// strip at the top of the canvas, so the pair would read and write a
 		// number nothing draws. Roblox's `PlayerGui` has them because Roblox has a
 		// bar; a setter that stored a float for a surface that does not exist is

@@ -24,7 +24,7 @@
 //
 // It is not a test-only hazard. Any program that runs a physics query before
 // `PreparePhysicsWorld` hits it, and it hides because it needs the query to
-// come *first* — which in a suite is a matter of which order the cases were
+// come *first* - which in a suite is a matter of which order the cases were
 // shuffled into.
 //
 // So every read of the resource in this module goes through here, and "is this

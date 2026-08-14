@@ -3,8 +3,8 @@
 // The texture a drawable gets when nothing has said what it is made of.
 //
 // **The gap this closes is that "no texture" had no picture.** A part with no
-// material sampled `FallbackTexture` — one white texel, created so an unbound
-// sampler binding is not uninitialised device memory — and one white texel is a
+// material sampled `FallbackTexture` - one white texel, created so an unbound
+// sampler binding is not uninitialised device memory - and one white texel is a
 // stand-in for a *binding*, not a material. So every untextured part in every
 // scene was flat white, and the seventeen-member `Material` enum that was
 // supposed to say otherwise said nothing a renderer could sample.
@@ -22,14 +22,14 @@
 // exists for.
 //
 // **Four kilobytes, and that is what the format choice buys.** The source is a
-// near-neutral 233–238 across the whole sheet — a plastic's character is in its
-// normal and roughness maps, not its colour — so the tile is one channel, and
+// near-neutral 233–238 across the whole sheet - a plastic's character is in its
+// normal and roughness maps, not its colour - so the tile is one channel, and
 // `TextureTable::Add` already widens `R8` to the pipeline's format, so nothing
 // here repeats that. The 237/234/233 tint the source carries is dropped with the
 // other two channels, deliberately: this is the *white* default, and a warm cast
 // on every untextured part in the engine is a decision no author made.
 //
-// **And it is lifted so the brightest texel is white — 250 to 255 rather than
+// **And it is lifted so the brightest texel is white - 250 to 255 rather than
 // 233 to 238.** The default multiplies whatever base colour an author set, so
 // shipping the sheet at its photographed exposure would darken every untextured
 // part in every existing scene by eight per cent, which reads as a lighting

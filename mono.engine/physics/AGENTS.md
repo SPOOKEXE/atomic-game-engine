@@ -1,4 +1,4 @@
-# physics — module invariants
+# physics - module invariants
 
 L8, `shared` tier. Shapes, integration, the two indexes that answer "which
 colliders might be touching", the six exact pairs that decide whether they
@@ -7,7 +7,7 @@ really are, the solver that pushes them apart, and the queries game code asks.
 what a reviewer should refuse.
 
 **The whole pipeline is here.** Integrate, sync, broad phase, narrow phase,
-solve, publish — the six rows of the §3.5 table — plus `Raycast`, `OverlapBox`,
+solve, publish - the six rows of the §3.5 table - plus `Raycast`, `OverlapBox`,
 `OverlapSphere` and `ShapeCast` against real colliders. The last section of this
 file lists what is still absent and why each absence is deliberate rather than
 unfinished.
@@ -19,7 +19,7 @@ the height was free when the table was written and `assets` has since taken it.
 It asks for the sharing to be confirmed rather than inherited. It is confirmed,
 on these grounds:
 
-- Sharing a height is already the norm rather than an exception —
+- Sharing a height is already the norm rather than an exception -
   `replication`, `input` and `render` all sit at L12.
 - The two are **disjoint**. Nothing here depends on `assets` and nothing in
   `assets` depends on this, so there is no edge between them to be ambiguous
@@ -36,7 +36,7 @@ height have to stay disjoint.
 ## The direction of every edge, and the one the build cannot check
 
 `core`, `parallel`, `ecs`, `spatial` and `scene`. All five are `shared`, so
-`mono_check_all_tiers` catches none of them — by rule 6 of the root `AGENTS.md`
+`mono_check_all_tiers` catches none of them - by rule 6 of the root `AGENTS.md`
 that makes the heights a convention, and this is where it is written down.
 
 Refuse:
@@ -89,18 +89,18 @@ Two rules follow, and both have a case in `tests/Shapes.cpp`:
 
 - **A second reading of `Extent` anywhere is the change to refuse.** The AABB
   derivation and the shape's own definition must agree, and the test that pins
-  it compares the two against each other rather than against a literal — so a
+  it compares the two against each other rather than against a literal - so a
   literal that was updated on one side and not the other cannot pass.
 - **The components a shape does not use are not read.** A sphere's `Extent.Y`
   is whatever the author left there. Deriving anything from it makes an
   ellipsoid out of a typo, and adding an ellipsoid is a change to
-  `scene::ShapeKind` — which costs a narrow-phase pair against every other
+  `scene::ShapeKind` - which costs a narrow-phase pair against every other
   shape, which is what `Enums.hpp` means by calling the set closed.
 
 **The world bound is exact per shape and not one oriented box for all three.**
 A sphere does not grow when it turns and a tilted cylinder is narrower than the
-box around it. The loose version is *correct* — a bound too large costs
-candidates and never drops a contact — so it will pass every test that is not
+box around it. The loose version is *correct* - a bound too large costs
+candidates and never drops a contact - so it will pass every test that is not
 looking for it, and it hands the broad phase a sphere 73 per cent too wide. The
 direction that matters is the other one: a bound smaller than the shape drops
 contacts and reports nothing at all.
@@ -115,7 +115,7 @@ to find.
 shape it **collides** as. They are the same number for a `MakePart` box and
 nothing keeps them so. An index built from the first can be smaller than the
 shape in the second, and a broad phase whose bound is too small drops contacts
-silently — the exact failure `core::AABB::FromOrientedBox` was written to avoid.
+silently - the exact failure `core::AABB::FromOrientedBox` was written to avoid.
 
 Querying `<Transform, Collider>` also excludes anything that does not collide,
 where every part has a `Bounds`.
@@ -134,7 +134,7 @@ same pair list.
 
 Since v0.12 `SyncBroadphase` calls `spatial::SuggestCellSize` on the proxies it
 is about to hand `Rebuild`, and the measured rows land on the hand-picked
-optimum at every density — 22% off the default at four thousand colliders, 17%
+optimum at every density - 22% off the default at four thousand colliders, 17%
 at a thousand.
 
 Four properties a reviewer should hold to:
@@ -163,7 +163,7 @@ Four properties a reviewer should hold to:
 `spatial::HashGrid` has no `Insert`, no `Move` and no `Remove`, and
 `spatial/AGENTS.md` is explicit that adding one is a different data structure
 rather than an extension. So the allocation table's "only re-insert what moved"
-is **not a call this module can make** — it is a decision about what to hand to
+is **not a call this module can make** - it is a decision about what to hand to
 `Rebuild`, and the answer `spatial/AGENTS.md` names is a second grid holding the
 static proxies.
 
@@ -175,7 +175,7 @@ static proxies.
   a tick, which is five times what the rest of the sync costs.
 - **A sleeping body is in the static set**, because `Publish` takes its
   `scene::Motion` away. That is the archetype move sleeping is built on, and it
-  means a scene settling costs one static rebuild per body that drops out —
+  means a scene settling costs one static rebuild per body that drops out -
   paid once each, while the count of dynamic rows falls.
 
 Staleness is decided by two gates, and a reviewer should refuse a change that
@@ -184,7 +184,7 @@ removes either:
 - `Store::ChangeVersion()`, which only moves for a write through `Set` to an
   observed component. An unchanged counter means nothing authored has happened
   and the changed-row walk is skipped. **This is what makes the property hold in
-  a store whose dirty bits nobody clears** — a bare `Scheduler` never calls
+  a store whose dirty bits nobody clears** - a bare `Scheduler` never calls
   `ClearChanges`, so `EachChanged` alone would report the same rows forever and
   rebuild every tick.
 - the changed-row walk itself, over `Transform` and `Collider`, skipping rows
@@ -202,7 +202,7 @@ Two refusals that look like omissions:
 
 - **No `RigidBody` in the query.** A platform, a projectile and a demo cube all
   move and none of them has a mass. Adding the term narrows the query to bodies
-  that have one and loads three floats the arithmetic never reads — and it
+  that have one and loads three floats the arithmetic never reads - and it
   silently stops moving all three. The split between `scene::Motion` and
   `scene::RigidBody` exists for this one query.
 - **No `MarkAllChanged<Transform>`.** See the section above: it would rebuild
@@ -216,7 +216,7 @@ quaternion step leaves the rotation off the unit sphere and the error compounds;
 a `CFrame` whose quaternion is not unit length *scales* what it transforms, so
 the symptom is parts that slowly grow and nobody looks at the integrator.
 Refuse a change that renormalises only past a threshold to save a reciprocal
-square root — that is a data-dependent branch in the hottest loop of the tick.
+square root - that is a data-dependent branch in the hottest loop of the tick.
 
 ## The steps are composed, not registered separately
 
@@ -237,7 +237,7 @@ Refuse a change that splits them back into two registered systems in one phase
 
 `INTEGRATE_GRAIN` is 1024, from `benchmarks/Integrate.cpp` in the `bench`
 preset. `Jobs::DEFAULT_GRAIN` is 4096 and, through `Jobs::MINIMUM_GRAINS`, would
-refuse to dispatch anything below 32768 rows — measured at twenty thousand
+refuse to dispatch anything below 32768 rows - measured at twenty thousand
 entities that is 73.5 microseconds against 27.3 for the same body.
 
 **It was 512 until the build moved to `-O3`, and the reason it moved is the
@@ -255,14 +255,14 @@ new value.
 ## Every buffer is cleared and never freed
 
 The pair, manifold and event lists and the candidate scratch all live on the
-`PhysicsWorld` resource and keep their capacity across ticks — the allocation
+`PhysicsWorld` resource and keep their capacity across ticks - the allocation
 table in `v02v03v04.md` names exactly these. A steady scene stops allocating
 after its first tick.
 
 Every one of them now has a producer. `BroadPhase` clears the pair list, **the
-narrow phase clears the manifold and event lists in its own step** — the event
+narrow phase clears the manifold and event lists in its own step** - the event
 list there rather than in `Publish`, so a world whose narrow phase ran and whose
-solver did not cannot hand a reader last tick's events as this tick's — and
+solver did not cannot hand a reader last tick's events as this tick's - and
 `Solve` clears the body and row lists. A reviewer should refuse one that
 reallocates per tick; `tests/Broadphase.cpp`, `tests/NarrowPhase.cpp` and
 `tests/Solver.cpp` each pin their own.
@@ -282,7 +282,7 @@ every one of these is read outside the function that filled it.
 
 Both indexes carry the index into `PhysicsWorld`'s own proxy and record arrays.
 That is what makes resolving a candidate's masks an array subscript instead of a
-store lookup — the cost an index exists to remove, and the reason
+store lookup - the cost an index exists to remove, and the reason
 `ColliderRecord` exists at all.
 
 The grids are therefore **not reachable from outside this module**, and a change
@@ -300,7 +300,7 @@ than entity order: from the first shape toward the second, points on the second.
 `ContactBetween` is the only function in the module that reorders a pair and the
 only one that reverses a normal. That is not tidiness. The pipeline names its
 two bodies by entity id and the pair functions name theirs by `ShapeKind`, and
-the two orders disagree for half of all pairs — so a flip written into each pair
+the two orders disagree for half of all pairs - so a flip written into each pair
 function is six chances to get it wrong, and getting it wrong in two of six
 reads as objects occasionally flying apart rather than as a sign error.
 
@@ -314,15 +314,15 @@ a pair that breaks it makes the flip wrong for that pair only.
 
 A box is a polytope, so its fifteen face and edge-cross axes are provably the
 whole set and box-box is exact. A sphere is analytic against everything, and so
-is sphere-cylinder — a closest point on a cylinder is a clamp along the barrel
+is sphere-cylinder - a closest point on a cylinder is a clamp along the barrel
 and a clamp across it. **The two remaining pairs are the ones with a stated
 limit.**
 
 A cylinder is smooth, so its minimum-penetration direction can point anywhere
 and no finite list of axes is complete for it. The lists in `ContactPairs.cpp`
-cover every contact the design names — cap on face, barrel on face, cap on cap,
+cover every contact the design names - cap on face, barrel on face, cap on cap,
 barrel on barrel crossed and parallel, box edge on barrel, box corner on barrel,
-box corner on rim, rim on rim, rim on wall — and stop short of a box *edge*
+box corner on rim, rim on rim, rim on wall - and stop short of a box *edge*
 meeting a cap's rim obliquely.
 
 The direction that failure runs in is worth knowing: `ProjectionRadius` is exact
@@ -335,7 +335,7 @@ resting configuration stops working.
 ## The solver is serial, and a reviewer should refuse `Jobs::For` in it
 
 Sequential impulse works by letting each contact see the velocities the previous
-ones left behind — that is the method, not an implementation detail. Two threads
+ones left behind - that is the method, not an implementation detail. Two threads
 visiting one contact list in whatever order they reached it give a different
 answer every run, and the run that differs is the one somebody recorded.
 `v02v03v04.md` §3.5 and decision 8 both say serial in as many words.
@@ -343,7 +343,7 @@ answer every run, and the run that differs is the one somebody recorded.
 This was mutation-tested rather than assumed: replacing the sweep loop with two
 threads over halves of the row list turns "two runs of one scene agree byte for
 byte" red. **The same mutation written with `parallel::Jobs::For` does not**,
-because a test binary has no worker pool running and `For` degrades to inline —
+because a test binary has no worker pool running and `For` degrades to inline -
 so a reviewer must not read a green suite as evidence that a `Jobs::For` in
 there is safe.
 
@@ -357,7 +357,7 @@ An overlap is unwound by a separate solve against `SolverBody::CorrectionLinear`
 rather than by adding a Baumgarte term to the real velocity. Two reasons, and
 the second is the one that bites:
 
-- Folded into the real velocity, the correction is energy — the bodies leave the
+- Folded into the real velocity, the correction is energy - the bodies leave the
   contact faster than they arrived, so a stack bounces.
 - A box at rest then carries a permanent upward velocity of exactly one tick of
   gravity, because that is what the correction has to cancel. No sleeping
@@ -376,7 +376,7 @@ rotational overlap is pushed straight out rather than tipped out.
 `Publish` applies the position correction through the reference an `Each` hands
 out, which `Store::Each` documents as a direct memory write. A write through
 `Set` stamps the row, and `SyncBroadphase` reads those stamps to decide whether
-*static* geometry moved — so a stamp left on a body that later falls asleep, and
+*static* geometry moved - so a stamp left on a body that later falls asleep, and
 therefore no longer has a `Motion` to exclude it from the static walk, rebuilds
 the static index every tick forever.
 
@@ -400,7 +400,7 @@ so at the time.
 
 Every read goes through `PreparedWorld` or `PreparedWorldMutable` in
 `src/WorldResource.hpp`, which answers "is this world prepared" with
-`Components::Find` — a name lookup that registers nothing — before it makes the
+`Components::Find` - a name lookup that registers nothing - before it makes the
 typed call. **`PHYSICS_WORLD_COMPONENT` is the one spelling of the name**, used
 by the registration and by that lookup.
 
@@ -426,8 +426,8 @@ are guarded the same way anyway, and a reviewer should refuse a
 `scene::Transform` and `scene::Motion` in its query, so calling it on a store
 where nobody registered the `scene` types registers them under the compiler's
 spelling. The audit is short enough to state in full: every other typed access
-here — every `Get`, `Each`, `Has`, `CountMatching` and the `SurfaceTable`
-lookup — sits after a `PreparedWorld` guard, and the two `Observe` calls sit
+here - every `Get`, `Each`, `Has`, `CountMatching` and the `SurfaceTable`
+lookup - sits after a `PreparedWorld` guard, and the two `Observe` calls sit
 inside `PreparePhysicsWorld`, whose first line is the registration.
 
 Three things make `IntegrateMotion` a different case from the one above.
@@ -440,7 +440,7 @@ before its own precisely so a caller preparing physics cannot mint them wrongly.
 Closing it properly needs a primitive the ECS does not have: a
 `Components::Registered<T>()` that reads the per-type slot and adopts nothing,
 so a module can ask about a type it does not own the name of.
-`Components::Find` cannot serve — it takes a name, and physics has no business
+`Components::Find` cannot serve - it takes a name, and physics has no business
 spelling `scene`'s. That is a change to `ecs`'s public surface and is not one
 this module should make on its own.
 
@@ -449,14 +449,14 @@ this module should make on its own.
 The table in `v02v03v04.md` says a `Sleeping` **tag moves the row to another
 archetype**, so the query never visits it. `scene::RigidBody` used to carry a
 `bool Sleeping` beside it, described in its own comment as what the tag was
-"derived from" — two answers to one question, the same state twice, and
+"derived from" - two answers to one question, the same state twice, and
 readable only by making the visit the tag existed to avoid.
 
 **The field is removed and the solver owns sleeping.** Three parts to the
 decision:
 
 - **A tag would not have worked.** `ecs::Store` has no "without this component"
-  query term — `SyncBroadphase` already records that fact — so a query for
+  query term - `SyncBroadphase` already records that fact - so a query for
   `<Transform, Motion>` matches the archetype that also holds a `Sleeping` tag.
   The row would still be visited, and the tag would deliver none of the benefit
   that made it better than a branch.
@@ -471,7 +471,7 @@ decision:
 
 Two consequences a reviewer should hold to. A body that fell asleep on static
 geometry produces no candidate pair at all, so `Publish` reports that contact as
-`Persisted` rather than `Ended` — the box did not leave the floor. And waking is
+`Persisted` rather than `Ended` - the box did not leave the floor. And waking is
 one pass over the manifolds in pair order, so a stack wakes one layer per tick:
 bounded, deterministic, and visibly a settling stack rather than a scene
 jumping at once.
@@ -493,7 +493,7 @@ and it would end parallel querying without anything failing to build. The
 scratch overflowing is reported through `QueryResult::Overflowed`, which is why
 it can be a fixed stack array at all.
 
-`RAYCAST_GRAIN` is 32 and is chosen rather than measured — `parallel/AGENTS.md`
+`RAYCAST_GRAIN` is 32 and is chosen rather than measured - `parallel/AGENTS.md`
 says a query body wants a grain in the tens, and the default 4096 is a guess
 about a body that does almost nothing. What a benchmark would refine is which
 side of a hundred it sits.
@@ -514,8 +514,8 @@ is, and `tests/PhysicsWorld.cpp` no longer holds the case that pinned it.
 What is still absent:
 
 - **Gravity.** There is no gravity row in §3.5, `scene::RigidBody` has no
-  gravity scale, and a world with no down — an orbital simulation, a top-down
-  game — should not have to switch one off. A host applies weight in its own
+  gravity scale, and a world with no down - an orbital simulation, a top-down
+  game - should not have to switch one off. A host applies weight in its own
   `PreSimulation` system, which is what `tests/Behaviour.cpp` does. Adding a
   gravity term here is a change to the design note first.
 - **A distance function between two convex shapes**, and therefore a

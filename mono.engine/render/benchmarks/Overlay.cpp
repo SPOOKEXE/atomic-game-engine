@@ -68,7 +68,7 @@ namespace overlay_bench {
 using namespace overlay_bench;
 
 // No benchmark for `Clear` on its own. It measured at zero, which is the
-// correct answer — clearing marks a region rather than touching pixels — and a
+// correct answer - clearing marks a region rather than touching pixels - and a
 // row of zeroes in a report teaches nothing while looking like a broken
 // measurement. The cost that exists is in the drawing below.
 

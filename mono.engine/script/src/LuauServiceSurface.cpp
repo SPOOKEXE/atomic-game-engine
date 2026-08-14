@@ -2,7 +2,7 @@
 //
 // **One file for the ten lines that were in five.** `LuauBindings.hpp`'s services
 // section carries the argument; what is here is the loop itself, which is short
-// enough that having it five times looked harmless and was not — the reason to
+// enough that having it five times looked harmless and was not - the reason to
 // have it once is that it is now somewhere a rule about services can be written
 // down and stay true, rather than five places that each have to remember.
 //
@@ -21,7 +21,7 @@
 namespace engine::script {
 
 	void InstallService(lua_State *state, const ServiceSurface &surface) {
-		// A service with no name is a table nothing can reach — installed as a
+		// A service with no name is a table nothing can reach - installed as a
 		// global called nothing, or as nothing at all. Refused loudly here
 		// rather than at the `lua_setglobal`, which would take a null and put
 		// the table somewhere no script can name.
@@ -34,16 +34,16 @@ namespace engine::script {
 		lua_newtable(state);
 
 		// **Signals first, so a method of the same name wins.** See
-		// `ServiceSurface::Signals` — nothing relies on this today and the order
+		// `ServiceSurface::Signals` - nothing relies on this today and the order
 		// is fixed here so that the day something does, the answer was decided
 		// rather than inherited from whichever loop happened to run last.
 		//
 		// No context upvalue: a signal is a value `PushSignal` builds, and what
 		// it needs to know is the kind and the subject. A service signal has no
-		// subject — `RunService.Heartbeat` is the world's, not any instance's —
+		// subject - `RunService.Heartbeat` is the world's, not any instance's -
 		// which is what `NULL_ENTITY` means here.
 		for (const ServiceSignal &signal : surface.Signals) {
-			// The name filter, for a service whose signals share one kind —
+			// The name filter, for a service whose signals share one kind -
 			// see `ServiceSignal::Property`. An invalid `core::Name` is what a
 			// signal with no filter carries, and `PushSignal`'s default.
 			PushSignal(
@@ -57,14 +57,14 @@ namespace engine::script {
 
 		// **The methods written once, through the neutral trampoline.** This is
 		// the same table `ServiceCatalogue.cpp` hands the JavaScript installer,
-		// so a row here is a member of the service in both languages — see
+		// so a row here is a member of the service in both languages - see
 		// `ServiceSurface::Methods`.
 		InstallLuauServiceMethods(state, surface.Methods);
 
 		// **The context as upvalue 1, on every method, without exception.** This
 		// is the invariant the five copies each had to remember on their own:
 		// `UpvalueContext` reads index 1 and a method installed with
-		// `lua_pushcfunction` gives it nothing to read — which compiles, links,
+		// `lua_pushcfunction` gives it nothing to read - which compiles, links,
 		// runs, and dereferences whatever was there.
 		//
 		// **After the neutral rows, so a name in both lists resolves to the
@@ -81,7 +81,7 @@ namespace engine::script {
 		// **A service with no properties is the table just built, and that is
 		// most of them.** One object, and this line is why: `RunService::
 		// GetService` looks in the globals before it looks at the tree, so the
-		// table set here is the same table `game:GetService(name)` hands back —
+		// table set here is the same table `game:GetService(name)` hands back -
 		// never a second one built to look like it, which a script comparing the
 		// two would tell apart immediately.
 		if (surface.Properties.empty()) {
@@ -117,15 +117,15 @@ namespace engine::script {
 		lua_newtable(state);
 
 		// **Upvalue 1 is the context and upvalue 2 is the surface itself**,
-		// which is what turns two generic metamethods into this service's — see
+		// which is what turns two generic metamethods into this service's - see
 		// `LuauServiceIndex`. The address is the reason `InstallService`
 		// requires a surface with static storage duration; a local would be
 		// read after it had gone.
 		//
 		// **`__newindex` is installed unconditionally**, unlike the methods,
 		// because a service with only read-only properties still has to refuse a
-		// write *by name*. Luau refuses either way — a userdata with no
-		// `__newindex` raises "attempt to index" — but that message names the
+		// write *by name*. Luau refuses either way - a userdata with no
+		// `__newindex` raises "attempt to index" - but that message names the
 		// receiver rather than the member, which is the difference between
 		// finding a typo and going to look at the binding.
 		const auto bind = [&](const char *metamethod, LuauFunction function) {

@@ -5,8 +5,8 @@
 // **A reader, not a compiler.** It walks the instruction stream once and keeps
 // the four things a graphics API has to agree with the shader about: which
 // entry point, at which stage, which capabilities, and which resources at which
-// descriptor set and binding. Everything else in the module — the code, the
-// types, the debug names of locals — is stepped over by word count.
+// descriptor set and binding. Everything else in the module - the code, the
+// types, the debug names of locals - is stepped over by word count.
 //
 //     Module module = ReflectBytes(bytes);
 //     if (!module.Parsed()) { ... module.Error ... }
@@ -38,7 +38,7 @@ namespace shadercheck {
 	// The pipeline stage an entry point runs at.
 	//
 	// `Unsupported` is a value rather than a parse failure because a geometry or
-	// tessellation module is perfectly valid SPIR-V — it is SDL's GPU API that
+	// tessellation module is perfectly valid SPIR-V - it is SDL's GPU API that
 	// has no such stage, and Metal that has neither. That is a contract finding
 	// with a name in it, not a corrupt file.
 	enum class Stage { Vertex, Fragment, Compute, Unsupported };
@@ -83,7 +83,7 @@ namespace shadercheck {
 		uint32_t Version = 0;
 
 		// The first entry point's name. `EntryPointCount` is kept separately
-		// because "more than one" is itself a finding — a module with two entry
+		// because "more than one" is itself a finding - a module with two entry
 		// points has no single name for a caller to pass.
 		std::string EntryPointName;
 		// The stage the first entry point runs at.
@@ -107,8 +107,8 @@ namespace shadercheck {
 	// which is why this overload is the one the work happens in.
 	Module Reflect(std::span<const uint32_t> words);
 
-	// Reflect the bytes of a `.spv` file. A byte-reversed module — SPIR-V may be
-	// stored either way round and the magic number says which — is swapped
+	// Reflect the bytes of a `.spv` file. A byte-reversed module - SPIR-V may be
+	// stored either way round and the magic number says which - is swapped
 	// rather than rejected.
 	Module ReflectBytes(std::span<const std::byte> bytes);
 

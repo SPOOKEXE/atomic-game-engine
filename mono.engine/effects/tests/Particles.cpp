@@ -1,4 +1,4 @@
-// The pool, the step and the packing — everything the roadmap's number rests on.
+// The pool, the step and the packing - everything the roadmap's number rests on.
 //
 // **This is the suite that makes a GPU unnecessary.** The whole reason the pool
 // and the step live in `shared` rather than in `render` is that the arithmetic
@@ -77,7 +77,7 @@ namespace {
 
 	// One frame: refresh the blocks, then step. The two are separate systems in a
 	// scheduler and are called together here for the same reason they are
-	// registered in that order — a block handed out after the step emits nothing
+	// registered in that order - a block handed out after the step emits nothing
 	// for one frame.
 	engine::effects::ParticleStatistics Frame(Store &store, float delta) {
 		engine::scene::ResolveAttachments(store);
@@ -92,7 +92,7 @@ TEST_CASE("a particle's size survives being packed", "[effects]") {
 	const uint32_t packed = PackParticleSize(1.5f, 3.25f);
 
 	// A millimetre of resolution over sixty-four metres, so the round trip is
-	// close rather than exact — and the tolerance is the quantum rather than a
+	// close rather than exact - and the tolerance is the quantum rather than a
 	// number picked to make the test pass.
 	const float quantum = MAX_PARTICLE_SIZE / 65535.0f;
 	REQUIRE(std::abs(UnpackParticleWidth(packed) - 1.5f) <= quantum);
@@ -128,7 +128,7 @@ TEST_CASE("a curve is sampled at both ends, not just the first fifteen", "[effec
 	REQUIRE(curves.Size[0] == Catch::Approx(4.0f));
 	REQUIRE(curves.Size[CURVE_SAMPLES - 1] == Catch::Approx(0.0f).margin(1e-5));
 
-	// Alpha is stored as opacity — one minus transparency — because that is what
+	// Alpha is stored as opacity - one minus transparency - because that is what
 	// the packed colour wants, and doing the flip in the step would be half a
 	// million subtractions to save one here.
 	REQUIRE(curves.Alpha[0] == Catch::Approx(1.0f));
@@ -163,7 +163,7 @@ TEST_CASE("an emitter gets a block sized by its own rate and lifetime", "[effect
 	const uint16_t slot = store.Get<EmitterSlot>(emitter)->Index;
 	REQUIRE(slot != NO_SLOT);
 
-	// Rate times the longest life, rounded up, plus one — the plus one is what
+	// Rate times the longest life, rounded up, plus one - the plus one is what
 	// stops an emitter at exactly one particle a second with a one-second life
 	// oscillating between zero slots and one.
 	REQUIRE(system->Blocks[slot].Capacity == 21);
@@ -257,7 +257,7 @@ TEST_CASE("particles are born, age and are retired", "[effects]") {
 	}
 
 	// Thirty frames at sixty a second is half a second, which is exactly the
-	// lifetime — so the pool is full of particles about to expire.
+	// lifetime - so the pool is full of particles about to expire.
 	//
 	// **Thirty-one and not thirty**, because a fresh block owes one particle
 	// immediately: `RefreshEmitters` starts the accumulator at 1 so an emitter
@@ -267,15 +267,15 @@ TEST_CASE("particles are born, age and are retired", "[effects]") {
 
 	// **And then back to thirty, which is the claim worth pinning.** The starting
 	// debt moves the *first* particle and nothing else: once the extra one has
-	// aged out the population is rate times lifetime — sixty a second over half a
-	// second — exactly as it was before the debt existed. An emitter that kept its
+	// aged out the population is rate times lifetime - sixty a second over half a
+	// second - exactly as it was before the debt existed. An emitter that kept its
 	// extra particle forever would be one whose rate quietly did not mean what it
 	// says.
 	const auto later = Frame(store, 1.0f / 60.0f);
 
 	// The population is what this case pins. There used to be a
 	// `REQUIRE(later.Retired >= 0)` above this line: `Retired` is a `uint32_t`,
-	// so that was true of every value it could hold — a line that read as a
+	// so that was true of every value it could hold - a line that read as a
 	// check and could not fail. It is gone rather than tightened, because on
 	// this frame `Retired` is *zero* while `Live` falls from 31 to 30, and what
 	// that says about when a retirement is counted is not something this case
@@ -320,7 +320,7 @@ TEST_CASE("a flipbook plays only the cells that hold a frame", "[effects]") {
 
 	// **Twenty-four of the grid's sixty-four cells.** The grid is the next square
 	// power of two that fits a source's frames, so a sheet that does not fill it
-	// would otherwise spend the difference showing nothing — an effect that
+	// would otherwise spend the difference showing nothing - an effect that
 	// flashes on and vanishes rather than one that plays.
 	//
 	// A flat number here rather than `fox_dance.gif`'s own, because this suite
@@ -365,7 +365,7 @@ TEST_CASE("acceleration moves a particle and drag slows it", "[effects]") {
 	}
 	const Vector3 fallen = store.Resource<ParticleSystem>()->Instances[0].Position;
 
-	// Semi-implicit Euler, so it has fallen — the exact distance is the
+	// Semi-implicit Euler, so it has fallen - the exact distance is the
 	// integrator's and is not what this pins.
 	REQUIRE(fallen.Y < born.Y);
 }
@@ -425,7 +425,7 @@ TEST_CASE("the pool holds the scale the roadmap asks for", "[effects]") {
 	// **Ten thousand emitters rather than the roadmap's hundred thousand**, and
 	// the difference is what a *test* is for against what a *benchmark* is for.
 	// This asserts the arithmetic holds at a scale where every block is checked
-	// individually — a hundred thousand emitters at five particles each is a
+	// individually - a hundred thousand emitters at five particles each is a
 	// three-second test that pins the same properties.
 	// `engine.effects.bench.particles` is where the full count is measured.
 	engine::parallel::Jobs::Start(0);
@@ -487,7 +487,7 @@ TEST_CASE("the pool holds the scale the roadmap asks for", "[effects]") {
 TEST_CASE("an emitter adopts the frame count its texture states", "[effects]") {
 	// **The bug this closes played half a dance and looked fine.**
 	// `fox_dance.gif` has forty-eight frames and the scene using it said
-	// twenty-four, so the animation stopped at the halfway pose and held it —
+	// twenty-four, so the animation stopped at the halfway pose and held it -
 	// which on screen is indistinguishable from a shorter animation. The number
 	// is in the baked texture; the client records it into the world; an emitter
 	// that says nothing adopts it, and nobody has to keep two copies in step.
@@ -521,14 +521,14 @@ TEST_CASE("an emitter adopts the frame count its texture states", "[effects]") {
 		highest = std::max(highest, cellOf(system->Instances[0].RotationAndCell));
 	}
 
-	// Twenty-four cells hold a frame, so the last one drawn is 23 — not 63,
+	// Twenty-four cells hold a frame, so the last one drawn is 23 - not 63,
 	// which is what the grid would give.
 	CHECK(highest == 23);
 }
 
 TEST_CASE("what the emitter says beats what the texture says", "[effects]") {
 	// **An author overriding a number means it.** The texture is the default,
-	// not the authority — a scene deliberately playing the first eight cells of
+	// not the authority - a scene deliberately playing the first eight cells of
 	// a sheet is a legitimate thing to want.
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
@@ -562,8 +562,8 @@ TEST_CASE("what the emitter says beats what the texture says", "[effects]") {
 
 TEST_CASE("a looping flipbook runs at the rate its texture was drawn at", "[effects]") {
 	// **Where an imported frame rate actually matters.** `OneShot` paces itself
-	// off the particle's lifetime and ignores every rate — that is Roblox's
-	// arrangement and it is unchanged — so a source's authored fps is for
+	// off the particle's lifetime and ignores every rate - that is Roblox's
+	// arrangement and it is unchanged - so a source's authored fps is for
 	// `Loop` and `PingPong`, which is what this walks.
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
@@ -599,7 +599,7 @@ TEST_CASE("a looping flipbook runs at the rate its texture was drawn at", "[effe
 
 	// **And the number that would have been wrong.** The twelve-a-second
 	// fallback puts the same age at 5.8, so this is not a test that would pass
-	// whatever rate was used — which is the only thing that makes the one above
+	// whatever rate was used - which is the only thing that makes the one above
 	// worth asserting.
 	CHECK(static_cast<uint32_t>((29.0f / 60.0f) * 12.0f) == 5);
 }

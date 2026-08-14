@@ -1,4 +1,4 @@
-# script — module invariants
+# script - module invariants
 
 L9. Running a script against a world. Above `scene` at L7, because a script's
 whole vocabulary is the class tree and the property surface that module
@@ -14,7 +14,7 @@ call the VM directly.
 That is what makes `v05.md` §5.7's second VM a source file here rather than a
 second module: JavaScript arrives beside Luau over the same `Runtime` shape,
 and every caller keeps working. The moment a vendor type reaches a public
-header, that stops being true — which is why the CMake row says `VENDOR` and not
+header, that stops being true - which is why the CMake row says `VENDOR` and not
 `VENDOR_PUBLIC`.
 
 ## Three kinds of file in `src/`, and the build tells them apart
@@ -22,34 +22,34 @@ header, that stops being true — which is why the CMake row says `VENDOR` and n
 `mono_check_script_vm_naming` in this module's `CMakeLists.txt` enforces one
 sentence, on every configure, transitively:
 
-> **A file in `src/` that reaches `<lua.h>` or `<quickjs.h>` — however many
-> `#include` hops away — has a name beginning `Luau`, `Js` or `JavaScript`.**
+> **A file in `src/` that reaches `<lua.h>` or `<quickjs.h>` - however many
+> `#include` hops away - has a name beginning `Luau`, `Js` or `JavaScript`.**
 
 Which makes the three kinds legible from the file list alone:
 
-- **Internal machinery** — runs per tick whether or not a script exists.
+- **Internal machinery** - runs per tick whether or not a script exists.
   `Tweens.cpp`, `Debris.cpp`, `Bus.cpp`, `Actions.cpp`, `Teleport.cpp`,
   `Signals.cpp`, `Changes.cpp`, `Tasks.cpp`. A system here compiles in a build
   that never opens a VM, which is what `AdmitTeleports` has to be: a world can be
   a teleport destination without containing a line of script.
-- **The scripting-exposed surface** — `ServiceSurface`, `ScriptMethod`,
+- **The scripting-exposed surface** - `ServiceSurface`, `ScriptMethod`,
   `ServiceProperty` and `ServiceSignal` rows, named for the service a script
   names. `UserInputService.cpp`, `ContextActionService.cpp`, `HttpService.cpp`,
   `TweenService.cpp`, `RunService.cpp` and the rest. No VM, so both languages
   install from the one description.
-- **Per-VM adapters** — `Luau*.cpp` and `Js*.cpp`, in pairs wherever the fact is
+- **Per-VM adapters** - `Luau*.cpp` and `Js*.cpp`, in pairs wherever the fact is
   shared and only the wrapper is not: `LuauInput.cpp`/`JsInput.cpp`,
   `LuauTween.cpp`/`JsTween.cpp`, `LuauServiceSurface.cpp`/`JsServiceSurface.cpp`.
 
 **`ServiceCatalogue.cpp` is the one exemption and it is named in the check.** It
-has met both VMs deliberately — it names every installer so the static archive
+has met both VMs deliberately - it names every installer so the static archive
 cannot drop one, and it walks the table once per language. A second name on that
 list is a claim that a file cannot be split and needs the same kind of argument
 written where the file is.
 
 **A neutral file needing one Luau *number* is not an exception to this.**
 `ServiceProperty` makes a service a userdata in Luau, so `UserInputService.cpp`
-and `SoundService.cpp` each name a tag — `LuauTags.hpp` is the tag block on its
+and `SoundService.cpp` each name a tag - `LuauTags.hpp` is the tag block on its
 own, with no `<lua.h>` under it, which is why they are still descriptions. The
 same shape closed `Vocabulary.cpp`: `LuauInstanceSignalNames()` has no VM type in
 its signature, so it is declared in `Signals.hpp` rather than reached through the
@@ -64,7 +64,7 @@ This is the whole model, so it is worth stating without hedging:
 
 There is no instance object, no per-instance allocation, no table of live
 instances, no scripting-only view. The userdata a script holds is an
-`ecs::Entity` — an index and a generation, sixty-four bits — and every operation
+`ecs::Entity` - an index and a generation, sixty-four bits - and every operation
 on it resolves against the same storage a C++ system iterates. `Instance.new`
 goes through `Store::CreateInstance`; `part.Size = v` goes through
 `Store::SetProperty` and lands in a column. A script and a system are two
@@ -72,17 +72,17 @@ callers of one store.
 
 That is why the engine has no transform hierarchy, no dirty cascade and no
 scene-graph node: `ecs/Instance.hpp` spends its header on the same point from
-the storage side, and Roblox's own model is the reason it works — the tree is
+the storage side, and Roblox's own model is the reason it works - the tree is
 organisational, so parenting moves nothing.
 
 **Two consequences that decide reviews:**
 
 - **A script cannot reach anything C++ cannot.** Adding a property for scripts
   alone is the change to refuse. If a script needs something, the property is
-  declared where the components live — `scene`, `examples`, or a game's own
-  module — and every consumer of the table gets it at once.
+  declared where the components live - `scene`, `examples`, or a game's own
+  module - and every consumer of the table gets it at once.
 - **The façade must never acquire state of its own.** A cache of instance
-  handles, a per-instance flags table, a "script sees this differently" field —
+  handles, a per-instance flags table, a "script sees this differently" field -
   each of those is a second copy of a fact the store already owns, and rule 2
   exists because two copies drift apart the first time one is written inside a
   branch.
@@ -102,7 +102,7 @@ A property was neutral from the start and a method was not, and the difference
 cost exactly what two lists cost. `ecs::PropertyDescriptor` is data, so `scene`
 declares a property once and Luau, JavaScript and the properties panel all read
 it. A method was a `lua_CFunction` in `LuauInstances.cpp` and a `JSCFunction` in
-`JsSurface.cpp`, written twice — Luau reached thirty entries and JavaScript
+`JsSurface.cpp`, written twice - Luau reached thirty entries and JavaScript
 twenty-one, nothing in the build named the nine that were missing, and the
 TypeScript declarations claimed all nine anyway.
 
@@ -133,12 +133,12 @@ Four rules a reviewer should hold to:
 - **A reader raises and never answers a failure**, so a method body reads its
   arguments straight through. On the JavaScript side that costs a thrown type
   the trampoline catches, because QuickJS reports an error by returning rather
-  than by unwinding — and nothing may escape that frame, since the caller is C.
+  than by unwinding - and nothing may escape that frame, since the caller is C.
 
 ## A service is data too, and every one of them crossed on it
 
 The same argument one level up. `ServiceSurface` described a service in
-`lua_CFunction`s, so it could only build a Luau one — and every JavaScript
+`lua_CFunction`s, so it could only build a Luau one - and every JavaScript
 service was hand-written, which is how `ContentService`, `CollectionService`,
 `HttpService`, `CrossWorldService` and `ContextActionService` came to be
 unreachable from JavaScript with the catalogue naming the gap and nothing able
@@ -153,20 +153,20 @@ and nothing else.
 **A property is not a method, and closing the last two took a second mechanism
 rather than more of the first.** `UserInputService` and `SoundService` carry live
 values, and the two VMs disagree about which half of that is hard. Luau needs the
-service to be a *userdata* — `luaL_sandbox` enables `safeenv`, so a field read off
+service to be a *userdata* - `luaL_sandbox` enables `safeenv`, so a field read off
 a constant global **table** compiles to a `GETIMPORT` resolved once and a live
-value reads as a frozen one — but could get by with a single `__index` that
+value reads as a frozen one - but could get by with a single `__index` that
 string-compares a field name, and did. JavaScript has native accessors that run
 on every read and no caching problem at all, but registers one **per name**. So
 the catch-all had to become a *list* before either language could stop being the
 only one: `ServiceProperty` is a name and two `ScriptMethod`s, Luau's `__index`
-walks it and JavaScript defines an accessor per row, and the userdata apparatus —
-`Tag`, `MethodsKey` — is unchanged because the trap it defeats has not gone away.
+walks it and JavaScript defines an accessor per row, and the userdata apparatus -
+`Tag`, `MethodsKey` - is unchanged because the trap it defeats has not gone away.
 
 **The last seven crossed on three additions rather than on a rewrite**, and
 naming them is the useful half because each is a mechanism the next service will
 want. `RunService`, `Debris`, `TweenService` and the bus four were the services
-still written twice: `ScriptCall::Await` is how a store method suspends — a
+still written twice: `ScriptCall::Await` is how a store method suspends - a
 yielded coroutine on one side and a `Promise` on the other, which is the one
 thing about them a VM genuinely decides; `ReadFieldNames`/`ReadFieldProperty` are
 how `TweenService:Create` reads a goal record whose values are `UDim2`s and
@@ -177,7 +177,7 @@ again, one entity wrapped per language.
 `ContextActionService`'s two reporting methods went the same way and are worth
 their own sentence, because they had been described as impossible: a record
 holding `Enum.KeyCode` members has no `ScriptValue` form, so the *record* became
-a `BoundActionReport` and each adapter builds its own — exactly what
+a `BoundActionReport` and each adapter builds its own - exactly what
 `InputReport` already did for an `InputObject`. The rule that fell out is that a
 record with a datatype in it wants a report struct, not a widened wire format.
 
@@ -185,7 +185,7 @@ Five rules a reviewer should hold to:
 
 - **`ServiceSurface::LuauMethods` is down to one service, and that one is not a
   debt.** A row there is a method JavaScript does not have, which was the honest
-  shape for a service part way across — `RunService`, `TweenService`, `Debris`,
+  shape for a service part way across - `RunService`, `TweenService`, `Debris`,
   the bus four and `ContextActionService`'s two reporting methods each sat there
   and each moved. What is left is `BreakpointService`'s four, whose JavaScript
   half cannot exist for the reason below. A row *added* to that span is a claim
@@ -204,7 +204,7 @@ Five rules a reviewer should hold to:
   `InputChanged` again.
 - **A dynamic set of signals is a `Connection::Property` filter, not a signal
   kind each.** `CrossWorldService:OpenChannel(name)` hands back the signal for
-  one channel, and both pumps fire only the connections carrying that name — the
+  one channel, and both pumps fire only the connections carrying that name - the
   mechanism `GetPropertyChangedSignal` has had since v0.6 and
   `GetAttributeChangedSignal` already reuses for a name the engine never
   declared. The catch-all `MessageReceived` it replaced could not be kept beside
@@ -215,12 +215,12 @@ Five rules a reviewer should hold to:
   hand-written filtered fire beside `FireInputSignal`'s two was not added.
 - **`ScriptValue` is a payload on this interface and never a handle.**
   `ReadValue`/`ReturnValue` carry the tree `HttpService` writes as JSON and
-  `CrossWorldService` puts on a bus — values that already leave a world. It has
+  `CrossWorldService` puts on a bus - values that already leave a world. It has
   no tag for an `EnumItem` and must not gain one. `GetBoundActionInfo` is the
   case that pressed on it: its record holds `Enum.KeyCode` members, and it was
   written twice for two versions on the argument that a return type invented for
   one service's shape is what the interface is not for. What closed it is not a
-  widened `ScriptValue` and not a record return — it is
+  widened `ScriptValue` and not a record return - it is
   `ScriptCall::ReturnBoundAction` over a `BoundActionReport`, which is the shape
   `ReturnInputObjects` already had: the *fact* is one struct and only the wrapper
   is two. **`ScriptCall::ReturnEnum` is the same point one size down**: one member
@@ -239,7 +239,7 @@ Five rules a reviewer should hold to:
 **`BreakpointService` stays Luau-only for a reason that is not a binding, and it
 is the only row that does.** `Debugger::Add` refuses a `.js`, `.mjs`, `.cjs`,
 `.ts` or `.tsx` chunk, so a JavaScript binding would answer "nothing can be
-armed" to everything — the surface `HttpService`'s absent three are refused for
+armed" to everything - the surface `HttpService`'s absent three are refused for
 being. `DEFERRED.md` D00106 carries what closing it would take.
 
 **The shared half of a service is shared machinery, and there are eight of them
@@ -247,7 +247,7 @@ now.** `SignalTable`, `ChangeQueue`, `TaskQueue`, `ActionStack`,
 `TopicSubscriptions`, `TweenTable`, `DebrisQueue` and `ChildWaiters` each hold an
 ordering a recording depends on with the callables left opaque. A service
 whose per-language halves differ only in where a list lives is a service whose
-list belongs in one of these — `MessagingService` was a Lua registry table on one
+list belongs in one of these - `MessagingService` was a Lua registry table on one
 side and an `unordered_map` on the other, and neither half decided anything a
 language decides.
 
@@ -274,7 +274,7 @@ than a chore. All three are answered, and how is worth keeping:**
   `ForgetSubtree` takes a lambda that is `lua_unref` on one side and an index
   into `JsContext::Callables` on the other, so the interesting half of both
   methods is per-language by construction. What crosses is an entity and a
-  request to forget it, and that is `ScriptCall::Forget` — the `Forget(subtree)`
+  request to forget it, and that is `ScriptCall::Forget` - the `Forget(subtree)`
   shape this file predicted, arriving with the caller that needed it. The *walk*
   is shared now, which is what stops a grandchild's connections outliving the row
   they watched in one language and not the other.
@@ -282,7 +282,7 @@ than a chore. All three are answered, and how is worth keeping:**
   through, and that is a change to state rather than to slip in.** Luau refused a
   name that is not a *scriptable* property and JavaScript compared
   `PropertyDescriptor::Name` and ignored `Scriptable`, so the two disagreed about
-  what a script may watch — a JavaScript script could watch `ShaderScript.Source`,
+  what a script may watch - a JavaScript script could watch `ShaderScript.Source`,
   which the read path refuses by answering "no such member" precisely so an error
   cannot tell a program what is there to reach for. `ScriptableProperty` is the
   one reader now and JavaScript gets the stricter answer.
@@ -324,7 +324,7 @@ cannot reproduce.** That is the test, not whether it looks dangerous.
 
 `RuntimeLimits::StepBudget` bounds an interrupt counter. A wall-clock deadline
 would make whether a script finished depend on how busy the machine was, and a
-recording made on a fast machine would then replay differently on a slow one —
+recording made on a fast machine would then replay differently on a slow one -
 the desync rule 5 names, arriving through the one mechanism meant to prevent it.
 
 Memory is a hard ceiling through the allocator, so exhaustion surfaces as an
@@ -332,8 +332,8 @@ ordinary script error rather than as a `bad_alloc` inside the interpreter.
 
 ## A yield is legal only when something is already coming back for it
 
-`v05.md` §5.8 settles what a yield must mean — a script may only resume from
-something the barrier delivers in a deterministic order — and `Run` is where that
+`v05.md` §5.8 settles what a yield must mean - a script may only resume from
+something the barrier delivers in a deterministic order - and `Run` is where that
 is enforced: it refuses a suspended thread **that nothing has registered a resume
 for**, because a script resumed at some later point nobody chose is work crossing
 a tick boundary. `ThreadIsScheduled` is the whole of the test, so the question is
@@ -343,13 +343,13 @@ rather than a judgement.
 There are two sources that come back, and each is a table on the context:
 `AwaitedTickets` is a bus reply the barrier applied, and `AwaitedChildren` is a
 `WaitForChild` the tree answered. A third one is a new table, a new pump and an
-argument for why the resume is deterministic — not a convenient default taken
+argument for why the resume is deterministic - not a convenient default taken
 inside whatever needed it.
 
 ## An unbounded wait is refused, and that is a divergence from Roblox
 
-`WaitForChild(name, timeout)` is supported. **`WaitForChild(name)` — Roblox's own
-form, which waits for ever and warns after five seconds — raises**, with a
+`WaitForChild(name, timeout)` is supported. **`WaitForChild(name)` - Roblox's own
+form, which waits for ever and warns after five seconds - raises**, with a
 message that says why and names the argument to pass.
 
 This is the sharpest place the engine's scheduling argument reaches a script
@@ -359,7 +359,7 @@ wait with no end is a script that never finishes its tick, and the whole of rule
 and its consequences, or to refuse the form and diverge from every place that
 would be ported in. **The refusal is the honest half**: it costs one line in a
 ported script and it is met at the call site, where the two approximations are
-met much later —
+met much later -
 
 - a **default timeout** hands a script that ported cleanly a nil it never checks
   for, on a tick nobody chose;
@@ -367,15 +367,15 @@ met much later —
   scene where the child is already there, and answers nil in exactly the case the
   method exists for.
 
-That is `HttpService.cpp`'s and `SoundService.cpp`'s rule — an absent member is
-better than one that does nothing — applied to an *argument* rather than to a
+That is `HttpService.cpp`'s and `SoundService.cpp`'s rule - an absent member is
+better than one that does nothing - applied to an *argument* rather than to a
 member, and `mono.tools/bindings` carries it into both declaration files by
 declaring the timeout **required**. So a ported script fails `just typecheck`
 before it fails at run time.
 
 **The resume is a second source at the barrier and the first that is not a bus
-reply.** `ChildWaiters` is the shared table — a parent, a name, a deadline in
-*ticks* through the same `TicksFor` `task.wait` and `Debris` use — and
+reply.** `ChildWaiters` is the shared table - a parent, a name, a deadline in
+*ticks* through the same `TicksFor` `task.wait` and `Debris` use - and
 `PumpChildWaiters` runs immediately after `PumpTree`, so a `ChildAdded` handler
 and a woken script see one world. The match is a `FindFirstChild` against the
 store rather than a filter over `ecs::TreeChange`, and that is deliberate:
@@ -392,7 +392,7 @@ than gaps to fill in later:
 
 - **A component the engine declared is not readable or writable through
   `GetComponent`/`SetComponent`.** A C++ struct has no field list at run time,
-  so there is nothing to marshal a table from — and it already has a property
+  so there is nothing to marshal a table from - and it already has a property
   surface. Adding a byte-level path to `scene::Visual` would be two ways to
   write one component, which the root `AGENTS.md` calls the most expensive kind
   of debt. `HasComponent` answers for any component, because asking is not
@@ -404,14 +404,14 @@ than gaps to fill in later:
 `World:CreateEntity` makes a **bare** entity: no class, no place in the tree,
 nothing drawn. It is still an `Instance` on the script side because an instance
 *is* an entity, and reading `.Name` on one fails the way any missing member
-does. That is not a wart to smooth over — it is the model stated in the section
+does. That is not a wart to smooth over - it is the model stated in the section
 above, and a handle that pretended to have a class would be the scripting-only
 view this module does not have.
 
 ## A host adds names, and it does it through one seam
 
 `script::HostSurface` is how a *program* offers a script something the engine
-does not — a toolbar, a docked panel, the source of another script. The editor
+does not - a toolbar, a docked panel, the source of another script. The editor
 adds `CreateDockWidget` and nothing in this module changes, which is the whole
 point of the shape.
 
@@ -429,7 +429,7 @@ Four rules a reviewer should hold to:
   cannot see.
 - **The globals are unfrozen for exactly one assignment.** `SetHost` runs after
   `luaL_sandbox`, so the table is readonly and a plain `lua_setglobal` throws.
-  The host table is frozen too — a plugin replacing one of its own host
+  The host table is frozen too - a plugin replacing one of its own host
   functions would be replacing it for every later chunk in that VM.
 - **`ReadHostValue` grows the stack before it recurses.** A C function is
   guaranteed `LUA_MINSTACK` slots and a map traversal holds a key and a value
@@ -443,13 +443,13 @@ take the program down with a plugin's typo.
 **An empty Luau table crosses as an `Array`, not a `Map`.** `{}` is one value
 and the reader has to pick a tag; a host expecting a map finds no entries under
 either, where a host expecting a *list* gets a tag it refuses. The ambiguity is
-harmless in one direction and not in the other, and `Selection:Set({})` — how a
-plugin deselects everything — is the call that was refused before.
+harmless in one direction and not in the other, and `Selection:Set({})` - how a
+plugin deselects everything - is the call that was refused before.
 
 **A dotted host name is a service, and `GetService` needed nothing added to
 it.** `Selection.Get` becomes a global table with a `Get` method, and
 `game:GetService` already resolves a service by looking up a global of the same
-name — the property `RunService` has had since v0.6 and whose comment gives the
+name - the property `RunService` has had since v0.6 and whose comment gives the
 reason: two objects for one service is two things to keep in step. Both call
 forms work, and the binding drops the leading `self` only when it is *that
 service's own* table, so `Selection:Set({part})` does not lose its argument.
@@ -458,7 +458,7 @@ service's own* table, so `Selection:Set({part})` does not lose its argument.
 
 `SoundService` is the case that states the rule and `UserInputService` is the one
 that established it. `engine::audio` is L12 `client` and this module is L9
-`shared`, so a binding here cannot name a mixer, a graph or a node — the tier
+`shared`, so a binding here cannot name a mixer, a graph or a node - the tier
 check fails at configure time with the edge named, and it is right to. The seam
 is `scene`: a script writes a resource, and whoever owns the device walks it.
 `scene::InputState` was the first, `scene::AudioState` is the second, and a third
@@ -467,7 +467,7 @@ should look the same rather than inventing a route.
 **What the tier decides is scope, not plumbing.** A member needing a *node* the
 audio graph does not have cannot be honestly bound however the seam is shaped, so
 `SoundService.cpp` names every Roblox member it does not have and what each
-would need first — a filter node for reverb, a Doppler node for `DopplerScale`, a
+would need first - a filter node for reverb, a Doppler node for `DopplerScale`, a
 shape in the emitter for `VolumetricAudio`, and for `PlayLocalSound` something
 that reports a sound has finished. That list is the file's most useful half, and
 it is `HttpService.cpp`'s shape one door along: **an absent member is better than
@@ -477,19 +477,19 @@ one that does nothing**, because a member that exists looks decided.
 
 `InputBegan` fired with a bare `Enum.KeyCode`, a bound action's handler took one
 as its third argument, and the generated declarations said both passed *nothing*.
-Three answers to one question, none of them Roblox's — so a handler copied from a
+Three answers to one question, none of them Roblox's - so a handler copied from a
 Roblox place read `input.KeyCode` off an `EnumItem`, got nil, and typechecked
 clean against a declaration that agreed with neither.
 
 That is what a datatype nobody built costs, and it is worth naming because the
 same shape is still open one door along: `PumpGuiEvents` passes nothing to a
-`TextButton`'s `InputBegan`, and `LuauBindings.hpp` says what closing it needs —
+`TextButton`'s `InputBegan`, and `LuauBindings.hpp` says what closing it needs -
 `gui::Router` recording which button produced an event, which is a change in
 `gui` rather than here.
 
 **`MouseButton1Click` is `Activated` under Roblox's other name, and one
 `SignalKind` serves both.** The router produces exactly one primary button, so
-the two questions have one answer here — and a second kind would be a second list
+the two questions have one answer here - and a second kind would be a second list
 for one event, where whichever name the pump did not know would never fire. That
 is the rule for a synonym: **two spellings of one signal, never two lists.**
 
@@ -501,7 +501,7 @@ is what `SoundService.cpp` keeps a list of refusing.
 
 **`engine.script.guisurface` is where a gui signal stops being a claim.** It
 stands a world up, lays it out, compiles the list, drives a real `gui::Router`
-with a pointer and hands what comes out to `Runtime::DeliverGuiEvents` — so every
+with a pointer and hands what comes out to `Runtime::DeliverGuiEvents` - so every
 one of the seven names above is asserted to have *fired*, in both languages, from
 one script. A suite that synthesised a `GuiEvent` would pass against a router
 nothing calls, which is exactly the bug that shipped.
@@ -515,27 +515,27 @@ reason `CollectionService` has no `GetInstanceAddedSignal`.
 
 **The six signals are one `SignalKind` told apart by name, in both languages.**
 `ServiceSignal::Property` is what carries the filter, `PumpInput` and
-`PumpJsInput` fire the row that matches, and the four report builders —
-`KeyReport`, `ButtonReport`, `MotionReport`, `WheelReport` — live in `Actions.cpp`
+`PumpJsInput` fire the row that matches, and the four report builders -
+`KeyReport`, `ButtonReport`, `MotionReport`, `WheelReport` - live in `Actions.cpp`
 because two pumps building a report each is two answers to what a frame did. An
 engine where a click carried a position in one language and not the other is one
 nobody could port a handler between.
 
 **`gameProcessedEvent` is real, and what backs it is the router's own events.**
 Roblox's second argument was passing nothing at all, so a handler written
-`function(input, gameProcessed)` — the form every Roblox place uses — read nil on
+`function(input, gameProcessed)` - the form every Roblox place uses - read nil on
 every edge and treated a click on its own menu as a click on the world.
 Swallowing the click instead would have been the other wrong answer; the right
 one is to deliver it *marked*. So both pumps are handed this beat's
 `PendingGuiEvents` and ask `InterfaceHasPointer` once, because an event naming an
-element is the only record there is of a press having been taken — `gui::Router`
+element is the only record there is of a press having been taken - `gui::Router`
 emits one exactly when the pointer is over or pressed on something that takes
 input, and `MouseLeave` is the one kind that means the opposite.
 
 **A key is never game-processed, and that is a gap named rather than a decision.**
 `gui` has no keyboard focus: `Router` holds a hover and a press, and a `TextBox`
 is a class that draws. Closing it needs the router to hold a focused element and
-release it on a press elsewhere, which is a change in `gui` — and until then a key
+release it on a press elsewhere, which is a change in `gui` - and until then a key
 is honestly unprocessed. `IsPointerReport` is the filter that keeps the answer
 from leaking onto one.
 
@@ -545,23 +545,23 @@ unread, so `Enum.ContextActionResult` was unspellable and the case
 `ContextActionService` exists for was unsolvable in the interesting direction: a
 vehicle nobody is driving wants to let E through to the door it is parked beside.
 `ActionStack::ClaimingFrom` is the walk, `Pass` continues it, and `Sink`, nil or a
-handler that raised stop it — a raise sinks because handing the key down on the
+handler that raised stop it - a raise sinks because handing the key down on the
 strength of a crash would make a broken script change which *other* script runs.
 
 **A signal that fires every frame is `InputChanged` wearing the other hat.**
 `LastInputTypeChanged` is an edge over `InputState::LastSource`, and the roll that
-makes it one lives in `input::Translator::BeginFrame` beside the other three —
+makes it one lives in `input::Translator::BeginFrame` beside the other three -
 `input/AGENTS.md` states it from that side. A version that fired on the value
 rather than the change would fire on every frame the player was doing anything.
 
 ## A signal about a thing that is destroyed cannot be queued
 
 `Player.CharacterAdded` and `CharacterRemoving` arrive by two different routes,
-and the split is forced rather than stylistic — it is `PlayerAdded` and
+and the split is forced rather than stylistic - it is `PlayerAdded` and
 `PlayerRemoving`'s split, one class along, for a sharper reason.
 
-- **`CharacterAdded` is queued.** `scene::SetPlayerCharacter` records it —
-  `scene` is L7 and cannot fire a signal — and `PumpCharacters` drains it at the
+- **`CharacterAdded` is queued.** `scene::SetPlayerCharacter` records it -
+  `scene` is L7 and cannot fire a signal - and `PumpCharacters` drains it at the
   barrier, after `PumpTree`, so a handler indexing `character.Humanoid` sees a
   world whose tree signals have already agreed the model is there.
 - **`CharacterRemoving` rides `Store::OnDescendantRemoving`.** Dying in this
@@ -572,8 +572,8 @@ and the split is forced rather than stylistic — it is `PlayerAdded` and
 
 **The two are disjoint and nothing fires twice.** The pump skips a change whose
 model is no longer alive, which is every removal the hook already reported; what
-is left for the pump is the release that did *not* destroy —
-`player.Character = nil` — which the hook cannot see. `PlayerLosingCharacter` is
+is left for the pump is the release that did *not* destroy -
+`player.Character = nil` - which the hook cannot see. `PlayerLosingCharacter` is
 the filter, and the gate on the *nearest* ancestor is what makes it fire once
 rather than once per level of the tree.
 
@@ -595,7 +595,7 @@ pauses; two rules about the surface around it are this file's:
 - **It is installed only when `RuntimeLimits::Role::Studio` is set, and it is
   absent rather than refusing.** Arming a breakpoint switches Luau's step mode
   on and costs the whole runtime its speed, which a shipped server has no
-  business letting a game script decide — and a service that existed and
+  business letting a game script decide - and a service that existed and
   answered "not in a game" to everything is a surface somebody writes against
   and then finds does nothing where it matters.
 
@@ -603,14 +603,14 @@ pauses; two rules about the surface around it are this file's:
 a value the frame made and an upvalue is one it captured from an enclosing
 scope; merging them answers "what is in scope" and loses "where did it come
 from", which is the question an upvalue is looked at to answer. A Luau main
-chunk closes over nothing — Lua 5.2's `_ENV` upvalue is not Luau's model — so an
+chunk closes over nothing - Lua 5.2's `_ENV` upvalue is not Luau's model - so an
 empty upvalue list is the ordinary state of a top-level frame and the panel says
 so rather than only drawing "none".
 
 **Only Luau has breakpoints, and a chunk that cannot carry one is refused where
 somebody asks for it.** `Debugger::Add` answers `false` for a `.js`, `.mjs`,
 `.cjs`, `.ts` or `.tsx` chunk, so a dead breakpoint cannot reach the list
-through any path — the service, the editor's gutter, the panel, or `Adopt`
+through any path - the service, the editor's gutter, the panel, or `Adopt`
 copying a list somebody else built. `BreakpointsRefused` is the one function
 that decides, and every caller uses it for the message rather than writing its
 own.
@@ -621,7 +621,7 @@ are different things to go and fix. `D00106` carries what closing the gap would
 take; the refusal names it.
 
 **A chunk name with no extension is allowed**, because `Runtime::Run(source,
-"probe")` names one that way and it is always Luau — refusing it would refuse
+"probe")` names one that way and it is always Luau - refusing it would refuse
 the form every test and every in-editor evaluation uses.
 
 ## Timed work happens at the head of the barrier, and it is not a resume
@@ -634,7 +634,7 @@ that follow are the ones a reviewer should hold to:
 
 - **They step on the fixed tick delta and never on a clock.** A tween that
   advanced by how long the last frame took would put the scene somewhere else on
-  a busy machine, and `just replay-check` would fail a long way from the cause —
+  a busy machine, and `just replay-check` would fail a long way from the cause -
   the same failure `os` is withheld to prevent. A debris deadline is a *tick
   number*, computed by the same `ceil(seconds / delta)` `task.wait` uses, so
   half a second is thirty ticks at sixty hertz on every machine.
@@ -643,19 +643,19 @@ that follow are the ones a reviewer should hold to:
   tick fire in the order the scripts made them; `DebrisQueue` sorts on
   `(DueTick, Sequence)`, so two items with one deadline go in the order they
   were added. A tween's *goals* are sorted by property name for a third instance
-  of the same rule — `Position` and `CFrame` both write `Transform`, so which
+  of the same rule - `Position` and `CFrame` both write `Transform`, so which
   lands last is observable.
 - **They go first because everything else in the barrier reacts.** A bound
   action, a `.Changed`, a tree signal, a resumed task and the beat all see one
   world in which this tick's motion has already happened; after the beat
   instead, every script would read a value one tick stale. It also settles what
-  a tween made *during* a barrier does — it first advances on the next one.
+  a tween made *during* a barrier does - it first advances on the next one.
 
 **A tween is an entity and is deliberately not an instance.** The entity is
 minted only to be a name that is unique in a world and can be the subject of a
 `SignalTable` entry, which is what makes `Completed` an ordinary
 `RBXScriptSignal` in both languages. It carries no class and no components, so
-nothing saves it, draws it or replicates it — and `ecs::Classes::Register` is
+nothing saves it, draws it or replicates it - and `ecs::Classes::Register` is
 process-wide, so a registered `Tween` class would have added a row every
 consumer of the class table then has to describe, plus an `Instance.new("Tween")`
 that mints a tween with no target. `Tweens.hpp` carries the whole argument.
@@ -663,7 +663,7 @@ that mints a tween with no target. `Tweens.hpp` carries the whole argument.
 **Its `Play` is a per-VM method rather than a neutral one, and that is the one
 place `ScriptCall.hpp` was deliberately not used.** The neutral instance methods
 are installed flat on *every* instance, and `Play` is a name Roblox puts on
-three classes — claiming it there would take it from every part, sound and
+three classes - claiming it there would take it from every part, sound and
 animation in the engine. Three small methods written twice is the cheaper of
 the two, and it is what `RBXScriptConnection` already pays.
 
@@ -671,9 +671,9 @@ the two, and it is what `RBXScriptConnection` already pays.
 name.** `TweenPosition`, `TweenSize` and `TweenSizeAndPosition` are neutral rows
 in `GuiMethods.cpp`, because none of those three names collides with anything and
 each is a `TweenService:Create` a script would otherwise write by hand. They build
-`TweenGoal`s through `ScriptCall::ReadProperty` — the argument is read as the
+`TweenGoal`s through `ScriptCall::ReadProperty` - the argument is read as the
 *target's own* `Position` or `Size`, so none of the three names a datatype and
-`TweenSize` on a `BasePart` tweens a `Vector3` — and then go through
+`TweenSize` on a `BasePart` tweens a `Vector3` - and then go through
 `TweenTable::Create` and `Play` like everything else. **There is no second
 interpolator, no second easing table and no second drain**, which is the rule to
 hold to: a convenience method that animated a property itself would be a second
@@ -681,15 +681,15 @@ answer to what half way between two `UDim2`s means.
 
 **`override` needed two methods on the table and `callback` needed one on the
 interface.** `TweenTable::Driving` and `CancelFor` are what Roblox's flag
-actually asks — is something already animating this object, and stop it — and
+actually asks - is something already animating this object, and stop it - and
 `ScriptCall::ConnectOnce` is the completion callback, which is a `:Once` on the
 tween's `Completed` rather than a second delivery path. Neither is a shortcut: a
 `override` that ignored its argument and a `callback` that was read and dropped
 are both members that exist and do nothing.
 
 **The *service* is neutral and the handle is not, and the two live in three
-files that each say which they are.** `TweenService.cpp` is the surface —
-`GetValue`, `Create` and the goal policy, with no VM in it — and `LuauTween.cpp`
+files that each say which they are.** `TweenService.cpp` is the surface -
+`GetValue`, `Create` and the goal policy, with no VM in it - and `LuauTween.cpp`
 and `JsTween.cpp` are the handle. `ScriptCall::ReturnTween` is where they meet,
 which is the split `ReturnSignal` was already on: one entity, two wrappers.
 
@@ -704,8 +704,8 @@ that ends up written twice should be asked which of the two it is.
 is live, because a tween silently dropped is a scene that animates on a small
 world and not on a big one. `DebrisQueue` destroys its oldest item early,
 because `AddItem` is a cleanup call and tidying up sooner is the conservative
-way for one to be wrong. A handle is not a lifetime — nothing here can tell an
-unplayed tween somebody still holds from one nobody does — which is why there is
+way for one to be wrong. A handle is not a lifetime - nothing here can tell an
+unplayed tween somebody still holds from one nobody does - which is why there is
 a count at all.
 
 ## One runtime, one world
@@ -722,8 +722,8 @@ client run when it does not own the world". Three rules a reviewer should hold
 to:
 
 - **It is a second selection, not an argument on the first.** `ScriptsIn`
-  answers Roblox's class rule — a `Script` is the server's, a `LocalScript` is a
-  client's — and that is the whole answer for a host that owns its world. A
+  answers Roblox's class rule - a `Script` is the server's, a `LocalScript` is a
+  client's - and that is the whole answer for a host that owns its world. A
   replica needs the container rule as well: a `LocalScript` runs when it is under
   the local player's own subtree or under `ReplicatedFirst`. Folding that into
   `ScriptsIn` would stop a `LocalScript` an author parked in `Workspace` from
@@ -731,7 +731,7 @@ to:
   for the sake of a rule about somebody else's world.
 - **No refusal is written here, and none should be.** A client script cannot
   write a property and cannot mint an instance, and both are `ecs::Store`'s
-  refusals through `AdoptOnly` — `SetProperty` and `MayMintAuthoritative`. What
+  refusals through `AdoptOnly` - `SetProperty` and `MayMintAuthoritative`. What
   this module owes is that the refusal *reaches the author*:
   `InstanceNewIndex` raises with a message naming the world as a replica, because
   a script author cannot tell a write that was rejected from one that was applied
@@ -739,13 +739,13 @@ to:
 - **A replica is never asked to furnish itself.** `OpenWorkspace` and its
   JavaScript twin call `scene::InstallServices` only when the store may mint;
   otherwise they resolve whatever the authority has already sent. Asking anyway
-  worked — the mint is refused and the fallback finds the arrived `Workspace` —
+  worked - the mint is refused and the fallback finds the arrived `Workspace` -
   and logged "refusing CreateInstance" at error level on every join, which reads
   as a fault and is the ordinary state of a world that owns nothing.
 
 `Runtime::RunNewScripts` is the other half. `RunWorldScripts` is a host saying
 "start this game" and starts everything it finds, every time it is called; a
 replica fills from the wire, so what it has to ask each tick is what arrived.
-The record of what has already started is the runtime's own — two VMs over one
-world would each answer it separately — which is why it is a member rather than
+The record of what has already started is the runtime's own - two VMs over one
+world would each answer it separately - which is why it is a member rather than
 a tag on the row.

@@ -7,7 +7,7 @@
 -- ever one grant deep and one round of the grant sweep is enough.
 --
 -- Turning the camera is what makes it two. Once pane A leaves the viewer's
--- frustum, everything A was revealing drops a level — and until v0.15 the sweep
+-- frustum, everything A was revealing drops a level - and until v0.15 the sweep
 -- followed exactly one, while the surface pass drew `SetSurfaceBounces` of them.
 -- The levels past the first were culled rather than late, which is why the
 -- symptom was an angle rather than a scene.
@@ -29,7 +29,7 @@ local SURFACE_SIZE = Vector3.new(512, 512, 0)
 
 -- **The world states its own depth, and a measurement scene is exactly what
 -- should.** Left alone the renderer works the depth out from the frame before,
--- which means the first frames of a run are drawn at one level, then two — so a
+-- which means the first frames of a run are drawn at one level, then two - so a
 -- capture taken early is a capture of the ramp rather than of the scene, and two
 -- builds that ramp differently differ for a reason that has nothing to do with
 -- the change under test. Three is the length of A -> B -> C; stating it makes

@@ -2,7 +2,7 @@
 //
 // **Written because the studio's Stop broke the viewport and nothing said so.**
 // Press Play, press Stop, and the explorer still showed every instance while the
-// screen went black — which is the worst shape a bug can have, because the thing
+// screen went black - which is the worst shape a bug can have, because the thing
 // that is wrong and the thing that looks wrong are in different modules. A
 // headless test over the same sequence is where that gets cornered.
 
@@ -50,7 +50,7 @@ namespace {
 	// now decides.
 	//
 	// Falls back to a root, because some of these scripts deliberately leave an
-	// instance unparented — an orphan is still reachable from C++ through
+	// instance unparented - an orphan is still reachable from C++ through
 	// `EachRoot`, and only a *script* is unable to list one. A test about
 	// signals or tasks should not have to care which of the two its fixture is.
 	Entity InScene(Store &store, std::string_view name) {
@@ -76,7 +76,7 @@ namespace {
 		return id;
 	}
 
-	// A part, **in the scene** — which since v0.7 means under `Workspace`
+	// A part, **in the scene** - which since v0.7 means under `Workspace`
 	// rather than merely alive in the world.
 	//
 	// The parenting is the fixture's job and not a detail of it: a draw list is
@@ -157,7 +157,7 @@ TEST_CASE("only the Workspace subtree is published", "[client][presentation]") {
 	CHECK(Drawn(universe, world) == 2);
 
 	// And taking it out again removes it, which is the half a set of hooks on
-	// the *parenting* side would most easily get wrong — the gate is derived
+	// the *parenting* side would most easily get wrong - the gate is derived
 	// from the tree every pass rather than maintained by whoever moved
 	// something.
 	universe.Enter(world, [](Store &store) {
@@ -196,7 +196,7 @@ TEST_CASE("a subtree follows its ancestor in and out of the scene", "[client][pr
 }
 
 // `Visible` was declared, bound, saved and reloaded from v0.4, and no draw path
-// read it. It is a term of the gate now rather than a branch in a loop — see
+// read it. It is a term of the gate now rather than a branch in a loop - see
 // `scene/Visibility.hpp` on why a tag and not a boolean test.
 TEST_CASE("an invisible part in the Workspace is not published", "[client][presentation]") {
 	Universe universe;
@@ -215,7 +215,7 @@ TEST_CASE("an invisible part in the Workspace is not published", "[client][prese
 	CHECK(Drawn(universe, world) == 1);
 
 	// **Still collides, still exists, still has its transform.** `Visible` and
-	// `Transparency` are different questions and neither is "delete it" — a
+	// `Transparency` are different questions and neither is "delete it" - a
 	// draw path that treated one as the other would give invisible parts no
 	// physics.
 	universe.Enter(world, [](Store &store) {
@@ -297,7 +297,7 @@ TEST_CASE("a part's transparency survives a snapshot", "[client][presentation]")
 		// **`CastShadow` is the next field this was written for.** It arrived at
 		// v0.7 into the same hand-written serialiser, and it is off here rather
 		// than on so that a reader that silently dropped it would come back
-		// `true` and fail — a check against the default is no check at all.
+		// `true` and fail - a check against the default is no check at all.
 		const bool casts = false;
 		REQUIRE(store.SetProperty(part, Name("CastShadow"), &casts, sizeof(casts)));
 
@@ -386,7 +386,7 @@ TEST_CASE("what a part looks like reaches the draw list whole", "[client][presen
 // presented a mirror that was never aimed.
 //
 // The visible half of that is not the camera. Aiming is also what writes
-// `Visual::Surface` onto the pane — step 4 of `scene/SurfaceCameras.hpp` — so
+// `Visual::Surface` onto the pane - step 4 of `scene/SurfaceCameras.hpp` - so
 // without the system the pane keeps the default of -1, samples no texture, and
 // draws as its own flat tint. A white pane looks like a broken surface pass,
 // which is why it went to the renderer twice before it came here.
@@ -436,7 +436,7 @@ TEST_CASE("a world that only presents still aims its mirrors", "[client][present
 		REQUIRE(list != nullptr);
 
 		// And it reaches the draw list, which is the half `Visual` alone does
-		// not prove — the renderer reads the copy, not the component.
+		// not prove - the renderer reads the copy, not the component.
 		const auto pane_drawn = std::find_if(
 			list->Instances.begin(), list->Instances.end(), [](const engine::scene::DrawInstance &instance) {
 				return instance.Surface == 0;
@@ -461,12 +461,12 @@ TEST_CASE("a world that only presents still aims its mirrors", "[client][present
 TEST_CASE("a part moved without a tick is drawn where it was moved to", "[client][presentation]") {
 	// **The editor's whole case, and it was drawing every part in the wrong
 	// place.** `World::Present` runs `PreRender` alone; `capture-previous` is a
-	// `PreSimulation` system, so a *suspended* world — which is what the studio
-	// shows while you author — never updates `PreviousTransform`. The draw list
+	// `PreSimulation` system, so a *suspended* world - which is what the studio
+	// shows while you author - never updates `PreviousTransform`. The draw list
 	// interpolates from that stale value toward the current one, and a suspended
 	// world's alpha does not advance either, so a part dragged in the properties
-	// panel stayed exactly where it started while its selection outline — which
-	// reads `Transform` directly — moved away from it.
+	// panel stayed exactly where it started while its selection outline - which
+	// reads `Transform` directly - moved away from it.
 	//
 	// Two parts of the frame disagreeing about where something is reads as a
 	// renderer fault, which is the most expensive kind of wrong place to look.
@@ -503,7 +503,7 @@ TEST_CASE("a part moved without a tick is drawn where it was moved to", "[client
 
 TEST_CASE("a scripted move still interpolates across a tick", "[client][presentation]") {
 	// **The case that refuted the obvious fix.** Making an authored write clear
-	// `PreviousTransform` — "a teleport, not a simulation step" — reads well and
+	// `PreviousTransform` - "a teleport, not a simulation step" - reads well and
 	// breaks every scripted animation in the engine: `examples/Rings.luau` sets
 	// `CFrame` once a tick and relies on the draw list interpolating between
 	// ticks, which is what buys smooth motion at 300 frames a second over a
@@ -511,7 +511,7 @@ TEST_CASE("a scripted move still interpolates across a tick", "[client][presenta
 	// tick rate.
 	//
 	// So a property write moves `Transform` and nothing else, and the editor's
-	// problem — a suspended world whose previous frame is never captured — is
+	// problem - a suspended world whose previous frame is never captured - is
 	// fixed by presenting such a world at alpha one instead. `PlaceInstance`
 	// carries both halves.
 	Universe universe;
@@ -543,7 +543,7 @@ TEST_CASE("a scripted move still interpolates across a tick", "[client][presenta
 // A studio in Edit mode never ticks: `Editor::Simulate` returns before
 // `Universe::Tick`, and `World::Present` runs `PreRender` alone. So a pass
 // registered in `PreSimulation` does not run at all while somebody is
-// authoring — and everything downstream of it reads whatever the component was
+// authoring - and everything downstream of it reads whatever the component was
 // last left holding, which for something the editor just made is the type's
 // default.
 //
@@ -593,7 +593,7 @@ TEST_CASE("a material assigned without a tick reaches the draw list", "[client][
 TEST_CASE("a light on an attachment is placed without a tick", "[client][presentation]") {
 	// `Attachment::WorldFrame` is a cache with one writer, and `CollectLights`
 	// reads it rather than walking the hierarchy per lamp. Unresolved, it is the
-	// identity — so every lamp in an edited world lit the origin, whatever it
+	// identity - so every lamp in an edited world lit the origin, whatever it
 	// was actually parented to.
 	Universe universe;
 	const WorldId world = AddWorld(universe, "presentation.lamp");
@@ -633,7 +633,7 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 	// arithmetic inside one world; what is drawn through that frustum is a draw
 	// list, and another world's draw list is on the far side of a boundary rule
 	// 3 keeps shut. The host is the only thing holding both, so the host is what
-	// joins them — by appending the far world's instances and telling the
+	// joins them - by appending the far world's instances and telling the
 	// surface which range is its own.
 	Universe universe;
 
@@ -657,7 +657,7 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 	REQUIRE(published == 2);
 
 	// A pane with a portal on it, naming the other world. The destination is a
-	// local stand-in — it is what the *camera* is placed against, and this test
+	// local stand-in - it is what the *camera* is placed against, and this test
 	// is about what is *drawn*.
 	universe.Enter(here, [](Store &store) {
 		const Entity pane = store.CreateInstance(engine::scene::PartClass(), "Pane");
@@ -706,7 +706,7 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 
 	// **The far world's rows do not join this world's**, which is the property
 	// the fix turned on: joined, every one of them would be culled against this
-	// camera, sorted into this scene's plan and submitted by the screen pass —
+	// camera, sorted into this scene's plan and submitted by the screen pass -
 	// the two rooms drawn on top of each other.
 	//
 	// Nothing is appended here either, and that is a statement about this
@@ -825,7 +825,7 @@ TEST_CASE("a same-world hole leaves the surface path for the recursive one", "[c
 	// **The pivot, stated as a test.** A `SurfaceCamera` is placed from the eye,
 	// so when one surface pass draws another pane it projects that pane's image
 	// with a matrix taken from the eye rather than from the camera the pass is
-	// rendering from — the wrong viewpoint, not a stale one. A same-world portal
+	// rendering from - the wrong viewpoint, not a stale one. A same-world portal
 	// is therefore drawn by `render::PortalView` and must *not* also arrive as a
 	// `SurfaceView`, or the pane is drawn twice and the second answer is wrong.
 	Universe universe;
@@ -848,7 +848,7 @@ TEST_CASE("a same-world hole leaves the surface path for the recursive one", "[c
 	CHECK(views.empty());
 
 	// Each hole names the other, so the level one opens can skip the pane it is
-	// standing at — CodeParade's `skipPortal`.
+	// standing at - CodeParade's `skipPortal`.
 	CHECK(portals[0].Partner == portals[1].Index);
 	CHECK(portals[1].Partner == portals[0].Index);
 
@@ -863,8 +863,8 @@ TEST_CASE("a same-world hole leaves the surface path for the recursive one", "[c
 	CHECK(std::abs(first.Normal.Z) == Catch::Approx(1.0f));
 
 	// **The defining property of the map**: the source pane's centre lands on
-	// the destination's. Everything the pass does — where the sub-camera stands,
-	// where its near plane is skewed to — follows from it.
+	// the destination's. Everything the pass does - where the sub-camera stands,
+	// where its near plane is skewed to - follows from it.
 	const Vector3 landed = first.Warp.Point(first.Centre);
 	CHECK(landed.X == Catch::Approx(second.Centre.X).margin(0.01f));
 	CHECK(landed.Y == Catch::Approx(second.Centre.Y).margin(0.01f));
@@ -878,14 +878,14 @@ TEST_CASE("a same-world hole leaves the surface path for the recursive one", "[c
 	// that: a pane's map and its partner's are exact inverses, so the lap closes
 	// no matter which face was entered. The pair of side-picked maps this used to
 	// carry both landed on the same side of the far pane and were therefore not
-	// inverses — a lap that started from behind came back displaced and turned by
+	// inverses - a lap that started from behind came back displaced and turned by
 	// whatever angle the pair turns through.
 	const Vector3 eye{0.0f, 1.0f, 5.0f};
 	const Vector3 there = first.Warp.Point(eye);
 
 	// A hundred units along X, because that is where the far room is. **Measured
 	// on the axis the pair is laid out on rather than as a distance**, so the
-	// case says "the other room" and not "and this far into it" — how far into it
+	// case says "the other room" and not "and this far into it" - how far into it
 	// is the round trip's business, checked below.
 	CHECK(std::abs(there.X - eye.X) == Catch::Approx(100.0f).margin(0.5f));
 
@@ -905,8 +905,8 @@ TEST_CASE("a same-world hole leaves the surface path for the recursive one", "[c
 }
 
 TEST_CASE("a hole with no partner still recurses, and a lone pane has none", "[client][presentation]") {
-	// A one-way hole is a real arrangement — a pane leading into a room with no
-	// pane back — and it must still be drawn recursively. What it has no answer
+	// A one-way hole is a real arrangement - a pane leading into a room with no
+	// pane back - and it must still be drawn recursively. What it has no answer
 	// for is which slot the level below should skip, and -1 is that answer
 	// rather than a slot number that happens to be zero.
 	Universe universe;
@@ -976,7 +976,7 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 	// there; the one that puts the far world's body into *this* room, in front
 	// of this world's pane, was not. So walking into the hole from one world
 	// worked and standing in the other world watching somebody walk in showed
-	// an empty block — a portal that draws from A into B and never back.
+	// an empty block - a portal that draws from A into B and never back.
 	//
 	// The two panes deliberately name different surface slots. A slot numbers a
 	// camera within one store, so asking the far world for "the pane on slot 2"
@@ -1021,7 +1021,7 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 			store.SetParent(camera, pane);
 
 			// **Standing in the pane, which is not a crossing.** The body has
-			// not moved at all — `PreviousTransform` is where it is — so the
+			// not moved at all - `PreviousTransform` is where it is - so the
 			// interpolation cannot move the clone whatever the frame's alpha.
 			const Entity body = store.CreateInstance(engine::scene::PartClass(), "Body");
 			const Vector3 bodySize{1.0f, 2.0f, 1.0f};
@@ -1070,7 +1070,7 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 
 			// **The same depth into the far pane as into the near one**, which
 			// is what makes the two halves meet at the plane rather than
-			// overlap or leave a gap — mirrored across it, because the map
+			// overlap or leave a gap - mirrored across it, because the map
 			// carries a pane's front hemisphere to the far pane's back one.
 			CHECK(row.Frame.Position.Z == Catch::Approx(-0.3f).margin(0.001f));
 
@@ -1101,7 +1101,7 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 
 		// **The mouth that did not.** The far world's body is standing in the
 		// far world's pane, and the half of it that is in this room belongs on
-		// the end of this room's list — where it is culled, lit and sorted with
+		// the end of this room's list - where it is culled, lit and sorted with
 		// everything else here rather than inside the glass.
 		CHECK(drawn.size() == ownHere + 1);
 		CHECK(cloneAt(drawn, -100.0f) == 1);
@@ -1140,7 +1140,7 @@ TEST_CASE("a cross-world pane is handed every row of the world it names", "[clie
 	//
 	// `AttachForeignSurfaces` is the whole of the crossing: it resolves the
 	// destination by *name*, copies that world's `DrawList` into a range of its
-	// own, and points the surface at it. Nothing here filters, sorts or culls —
+	// own, and points the surface at it. Nothing here filters, sorts or culls -
 	// so if a part is in the far world's draw list it is in the range, and if it
 	// is missing from the picture the loss is downstream.
 	Universe universe;
@@ -1198,7 +1198,7 @@ TEST_CASE("a cross-world pane is handed every row of the world it names", "[clie
 		(void)client::CollectPortalViews(store, portals);
 
 		// **Empty, and that is the assertion under the assertion.** A
-		// cross-world pane is not a `PortalView` — it does not recurse — so it
+		// cross-world pane is not a `PortalView` - it does not recurse - so it
 		// must still be a `SurfaceView`, and a change that swept it onto the
 		// recursive path would show up here first.
 		CHECK(portals.empty());
@@ -1222,7 +1222,7 @@ TEST_CASE("a cross-world pane is handed every row of the world it names", "[clie
 
 TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client][presentation]") {
 	// **The rule a mirror has always had about itself, which a cross-world pair
-	// had nowhere to state — and it blanked the feature outright.**
+	// had nowhere to state - and it blanked the feature outright.**
 	//
 	// A pair is laid out the same way at both ends: that is what makes a hole
 	// read as an opening rather than as a painting, and it is what
@@ -1231,14 +1231,14 @@ TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client]
 	// fitted to, and it is the same rectangle that frustum covers. It filled the
 	// image edge to edge in one flat colour and hid every room behind it.
 	//
-	// What that reads as is "the other world does not render its objects" — the
+	// What that reads as is "the other world does not render its objects" - the
 	// floor shows wherever the slab does not quite reach, and nothing else ever
 	// does. It survived a correct camera, a correct sampling matrix and a
 	// correct foreign range, because all three of those were doing their jobs on
 	// a picture of a wall.
 	//
 	// **Selected by slot rather than by entity**, because a draw instance carries
-	// a surface index and no identity — and the slots wanted are exactly the ones
+	// a surface index and no identity - and the slots wanted are exactly the ones
 	// `AttachForeignSurfaces` already gathers to bring the far world's straddlers
 	// back here.
 	Universe universe;
@@ -1279,7 +1279,7 @@ TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client]
 
 			// **An eye, because a surface camera is placed from one.** Without an
 			// `ActiveCamera` the aim pass has no viewer to map and assigns no
-			// slot — and a pane with no slot is not a pane any filter can see.
+			// slot - and a pane with no slot is not a pane any filter can see.
 			const Entity eye = store.CreateInstance(engine::ecs::Classes::Find(Name("Camera")), "Eye");
 			store.Set(eye, engine::scene::Transform{engine::core::CFrame(Vector3{0.0f, 5.0f, 16.0f})});
 			store.SetResource(engine::scene::ActiveCamera{eye, 16.0f / 9.0f});
@@ -1300,7 +1300,7 @@ TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client]
 	pair(there, here);
 
 	// **Aimed before it is published**, because that is what writes
-	// `Visual::Surface` onto a pane — and a draw instance's surface index is the
+	// `Visual::Surface` onto a pane - and a draw instance's surface index is the
 	// only thing the filter has to recognise a pane by. In a running host
 	// `client::InstallControls` registers this; the fixture installs
 	// presentation alone, so it is called here.
@@ -1330,7 +1330,7 @@ TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client]
 	// **And nothing invisible is in it, which is the other rule and the other
 	// bug.** Every other draw path sends a fully transparent part to the blended
 	// run, where an alpha of nothing contributes nothing. This range has no runs
-	// — it is one plain draw that bypasses the plan — so an invisible row
+	// - it is one plain draw that bypasses the plan - so an invisible row
 	// arrives at the opaque pipeline and draws solid. A cross-world pair has
 	// exactly such a row at exactly the worst place: the stand-in sits at the
 	// pane, which is where the camera is aimed and the size the frustum is
@@ -1339,7 +1339,7 @@ TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client]
 		CHECK(instance.Transparency < 1.0f);
 	}
 
-	// And the room is still there — a filter that dropped the far world rather
+	// And the room is still there - a filter that dropped the far world rather
 	// than its pane and its stand-in would pass both lines above and show
 	// nothing at all. Two rows fewer, and exactly two.
 	CHECK(foreign.size() + 2 == Drawn(universe, there));

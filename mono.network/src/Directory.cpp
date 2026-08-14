@@ -59,7 +59,7 @@ namespace network {
 			if (decoded->Session.Admits == Access::Private && !decoded->Authenticated) {
 				// Listed anyway. "I can see it but cannot join it" and "I cannot
 				// see it" are different problems, and a person reports both with
-				// the same sentence — so the row exists and the counter says
+				// the same sentence - so the row exists and the counter says
 				// which it was.
 				Tally.Locked++;
 			}

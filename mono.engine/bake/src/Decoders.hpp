@@ -3,7 +3,7 @@
 // The per-format entry points `Image.cpp` dispatches to.
 //
 // Private, because which formats exist is `ImageFormat`'s business and a caller
-// that reached for `ReadPng` directly would be choosing a decoder by name —
+// that reached for `ReadPng` directly would be choosing a decoder by name -
 // which is exactly the mistake `ReadImage` sniffing the signature exists to
 // prevent.
 
@@ -35,7 +35,7 @@ namespace engine::bake {
 	// Decodes a GIF into one flipbook sheet.
 	//
 	// **A grid, not a list of frames**, because a flipbook is the thing this
-	// engine can already draw animated — `effects::FlipbookLayout`. `Gif.cpp`
+	// engine can already draw animated - `effects::FlipbookLayout`. `Gif.cpp`
 	// carries the whole argument and what it costs.
 	//
 	// @param bytes   The file, `GIF8` included.
@@ -56,7 +56,7 @@ namespace engine::bake {
 	//
 	// **The one entry here that takes a size, because an SVG has none.** Every
 	// other format states its own dimensions and this one states a coordinate
-	// system, so the pixels are the caller's decision — which is why the public
+	// system, so the pixels are the caller's decision - which is why the public
 	// name for this is `RasterizeSvg` and why the pipeline reaches it through a
 	// node that carries the target rather than through `ReadImage`.
 	//

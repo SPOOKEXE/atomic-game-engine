@@ -1,7 +1,7 @@
-// What a world decides about how it is heard — **and almost nothing else**.
+// What a world decides about how it is heard - **and almost nothing else**.
 //
-// Three of Roblox's `SoundService` are here — `GetListener`, `SetListener` and
-// `Volume` — and every other member of it is absent rather than stubbed, for
+// Three of Roblox's `SoundService` are here - `GetListener`, `SetListener` and
+// `Volume` - and every other member of it is absent rather than stubbed, for
 // `HttpService.cpp`'s reason: a member that exists and does nothing is a surface
 // an author writes against and then finds does nothing, and worse, it *looks*
 // decided, so the next reader assumes somebody thought about it. Everything left
@@ -11,7 +11,7 @@
 // ## The tier is the whole shape of this file
 //
 // `engine::audio` is **L12 `client`** and this module is **L9 `shared`**, so
-// nothing here can name a mixer, a graph or a node — `mono.build/MonoLibrary.cmake`
+// nothing here can name a mixer, a graph or a node - `mono.build/MonoLibrary.cmake`
 // fails at configure time with the edge named, and it is right to. The seam is
 // the one `scene::InputState` established and `client/Sounds.hpp` already uses
 // for every sound in the world: a script writes a resource on the world, and the
@@ -25,8 +25,8 @@
 // ## `Volume` is not a Roblox property, and that is deliberate
 //
 // Roblox has no `SoundService.Volume`. Its answer to "turn the music down" is a
-// `SoundGroup` — an instance sounds join through `Sound.SoundGroup`, with a
-// `Volume` of its own — and this engine has no such class: `client::SoundStage`
+// `SoundGroup` - an instance sounds join through `Sound.SoundGroup`, with a
+// `Volume` of its own - and this engine has no such class: `client::SoundStage`
 // builds one fader per `Sound` straight into the output, and there is no node in
 // between for a group to be. A master gain is the honest one-line version of what
 // a group is for, and naming it something Roblox does not use is better than
@@ -41,42 +41,42 @@
 // This was Luau's alone for exactly one mechanism: `Volume` is a live property,
 // and a `ServiceSurface` could describe a method and not an accessor.
 // `ServiceProperty` closed it, and nothing about the three members below is per
-// language any more — the Luau half is a userdata because `safeenv` forces one
+// language any more - the Luau half is a userdata because `safeenv` forces one
 // and the JavaScript half is a plain object with two accessors, and that
 // asymmetry lives in the two adapters rather than here.
 //
 // ## What is absent, and what each would need first
 //
-// - **`PlayLocalSound(sound)`** — `sound.Playing = true` already *is* it. A
+// - **`PlayLocalSound(sound)`** - `sound.Playing = true` already *is* it. A
 //   `Sound` with no parent plays and is heard everywhere at one level, and a
 //   client's own world is not replicated upward, so on the side where "local"
 //   means anything the property is already the whole method. Roblox's version
 //   plays a *copy*, which would need something that reports a sound has finished
-//   so the copy can be reaped — this engine has no such signal, so a
+//   so the copy can be reaped - this engine has no such signal, so a
 //   fire-and-forget copy is an entity nobody deletes. The non-replicated half
 //   would need a property write the wire skips, and there is not one.
-// - **`GetMixerTime()`** — the mixer's sample clock is exactly what
+// - **`GetMixerTime()`** - the mixer's sample clock is exactly what
 //   `script/AGENTS.md` refuses `os.clock` for: a script branching on it produces
 //   a run that does not replay, and `just replay-check` would fail a long way
 //   from the cause. `store.Time()` is the clock a world has, and it is simulated.
-// - **`AmbientReverb`** — there is no filter node of any kind.
+// - **`AmbientReverb`** - there is no filter node of any kind.
 //   `audio/AGENTS.md` names reverb first in its "not here yet" list.
-// - **`RolloffScale`** — `audio::EmitterPlacement` is two distances and no curve,
+// - **`RolloffScale`** - `audio::EmitterPlacement` is two distances and no curve,
 //   and `audio/Graph.hpp` argues for that on purpose. There is no rolloff
 //   exponent to scale.
-// - **`DistanceFactor` and `DopplerScale`** — both describe the Doppler effect
+// - **`DistanceFactor` and `DopplerScale`** - both describe the Doppler effect
 //   and the mixer has no Doppler node. A player's cursor is advanced by the
 //   sample rate alone.
-// - **`VolumetricAudio`** — an `Emitter` is a point. Emitting from the interior
+// - **`VolumetricAudio`** - an `Emitter` is a point. Emitting from the interior
 //   of a part needs a shape in the placement.
-// - **`RespectFilteringEnabled`** — this decides whether a client's `Play`
+// - **`RespectFilteringEnabled`** - this decides whether a client's `Play`
 //   replicates to the server, and there is no client-to-server sound path at all.
-// - **`OpenAttenuationCurveEditor` / `OpenDirectionalCurveEditor`** — plugin
+// - **`OpenAttenuationCurveEditor` / `OpenDirectionalCurveEditor`** - plugin
 //   security, an editor window, and curve objects none of which exist.
-// - **`ListenerCFrame`, `ListenerObject`, `ListenerType`** — Roblox's newer
+// - **`ListenerCFrame`, `ListenerObject`, `ListenerType`** - Roblox's newer
 //   property form of `GetListener`/`SetListener`. Two spellings of one fact is
 //   the debt the root `AGENTS.md` calls the most expensive kind, so only the
-//   method pair is here — which is also what Roblox's own documentation still
+//   method pair is here - which is also what Roblox's own documentation still
 //   tells authors to use.
 //
 // @tier L9 · shared
@@ -140,7 +140,7 @@ namespace engine::script {
 		// what `SetListener` takes for it.
 		//
 		// **The one method on any surface that answers twice**, which JavaScript
-		// spells as an array — see `ScriptCall`'s `Return` block for why that
+		// spells as an array - see `ScriptCall`'s `Return` block for why that
 		// spelling difference is allowed where a record return invented for one
 		// service's shape would not be.
 		void GetListener(ScriptCall &call) {
@@ -153,7 +153,7 @@ namespace engine::script {
 
 			// **Nil for an instance that has gone away**, rather than a handle to
 			// a dead row. `client::SoundStage` falls back to the camera for the
-			// same case, so the two agree about what the setting now means — a
+			// same case, so the two agree about what the setting now means - a
 			// handle here would say the ear is somewhere the mixer is not putting
 			// it. `ReturnInstance` is what turns the null into each language's nil.
 			const bool pointed =
@@ -165,7 +165,7 @@ namespace engine::script {
 		//
 		// **`Enum.ListenerType` has two members here and four in Roblox**, and the
 		// two missing ones are missing from the *enum* rather than refused by this
-		// method — `scene/Audio.hpp` gives the reason, which is that the mixer is
+		// method - `scene/Audio.hpp` gives the reason, which is that the mixer is
 		// posted a position and never a facing. So `Enum.ListenerType.CFrame` does
 		// not exist to be passed, and a script that names it fails where it names
 		// it rather than here.

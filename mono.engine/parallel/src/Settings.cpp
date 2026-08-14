@@ -27,7 +27,7 @@ namespace engine::parallel {
 	}
 
 	void ApplyFlags() {
-		// Nothing declared these, so this program does not use them — the same
+		// Nothing declared these, so this program does not use them - the same
 		// direction `assets::ContentPolicy::FromFlags` takes, and for the same
 		// reason: a dead flag reads `false`, which here would happen to be right
 		// and for the wrong reason.

@@ -134,7 +134,7 @@ namespace engine::script {
 
 	// The three `effects` is authored in, and the same gap again: `JsDatatypes.cpp`
 	// has installed the constructors and the class ids since v0.6, and what was
-	// missing was the pair that carries a property's bytes — which is why a
+	// missing was the pair that carries a property's bytes - which is why a
 	// `NumberSequence` could be built in a script and assigned to nothing.
 	//
 	// **`MakeValue` allocates and copies, and here that is a 408-byte copy** where
@@ -177,7 +177,7 @@ namespace engine::script {
 		// property declaration reach both languages.
 
 		// How wide a property value can be. See `LuauInstances.cpp`, which carries
-		// the whole argument — this is the same constant on the other language's
+		// the whole argument - this is the same constant on the other language's
 		// side, and the two being spelled from the same two `sizeof`s is what
 		// stops a property that reads in Luau failing in JavaScript.
 		constexpr size_t WIDEST_PROPERTY =
@@ -198,7 +198,7 @@ namespace engine::script {
 		case PropertyType::Int64:
 			return JS_NewInt64(context, *static_cast<const int64_t *>(bytes));
 		case PropertyType::Name:
-			// Text, never the interned id — the number means a different
+			// Text, never the interned id - the number means a different
 			// string in the next process.
 			return JS_NewString(context, static_cast<const Name *>(bytes)->Text().data());
 		case PropertyType::String:
@@ -209,7 +209,7 @@ namespace engine::script {
 			// forgot the branch fail loudly instead of corrupting a heap.
 			return JS_ThrowTypeError(context, "a string property is read through its own path");
 		case PropertyType::Enum:
-			// An `EnumItem`, not a string — the same value the Luau side
+			// An `EnumItem`, not a string - the same value the Luau side
 			// hands back, so a property declared once behaves the same in
 			// both languages. The storage is an interned `Name` either way;
 			// what the type buys is that a wrong member is refused.
@@ -239,7 +239,7 @@ namespace engine::script {
 			// back `workspace` before v0.7, because `workspace` *was* the
 			// world and a root therefore belonged to it. `workspace` is now
 			// the `Workspace` instance, so having no parent is an ordinary
-			// state a script can produce and read back — and an instance in
+			// state a script can produce and read back - and an instance in
 			// that state is drawn by nothing and listed by nothing. The Luau
 			// side says the same thing in `PushValue`; one property
 			// declaration, two languages, one answer.
@@ -251,13 +251,13 @@ namespace engine::script {
 			// **The stored object for the Workspace, not a fresh one.**
 			// `MakeJsInstance` mints a new JS object per call, and
 			// JavaScript's `===` is object identity with no `__eq` to
-			// override — so `part.Parent === workspace` would be false for
+			// override - so `part.Parent === workspace` would be false for
 			// the one comparison every script makes. Luau has no such
 			// problem: its `Instance` metatable carries `__eq` and compares
 			// entities.
 			//
 			// Narrow on purpose. This does not give instances identity in
-			// general — `child.Parent === model` is still false — and
+			// general - `child.Parent === model` is still false - and
 			// pretending otherwise would need every live instance interned
 			// in the context. What it does is keep the one object a script
 			// is handed as a global comparable with itself.
@@ -397,7 +397,7 @@ namespace engine::script {
 		case PropertyType::Reference: {
 			// An instance arrives as its object; `null` detaches, which is
 			// what Roblox's `Parent = nil` means. `workspace` needs no case
-			// of its own any more — it is an instance object like any other,
+			// of its own any more - it is an instance object like any other,
 			// which is the whole of what collapsing the two notions of "the
 			// workspace" bought.
 			if (JS_IsNull(value) || JS_IsUndefined(value)) {
@@ -428,7 +428,7 @@ namespace engine::script {
 		// The two surfaces share rules rather than code, and this is one of the
 		// rules.
 		// **A non-scriptable property is not found here either.** The two
-		// surfaces share rules rather than code — `LuauInstances.cpp`'s twin
+		// surfaces share rules rather than code - `LuauInstances.cpp`'s twin
 		// carries why the answer is "no such member" rather than a refusal.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, const char *name) {
 			const std::string_view key(name);
@@ -500,7 +500,7 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "'%s' is read-only", property->Name.Text().data());
 			}
 
-			// The write half of the same exception — see the getter above.
+			// The write half of the same exception - see the getter above.
 			if (property->Type == PropertyType::String) {
 				size_t length = 0;
 				const char *text = JS_ToCStringLen(context, &length, argv[0]);
@@ -548,7 +548,7 @@ namespace engine::script {
 			// **Behind the shared method prototype**, so `part.Destroy()`
 			// resolves up the chain rather than being copied onto every class.
 			// Installed by `OpenJsSurface`, which runs after this file's own
-			// `Open` — so a prototype built before it falls back to a plain
+			// `Open` - so a prototype built before it falls back to a plain
 			// object rather than failing.
 			JSValue global = JS_GetGlobalObject(context);
 			JSValue methods = JS_GetPropertyStr(context, global, "__instanceMethods");
@@ -579,7 +579,7 @@ namespace engine::script {
 		//
 		// **`Enum` is a getter on the global rather than a table built at
 		// open.** A game registers its own materials at load time, so a table
-		// snapshotted when the VM opened would have missed every one of them —
+		// snapshotted when the VM opened would have missed every one of them -
 		// and the Luau side solves this with an `__index` metamethod, which
 		// JavaScript has no equivalent of without `Proxy`. `Proxy` is
 		// deliberately excluded (a script could wrap an instance and intercept
@@ -679,7 +679,7 @@ namespace engine::script {
 			return true;
 		}
 
-		// `Enum` — rebuilt from the registry on every read.
+		// `Enum` - rebuilt from the registry on every read.
 		JSValue EnumGet(JSContext *context, JSValueConst) {
 			JSValue table = JS_NewObject(context);
 
@@ -692,7 +692,7 @@ namespace engine::script {
 				}
 
 				// Sealed, so a script cannot add a member that no property would
-				// ever accept — the storage checks against `EnumTable`, and a
+				// ever accept - the storage checks against `EnumTable`, and a
 				// value only userland knew about would be refused on write with
 				// nothing explaining where it came from.
 				JS_PreventExtensions(context, set);
@@ -753,7 +753,7 @@ namespace engine::script {
 			JS_SetOpaque(object, new Entity(instance));
 
 			// Sealed, so a script cannot add a field of its own. An instance is
-			// an entity and its properties are what the class table declares —
+			// an entity and its properties are what the class table declares -
 			// a JavaScript object that quietly accepted `part.Transparency`
 			// would be a second, invisible place for state to live, which is
 			// exactly the "no scripting-only view" rule.
@@ -854,7 +854,7 @@ namespace engine::script {
 			);
 		}
 
-		// `CFrame.lookAt(from, to, up)` — see the Luau side for why a camera
+		// `CFrame.lookAt(from, to, up)` - see the Luau side for why a camera
 		// needs it and what its absence cost.
 		JSValue CFrameLookAt(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			if (argc < 2) {
@@ -923,7 +923,7 @@ namespace engine::script {
 				//
 				// Without this the two languages disagreed about what a service
 				// *is*: a Luau script reached `StarterGui` and a JavaScript one
-				// was told the engine does not provide it — which is the parity
+				// was told the engine does not provide it - which is the parity
 				// the roadmap's gate exists to refuse, and it was found by the
 				// first TypeScript panel that tried to parent a `ScreenGui`.
 				const ecs::Entity found = JsOf(context).World->FindFirstRoot(name);
@@ -936,7 +936,7 @@ namespace engine::script {
 				// half gives: a service the *other* language binds is a different
 				// failure from one the engine does not have. Every surface service
 				// is in both languages since v0.16, so the narrow sentence is now
-				// `BreakpointService`'s alone — which is a debugger feature this
+				// `BreakpointService`'s alone - which is a debugger feature this
 				// language does not have rather than a binding nobody wrote.
 				const ServiceDefinition *known = FindService(name);
 				const bool elsewhere =
@@ -1034,7 +1034,7 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "mul needs a number or a Vector3");
 			}
 
-			// Component-wise against another vector, matching Roblox — and not
+			// Component-wise against another vector, matching Roblox - and not
 			// a dot product, which is the confusion `Vector3::operator*`
 			// already carries a comment about.
 			if (const core::Vector3 *right = AsVector3(context, argv[0]); right != nullptr) {
@@ -1099,7 +1099,7 @@ namespace engine::script {
 
 		// A recycled slot when there is one. Without this a game that connects
 		// and disconnects every frame grows `Callables` by one index per frame
-		// for the life of the world — which is not a leak of the *values*, but
+		// for the life of the world - which is not a leak of the *values*, but
 		// is an unbounded vector nobody would think to look at.
 		if (!bound.FreeRefs.empty()) {
 			const CallbackRef reference = bound.FreeRefs.back();
@@ -1135,7 +1135,7 @@ namespace engine::script {
 	// One instance object for an entity, prototype and all.
 	//
 	// Shared by `Instance.new`, by `workspace` and by every `Reference`
-	// property that hands one back — three call sites that had grown three
+	// property that hands one back - three call sites that had grown three
 	// copies of the same six lines before this existed.
 	JSValue MakeJsInstance(JSContext *context, Entity instance) {
 		JsContext &bound = JsOf(context);
@@ -1146,8 +1146,8 @@ namespace engine::script {
 		// **Alive, not "has a class", and the difference arrived with v0.12.**
 		// This used to refuse anything `ClassOf` could not name, which conflated
 		// two things: a handle naming nothing, and an entity that is simply not
-		// an instance of a registered class. The second is an ordinary state —
-		// `World.CreateEntity()` produces one — and refusing it meant the ECS
+		// an instance of a registered class. The second is an ordinary state -
+		// `World.CreateEntity()` produces one - and refusing it meant the ECS
 		// surface handed back `null` for every entity it created.
 		//
 		// A dead handle is still `null`, which is the check that was doing the
@@ -1156,7 +1156,7 @@ namespace engine::script {
 		//
 		// `PrototypeFor` needs no case for it. An invalid class has no
 		// properties, so it builds the one prototype carrying the shared methods
-		// and nothing else, and caches it under the invalid id — which is what a
+		// and nothing else, and caches it under the invalid id - which is what a
 		// classless entity's members are.
 		if (!bound.World->Alive(instance)) {
 			return JS_NULL;
@@ -1180,7 +1180,7 @@ namespace engine::script {
 		//
 		// **It was missing, and missing in the worst available way.** The Luau
 		// side special-cases this pair in `InstanceIndex`/`InstanceNewIndex`
-		// because the property projects onto no component — it is a *resource*,
+		// because the property projects onto no component - it is a *resource*,
 		// `scene::ActiveCamera`, holding which eye the renderer resolves. Nothing
 		// did that here, and the world object is sealed with
 		// `JS_PreventExtensions` before it reaches a script, so
@@ -1210,7 +1210,7 @@ namespace engine::script {
 		JSValue CurrentCameraSet(JSContext *context, JSValueConst, JSValueConst value) {
 			ecs::Store &store = *JsOf(context).World;
 
-			// The aspect ratio is the *consumer's* — a window wrote it — so it
+			// The aspect ratio is the *consumer's* - a window wrote it - so it
 			// survives a camera change. Read first and kept, exactly as
 			// `SetCurrentCamera` does; clearing it would make the next resolved
 			// frame use a ratio of one and stretch every view.
@@ -1231,7 +1231,7 @@ namespace engine::script {
 			const Entity camera = JsEntityOf(context, value);
 
 			// Refused when the instance carries no `Camera`, rather than accepted
-			// and quietly ignored by `ResolveActiveCamera` — which leaves the
+			// and quietly ignored by `ResolveActiveCamera` - which leaves the
 			// matrices as they were, so the symptom would be a view that stopped
 			// following anything with nothing reporting why.
 			if (camera == ecs::NULL_ENTITY || store.Get<scene::Camera>(camera) == nullptr) {
@@ -1247,8 +1247,8 @@ namespace engine::script {
 	JSValue MakeJsEnumItem(JSContext *context, core::Name enumName, core::Name member) {
 		// **A wrapper rather than a move, because the class id, the payload and
 		// the finaliser are all this translation unit's.** What is outside is one
-		// caller — the input pump, which hands a bound action's handler
-		// `Enum.UserInputState.Begin` — and a second way to build an `EnumItem`
+		// caller - the input pump, which hands a bound action's handler
+		// `Enum.UserInputState.Begin` - and a second way to build an `EnumItem`
 		// is exactly the kind of duplicate `ReadEnumValueImpl` already exists to
 		// avoid on the way in.
 		return MakeEnumItem(context, enumName, member);
@@ -1264,14 +1264,14 @@ namespace engine::script {
 		// **Before anything builds a prototype.** `PrototypeFor` chains every
 		// class prototype behind `__instanceMethods` and caches what it builds,
 		// so a prototype made before that object existed kept a plain one for
-		// the life of the VM — which is what left the `workspace` global below
+		// the life of the VM - which is what left the `workspace` global below
 		// with no `IsA`, no `GetChildren` and no signals.
 		InstallJsInstanceMethods(context);
 
 		JSRuntime *runtime = JS_GetRuntime(context);
 
 		// Classes exist so an object of the wrong kind is caught by the VM
-		// rather than by a cast that happens to line up — `Vector3` and
+		// rather than by a cast that happens to line up - `Vector3` and
 		// `Color3` are three floats each.
 		static const JSClassDef instanceClass = {
 			"Instance",
@@ -1283,7 +1283,7 @@ namespace engine::script {
 			nullptr,
 			nullptr
 		};
-		// **`JS_GetAnyOpaque`, not `JS_GetOpaque(value, 0)`** — and that was a
+		// **`JS_GetAnyOpaque`, not `JS_GetOpaque(value, 0)`** - and that was a
 		// real leak rather than a style point. A finalizer cannot capture, so
 		// it has no way to name the class id it was registered under, and
 		// `JS_GetOpaque` returns null whenever the id does not match. Passing
@@ -1370,7 +1370,7 @@ namespace engine::script {
 			// **The same two constants the Luau surface carries, spelled the same
 			// way.** Two bindings over one engine is exactly the drift a declared
 			// property prevents for components, and there is no such mechanism for
-			// a library constant — so the only thing keeping `Vector3.zero`
+			// a library constant - so the only thing keeping `Vector3.zero`
 			// meaning the same in both languages is that both are written here and
 			// in `LuauValues.cpp` from `core::Vector3`'s own members.
 			//
@@ -1417,13 +1417,13 @@ namespace engine::script {
 			JS_SetPropertyStr(context, global, "CFrame", table);
 		}
 
-		// Before anything constructs a `Postbox` — see `ServiceCatalogue.cpp` for what
+		// Before anything constructs a `Postbox` - see `ServiceCatalogue.cpp` for what
 		// happens otherwise, which is an abort in an unrelated test.
 		world::RegisterMailboxTypes();
 
 		// **No services here any more.** They are installed from the catalogue in
 		// `OpenJsSurface`, which is the later of this language's two install
-		// halves — see `ServiceCatalogue.hpp`. `world::RegisterMailboxTypes()`
+		// halves - see `ServiceCatalogue.hpp`. `world::RegisterMailboxTypes()`
 		// above stays, because it must run before anything constructs a
 		// `Postbox` and that is earlier than either walk.
 
@@ -1440,7 +1440,7 @@ namespace engine::script {
 				context, table, "GetService", JS_NewCFunction(context, GetService, "GetService", 1)
 			);
 
-			// Which world this script is standing on — see the Luau side for
+			// Which world this script is standing on - see the Luau side for
 			// why a world's name is what `JobId` answers with. A plain string
 			// property rather than a getter, because the name is fixed for the
 			// life of the world and a getter would imply otherwise.
@@ -1500,7 +1500,7 @@ namespace engine::script {
 			JS_SetPropertyStr(context, global, "Instance", table);
 		}
 
-		// workspace — **this world's `Workspace` service**, and until v0.7 it
+		// workspace - **this world's `Workspace` service**, and until v0.7 it
 		// was a plain object standing for the world itself. `LuauBindings.hpp`
 		// carries the whole reason the two were collapsed; the short version is
 		// that a world now has a real `Workspace` instance, keeping both meant
@@ -1508,7 +1508,7 @@ namespace engine::script {
 		// neither.
 		{
 			// Idempotent, and here so that a world always has one. A replica is
-			// not asked at all — see the Luau `OpenWorkspace`, which does the
+			// not asked at all - see the Luau `OpenWorkspace`, which does the
 			// same for the same reason.
 			Entity workspace = store.AdoptOnly() ? scene::WorkspaceOf(store) : scene::InstallServices(store);
 			if (workspace == ecs::NULL_ENTITY) {
@@ -1516,7 +1516,7 @@ namespace engine::script {
 			}
 
 			// Built out rather than through `MakeJsInstance`, which seals the
-			// object before returning it — and this one takes `Raycast` first.
+			// object before returning it - and this one takes `Raycast` first.
 			// Everything else about it is an ordinary instance: same class,
 			// same prototype, same opaque entity, so `IsA`, `GetChildren` and
 			// every declared property arrive through the chain rather than
@@ -1532,7 +1532,7 @@ namespace engine::script {
 			}
 
 			// **Before the seal**, because a sealed object cannot take a method
-			// — nor an accessor, which is what made `CurrentCamera`'s absence
+			// - nor an accessor, which is what made `CurrentCamera`'s absence
 			// silent rather than loud.
 			InstallJsQueries(context, global, world);
 
@@ -1568,7 +1568,7 @@ namespace engine::script {
 
 		// **The store's change listeners go before the VM does.** They capture
 		// the queue, and a store that outlives the runtime would otherwise call
-		// into freed memory at its next barrier — which is the ordinary case,
+		// into freed memory at its next barrier - which is the ordinary case,
 		// because a world is destroyed after the scripts that built it.
 		if (bound->World != nullptr) {
 			bound->Changes.Detach(*bound->World);
@@ -1662,7 +1662,7 @@ namespace engine::script {
 			}
 
 			// **A channel message goes to the channel's own connections**, which
-			// is one `SignalKind` with no subject filtered by name — the trick
+			// is one `SignalKind` with no subject filtered by name - the trick
 			// `getPropertyChangedSignal` and `getAttributeChangedSignal` are
 			// already on. Without the filter every listener in this world would
 			// hear every channel it had opened, which is the traffic separation
@@ -1683,8 +1683,8 @@ namespace engine::script {
 
 				// **The sender's name, second, which is what makes a channel a
 				// channel.** A topic subscriber is told which topic; a channel
-				// receiver already knows the channel — it named it to get this
-				// handle — and what it cannot know is who to answer.
+				// receiver already knows the channel - it named it to get this
+				// handle - and what it cannot know is who to answer.
 				const std::string_view from = delivery.From.Text();
 				arguments[1] = JS_NewStringLen(context, from.data(), from.size());
 

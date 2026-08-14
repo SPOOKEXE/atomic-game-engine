@@ -5,7 +5,7 @@
 // every world it makes *and* on every world it loads, because a game file
 // written before services existed has none and one written after has them all.
 // If the second call created a second `Workspace`, every author who opened an
-// old game would get a duplicate holding none of their scene — and the first
+// old game would get a duplicate holding none of their scene - and the first
 // symptom would be a script resolving the empty one.
 
 #include <engine/ecs/Classes.hpp>
@@ -37,7 +37,7 @@ namespace services_test {
 
 	// How many children a container holds. `Store::HasChildren` answers whether
 	// there are any and nothing answers how many, because nothing in the engine
-	// needs the number — a test does, and counting the walk here is cheaper than
+	// needs the number - a test does, and counting the walk here is cheaper than
 	// widening a public header for it.
 	size_t Children(const Store &store, Entity container) {
 		size_t found = 0;
@@ -92,7 +92,7 @@ TEST_CASE("a furnished world has every fixture, once", "[scene][services]") {
 	// whoever is looking rather than to the game: the editor makes one for its
 	// viewport, a client makes one for its player, and several people editing
 	// one game make one each. Furnishing a world with one would write somebody's
-	// viewpoint into every file made from it — see `scene::TransientComponent`,
+	// viewpoint into every file made from it - see `scene::TransientComponent`,
 	// and `studio::Editor::EnsureViewerCamera` for who does make it.
 	CHECK(store.FindFirstChild(workspace, "Camera") == NULL_ENTITY);
 }
@@ -189,7 +189,7 @@ TEST_CASE("a server-scoped service and everything under it is hidden from client
 
 	// **Containment and not the row**, which is the whole reason this walks. The
 	// same instance moved from one service to another must change answer with
-	// nothing else edited — a flag copied onto descendants would be the version
+	// nothing else edited - a flag copied onto descendants would be the version
 	// that goes stale on a reparent.
 	const Entity secret = store.CreateInstance(Classes::Find(Name("Part")), "Secret");
 	REQUIRE(secret != NULL_ENTITY);
@@ -205,7 +205,7 @@ TEST_CASE("an orphan is shared rather than secret", "[scene][services]") {
 	// **The safe answer is the permissive one here, which is worth stating
 	// because it reads backwards.** An instance a script has created and not yet
 	// parented is under no service, so it has no scope to read. Calling that
-	// `Server` would hide it — and a client that skipped it while it was an
+	// `Server` would hide it - and a client that skipped it while it was an
 	// orphan would still be missing it after the script parented it into
 	// `Workspace`, because the wire sends what changed and nothing changed on
 	// the row. A missing part is a bug nobody can find; an orphan is not secret
@@ -224,7 +224,7 @@ TEST_CASE("an orphan is shared rather than secret", "[scene][services]") {
 TEST_CASE("what is under a player belongs to that player", "[scene][services]") {
 	// **Scope cannot say this, and that is why there are two predicates.**
 	// `Players` is `Shared` because both halves of a game need the list of who
-	// is connected — so the service is visible to everyone and what is under one
+	// is connected - so the service is visible to everyone and what is under one
 	// player's row is not. A second client shown somebody else's `PlayerGui`
 	// gets an interface it cannot interact with, and a script writing into one
 	// would be writing into everybody's.
@@ -242,7 +242,7 @@ TEST_CASE("what is under a player belongs to that player", "[scene][services]") 
 	CHECK(engine::scene::PlayerOwning(store, second) == second);
 
 	// The container `AddPlayer` makes beside every player, which is the whole
-	// reason this predicate exists — see `Player.PlayerGui`.
+	// reason this predicate exists - see `Player.PlayerGui`.
 	const Entity gui = store.FindFirstChild(first, engine::scene::PLAYER_GUI_NAME);
 	REQUIRE(gui != NULL_ENTITY);
 	CHECK(engine::scene::PlayerOwning(store, gui) == first);
@@ -262,7 +262,7 @@ TEST_CASE("what is under a player belongs to that player", "[scene][services]") 
 TEST_CASE("a renamed fixture is still the fixture", "[scene][services]") {
 	// **The bug this closes, and it was live from v0.7 to v0.17.** Every fixture
 	// lookup was `FindFirstRoot(name)`, so a script renaming the workspace made
-	// `WorkspaceOf` answer nothing — and `InstallServices`, which used that same
+	// `WorkspaceOf` answer nothing - and `InstallServices`, which used that same
 	// lookup to decide what a world was missing, then minted a *second*
 	// `Workspace` beside the one holding the scene. Two workspaces, one of which
 	// holds everything and neither of which a script can be sure it has.
@@ -358,7 +358,7 @@ TEST_CASE("a player has an identity and the world is bounded", "[scene][services
 	// **Three properties that had no reader until they had one.** `MaxPlayers`
 	// is enforced by the one door a player arrives through, `UserId` is handed
 	// out by a counter on the world so two runs of a recording agree, and
-	// `NumPlayers` is counted rather than kept — a field incremented on arrival
+	// `NumPlayers` is counted rather than kept - a field incremented on arrival
 	// is the copy that goes wrong the first time a script destroys somebody.
 	services_test::Ready();
 
@@ -426,7 +426,7 @@ TEST_CASE("only ReplicatedFirst is replicated first", "[scene][services]") {
 	CHECK(!engine::scene::InReplicatedFirst(store, shared));
 	CHECK(!engine::scene::InReplicatedFirst(store, WorkspaceOf(store)));
 
-	// Moved out, it stops being first — with nothing else edited.
+	// Moved out, it stops being first - with nothing else edited.
 	store.SetParent(screen, shared);
 	CHECK(!engine::scene::InReplicatedFirst(store, screen));
 	CHECK(!engine::scene::InReplicatedFirst(store, deep));
@@ -463,7 +463,7 @@ TEST_CASE("every player container is that player's alone", "[scene][services]") 
 		// The half that fails if the predicate is too generous.
 		CHECK(engine::scene::PlayerOwning(store, other) != mine);
 
-		// Every one of them is still shared-scope, because the *service* is —
+		// Every one of them is still shared-scope, because the *service* is -
 		// the two rules answer different questions and both have to hold.
 		CHECK(engine::scene::VisibleToClients(store, ours));
 	}
@@ -477,9 +477,9 @@ TEST_CASE("every player container is that player's alone", "[scene][services]") 
 
 TEST_CASE("an author may not destroy or reparent a fixture", "[scene][services][fixture]") {
 	// **`ServiceComponent::Fixture` refused nothing until v0.15.** The field
-	// carried the sentence — a world with no `Workspace` is not a world an
+	// carried the sentence - a world with no `Workspace` is not a world an
 	// author meant to build, and deleting one turns every `game:GetService` in
-	// the place into a runtime error a long way from the delete that caused it —
+	// the place into a runtime error a long way from the delete that caused it -
 	// and a script could still `Destroy()` `Lighting`, and the editor could
 	// still delete it with the Delete key. That is rule 6 in its plainest form:
 	// the constraint was documentation.
@@ -533,7 +533,7 @@ TEST_CASE("a world read out of a file is protected too", "[scene][services][fixt
 	// **The half that would have been missing, and the worst one to miss.** The
 	// install loop *finds* a saved world's services rather than making them, so
 	// protection applied only where an instance was minted would hold in a new
-	// game and not in a saved one — and a rule that silently does not apply is
+	// game and not in a saved one - and a rule that silently does not apply is
 	// the failure this guard is about wearing a different hat.
 	services_test::Ready();
 

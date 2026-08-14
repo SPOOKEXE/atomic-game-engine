@@ -20,8 +20,8 @@
 #include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>
 
-// Private: the registry-level invariant this suite pins — that a query against
-// an unprepared world registers nothing — is a property of the lookup in
+// Private: the registry-level invariant this suite pins - that a query against
+// an unprepared world registers nothing - is a property of the lookup in
 // `src/WorldResource.hpp`, and there is no public way to ask it.
 #include "WorldResource.hpp"
 
@@ -266,8 +266,8 @@ TEST_CASE("a raycast respects the layer mask", "[physics][query]") {
 
 TEST_CASE("a raycast carries on out of the far side of a portal", "[physics][query]") {
 	// **The floor a body in the seam is standing on is in the other room.** A
-	// pane is a hole — `scene::OpenPortals` takes its collider out of the solver
-	// so a body can be inside one — so a character halfway through has the near
+	// pane is a hole - `scene::OpenPortals` takes its collider out of the solver
+	// so a body can be inside one - so a character halfway through has the near
 	// room's floor under it only for as long as that floor reaches the doorway.
 	// A ray that stopped at the glass answered "nothing under you" for a
 	// character everybody can see standing on something, and
@@ -306,7 +306,7 @@ TEST_CASE("a raycast carries on out of the far side of a portal", "[physics][que
 	store.SetParent(camera, paneA);
 
 	// **The return pane, because a hole is a pair.** Without it B is ordinary
-	// scenery and the ray that comes out of it hits its own glass — which is
+	// scenery and the ray that comes out of it hits its own glass - which is
 	// what `OpenPortals` exists to stop, and is only ever true of a pane nobody
 	// linked back.
 	const Entity mouth = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Mouth");
@@ -328,7 +328,7 @@ TEST_CASE("a raycast carries on out of the far side of a portal", "[physics][que
 	Index(store);
 
 	// **The near room holds nothing but the pane**, so what an ordinary raycast
-	// finds is the glass — which is the whole obstacle this exists to look past,
+	// finds is the glass - which is the whole obstacle this exists to look past,
 	// and is why the case is the one it claims to be rather than a hit that
 	// would have happened anyway.
 	const std::optional<ColliderHit> plain = Raycast(store, down, 5.0f);
@@ -392,7 +392,7 @@ TEST_CASE("a query against a world with no physics resource finds nothing", "[ph
 	// the next `RegisterPhysicsComponents` then aborts the process because a
 	// type may not have two names. It hides because it needs a query to run
 	// *before* any registration, which in a shuffled suite is a matter of the
-	// seed — it was reported as an unreproducible flake first, and it is not
+	// seed - it was reported as an unreproducible flake first, and it is not
 	// one. `src/WorldResource.hpp` carries the whole account.
 	const bool registeredBefore = PhysicsWorldRegistered();
 
@@ -434,7 +434,7 @@ TEST_CASE("a query against a world with no physics resource finds nothing", "[ph
 
 TEST_CASE("an overlap tests the shape and not the bound", "[physics][query]") {
 	// A cylinder standing in the corner of its own bounding box is reported by
-	// `spatial::OverlapSphere` from a metre away, correctly — it answers about
+	// `spatial::OverlapSphere` from a metre away, correctly - it answers about
 	// boxes. This one has to say no.
 	Store store("query.exactoverlap");
 	PreparePhysicsWorld(store, 4.0f);
@@ -558,7 +558,7 @@ TEST_CASE("a shape cast with no motion is an overlap", "[physics][query]") {
 TEST_CASE("a shape cast sweeps a rotated shape by its own bound", "[physics][query]") {
 	// The conservative half of the contract, stated as a test so nobody reads
 	// the sweep as exact. A cylinder lying diagonally has a bound much larger
-	// than itself, and the sweep is of the bound — so a collider beside the
+	// than itself, and the sweep is of the bound - so a collider beside the
 	// path, inside that bound, is reported.
 	Store store("query.shapecast.conservative");
 	PreparePhysicsWorld(store, 4.0f);
@@ -585,7 +585,7 @@ TEST_CASE("a shape cast sweeps a rotated shape by its own bound", "[physics][que
 
 TEST_CASE("a raycast can look straight through the thing casting it", "[physics][query]") {
 	// **The case a character controller is, and it is not an edge case.** A
-	// humanoid asks what is under its feet by casting from just *inside* them —
+	// humanoid asks what is under its feet by casting from just *inside* them -
 	// a ray that begins exactly on a face is a coin flip about whether it hits
 	// it, and the coin lands differently on two machines, which is a desync
 	// arriving through a character controller. With a root collider the full
@@ -619,7 +619,7 @@ TEST_CASE("a raycast can look straight through the thing casting it", "[physics]
 	CHECK(ground->Owner == floor);
 
 	// **Ignoring something that is not in the way changes nothing**, and a null
-	// entity ignores nobody — which is what makes the parameter safe to default.
+	// entity ignores nobody - which is what makes the parameter safe to default.
 	const std::optional<ColliderHit> unaffected = Raycast(store, under, 0.25f, LayerMask::All(), floor);
 	REQUIRE(unaffected.has_value());
 	CHECK(unaffected->Owner == caster);

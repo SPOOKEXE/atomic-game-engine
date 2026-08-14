@@ -13,7 +13,7 @@ namespace engine::script {
 		// once and never re-sorted: `EachSubject` promises the order instances
 		// were first connected in, and a subject that disconnected and
 		// reconnected keeping its old place is the less surprising of the two
-		// answers — a script that toggles a listener does not expect its world
+		// answers - a script that toggles a listener does not expect its world
 		// to start reporting changes in a different sequence.
 		if (list.empty()) {
 			SubjectOrder[static_cast<uint8_t>(kind)].push_back(subject);
@@ -67,7 +67,7 @@ namespace engine::script {
 
 			// Only when nothing is walking the list. A fire in progress
 			// compacts on its own way out, and doing it here would move the
-			// vector under the loop — the exact failure the `Live` flag exists
+			// vector under the loop - the exact failure the `Live` flag exists
 			// to avoid.
 			if (Firing == 0) {
 				Compact(list->second);
@@ -169,8 +169,8 @@ namespace engine::script {
 			// Out of the walk order too, or the vector grows by one entry per
 			// destroyed instance for the rest of the world's life and
 			// `EachSubject` hands out a dead handle. Nothing in the engine walks
-			// subjects today — the `.Changed` fan-out is `ChangeQueue`,
-			// subscribed per component with an entity filter — so this is a leak
+			// subjects today - the `.Changed` fan-out is `ChangeQueue`,
+			// subscribed per component with an entity filter - so this is a leak
 			// first and a wrong answer only once something does.
 			if (const auto order = SubjectOrder.find(static_cast<uint8_t>(kind));
 				order != SubjectOrder.end()) {

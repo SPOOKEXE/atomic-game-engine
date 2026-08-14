@@ -12,7 +12,7 @@ namespace engine::assets {
 
 		// The highest ordinal the bitset can hold. Checked against the table
 		// rather than trusted, because a form added past it would silently be
-		// allowed for ever — the failure a policy must not have.
+		// allowed for ever - the failure a policy must not have.
 		constexpr size_t POLICY_BITS = 128;
 
 		size_t OrdinalOf(ContentForm form) {
@@ -124,8 +124,8 @@ namespace engine::assets {
 
 		// **Nothing declared them means everything is allowed, which is the
 		// safe direction and not the convenient one.** A dead flag handle reads
-		// `false`, so a program that never called `DeclareContentFlags` — a
-		// tool, a test standing one part of the engine up — would otherwise
+		// `false`, so a program that never called `DeclareContentFlags` - a
+		// tool, a test standing one part of the engine up - would otherwise
 		// refuse every form it has and produce an empty bake with no
 		// explanation. Allowing is what this engine did before the flags
 		// existed, so a build that does not use them behaves as it always did.
@@ -149,7 +149,7 @@ namespace engine::assets {
 
 			// **A generation and not a bool**, because a test resetting the
 			// flags and declaring a different table must not be handed the
-			// previous suite's answer — and "have I read this yet" cannot tell
+			// previous suite's answer - and "have I read this yet" cannot tell
 			// the two apart. Starts one behind, so the first call always reads.
 			uint32_t ReadAt = ~uint32_t{0};
 		};
@@ -174,7 +174,7 @@ namespace engine::assets {
 	bool DeclareContentFlags(ContentVerb verb) {
 		// A form whose ordinal is past the bitset would be allowed for ever with
 		// nothing reporting it, so the count is checked here rather than trusted
-		// — this is the one function every program calls before reading a
+		// - this is the one function every program calls before reading a
 		// policy.
 		static_assert(POLICY_BITS == 128, "the policy holds two words");
 

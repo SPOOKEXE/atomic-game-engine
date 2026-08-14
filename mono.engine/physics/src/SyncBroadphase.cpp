@@ -22,7 +22,7 @@ namespace engine::physics {
 		// Appends one collider's proxy and record, in the order rows are
 		// visited.
 		//
-		// `Proxy::Id` is the index the two arrays share, not the entity — see
+		// `Proxy::Id` is the index the two arrays share, not the entity - see
 		// `PhysicsWorld`, which explains why. The entity is on the record, so
 		// resolving a candidate is a subscript and never a store lookup.
 		void Append(
@@ -115,8 +115,8 @@ namespace engine::physics {
 		{
 			// The rebuild on its own, separate from gathering the proxies that
 			// feed it. Both scale with the moving set and they scale
-			// differently — the gather is a store walk and this is a count-then-
-			// fill over cells — so one number covering both says a broadphase is
+			// differently - the gather is a store walk and this is a count-then-
+			// fill over cells - so one number covering both says a broadphase is
 			// expensive without saying which half to go and look at.
 			ENGINE_PROFILE_CAT("physics.index-dynamic", core::ProfileCategory::Physics);
 
@@ -129,8 +129,8 @@ namespace engine::physics {
 			// The swing is measured and it is large:
 			// `engine.physics.bench.broadphase` puts four thousand colliders at
 			// 499 us with 2 m cells and 184 us with 8 m, for the same scene and
-			// the same answer. Nothing about the pair list changes — the walk is
-			// exhaustive at any spacing — so this is speed and not behaviour.
+			// the same answer. Nothing about the pair list changes - the walk is
+			// exhaustive at any spacing - so this is speed and not behaviour.
 			//
 			// **Free when the answer is the same**, which it is on almost every
 			// tick: `SuggestCellSize` quantises to a power of two and
@@ -147,7 +147,7 @@ namespace engine::physics {
 
 		// Every collider, minus the ones that just went into the dynamic index.
 		// `ecs::Store` has no "without this component" query term, so the count
-		// is a subtraction and the pass below asks per row — which is affordable
+		// is a subtraction and the pass below asks per row - which is affordable
 		// exactly because it is not a per-tick pass.
 		const size_t colliders = store.CountMatching<scene::Transform, scene::Collider>();
 		const size_t staticCount = colliders - dynamicRecords.size();

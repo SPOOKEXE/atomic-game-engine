@@ -2,16 +2,16 @@
 //
 // **This file exists because binding a handler that never fires is worse than
 // not binding one.** `ContextActionService` became a service both languages
-// reach at v0.16 — its stack is `ActionStack` and its handler crosses as a
-// `CallbackRef` — and this language had no input pump at all, so a JavaScript
+// reach at v0.16 - its stack is `ActionStack` and its handler crosses as a
+// `CallbackRef` - and this language had no input pump at all, so a JavaScript
 // `BindAction` would have taken a function and forgotten it. That is the failure
 // `script/AGENTS.md` names twice over: `InputChanged` was reachable and silent
 // for six versions, and `CollectionService` has no `GetInstanceAddedSignal`
 // precisely so that it cannot happen again.
 //
 // **`UserInputService`'s six signals are here too, since that service crossed.**
-// They were deliberately absent while it was Luau's alone — a signal surface for
-// a service this language cannot reach is a signal nothing can connect — and
+// They were deliberately absent while it was Luau's alone - a signal surface for
+// a service this language cannot reach is a signal nothing can connect - and
 // leaving them out once it *had* crossed would have been the same failure in the
 // other direction: `InputBegan` reachable, connectable and silent, which is the
 // state this module names twice as reading like a broken engine rather than an
@@ -19,8 +19,8 @@
 // edges in the same order.
 //
 // **The report is shared and only the wrapper is here.** `Actions.hpp` holds
-// `InputReport` and all four builders — `KeyReport`, `ButtonReport`,
-// `MotionReport` and `WheelReport` — because two pumps building a report each is
+// `InputReport` and all four builders - `KeyReport`, `ButtonReport`,
+// `MotionReport` and `WheelReport` - because two pumps building a report each is
 // two answers to what a frame did; `LuauInput.cpp` builds the Luau userdata
 // and this builds the JavaScript object. Both are the same five fields over the
 // same fact, which is what makes a handler ported between the two languages read
@@ -94,7 +94,7 @@ namespace engine::script {
 			return report == nullptr ? JS_EXCEPTION : MakeVector3(context, report->Delta);
 		}
 
-		// **`JS_GetAnyOpaque` and not `JS_GetOpaque(value, 0)`** — a finaliser
+		// **`JS_GetAnyOpaque` and not `JS_GetOpaque(value, 0)`** - a finaliser
 		// cannot capture, so it has no way to name the class id it was registered
 		// under, and `JS_GetOpaque` answers null whenever the id does not match.
 		// Passing zero frees nothing, which is the leak `JsBindings.cpp` records
@@ -135,8 +135,8 @@ namespace engine::script {
 		// callable, and that is the one place the two pumps genuinely differ.**
 		// Luau's arguments live on a stack and have to be pushed per call;
 		// JavaScript's are values, so building them once is both simpler and
-		// cheaper. What is shared is the rule underneath — which signals get what
-		// — and that lives in the two pumps' identical call sites.
+		// cheaper. What is shared is the rule underneath - which signals get what
+		// - and that lives in the two pumps' identical call sites.
 		//
 		// @param context   The VM.
 		// @param signal    Which signal, by name.
@@ -149,7 +149,7 @@ namespace engine::script {
 			std::string firstError;
 
 			// **What a `Once` connection spends.** `SignalTable::Fire` retires
-			// nothing itself — only the VM knows how to release a callable — so
+			// nothing itself - only the VM knows how to release a callable - so
 			// every direct caller owes this, and the Luau twin of this function
 			// did not pay it either. `FireJsSignal` in `JsSurface.cpp` is what
 			// this is copied from.
@@ -300,7 +300,7 @@ namespace engine::script {
 			}
 		};
 
-		// Decided once for the whole beat, exactly as the Luau pump does — see
+		// Decided once for the whole beat, exactly as the Luau pump does - see
 		// `InterfaceHasPointer` and `InterfaceHasKeyboard` for what each means
 		// and why they are two answers rather than one.
 		const bool pointerTaken = InterfaceHasPointer(interface);
@@ -323,7 +323,7 @@ namespace engine::script {
 
 		// **Focus first, before the releases it caused.**
 		// `input::Translator::ReleaseAll` clears every key on the frame focus is
-		// lost, so this pump is also the one that reports them released — and a
+		// lost, so this pump is also the one that reports them released - and a
 		// listener that hears "you lost focus" after "W came up" has to guess
 		// which of the two explains the other.
 		if (input->WasFocusGained()) {
@@ -333,7 +333,7 @@ namespace engine::script {
 			note(FireInputSignal(context, core::Name("WindowFocusReleased"), {}));
 		}
 
-		// Before the edges, because it explains them — the Luau pump's order.
+		// Before the edges, because it explains them - the Luau pump's order.
 		if (input->WasLastSourceChanged()) {
 			JSValue member = MakeJsEnumItem(
 				context, core::Name("UserInputType"), core::Name(scene::Describe(input->LastSource))
@@ -342,7 +342,7 @@ namespace engine::script {
 			JS_FreeValue(context, member);
 		}
 
-		// **Edges only**, which is what a bound action means — `Begin` and `End`
+		// **Edges only**, which is what a bound action means - `Begin` and `End`
 		// are the two calls a handler gets, and a third every frame would make
 		// every action a repeat-rate question. The same walk the Luau pump does,
 		// over the same `KeyCode` order, so two worlds scripted in the two
@@ -383,7 +383,7 @@ namespace engine::script {
 		// changing.** Exact compares against zero and not an epsilon: both fields
 		// are written by the translator as a sum of integer SDL deltas and cleared
 		// to a literal zero every frame, so a compare answers exactly the question
-		// — and an epsilon would swallow the one-pixel move a slow drag is made
+		// - and an epsilon would swallow the one-pixel move a slow drag is made
 		// of.
 		if (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f) {
 			fireReport(core::Name("InputChanged"), MotionReport(*input));

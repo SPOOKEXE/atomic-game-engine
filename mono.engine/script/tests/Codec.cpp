@@ -122,7 +122,7 @@ TEST_CASE("the sort is by bytes and not by any language's collation", "[codec]")
 
 	CHECK(Bytes(first) == Bytes(second));
 
-	// 0x7A ('z') sorts below 0xC3, so "z" comes first by bytes — which is the
+	// 0x7A ('z') sorts below 0xC3, so "z" comes first by bytes - which is the
 	// opposite of what a locale-aware comparison would usually say.
 	ScriptValue sorted = first;
 	std::vector<std::byte> ignored;
@@ -234,7 +234,7 @@ TEST_CASE("a lying length is refused before anything is reserved", "[codec]") {
 
 TEST_CASE("trailing bytes are refused", "[codec]") {
 	// Accepting them would let a sender append anything it liked to a
-	// well-formed message and have it ignored — a channel, and one nobody
+	// well-formed message and have it ignored - a channel, and one nobody
 	// audits.
 	std::vector<std::byte> bytes = Bytes(Number(1.0));
 	bytes.push_back(std::byte{0});

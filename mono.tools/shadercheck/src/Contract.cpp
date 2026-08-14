@@ -80,7 +80,7 @@ namespace shadercheck {
 		// **The compute split between 0 and 1 is by read-only against
 		// read-write, and this does not check which.** That needs `NonWritable`
 		// tracking through the struct members, and there is no compute shader in
-		// the engine to check it against — a rule written for no caller is a rule
+		// the engine to check it against - a rule written for no caller is a rule
 		// nobody has run. Both sets are accepted for storage resources, and this
 		// comment is where the gap is recorded rather than in somebody's memory.
 		int SetFor(Stage stage, ResourceKind kind, bool &eitherOfTwo) {
@@ -150,7 +150,7 @@ namespace shadercheck {
 		for (const uint32_t capability : module.Capabilities) {
 			if (Allowed().count(capability) == 0) {
 				report(
-					"declares " + CapabilityName(capability) + " — " + WhyRefused(capability) +
+					"declares " + CapabilityName(capability) + " - " + WhyRefused(capability) +
 					". If it can, add it to ALLOWED in Contract.cpp with the reason."
 				);
 			}

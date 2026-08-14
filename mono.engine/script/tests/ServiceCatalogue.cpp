@@ -2,7 +2,7 @@
 //
 // **This suite is the reason the catalogue is worth having.** A single list of
 // services is only an improvement over two lists if something checks it against
-// reality — otherwise it is a third place the same fact is written, and the
+// reality - otherwise it is a third place the same fact is written, and the
 // least trustworthy of the three, because a row costs nothing to add and nothing
 // to get wrong. What went before was exactly that failure without the list:
 // Luau bound nine surface services and JavaScript bound five, four were
@@ -69,7 +69,7 @@ TEST_CASE("every service the catalogue claims for a language is reachable in it"
 	//
 	// **Studio rows are skipped and that is not a hole.** `BreakpointService`
 	// installs only when the runtime carries a debugger, which a plain
-	// `MakeRuntime` does not — `engine.script.debugger` is where that pairing is
+	// `MakeRuntime` does not - `engine.script.debugger` is where that pairing is
 	// pinned, and asserting it here would be asserting the absence of a
 	// debugger.
 	for (const Language language : {Language::Luau, Language::JavaScript}) {
@@ -100,19 +100,19 @@ TEST_CASE("every service the catalogue claims for a language is reachable in it"
 TEST_CASE("every surface service is now in both languages", "[scripting][services]") {
 	// **What this case used to be, and why it is this instead.** It ran the
 	// services one language does *not* bind and asserted the refusal named the
-	// other — with a landmine on the end saying the JavaScript half must find
+	// other - with a landmine on the end saying the JavaScript half must find
 	// exactly `{SoundService, UserInputService}`, set deliberately so that
 	// closing them could not land silently. They are closed: `ServiceProperty`
 	// gave a live property a neutral shape, both VMs install both services, and
 	// the loop that walked the gap now walks nothing.
 	//
 	// **The landmine is replaced rather than deleted, because the fact it
-	// guarded is still worth guarding** — it has simply become the opposite
+	// guarded is still worth guarding** - it has simply become the opposite
 	// fact. Every `Always` row binds both languages, and the set below is empty
 	// and *named*: un-bind one and this fails saying which, exactly as adding one
 	// used to.
 	//
-	// The refusal path itself is not lost with it — see the case below, which
+	// The refusal path itself is not lost with it - see the case below, which
 	// exercises it against the one row that is genuinely one language's.
 	for (const Language language : {Language::Luau, Language::JavaScript}) {
 		const ServiceLanguages want =
@@ -139,7 +139,7 @@ TEST_CASE("a service the other language binds refuses by name", "[scripting][ser
 	// their spelling, which is the one place the answer is not.
 	//
 	// **`BreakpointService` is the one row left in that position, and it is a
-	// feature gap rather than a binding one** — `Debugger::Add` refuses a `.js`,
+	// feature gap rather than a binding one** - `Debugger::Add` refuses a `.js`,
 	// `.mjs`, `.cjs`, `.ts` or `.tsx` chunk outright, so a JavaScript binding
 	// would answer "nothing can be armed" to everything. It is a `Studio` row, so
 	// a plain `MakeRuntime` installs it in neither VM; what is being asserted
@@ -178,8 +178,8 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 	// whether a *service* is reachable, which is what the catalogue claims; this
 	// asks whether every *member* of one is, which the catalogue cannot claim
 	// because a language mask is per service. `TeleportService::GetTeleportData`
-	// lived in that gap from v0.15 to v0.16 — declared in `engine.d.ts`, present
-	// in Luau, absent in JavaScript — and so did `ContextActionService`'s two
+	// lived in that gap from v0.15 to v0.16 - declared in `engine.d.ts`, present
+	// in Luau, absent in JavaScript - and so did `ContextActionService`'s two
 	// reporting methods.
 	//
 	// **A hand-written list, deliberately, and it is the point rather than a
@@ -276,7 +276,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 			// **The probe raises rather than answering, because `Run` reports
 			// whether a chunk *ran*.** A script returning `false` ran perfectly
 			// well, so `return typeof(x) == 'function'` passes whatever the answer
-			// is — which is how the first version of this case reported green
+			// is - which is how the first version of this case reported green
 			// against a `TeleportService` with `GetTeleportData` deliberately
 			// removed.
 			//
@@ -322,7 +322,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 TEST_CASE("the catalogue holds no duplicate names", "[scripting][services]") {
 	// **Two rows for one name is one row that never installs.** Both would run,
 	// the second would overwrite the first's global, and `FindService` would
-	// answer with whichever came first — so the mask consulted by a refusal and
+	// answer with whichever came first - so the mask consulted by a refusal and
 	// the installer that actually ran could describe different services. Cheap
 	// to check and impossible to see by reading the table.
 	for (const ServiceDefinition &left : Services()) {
@@ -339,7 +339,7 @@ TEST_CASE("a row claims no language it has no installer for", "[scripting][servi
 	// **The mask and the function pointer are two statements of one fact**, and
 	// the catalogue is the only place they can disagree. A row claiming a
 	// language whose installer is null would install nothing and then refuse
-	// with the *general* message — a service that reads as never having existed,
+	// with the *general* message - a service that reads as never having existed,
 	// with a table saying otherwise.
 	//
 	// Checked through the VM rather than by reaching for the private table: the

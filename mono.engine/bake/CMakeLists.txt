@@ -10,7 +10,7 @@
 # is the largest attack surface a content pipeline has, and a client that
 # carried one would be paying for a Huffman tree on the frame a texture streamed
 # in. The row in `mono.tools/architecture/expected_graph.json` is the standing
-# proof — `client`, `server` and `cdn` must not name `bake`, and the day one
+# proof - `client`, `server` and `cdn` must not name `bake`, and the day one
 # does, that diff is the review.
 #
 # `shared` rather than a tool-tier idea because two things bake: the `assetc`
@@ -21,7 +21,7 @@
 # All three vendors are VENDOR rather than VENDOR_PUBLIC. Crypto++ supplies the
 # DEFLATE decoder a PNG's pixels are compressed with and the CRC-32 its chunks
 # carry; nlohmann/json parses glTF's JSON chunk; zstd inflates the chunks of a
-# `.rbxm` that a recent Studio wrote. None reaches a public header here — what
+# `.rbxm` that a recent Studio wrote. None reaches a public header here - what
 # this module hands back is an `assets::MeshData`, an `assets::TextureData` or a
 # `RobloxModel`, and nothing that says what produced it.
 #

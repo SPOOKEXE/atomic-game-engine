@@ -3,7 +3,7 @@
 -- pass is a recursion or an iteration.
 --
 -- **The picture is the measurement.** A pane facing a pane shows that pane,
--- which shows the first one again, forever — so the number of nested rectangles
+-- which shows the first one again, forever - so the number of nested rectangles
 -- visible in the frame *is* the depth the renderer resolved. One rectangle is
 -- one bounce. Two is two. A pass that draws the second rectangle flat has told
 -- you exactly where it stopped, and no instrumentation is needed to read it.
@@ -16,7 +16,7 @@
 -- the pane drawn inside another pane's picture is projected with a matrix taken
 -- from the eye rather than from the camera that picture was rendered from. The
 -- coordinate leaves the texture's 0..1 rectangle and `opaque.frag` falls back
--- to the plain lit pane — which is what the flat slab in the reflection is.
+-- to the plain lit pane - which is what the flat slab in the reflection is.
 --
 --     client --script MirrorCorridor.luau --frames 90 --capture out.bmp
 --
@@ -24,9 +24,9 @@
 -- difference between two builds is the change under test.
 --
 -- **Nothing here states a depth, and that is the point of this scene now.** The
--- renderer measures the frame it just drew — how deep the chain of panes went,
+-- renderer measures the frame it just drew - how deep the chain of panes went,
 -- and whether the deepest level still had a pane in view it was not allowed to
--- descend into — and goes one level deeper next frame when there was. A corridor
+-- descend into - and goes one level deeper next frame when there was. A corridor
 -- says yes at every level, so this scene climbs to `MAX_SURFACE_DEPTH` on its own
 -- within three frames and stays there; a room with one mirror in it says no on
 -- the first frame and costs one level for ever. That is why the capture is taken
@@ -104,7 +104,7 @@ mirror("PaneFar", CFrame.new(Vector3.new(0, 4, -SEPARATION / 2)) * CFrame.Angles
 -- version of this scene got that wrong in a way worth recording. A surface
 -- camera's frustum is fitted to *its own pane* and to nothing else, so from
 -- outside the corridor the near pane's frustum leans hard away from the axis and
--- the far pane falls fifty studs outside it — correctly, since it genuinely does
+-- the far pane falls fifty studs outside it - correctly, since it genuinely does
 -- not appear in that reflection. The chain then telescopes one way only, which
 -- looks exactly like a recursion that stops after one level and is not one.
 --

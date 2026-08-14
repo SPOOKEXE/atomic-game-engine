@@ -52,7 +52,7 @@ namespace {
 
 	// Both ends of one completed agreement.
 	//
-	// A Sealer has no constructor taking a key — that is the point of the type —
+	// A Sealer has no constructor taking a key - that is the point of the type -
 	// so every sealing test starts from a handshake, and the handshake is driven
 	// from fixed secrets so that a failure reproduces.
 	struct Ends {
@@ -177,7 +177,7 @@ TEST_CASE("the wrong key is refused", "[net][cipher]") {
 	// other, which is what makes a recorded session useless against the next one.
 	CHECK_FALSE(other.Responder.Receiving.Open(sealed->Counter, frame, {}).has_value());
 
-	// The sender's own receiving key is a different key too — the two directions
+	// The sender's own receiving key is a different key too - the two directions
 	// do not share one. A build that wired them together would pass every test
 	// above and fail this one.
 	CHECK_FALSE(ends.Initiator.Receiving.Open(sealed->Counter, frame, {}).has_value());
@@ -230,7 +230,7 @@ TEST_CASE("the counter advances once per frame", "[net][cipher]") {
 TEST_CASE("the counter can be read before it is spent", "[net][cipher]") {
 	// **Why reading one is safe when setting one would not be.** A frame's
 	// associated data is the packet header it travels under, and the header
-	// carries the counter — so the header has to be written before the frame is
+	// carries the counter - so the header has to be written before the frame is
 	// sealed, and the only way to write it correctly is to ask. A caller that
 	// asks and then does not seal skips one value out of 2^64 and repeats
 	// nothing.
@@ -288,7 +288,7 @@ TEST_CASE("an opener refuses key material of the wrong length", "[net][cipher]")
 TEST_CASE("RFC 8439 section 2.8.2 opens to the published plaintext", "[net][cipher]") {
 	// The AEAD_CHACHA20_POLY1305 example vector, verbatim. An implementation
 	// tested only against itself is consistent and can still be wrong in every
-	// direction at once — a swapped endianness in the block counter, a Poly1305
+	// direction at once - a swapped endianness in the block counter, a Poly1305
 	// key derived from the wrong block, an AAD that is padded differently. None
 	// of those survive a published vector.
 	//

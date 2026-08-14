@@ -9,8 +9,8 @@
 // calls handlers at the barrier.
 //
 // **The report is shared and only the wrapper is here.** `Actions.hpp` holds
-// `InputReport` and all four builders — `KeyReport`, `ButtonReport`,
-// `MotionReport` and `WheelReport` — because two pumps building a report each is
+// `InputReport` and all four builders - `KeyReport`, `ButtonReport`,
+// `MotionReport` and `WheelReport` - because two pumps building a report each is
 // two answers to what a frame did. `ActionStack::ClaimingFrom` decides which
 // claim a key reaches for the same reason, which is what makes `PumpJsInput` the
 // same pump rather than a second one that agrees today.
@@ -51,7 +51,7 @@ namespace engine::script {
 		// heartbeat into a failure, including on worlds with no input.
 		//
 		// The service's own members reach the world through `ScriptCall::World`
-		// instead, since they became neutral — see `InputOf`.
+		// instead, since they became neutral - see `InputOf`.
 		const InputState *StateOf(lua_State *state) {
 			return ContextOf(state).World->Resource<InputState>();
 		}
@@ -61,7 +61,7 @@ namespace engine::script {
 		// **What Roblox hands an input handler, and what this engine used to hand
 		// nobody.** `InputBegan` fired with a bare `Enum.KeyCode`, the bound-action
 		// handler got one as its third argument, and the generated declarations
-		// claimed the signals passed *nothing at all* — three different answers to
+		// claimed the signals passed *nothing at all* - three different answers to
 		// one question, none of them Roblox's, and a script copied from a Roblox
 		// place indexed `input.KeyCode` on an `EnumItem` and got nil.
 		//
@@ -71,7 +71,7 @@ namespace engine::script {
 		// than a value anybody authors, and Roblox offers none either.
 		//
 		// **The report itself is shared and only the wrapper is per language**,
-		// since v0.16 — `Actions.hpp` holds `InputReport`, this file builds the
+		// since v0.16 - `Actions.hpp` holds `InputReport`, this file builds the
 		// Luau userdata and `JsInput.cpp` the JavaScript object. That is what a
 		// `ContextActionService` handler is handed as its third argument in
 		// either language, and what `UserInputService`'s three input signals now carry
@@ -128,7 +128,7 @@ namespace engine::script {
 	void OpenInputObject(lua_State *state) {
 		// **Read-only and unreachable**: there is no `__newindex`, so a handler
 		// cannot edit the report it was given and hand it on, and `__metatable`
-		// is set for `LuauValues.cpp`'s reason — a metatable a script can reach is one
+		// is set for `LuauValues.cpp`'s reason - a metatable a script can reach is one
 		// it can rewrite, and then every `InputObject` in the world changes
 		// underneath everything holding one.
 		luaL_newmetatable(state, INPUT_OBJECT_TYPE);
@@ -137,7 +137,7 @@ namespace engine::script {
 		lua_setfield(state, -2, "__index");
 
 		// What `typeof` actually reads. Luau's `typeof` is a fastcall builtin
-		// that returns this field rather than consulting a global — see
+		// that returns this field rather than consulting a global - see
 		// `LuauValues.cpp`'s `Install`.
 		lua_pushstring(state, INPUT_OBJECT_TYPE);
 		lua_setfield(state, -2, "__type");
@@ -151,8 +151,8 @@ namespace engine::script {
 	namespace {
 		// Calls everything connected to one of the service's signals.
 		//
-		// **A helper because there are now five callers** — two key edges, two
-		// button edges, motion and the wheel — where there was one. The name
+		// **A helper because there are now five callers** - two key edges, two
+		// button edges, motion and the wheel - where there was one. The name
 		// filter is the whole of what distinguishes the signals: they share one
 		// `SignalKind` and are told apart by what the connection carries, exactly
 		// as `GetAttributeChangedSignal` reuses `PropertyChanged`.
@@ -160,7 +160,7 @@ namespace engine::script {
 		// **`push` and not a report, since the signals stopped agreeing about
 		// their arguments.** The three input signals take `(InputObject,
 		// gameProcessedEvent)`, `LastInputTypeChanged` takes an
-		// `Enum.UserInputType`, and the focus pair takes nothing — three shapes
+		// `Enum.UserInputType`, and the focus pair takes nothing - three shapes
 		// over one retirement rule, and a second copy of that rule is exactly the
 		// bug this function's own comment below records.
 		//
@@ -175,9 +175,9 @@ namespace engine::script {
 
 			// **What a `:Once` connection spends, collected here and retired
 			// below.** `SignalTable::Fire` deliberately does not retire anything
-			// itself — only the VM knows how to release a callable, and a
+			// itself - only the VM knows how to release a callable, and a
 			// disconnect arriving from inside a fire may be about a value still
-			// on the stack — so every direct caller of `Fire` owes this, and this
+			// on the stack - so every direct caller of `Fire` owes this, and this
 			// one did not pay it. A `UserInputService` signal connected with
 			// `:Once` fired on every edge for ever, which is a handler a script
 			// cannot get rid of and did not ask to keep.
@@ -230,8 +230,8 @@ namespace engine::script {
 		//
 		// **The highest claim decides, and until v0.16 it was the only one that
 		// heard.** `Enum.ContextActionResult` is how Roblox lets a handler decline
-		// — `Pass` hands the press to the next claim down, and `Sink` or no answer
-		// at all stops it here — and a pump that ignored the return value made the
+		// - `Pass` hands the press to the next claim down, and `Sink` or no answer
+		// at all stops it here - and a pump that ignored the return value made the
 		// enum unspellable and the door-and-vehicle case unsolvable in the one
 		// direction that needs it: a vehicle that is not being driven wants to let
 		// E through to the door it is parked beside.
@@ -241,7 +241,7 @@ namespace engine::script {
 		// which *other* script runs.
 		//
 		// **Keys only.** `BoundAction::Keys` holds `scene::KeyCode` ordinals, and
-		// Roblox's `BindAction` also takes `Enum.UserInputType` members — binding a
+		// Roblox's `BindAction` also takes `Enum.UserInputType` members - binding a
 		// mouse button would need the vector to say which of the two spaces each
 		// entry is in, which is a change to `Actions.hpp`'s `BoundAction` rather
 		// than to this loop.
@@ -280,7 +280,7 @@ namespace engine::script {
 				}
 
 				// **Anything that is not `Pass` sinks**, which covers `Sink`, nil
-				// and whatever else a handler happened to return — `ReadEnumValue`
+				// and whatever else a handler happened to return - `ReadEnumValue`
 				// answers false for all three. Roblox's default is to sink and a
 				// stray return value must not silently change which script gets a
 				// key.
@@ -313,7 +313,7 @@ namespace engine::script {
 
 		// The two shapes every input signal below is fired with. **Named rather
 		// than written out four times**, because the argument list is the half a
-		// pump gets wrong — a signal that quietly passed one argument where its
+		// pump gets wrong - a signal that quietly passed one argument where its
 		// neighbour passed two is `InputChanged` again.
 		const auto pushNothing = [] { return 0; };
 		const auto pushReport = [state, pointerTaken, keyboardTaken](const InputReport &report) {
@@ -333,7 +333,7 @@ namespace engine::script {
 
 		// **Focus first, before the releases it caused.**
 		// `input::Translator::ReleaseAll` clears every key on the frame focus is
-		// lost, so this pump is also the one that reports them released — and a
+		// lost, so this pump is also the one that reports them released - and a
 		// listener that hears "you lost focus" after "W came up" has to guess
 		// which of the two explains the other.
 		if (input->WasFocusGained()) {
@@ -361,7 +361,7 @@ namespace engine::script {
 		}
 
 		// **Edges only.** A held key fires once, which is what a bound action
-		// means — `Enum.UserInputState.Begin` and `.End` are the two calls a
+		// means - `Enum.UserInputState.Begin` and `.End` are the two calls a
 		// handler gets, and a third every frame would make every action a
 		// repeat-rate question.
 		for (size_t index = 0; index < static_cast<size_t>(KeyCode::Count); index++) {
@@ -386,7 +386,7 @@ namespace engine::script {
 		// **The buttons, which fired nothing at all before v0.16.** `InputState`
 		// has carried `WasButtonPressed` since v0.10 and nothing in the script
 		// layer ever asked it, so a click was invisible to a script that was not
-		// polling — the one input this engine had that a Roblox place could not
+		// polling - the one input this engine had that a Roblox place could not
 		// hear. No bound actions here, for the reason `RunBoundActions` gives.
 		for (size_t index = 0; index < static_cast<size_t>(MouseButton::Count); index++) {
 			const auto button = static_cast<MouseButton>(index);
@@ -402,7 +402,7 @@ namespace engine::script {
 		}
 
 		// **`InputChanged`, which the service has offered since v0.10 and which
-		// nothing ever fired.** It was reachable, connectable and silent — which
+		// nothing ever fired.** It was reachable, connectable and silent - which
 		// reads as a broken engine rather than as an unfinished one, and is the
 		// trade `v0.5` records for `Heartbeat`. Motion and the wheel are the two
 		// things this engine can report changing.
@@ -410,7 +410,7 @@ namespace engine::script {
 		// **Exact compares against zero, not an epsilon.** Both fields are written
 		// by the translator as a sum of integer SDL deltas and cleared to a literal
 		// zero every frame, so "did anything happen" is exactly the question a
-		// compare answers here — and an epsilon would swallow the one-pixel move
+		// compare answers here - and an epsilon would swallow the one-pixel move
 		// that a slow drag is made of.
 		if (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f) {
 			const InputReport report = MotionReport(*input);

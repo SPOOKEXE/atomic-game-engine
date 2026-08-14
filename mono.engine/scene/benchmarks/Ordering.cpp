@@ -2,12 +2,12 @@
 //
 // **The multiplier here is views, and it is easy to forget.** `OrderScene` runs
 // once for the player's camera, once for every shadow-casting light, and once
-// for every live surface — and `MAX_SURFACES` is sixteen. A room with four
+// for every live surface - and `MAX_SURFACES` is sixteen. A room with four
 // mirrors and a sun is six full orderings of the same draw list every frame, so
 // a figure that looks fine on its own is six times that in the frame budget.
 //
 // **Transparency is the parameter that changes the shape, not the size.** An
-// opaque scene is a partition — a linear pass — and a transparent one is a
+// opaque scene is a partition - a linear pass - and a transparent one is a
 // stable sort by squared distance, which is `n log n` and allocates. So the
 // ladder below varies the transparent *fraction* at a fixed instance count, and
 // the gap between 0% and 25% is the whole cost of the blended pass's ordering.
@@ -17,7 +17,7 @@
 // `SignatureOf` is measured because it runs over the whole list every frame per
 // surface to decide whether that surface needs redrawing at all. It is the
 // cheap check guarding an expensive redraw, and a cheap check that is not cheap
-// is worse than no check — it pays the scan and then redraws anyway.
+// is worse than no check - it pays the scan and then redraws anyway.
 
 #include <engine/core/Name.hpp>
 #include <engine/core/Random.hpp>
@@ -63,7 +63,7 @@ namespace ordering_bench {
 	constexpr float HALF_HEIGHT = 8.0f;
 
 	// Where the view sits. Off to one side rather than at the origin, so the
-	// distance keys are not symmetric about zero — a symmetric spread halves
+	// distance keys are not symmetric about zero - a symmetric spread halves
 	// the number of distinct keys a sort has to separate.
 	const Vector3 EYE(96.0f, 4.0f, 96.0f);
 
@@ -196,7 +196,7 @@ BENCH_PER_ITEM("OrderScene · 10k instances, 100% transparent", 10'000) {
 
 BENCH_PER_ITEM("OrderScene · 10k instances, 10% showing a surface", 10'000) {
 	// `PartitionSurfaces` returns without touching the order when nothing shows
-	// a surface — every scene with no mirror in it — because `stable_partition`
+	// a surface - every scene with no mirror in it - because `stable_partition`
 	// allocates a temporary. So the gap between this row and the 0% one is the
 	// difference between a per-frame heap allocation in the render path and
 	// none, which is what that early-out was written for.
@@ -248,7 +248,7 @@ BENCH_PER_ITEM("PartitionCasters · 10k opaque instances", 10'000) {
 BENCH_PER_ITEM("PartitionSurfaces · 10k instances with no mirror", 10'000) {
 	// **The early-out row.** No instance shows a surface, so this must return
 	// without touching the order and without allocating. It should be a linear
-	// scan and nothing else — if it costs anything like the row below, the scan
+	// scan and nothing else - if it costs anything like the row below, the scan
 	// that avoids `stable_partition`'s temporary is not happening.
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 0, 0);
 	std::vector<uint32_t> &order = Order();
@@ -283,7 +283,7 @@ BENCH_PER_ITEM("IsTransparent · 100k calls", 100'000) {
 BENCH_PER_ITEM("SignatureOf · 10k instances", 10'000) {
 	// **Runs every frame per live surface**, over the whole list, to decide
 	// whether that surface needs redrawing. Sixteen surfaces is sixteen full
-	// scans of the draw list before anything is drawn — so this row times
+	// scans of the draw list before anything is drawn - so this row times
 	// `MAX_SURFACES` is the fixed cost of the reflection system in a frame where
 	// nothing moved and nothing was redrawn.
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 10, 10);

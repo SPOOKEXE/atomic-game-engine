@@ -18,7 +18,7 @@ namespace engine::graph {
 		// same question.
 		//
 		// A unit box rather than an inverted one. Nothing here accumulates from
-		// an empty sentinel — `AABB.hpp` says so and says why — and a caller
+		// an empty sentinel - `AABB.hpp` says so and says why - and a caller
 		// handed an inverted box would fit a light to a volume that contains
 		// nothing.
 		core::AABB BoundsOfNothing() {
@@ -33,7 +33,7 @@ namespace engine::graph {
 		//
 		// **The renderer does not take this path; `CullAndBound` does the same
 		// walk beside the frustum test.** So a profile with no `graph.light-bounds`
-		// row in it has not lost the work — look for `graph.cull-bound`. This
+		// row in it has not lost the work - look for `graph.cull-bound`. This
 		// stays the entry point for a caller that wants the bound alone, and it
 		// is what the tests pin.
 		ENGINE_PROFILE_CAT("graph.light-bounds", core::ProfileCategory::Render);
@@ -55,8 +55,8 @@ namespace engine::graph {
 		std::vector<uint32_t> &visible,
 		core::AABB &bounds
 	) {
-		// One row where there used to be two — `graph.cull` and
-		// `graph.light-bounds` — because there is now one walk. Still a pass
+		// One row where there used to be two - `graph.cull` and
+		// `graph.light-bounds` - because there is now one walk. Still a pass
 		// over the whole draw list that does not get cheaper when the camera
 		// turns away: culling decides what is *drawn*, not what is *looked at*.
 		ENGINE_PROFILE_CAT("graph.cull-bound", core::ProfileCategory::Render);
@@ -132,7 +132,7 @@ namespace engine::graph {
 
 		// **`glm::orthoZO`, not `glm::ortho`.** The engine pins
 		// `GLM_FORCE_DEPTH_ZERO_TO_ONE` for Vulkan, and the unsuffixed name
-		// follows that define — but naming the convention here means this stays
+		// follows that define - but naming the convention here means this stays
 		// right if the define ever moves, and the alternative is a depth
 		// comparison that is half a unit out and shadows the whole scene.
 		const glm::mat4 projection = glm::orthoZO(-radius, radius, -radius, radius, 0.0f, radius * 2.0f);
@@ -156,7 +156,7 @@ namespace engine::graph {
 
 		// **How far the rectangle reaches across the light**, which is what the
 		// sides of the box are fitted to. Four corners projected onto the light's
-		// own right and up, and the extreme of each — the same min and max over
+		// own right and up, and the extreme of each - the same min and max over
 		// four projected positions that fits a surface camera to a pane, for the
 		// same reason: a rectangle seen at an angle is not its own width.
 		const glm::vec3 ahead = ToGlm(forward);
@@ -185,7 +185,7 @@ namespace engine::graph {
 
 		// **The depth is the scene's, not the rectangle's.** What has to be in
 		// range is every caster between the sun and the hole and every receiver
-		// the beam reaches after it — and the second of those is as far away as
+		// the beam reaches after it - and the second of those is as far away as
 		// the room is long. Measured as the bounding sphere's radius for
 		// `FitDirectionalLight`'s reason: it does not change as the light turns.
 		const float radius = std::max(bounds.Size().Magnitude() * 0.5f, 1.0e-3f);

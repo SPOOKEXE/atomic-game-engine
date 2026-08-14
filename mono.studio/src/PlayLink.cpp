@@ -73,7 +73,7 @@ namespace studio {
 		universe.Enter(replica, [&interpolation](Store &store, engine::ecs::Scheduler &systems) {
 			// **Both refusals first, because the build now asks about them.**
 			// Replicas cannot publish bus writes or mint authoritative entities,
-			// and `BuildReplicatedWorld` opens a VM and installs `GuiService` —
+			// and `BuildReplicatedWorld` opens a VM and installs `GuiService` -
 			// each of which asks the store whether minting is legal. Setting the
 			// flag afterwards left a window in which the answer was wrong.
 			store.SetResource(engine::world::Replica{});
@@ -101,7 +101,7 @@ namespace studio {
 
 		// **A player and a body in the authority, and the identity in the
 		// replica.** This is the studio's version of what `mono.server` does on
-		// `OnAdmitted` — a client that is admitted and given nothing to be is a
+		// `OnAdmitted` - a client that is admitted and given nothing to be is a
 		// client that watches. The two halves are the same two halves there:
 		// the world gains a `Player` and a character, and the viewer is told
 		// which player is its own.
@@ -111,7 +111,7 @@ namespace studio {
 		// way to reach another process; here the two worlds are two stores in
 		// one address space and the notice would be a byte buffer encoded and
 		// decoded between two lines of the same function. What crosses a
-		// *world* boundary is still nothing — this writes a resource into each
+		// *world* boundary is still nothing - this writes a resource into each
 		// world while holding it, which is the same discipline every other
 		// studio pass follows.
 		universe.Enter(authority, [this, label, adopt](Store &store) {
@@ -137,7 +137,7 @@ namespace studio {
 				// order and for its reason**: a `ScreenGui` a script reaches
 				// for from a spawn handler has to exist by the time the handler
 				// runs. `StarterGui` is a template and what a player sees is
-				// their own copy — see `gui::ResetPlayerGui`.
+				// their own copy - see `gui::ResetPlayerGui`.
 				(void)engine::gui::ResetPlayerGui(store, Player_);
 				(void)engine::scene::LoadCharacter(store, Player_);
 			}
@@ -181,12 +181,12 @@ namespace studio {
 		//
 		// **Before the publish, so a move made this frame is in the tick this
 		// frame describes.** After it, every input would be one tick late and
-		// the character would answer the keyboard a tick behind — invisible at
+		// the character would answer the keyboard a tick behind - invisible at
 		// sixty ticks and exactly the kind of lag nobody can find by reading the
 		// controller.
 		//
 		// **Through the real codec, even though nothing is being sent.** There
-		// is no socket here — that is the whole point of this class — but
+		// is no socket here - that is the whole point of this class - but
 		// `game::EncodeMoveInput` and `game::DecodeMoveInput` are what a real
 		// client's bytes go through, and running them costs nothing and means
 		// the editor exercises the format rather than a shortcut past it. It
@@ -210,7 +210,7 @@ namespace studio {
 
 				// **Consumed here, and only here.** This is the one reader of
 				// the replica's taps per tick, so clearing them is this
-				// function's job — a tap left latched would jump again on the
+				// function's job - a tap left latched would jump again on the
 				// next tick and a tap cleared by a second reader would not jump
 				// at all.
 				if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
@@ -230,7 +230,7 @@ namespace studio {
 		// one reason that decides where it can go: only the authority may run
 		// it.** The editor registers its character systems through
 		// `client::InstallPresentation`, which runs on *both* of this link's
-		// worlds — and a replica handing itself a new body would be minting an
+		// worlds - and a replica handing itself a new body would be minting an
 		// entity the server never issued. This function is the one place that
 		// knows which of the two is the authority.
 		//
@@ -291,9 +291,9 @@ namespace studio {
 		}
 
 		// **The player goes before the world it is a player of.** Destroying the
-		// instance is what makes `scene.ownership`'s reclaim fire — a body owned
+		// instance is what makes `scene.ownership`'s reclaim fire - a body owned
 		// by an entity that is no longer alive is a body nothing will ever
-		// simulate again — and it takes the character with it, because
+		// simulate again - and it takes the character with it, because
 		// `RemoveCharacter` is what `DestroyInstance` on a `Player` cannot do
 		// for itself.
 		if (Player_ != engine::ecs::NULL_ENTITY && Authority_.IsValid()) {

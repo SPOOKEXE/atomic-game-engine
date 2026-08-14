@@ -6,13 +6,13 @@
 // save file for a game contains the universe plus all subworlds, and that
 // sentence is this module: `world::Universe` is the container, a world is a
 // scene, and the file carries the lot in one document. There is deliberately no
-// per-world file format that a game file is a list of — a game split across
+// per-world file format that a game file is a list of - a game split across
 // files is a game somebody ships half of.
 //
 // **Text, and specifically XML, for a reason that is not taste.**
 // `world::Universe::Save` already writes a binary snapshot and keeps working;
 // this is a different job. A snapshot is a running universe frozen mid-tick,
-// including entity ids, tick counters and bus state — restoring one into a
+// including entity ids, tick counters and bus state - restoring one into a
 // different build is not promised and never was. A game file is *authored
 // content*: it has to survive an engine version, be reviewable in a diff, be
 // mergeable by two people, and be repairable by hand when something goes wrong.
@@ -20,7 +20,7 @@
 //
 // **Which means nothing here writes an entity id.** Instances carry a
 // document-local `id` attribute used only to resolve references within the same
-// file, exactly as `.rbxlx` does — rule 4, arriving at a save format: a name
+// file, exactly as `.rbxlx` does - rule 4, arriving at a save format: a name
 // crosses and a number does not.
 //
 // **Properties equal to their class default are not written.** A `Part` exposes
@@ -28,8 +28,8 @@
 // a readable file into a wall and a one-property change into a diff nobody can
 // read. The consequence is stated rather than hidden: a file written by one
 // build and loaded by a later one picks up that build's defaults for anything
-// it did not name. That is the behaviour you want — a default that improves
-// should improve existing content — and it is the same choice Roblox made.
+// it did not name. That is the behaviour you want - a default that improves
+// should improve existing content - and it is the same choice Roblox made.
 //
 // @tier L10 · shared
 
@@ -64,7 +64,7 @@ namespace engine::game {
 	//
 	// **Format 1 still reads.** The settings are looked for in the child and
 	// fall back to the attributes, so a file written before this change loads
-	// with its own numbers rather than with the defaults — a migration that
+	// with its own numbers rather than with the defaults - a migration that
 	// silently substituted 60 for somebody's 30 would be worse than a refusal.
 	inline constexpr uint32_t FORMAT_VERSION = 2;
 
@@ -77,7 +77,7 @@ namespace engine::game {
 	// documents and confusing them is a lost afternoon.** Opening a world as a
 	// game gets you a universe with no worlds; importing a game as a world gets
 	// you nothing. The root element says which, so the reader refuses either
-	// mistake rather than half-reading it — the extension is the courtesy.
+	// mistake rather than half-reading it - the extension is the courtesy.
 	inline constexpr std::string_view WORLD_EXTENSION = ".aworld";
 
 	// What a game file says about itself, and the settings behind it.
@@ -114,7 +114,7 @@ namespace engine::game {
 
 	// Writes one world's instance tree and script text into an open element.
 	//
-	// The element is expected to be open and is not closed here — a caller
+	// The element is expected to be open and is not closed here - a caller
 	// writing a whole game has a `<World>` open, and a caller exporting one
 	// world has a `<World>` open too. One function, so the two documents cannot
 	// describe a world differently.
@@ -146,7 +146,7 @@ namespace engine::game {
 	//
 	// **What makes an instance movable between two worlds.** An `ecs::Entity`
 	// is a handle inside one store and means nothing in another, so a subtree
-	// cannot be handed across — it has to be described and rebuilt. This is the
+	// cannot be handed across - it has to be described and rebuilt. This is the
 	// describing half, and it is the same writer a game file uses, so an
 	// instance that survives a save survives a move.
 	//
@@ -167,7 +167,7 @@ namespace engine::game {
 	// is a handle into the world being left; leaving it at its default is what
 	// a missing target already means everywhere else in this format.
 	//
-	// @param store    The world to build into. Need not be empty — unlike
+	// @param store    The world to build into. Need not be empty - unlike
 	//                 `ReadWorldBody`, this merges, which is the whole point.
 	// @param document The document, as `WriteInstanceDocument` produced it.
 	// @param parent   What to parent the subtree to, or a null entity to make
@@ -181,7 +181,7 @@ namespace engine::game {
 	// Writes one world as a standalone document, without touching a disk.
 	//
 	// **The half of `ExportWorld` an editor needs on its own.** Duplicating a
-	// world and renaming one are both a write followed by a read — and going
+	// world and renaming one are both a write followed by a read - and going
 	// through a temporary file to do it would make two ordinary editor actions
 	// depend on somewhere being writable.
 	//
@@ -243,7 +243,7 @@ namespace engine::game {
 	// **The runtime is returned as a `shared_ptr` and the scheduler holds one
 	// too.** A script that connects to `RunService.Heartbeat` *is* the
 	// simulation for what it built, so the VM has to outlive the call that
-	// started it — the same arrangement `examples::LoadScene` uses and for the
+	// started it - the same arrangement `examples::LoadScene` uses and for the
 	// same reason. A caller that drops its copy leaves the world holding the
 	// last one.
 	//
@@ -256,12 +256,12 @@ namespace engine::game {
 	// @param scheduler The systems to install the heartbeat into.
 	// @param limits    What bounds a script, including the host's role.
 	// @param error     Filled in with the first script failure, if any. A
-	//                  failure does not stop the others — a world where half
+	//                  failure does not stop the others - a world where half
 	//                  the scripts silently did not start is a bug report with
 	//                  nothing in it.
 	// @param breakpoints Optional. Adopted by the runtime **before** its scripts
 	//                    run, which is the only ordering that lets a breakpoint
-	//                    on a script's top level fire at all — that code has
+	//                    on a script's top level fire at all - that code has
 	//                    already executed by the time this returns.
 	// @return The runtime, which is never null.
 	std::shared_ptr<script::Runtime> StartWorldScripts(
@@ -278,7 +278,7 @@ namespace engine::game {
 	//
 	// **A remote world is written as a name and a setting, not as content.** A
 	// world held by a supervised host has no store here, so its instances are
-	// not this process's to save — and writing an empty one would be a save
+	// not this process's to save - and writing an empty one would be a save
 	// file that quietly deleted somebody's scene.
 	//
 	// @param universe The universe to write.
@@ -295,8 +295,8 @@ namespace engine::game {
 	// **The merging counterpart to `LoadGame`, and the reason both exist.**
 	// Loading replaces: it empties the universe first, because one that is half
 	// of one game and half of another is `ecs::Store::Load`'s hazard a layer up.
-	// Importing is the other operation — bringing a colleague's scenes into the
-	// game already open — and it is what `ImportWorld` does for one world.
+	// Importing is the other operation - bringing a colleague's scenes into the
+	// game already open - and it is what `ImportWorld` does for one world.
 	//
 	// A world whose name is taken is renamed with a numeric suffix rather than
 	// refused; two worlds cannot share a name and being made to guess a free
@@ -336,7 +336,7 @@ namespace engine::game {
 	// Builds the document a `SaveGame` would write, without touching a disk.
 	//
 	// For a test, and for a studio comparing what is on screen against what was
-	// last saved — which is how the title bar knows to show a modified marker
+	// last saved - which is how the title bar knows to show a modified marker
 	// without keeping a second copy of the world to diff against.
 	//
 	// @param universe The universe to write.

@@ -6,7 +6,7 @@
 // statics.** `script/ServiceCatalogue` made this argument first and it holds
 // harder here: a flag declared in a translation unit nothing else references is
 // dropped by the linker out of a static archive, and a flag that silently does
-// not exist is worse than one that is missing — the program runs, reads the
+// not exist is worse than one that is missing - the program runs, reads the
 // built-in default, and reports nothing. So a module writes one table and one
 // `Declare` call, a program names the registrars it wants, and a config key
 // naming a flag no registrar declared is an **error** rather than a shrug.
@@ -67,8 +67,8 @@ namespace engine::core {
 		// **Because some settings are genuinely several and a scalar cannot say
 		// so.** Content origins are tried in priority order and an origin's
 		// upstreams are too, so the setting is a sequence and splitting a scalar
-		// on a separator would make any value containing that separator — a path
-		// somebody chose — a bug nobody could see.
+		// on a separator would make any value containing that separator - a path
+		// somebody chose - a bug nobody could see.
 		//
 		// A key repeated *within one source* appends; a source that outranks it
 		// replaces the whole list. That is the scalar precedence rule applied to
@@ -90,7 +90,7 @@ namespace engine::core {
 		// What `Flags.cpp` declares. Every flag starts here.
 		Default = 0,
 
-		// A `[section]` `key = value` file — `core::ConfigFile`.
+		// A `[section]` `key = value` file - `core::ConfigFile`.
 		ConfigFile = 1,
 
 		// The process environment.
@@ -112,7 +112,7 @@ namespace engine::core {
 	// reviewer reads the declared value in the form a config file would write
 	// it.
 	struct FlagDescription {
-		// Dotted and lowercase — `content.gif`, `server.tick-rate`. The prefix
+		// Dotted and lowercase - `content.gif`, `server.tick-rate`. The prefix
 		// is the area rather than the module, because a flag is read by whoever
 		// needs it and named after what it is about.
 		std::string_view Name;
@@ -143,8 +143,8 @@ namespace engine::core {
 		NotAValue,
 
 		// Something of at least this precedence has already spoken. Not a
-		// failure — it is what makes a config file unable to overwrite a
-		// command line — so a caller applying a whole file treats it as
+		// failure - it is what makes a config file unable to overwrite a
+		// command line - so a caller applying a whole file treats it as
 		// ordinary.
 		Outranked,
 
@@ -188,7 +188,7 @@ namespace engine::core {
 		// **The quiet form of the question**, where constructing a `Flag` and
 		// asking `IsValid` logs. That is right for a read that was meant to
 		// work and wrong for a caller checking whether a whole table was ever
-		// registered — which is a legitimate thing to ask, and would otherwise
+		// registered - which is a legitimate thing to ask, and would otherwise
 		// print a warning per row for a program that simply does not use them.
 		//
 		// @param name The flag.
@@ -231,7 +231,7 @@ namespace engine::core {
 		//
 		// **What makes a cached `Flag` index safe across a `Reset`.** Only a
 		// test resets, and only a test would then read a handle resolved
-		// against the table that is gone — but a stale index into a
+		// against the table that is gone - but a stale index into a
 		// re-declared table answers the *wrong flag*, which is a failure that
 		// reads as the code under test being wrong.
 		static uint32_t Generation();
@@ -243,7 +243,7 @@ namespace engine::core {
 	// program's built-in values live in its own `Options` struct and a content
 	// form's flag name is built from the extension table, so a
 	// `static constexpr` array of literals cannot express either without
-	// writing the fact down twice — which is the drift rule 2 exists for. This
+	// writing the fact down twice - which is the drift rule 2 exists for. This
 	// holds the text and hands back rows pointing into it.
 	//
 	// The storage is node-based on purpose: `FlagDescription` borrows its
@@ -257,7 +257,7 @@ namespace engine::core {
 	  public:
 		// Adds one row, formatting `value` as the text a config file would write.
 		//
-		// Each returns `*this`, so a table is one chained expression — which is
+		// Each returns `*this`, so a table is one chained expression - which is
 		// what keeps a program's settings readable as a list rather than as a
 		// paragraph of statements.
 		//
@@ -276,7 +276,7 @@ namespace engine::core {
 		//
 		// **No default items, and that is not an omission.** A built-in list
 		// would have to be spelled somewhere and every source above it either
-		// replaces or appends to it — so a default of one entry is a default a
+		// replaces or appends to it - so a default of one entry is a default a
 		// deployment cannot remove without knowing it is there. The programs
 		// that want a fallback apply it after reading, where it is visible.
 		FlagTableBuilder &List(std::string_view name, std::string_view description);
@@ -298,8 +298,8 @@ namespace engine::core {
 
 	// A read of one flag by name.
 	//
-	// Construct once — a file-scope constant beside the code that reads it is
-	// the intended shape — and read as often as you like. The first read is a
+	// Construct once - a file-scope constant beside the code that reads it is
+	// the intended shape - and read as often as you like. The first read is a
 	// linear scan of the table; every read after it is an array index.
 	//
 	// **Resolved on first read rather than on construction**, because a
@@ -311,7 +311,7 @@ namespace engine::core {
 	// **An undeclared name is a dead handle rather than a crash**, and it logs
 	// once. A flag read through a dead handle answers its type's zero, which is
 	// the same answer a caller would have got from a flag that exists and is
-	// off — so the log line is the only thing that tells them apart, and it
+	// off - so the log line is the only thing that tells them apart, and it
 	// names the flag rather than the symptom.
 	class Flag {
 	  public:
@@ -340,7 +340,7 @@ namespace engine::core {
 		// every call site testing the kind.
 		double Number() const;
 
-		// The value as text, whatever the kind — so a listing can print one
+		// The value as text, whatever the kind - so a listing can print one
 		// without switching. A list is joined with `, `, for display only.
 		//
 		// Valid until the next `Set` of this flag, and for the life of the

@@ -6,7 +6,7 @@
 //
 // **It captures, it does not pause.** A breakpoint here records the call stack
 // and every local in scope at the moment the line ran, and then execution
-// carries on — or stops that one script, if that is what the breakpoint asked
+// carries on - or stops that one script, if that is what the breakpoint asked
 // for. What it never does is hold the VM inside the line while somebody looks.
 //
 // Two reasons, and both are load-bearing rather than temporary:
@@ -31,7 +31,7 @@
 // Nothing. Luau's single-step mode is switched on only while at least one
 // breakpoint exists and off again when the last one goes, so a runtime nobody
 // is debugging runs exactly as it did before this file existed. That is the
-// property worth protecting in any change here — a debugger that costs
+// property worth protecting in any change here - a debugger that costs
 // something when unused is one that gets compiled out and then rots.
 //
 // @tier L9 · shared
@@ -57,8 +57,8 @@ namespace engine::script {
 		// Record the stack and raise, which ends this script's run.
 		//
 		// **An ordinary script error, not a special state.** The host already
-		// knows what to do with one — it is logged, the remaining scripts still
-		// run, and `LastError` names it — so stopping needs no new path through
+		// knows what to do with one - it is logged, the remaining scripts still
+		// run, and `LastError` names it - so stopping needs no new path through
 		// the runtime and cannot leave the VM somewhere nothing expects.
 		Stop,
 	};
@@ -94,7 +94,7 @@ namespace engine::script {
 		// What the script calls it.
 		std::string Name;
 
-		// Its value, rendered the way `print` would render it — so an instance
+		// Its value, rendered the way `print` would render it - so an instance
 		// reads as its name and a Vector3 as its components rather than as an
 		// address.
 		std::string Value;
@@ -122,14 +122,14 @@ namespace engine::script {
 		// separation is what makes the capture worth reading. A local is a value
 		// this frame made; an upvalue is one it *captured* from an enclosing
 		// scope, so it is shared with whoever else closed over the same
-		// variable — and "why did this change when nothing in this function
+		// variable - and "why did this change when nothing in this function
 		// touched it" is the question upvalues answer and locals cannot.
 		//
 		// **Empty for a chunk's own top level, and that is Luau rather than a
 		// gap here.** Lua 5.2 gives every chunk an `_ENV` upvalue; Luau keeps a
 		// closure's environment beside the upvalue array instead, so a main
 		// chunk closes over nothing and reports nothing. The same variable read
-		// from an enclosing function *is* an upvalue there — which is what makes
+		// from an enclosing function *is* an upvalue there - which is what makes
 		// the two lists disagree usefully, and `engine.script.debugger` pins
 		// both halves.
 		//
@@ -159,21 +159,21 @@ namespace engine::script {
 	// **Only Luau has breakpoints, and a chunk that cannot carry one has to say
 	// so where somebody asks for it.** The alternative is a breakpoint that sits
 	// in the list looking armed and never fires, which reads as the debugger
-	// being broken rather than as the language not being supported — and the
+	// being broken rather than as the language not being supported - and the
 	// person who set it has no way to tell those apart.
 	//
 	// **Decided by the chunk's name, because that is what a caller has.** A
 	// breakpoint is asked for before anything runs, so there is no runtime to
 	// ask which VM will get it; the extension is what the loader itself uses to
-	// choose one — see `LanguageOf` in the studio's plugin host.
+	// choose one - see `LanguageOf` in the studio's plugin host.
 	//
 	// **A name with no extension is allowed.** `Runtime::Run(source, "probe")`
 	// names a chunk that way and it is always Luau, so refusing it would refuse
 	// the one form a test and an in-editor evaluation both use.
 	//
 	// `.ts` is refused as well as `.js`, and it is the likelier thing somebody
-	// types: TypeScript never reaches a runtime at all — `tsc` turns it into
-	// JavaScript first — so a breakpoint on one is two steps from anything that
+	// types: TypeScript never reaches a runtime at all - `tsc` turns it into
+	// JavaScript first - so a breakpoint on one is two steps from anything that
 	// could fire.
 	//
 	// @param source The chunk name.
@@ -198,7 +198,7 @@ namespace engine::script {
 		//
 		// **Refused for a chunk this engine cannot break inside**, which is
 		// what stops a dead breakpoint reaching the list through any path at
-		// all — the service, the gutter, the panel and `Adopt` all arrive here.
+		// all - the service, the gutter, the panel and `Adopt` all arrive here.
 		// A caller wanting to say *why* asks `BreakpointsRefused`.
 		//
 		// @param source The chunk name, matched as a suffix.
@@ -229,7 +229,7 @@ namespace engine::script {
 		//
 		// **What a fresh runtime is given at the start of a run.** Breakpoints
 		// belong to the person debugging, not to the VM that happens to be
-		// alive — a Stop destroys the runtime, and re-typing every line number
+		// alive - a Stop destroys the runtime, and re-typing every line number
 		// afterwards is how a debugger stops being used. Hits are deliberately
 		// not carried: they describe a run that is over, and showing them
 		// against a new one would be a lie about when they happened.

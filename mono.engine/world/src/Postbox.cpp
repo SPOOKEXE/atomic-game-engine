@@ -32,7 +32,7 @@ namespace engine::world {
 		// because a recording, a snapshot of pending traffic and the link to a
 		// supervised host all read it, and three encoders would agree until the
 		// day one of them did not. These four are the shape
-		// `Components::Register` wants — a count and a void pointer — wrapped
+		// `Components::Register` wants - a count and a void pointer - wrapped
 		// round that one encoder.
 		void WriteEnvelopes(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *boxes = static_cast<const Outbox *>(source);
@@ -131,7 +131,7 @@ namespace engine::world {
 		if (IsReplica()) {
 			// A replica simulates its own copy and reconciles against
 			// authoritative state. Writing to a bus would be a client telling
-			// the universe something the server never said — so it is refused
+			// the universe something the server never said - so it is refused
 			// here, at the call, rather than left as a rule somebody
 			// eventually breaks.
 			return Ticket{};
@@ -165,7 +165,7 @@ namespace engine::world {
 		outbox.Pending.push_back(std::move(envelope));
 
 		// `From` is stamped by the driver at the barrier rather than here. A
-		// world does not get to say who it is — that is the one field a
+		// world does not get to say who it is - that is the one field a
 		// compromised or buggy world could otherwise lie about, and every
 		// ordering decision depends on it.
 		return issued;
@@ -173,7 +173,7 @@ namespace engine::world {
 
 	// The four fire-and-forget operations check the budget themselves, because
 	// `Post` reports failure by returning no ticket and these never ask for one
-	// — so success and refusal would otherwise look identical.
+	// - so success and refusal would otherwise look identical.
 
 	bool Postbox::Publish(std::string_view topic, std::span<const std::byte> payload) {
 		if (IsReplica() || Remaining() == 0) {
@@ -200,8 +200,8 @@ namespace engine::world {
 	}
 
 	// **A channel is opened with `Subscribe` one bus along**, which is `Bus.hpp`'s
-	// argument: the act is the same one — a world declaring what it wants
-	// delivered — and the router tells the two apart by the `BusKind` it has to
+	// argument: the act is the same one - a world declaring what it wants
+	// delivered - and the router tells the two apart by the `BusKind` it has to
 	// read anyway.
 	//
 	// **The open asks for a reply where the close does not**, because it is the

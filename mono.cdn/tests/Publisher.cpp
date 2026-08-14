@@ -109,7 +109,7 @@ TEST_CASE("a directory of files becomes a signed store", "[cdn][publisher]") {
 
 TEST_CASE("a name is relative and uses forward slashes", "[cdn][publisher]") {
 	// A manifest keys on the name, so the same files published on Windows and
-	// on Linux have to produce one manifest — otherwise the two builds share no
+	// on Linux have to produce one manifest - otherwise the two builds share no
 	// cache entries and nothing says why.
 	Workspace workspace;
 	workspace.Add("meshes/rock.mesh", "content");
@@ -128,7 +128,7 @@ TEST_CASE("a name is relative and uses forward slashes", "[cdn][publisher]") {
 }
 
 TEST_CASE("the kind is decided once, at publish", "[cdn][publisher]") {
-	// Nothing downstream re-derives it — that is the whole argument in
+	// Nothing downstream re-derives it - that is the whole argument in
 	// AssetKind.hpp for the kind being in the manifest at all.
 	Workspace workspace;
 	workspace.Add("meshes/rock.mesh", "a");
@@ -213,7 +213,7 @@ TEST_CASE("republishing unchanged content is a no-op on the store", "[cdn][publi
 }
 
 TEST_CASE("changing one file changes the root and reuses the rest", "[cdn][publisher]") {
-	// The invalidation set is the chain of changed hashes — CDN.md §2 — so a
+	// The invalidation set is the chain of changed hashes - CDN.md §2 - so a
 	// one-file edit must not rewrite the store.
 	Workspace workspace;
 	workspace.Add("meshes/rock.mesh", "MESHv1 rock");
@@ -228,7 +228,7 @@ TEST_CASE("changing one file changes the root and reuses the rest", "[cdn][publi
 	REQUIRE(after.has_value());
 
 	CHECK(after->Root != before->Root);
-	// The old chunk is still there — nothing prunes — and the new one joined it.
+	// The old chunk is still there - nothing prunes - and the new one joined it.
 	CHECK(after->Chunks > before->Chunks);
 }
 
@@ -338,7 +338,7 @@ TEST_CASE("a published bundle reassembles from the store", "[cdn][publisher]") {
 
 TEST_CASE("a refused form never becomes a chunk, a name or a manifest row", "[cdn][publisher][content]") {
 	// **The gate is before the chunker, and that is what is being asserted.** A
-	// filter applied after — at serve time, say — would be looking at a hash
+	// filter applied after - at serve time, say - would be looking at a hash
 	// that has already been stored, and `cdn/Publisher.hpp`'s first paragraph
 	// says a hash cannot be walked back to a name. So the only honest place is
 	// the one moment the name is real, and the evidence is that the store is

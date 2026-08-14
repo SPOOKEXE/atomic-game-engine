@@ -4,7 +4,7 @@
 // and the named channels are actually kept in.
 //
 // Private to this module. A bus is reached through `Postbox` from inside a
-// world, or not at all — nothing outside `world` has any business holding the
+// world, or not at all - nothing outside `world` has any business holding the
 // table a DataStore keeps.
 //
 // Storage and nothing else. What applies traffic to these, and in what order,
@@ -77,7 +77,7 @@ namespace engine::world {
 		// things that touch either half.** Deriving it means walking every
 		// channel in the universe per open, which is the cost the cap exists to
 		// bound turned into the cost of enforcing it; keeping it beside the table
-		// is a second copy of one fact, which is rule 2 — so the copy is private
+		// is a second copy of one fact, which is rule 2 - so the copy is private
 		// to this struct and nothing outside can move one half without the other.
 		std::unordered_map<uint32_t, uint32_t> Held;
 
@@ -99,7 +99,7 @@ namespace engine::world {
 		// @param world   The world's registry index.
 		// @param limit   `UniverseSettings::ChannelsPerWorld`.
 		// @return `false` when the world is at the limit and this is a new
-		//         channel for it. Nothing is inserted in that case — an empty
+		//         channel for it. Nothing is inserted in that case - an empty
 		//         entry left behind by a refused open would grow the table the
 		//         limit exists to bound.
 		bool OpenFor(uint32_t channel, uint32_t world, uint32_t limit) {
@@ -155,7 +155,7 @@ namespace engine::world {
 	// Everything the universe's buses hold.
 	//
 	// This is what `ROADMAP.md` calls "Universe Data": the backing state of the
-	// buses, and nothing else. There is no general-purpose shared world — player
+	// buses, and nothing else. There is no general-purpose shared world - player
 	// data is a DataStore key, not a row in a world nobody owns.
 	//
 	// **A teleport has no table here and does not want one.** It is routed to a

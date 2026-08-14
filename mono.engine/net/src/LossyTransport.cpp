@@ -11,7 +11,7 @@
 // to keep correct, and the point of a wrapper is that there is only one.
 //
 // The drain loop is the one part worth reading twice. `Receive` must not report
-// `Empty` merely because the datagram it happened to pull was dropped — a caller
+// `Empty` merely because the datagram it happened to pull was dropped - a caller
 // polls until `Empty` and would stop early, leaving real traffic in the queue
 // underneath for a tick. So it loops: take, decide, and only report what a
 // caller can act on.
@@ -41,7 +41,7 @@ namespace engine::net {
 		}
 
 		// Indexed rather than streamed, so the answer for arrival `n` depends on
-		// nothing but `n` and the seed — a case that fails at 3% loss on seed 7
+		// nothing but `n` and the seed - a case that fails at 3% loss on seed 7
 		// fails again on seed 7, and reordering the cases in the file cannot move
 		// it. A stateful generator would look equivalent and quietly not be.
 		return core::Random::Float(static_cast<uint32_t>(number), Settings.Seed) < Settings.LossChance;

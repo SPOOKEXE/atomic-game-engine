@@ -63,7 +63,7 @@ namespace client {
 		if (const std::string refused =
 				engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle).RefusedText();
 			!refused.empty()) {
-			ENGINE_INFO("content: turned off — {}", refused);
+			ENGINE_INFO("content: turned off - {}", refused);
 		}
 
 		// Before anything reads a file. Changing it later would leave whatever
@@ -95,15 +95,15 @@ namespace client {
 			}
 		}
 
-		// Null when headless, which is what puts the renderer in that mode — the
+		// Null when headless, which is what puts the renderer in that mode - the
 		// same call the editor makes, for the same reason.
 		if (!Renderer.Initialise(Window)) {
 			return false;
 		}
 
 		// **Said once here and applied every frame, beside the sun.** The depth
-		// is the world's now — `workspace.SurfaceBounces`, or the renderer's own
-		// measurement when nothing says — so a value pushed once at startup would
+		// is the world's now - `workspace.SurfaceBounces`, or the renderer's own
+		// measurement when nothing says - so a value pushed once at startup would
 		// be overwritten by the first world drawn. What this line is for is the
 		// log: a run that pins the number has done something the scene did not
 		// ask for, and that is worth one line rather than a silent override.
@@ -182,8 +182,8 @@ namespace client {
 		}
 
 		// **Both halves, in one process.** A single-player run is a server and
-		// a client at once — `HostRole::OfBoth` says so and `RunService.hpp`
-		// argues that both being true is a legal answer rather than a bug — so
+		// a client at once - `HostRole::OfBoth` says so and `RunService.hpp`
+		// argues that both being true is a legal answer rather than a bug - so
 		// a game's `Script` and its `LocalScript` both run here.
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
@@ -195,7 +195,7 @@ namespace client {
 				InstallPresentation(store, systems, Settings.Entities);
 
 				// The scripts before the camera, so a scene that aimed one of
-				// its own keeps it — see `InstallDefaultCamera`.
+				// its own keeps it - see `InstallDefaultCamera`.
 				Runtimes.emplace_back(id, engine::game::StartWorldScripts(store, systems, limits, failure));
 				InstallDefaultCamera(store, systems);
 			});
@@ -209,7 +209,7 @@ namespace client {
 		}
 
 		ENGINE_INFO(
-			"playing '{}' — {} world(s)", info.Name.IsValid() ? info.Name.Text() : "game", worlds.size()
+			"playing '{}' - {} world(s)", info.Name.IsValid() ? info.Name.Text() : "game", worlds.size()
 		);
 		return true;
 	}
@@ -258,8 +258,8 @@ namespace client {
 
 			// **Recorded against the world, which is what `DeliverGuiEvents`
 			// needs and what this path never did.** The scheduler holds the last
-			// reference and drops it with the world — that is still true and is
-			// still the lifetime — but nothing could *name* the VM, so a
+			// reference and drops it with the world - that is still true and is
+			// still the lifetime - but nothing could *name* the VM, so a
 			// `TextButton` in a `--script` scene fired nothing in a shipped
 			// client while the same tree worked in the editor. The `--game` path
 			// has filled this vector since v0.7; the demo path had not.
@@ -310,7 +310,7 @@ namespace client {
 
 	bool Client::BeginContentDelivery() {
 		if (Settings.ContentSources.empty() && Settings.ContentPublisherKey.empty()) {
-			// Nothing was asked for. Not a failure — a game with its content
+			// Nothing was asked for. Not a failure - a game with its content
 			// beside it in a game file needs no origin at all.
 			return true;
 		}
@@ -368,17 +368,17 @@ namespace client {
 
 			// **Nothing is requested by kind, which is what v0.10 ended.** The
 			// unit that travels is a *bundle*, so asking for every mesh and
-			// every material asks for essentially every bundle in the store —
+			// every material asks for essentially every bundle in the store -
 			// and `AssetClient::Pump` resolves, verifies and decompresses all of
 			// it synchronously, because the contract forbids a background
 			// thread. On this repository's own store that was 6.9 GB through one
 			// function on the frame the client started.
 			//
 			// `client/ContentDemand.hpp` carries both failures this replaces.
-			ENGINE_INFO("content: catalogue ready — assets are fetched as the world names them");
+			ENGINE_INFO("content: catalogue ready - assets are fetched as the world names them");
 
 			// **The manifest's mesh names, handed to the world once.** Names, not
-			// content — a few hundred strings against the 6.9 GB above. It is the
+			// content - a few hundred strings against the 6.9 GB above. It is the
 			// only way a scene can find out what there is to name, because the
 			// catalogue it can otherwise read holds what has already been asked
 			// for. `scene/PublishedCatalogue.hpp` carries the whole argument, and
@@ -388,7 +388,7 @@ namespace client {
 
 		// **Every pump, and it is a diff rather than a walk of the catalogue.**
 		// A world's content names change when a scene is authored, loaded or
-		// replicated, none of which this can observe cheaply — so the names are
+		// replicated, none of which this can observe cheaply - so the names are
 		// collected and everything already asked for is dropped. What survives is
 		// almost always nothing.
 		if (ContentRequested) {
@@ -426,7 +426,7 @@ namespace client {
 
 			// **Read before the take, because a take is what destroys it.** A
 			// failed request answers no asset and therefore no name, and the
-			// name is what has to be unmarked — see `render::ChooseTexture`.
+			// name is what has to be unmarked - see `render::ChooseTexture`.
 			const engine::core::Name asked(Content->NameOf(id));
 
 			std::optional<engine::delivery::Asset> asset = Content->Take(id);
@@ -448,7 +448,7 @@ namespace client {
 			// **The name is published as-is, extension included.** A
 			// `SurfaceAppearance` naming `characters/skin.atex` and a manifest
 			// carrying `characters/skin.atex` have to be the same string or the
-			// lookup misses — and the one place that could diverge is here.
+			// lookup misses - and the one place that could diverge is here.
 			const engine::core::Name name(asset->Name);
 			engine::core::ByteReader reader(asset->Bytes);
 
@@ -460,7 +460,7 @@ namespace client {
 				}
 				// **A mesh's own sheets, asked for at the one point their names
 				// are readable.** `Submesh::Texture` lives in the mesh file, so
-				// `CollectWantedTextures` cannot see it — an imported model's
+				// `CollectWantedTextures` cannot see it - an imported model's
 				// twenty sheets would otherwise never be fetched at all now that
 				// textures are demand-driven.
 				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
@@ -474,7 +474,7 @@ namespace client {
 
 					// **The sheets its submeshes name, recorded where they are
 					// readable.** They live inside the mesh file, so this is the
-					// one point anything can learn them — and without them a
+					// one point anything can learn them - and without them a
 					// script that wants to swap a model's texture has no way to
 					// find out what it is wearing or what to put back.
 					std::vector<engine::core::Name> sheets;
@@ -510,7 +510,7 @@ namespace client {
 				// as the triangle count above is. A 4x4 animation sheet and a 4x4
 				// tile atlas are the same pixels, so the grid, the frame count
 				// and the authored rate are what tell an emitter how to play one
-				// — and without them every scene using a GIF would have to state
+				// - and without them every scene using a GIF would have to state
 				// numbers the file already holds. See `scene::TextureCatalogue`.
 				//
 				// Recorded whether or not the upload succeeded: a headless run
@@ -540,7 +540,7 @@ namespace client {
 				}
 
 				// **World data, not renderer state**, exactly as the triangle
-				// count and the flipbook layout above are — and for the sharper
+				// count and the flipbook layout above are - and for the sharper
 				// version of the same reason: the renderer never sees a material
 				// at all. `ResolveMaterials` turns one into a texture name on a
 				// part, in `shared`, so a headless server resolves the same
@@ -560,14 +560,14 @@ namespace client {
 
 				// **Deliberately not asked for here**, unlike a mesh's sheets, and
 				// the asymmetry is the point. Every material in the catalogue
-				// arrives whether anything uses it or not — 295 of them on this
-				// store — so fetching each one's sheet on arrival is requesting
+				// arrives whether anything uses it or not - 295 of them on this
+				// store - so fetching each one's sheet on arrival is requesting
 				// every texture by kind again, one indirection later, and it
 				// refuses 160 of them exactly as before.
 				//
 				// A material reaches a *part* through `ResolveMaterials`, which
 				// writes this name into that part's `SurfaceAppearance::ColourMap`
-				// — and that is a field `CollectWantedTextures` already reads. So
+				// - and that is a field `CollectWantedTextures` already reads. So
 				// the demand path needs no special case: the next pump asks for
 				// the sheets of the materials something is actually made of.
 				for (const engine::world::WorldId id : Simulated) {
@@ -585,7 +585,7 @@ namespace client {
 				// **Decoded and converted here, once.** The graph must never resample
 				// on the device thread, and a buffer converted per voice would pay
 				// for it again for every part playing a footstep. `DecodeAudio` picks
-				// its decoder from the bytes rather than from the name — Sounds.hpp.
+				// its decoder from the bytes rather than from the name - Sounds.hpp.
 				std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(asset->Bytes);
 				if (!samples) {
 					ENGINE_WARN("content: {} is not audio this engine decodes", asset->Name);
@@ -638,7 +638,7 @@ namespace client {
 		// **Runtime-readable only.** A `.pmx` and a `.amesh` are both
 		// `AssetKind::Mesh` and only the second is one this process decodes, so
 		// offering both would hand a scene names it can set, fetch and then fail
-		// to draw — a part on the fallback cube with a perfectly good string
+		// to draw - a part on the fallback cube with a perfectly good string
 		// behind it.
 		//
 		// **And forms this deployment turned off, for the same reason one step
@@ -656,7 +656,7 @@ namespace client {
 			}
 		}
 
-		// Every simulated world, and the replica when there is one — a scene is a
+		// Every simulated world, and the replica when there is one - a scene is a
 		// scene wherever it came from, and a list offered to only some of them
 		// would be a service that answers differently depending on which world a
 		// script happens to be in.
@@ -694,7 +694,7 @@ namespace client {
 
 	void Client::RequestAsset(const engine::core::Name &texture) {
 		// **Asked once and never again, whatever happened to it.** A name that
-		// failed — not in the manifest, refused by the table — must not be
+		// failed - not in the manifest, refused by the table - must not be
 		// retried, or a scene naming one misspelled asset issues a request per
 		// pump for the life of the process.
 		if (!Content || !texture.IsValid() || !ContentAsked.insert(texture.Id()).second) {
@@ -704,13 +704,13 @@ namespace client {
 		// **Refused before the request and not on arrival, so the bytes never
 		// cross.** A form this deployment has turned off is one nothing here
 		// will decode, and fetching it anyway would spend the link on something
-		// destined for a `continue`. Logged once — the insert above is what
-		// makes it once — because a name that silently never arrives is exactly
+		// destined for a `continue`. Logged once - the insert above is what
+		// makes it once - because a name that silently never arrives is exactly
 		// the failure the settings layer exists to make legible.
 		if (const engine::assets::ContentForm form = engine::assets::FormOfName(texture.Text());
 			!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle).Allows(form)) {
 			ENGINE_INFO(
-				"content: not asking for {} — {} content is turned off",
+				"content: not asking for {} - {} content is turned off",
 				texture.Text(),
 				engine::assets::Describe(form)
 			);
@@ -720,14 +720,14 @@ namespace client {
 		// **Queued rather than appended, because this is called from inside the
 		// walk over `ContentPending`.** A mesh names its own sheets and a
 		// material names its colour map, and both are read while draining that
-		// vector — pushing to it there is a range-for over a container being
+		// vector - pushing to it there is a range-for over a container being
 		// grown, which is what it looks like: the walk lost its place and one
 		// texture out of the several hundred asked for arrived.
 		ContentIssued.push_back(Content->Request(texture.Text()));
 
 		// **Marked before the answer, which is the whole point.** Until this
 		// request finishes, a part naming this sheet draws as the default
-		// material rather than as the purple marker — so a scene load looks like
+		// material rather than as the purple marker - so a scene load looks like
 		// untextured parts becoming textured instead of a purple shimmer across
 		// every imported model. See `render::ChooseTexture`.
 		Renderer.ExpectTexture(texture);
@@ -743,7 +743,7 @@ namespace client {
 		if (ClickFrames > 0) {
 			// **The release, two frames after the press.** `gui::Router` turns a
 			// press into an `Activated` on the *release* over the same element,
-			// which is what a button is — so a synthetic click that never let go
+			// which is what a button is - so a synthetic click that never let go
 			// would light the button and never fire it.
 			if (--ClickFrames == 0) {
 				SDL_Event released{};
@@ -817,7 +817,7 @@ namespace client {
 	void Client::PumpSounds() {
 		// **Runs with or without a device.** A null device drains the queue like
 		// a real one, so a machine with no output still exercises every hop but
-		// the last — which is the property that keeps this path from only working
+		// the last - which is the property that keeps this path from only working
 		// on the developer's laptop.
 		if (Sound == nullptr) {
 			return;
@@ -845,7 +845,7 @@ namespace client {
 		}
 
 		// The server's world too, so a `Sound` the authority replicated is heard
-		// on the client that received it. Nothing here distinguishes the two —
+		// on the client that received it. Nothing here distinguishes the two -
 		// a replicated `Sound` row and a locally created one are the same rows,
 		// which is what makes "made by a LocalScript, heard by that player alone"
 		// fall out of replication rather than out of an audio rule.
@@ -1026,7 +1026,7 @@ namespace client {
 			Discovery->Reach(*wanted, std::move(key), engine::core::Clock::Seconds());
 		} else if (Discovery->Rendezvousing()) {
 			// No id, so ask the point what it has. A private session is never
-			// in that answer — reaching one needs its id, which is what the
+			// in that answer - reaching one needs its id, which is what the
 			// host handed over with the key.
 			Discovery->Browse(engine::core::Clock::Seconds());
 		}
@@ -1165,7 +1165,7 @@ namespace client {
 				// **Said here rather than left to the first `Connector::Poll`,
 				// because something now builds instances between the two.**
 				// `BuildReplicatedWorld` opens a VM and installs `GuiService`,
-				// and both of those ask the store whether minting is legal — an
+				// and both of those ask the store whether minting is legal - an
 				// authoritative index taken in the window before the connector
 				// spoke would be one the server is also handing out. The
 				// connector still sets it, idempotently, for a store it was
@@ -1175,8 +1175,8 @@ namespace client {
 				// A replicated world simulates nothing: everything in it
 				// arrived, and stepping it here would be this process
 				// disagreeing with the authority once per tick. What this
-				// installs is the `PreRender` half — the draw list and the
-				// system that fills it — and, since v0.15, a VM whose scripts
+				// installs is the `PreRender` half - the draw list and the
+				// system that fills it - and, since v0.15, a VM whose scripts
 				// are the ones this client may run out of somebody else's
 				// world.
 				//
@@ -1195,8 +1195,8 @@ namespace client {
 		);
 
 		// **Named here, which is the whole of what `DeliverGuiEvents` needs.**
-		// The scheduler holds a reference and drops it with the world — that is
-		// the lifetime and it has not changed — but a VM nothing can *name* is
+		// The scheduler holds a reference and drops it with the world - that is
+		// the lifetime and it has not changed - but a VM nothing can *name* is
 		// one no press can be handed to, which is the shape the demo path had
 		// until v0.14 and the replicated path had until now.
 		if (replicaScripts != nullptr) {
@@ -1217,8 +1217,8 @@ namespace client {
 		);
 
 		// **Which player is this client's, which nothing else can tell it.**
-		// `scene::LocalPlayer` cannot be replicated — a resource is one row and
-		// the answer differs per client — so the host says it once over the user
+		// `scene::LocalPlayer` cannot be replicated - a resource is one row and
+		// the answer differs per client - so the host says it once over the user
 		// channel. `game/Play.hpp` carries the whole argument.
 		Connection->OnUserMessage([this](std::span<const std::byte> message) {
 			engine::game::JoinNotice notice;
@@ -1237,8 +1237,8 @@ namespace client {
 
 		if (Discovery != nullptr) {
 			// The connector owns the drain from here. Rendezvous traffic keeps
-			// arriving on this socket — the registration this client's peer is
-			// repeating, and the pokes that keep the mapping alive — so it is
+			// arriving on this socket - the registration this client's peer is
+			// repeating, and the pokes that keep the mapping alive - so it is
 			// routed back rather than counted as a refusal.
 			Connection->SetForeign(
 				[this](std::span<const std::byte> datagram, const engine::net::Endpoint &from) {
@@ -1283,8 +1283,8 @@ namespace client {
 		// that away every frame. `scene::InputState` is the seam in both
 		// directions.
 		// **Three fields survive the overwrite, for two different reasons.** The
-		// pointer mode and whether the cursor is drawn travel the other way — a
-		// script writes them and the window obeys — and the tap latch is *older
+		// pointer mode and whether the cursor is drawn travel the other way - a
+		// script writes them and the window obeys - and the tap latch is *older
 		// than this frame* by design: it is what a key pressed between two ticks
 		// is remembered in, and `Input.State()` only knows about the frame it
 		// just read.
@@ -1309,7 +1309,7 @@ namespace client {
 
 		// Latched here, where every frame is seen. This used to set a private
 		// `PendingJump` on the client, which `SubmitMove` then had to merge back
-		// in by hand — jump was the one key that did not travel through
+		// in by hand - jump was the one key that did not travel through
 		// `scene::InputState`. `LatchPresses` is that latch for every key, in
 		// the state both the client and the studio already share.
 		state->LatchPresses();
@@ -1327,7 +1327,7 @@ namespace client {
 		Universe_->Enter(Replicated, [this, &move, &aim, &tick](engine::ecs::Store &store) {
 			// **Only once there is a body**, because until the join notice
 			// arrives and the character replicates there is nothing for a move
-			// to mean — and a host that received one would look up a player,
+			// to mean - and a host that received one would look up a player,
 			// find no character, and do the work of deciding that every tick.
 			if (const auto *local = store.Resource<engine::scene::LocalPlayer>();
 				local == nullptr ||
@@ -1346,7 +1346,7 @@ namespace client {
 			// **Read in the same scope as the move, from the same tick.** Two
 			// entries would sample the camera on one tick and the keys on
 			// another, so a shot fired while turning would be aimed a tick
-			// behind where the player was looking — which on a fast flick is
+			// behind where the player was looking - which on a fast flick is
 			// several degrees and reads as the server cheating.
 			aim = engine::scene::ReadAimIntent(store);
 
@@ -1360,7 +1360,7 @@ namespace client {
 		// **The aim, and never the result.** `Server::ApplyInputs` states the
 		// division and this is the half that had no caller: `examples::
 		// EncodeShot` existed with a complete server-side rewind and hit test
-		// behind it, and nothing in the tree had ever sent one — `D00109`
+		// behind it, and nothing in the tree had ever sent one - `D00109`
 		// records that as two finished halves connected to nothing.
 		//
 		// Sent before the move because the two share a channel and a shot is
@@ -1373,7 +1373,7 @@ namespace client {
 			// **The engine's ceiling and not a game's choice.** A client picks
 			// its own range on the wire and `DecodeShot` refuses anything past
 			// `MAXIMUM_SHOT_RANGE`, so sending the ceiling is sending the most
-			// an honest client is allowed to — a game with a shorter weapon
+			// an honest client is allowed to - a game with a shorter weapon
 			// shortens it here and the host still bounds it.
 			shot.Range = engine::examples::MAXIMUM_SHOT_RANGE;
 
@@ -1392,7 +1392,7 @@ namespace client {
 
 		// **Sent every tick, including the still ones.** A client that only
 		// spoke when its keys changed would leave a character walking for ever
-		// after a dropped release — an input channel is unreliable by design,
+		// after a dropped release - an input channel is unreliable by design,
 		// and "still walking" is the failure a state-change protocol produces.
 		if (Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
 			// **Cleared once the tap is actually on the wire**, and not when it
@@ -1432,7 +1432,7 @@ namespace client {
 
 		// The exchange, before the world. A client that sat there with an empty
 		// scene used to have one explanation; it now has two, and the log has to
-		// say which — the handshake never finished, or it finished and the
+		// say which - the handshake never finished, or it finished and the
 		// snapshot has not arrived.
 		if (!ReportedAdmission && (Connection->Admitted() || Connection->Rejected())) {
 			ReportedAdmission = true;
@@ -1477,8 +1477,8 @@ namespace client {
 		Actions.BeginFrame();
 
 		// **The raw state beside the action layer, not instead of it.** `Actions`
-		// maps a key to an *intent* the client acts on — F5 toggles the frame
-		// graph — and this records what is *held*, which is what a game's own
+		// maps a key to an *intent* the client acts on - F5 toggles the frame
+		// graph - and this records what is *held*, which is what a game's own
 		// scripts read. Two questions about one keyboard, and both want every
 		// event.
 		Input.BeginFrame();
@@ -1486,7 +1486,7 @@ namespace client {
 		{
 			// **The pump on its own.** `pump events` covered the poll and every
 			// key it then acted on, and the poll is the half that can block on
-			// the compositor — so a frame stalled by the window system and a
+			// the compositor - so a frame stalled by the window system and a
 			// frame stalled by a keybinding doing work read as one number.
 			// There is nothing worth a span inside `input` itself: `Actions` is
 			// a bitset and a switch, and this is the cost of reaching it.
@@ -1498,7 +1498,7 @@ namespace client {
 
 				// **Both, unconditionally, and neither consumes for the other.**
 				// `Actions::HandleEvent` reports whether it took an event and that
-				// answer is about the *client's* bindings — a script watching F5
+				// answer is about the *client's* bindings - a script watching F5
 				// should still see F5. Gating this on that return would make the
 				// engine's own keybindings invisible to the game, which is a rule
 				// nobody asked for.
@@ -1521,7 +1521,7 @@ namespace client {
 			// drag-to-rotate wants the pointer gone and back where it started when
 			// the drag ends, which is why it hides without warping where relative
 			// mode would warp to the centre. `MouseIconEnabled` is what decides
-			// every other case, which is the one Roblox uses it for — a cutscene
+			// every other case, which is the one Roblox uses it for - a cutscene
 			// with the pointer free and invisible.
 			const bool hidden = relative ||
 								PointerMode == engine::scene::MouseBehavior::LockCurrentPosition ||
@@ -1553,7 +1553,7 @@ namespace client {
 			if (Connection == nullptr) {
 				if (!ReportedNoNetwork) {
 					ReportedNoNetwork = true;
-					ENGINE_INFO("F4: no network panel — this client was not given --connect");
+					ENGINE_INFO("F4: no network panel - this client was not given --connect");
 				}
 			} else {
 				Settings.ShowNetwork = !Settings.ShowNetwork;
@@ -1611,7 +1611,7 @@ namespace client {
 			// collection only retains while the panel is open, so F8 with F5
 			// closed has nothing to write.
 			ENGINE_WARN(
-				"no snapshot written to {} — nothing retained. The frame graph only records "
+				"no snapshot written to {} - nothing retained. The frame graph only records "
 				"while it is open, so press F5 first.",
 				path.string()
 			);
@@ -1648,7 +1648,7 @@ namespace client {
 			} else if (now < NextFrameAt) {
 				std::this_thread::sleep_until(NextFrameAt);
 			} else if (now - NextFrameAt > period * 4) {
-				// A stall — a resize, a hitch, a debugger. Catching up on four
+				// A stall - a resize, a hitch, a debugger. Catching up on four
 				// frames of deficit by running four frames flat out is worse
 				// than the stall was, so the deadline is reset rather than
 				// chased.
@@ -1663,7 +1663,7 @@ namespace client {
 		// drawn from input that is already a frame old. The client has the same
 		// shape as the studio and had the same frame of delay in it.
 		//
-		// It costs a frame of nothing when it fails — minimised, or mid-resize —
+		// It costs a frame of nothing when it fails - minimised, or mid-resize -
 		// and `Render` reaches the same conclusion for itself below.
 		Renderer.WaitForFrame();
 
@@ -1688,7 +1688,7 @@ namespace client {
 		// is often zero on a fast machine and several after a stall.
 		//
 		// A system therefore never sees a variable delta, so the same scene
-		// behaves identically at 30 fps and 600 — and a recorded run replays.
+		// behaves identically at 30 fps and 600 - and a recorded run replays.
 		// RENDER_PIPELINE.md §14.
 		{
 			// The universe owns the accumulator now, so the world runs however
@@ -1700,7 +1700,7 @@ namespace client {
 
 		{
 			// After the tick and before presentation, the same place the server
-			// publishes from — so what the replica applied this frame is what
+			// publishes from - so what the replica applied this frame is what
 			// the frame draws, rather than being one frame stale for no reason.
 			//
 			// `Network` and not `ECS`: this is the socket being drained and
@@ -1711,7 +1711,7 @@ namespace client {
 			PollServer(engine::core::Clock::Seconds());
 
 			// **After the poll, so a move is stamped with the tick this client
-			// has just finished receiving** — a submission tagged with a tick
+			// has just finished receiving** - a submission tagged with a tick
 			// the server has not reached is one it rewinds against nothing.
 			SubmitMove(engine::core::Clock::Seconds());
 		}
@@ -1733,7 +1733,7 @@ namespace client {
 			// last time it was, which is a world that appears frozen for a
 			// reason nothing reports.
 			// **Cleared once, before any world is asked.** `CollectSurfaceViews`
-			// clears as well, but only the drawn world reaches it — a world that
+			// clears as well, but only the drawn world reaches it - a world that
 			// returns early for want of a camera would otherwise leave the
 			// previous frame's mirrors in the list, and the surface pass would
 			// go on rendering a camera that is no longer in the scene.
@@ -1758,7 +1758,7 @@ namespace client {
 				//
 				// **Every simulated world, not only the drawn one.** A world the
 				// player is not looking at still ticks its scripts, and a script
-				// polling `UserInputService` there should get the same answer —
+				// polling `UserInputService` there should get the same answer -
 				// the alternative is input that works in one world and silently
 				// does not in another.
 				Universe_->Enter(id, [this](engine::ecs::Store &store) { WriteInput(store); });
@@ -1820,7 +1820,7 @@ namespace client {
 						// installed here, on a world change rather than per
 						// frame. `PipelinesInstalledFor` guarded that and
 						// `PipelineSelected` carried the answer to the render
-						// call below — both members are still declared and both
+						// call below - both members are still declared and both
 						// are marked. See `client::InstallWorldPipelines`.
 
 						// **The particles, from the world being drawn and only
@@ -1851,15 +1851,15 @@ namespace client {
 			}
 
 			// The replicated world, once it has joined and been given a
-			// channel. Presented like any other world — `PreRender` is where
+			// channel. Presented like any other world - `PreRender` is where
 			// deriving what to draw belongs, whoever owns the simulation.
 			//
 			// **It is looked at through this client's own camera**, because a
 			// replica has none: a camera is an entity, and an authoritative
 			// entity minted in a replica collides exactly with one the server
 			// minted, which is what `Store::SetAdoptOnly` refuses. A local row
-			// in a replicated world is safe — `Store::CreatePredicted` mints
-			// from a range the server never allocates from — and since v0.8
+			// in a replicated world is safe - `Store::CreatePredicted` mints
+			// from a range the server never allocates from - and since v0.8
 			// something does own it: `AimReplicaViewer` puts a predicted camera
 			// in the replica and names it `ActiveCamera`.
 			//
@@ -1871,8 +1871,8 @@ namespace client {
 				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
 					// **The replica takes this frame's input like a simulated
 					// world does**, because since v0.14 it has a camera and a
-					// character of its own to drive. It is not in `Simulated` —
-					// it never will be, nothing here is stepped — so it is
+					// character of its own to drive. It is not in `Simulated` -
+					// it never will be, nothing here is stepped - so it is
 					// written here rather than by widening that loop to mean
 					// something other than what it says.
 					WriteInput(store);
@@ -1919,7 +1919,7 @@ namespace client {
 		// **Advanced with the frame it will be drawn against.** Accumulated from
 		// the frame delta rather than read from a wall clock, so a run that
 		// stalls does not skip an animation forward and two runs of one
-		// recording show the same frames — `Renderer::SetAnimationTime`.
+		// recording show the same frames - `Renderer::SetAnimationTime`.
 		AnimationSeconds += delta;
 
 		// Ticks actually achieved, over a one-second window. It matches the
@@ -1935,7 +1935,7 @@ namespace client {
 
 		// **The requested size when there is no window to ask.** A headless run
 		// still lays the panels out and still renders into an offscreen target
-		// of this size, so the numbers have to come from somewhere — and
+		// of this size, so the numbers have to come from somewhere - and
 		// `--width`/`--height` is what a caller asked for.
 		int pixelWidth = Settings.Width;
 		int pixelHeight = Settings.Height;
@@ -1952,7 +1952,7 @@ namespace client {
 			// every frame from the texture they were last drawn into.
 			//
 			// They are read by a person, and a person cannot read a number that
-			// changes a thousand times a second — past about twenty updates a
+			// changes a thousand times a second - past about twenty updates a
 			// second the extra work buys a blur. Rasterising the glyphs and
 			// pushing the image across were together the largest thing in the
 			// frame, and at 1000 fps this is fifty times less of both.
@@ -2060,7 +2060,7 @@ namespace client {
 
 		// Drawn from what the compositor took off the view channels, not from a
 		// store. The camera was placed by a system and the draw list was filled
-		// by one in PreRender — but the renderer runs at the display's rate and
+		// by one in PreRender - but the renderer runs at the display's rate and
 		// the worlds run at their own, so reaching into a store here would be
 		// reading something somebody else is writing. Between them sits three
 		// slots and an atomic index, which is what lets a slow frame drop
@@ -2074,12 +2074,12 @@ namespace client {
 		// canvas, which is the window.
 		//
 		// **An instance is an entity and a class is a set of components**, so
-		// the `ScreenGui` this walks is the same storage a system iterates —
+		// the `ScreenGui` this walks is the same storage a system iterates -
 		// there is no second tree to keep in step, which is what makes one
 		// `Layout` pass over the store the whole of it.
 		// **The image resolver, set once and never unset.** `InterfacePass` takes
 		// a hook rather than a texture table because `render` has no business
-		// resolving a game's content names — `gui::DrawCommand::Image` is a name
+		// resolving a game's content names - `gui::DrawCommand::Image` is a name
 		// precisely so that whoever owns the textures decides. Nothing supplied
 		// one, so every `ImageLabel` in the engine drew the atlas's white texel
 		// and read as a missing image whatever had loaded. The seam was right and
@@ -2111,7 +2111,7 @@ namespace client {
 		// connected client draws its local scene *and* the server's; the
 		// `PlayerGui` a person can press lives under their own `Player`, which is
 		// a row in the replica. Compiling the local world and routing the press
-		// into it is what made every button in a replicated world silent — the
+		// into it is what made every button in a replicated world silent - the
 		// press was picked correctly, produced the right event, and was handed to
 		// a VM that was not the one the button's script was in.
 		const engine::world::WorldId interfaceWorld = InterfaceWorld();
@@ -2122,7 +2122,7 @@ namespace client {
 
 			// **What Return did, which the router cannot produce.** Releasing the
 			// focus with a key is not a press, so nothing is picked and
-			// `Router::Update` names no element — `gui::TypeResult::Released` is
+			// `Router::Update` names no element - `gui::TypeResult::Released` is
 			// the only record of it, and a script's `FocusLost` is owed one
 			// however the focus went away.
 			std::vector<engine::gui::GuiEvent> typedEvents;
@@ -2139,8 +2139,8 @@ namespace client {
 			Universe_->Enter(interfaceWorld, [&](engine::ecs::Store &store) {
 				// **Before the layout, and that order is the whole of it.** A
 				// `SurfaceGui` sized in pixels-per-stud and a `BillboardGui`
-				// sized in studs both need numbers `gui` cannot reach — the
-				// adornee's stud extent and the live camera's distance — so
+				// sized in studs both need numbers `gui` cannot reach - the
+				// adornee's stud extent and the live camera's distance - so
 				// this resolves them into `gui::SpatialCanvas` and the layout
 				// reads that instead of the authored pixels. Running it *after*
 				// would draw every billboard at the previous frame's size,
@@ -2159,7 +2159,7 @@ namespace client {
 				// what was typed.** `--type` is `--click`'s diagnostic for the
 				// keyboard and needs it to have run first, because only a press
 				// moves the focus. It enters as an SDL event so the translator
-				// stays the only thing in the engine that decodes one —
+				// stays the only thing in the engine that decodes one -
 				// `Options::TypedText` says what this does and does not cover.
 				if (!Settings.TypedText.empty() && !TypedTextSent &&
 					engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY) {
@@ -2177,7 +2177,7 @@ namespace client {
 				// in between.** `Translate.hpp` keeps the string on the translator
 				// rather than on `scene::InputState` because that resource is
 				// trivially copyable and a `std::string` on it buys a hand-written
-				// serialiser, so this is the one hop it makes — into the world,
+				// serialiser, so this is the one hop it makes - into the world,
 				// where rule 2 says the text lives.
 				engine::gui::Typing typing;
 				typing.Text = Input.TypedText();
@@ -2187,7 +2187,7 @@ namespace client {
 								Input.State().IsKeyDown(engine::scene::KeyCode::RightShift);
 
 				// **One step per press and not one per repeat**, because
-				// `input::Translator` drops SDL's key repeats deliberately — a
+				// `input::Translator` drops SDL's key repeats deliberately - a
 				// held arrow moves the caret once until something records how many
 				// times it fired.
 				if (Input.State().WasKeyPressed(engine::scene::KeyCode::Left)) {
@@ -2206,7 +2206,7 @@ namespace client {
 
 				// **The hit test, which a shipped client did not do at all.** The
 				// router was constructed, read for `Hovered` and `Pressed`, and
-				// never `Update`d — so a `TextButton` in a game never lit up and
+				// never `Update`d - so a `TextButton` in a game never lit up and
 				// its `Activated` never fired, while the same tree worked in the
 				// editor because `studio::Overlay` drives a router of its own.
 				// A button that does nothing in the shipped build and works in
@@ -2214,7 +2214,7 @@ namespace client {
 				// invisible to whoever is authoring.
 				//
 				// **Against the list that was just compiled**, and the hover it
-				// fed that compile is deliberately the previous frame's — see
+				// fed that compile is deliberately the previous frame's - see
 				// `Router::Hovered`, which explains why the one-frame loop is the
 				// alternative to a compile that depends on its own output.
 				engine::gui::Pointer pointer;
@@ -2223,7 +2223,7 @@ namespace client {
 
 				// **Focus and not a rectangle test.** The position is already in
 				// window pixels, and a pointer that has left the window stops
-				// producing motion — what it does *not* do is end the hover,
+				// producing motion - what it does *not* do is end the hover,
 				// which is what this flag is for.
 				pointer.Inside = Input.State().Focused;
 
@@ -2252,7 +2252,7 @@ namespace client {
 			// rewritten by the next `Update`; `DeliverGuiEvents` copies.
 			if (!typedEvents.empty() || !interfaceEvents.empty()) {
 				if (engine::script::Runtime *runtime = RuntimeOf(interfaceWorld); runtime != nullptr) {
-					// Typing first, because it happened first — the keystroke is
+					// Typing first, because it happened first - the keystroke is
 					// applied above the routing for the reason stated there.
 					if (!typedEvents.empty()) {
 						runtime->DeliverGuiEvents(typedEvents);
@@ -2274,7 +2274,7 @@ namespace client {
 
 		// **SDL is asked for text only while a `TextBox` has the keyboard, and
 		// that is a decision rather than a saving.** Text input is not a stream
-		// somebody switches on to receive characters — it is what raises the
+		// somebody switches on to receive characters - it is what raises the
 		// on-screen keyboard on a phone and opens an input method's composition
 		// window on a desktop, and both of those cover the game. A client that
 		// started it once and left it on would be a game with a keyboard over it
@@ -2283,7 +2283,7 @@ namespace client {
 		//
 		// **`gui::FocusedTextBox` is the switch, and being a lookup is exactly
 		// what makes it usable as one.** The fact rests in the world, one module
-		// decides it and this reads it — no flag here mirrors it, which is the
+		// decides it and this reads it - no flag here mirrors it, which is the
 		// same refusal `WriteInput`'s three surviving fields are about.
 		//
 		// **Compared before it is called**, for the reason the pointer mode above
@@ -2295,13 +2295,13 @@ namespace client {
 
 			// **Logged because nothing else can see it.** Whether the platform
 			// accepted the request is SDL's answer and there is no test that can
-			// ask — a headless run has no input method to raise — so the one
+			// ask - a headless run has no input method to raise - so the one
 			// record that the call was made on the frame the focus changed is
 			// this line. `--type` synthesises the event SDL would have sent and
 			// therefore proves the hop after this one, never this one.
 			const bool accepted = wantsTextInput ? SDL_StartTextInput(Window) : SDL_StopTextInput(Window);
 			ENGINE_INFO(
-				"text input: {} — SDL {}", wantsTextInput ? "on" : "off", accepted ? "ok" : SDL_GetError()
+				"text input: {} - SDL {}", wantsTextInput ? "on" : "off", accepted ? "ok" : SDL_GetError()
 			);
 		}
 
@@ -2309,7 +2309,7 @@ namespace client {
 		// client into a two-step render.** The scene goes into a texture, the
 		// texture is what gets copied back, and the window is presented from
 		// it. A game does not want that cost, which is why it happens only when
-		// `--capture` was passed — and why the flag is a diagnostic rather than
+		// `--capture` was passed - and why the flag is a diagnostic rather than
 		// a feature.
 		engine::render::SceneTarget target{};
 		const engine::render::SceneTarget *sceneTarget = nullptr;
@@ -2321,7 +2321,7 @@ namespace client {
 
 		// **Accumulated from the frame's own delta rather than read from a
 		// clock**, so a paused editor or a stopped run holds its animations
-		// where they were and a recorded session replays them identically —
+		// where they were and a recorded session replays them identically -
 		// `Renderer::SetAnimationTime` carries the rule.
 		Renderer.SetAnimationTime(AnimationSeconds);
 
@@ -2329,7 +2329,7 @@ namespace client {
 		// of it.** This is the step the standalone client never had: the studio
 		// has called `AttachForeignSurfaces` since cross-world panes existed and
 		// this loop handed the renderer an empty foreign span, so a
-		// `DestinationWorld` pane fell back to showing its own world — a mirror
+		// `DestinationWorld` pane fell back to showing its own world - a mirror
 		// where a window was authored.
 		//
 		// **Outside every `Enter`, because it enters other worlds** and
@@ -2340,7 +2340,7 @@ namespace client {
 		// That step exists there because a panel presents only the world it
 		// shows, so a far world's draw list was whatever it held last time
 		// somebody looked at it. This loop presents *every* simulated world
-		// already — a world the player is not looking at still ticks — so the
+		// already - a world the player is not looking at still ticks - so the
 		// far list is this frame's by the time we get here.
 		Foreign.clear();
 		std::span<const engine::scene::DrawInstance> drawn = Views.Instances();
@@ -2355,7 +2355,7 @@ namespace client {
 
 		// **The world's sun, pushed before the frame that shades with it.** It is
 		// a knob rather than an argument for `SetPortalDepth`'s reason, so this is
-		// where a world's `scene::Sun` reaches the renderer — every frame, because
+		// where a world's `scene::Sun` reaches the renderer - every frame, because
 		// a resource a script may write is one a script may write at any time and
 		// two floats compared per frame is cheaper than anything that would notice
 		// when it changed.
@@ -2384,7 +2384,7 @@ namespace client {
 
 		// **The shaders this world's materials name, resolved before the frame
 		// that draws with them.** Beside the sun and for the same reason: a
-		// script may select one at any time, so this runs every frame — and on a
+		// script may select one at any time, so this runs every frame - and on a
 		// world nobody is editing it is one walk over the materials and an
 		// integer compare per distinct shader, which is what
 		// `ShaderSource::Revision` exists to make possible.
@@ -2413,7 +2413,7 @@ namespace client {
 
 				// **A warning and not a fatal, and the part goes on drawing with
 				// the engine's own shader.** `render/AGENTS.md` is explicit that
-				// a user shader failing is a diagnostic string — the built-in
+				// a user shader failing is a diagnostic string - the built-in
 				// ones fail the build instead, which is where that belongs.
 				if (!module->Error.empty()) {
 					ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
@@ -2429,7 +2429,7 @@ namespace client {
 		// The old system's `Render` takes one camera's worth of arguments
 		// positionally; the one being replaced took `std::span<const View>`, so a
 		// frame could carry several cameras and each could name **its own
-		// pipeline** — `view.World` and `view.Pipeline` were set together here,
+		// pipeline** - `view.World` and `view.Pipeline` were set together here,
 		// because the pipeline key a world installs is qualified by the world id
 		// and a view naming one without the other asks for a pipeline nothing
 		// installed.
@@ -2456,7 +2456,7 @@ namespace client {
 		);
 
 		// **After the frame rather than before it**, so the capture is of a
-		// frame whose scene texture exists — the studio's own capture states
+		// frame whose scene texture exists - the studio's own capture states
 		// the same thing for the same reason. One frame before the last, so the
 		// request is made on one frame and written by the next while the run
 		// still ends when it was told to.
@@ -2471,7 +2471,7 @@ namespace client {
 		// **Presented, or simply drawn when there is nowhere to present.** A
 		// headless renderer never presents by design, so counting presents alone
 		// would leave `--frames` unreachable and a run that nobody is watching
-		// would never end — which is the one failure mode a build server cannot
+		// would never end - which is the one failure mode a build server cannot
 		// recover from. The editor makes the same allowance for the same reason.
 		if (LastFrame.Presented || Settings.Headless) {
 			FramesDrawn++;
@@ -2489,7 +2489,7 @@ namespace client {
 		// **The three that only mean anything as a series.** A batch count says
 		// whether the interface is being rebuilt into more draws than it needs;
 		// the two compositor figures are the ones that say a run is heading for
-		// trouble rather than in it — drops climbing is a compositor behind its
+		// trouble rather than in it - drops climbing is a compositor behind its
 		// producers, and growths climbing is a draw list with no upper edge.
 		// Counted rather than merely available, because a number nobody reads
 		// answers no question.
@@ -2498,7 +2498,7 @@ namespace client {
 		Metrics::Count("view.growths", static_cast<double>(Views.Growths()));
 
 		// **The peak rather than the latest.** The frame a run exits on is
-		// often one that presented nothing — the window is going away — so the
+		// often one that presented nothing - the window is going away - so the
 		// last frame's counters are zero on almost every bounded run, which
 		// makes them useless as the one number a log can carry.
 		PeakTriangles = std::max(PeakTriangles, LastFrame.Triangles);
@@ -2522,7 +2522,7 @@ namespace client {
 				// **The pass counts are here because nothing else can report
 				// them.** A shadow pass or a surface pass that silently did not
 				// run looks exactly like one that ran and changed nothing, and
-				// neither has a unit test — `AGENTS.md` names the GPU exception
+				// neither has a unit test - `AGENTS.md` names the GPU exception
 				// and refuses a mock renderer to close it. The last frame's
 				// draw calls are the cheapest honest evidence that the passes
 				// are being submitted at all.
@@ -2599,7 +2599,7 @@ namespace client {
 		// clock would be a counter that read one, and this module's whole
 		// discipline is that it does not.
 		//
-		// The window is however long it has been since the last panel redraw —
+		// The window is however long it has been since the last panel redraw -
 		// a twentieth of a second at the panel's own rate. Short enough to
 		// follow a stream that starts and stops, long enough that it is not one
 		// packet's worth of noise.
@@ -2630,7 +2630,7 @@ namespace client {
 		network.Stale = replica.Stale;
 
 		// The interpolation half, and the row count that says whether any of it
-		// reached a draw list. Only once the world exists — before the join
+		// reached a draw list. Only once the world exists - before the join
 		// there is no replicated store to enter.
 		if (ReportedJoin) {
 			Universe_->Enter(Replicated, [&network](engine::ecs::Store &store) {
@@ -2660,8 +2660,8 @@ namespace client {
 		// **A replica that joined and drew nothing reads from outside exactly
 		// like a replica that never joined**, and the difference is four
 		// numbers this process already has. Printed at exit rather than left in
-		// the F3 panel, because the reported symptom — "nothing appears in the
-		// scene" — is one somebody hits on a machine where they are looking at
+		// the F3 panel, because the reported symptom - "nothing appears in the
+		// scene" - is one somebody hits on a machine where they are looking at
 		// the window rather than at a counter, and a run with `--frames`
 		// produces no window to look at at all.
 		//
@@ -2710,7 +2710,7 @@ namespace client {
 		// `mono.client/AGENTS.md` records the camera of its own that fixes it.
 		if (drawn > 0) {
 			ENGINE_INFO(
-				"replica: drawn through the demo world's camera — `--view-spacing 0` overlays the two if the "
+				"replica: drawn through the demo world's camera - `--view-spacing 0` overlays the two if the "
 				"replicated world is not on screen"
 			);
 		}

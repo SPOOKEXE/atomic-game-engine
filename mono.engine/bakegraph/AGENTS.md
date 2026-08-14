@@ -1,4 +1,4 @@
-# bakegraph — module invariants
+# bakegraph - module invariants
 
 L9, `shared` tier. The words a bake pipeline is described in, and nothing that
 runs one.
@@ -6,13 +6,13 @@ runs one.
 ## `Engine::core` and nothing else
 
 This module exists to keep a decoder out of a save format. `bake` carries every
-importer the engine has — PNG, JPEG, GIF, BMP, OBJ, glTF, PMX — and nothing a
+importer the engine has - PNG, JPEG, GIF, BMP, OBJ, glTF, PMX - and nothing a
 shipped game links may link it; `Engine::game` links *this*, so a dedicated
 server parses a pipeline document with none of them.
 
 That property is one link line wide. The day something here wants `assets`, ask
 what for: a document is names and numbers, and a payload is `bake`'s. The tier
-check will not stop it — `assets` is below this — so the guard is the row in
+check will not stop it - `assets` is below this - so the guard is the row in
 `mono.tools/architecture/expected_graph.json` and this paragraph.
 
 ## The namespace is still `engine::bake`
@@ -29,7 +29,7 @@ kind is appended and never inserted, and both halves of `NodeText` /
 the same answer about the same list; a second copy of it beside the second
 caller is exactly the drift it exists to prevent.
 
-A kind this build does not have reads as a malformed line, deliberately — it is
+A kind this build does not have reads as a malformed line, deliberately - it is
 indistinguishable from a typo, and guessing would bake something nobody wrote.
 What that refusal *costs* is the caller's: `game::ReadAssetPipelines` drops the
 world's pipelines and keeps the world.
@@ -46,5 +46,5 @@ being diffable and a round-trip test stops meaning anything.
 Nothing here validates: recording is unchecked because an editor lets somebody
 wire two nodes and then delete one, and `bake::Build` is where a document meets a
 graph and can be wrong. So the format must round trip a broken document as
-faithfully as a working one — a writer that quietly dropped an edit it thought
+faithfully as a working one - a writer that quietly dropped an edit it thought
 was nonsense would lose an author's work in progress.

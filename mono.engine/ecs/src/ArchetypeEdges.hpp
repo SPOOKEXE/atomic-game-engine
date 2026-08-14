@@ -8,14 +8,14 @@
 // process-wide mutex, and only then does `TableFor` hash the resulting set id to
 // reach the table. Both halves produce the same answer every time for the same
 // starting table and the same component, because a table's component set never
-// changes — so the second time is a cache miss that had all the information to
+// changes - so the second time is a cache miss that had all the information to
 // be a hit.
 //
 // **This was built against a measurement, not a hunch.** `ecs/docs/TODO.md`
 // gated it on one: *the number to have first is what archetype transitions cost
 // as a fraction of a tick*. `benchmarks/Structure.cpp` is that number, and it
 // says a transition is roughly fifty nanoseconds against nine for overwriting a
-// component already present — so changing an entity's shape costs about five
+// component already present - so changing an entity's shape costs about five
 // times what writing to it does, and rather more than iterating it.
 //
 // **A linear scan of a small vector, not a hash map.** An archetype has a
@@ -25,7 +25,7 @@
 // replaced would be a cache that bought nothing.
 //
 // **The one thing that invalidates an edge is `Observe`.** A table's set is
-// fixed, so `(table, component)` maps to one destination forever — *unless*
+// fixed, so `(table, component)` maps to one destination forever - *unless*
 // observing a component starts requiring a `DirtyBits` column, which changes
 // what `Tracked` appends and therefore which table a transition should reach.
 // That is why every lookup carries the watch epoch and a stale one wipes the
@@ -103,7 +103,7 @@ namespace engine::ecs {
 
 	  private:
 		struct Edge {
-			// The component's dense index, not the `ComponentId` — the compare
+			// The component's dense index, not the `ComponentId` - the compare
 			// is the whole inner loop and comparing one integer is the point.
 			uint32_t Component = 0;
 

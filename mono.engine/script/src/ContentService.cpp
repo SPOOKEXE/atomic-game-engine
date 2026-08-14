@@ -1,8 +1,8 @@
 // What content this world actually has, from a script.
 //
 // **A scene could name an asset and had no way to ask what the names were.**
-// `part.MeshId = "props/fox.amesh"` is rule 4 working correctly — a name crosses
-// and an id does not — but it left every demo in `examples/` holding a string
+// `part.MeshId = "props/fox.amesh"` is rule 4 working correctly - a name crosses
+// and an id does not - but it left every demo in `examples/` holding a string
 // literal for a file that only exists if somebody baked and published that exact
 // tree. `MeshGrid.luau` had six of them, and on any store but the one it was
 // written against every single part fell back to a cube. Nothing warned: an
@@ -14,28 +14,28 @@
 //
 // **Neutral since v0.16, and nothing in this file names a VM.** It was six
 // `lua_CFunction`s and a `lua_State` per line, which is why JavaScript did not
-// have this service at all — an installer can only build the VM it was written
+// have this service at all - an installer can only build the VM it was written
 // against. Every method is a `ScriptMethod` now and `ServiceCatalogue.cpp`
 // builds both languages from the one surface at the foot of the file.
 //
 // **Most of it reports what this world has, not what a store holds.**
 // `MeshCatalogue` and `TextureCatalogue` are written by whatever registered the
-// content this run — the client's content pump — so an empty list means "nothing
+// content this run - the client's content pump - so an empty list means "nothing
 // has arrived here", which on a headless server is the permanent and correct
 // answer.
 //
 // **`GetPublishedMeshes` is the one exception, and v0.10 made it necessary.**
 // While content was fetched by kind, everything published arrived whether a
 // scene wanted it or not, so "what has arrived" and "what exists" were the same
-// list and only the first needed asking. Nothing is fetched by kind any more —
-// `client/ContentDemand.hpp` carries the 6.9 GB that ended it — so a scene
+// list and only the first needed asking. Nothing is fetched by kind any more -
+// `client/ContentDemand.hpp` carries the 6.9 GB that ended it - so a scene
 // reading only the first can never discover anything, and every demo was back to
 // string literals. It reads the manifest a client already verified, which is a
 // few hundred strings rather than a store, and naming one of them is what
 // fetches it.
 //
 // **Names, in sorted order, and nothing else.** Not handles, not a table of
-// metadata that would then be a second place facts about a mesh live —
+// metadata that would then be a second place facts about a mesh live -
 // `MeshPart.TrianglesCount` is already the way to ask about one. Sorted because
 // the catalogues are hash maps and a demo that laid parts out in iteration order
 // would arrange itself differently on every run, which is exactly the kind of
@@ -93,8 +93,8 @@ namespace engine::script {
 		// **What there is to name, where `GetMeshes` says what has been named.**
 		// The two used to be one question because content was fetched by kind, so
 		// everything published arrived whether or not a scene wanted it. Since
-		// v0.10 nothing is fetched by kind — `client/ContentDemand.hpp` has the
-		// 6.9 GB that made that necessary — and the consequence landed here: a
+		// v0.10 nothing is fetched by kind - `client/ContentDemand.hpp` has the
+		// 6.9 GB that made that necessary - and the consequence landed here: a
 		// scene reading `GetMeshes` sees only what it or another scene already
 		// asked for, so it can never discover anything.
 		//
@@ -118,7 +118,7 @@ namespace engine::script {
 		//
 		// **What a model is wearing, which nothing else could answer.** A
 		// `MeshPart` naming no `TextureID` shows whatever each of its submeshes
-		// recorded at bake time, and those names live *inside* the mesh file —
+		// recorded at bake time, and those names live *inside* the mesh file -
 		// so a script that wants to swap a character's sheet had no way to learn
 		// the current one and no name to put back. `MeshCatalogue::Textures`
 		// records them at intake, where the file is open.
@@ -129,7 +129,7 @@ namespace engine::script {
 		// destroying. So this one is deliberately *not* sorted or deduplicated.
 		//
 		// An empty list for a mesh nothing has recorded and for one whose
-		// submeshes name nothing — every built-in is the second. Those two are
+		// submeshes name nothing - every built-in is the second. Those two are
 		// the same answer for the same reason `TrianglesOf` answers zero to
 		// both: this world cannot tell you, and a caller can act on neither.
 		void GetMeshTextures(ScriptCall &call) {
@@ -142,14 +142,14 @@ namespace engine::script {
 			names.reserve(sheets.size());
 			for (const core::Name &sheet : sheets) {
 				// **An empty string, not a hole and not a null.** A submesh that
-				// names no sheet is an ordinary thing — a model with one
-				// untextured run — and the slot has to stay in the list or the
+				// names no sheet is an ordinary thing - a model with one
+				// untextured run - and the slot has to stay in the list or the
 				// index stops meaning "submesh number", which is the whole
 				// reason this is in submesh order.
 				//
 				// `Name("")` is invalid and `Name::Text()` on an invalid name is
 				// a view over a **null pointer**, so the empty view here is over
-				// a literal rather than default-constructed — `lua_pushlstring`
+				// a literal rather than default-constructed - `lua_pushlstring`
 				// traps on a null even with a length of zero. Found twice: by a
 				// crash on the first model with an untextured submesh, and again
 				// by the same test the day this moved to `ReturnStrings`.
@@ -178,8 +178,8 @@ namespace engine::script {
 		// `ContentService:GetFlipbook(texture)` -> `{Side, Frames, FrameRate}` or nil
 		//
 		// **The one piece of metadata that is not derivable and not already
-		// exposed.** A flipbook's grid and rate come from the source file — a
-		// GIF states a delay per frame — and a scene that wanted to drive an
+		// exposed.** A flipbook's grid and rate come from the source file - a
+		// GIF states a delay per frame - and a scene that wanted to drive an
 		// emitter at the authored rate would otherwise have to hardcode a number
 		// the bake already knows. Nil for a still image, which is the same
 		// answer as "this world has not been told", and for the same reason as
@@ -216,7 +216,7 @@ namespace engine::script {
 		// `ContentService:GetTriangleCount(mesh)`
 		//
 		// The same number `MeshPart.TrianglesCount` gives, asked about a mesh
-		// rather than about a part — so a script can size a layout before it has
+		// rather than about a part - so a script can size a layout before it has
 		// built anything to measure.
 		void GetTriangleCount(ScriptCall &call) {
 			call.ReturnNumber(

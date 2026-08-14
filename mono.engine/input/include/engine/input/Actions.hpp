@@ -7,7 +7,7 @@
 // than a branch spread across the codebase. That is what makes rebinding a
 // table edit later instead of a search.
 //
-// This module translates events. It does not pump them — the program owns its
+// This module translates events. It does not pump them - the program owns its
 // event loop, because on some platforms SDL insists on it.
 //
 // @tier L12 · client

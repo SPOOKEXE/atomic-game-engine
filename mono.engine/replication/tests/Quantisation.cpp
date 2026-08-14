@@ -55,7 +55,7 @@ namespace quantisation_test {
 	// **Twenty-eight bytes in the store and ten on the wire, which is the
 	// `scene::Transform` figure and is why those are the numbers.** Three
 	// coarse axes and four fine ones, standing in for a position and an
-	// orientation without this module learning that either exists — it carries
+	// orientation without this module learning that either exists - it carries
 	// named components and has no idea which of them is a position, and a test
 	// that borrowed `scene::Transform` to make the point would be the
 	// dependency the module refuses.
@@ -70,7 +70,7 @@ namespace quantisation_test {
 	};
 
 	// The same twenty-eight bytes with no wire form at all, so the verbatim
-	// path stays covered by a case rather than by the absence of one — and so
+	// path stays covered by a case rather than by the absence of one - and so
 	// the entities-per-datagram measurement has a real control to measure
 	// against instead of an arithmetic guess.
 	struct Plain {
@@ -290,7 +290,7 @@ TEST_CASE("replicating a world does not change the world", "[replication][quanti
 	// bytes rather than argued from where the code sits. A compact form is
 	// lossy, and the natural implementation is a codec per component with the
 	// natural mistake of round-tripping the authority's own values through it
-	// — after which the server is simulating the client's approximation of its
+	// - after which the server is simulating the client's approximation of its
 	// world and `just determinism` is comparing two runs of that.
 	// **Two worlds ticked identically, one of them served.** The same shape
 	// `just determinism` uses, in one process: every float operation happens on
@@ -346,7 +346,7 @@ TEST_CASE("replicating a world does not change the world", "[replication][quanti
 TEST_CASE("a recording of a quantised component is lossless", "[replication][quantisation]") {
 	// **The reason the wire form is a second pair of hooks rather than a codec
 	// fitted over `TypeDescriptor::Write`.** That codec would have made every
-	// recording lossy, and `just replay-check` would have gone on passing —
+	// recording lossy, and `just replay-check` would have gone on passing -
 	// comparing one lossy file against another, which is a check that passes
 	// and means nothing. So the file path is asserted to be exact for the same
 	// values the wire path visibly rounds.
@@ -400,7 +400,7 @@ TEST_CASE("a recording of a quantised component is lossless", "[replication][qua
 
 TEST_CASE("the snapshot and the delta deliver the same value", "[replication][quantisation]") {
 	// **If one path quantises and the other does not, a client's world depends
-	// on when it joined** — which never shows up as a failure and always shows
+	// on when it joined** - which never shows up as a failure and always shows
 	// up as two clients drifting apart. The join snapshot is built from a
 	// scratch store and the delta is built from the dirty bits, so they are two
 	// separate places that have to make the same choice.
@@ -573,7 +573,7 @@ TEST_CASE("a compact component puts more entities in a datagram", "[replication]
 
 TEST_CASE("a truncated compact value is refused rather than half applied", "[replication][quantisation]") {
 	// Every field of an inbound message is hostile, and a compact form is a
-	// different number of bytes per entity — so a message claiming more
+	// different number of bytes per entity - so a message claiming more
 	// entities than it carries values for is the shape of malformed this change
 	// introduced.
 	Server server;
@@ -601,7 +601,7 @@ TEST_CASE("a truncated compact value is refused rather than half applied", "[rep
 TEST_CASE("a component too large for a message crosses in its compact form", "[replication][quantisation]") {
 	// **The check that refuses an unpackable component has to measure the form
 	// that is packed.** One entity of a sixteen-hundred-byte component cannot
-	// fit an empty message and is refused before packing begins — correctly,
+	// fit an empty message and is refused before packing begins - correctly,
 	// because dropping it quietly would be a component that never arrives. Two
 	// bytes fits with room to spare, so measuring the stored size instead is a
 	// component silently refused for a size nothing ever sends.

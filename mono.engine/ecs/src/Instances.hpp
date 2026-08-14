@@ -4,7 +4,7 @@
 //
 // An instance is not an object. It is an entity in the archetype its class
 // names, carrying `InstanceClass`, `Hierarchy` and `InstanceName` alongside
-// whatever else that class holds — so a system that wants every part in the
+// whatever else that class holds - so a system that wants every part in the
 // world writes a query rather than walking a tree.
 //
 // The tree here is **organisational, not spatial**. Parenting moves nothing and
@@ -46,22 +46,22 @@ namespace engine::ecs {
 	// Two things followed, and both were silent.
 	//
 	// **A name nothing guarantees ends up in a file.** A snapshot records
-	// components by name, and `TypeNameOf` is `__PRETTY_FUNCTION__` — so the
+	// components by name, and `TypeNameOf` is `__PRETTY_FUNCTION__` - so the
 	// name in the file was a property of the compiler that wrote it. That is
 	// the exact reasoning `scene` gave for naming `Hierarchy` explicitly; it
 	// applies just as well to the other two.
 	//
 	// **And whoever registered first decided the name.** `Components::Adopt`
 	// refuses an explicit name for a type that already has an automatic one,
-	// because a type cannot have two — so a program where anything touched a
+	// because a type cannot have two - so a program where anything touched a
 	// `Hierarchy` before `scene` registered it *aborted*. Nothing declared the
 	// order. In a shipped program `RegisterSceneComponents` happened to run
 	// first; in a test binary the shuffle decided, and `test_replication` died
 	// roughly one run in twenty-five with `component 'ecs.Hierarchy' is already
 	// registered as 'Hierarchy'`.
 	//
-	// Called from every door into the instance model — a class registration and
-	// a store's construction — because being first is the entire job. Repeating
+	// Called from every door into the instance model - a class registration and
+	// a store's construction - because being first is the entire job. Repeating
 	// it is a lock and three compares.
 	void RegisterInstanceComponents();
 
@@ -117,7 +117,7 @@ namespace engine::ecs {
 	// Visits everything under an instance, nearest first.
 	//
 	// **Depth first, in the order a recursive walk written by hand would
-	// produce** — a child, then everything under that child, then the next
+	// produce** - a child, then everything under that child, then the next
 	// child. That is Roblox's `GetDescendants` order, and scripts index into
 	// the result, so it is a contract rather than an implementation detail.
 	//
@@ -220,7 +220,7 @@ namespace engine::ecs {
 	//
 	// **What `Store::Destroy` owes the tree.** Freeing a row does not touch the
 	// links that point *at* it, so a raw destroy used to leave a live parent
-	// naming a freed child — and `EachChild` stops at the first dead link
+	// naming a freed child - and `EachChild` stops at the first dead link
 	// rather than stepping over it, because the links *out of* a freed row went
 	// with the row. Destroying the middle of three children therefore truncated
 	// the list to one, silently, and the two that were left were unreachable.
@@ -255,7 +255,7 @@ namespace engine::ecs {
 	//
 	// **The pairs come back because the caller has to finish the job.** A
 	// reference pointing inside the subtree has to be rewritten to point inside
-	// the copy of it, and that is a *property*-level operation — the getters
+	// the copy of it, and that is a *property*-level operation - the getters
 	// and setters take a `Store`, which this layer does not have. So the copy
 	// happens here and `Store::CloneInstance` remaps.
 	//

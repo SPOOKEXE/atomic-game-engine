@@ -5,7 +5,7 @@
 // Everything in content delivery is named by the hash of its bytes and never by
 // where it sits: a chunk, an asset, a bundle and the manifest are each a
 // `ContentHash`. A path that reaches the request layer is a bug, because a path
-// can be walked and a hash cannot — CDN.md §1.
+// can be walked and a hash cannot - CDN.md §1.
 //
 // The hash is BLAKE3-256. DATATYPES_LIBRARIES.md §1.1 picks it for content
 // addressing because that job is adversarial by definition: anyone can run a
@@ -34,14 +34,14 @@ namespace engine::assets {
 	//
 	// Ordered, so that a list of hashes has one canonical arrangement. Every
 	// list in the manifest is sorted by this, because a manifest that differs
-	// run to run cannot be diffed and cannot be cached — the same discipline
+	// run to run cannot be diffed and cannot be cached - the same discipline
 	// snapshots already follow.
 	struct ContentHash {
 		// Digest length. Not configurable: it is part of the format.
 		static constexpr size_t BYTES = 32;
 
 		// The digest itself. Zero-initialised, which is not a valid hash of
-		// anything — see IsZero.
+		// anything - see IsZero.
 		std::array<uint8_t, BYTES> Digest{};
 
 		// Byte-wise ordering, for the canonical sort every manifest list uses.
@@ -54,8 +54,8 @@ namespace engine::assets {
 
 		// Whether this is the all-zero placeholder rather than a real digest.
 		//
-		// A default-constructed hash is a hash of nothing at all — the empty
-		// input has its own non-zero digest — so zero is safe to use as "not
+		// A default-constructed hash is a hash of nothing at all - the empty
+		// input has its own non-zero digest - so zero is safe to use as "not
 		// set" and this is how that is asked.
 		bool IsZero() const;
 
@@ -103,7 +103,7 @@ namespace engine::assets {
 
 		// Discards the state and starts again, without releasing anything.
 		//
-		// For a loop that hashes many chunks — reusing one Hasher keeps the
+		// For a loop that hashes many chunks - reusing one Hasher keeps the
 		// inline state hot instead of reconstructing it per chunk.
 		void Reset();
 
@@ -115,7 +115,7 @@ namespace engine::assets {
 
 	  private:
 		// Storage for the vendored hasher, sized here so that `blake3.h` stays
-		// out of this header — AGENTS.md refuses a vendor type in a public
+		// out of this header - AGENTS.md refuses a vendor type in a public
 		// header, and a `unique_ptr` instead would put an allocation on the path
 		// that hashes every chunk of every asset.
 		//
@@ -125,8 +125,8 @@ namespace engine::assets {
 
 		// Named rather than written inline in the alignas, so the source file
 		// can assert against the number the member actually got. `alignof` on
-		// the array type answers 1 — it describes `unsigned char`, not the
-		// alignment this alignas imposes — so a check written that way passes or
+		// the array type answers 1 - it describes `unsigned char`, not the
+		// alignment this alignas imposes - so a check written that way passes or
 		// fails for reasons unrelated to the question.
 		static constexpr size_t STATE_ALIGNMENT = 16;
 

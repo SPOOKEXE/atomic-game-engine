@@ -3,8 +3,8 @@
 # What every `run-*.sh` in this directory is made of.
 #
 # **Sourced, not executed.** Each scene script sets a few variables and then
-# sources this; everything else — locating the repository, building, finding the
-# staged client, the frame-rate policy — happens once, here. Eleven copies of a
+# sources this; everything else - locating the repository, building, finding the
+# staged client, the frame-rate policy - happens once, here. Eleven copies of a
 # build sequence is eleven places to fix a preset name, and the copies would
 # stop agreeing the first time one of them was edited in a hurry.
 #
@@ -14,7 +14,7 @@
 #   SCENE_ARGS  an array of flags this scene needs to be itself
 #
 # Everything a caller passes on the command line is appended after those, so a
-# scene's own flags can be overridden per run — the last spelling of an option
+# scene's own flags can be overridden per run - the last spelling of an option
 # is the one `core::Arguments` keeps.
 #
 # --- The frame-rate policy ------------------------------------------------
@@ -42,7 +42,7 @@ build="$root/.cache/build/$preset"
 # there fails inside CMake with `unknown target` and the reason is not in the
 # message. Say what the preset is for instead.
 if [ "$preset" = "server" ]; then
-	echo "the 'server' preset builds no client — there is nothing to run." >&2
+	echo "the 'server' preset builds no client - there is nothing to run." >&2
 	echo "  try:  PRESET=dev $0" >&2
 	exit 1
 fi
@@ -53,7 +53,7 @@ if ! command -v cmake > /dev/null; then
 fi
 
 # Configure is quiet and the build is not. Re-running a demo should show what it
-# is compiling, if anything, and nothing else — the configure has no news.
+# is compiling, if anything, and nothing else - the configure has no news.
 #
 # The build is by directory rather than by preset, which is the one place these
 # two lines are not symmetrical. `--build --preset` reads CMakePresets.json out
@@ -80,7 +80,7 @@ scene=()
 if [ -n "${SCENE:-}" ]; then
 	# **The staged copy, not the source.** `mono.engine/examples/` is where a
 	# scene is written and `assets/examples/` under the build is where it is
-	# staged beside the binary it runs in — a demo that ran the source tree
+	# staged beside the binary it runs in - a demo that ran the source tree
 	# would work here and nowhere a staged tree was copied to.
 	staged="$build/client/assets/examples/$SCENE"
 	if [ ! -f "$staged" ]; then

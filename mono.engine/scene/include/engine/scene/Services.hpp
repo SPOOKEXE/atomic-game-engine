@@ -3,7 +3,7 @@
 // The fixtures every world has: a workspace and the services.
 //
 // **A service is an instance, for the same reason a camera is one.** Roblox's
-// `game:GetService("Lighting")` hands back a thing in the tree — it has a
+// `game:GetService("Lighting")` hands back a thing in the tree - it has a
 // parent, children, properties, and it is in the save file. The engine already
 // had services as *script globals* (`RunService`, `MessagingService`), which is
 // a different animal: those are engine surfaces a script calls, they hold no
@@ -18,8 +18,8 @@
 //
 // **What makes them different from an ordinary instance is a component, not a
 // class check.** `ServiceComponent` is on every one of them, so "is this a
-// fixture" and "show me this world's services" are queries. The alternative —
-// comparing class names at each call site — is one string comparison per
+// fixture" and "show me this world's services" are queries. The alternative -
+// comparing class names at each call site - is one string comparison per
 // service, and they drift the first time somebody adds another one.
 //
 // @tier L7 · shared
@@ -46,7 +46,7 @@ namespace engine::scene {
 	// a component rather than a special case in the writer.** The camera in
 	// `Workspace` is the *viewer's*: the editor makes one to show its own point
 	// of view, a client makes one for the player, and when several people edit
-	// one game they each make their own. None of them is content — a game file
+	// one game they each make their own. None of them is content - a game file
 	// that carried somebody's camera would hand their viewpoint to everyone who
 	// opened it, and a second person joining would add a second one to the file
 	// forever.
@@ -59,7 +59,7 @@ namespace engine::scene {
 	// @since v0.7
 	struct TransientComponent {
 		// Explicit padding, so the object representation a snapshot writes holds
-		// no uninitialised bytes. A snapshot *does* carry these — Stop has to
+		// no uninitialised bytes. A snapshot *does* carry these - Stop has to
 		// put the editor's camera back exactly as it was, and that is a
 		// different question from what a game file holds.
 		uint32_t Reserved = 0;
@@ -96,7 +96,7 @@ namespace engine::scene {
 	// shared component with eight unused floats on every service is eight
 	// floats in every snapshot of every world.
 	//
-	// Nothing reads these yet — the renderer's lighting is not driven from a
+	// Nothing reads these yet - the renderer's lighting is not driven from a
 	// world's `Lighting` service. They are authored and they round-trip, which
 	// is the half that has to exist before the renderer can read them.
 	//
@@ -147,8 +147,8 @@ namespace engine::scene {
 		// How many players this world admits.
 		//
 		// **Enforced by `AddPlayer`, which is the one door a player arrives
-		// through.** The transport has its own cap —
-		// `replication::ListenerSettings::MaximumClients` — and the two are
+		// through.** The transport has its own cap -
+		// `replication::ListenerSettings::MaximumClients` - and the two are
 		// different questions: that one is how many sockets a process will hold,
 		// this one is how many occupants the *game* is for.
 		int32_t MaxPlayers = 50;
@@ -228,7 +228,7 @@ namespace engine::scene {
 	// **Idempotent, and that is what makes it safe to call on a world that came
 	// out of a file.** A game saved before this existed has no services in it;
 	// a game saved after has all of them. Calling this on either one leaves the
-	// same eleven roots, and calling it twice does nothing the second time —
+	// same eleven roots, and calling it twice does nothing the second time -
 	// which is what lets the studio run it after every load without checking
 	// which kind of file it got.
 	//
@@ -236,7 +236,7 @@ namespace engine::scene {
 	// rather than beside it.
 	//
 	// **No camera.** A camera belongs to whoever is looking rather than to the
-	// game — see `TransientComponent` — so the viewer makes its own.
+	// game - see `TransientComponent` - so the viewer makes its own.
 	//
 	// @param store The world to furnish.
 	// @return The `Workspace`, which is the one callers usually want next.
@@ -246,7 +246,7 @@ namespace engine::scene {
 	//
 	// **By class and never by name, and that distinction was a live bug.**
 	// `WorkspaceOf` was `FindFirstRoot("Workspace")`, so a script renaming the
-	// workspace made it answer nothing — and `InstallServices`, which used the
+	// workspace made it answer nothing - and `InstallServices`, which used the
 	// same lookup to decide what a world was missing, then minted a *second*
 	// `Workspace` beside the one holding the scene. A class is registered once
 	// and a rename cannot touch it, so this is the shape every fixture lookup in
@@ -297,7 +297,7 @@ namespace engine::scene {
 	// **A predicate rather than a filter, for `VisibleToClients`' reason.**
 	// `mono.engine/replication` does not depend on `scene` and must not, so the
 	// rule lives here beside the service it reads and the plumbing lives in
-	// whoever owns a connection — `Authority::SetPriority` is the hook.
+	// whoever owns a connection - `Authority::SetPriority` is the hook.
 	//
 	// @param store    The world.
 	// @param instance Anything in the tree.
@@ -309,12 +309,12 @@ namespace engine::scene {
 	//
 	// **A resource rather than a component, because there is one of it.** A
 	// world has many `Player` instances and at most one of them is *this*
-	// viewer — `ecs/AGENTS.md`'s rule is that one-of-a-kind state is a resource,
+	// viewer - `ecs/AGENTS.md`'s rule is that one-of-a-kind state is a resource,
 	// and a `LocalPlayer` tag on a row would be a second place the answer lived.
 	//
 	// **Empty on a server, and that is the whole point.** `Players.LocalPlayer`
 	// is nil where `IsClient()` is false, so a `Script` that reached for it gets
-	// nil rather than somebody else's player — which is the bug this separation
+	// nil rather than somebody else's player - which is the bug this separation
 	// exists to make impossible.
 	//
 	// @since v0.10
@@ -326,15 +326,15 @@ namespace engine::scene {
 	// Admits one occupant: the `Player`, its four containers, and the two
 	// `Starter*` copies that are made once and never again.
 	//
-	// **Not automatic.** Who is in a game is the host's business — a dedicated
+	// **Not automatic.** Who is in a game is the host's business - a dedicated
 	// server admits players as they connect and the studio admits one per client
-	// view — so furnishing a world does not invent an occupant.
+	// view - so furnishing a world does not invent an occupant.
 	//
 	// ## What a join does, in order
 	//
 	//   1. The `Player` row, under `Players`, named `name`.
 	//   2. `PlayerGui`, `PlayerScripts`, `Backpack` and `StarterGear` under it.
-	//      All four are private to that player on the wire — see `PlayerOwning`.
+	//      All four are private to that player on the wire - see `PlayerOwning`.
 	//   3. Every child of `StarterPlayer.StarterPlayerScripts` cloned into
 	//      `PlayerScripts`. **Once, on join, and never on a respawn**, which is
 	//      Roblox's rule and the whole reason that container is not
@@ -369,7 +369,7 @@ namespace engine::scene {
 	// there are four of them and they differ only in which pair they name.**
 	// `StarterPlayerScripts` into `PlayerScripts`, `StarterPack` into
 	// `StarterGear`, `StarterCharacterScripts` into the character, `StarterGear`
-	// into `Backpack` — four calls rather than four copies of a loop, which is
+	// into `Backpack` - four calls rather than four copies of a loop, which is
 	// the paste `docs/CODE_QUALITY.md` asks about. The fifth,
 	// `StarterGui` into `PlayerGui`, is `gui::ResetPlayerGui`'s because it
 	// carries a survival rule the other four do not have.
@@ -396,7 +396,7 @@ namespace engine::scene {
 	// **`Backpack`'s half of a respawn, and it is a function because the
 	// gathering matters.** `DestroyInstance` walks the instance's own children,
 	// so calling it from inside `EachChild` is destroying what the walk is
-	// holding — the same collect-then-act `ResetPlayerGui` and
+	// holding - the same collect-then-act `ResetPlayerGui` and
 	// `ReclaimOrphanedCharacters` both make.
 	//
 	// @param store     The world.
@@ -427,7 +427,7 @@ namespace engine::scene {
 	//
 	// **`PlayerGui` is spelled here and again in `gui::PLAYER_GUI`**, because
 	// `gui` decides whether a `ScreenGui` draws by walking its ancestors and
-	// comparing names, and the two modules may not link each other —
+	// comparing names, and the two modules may not link each other -
 	// `gui/AGENTS.md` refuses the edge, and this is the other side of the same
 	// refusal.
 	//
@@ -463,7 +463,7 @@ namespace engine::scene {
 	//
 	// **`ServiceComponent::Scope` has existed since v0.7 and nothing read it.**
 	// It round-trips through a save file and it is in the properties panel, and
-	// the wire ignored it — so `ServerScriptService` and `ServerStorage`, the two
+	// the wire ignored it - so `ServerScriptService` and `ServerStorage`, the two
 	// containers whose entire purpose is that a client must not see them, were
 	// replicated to every client along with everything else. A game's server
 	// scripts and its unreleased content went down the wire.
@@ -472,7 +472,7 @@ namespace engine::scene {
 	// `mono.engine/replication` does not depend on `scene` and must not: the
 	// wire's job is to move components and it has no business knowing what a
 	// service is. `replication::Authority::Interest` is the hook that exists for
-	// exactly this — a host that knows both sides installs a predicate built from
+	// exactly this - a host that knows both sides installs a predicate built from
 	// these. So the *rule* lives here, beside the scope it reads, and the
 	// *plumbing* lives in whoever owns a connection.
 
@@ -489,7 +489,7 @@ namespace engine::scene {
 	// @param instance Anything in the tree.
 	// @return The scope of the service it is under. `Shared` for an instance
 	//         under no service at all, which is the safe answer for an orphan a
-	//         script has created and not yet parented — it is not yet secret,
+	//         script has created and not yet parented - it is not yet secret,
 	//         and treating it as secret would make a client miss it forever if
 	//         the script then parents it into `Workspace`.
 	// @since v0.15
@@ -512,7 +512,7 @@ namespace engine::scene {
 	// Which player's own subtree this instance is in, or a null entity.
 	//
 	// **The other half of the whitelist, and it is per client rather than per
-	// world.** A player's `PlayerGui` is that player's — a second client seeing
+	// world.** A player's `PlayerGui` is that player's - a second client seeing
 	// it would see an interface it cannot interact with, and a script writing
 	// into one player's would be writing into everybody's. Scope cannot express
 	// that, because `Players` is `Shared`: both halves need the *list* of who is
@@ -521,7 +521,7 @@ namespace engine::scene {
 	// @param store    The world.
 	// @param instance Anything in the tree.
 	// @return The `Player` this is under, or `ecs::NULL_ENTITY` for anything
-	//         that is not under one — which is almost everything.
+	//         that is not under one - which is almost everything.
 	// @since v0.15
 	ecs::Entity PlayerOwning(const ecs::Store &store, ecs::Entity instance);
 }

@@ -1,13 +1,13 @@
 // What the script editor offers, and where it decides that from.
 //
 // **Both halves fail silently, which is why they are reachable from here.** A
-// scanner that misreads the caret offers the wrong list — and a wrong list looks
+// scanner that misreads the caret offers the wrong list - and a wrong list looks
 // exactly like an engine whose API does not have the thing you wanted. A list
 // containing a name the VM does not have is worse: an author picks it, writes
 // it, and finds out at run time in whatever scene reaches that line first.
 // Neither needs a window to happen, and neither is visible in a screenshot.
 //
-// `engine.script.vocabulary` covers the other end of the same pipe — that the
+// `engine.script.vocabulary` covers the other end of the same pipe - that the
 // names handed to this file are names a VM actually installs. This covers what
 // is done with them.
 
@@ -55,7 +55,7 @@ namespace {
 	}
 
 	// A surface standing in for a walked VM, so these cases do not depend on
-	// which globals the engine happens to install today — only on what this
+	// which globals the engine happens to install today - only on what this
 	// file does with whatever it is handed.
 	ScriptSurface Surface() {
 		ScriptSurface surface;
@@ -113,8 +113,8 @@ namespace {
 
 TEST_CASE("the scanner reads what is under the caret", "[studio][complete]") {
 	// **The separator is kept rather than folded into a boolean**, because Luau
-	// uses the two for different things — `part:Destroy()` passes the instance
-	// and `part.Name` does not — so a scanner that reported "there was a
+	// uses the two for different things - `part:Destroy()` passes the instance
+	// and `part.Name` does not - so a scanner that reported "there was a
 	// separator" would leave the caller unable to tell a method from a property.
 	SECTION("a bare word is a prefix and nothing else") {
 		const CompletionQuery query = Scan("local wor|");
@@ -196,8 +196,8 @@ TEST_CASE("a class name is offered where a class name goes", "[studio][complete]
 		CHECK(Offers(entries, "Part"));
 
 		// **The abstract bases are refused here and nowhere else.** The run time
-		// would mint an `Instance` perfectly happily — `LuauInstances.cpp` looks the
-		// name up and takes whatever it finds — so offering one produces a row
+		// would mint an `Instance` perfectly happily - `LuauInstances.cpp` looks the
+		// name up and takes whatever it finds - so offering one produces a row
 		// nothing knows how to draw.
 		CHECK_FALSE(Offers(entries, "PVInstance"));
 		CHECK_FALSE(Offers(entries, "BasePart"));
@@ -237,7 +237,7 @@ TEST_CASE("a local declared with Instance.new resolves to its class", "[studio][
 	const Fixture fixture;
 
 	// **Read rather than inferred.** The class is written on the line, so
-	// resolving it is not type inference and does not pretend to be — a local
+	// resolving it is not type inference and does not pretend to be - a local
 	// from `FindFirstChild` falls back to the union, which is a longer list and
 	// never a wrong one.
 	const std::vector<Completion> entries = Complete("local p = Instance.new(\"Part\")\np.Anch|");
@@ -246,7 +246,7 @@ TEST_CASE("a local declared with Instance.new resolves to its class", "[studio][
 	// **Every row says whose property it is.** A narrowed row names the class
 	// it is claiming for and a union row does not name one at all, which is the
 	// only thing that lets an author tell "Part has this" from "something has
-	// this" — see `Complete.hpp`.
+	// this" - see `Complete.hpp`.
 	CHECK(Detail(entries, "Anchored") == "bool on Part");
 }
 
@@ -276,7 +276,7 @@ TEST_CASE("an assignment is followed only where the class is written", "[studio]
 	SECTION("FindFirstChild is a child of unknown class, so the union stands") {
 		// **The case that decides whether this feature is worth having.** A
 		// child of a `Model` is not a `Model`, so narrowing to the receiver
-		// would offer `Model`'s properties for a `Part` — a list that says
+		// would offer `Model`'s properties for a `Part` - a list that says
 		// "this class has this" and is wrong, which an author cannot tell from
 		// the truth. The union says "one of these classes has this" instead.
 		const std::vector<Completion> entries =
@@ -298,7 +298,7 @@ TEST_CASE("an assignment is followed only where the class is written", "[studio]
 
 	SECTION("a trailing comment is not part of the expression") {
 		// Both comment markers, because both languages are read by the same
-		// code — and a declaration with a note beside it is the ordinary way
+		// code - and a declaration with a note beside it is the ordinary way
 		// somebody writes one.
 		CHECK(
 			Detail(Complete("local p = Instance.new(\"Part\") -- the hitbox\np.Anch|"), "Anchored") ==
@@ -322,7 +322,7 @@ TEST_CASE("an assignment is followed only where the class is written", "[studio]
 
 	SECTION("JavaScript is the same rule with the other accessor") {
 		// The feature was asked for in both languages, and neither the shapes
-		// being followed nor the class names in them are Luau's — `.Clone()`
+		// being followed nor the class names in them are Luau's - `.Clone()`
 		// and `:Clone()` are one rule.
 		const std::vector<Completion> entries = Complete(
 			"const part = Instance.new(\"Part\");\nconst copy = part.Clone();\ncopy.Anch|",
@@ -361,7 +361,7 @@ TEST_CASE("keywords and file identifiers fill an empty line", "[studio][complete
 	CHECK(Offers(entries, "local"));
 
 	// The word being typed is not offered back, and a word already in the file
-	// is — which is what makes completion useful on somebody's own code.
+	// is - which is what makes completion useful on somebody's own code.
 	const std::vector<Completion> named = Complete("local counter = 1\ncoun|");
 	CHECK(Offers(named, "counter"));
 }

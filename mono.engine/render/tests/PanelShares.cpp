@@ -60,7 +60,7 @@ TEST_CASE("a bar is a share of the busy frame and not of the whole one", "[panel
 	// of it a sleep, and 1.7 ms of work spread over two categories.
 	//
 	// **This is the case the tab was getting wrong.** Divided by the frame,
-	// render's bar was 0.9 ms in 16.7 and drew at five per cent of its track —
+	// render's bar was 0.9 ms in 16.7 and drew at five per cent of its track -
 	// so with vertical sync on, which is the default, every bar on the panel
 	// was a stub and nothing on it could be compared with anything else.
 	const std::vector<FrameSpan> spans{
@@ -93,7 +93,7 @@ TEST_CASE("the bars partition the busy frame", "[panelshares]") {
 		Span(ProfileCategory::Network, 0.5f),
 	};
 
-	// Frame 16.0, idle 10.0, so busy is 6.0 — of which 3.5 is in spans and the
+	// Frame 16.0, idle 10.0, so busy is 6.0 - of which 3.5 is in spans and the
 	// remaining 2.5 was never inside one.
 	const auto shares = CategoryShares(Panel(spans, 16.0f, 10.0f, 2.5f));
 
@@ -109,7 +109,7 @@ TEST_CASE("idle gets no bar of its own", "[panelshares]") {
 
 	// Idle is not in the denominator, so a share of it is not a quantity. Zero
 	// rather than 15/1.7, which would be a bar nine times the panel width and
-	// would have to be clamped to a full track — reading as "the frame was
+	// would have to be clamped to a full track - reading as "the frame was
 	// entirely idle work", which is a contradiction.
 	const auto shares = CategoryShares(Panel(spans, 16.7f, 15.0f));
 	REQUIRE(shares[Slot(ProfileCategory::Idle)] == Approx(0.0f));
@@ -150,8 +150,8 @@ TEST_CASE("unmarked time rides in the slot after the last category", "[panelshar
 
 TEST_CASE("a category outside the enum is dropped rather than written past", "[panelshares]") {
 	// Not reachable through the profiling macros, which take a `ProfileCategory`.
-	// Reachable by anyone filling a `FrameSpan` by hand — which the panel suite
-	// does — and the panels are the thing that says whether a frame can be
+	// Reachable by anyone filling a `FrameSpan` by hand - which the panel suite
+	// does - and the panels are the thing that says whether a frame can be
 	// trusted, so they do not get to be the thing that corrupts it.
 	std::vector<FrameSpan> spans{Span(ProfileCategory::Engine, 1.0f)};
 	spans[0].Category = static_cast<ProfileCategory>(200);
@@ -165,7 +165,7 @@ TEST_CASE("a category outside the enum is dropped rather than written past", "[p
 // --- the SHARE column -------------------------------------------------------
 //
 // The bug this guards against was reported off the screen, not off a test: the
-// column read **2634%**. Nothing was corrupt — a span's `Milliseconds` is
+// column read **2634%**. Nothing was corrupt - a span's `Milliseconds` is
 // inclusive, the denominator was the frame less its idle time, and the render
 // span encloses the swapchain wait. The arithmetic divided two real numbers
 // that were never the same measurement.
@@ -283,7 +283,7 @@ TEST_CASE("busy and idle split an inclusive duration in two", "[panelshares]") {
 	CHECK(spans[1].IdleMilliseconds == Approx(16.115f).margin(0.001));
 	CHECK(BusyMillisecondsOf(spans[1]) == Approx(0.0f).margin(0.001));
 
-	// A sibling that never waited reports no idle at all — the column has to
+	// A sibling that never waited reports no idle at all - the column has to
 	// distinguish "did not wait" from "was not measured".
 	CHECK(spans[2].IdleMilliseconds == Approx(0.0f).margin(0.001));
 	CHECK(BusyMillisecondsOf(spans[2]) == Approx(0.231f).margin(0.001));
@@ -345,7 +345,7 @@ TEST_CASE("a parent chain that points at itself terminates", "[panelshares]") {
 	spans[1].Category = ProfileCategory::Render;
 
 	// A cycle is not something the frame graph should produce, and the overlay
-	// must not hang if it ever does — a profiler that freezes the frame it is
+	// must not hang if it ever does - a profiler that freezes the frame it is
 	// profiling is worse than a wrong number.
 	engine::core::AccumulateIdleMilliseconds(spans);
 	const std::vector<float> shares = BusyShares(Panel(spans, 1.0f, 0.0f));

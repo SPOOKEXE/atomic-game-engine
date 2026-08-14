@@ -27,7 +27,7 @@ TEST_CASE("a sequence is trivially copyable, which is what buys it a column", "[
 
 TEST_CASE("the unused tail is zeroed rather than left alone", "[sequence]") {
 	// Uninitialised bytes past `Count` still reach a snapshot, and that is the
-	// failure `ecs::WorldTime` found the expensive way — two runs of one scene
+	// failure `ecs::WorldTime` found the expensive way - two runs of one scene
 	// producing different files.
 	NumberSequence first;
 	NumberSequence second;
@@ -161,7 +161,7 @@ TEST_CASE("equality compares the used keypoints and not the tail", "[sequence]")
 
 TEST_CASE("the envelope is carried and not consumed by evaluation", "[sequence]") {
 	// Sampling inside the band needs a generator, and which generator is the
-	// caller's decision — a sequence reaching for a global one is exactly the
+	// caller's decision - a sequence reaching for a global one is exactly the
 	// determinism hazard `core::Random` exists to avoid.
 	NumberSequence sequence;
 	sequence.Add(NumberKeypoint{0.0f, 5.0f, 2.0f});

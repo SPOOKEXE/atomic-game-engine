@@ -23,7 +23,7 @@ namespace engine::scene {
 		// No Y flip, matching what the renderer submits: SDL's Vulkan backend
 		// already applies a negative-height viewport, so clip space is Y-up on
 		// every backend. Depth is 0..1, pinned engine-wide by
-		// GLM_FORCE_DEPTH_ZERO_TO_ONE in core's build rather than here — a
+		// GLM_FORCE_DEPTH_ZERO_TO_ONE in core's build rather than here - a
 		// projection built under a different setting is a depth buffer that is
 		// subtly inverted, and that reads as z-fighting rather than as a matrix
 		// mistake.
@@ -52,7 +52,7 @@ namespace engine::scene {
 		// **Into view space by the transpose of the camera's frame, not by its
 		// inverse.** A plane is a covector: points go `p_view = View * p_world`
 		// with `View = inverse(frame)`, so a plane goes by `inverse(View)`
-		// transposed — and `inverse(View)` is the frame matrix itself. Using the
+		// transposed - and `inverse(View)` is the frame matrix itself. Using the
 		// view matrix here instead compiles, runs, and clips against a plane
 		// that is wrong wherever the camera is rotated.
 		const glm::vec4 clip = glm::transpose(frame.ToMatrix()) * world;
@@ -125,7 +125,7 @@ namespace engine::scene {
 		const glm::mat4 rigid = lens.Mapping.ToMatrix();
 
 		// **A scale of one is the identity and is worth taking early**, because
-		// it is every mirror and every matched pair of panes — which is nearly
+		// it is every mirror and every matched pair of panes - which is nearly
 		// every surface in nearly every world. Three matrix multiplies avoided
 		// per surface per frame, and no float error introduced where there was
 		// none.
@@ -134,7 +134,7 @@ namespace engine::scene {
 		}
 
 		// **Taken about the source pane's centre**, which is the point the rigid
-		// half already sends to the destination's centre — so scaling here and
+		// half already sends to the destination's centre - so scaling here and
 		// scaling at the far end are the same map, and only the centre this lens
 		// carries is needed to say it.
 		const glm::vec3 origin{lens.MappingOrigin.X, lens.MappingOrigin.Y, lens.MappingOrigin.Z};
@@ -177,7 +177,7 @@ namespace engine::scene {
 		// **The near plane the renderer will actually draw with, not the one the
 		// scene authored.** A hole is walked up to and then through, and for the
 		// last hand's width of that approach an authored near plane slices the
-		// pane open — you see through the wall beside the doorway on the one
+		// pane open - you see through the wall beside the doorway on the one
 		// frame the illusion is judged on. `PortalNearPlane` gives the drawing
 		// value back without touching the component, so the authored number
 		// survives and comes back the moment the eye is clear.

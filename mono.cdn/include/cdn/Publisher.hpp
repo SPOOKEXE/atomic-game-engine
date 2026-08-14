@@ -11,7 +11,7 @@
 //
 // 1. **Walk and chunk.** Every file under the content directory becomes an
 //    asset, cut into content-defined chunks and written into the store. Dedup
-//    falls out for free — two files sharing bytes share chunks, and the second
+//    falls out for free - two files sharing bytes share chunks, and the second
 //    write is a no-op.
 // 2. **Name and classify.** `KindOfName` decides what each asset is, once,
 //    here. Nothing downstream re-derives it.
@@ -30,7 +30,7 @@
 // something an origin does when it starts.
 //
 // **Affinity is derived from the directory a file sits in.** A group has to be
-// independently useful — CDN.md §5 — and without an authoring tool to declare
+// independently useful - CDN.md §5 - and without an authoring tool to declare
 // what belongs with what, the directory is the best available statement of it:
 // somebody who put a mesh and its textures in one folder was saying they go
 // together. Stated plainly because it is a heuristic standing in for a decision
@@ -64,7 +64,7 @@ namespace cdn {
 		// Whether to train a compression dictionary over the content.
 		//
 		// On by default. Zstd refuses when it has too little to learn from, and
-		// that refusal is passed through rather than papered over — a
+		// that refusal is passed through rather than papered over - a
 		// dictionary trained on too little costs bytes on every fetch and buys
 		// nothing.
 		bool TrainDictionary = true;
@@ -78,7 +78,7 @@ namespace cdn {
 		// serve-time one.** Step 2 above is where a name is real; after it
 		// there are only hashes, and a hash cannot be walked back to an
 		// extension. So a form refused here never becomes a chunk, never
-		// appears in the manifest and is never served — where a serve-time
+		// appears in the manifest and is never served - where a serve-time
 		// check would be looking at a hash that has already been decided.
 		//
 		// **Defaulted from the process's own settings**, so an origin is gated
@@ -139,7 +139,7 @@ namespace cdn {
 	//
 	// The store is left ready to serve: chunks, a signed manifest and a
 	// dictionary if one was trained. An existing store is added to rather than
-	// replaced, which is what makes republishing cheap — unchanged content is
+	// replaced, which is what makes republishing cheap - unchanged content is
 	// already there and every write of it is a no-op.
 	//
 	// @param contentDirectory The files to publish. Walked recursively; names

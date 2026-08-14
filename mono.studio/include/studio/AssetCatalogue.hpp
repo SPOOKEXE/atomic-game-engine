@@ -5,7 +5,7 @@
 // **One tab per place content lives, because "where is it" is the question the
 // panel could not answer.** A single "Published" list said what one store had
 // published and nothing about the engine's own assets, the second origin
-// somebody had configured, or which of the three a name would resolve from —
+// somebody had configured, or which of the three a name would resolve from -
 // and a name that resolves from two places at once is exactly the thing an
 // author needs to see.
 //
@@ -39,14 +39,14 @@ namespace studio {
 		// Everything below, merged.
 		All,
 
-		// Generated in this process — `assets::MakeBuiltin`. No manifest names
+		// Generated in this process - `assets::MakeBuiltin`. No manifest names
 		// these and nothing fetches them.
 		Engine,
 
 		// A published content tree on this machine, read from its manifest.
 		Directory,
 
-		// An HTTP origin, listed by asking it — `cdn::Service`'s `/catalogue`.
+		// An HTTP origin, listed by asking it - `cdn::Service`'s `/catalogue`.
 		//
 		// **An origin that will not answer is a sentence and never an empty
 		// table.** Enumeration is off by default there and admitted by the
@@ -80,7 +80,7 @@ namespace studio {
 
 		// The file this would be baked from, for a row in a raw folder.
 		//
-		// Relative to the folder, with forward slashes — what
+		// Relative to the folder, with forward slashes - what
 		// `assetc::Settings::Only` takes. Empty for everything that is already
 		// an asset.
 		//
@@ -123,8 +123,8 @@ namespace studio {
 	// Why an origin's tab holds what it holds.
 	//
 	// **A panel that cannot enumerate says so, and never guesses.** The
-	// alternative that was on the table — drawing the live delivery client's
-	// catalogue under a named origin's tab — would attribute every name to
+	// alternative that was on the table - drawing the live delivery client's
+	// catalogue under a named origin's tab - would attribute every name to
 	// whichever origin the tab happened to be, and the first time two origins
 	// disagreed the panel would be confidently wrong about where content came
 	// from. So every way of not knowing is its own outcome with its own
@@ -218,7 +218,7 @@ namespace studio {
 		// The most entries collected across every page of one origin.
 		//
 		// A bound rather than a preference: an origin is something anybody can
-		// run — `repo_layout.md` §1 — and a cursor it never terminates is an
+		// run - `repo_layout.md` §1 - and a cursor it never terminates is an
 		// allocator with a stranger's hand on it.
 		size_t MaximumEntries = 100000;
 	};
@@ -230,7 +230,7 @@ namespace studio {
 	// own lifetime and its own pump, which is a state machine the panel does not
 	// have; a listing is asked for when somebody opens or refreshes the panel,
 	// so the boring option is to wait for the answer with a ceiling on the wait
-	// — `MaximumPolls` times `PollMicroseconds` per page — rather than to grow
+	// - `MaximumPolls` times `PollMicroseconds` per page - rather than to grow
 	// one. It must therefore never be called from a per-frame path.
 	//
 	// @param settings How to bound it.
@@ -262,7 +262,7 @@ namespace studio {
 	// Reads one page of `cdn::Service`'s listing route.
 	//
 	// **Every byte of this is hostile.** An origin is something anybody can run,
-	// so a body that is not this format is reported rather than half-read — a
+	// so a body that is not this format is reported rather than half-read - a
 	// half-read page would put invented names in front of an author under a
 	// named origin's tab, which is the one thing this feature exists not to do.
 	//
@@ -275,8 +275,8 @@ namespace studio {
 	// The engine's own assets: the six built-in shapes and the built-in sheets.
 	//
 	// **Always listed, on every machine, with no store and no network.** These
-	// are the only names an editor is guaranteed to resolve — `MeshTable` and
-	// `TextureTable` register them at start-up — which makes them the right
+	// are the only names an editor is guaranteed to resolve - `MeshTable` and
+	// `TextureTable` register them at start-up - which makes them the right
 	// thing to have in front of somebody whose content has not arrived.
 	//
 	// @return The entries, in name order.
@@ -284,7 +284,7 @@ namespace studio {
 
 	// What a published content tree holds.
 	//
-	// @param processed The `processed/` directory — what a `Directory` source
+	// @param processed The `processed/` directory - what a `Directory` source
 	//        points at.
 	// @param source The name to stamp on each row.
 	// @return The manifest's entries, in name order. Empty when there is no
@@ -320,7 +320,7 @@ namespace studio {
 	// @param origins What asks an HTTP origin for its catalogue, or null to
 	//        leave those tabs saying they were not asked. Borrowed for the call
 	//        and not kept.
-	// @return The tabs. Never empty — the engine's own are always there.
+	// @return The tabs. Never empty - the engine's own are always there.
 	std::vector<CatalogueTab> BuildCatalogue(const ContentSources &sources, OriginLister *origins = nullptr);
 
 	// Every tab's entries in one list, in name order.

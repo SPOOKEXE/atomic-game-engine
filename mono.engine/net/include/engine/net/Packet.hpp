@@ -2,8 +2,8 @@
 
 // What actually goes on the wire, and what a reader is allowed to believe.
 //
-// One header, on every packet, in one place. The alternative — each subsystem
-// framing its own — is how two builds end up disagreeing about a length field,
+// One header, on every packet, in one place. The alternative - each subsystem
+// framing its own - is how two builds end up disagreeing about a length field,
 // and the disagreement surfaces as a desync a long way from its cause.
 //
 // **Every field of an inbound packet is hostile.** `repo_layout.md` §1 says
@@ -11,8 +11,8 @@
 // attacker-controlled from the other side's point of view. There is no
 // "trusted direction" here and the reader has no fast path that skips a check.
 //
-// The header is deliberately small. It is paid on every packet — sixty times a
-// second per player — so a byte here is bandwidth for the life of the product,
+// The header is deliberately small. It is paid on every packet - sixty times a
+// second per player - so a byte here is bandwidth for the life of the product,
 // which is why the channel is one byte rather than a spelled-out name and why
 // there is no room for anything a receiver can derive.
 //
@@ -47,7 +47,7 @@ namespace engine::net {
 		//
 		// **Unreliable delivery is what this is for.** A receiver keeps the
 		// highest sequence it has seen and discards anything older, because a
-		// position update that arrives after a newer one is worse than useless —
+		// position update that arrives after a newer one is worse than useless -
 		// applying it moves the world backwards. Reliable delivery uses it to
 		// order and to detect a gap.
 		uint16_t Sequence = 0;
@@ -87,14 +87,14 @@ namespace engine::net {
 		// fails. It is covered anyway, because the whole header is.
 		//
 		// Zero on the handshake channel, which is the one channel with no keys
-		// yet — see `Enums.hpp`.
+		// yet - see `Enums.hpp`.
 		uint64_t Counter = 0;
 	};
 
 	// Reading and writing the wire format.
 	//
-	// Static, because framing has no state. Anything that needs state — the
-	// sequence counters, the acknowledgement window — belongs to the connection
+	// Static, because framing has no state. Anything that needs state - the
+	// sequence counters, the acknowledgement window - belongs to the connection
 	// that owns them, and putting it here would make one shared framer the
 	// bottleneck every connection queues behind.
 	class Packet {
@@ -118,8 +118,8 @@ namespace engine::net {
 		// The largest payload one packet may carry, sealed.
 		//
 		// 1200 bytes, chosen rather than derived: it is the conventional safe
-		// figure that survives the smallest path MTU in real use — 1280 for IPv6
-		// — with room for the IP and UDP headers underneath. Sending more means
+		// figure that survives the smallest path MTU in real use - 1280 for IPv6
+		// - with room for the IP and UDP headers underneath. Sending more means
 		// fragmentation, and a fragmented datagram is lost entirely when any one
 		// fragment is, which multiplies the loss rate this whole design assumes
 		// is small.
@@ -134,7 +134,7 @@ namespace engine::net {
 		// **This is the number every budget above this module must be sized
 		// against, and getting it wrong has one symptom.** A message that can
 		// never fit is refused by `Link::Reserve`, and a refusal is also what
-		// ordinary backpressure looks like — so a budget left at the sealed size
+		// ordinary backpressure looks like - so a budget left at the sealed size
 		// produces a message that is never sent and never reported as anything
 		// but a busy link. That has cost this module a session's worth of bugs
 		// already; see `replication/AGENTS.md`.
@@ -144,7 +144,7 @@ namespace engine::net {
 		//
 		// @param writer Where the bytes go.
 		// @param header The header to write.
-		// @param payload The payload. May be empty — a packet carrying only an
+		// @param payload The payload. May be empty - a packet carrying only an
 		//        acknowledgement is how a quiet connection stays alive.
 		// @return False when the payload is over MAXIMUM_PAYLOAD_BYTES, in which
 		//         case nothing is written.
@@ -155,7 +155,7 @@ namespace engine::net {
 		// before the payload exists.
 		//
 		// The header is the associated data of the frame that follows it, so it
-		// has to be serialised first and then sealed over — which means the
+		// has to be serialised first and then sealed over - which means the
 		// length field is written from a size the caller states rather than from
 		// a payload it is holding. Append the sealed bytes to the same writer
 		// afterwards and the result is exactly what `Write` would have produced.
@@ -199,7 +199,7 @@ namespace engine::net {
 		// Refuses a wrong magic, an unknown version, a channel that is not a
 		// `ChannelKind`, a length that runs past the buffer, and a payload over
 		// the maximum. Each is a `DisconnectReason::ProtocolError` at the call
-		// site — not a warning, and not a partly filled `Inbound` a caller might
+		// site - not a warning, and not a partly filled `Inbound` a caller might
 		// use.
 		//
 		// @param reader The bytes to parse.
@@ -215,7 +215,7 @@ namespace engine::net {
 		// connection table yet.
 		//
 		// Reads the magic, the version and the channel byte, and stops. **It is
-		// not a substitute for `Read`** — nothing after the channel has been
+		// not a substitute for `Read`** - nothing after the channel has been
 		// looked at, so a caller that acts on the payload without reading it has
 		// trusted a length nobody checked. It exists so that "which channel" is
 		// one function rather than a byte offset copied into two routers.
@@ -228,7 +228,7 @@ namespace engine::net {
 		// Whether `sequence` is newer than `against`, accounting for wrapping.
 		//
 		// **A 16-bit counter wraps every 65536 packets**, which at sixty packets
-		// a second is about eighteen minutes — well inside one session. A plain
+		// a second is about eighteen minutes - well inside one session. A plain
 		// `>` comparison therefore discards every packet for the eighteen minutes
 		// after the first wrap, and a game that is fine in testing breaks in a
 		// long match. The comparison is done on the half-range instead.

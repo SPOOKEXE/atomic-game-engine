@@ -4,18 +4,18 @@
 //
 // The built-in shaders are compiled by `glslc` during the build, and that is
 // the right place for them: a shader that ships with the engine should fail the
-// build rather than the frame. This is for the ones that cannot be — a
+// build rather than the frame. This is for the ones that cannot be - a
 // `ShaderScript` whose revision changed, a swapped antialias pass, a shader
 // permutation the graph solved for. None of those exist at build time.
 //
 // No shaderc type appears here. The wrapper takes a string and hands back a
-// vector of words, which is the whole reason to have one — `render`'s public
+// vector of words, which is the whole reason to have one - `render`'s public
 // surface must not make every consumer acquire a compiler API.
 //
 // **SPIR-V is the intermediate and not always the end.** SDL's Metal backend
 // takes Metal Shading Language and never SPIR-V, so on that device the words
 // this produces go through `engine::msl::Translate` before
-// `SDL_CreateGPUShader` sees them — the same function the build runs over the
+// `SDL_CreateGPUShader` sees them - the same function the build runs over the
 // built-in shaders. That step is a module of its own rather than a second half
 // bolted on here, because a build tool needs it too and must not link a
 // renderer to get it.
@@ -62,7 +62,7 @@ namespace engine::render {
 		bool Failed = false;
 
 		// The compiler's own diagnostic, with line numbers. Shown to whoever
-		// authored the shader — this is the string a script reads back from
+		// authored the shader - this is the string a script reads back from
 		// `CompileError`, so it is part of the surface rather than a log line.
 		std::string Error;
 
@@ -93,7 +93,7 @@ namespace engine::render {
 		ShaderCompiler &operator=(const ShaderCompiler &) = delete;
 
 		// `name` appears in diagnostics and nowhere else. Give it something a
-		// person can locate — the instance path of the script, not "shader".
+		// person can locate - the instance path of the script, not "shader".
 		// Source and name are consumed during this call and are not retained.
 		//
 		// @param source GLSL source bytes; null termination is not required.
@@ -117,7 +117,7 @@ namespace engine::render {
 		// `unique_ptr` anyway: the deleter needs the complete type at the point
 		// the destructor is *defined*, not at the point it is declared. It is
 		// declared above and defined in `ShaderCompiler.cpp`, where `Impl` is
-		// complete — the same arrangement `Renderer.hpp` uses.
+		// complete - the same arrangement `Renderer.hpp` uses.
 		std::unique_ptr<Impl> State;
 	};
 }

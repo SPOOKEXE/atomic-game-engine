@@ -7,7 +7,7 @@
 -- that a body straddling the seam is not drawn in both rooms and in the
 -- picture.
 --
--- The claim being tested is the strong one — **a portal is a wormhole and the
+-- The claim being tested is the strong one - **a portal is a wormhole and the
 -- far room should render as if it were simply there**. So every check here is
 -- about what a still frame shows, and each object is placed to make one failure
 -- visually unmistakable rather than to look like anything.
@@ -17,7 +17,7 @@
 --   * A black baseplate under both rooms, so anything the portal draws stands
 --     out against it rather than against a lit floor.
 --   * **A quarter-turn pair.** Room B is down +X and rotated ninety degrees, so
---     the map is a rotation and not a translation — a hole that only works when
+--     the map is a rotation and not a translation - a hole that only works when
 --     the two frames are parallel passes a straight-through pair and fails this
 --     one. That is the case `NON-EUCLIDEAN.md` records as the authoring
 --     mistake nothing in the engine can catch.
@@ -26,7 +26,7 @@
 --     has to appear in the hole. Seeing orange means the pane is a mirror;
 --     seeing nothing means it is a wall.
 --   * **A tall block halfway through the seam.** It has to be drawn in room A,
---     in room B, *and* inside the picture the pane shows — three places, and
+--     in room B, *and* inside the picture the pane shows - three places, and
 --     the artefact this repository has chased twice is any one of them missing.
 --   * **Two cameras' worth of viewpoints, taken as stills.** `PROBE_VIEW`
 --     selects which, so one scene answers "what does the entry side look like"
@@ -67,7 +67,7 @@ end
 -- the part this scene got wrong first and it is worth writing down: a pane's
 -- hole is one *face* of its box, so `Face = Right` wants a slab thin in X and
 -- `Face = Front` one thin in Z. Author it the other way and the rectangle the
--- camera is fitted to is the slab's thin edge — a sliver — which draws a hole
+-- camera is fitted to is the slab's thin edge - a sliver - which draws a hole
 -- the width of a pencil and looks exactly like a portal that does not work.
 --
 -- `Face` is resolved on the *destination* as well as the source, so the pair
@@ -90,7 +90,7 @@ baseplate("GroundB", Vector3.new(100, 0, 0), 60)
 -- quarter, so going through is a ninety-degree corner.
 local paneA = pane("PaneA", CFrame.new(Vector3.new(0, 3.5, 0)))
 -- **Turned minus a quarter, and the sign is the whole of the authoring rule.**
--- `Front` is local -Z, and rotating that by +90 degrees about Y gives -X — which
+-- `Front` is local -Z, and rotating that by +90 degrees about Y gives -X - which
 -- points back down the corridor at room A, so the hole showed room A from a
 -- hundred studs away and looked for all the world like a portal that does not
 -- work. Minus a quarter puts B's front at +X, into its own room. This is the
@@ -122,7 +122,7 @@ view.Name = "Viewer"
 view.FieldOfView = 70
 
 -- **A line this file rewrites rather than a global.** `_G` is readonly in the
--- script sandbox, so nothing outside a scene can set one — the capture scripts
+-- script sandbox, so nothing outside a scene can set one - the capture scripts
 -- copy the file and substitute the line below, which is the only mechanism that
 -- actually works from a shell.
 local VIEW = ""

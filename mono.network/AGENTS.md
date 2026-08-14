@@ -1,4 +1,4 @@
-# network — module invariants
+# network - module invariants
 
 Finding a peer, and being findable. `shared` tier, above `Engine::net` and
 below every program. The client, the server, the studio and the content origin
@@ -12,7 +12,7 @@ host an `http::Client` dials.
 
 **It must not grow a connection.** `replication::Listener` and
 `replication::Connector` already own a connected session over a transport, and
-two ways to do one job is the most expensive debt in a monorepo — AGENTS.md
+two ways to do one job is the most expensive debt in a monorepo - AGENTS.md
 rule, and this is the module most likely to violate it, because "connect to the
 session I just found" reads like it belongs here. It does not.
 
@@ -28,7 +28,7 @@ expiry and every give-up deadline is an argument.
 
 Two reasons, both the same as `net`'s. A wall clock read inside puts a
 non-deterministic input in a subsystem whose failures are hardest to reproduce.
-And it makes a timeout something a suite *states* rather than waits for — which
+And it makes a timeout something a suite *states* rather than waits for - which
 is why the discovery and rendezvous suites run in microseconds and never sleep.
 
 ## Everything from a wire is hostile, and an advert is a hint
@@ -38,7 +38,7 @@ are capped, enums are range-checked against their closed lists, trailing bytes
 are a refusal, and a frame that disagrees with itself is dropped whole.
 
 **A listing is never a trust decision.** `Listing::Joinable` is a filter for a
-user interface — it hides rows a person cannot act on — and is not the check
+user interface - it hides rows a person cannot act on - and is not the check
 that a peer is who it claims. That check happens after a connection exists,
 against a pinned identity, one layer up:
 `replication::ConnectorSettings::ServerIdentity`.
@@ -85,7 +85,7 @@ Three consequences, and each is enforced somewhere:
   about to be given the key never learns the session exists otherwise. The row
   is not joinable and `DirectoryCounters::Locked` says why.
 - **`DecodedAdvert::Authenticated` covers three situations and distinguishes
-  none of them** — no tag, a tag under a key we do not hold, and a tag that
+  none of them** - no tag, a tag under a key we do not hold, and a tag that
   failed. A field that told them apart would answer "is this the right key" one
   guess at a time.
 
@@ -121,8 +121,8 @@ through and the game's socket is as unreachable as it was.
 So `RendezvousClient` borrows the transport it will punch on, and there are two
 ways to drive it:
 
-- `Pump` — it owns the drain. What `Presence` does, on the announcing socket.
-- `Deliver` — the caller owns the drain and offers each datagram. What a program
+- `Pump` - it owns the drain. What `Presence` does, on the announcing socket.
+- `Deliver` - the caller owns the drain and offers each datagram. What a program
   wanting the punch to serve *its own traffic* does, handing over the transport
   that traffic uses.
 
@@ -132,7 +132,7 @@ is `ATN1`, an advert is `ATNA`, a rendezvous message is `ATNR`.
 ## `Presence` is the only thing here that opens a socket
 
 Everything else borrows a transport, which is what makes the whole module
-testable over a loopback with real encoding — `TransportSettings::Broadcast`
+testable over a loopback with real encoding - `TransportSettings::Broadcast`
 reaches every other end of a loopback network precisely so that discovery is a
 path a suite exercises rather than one tested on somebody's subnet.
 
@@ -149,7 +149,7 @@ be essential.
 ## Announcements, not probes
 
 Hosts announce on an interval; listeners never ask. The other arrangement lists a
-session sooner and costs the property that matters more — every host would have
+session sooner and costs the property that matters more - every host would have
 to bind the well-known port, so a machine could host exactly one session.
 
 It also means a host answers nothing it was not going to say anyway. There is no

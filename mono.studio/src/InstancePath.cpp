@@ -50,7 +50,7 @@ namespace studio {
 			Entity next = NULL_ENTITY;
 			store.EachChild(found, [&](Entity child) {
 				// **The first match wins.** Two siblings may share a name, so a
-				// path is not a key — it is the best identity available without
+				// path is not a key - it is the best identity available without
 				// the document format carrying one, and where it is ambiguous
 				// the ambiguity was already there in what a person sees.
 				if (next == NULL_ENTITY && store.InstanceNameOf(child).Text() == path[index]) {

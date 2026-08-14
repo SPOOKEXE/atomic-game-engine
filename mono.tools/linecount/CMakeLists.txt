@@ -1,10 +1,10 @@
-# The line counter — empty, comment and code, as markdown.
+# The line counter - empty, comment and code, as markdown.
 #
 # A library plus a thin executable, the same shape as testrunner and docgen and
 # for the same reason: the interesting half is a pure function from a string to
 # three numbers, and a function inside a main.cpp is one nothing can test. The
-# classification is a judgement — a blank line inside a block comment, a `//`
-# inside a raw string of GLSL — and a judgement with no suite behind it drifts.
+# classification is a judgement - a blank line inside a block comment, a `//`
+# inside a raw string of GLSL - and a judgement with no suite behind it drifts.
 #
 # `shared` tier: it links no client or server code, and it is not shipped.
 

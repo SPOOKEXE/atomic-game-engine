@@ -61,7 +61,7 @@ namespace studio {
 		// How many lines the output panel keeps.
 		//
 		// Bounded rather than unbounded, because a script erroring every tick
-		// at sixty ticks a second fills memory in an afternoon — and the last
+		// at sixty ticks a second fills memory in an afternoon - and the last
 		// thousand lines are the ones anybody reads.
 		constexpr size_t OUTPUT_LIMIT = 1024;
 
@@ -80,7 +80,7 @@ namespace studio {
 
 		// **The pair, and they are a pair on purpose.** A teleport needs
 		// somewhere to go, and until v0.14 there were five worlds a player could
-		// not be in — no characters, so no players, so a `TeleportService` with
+		// not be in - no characters, so no players, so a `TeleportService` with
 		// one destination would have been a delete. These two are the smallest
 		// arrangement where pressing Play, walking onto a pad and arriving
 		// somewhere else is a thing an author can do without writing anything.
@@ -103,8 +103,8 @@ namespace studio {
 	// The engine log, teed into the Output panel.
 	//
 	// **Without this the Output panel is a list of the editor's own
-	// announcements**, and the one thing an author actually wants there — what
-	// their script printed, and the error when it stopped — goes to a terminal
+	// announcements**, and the one thing an author actually wants there - what
+	// their script printed, and the error when it stopped - goes to a terminal
 	// they did not open. `print`, `warn` and `error` are userland globals that
 	// land in this logger, which `core/Log.hpp` says in its first sentence.
 	//
@@ -124,7 +124,7 @@ namespace studio {
 	  protected:
 		void sink_it_(const spdlog::details::log_msg &message) override {
 			// The payload rather than the formatted line. A panel line does not
-			// want the timestamp and the logger name that a terminal does —
+			// want the timestamp and the logger name that a terminal does -
 			// there is one process, the lines are in order, and the width is
 			// worth more than the prefix.
 			Message line;
@@ -177,7 +177,7 @@ namespace studio {
 		case EditAuthority::Authoritative:
 			return "server";
 		case EditAuthority::ClientLocal:
-			return "client — local only";
+			return "client - local only";
 		}
 		return "?";
 	}
@@ -206,7 +206,7 @@ namespace studio {
 		// **"Viewport 2" upwards, and the main panel is plain "Viewport".** The
 		// numbering is what a person reads in the View menu and what the saved
 		// layout keys its dock node on, so it is derived from the index and
-		// never from creation order — panel 5 is "Viewport 6" in every session
+		// never from creation order - panel 5 is "Viewport 6" in every session
 		// whether it was made first or last.
 		for (size_t index = previous; index < Extras.size(); index++) {
 			Extras[index].Title = "Viewport " + std::to_string(index + 2);
@@ -222,7 +222,7 @@ namespace studio {
 	size_t Editor::AddViewport() {
 		// **The main panel first, because the View menu no longer names it.**
 		// Every panel in this program is closable and the menu is the only way
-		// back — `mono.studio/AGENTS.md` — and with one entry standing for every
+		// back - `mono.studio/AGENTS.md` - and with one entry standing for every
 		// viewport, that entry has to be the way back to the first one too. A
 		// person who shut Viewport from its title bar presses New Viewport and
 		// gets it, rather than a second panel beside a hole.
@@ -251,7 +251,7 @@ namespace studio {
 		const WorldId showing = ViewportWorld(index);
 
 		// **An extra, never the main one.** `AddViewport` hands the main panel
-		// back first because the menu has to be able to reopen it — but the main
+		// back first because the menu has to be able to reopen it - but the main
 		// panel follows the active world by construction, so a `+` that returned
 		// it would open a view of a different scene from the one it was pressed
 		// on.
@@ -259,7 +259,7 @@ namespace studio {
 
 		// **Pinned to the world the panel it came from is showing, rather than
 		// left following the active one.** The button is on that panel's tab
-		// strip, so "another view of this" is what pressing it means — a new
+		// strip, so "another view of this" is what pressing it means - a new
 		// panel that jumped to whatever scene happened to be active would be a
 		// second view of something else.
 		if (ViewportState *view = ExtraAt(made); view != nullptr) {
@@ -268,7 +268,7 @@ namespace studio {
 			// Where the panel it was opened from is looking, so the two start
 			// as one picture and diverge as somebody moves. Opening at the
 			// identity looks past the world and reads as a panel that does not
-			// work — `Initialise` gives the same reason.
+			// work - `Initialise` gives the same reason.
 			if (const ViewportState *from = ExtraAt(index); from != nullptr) {
 				view->Frame = from->Frame;
 				view->Yaw = from->Yaw;
@@ -339,8 +339,8 @@ namespace studio {
 		}
 
 		// **Said once here and applied per panel, where the world is entered.**
-		// The depth belongs to the world being shown — `workspace.SurfaceBounces`
-		// — or to the renderer's own measurement of the last frame, so a value
+		// The depth belongs to the world being shown - `workspace.SurfaceBounces`
+		// - or to the renderer's own measurement of the last frame, so a value
 		// pushed once at startup would be taken back by the first panel that
 		// draws. The log is what this line is for: a run pinning the number has
 		// overridden the scene, and that is worth saying out loud.
@@ -359,7 +359,7 @@ namespace studio {
 		// unpaced-and-capped rather than paced by the display, so this is the
 		// call that puts the swapchain in the state `Editor::VerticalSync`
 		// already claims it is in. The flag only clears the ceiling, and is not
-		// read again — the Preferences page is what moves either of them after
+		// read again - the Preferences page is what moves either of them after
 		// this point.
 		if (Settings.Uncapped) {
 			FrameCap = 0.0f;
@@ -396,12 +396,12 @@ namespace studio {
 
 		// **Built here rather than lazily on the first fetch**, so a
 		// misconfigured source says so at start-up in the log rather than as a
-		// stream of individually plausible failures later — `ContentRoot::Mount`'s
+		// stream of individually plausible failures later - `ContentRoot::Mount`'s
 		// rule, which every other resolver in this stack already follows.
 		RebuildContentClients();
 
 		// **The interface runs headless, and that is the point.** Its backends
-		// need a window and are not started without one — but the context is, so
+		// need a window and are not started without one - but the context is, so
 		// every panel's code executes, every layout is computed and every action
 		// a script or an agent triggers goes through exactly the path a person's
 		// click would. What is missing is the drawing.
@@ -419,7 +419,7 @@ namespace studio {
 		Sink = std::make_shared<PanelSink>();
 		engine::core::Log::Logger().sinks().push_back(Sink);
 
-		// The configured count wins, and zero means work it out — see
+		// The configured count wins, and zero means work it out - see
 		// `parallel::ConfiguredWorkers`.
 		const unsigned configured = engine::parallel::ConfiguredWorkers();
 		engine::parallel::Jobs::Start(configured != 0 ? configured : engine::parallel::WorkersPerHost(1));
@@ -434,7 +434,7 @@ namespace studio {
 		// **Before any world is built, which is what the header asks for.** A
 		// resource is keyed by a component id too, so one registered lazily by
 		// the first `SetResource` takes the compiler's spelling of the type and
-		// aborts the process once the table is sealed — at a call site with
+		// aborts the process once the table is sealed - at a call site with
 		// nothing to do with physics.
 		//
 		// `PreparePhysicsWorld` calls this itself, and that is exactly why it
@@ -483,7 +483,7 @@ namespace studio {
 
 		// **The scene a capture was asked for, made the active one.** The
 		// capture photographs whichever world the drawing viewport shows, so
-		// naming one has to move the viewport rather than reach past it — there
+		// naming one has to move the viewport rather than reach past it - there
 		// is one scene target per panel and only the panel that drew this frame
 		// has anything in it.
 		//
@@ -499,12 +499,12 @@ namespace studio {
 				SelectionWorld = Active;
 			} else {
 				ENGINE_WARN(
-					"capture: no world called '{}' — capturing the active one", Settings.CaptureWorld
+					"capture: no world called '{}' - capturing the active one", Settings.CaptureWorld
 				);
 			}
 		}
 
-		// Back and up, looking at the origin — where a new scene's first part
+		// Back and up, looking at the origin - where a new scene's first part
 		// is. A camera at the origin looking down the axis starts inside
 		// whatever gets made first, which reads as a black viewport.
 		CameraYaw = -0.6f;
@@ -513,7 +513,7 @@ namespace studio {
 
 		// **Every extra viewport starts where the main one does.** Left at the
 		// identity it sits at the origin looking down an axis, which is inside
-		// or past whatever the world holds — a panel that opens showing nothing
+		// or past whatever the world holds - a panel that opens showing nothing
 		// reads as a panel that does not work, and that is exactly how it read.
 		//
 		// This is the pass for the panels that already exist; `ResizeViewports`
@@ -546,7 +546,7 @@ namespace studio {
 
 		// **After the universe exists and before the first frame**, because a
 		// plugin holds a `Store &` and there has to be one. Reloaded whenever
-		// the active world is replaced — see `OpenGame` — for the same reason:
+		// the active world is replaced - see `OpenGame` - for the same reason:
 		// a runtime outliving the world it was started against is a reference
 		// into a store that has gone.
 		LoadPlugins();
@@ -617,14 +617,14 @@ namespace studio {
 			// **The wait comes first, and that is the whole of the input-latency
 			// fix.** `Renderer::Render` blocks the better part of a frame waiting
 			// for the display, and it used to do so *after* the events had been
-			// read — so every frame was built from input that was already a frame
+			// read - so every frame was built from input that was already a frame
 			// old, and no amount of speed between the two would have closed it.
 			// The editor was measured at 0.8 ms of CPU work in a 16.67 ms frame:
 			// the delay was never the work, it was where the sleeping happened.
 			//
 			// Nothing is done with the result. A frame that could not be acquired
 			// is minimised or mid-resize, and `Render` reaches the same
-			// conclusion for itself a few lines later — checking it twice would
+			// conclusion for itself a few lines later - checking it twice would
 			// mean deciding here what to skip, which is exactly the knowledge
 			// this loop does not have.
 			Renderer.WaitForFrame();
@@ -713,8 +713,8 @@ namespace studio {
 			// them.
 			//
 			// **Not filtered by whether imgui wanted the event.** A drop has no
-			// keyboard or mouse capture to respect — imgui does not consume
-			// them — and a drop that only worked when the pointer was over the
+			// keyboard or mouse capture to respect - imgui does not consume
+			// them - and a drop that only worked when the pointer was over the
 			// right panel would be a rule nobody could guess.
 			if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
 				DropAssetPath(event.drop.data);
@@ -729,14 +729,14 @@ namespace studio {
 	void Editor::Simulate(float frameSeconds) {
 		// **Cleared first and set once, at the tick.** Every early return below
 		// is a frame the universe does not advance, and `Present` has to know
-		// which — see `studio::PresentationAlpha` for what reading it wrong
+		// which - see `studio::PresentationAlpha` for what reading it wrong
 		// did.
 		Advancing = false;
 
 		if (!AnyRunning()) {
 			// **A world being edited does not tick, and that is deliberate.**
 			// A universe that simulated while somebody was authoring would
-			// settle physics under their hands — a part placed in the air would
+			// settle physics under their hands - a part placed in the air would
 			// be on the floor by the time they looked away, and nothing would
 			// tell them why.
 			//
@@ -748,8 +748,8 @@ namespace studio {
 
 		// **Paused when every running scene is paused.** `Universe::Tick`
 		// advances the universe rather than a world, so a half-paused universe
-		// is expressed by suspending the paused worlds — which is what the loop
-		// below does — rather than by skipping the tick.
+		// is expressed by suspending the paused worlds - which is what the loop
+		// below does - rather than by skipping the tick.
 		bool anyLive = false;
 		for (const WorldRun &run : Runs) {
 			if (!run.Paused) {
@@ -764,7 +764,7 @@ namespace studio {
 		if (!anyLive) {
 			// **The clock stops and nothing else does.** The runtimes are
 			// still alive, their connections still exist and the snapshot Stop
-			// restores is untouched — a paused run resumes rather than
+			// restores is untouched - a paused run resumes rather than
 			// restarts. Skipping the tick is the whole of it, which is why
 			// this is a flag and not a fourth `RunMode`.
 			return;
@@ -779,11 +779,11 @@ namespace studio {
 		ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
 
 		// **Every world, together.** `Universe::Tick` runs them under the
-		// universe's `ExecutionMode`, which is `WorldParallel` by default — so
+		// universe's `ExecutionMode`, which is `WorldParallel` by default - so
 		// subworlds are already simulated alongside each other rather than one
 		// after another, and suspending the empty ones is what keeps that
 		// affordable.
-		// **Before the tick, not after it — and a server publishes after.** The
+		// **Before the tick, not after it - and a server publishes after.** The
 		// difference is the editor, and it cost a failing test to find.
 		//
 		// A world clears its change bits at the *start* of a tick, so bits set
@@ -792,7 +792,7 @@ namespace studio {
 		// nothing, because on a server every write happens inside a system.
 		//
 		// **In a studio they do not.** Dragging a part in the viewport, typing a
-		// number into the properties panel, deleting an instance — every one of
+		// number into the properties panel, deleting an instance - every one of
 		// those is a write between two ticks, and a publish that ran before them
 		// and a `ClearChanges` that ran after would drop the bit without anyone
 		// being told. The author would watch the server view move and the client
@@ -819,7 +819,7 @@ namespace studio {
 		// **After the tick, because a teleport is applied at the barrier.** A
 		// script's `TeleportService:Teleport` destroys the player in this world
 		// immediately and the destination rebuilds them when the driver delivers
-		// — which is inside `Universe::Tick`. Looking before it would see the
+		// - which is inside `Universe::Tick`. Looking before it would see the
 		// player gone and the arrival not yet made, and this would drop a client
 		// that was mid-flight.
 		FollowTeleports();
@@ -845,12 +845,12 @@ namespace studio {
 		}
 
 		// The interface first, because the viewport rectangle it produces is
-		// what the world is projected for — and a frame that drew the world
+		// what the world is projected for - and a frame that drew the world
 		// against last frame's rectangle would stretch for one frame after
 		// every splitter drag.
 		//
 		// **Profiled, and it was not.** Building the panels is most of an
-		// editor's frame — every window, every table, every widget's layout —
+		// editor's frame - every window, every table, every widget's layout -
 		// and it had no span at all, so it appeared in the frame graph as a wide
 		// blank between the simulation and `Renderer::Render`. The panel was
 		// telling the truth twice over and neither reading was legible: the gap
@@ -875,7 +875,7 @@ namespace studio {
 			PumpThumbnails();
 
 			// The node demo's own previews, bounded the same way and in the same
-			// gap — see `PumpNodeDemoImages`.
+			// gap - see `PumpNodeDemoImages`.
 			PumpNodeDemoImages();
 		}
 
@@ -893,7 +893,7 @@ namespace studio {
 	void Editor::InstallExampleScript(Store &store, std::string_view file, std::string_view instanceName) {
 		// **A `Script` in the tree, not a scene built behind somebody's back.**
 		// `examples::LoadScene` would run the file right now and leave the
-		// mirror's parts in the world as though an author had placed them —
+		// mirror's parts in the world as though an author had placed them -
 		// which is the wrong shape for an editor twice over: the geometry would
 		// be saved into every game file made from a new place, and the thing
 		// that produced it would be invisible. A script instance is content: it
@@ -907,8 +907,8 @@ namespace studio {
 		// **Located with `ExamplePath` and filed under a relative name**, and
 		// the two are different on purpose. The scenes stage into
 		// `<stage>/assets/examples` while `Paths::Assets()` is each program's
-		// own directory — a layout mismatch `ExamplePath` already knows how to
-		// bridge — so finding the file needs its fallback. What goes *into* the
+		// own directory - a layout mismatch `ExamplePath` already knows how to
+		// bridge - so finding the file needs its fallback. What goes *into* the
 		// world is the short name, because an absolute path from this machine
 		// would be written into the save file.
 		const Name PATH(std::string("examples/") + std::string(file));
@@ -917,13 +917,13 @@ namespace studio {
 		// **Read now and filed into the world**, rather than left as a path for
 		// the runtime to resolve later. `ReadSource` looks in the cache before
 		// the filesystem, so filing it here is what makes the game *contain*
-		// the program — a `.agame` saved from a new place carries the text and
+		// the program - a `.agame` saved from a new place carries the text and
 		// opens on a machine that has no engine checkout beside it.
 		std::string text;
 		std::string error;
 		if (!engine::script::ReadSource(store, located, text, error)) {
 			// Not fatal, and not silent. A build with no staged assets is a
-			// real situation — the editor still works, it just has nothing to
+			// real situation - the editor still works, it just has nothing to
 			// put in the new place.
 			ENGINE_WARN("no example script to install: {}", error);
 			return;
@@ -973,7 +973,7 @@ namespace studio {
 		}
 
 		// **Cleared before the destroy rather than after**, so a world that has
-		// already gone — closed, or never valid — still leaves the record empty.
+		// already gone - closed, or never valid - still leaves the record empty.
 		// Leaving the handle behind would make the next `Ensure` believe it
 		// already has a camera in a world that cannot produce one.
 		const WorldId world = viewer.World;
@@ -1002,7 +1002,7 @@ namespace studio {
 			// **`DestroyInstance`, because this camera has a parent.** It was
 			// parented into the workspace when it was minted, and `Destroy`
 			// frees the row while leaving the workspace's `LastChild` naming
-			// it — so the next camera parented into that workspace writes
+			// it - so the next camera parented into that workspace writes
 			// through a handle to a row that is gone. A viewport switched to
 			// another world and back is all it took.
 			store.DestroyInstance(instance);
@@ -1040,7 +1040,7 @@ namespace studio {
 
 			ViewerCamera &viewer = Viewers[viewport];
 
-			// A world can drop it without this editor knowing — a snapshot
+			// A world can drop it without this editor knowing - a snapshot
 			// restore replaces every entity, and the handle this held names a
 			// row that is no longer there.
 			if (viewer.Instance != NULL_ENTITY && !store.Alive(viewer.Instance)) {
@@ -1051,7 +1051,7 @@ namespace studio {
 				// **Named per panel, because they share a workspace.** Four
 				// instances called `Camera` in one explorer is four rows nobody
 				// can tell apart, and `FindFirstChild` would hand every panel
-				// the first of them — which is the shared camera this replaces,
+				// the first of them - which is the shared camera this replaces,
 				// reached by a different route.
 				const std::string name =
 					viewport == 0 ? std::string("Camera") : "Camera" + std::to_string(viewport + 1);
@@ -1059,7 +1059,7 @@ namespace studio {
 				const Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
 				if (camera == NULL_ENTITY) {
 					// A replica refuses to mint an authoritative entity. That is
-					// not a failure here — `client::AimReplicaViewer` is the path
+					// not a failure here - `client::AimReplicaViewer` is the path
 					// for those, and it puts a predicted camera in instead.
 					return;
 				}
@@ -1078,7 +1078,7 @@ namespace studio {
 
 			// **Named every frame, not once at creation.** It used to be set
 			// only when the instance was minted, so a script assigning
-			// `workspace.CurrentCamera` took the world's eye away for good — and
+			// `workspace.CurrentCamera` took the world's eye away for good - and
 			// `scene::AimSurfaceCameras` reflects through whatever this names,
 			// so every mirror in the scene started reflecting from a camera the
 			// viewport was not looking through, with nothing on screen to say
@@ -1089,7 +1089,7 @@ namespace studio {
 
 			// **Followed, not driven, when somebody is looking through it.**
 			// Writing the eye into the camera every frame would fight an author
-			// dragging its CFrame in the properties panel — the view would
+			// dragging its CFrame in the properties panel - the view would
 			// snap back on the next frame and the field would look broken.
 			if (follow == viewer.Instance) {
 				return;
@@ -1107,7 +1107,7 @@ namespace studio {
 	void Editor::SampleFrame(float frameSeconds) {
 		// **Sampled every frame, whether or not a panel is open.** A frame-rate
 		// panel that started collecting when it was opened would show an empty
-		// graph for its first second — which is exactly the second somebody
+		// graph for its first second - which is exactly the second somebody
 		// opened it to look at, because they opened it when the editor
 		// stuttered.
 		Statistics.Record(Clock.Now(), frameSeconds);
@@ -1119,7 +1119,7 @@ namespace studio {
 		// **Unless a fixed step was asked for**, in which case the measured delta
 		// is ignored outright rather than blended with. A capture run is compared
 		// against another capture run, and a clock that is *mostly* reproducible
-		// produces a diff nobody can attribute — see `Options::FixedAnimationStep`.
+		// produces a diff nobody can attribute - see `Options::FixedAnimationStep`.
 		AnimationSeconds += Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
 		Renderer.SetAnimationTime(AnimationSeconds);
 
@@ -1129,11 +1129,11 @@ namespace studio {
 		// overlay makes the same trade.
 		//
 		// A snapshot at the end of the run counts as reading it, and is the
-		// only way to profile something — a window drag — that occupies the
+		// only way to profile something - a window drag - that occupies the
 		// hands that would otherwise be opening the panel.
 		// **Three reasons to record, and the third is not a panel.** This line
 		// runs every frame and is the authority, so a caller that switched the
-		// graph on from outside had it switched off again before the next frame —
+		// graph on from outside had it switched off again before the next frame -
 		// which is exactly what `profile_frame` did until it had a flag of its
 		// own to set.
 		engine::core::FrameGraph::SetEnabled(
@@ -1154,7 +1154,7 @@ namespace studio {
 		// world is named rather than handled for the reason `TeleportService`
 		// names one: a handle out of another world is the thing rule 3 exists to
 		// refuse, and a name is resolved against the universe by whoever holds
-		// both — which is this class and nothing below it.
+		// both - which is this class and nothing below it.
 		std::vector<Name> wanted;
 
 		Universe->Enter(shown, [&wanted](Store &store) {
@@ -1192,14 +1192,14 @@ namespace studio {
 
 	void Editor::PresentWorld(float frameSeconds) {
 		// **Which panel this frame draws.** `Renderer::Render` owns the whole
-		// frame — swapchain, interface, present — so it draws one world per
+		// frame - swapchain, interface, present - so it draws one world per
 		// call. With both viewports open they take turns: each holds its own
 		// target and shows the last texture drawn into it, so each refreshes at
 		// half the frame rate. Drawing both in one frame means `Render` taking
 		// a list of views, which is a change to the shared renderer and is
 		// tracked separately.
 		// **Round-robin over whatever is open.** `Renderer::Render` owns the
-		// whole frame — swapchain, interface, present — so it draws one world
+		// whole frame - swapchain, interface, present - so it draws one world
 		// per call, and N open panels therefore take turns. Each keeps its own
 		// target and shows the last texture drawn into it.
 		//
@@ -1221,7 +1221,7 @@ namespace studio {
 
 		// **The asset preview is one more slot in the rotation, and it took
 		// every frame instead.** It used to be tested before the loop and
-		// `return` on success — and because a hovered row re-asks for its
+		// `return` on success - and because a hovered row re-asks for its
 		// preview on every frame it is hovered, that early return fired on
 		// *every* frame too. `Renderer::Render` owns the swapchain and the
 		// present, so the editor's own chrome was never drawn for as long as the
@@ -1230,7 +1230,7 @@ namespace studio {
 		//
 		// The comment that used to sit here said the cost was "a hovered row's
 		// worth of frames rather than a permanent share of the rotation". That
-		// was the intent and the code did the opposite — it took the whole
+		// was the intent and the code did the opposite - it took the whole
 		// rotation and left nothing for the panels.
 		//
 		// As a candidate it gets one turn in N like everything else, so a
@@ -1243,7 +1243,7 @@ namespace studio {
 		}
 
 		// **A closed panel gives its camera back, every frame rather than on an
-		// event.** There is no close callback to hang this on — a panel is open
+		// event.** There is no close callback to hang this on - a panel is open
 		// because imgui says its window is, and it can be shut by the title bar,
 		// by a menu item or by a saved layout arriving from disk. Reconciling
 		// against the list that was just built covers all three, and costs a
@@ -1261,8 +1261,8 @@ namespace studio {
 		}
 
 		if (Candidates.empty()) {
-			// Nothing to draw into. The frame still runs — the chrome is drawn
-			// and presented — so the editor does not freeze when every viewport
+			// Nothing to draw into. The frame still runs - the chrome is drawn
+			// and presented - so the editor does not freeze when every viewport
 			// is closed.
 			DrawingViewport = 0;
 		} else {
@@ -1280,7 +1280,7 @@ namespace studio {
 				return;
 			}
 
-			// It asked and could not be drawn — an unloaded mesh, or a bounds
+			// It asked and could not be drawn - an unloaded mesh, or a bounds
 			// entry that has gone. Fall through to the first viewport rather than
 			// spending the frame on nothing.
 			PreviewWanted.clear();
@@ -1292,7 +1292,7 @@ namespace studio {
 
 		// **The second panel defaults to a *different* world, not to the active
 		// one.** Two viewports showing the same world is one view drawn twice
-		// at half the rate — strictly worse than one viewport, and the first
+		// at half the rate - strictly worse than one viewport, and the first
 		// thing somebody opening the second one would see. Where there is only
 		// one world it follows the active one, because a blank panel is worse
 		// than a duplicate.
@@ -1314,7 +1314,7 @@ namespace studio {
 		// ran before the eye was known would reflect through last frame's.
 		// **The scene's camera when one is being looked through.** The free
 		// camera is what an editor flies; a `Camera` instance is content, and
-		// moving content should move what a viewport showing it draws — which
+		// moving content should move what a viewport showing it draws - which
 		// it did not, and which is why the instance looked broken.
 		engine::core::CFrame eye = drawingSecond ? extra->Frame : CameraFrame;
 		float reach = drawingSecond ? extra->Speed : CameraSpeed;
@@ -1365,8 +1365,8 @@ namespace studio {
 		// that turns state into something to draw, and an edited world's state
 		// changes without a tick.
 		// **A replica is given this viewport's eye before it presents.** It has
-		// no camera of its own — an authoritative entity minted in a replica
-		// would collide with one the authority minted — so `AimReplicaViewer`
+		// no camera of its own - an authoritative entity minted in a replica
+		// would collide with one the authority minted - so `AimReplicaViewer`
 		// puts a predicted one there and names it `ActiveCamera`.
 		//
 		// Before `Present`, because `aim-surface-cameras` runs in `PreRender`
@@ -1380,14 +1380,14 @@ namespace studio {
 
 				// **And read it back, which is what makes a client view a
 				// client's view.** A replica with a character places its own
-				// camera — `replica-camera` turns it with the mouse and sits it
-				// behind the body — and `AimReplicaViewer` steps aside when it
+				// camera - `replica-camera` turns it with the mouse and sits it
+				// behind the body - and `AimReplicaViewer` steps aside when it
 				// does. Continuing to draw from `eye` would show the editor's
 				// free camera looking at a world somebody is walking around in,
 				// which is the picture this panel exists not to be.
 				//
 				// With no character the two are the same value, because `eye` is
-				// what `AimReplicaViewer` just wrote — so this folds both cases
+				// what `AimReplicaViewer` just wrote - so this folds both cases
 				// into one read rather than a condition.
 				if (store.Alive(camera)) {
 					if (const auto *placement = store.Get<engine::scene::Transform>(camera)) {
@@ -1402,8 +1402,8 @@ namespace studio {
 
 		// **And the same for a world that is not a replica, which is the half
 		// the rule above was written for and did not cover.** `AimReplicaViewer`
-		// and `EnsureViewerCamera` are the two ways this editor names an eye —
-		// one per world kind — and only the first was on this side of `Present`.
+		// and `EnsureViewerCamera` are the two ways this editor names an eye -
+		// one per world kind - and only the first was on this side of `Present`.
 		// The second ran after it, so `aim-surface-cameras` reflected through
 		// whatever `ActiveCamera` had been left pointing at.
 		//
@@ -1425,7 +1425,7 @@ namespace studio {
 			// play. See `scene/Visibility.hpp`.
 			// **A world that is not being ticked is presented at one, not at
 			// its accumulator.** Alpha is where *between* two ticks to draw,
-			// and a world nothing advances has no next tick to draw towards —
+			// and a world nothing advances has no next tick to draw towards -
 			// its accumulator stops wherever it stopped, which is usually zero,
 			// and zero means "draw the previous frame". `capture-previous` is a
 			// `PreSimulation` system and `Present` runs `PreRender` alone, so
@@ -1451,13 +1451,13 @@ namespace studio {
 		std::vector<engine::scene::DrawInstance> drawn;
 
 		// Whatever *other* worlds this panel's portals look into. Kept apart
-		// from `drawn` all the way to the renderer — see `Renderer::Render`'s
+		// from `drawn` all the way to the renderer - see `Renderer::Render`'s
 		// `foreign` argument for what joining them costs.
 		std::vector<engine::scene::DrawInstance> foreign;
 
 		// **Cleared before the world is asked, not inside the ask.** A viewport
 		// with no world would otherwise keep whatever the last world it drew
-		// held — a mirror in a scene that is no longer on screen, rendering into
+		// held - a mirror in a scene that is no longer on screen, rendering into
 		// a texture nothing samples, and a surface pass paid for every frame the
 		// panel is empty.
 		Surfaces.clear();
@@ -1474,7 +1474,7 @@ namespace studio {
 
 				// **The surface cameras, which the studio was never asking
 				// for.** `Renderer::Render` takes them and the editor passed
-				// nothing — so the surface pass never ran, no texture was ever
+				// nothing - so the surface pass never ran, no texture was ever
 				// written, and a `Part` naming one sampled nothing. The mirror
 				// example looked like a bug in the mirror: the frame was there,
 				// the pane was empty, and the world behind it was rendering
@@ -1494,7 +1494,7 @@ namespace studio {
 				// **How deep this world's mirrors go, pushed with the world that
 				// says it.** The number is `workspace.SurfaceBounces` or the
 				// renderer's own measurement of the last frame, and either way it
-				// is a fact about the scene rather than about the editor — so it
+				// is a fact about the scene rather than about the editor - so it
 				// arrives per panel, beside the surface cameras it governs, and
 				// not once at startup where the first world drawn would take it
 				// back.
@@ -1516,7 +1516,7 @@ namespace studio {
 				// property look broken.
 				//
 				// `Refresh` is an integer compare per distinct shader on a
-				// world nobody is editing — see `scene::ShaderSource::Revision`.
+				// world nobody is editing - see `scene::ShaderSource::Revision`.
 				if (Shaders.Refresh(store) > 0) {
 					for (const engine::core::Name &shader : Shaders.Changed()) {
 						const engine::render::ShaderModule *module = Shaders.Find(shader);
@@ -1545,7 +1545,7 @@ namespace studio {
 			// **The far world draws itself first, and this is the step that was
 			// missing.** `Universe::Present` is what runs `PreRender`, and
 			// `PreRender` is where `collect-instances` builds a world's
-			// `client::DrawList` — so a world builds a draw list exactly when
+			// `client::DrawList` - so a world builds a draw list exactly when
 			// somebody presents it, and until now the only world presented for a
 			// panel was the one the panel shows.
 			//
@@ -1553,27 +1553,27 @@ namespace studio {
 			// screen. Its list was therefore whatever it held the last time it
 			// was looked at directly: empty for a world nobody had opened, which
 			// `AttachForeignSurfaces` reads as "nothing published yet" and skips
-			// — leaving the pane showing this world, which is a mirror and is
+			// - leaving the pane showing this world, which is a mirror and is
 			// exactly the "the other side does not render" report. Or, worse,
 			// stale: a still photograph of the far world taken whenever it was
 			// last in a panel, which is the one thing `ImmersivePortals.luau`
 			// holds both worlds awake to avoid.
 			//
 			// **So the destination is presented, and it is presented here.** The
-			// far world renders itself, in its own pass, from its own camera —
+			// far world renders itself, in its own pass, from its own camera -
 			// and what crosses to this panel is the result rather than the
 			// responsibility. `Present` runs no simulation, so this neither
 			// ticks the far world nor decides anything about it; it asks it for
 			// this frame's picture.
 			//
 			// Immediately before the attach, because the attach reads exactly
-			// what this produces — and outside the `Enter` above, for the reason
+			// what this produces - and outside the `Enter` above, for the reason
 			// the attach gives.
 			PresentPortalDestinations(shown, frameSeconds);
 
 			// **Outside the `Enter`, because it enters other worlds.** A portal
 			// naming another scene needs that scene's draw list, and
-			// `Universe::Enter` is not re-entrant — so this is the one step that
+			// `Universe::Enter` is not re-entrant - so this is the one step that
 			// has to happen once the source store has been let go of. It fills
 			// `foreign` with the far world's instances and points the surface at
 			// a range of it; a frame with no cross-world portal in it clears
@@ -1594,13 +1594,13 @@ namespace studio {
 		// **Nothing here.** The viewer camera is placed before `Present`, above,
 		// because `aim-surface-cameras` runs in that phase and reflects through
 		// what it names. A replica gets `client::AimReplicaViewer` instead, for
-		// the same reason and in the same place — a replica may not mint an
+		// the same reason and in the same place - a replica may not mint an
 		// authoritative entity, so its viewpoint comes out of the predicted
 		// range.
 		//
 		// **`DrawingViewport` below chooses the surface textures as well as the
 		// scene target, and the mirrors need it to.** The views collected above
-		// were aimed from *this* panel's eye a few lines ago — the aim is world
+		// were aimed from *this* panel's eye a few lines ago - the aim is world
 		// state and one panel draws per frame, so it is correct at the moment it
 		// is read and wrong by the time the next panel draws. What outlives the
 		// frame is the texture, so that is what is kept per viewport: every panel
@@ -1610,7 +1610,7 @@ namespace studio {
 		// flying either camera moved the mirrors in both windows.
 
 		// TODO(render-pipeline): this took a `render::View` per camera, and the
-		// viewport set `view.World` and `view.Pipeline` together — the pipeline
+		// viewport set `view.World` and `view.Pipeline` together - the pipeline
 		// key a world installs is qualified by the world id, so naming one
 		// without the other asks for a pipeline nothing installed.
 		LastFrame = Renderer.Render(
@@ -1633,20 +1633,20 @@ namespace studio {
 
 		// **Presented, or simply drawn when there is nowhere to present.**
 		// A headless renderer never presents by design, so counting presents
-		// would leave `--frames` unreachable and the run would never end — which
+		// would leave `--frames` unreachable and the run would never end - which
 		// is the one failure mode a build server cannot recover from.
 		if (LastFrame.Presented || Settings.Headless) {
 			FramesDrawn++;
 		}
 
 		// **After the frame rather than before it**, so the capture is of a
-		// frame that has a scene texture — the first frame has none, because the
+		// frame that has a scene texture - the first frame has none, because the
 		// viewport panel only learns its size once it has been laid out.
 		//
 		if (!Settings.Capture.empty() && FramesDrawn == CaptureAtFrame()) {
 			// **Named by viewport, or the wrong scene is photographed.** With
 			// two panels the request made here is consumed by the *next*
-			// `Render`, which is the other panel — so `--capture-world` moved
+			// `Render`, which is the other panel - so `--capture-world` moved
 			// `Active` correctly and the picture came out of whichever panel
 			// happened to be next. Finding the panel showing the wanted world
 			// makes the renderer wait for its turn.
@@ -1668,7 +1668,7 @@ namespace studio {
 
 	int64_t Editor::CaptureAtFrame() const {
 		// The frame before the last, so the capture is requested on one frame
-		// and written by the next — and the run still ends when it was told to.
+		// and written by the next - and the run still ends when it was told to.
 		// With no budget, a handful of frames in: enough for the layout to
 		// settle and the first scene to be presented.
 		constexpr int64_t SETTLED = 4;
@@ -1703,7 +1703,7 @@ namespace studio {
 
 		// The anchor goes with it. `SelectRange` already falls back to a plain
 		// click for an anchor it cannot find a row for, so a stale one is not a
-		// fault — but an author whose next shift-click measures from a row they
+		// fault - but an author whose next shift-click measures from a row they
 		// deselected two minutes ago has no way to know why.
 		SelectionAnchor = NULL_ENTITY;
 	}
@@ -1721,7 +1721,7 @@ namespace studio {
 		const std::string what(Commands->NextUndo());
 
 		if (!Commands->Undo()) {
-			Say("nothing to undo — '" + what + "' is gone", engine::core::LogLevel::Warning);
+			Say("nothing to undo - '" + what + "' is gone", engine::core::LogLevel::Warning);
 			return;
 		}
 
@@ -1740,7 +1740,7 @@ namespace studio {
 		const std::string what(Commands->NextRedo());
 
 		if (!Commands->Redo()) {
-			Say("nothing to redo — '" + what + "' is gone", engine::core::LogLevel::Warning);
+			Say("nothing to redo - '" + what + "' is gone", engine::core::LogLevel::Warning);
 			return;
 		}
 
@@ -1759,7 +1759,7 @@ namespace studio {
 
 		// **The fixtures, on every world this program makes.** A world with no
 		// `Workspace` is one where `game:GetService` fails and where an author
-		// has nowhere obvious to put a part — and the one place that would be
+		// has nowhere obvious to put a part - and the one place that would be
 		// discovered is a script that already ran.
 		//
 		// Idempotent, which is what lets it run on every file whatever its age:
@@ -1772,19 +1772,19 @@ namespace studio {
 		// may not link `gui`, so `GuiService` cannot come from the line above and
 		// a host calls both. `D00117` recorded this line as owed: without it a
 		// world the editor made had no `GuiService`, `gui::Focus` refused every
-		// press, and clicking a `TextBox` in a viewport took no focus — the same
+		// press, and clicking a `TextBox` in a viewport took no focus - the same
 		// symptom `examples::LoadScene` closed for every `--script` world.
 		engine::gui::InstallGuiServices(store);
 
 		// **Physics, which nothing in this repository was running.** `D00039`:
 		// the module was complete, tested, benchmarked and connected to nothing
-		// — `RegisterPhysicsSystems` was called from its own suites and nowhere
+		// - `RegisterPhysicsSystems` was called from its own suites and nowhere
 		// else, so integrate, broad phase, narrow phase and solver had never run
 		// against a real scene.
 		//
 		// **It costs an anchored world nothing**, which is why this can be on
 		// for every world rather than a per-world switch nobody would find. An
-		// anchored part carries no rigid body at all — `scene::Part` says so —
+		// anchored part carries no rigid body at all - `scene::Part` says so -
 		// so a scene of anchored geometry integrates nothing and solves nothing,
 		// and every example this repository ships is anchored throughout.
 		//
@@ -1796,8 +1796,8 @@ namespace studio {
 		engine::physics::RegisterPhysicsSystems(systems);
 
 		// **And the weight, which is a separate feature and was the other half
-		// of why nothing fell.** `physics` deliberately has no gravity — a
-		// top-down game should not have to switch one off — so wiring the
+		// of why nothing fell.** `physics` deliberately has no gravity - a
+		// top-down game should not have to switch one off - so wiring the
 		// pipeline alone would have integrated every body at zero acceleration
 		// for ever. `scene::Gravity` is the rule and this is the host applying
 		// it, which is exactly the arrangement the physics suites describe.
@@ -1811,14 +1811,14 @@ namespace studio {
 		engine::scene::RegisterOwnershipSystem(systems);
 
 		// **The teleport admitter is not registered here, and that is the
-		// correction.** It belongs to every world whether or not scripts run —
-		// `script::RegisterTeleportAdmission` carries the whole argument — and
+		// correction.** It belongs to every world whether or not scripts run -
+		// `script::RegisterTeleportAdmission` carries the whole argument - and
 		// `client::InstallPresentation` above already installs it, because the
 		// studio and the standalone client share that call. Adding it a second
 		// time here is what made every arrival admit twice: `ecs::Scheduler`
 		// does not dedupe by name, so two copies of the system both ran, and a
 		// cross-world portal produced two players and two characters per
-		// crossing — one adopted by the play link and one orphan nobody drives,
+		// crossing - one adopted by the play link and one orphan nobody drives,
 		// one more of them on every teleport.
 		//
 		// The admitter itself now takes what it admits out of the inbox, so a
@@ -1877,7 +1877,7 @@ namespace studio {
 		// menu item nobody had a reason to click.
 		//
 		// They are also two different kinds of scene on purpose. The skygrid is
-		// sparse geometry over empty sky — mostly background, nothing to hide a
+		// sparse geometry over empty sky - mostly background, nothing to hide a
 		// culling or projection mistake behind. The mirror is the opposite: a
 		// surface camera, a texture sampled back, and a floor under it. One
 		// template exercises both halves of the renderer.
@@ -1887,12 +1887,12 @@ namespace studio {
 		// **A third, and it is the one that shows what a `MeshPart` is.** The
 		// other two are made of `Part`s, so a new game contained no example of
 		// the class the mesh picker, the content pipeline and half of v0.9 exist
-		// to serve — somebody looking for "how do I use a mesh" found a menu
+		// to serve - somebody looking for "how do I use a mesh" found a menu
 		// item and no scene.
 		//
 		// **It costs nothing at start-up, which is the only reason it can be
 		// here.** `MeshGrid.luau` seeds from the six built-in ids, and a built-in
-		// is generated in-process and never fetched — `Editor::
+		// is generated in-process and never fetched - `Editor::
 		// RequestContentAsset` refuses to ask a CDN for one. So this world names
 		// six meshes that are already registered and issues no request at all: a
 		// template that pulled content on open would put back the twenty-nine
@@ -1903,7 +1903,7 @@ namespace studio {
 		// anchored throughout, which is exactly why nothing in this repository
 		// ever ran the physics module: an anchored part carries no rigid body,
 		// so integrate, broad phase, narrow phase and solver had suites,
-		// benchmarks and no consumer at all — `DEFERRED.md` D00039.
+		// benchmarks and no consumer at all - `DEFERRED.md` D00039.
 		//
 		// A slide rather than a stack, because a stack tests the solver and
 		// nothing else. Blocks sliding down a curve and launching off the end
@@ -1921,7 +1921,7 @@ namespace studio {
 		// **It is here because a `Portal` is invisible in a properties panel.**
 		// The class is a `SurfaceCamera` with one extra reference on it, so a
 		// template without it leaves the v0.14 headline as a class in the insert
-		// menu and a paragraph in the roadmap — which is the "an API with no
+		// menu and a paragraph in the roadmap - which is the "an API with no
 		// caller" the interface world was added to avoid, one version on.
 		//
 		// It also exercises a rendering path the mirror world cannot reach on
@@ -1968,7 +1968,7 @@ namespace studio {
 			// **The 2D tree beside the 3D one, in the same world.** v0.8's
 			// widget set is the version's headline and a template that did not
 			// show it would leave `Instance.new("Frame")` as a thing you have
-			// to know about — which is the "an API with no caller" the roadmap
+			// to know about - which is the "an API with no caller" the roadmap
 			// refuses. The example builds its own `ScreenGui` from a script, so
 			// it exercises the bindings as well as the layout.
 			//
@@ -1979,13 +1979,13 @@ namespace studio {
 		});
 
 		// **No baseplate here either, and the reason is specific rather than
-		// symmetric.** `Mirrors-1-world.luau` builds its own `Floor` — 60x60,
-		// top face at y = 0 — and the editor's baseplate is 128x128 with its top
+		// symmetric.** `Mirrors-1-world.luau` builds its own `Floor` - 60x60,
+		// top face at y = 0 - and the editor's baseplate is 128x128 with its top
 		// face at *the same* y = 0. Two coplanar surfaces is z-fighting, and
 		// during Play the mirror world showed a floor tearing between two greys.
 		//
-		// The general rule the baseplate came from — an empty world is a black
-		// frame and a black frame looks like a broken renderer — still holds for
+		// The general rule the baseplate came from - an empty world is a black
+		// frame and a black frame looks like a broken renderer - still holds for
 		// a world somebody made themselves. It does not hold for one whose
 		// script lays a floor the moment it runs.
 		Universe->Enter(mirrors, [this](Store &store) {
@@ -1996,7 +1996,7 @@ namespace studio {
 		// same nothing the other two do.
 		//
 		// **It was the mesh grid until v0.15.** That scene answered one question
-		// thoroughly — did every *mesh* arrive — and the question a default game
+		// thoroughly - did every *mesh* arrive - and the question a default game
 		// wants answered on open is wider and shallower: of the six kinds this
 		// engine can name, which reach the screen at all. One labelled bay each,
 		// so the frame says which pipeline broke rather than only that one did.
@@ -2012,13 +2012,13 @@ namespace studio {
 		});
 
 		// Three floors, three ceilings and twelve walls, all laid by the script
-		// — and a baseplate under them would be a floor stretched between rooms
+		// - and a baseplate under them would be a floor stretched between rooms
 		// that are supposed to have nothing between them.
 		Universe->Enter(portals, [this](Store &store) {
 			InstallExampleScript(store, "Portals-1-world.luau", "PortalScene");
 		});
 
-		// Two shells and a black plain, all laid by the script — and a baseplate
+		// Two shells and a black plain, all laid by the script - and a baseplate
 		// under them would be a second surface coplanar with the one the scene
 		// lays, which is the z-fighting the mirror world's comment describes.
 		Universe->Enter(tunnels, [this](Store &store) {
@@ -2027,7 +2027,7 @@ namespace studio {
 
 		// **Two scripts each, and the split is the point.** The world's geometry
 		// is one file and the pad naming the *other* world is another, because a
-		// scene that names a destination only works in a universe that has one —
+		// scene that names a destination only works in a universe that has one -
 		// and `Playground.luau` is also what `scripts/demos/run-local-server.sh`
 		// hosts on its own. `PlaygroundPad.luau` carries the whole argument.
 		Universe->Enter(playground, [this](Store &store) {
@@ -2082,8 +2082,8 @@ namespace studio {
 		// `FocusWorlds`.
 		FocusWorlds = 4;
 
-		Say("new game: eight worlds — skygrid, mirrors, meshes, slide, portals, "
-			"tunnels, playground and arena — ticking in parallel");
+		Say("new game: eight worlds - skygrid, mirrors, meshes, slide, portals, "
+			"tunnels, playground and arena - ticking in parallel");
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
@@ -2118,7 +2118,7 @@ namespace studio {
 		SelectionWorld = Active;
 
 		// **Remembered on a successful open rather than on the attempt.** A path
-		// that failed to load is not one to offer again from a menu — the list
+		// that failed to load is not one to offer again from a menu - the list
 		// exists to get somebody back to work, and a row that reproduces an
 		// error is the opposite of that.
 		Recent.Remember(path);
@@ -2126,10 +2126,10 @@ namespace studio {
 		// **Restarted against the world that just replaced theirs.** Every
 		// plugin holds a `Store &` from the universe this call has just torn
 		// down, so carrying them across would be a reference into storage that
-		// is gone — which is a crash rather than a stale reading.
+		// is gone - which is a crash rather than a stale reading.
 		LoadPlugins();
 
-		Say("opened " + path.string() + " — " + std::to_string(info.Worlds.size()) + " world(s)");
+		Say("opened " + path.string() + " - " + std::to_string(info.Worlds.size()) + " world(s)");
 		return true;
 	}
 
@@ -2156,7 +2156,7 @@ namespace studio {
 		}
 
 		// **Relative to the project file, not to the working directory.** A
-		// launcher's cwd must not decide which tree gets read — the same rule
+		// launcher's cwd must not decide which tree gets read - the same rule
 		// `Keybinds::Load` gives for the configuration beside the binary.
 		const std::filesystem::path root = project.parent_path();
 
@@ -2226,7 +2226,7 @@ namespace studio {
 
 		// **Every world is reported, including the ones that worked, and the
 		// failures are not fatal to the run.** That is the whole reason the
-		// worlds sync separately — an author with five folders and one typo has
+		// worlds sync separately - an author with five folders and one typo has
 		// to be told which folder, and a single "sync failed" would tell them
 		// nothing they could act on.
 		for (const RojoWorldSync &world : report.Worlds) {
@@ -2296,7 +2296,7 @@ namespace studio {
 		Modified = false;
 
 		// A Save As is how a game gets its real name, so the list has to follow
-		// it — otherwise the menu would go on offering the scratch file it was
+		// it - otherwise the menu would go on offering the scratch file it was
 		// saved from.
 		Recent.Remember(path);
 
@@ -2322,14 +2322,14 @@ namespace studio {
 
 	bool Editor::ExportUniverse(const std::filesystem::path &path) {
 		// **The universe and every world under it, which is what an `.agame`
-		// already is** — so this shares `SaveGame`'s writer and differs from
+		// already is** - so this shares `SaveGame`'s writer and differs from
 		// Save As in what it does to the editor afterwards, which is nothing.
 		//
 		// That difference is the whole reason it is a separate action rather
 		// than a second name for Save As. Save As *adopts* the path: the title
 		// bar changes, the modified marker clears, and Ctrl+S from then on
-		// writes there. Exporting is handing a copy to somebody — a build
-		// server, a teammate, a backup — and an author who exported a copy and
+		// writes there. Exporting is handing a copy to somebody - a build
+		// server, a teammate, a backup - and an author who exported a copy and
 		// then pressed Ctrl+S expecting to save their own file would have
 		// written over the copy instead. `ExportActiveWorld` has always drawn
 		// the same line one level down.
@@ -2348,7 +2348,7 @@ namespace studio {
 			return false;
 		}
 
-		Say("exported the universe — " + std::to_string(Universe->Count()) + " world(s) — to " +
+		Say("exported the universe - " + std::to_string(Universe->Count()) + " world(s) - to " +
 			path.string());
 		return true;
 	}
@@ -2397,7 +2397,7 @@ namespace studio {
 			return false;
 		}
 
-		// The client's half and the fixtures, on every world that arrived —
+		// The client's half and the fixtures, on every world that arrived -
 		// the same two things `OpenGame` does, for the same reasons. A world
 		// with no draw list renders as an empty frame.
 		for (const WorldId id : Universe->Worlds()) {
@@ -2506,7 +2506,7 @@ namespace studio {
 			// nothing draws it, and `Insert Object` with an empty selection
 			// would have quietly produced something invisible. It used to be
 			// drawn, because an unparented instance was a root of the world and
-			// roots were what the renderer collected — see
+			// roots were what the renderer collected - see
 			// `scene/Visibility.hpp` for why that is no longer the rule.
 			//
 			// Studio does the same thing, and for an author it is the only
@@ -2520,7 +2520,7 @@ namespace studio {
 
 			// **After the parent, not before it.** The document a redo rebuilds
 			// from is taken here, and one taken before `SetParent` would rebuild
-			// the instance as a root — an undo followed by a redo would quietly
+			// the instance as a root - an undo followed by a redo would quietly
 			// move it out of the tree.
 			if (Commands != nullptr) {
 				Commands->RecordCreate(store, world, created, "Insert " + std::string(Label(info.Name)));
@@ -2537,7 +2537,7 @@ namespace studio {
 			// **Invalidated on a structural change and not on every edit.** A
 			// property write is what actually *names* an asset, and invalidating
 			// there would rescan every world on every frame of a dragged slider
-			// — which is the shape of the bug this flag was added to fix. An
+			// - which is the shape of the bug this flag was added to fix. An
 			// insert or a delete is rare and bounded; anything finer is what
 			// `Rescan` is for.
 			GalleryScanned = false;
@@ -2571,7 +2571,7 @@ namespace studio {
 				if (store.Alive(instance)) {
 					// **Recorded before the destroy**, because after it there is
 					// nothing left to photograph and the undo would restore an
-					// empty document — which reads as "undo did nothing" rather
+					// empty document - which reads as "undo did nothing" rather
 					// than as a fault, and is therefore the version of this
 					// mistake nobody reports.
 					if (Commands != nullptr) {
@@ -2708,7 +2708,7 @@ namespace studio {
 		// its heartbeats, which is running by any name an author would use.
 		//
 		// With nothing running there is no tick at all, so everything goes back
-		// to active — otherwise an author would return to Edit and find half
+		// to active - otherwise an author would return to Edit and find half
 		// their scenes marked suspended for no reason they could see.
 		const bool anything = AnyRunning();
 
@@ -2721,8 +2721,8 @@ namespace studio {
 			// alone.** It carries no simulation system, so keeping it active
 			// costs a barrier and buys the thing that matters: it is presented
 			// and drawn every frame, exactly like the world it is a view of. A
-			// suspended one would still draw — `Present` does not consult the
-			// state — which is worse than either alternative, because it would
+			// suspended one would still draw - `Present` does not consult the
+			// state - which is worse than either alternative, because it would
 			// be marked stopped in the Worlds panel while visibly running.
 			const bool wanted = !anything || IsRunning(id) || IsReplicaWorld(id);
 			Universe->SetState(
@@ -2741,14 +2741,14 @@ namespace studio {
 
 		// **Stopped first, whatever the destination.** Switching a running world
 		// from Run to Play is a restore followed by a start, not a mode swapped
-		// underneath a live VM — the scripts have already changed the scene and
+		// underneath a live VM - the scripts have already changed the scene and
 		// the author's content is in the snapshot.
 		if (IsRunning(world)) {
 			EndRun(world);
 		}
 
 		if (mode == RunMode::Edit) {
-			Say("stopped '" + label + "' — the scene is back as it was");
+			Say("stopped '" + label + "' - the scene is back as it was");
 			SyncWorldStates();
 			return;
 		}
@@ -2767,7 +2767,7 @@ namespace studio {
 		}
 
 		// **Script buffers first, and the order is the whole point.** What is
-		// on screen has to be in the world before the snapshot is taken —
+		// on screen has to be in the world before the snapshot is taken -
 		// otherwise Stop restores a scene from *before* the author's code was
 		// filed, and pressing Play deletes whatever they had just typed. That is
 		// not a subtle failure and it is not recoverable; it was the first thing
@@ -2786,7 +2786,7 @@ namespace studio {
 		// scene as whatever their scripts made of it.
 		//
 		// `WriteWorldDocument` rather than `Universe::Save`, because the
-		// universe snapshot is *every* world at once — which is exactly what
+		// universe snapshot is *every* world at once - which is exactly what
 		// made Stop restore scenes nobody had run. This is the same call
 		// Duplicate and Rename already make.
 		std::string error;
@@ -2821,7 +2821,7 @@ namespace studio {
 
 		// **The undo stack does not survive the run, and Stop is why.** Stop
 		// restores the snapshot taken on the line above, which throws away
-		// everything the run did — so a command recorded before it describes a
+		// everything the run did - so a command recorded before it describes a
 		// world that the restore has already put back, and one recorded during
 		// it describes a world that no longer exists. Either way the entry is a
 		// lie the moment Stop is pressed.
@@ -2836,7 +2836,7 @@ namespace studio {
 
 		// **Through `game::StartWorldScripts`, which is the same call a
 		// dedicated server makes.** What "running a game" means has to be one
-		// function or the studio's Play and the server's hosting drift — and the
+		// function or the studio's Play and the server's hosting drift - and the
 		// first thing to drift would be the heartbeat's delta.
 		Universe->Enter(world, [&](Store &store, Scheduler &systems) {
 			run.Runtime = engine::game::StartWorldScripts(store, systems, limits, failure, &Breakpoints);
@@ -2854,13 +2854,13 @@ namespace studio {
 		// which this is what makes true.
 		//
 		// **After the run is recorded, because `SpawnPlayer` finds the run by
-		// world.** That ordering is not incidental — it is what makes the Play
+		// world.** That ordering is not incidental - it is what makes the Play
 		// path and the Spawn Player button the same path, so there is one place
 		// that admits somebody and one place that can be wrong about it.
 		//
 		// **Started after the scripts**, so the join snapshot describes a world
 		// that has been built rather than an empty one. It would converge either
-		// way — the snapshot is re-sent until it is acknowledged — but a client
+		// way - the snapshot is re-sent until it is acknowledged - but a client
 		// view that opens blank and fills in reads as a bug in the link.
 		//
 		// **Two clients is what Play asks for by default**, because two is what
@@ -2887,9 +2887,9 @@ namespace studio {
 		}
 
 		// **The panel that lists what is running, opened when something starts
-		// running.** It is the only way back to a view that has been closed —
+		// running.** It is the only way back to a view that has been closed -
 		// the server's especially, which is not a world of its own and therefore
-		// appears in no other list — and a way back nobody has found is not one.
+		// appears in no other list - and a way back nobody has found is not one.
 		// Enough frames to outlast a first-run layout rebuild, as `FocusWorlds`.
 		ShowLiveInstances = true;
 		FocusInstances = 4;
@@ -2906,7 +2906,7 @@ namespace studio {
 
 		// **The client view goes first of all.** It owns a world in this same
 		// universe, and every viewport, the worlds panel and the lifecycle ask
-		// `IsReplicaWorld` about it — so a link left alive across the restore
+		// `IsReplicaWorld` about it - so a link left alive across the restore
 		// below would have each of them answering about a world that is being
 		// rebuilt underneath them. It also holds no reference to the authority's
 		// store, which is why it can go before the runtime rather than after.
@@ -2935,7 +2935,7 @@ namespace studio {
 		// that home for its whole life, but the world it plays moves: walk a
 		// character through a portal and `FollowTeleports` re-homes the link to
 		// the destination, in the same run. After one crossing the two disagree
-		// — `Claimed` above says the same thing from the other end — so the loop
+		// - `Claimed` above says the same thing from the other end - so the loop
 		// above, which reads the *run's* list, stops the clients that arrived
 		// from here and not the ones that arrived *at* here.
 		//
@@ -2993,7 +2993,7 @@ namespace studio {
 
 		// Script tabs first: their entity handles do not survive the world being
 		// rebuilt, and a tab that saved afterwards would write into storage that
-		// had been freed. Only this world's — another scene's tabs are untouched
+		// had been freed. Only this world's - another scene's tabs are untouched
 		// by this restore, which is the whole point of running one scene.
 		for (size_t index = Scripts.size(); index > 0; index--) {
 			if (Scripts[index - 1].World == world) {
@@ -3007,12 +3007,12 @@ namespace studio {
 		// **Destroyed and rebuilt, because `ReadWorldDocument` creates a scene
 		// rather than restoring into one.** `Universe::Adopt` reuses the hole a
 		// destroy leaves, so the handle survives and a viewport pinned to this
-		// world still points at it — the same trick `RenameWorld` depends on.
+		// world still points at it - the same trick `RenameWorld` depends on.
 		Universe->Destroy(world);
 
 		// **This scene's undo history goes with it, and only this scene's.** A
-		// running world can still be manipulated — the gizmo and the explorer
-		// both work during a play test on purpose — so edits are recorded during
+		// running world can still be manipulated - the gizmo and the explorer
+		// both work during a play test on purpose - so edits are recorded during
 		// the run, and the destroy above has just invalidated every handle they
 		// name. Here rather than after the restore because the failure path
 		// below returns without one, and those commands are just as dead.
@@ -3041,12 +3041,12 @@ namespace studio {
 		// empty frame, which reads as Stop having broken the renderer.
 		// **`PrepareWorld` rather than the presentation alone, which is what
 		// this used to do.** A world restored by Stop went back without services
-		// — every other path installs them — so it was the one world in the
+		// - every other path installs them - so it was the one world in the
 		// program where `game:GetService` could fail.
 		Universe->Enter(restored, PrepareWorld);
 
 		// **Everything that held the old handle, repointed.** `Adopt` normally
-		// hands back the same slot, but nothing promises it — and a viewport
+		// hands back the same slot, but nothing promises it - and a viewport
 		// pinned to a stale id draws nothing with no way to say why.
 		if (wasActive) {
 			Active = restored;
@@ -3111,8 +3111,8 @@ namespace studio {
 			std::string error;
 			if (!engine::script::ReadSource(store, tab.Path, tab.Text, error)) {
 				// Empty rather than refused. A script instance whose file does
-				// not exist yet is a legal state — an author makes the instance
-				// before choosing the file — so the editor opens an empty
+				// not exist yet is a legal state - an author makes the instance
+				// before choosing the file - so the editor opens an empty
 				// buffer and saving creates it.
 				tab.Text.clear();
 			}
@@ -3141,7 +3141,7 @@ namespace studio {
 				tab.Path = Name("Scripts/" + leaf + ".luau");
 
 				// One rule for which container a path belongs in, and the
-				// selector follows it — `script::SetSourcePath`.
+				// selector follows it - `script::SetSourcePath`.
 				engine::script::SetSourcePath(store, tab.Instance, tab.Path);
 			}
 

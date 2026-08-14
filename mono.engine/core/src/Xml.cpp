@@ -20,7 +20,7 @@ namespace engine::core::xml {
 		}
 
 		// XML's name rule, narrowed. Letters, digits, underscore, hyphen, dot
-		// and colon — and colon only because it is legal, not because anything
+		// and colon - and colon only because it is legal, not because anything
 		// here means anything by it.
 		//
 		// **Narrowed rather than complete on purpose.** XML admits most of
@@ -118,7 +118,7 @@ namespace engine::core::xml {
 		// **The five predefines and a numeric character reference, and nothing
 		// else.** Every other name would have to have been declared, this refuses
 		// every declaration, so a reference to one is a document that was written
-		// against a parser this is not — named rather than dropped, because a
+		// against a parser this is not - named rather than dropped, because a
 		// dropped one turns an entity bomb into what looks like a typo.
 		//
 		// A name that is refused is `Fault::Refused` and a numeric reference that
@@ -134,8 +134,8 @@ namespace engine::core::xml {
 		) {
 			const size_t semicolon = text.find(';');
 
-			// Nine characters is past every name this admits — `#x10FFFF` is the
-			// longest, at eight — and the bound is what stops a lone `&` in a
+			// Nine characters is past every name this admits - `#x10FFFF` is the
+			// longest, at eight - and the bound is what stops a lone `&` in a
 			// document from swallowing the rest of it looking for a terminator.
 			if (semicolon == std::string_view::npos || semicolon > 10) {
 				const bool numeric = text.size() > 1 && text[1] == '#';
@@ -213,7 +213,7 @@ namespace engine::core::xml {
 				options,
 				Fault::Refused,
 				"entity reference '&" + std::string(name) +
-					";' — only the five predefined entities are read, because anything else would need a "
+					";' - only the five predefined entities are read, because anything else would need a "
 					"declaration this refuses"
 			);
 		}
@@ -244,8 +244,8 @@ namespace engine::core::xml {
 			}
 
 			// **The one `<!` that is not a declaration.** A CDATA section is
-			// character data wearing markup's punctuation — it declares nothing
-			// and expands to nothing — so it is stepped over here and captured by
+			// character data wearing markup's punctuation - it declares nothing
+			// and expands to nothing - so it is stepped over here and captured by
 			// `ReadContent` where a caller actually wants the text.
 			if (text.starts_with("![CDATA[")) {
 				const size_t end = text.find("]]>");
@@ -259,15 +259,15 @@ namespace engine::core::xml {
 
 			if (text.starts_with("!")) {
 				// **DOCTYPE and ENTITY, refused outright rather than bounded.**
-				// An entity declaration is the billion-laughs expansion — a
-				// kilobyte of markup that unfolds into gigabytes — and an external
+				// An entity declaration is the billion-laughs expansion - a
+				// kilobyte of markup that unfolds into gigabytes - and an external
 				// one is a file read performed by a parser that has no business
 				// touching a filesystem. No format read through here needs either.
 				Refuse(
 					failure,
 					options,
 					Fault::Refused,
-					"a DOCTYPE or ENTITY declaration is refused — entity expansion is how a kilobyte of "
+					"a DOCTYPE or ENTITY declaration is refused - entity expansion is how a kilobyte of "
 					"XML becomes a gigabyte, and an external entity is a file read"
 				);
 				return Scan::Error;
@@ -311,7 +311,7 @@ namespace engine::core::xml {
 		text.remove_prefix(nameEnd);
 
 		// The attribute run, ending at the first `>` that is not inside a quoted
-		// value — a `>` in an attribute is legal XML and ending the tag on it
+		// value - a `>` in an attribute is legal XML and ending the tag on it
 		// would read the rest of the document as character data.
 		size_t index = 0;
 		char quote = 0;

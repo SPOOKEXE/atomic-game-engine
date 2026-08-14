@@ -5,7 +5,7 @@
 //
 // **Here rather than in the client, because `Actions.hpp` already says the
 // rule**: nothing outside this module names a key. `Actions` is the half that
-// maps a key to an *intent* — F5 toggles the frame graph — and this is the half
+// maps a key to an *intent* - F5 toggles the frame graph - and this is the half
 // that reports what is held, which is what a game's own scripts need. Two halves
 // of one question, and both belong to whichever module owns the keyboard.
 //
@@ -13,8 +13,8 @@
 // point: `scene::InputState` is a resource a script can reach and an SDL event is
 // not, and this is the one function that crosses between them.
 //
-// This module still pumps nothing. The caller owns the event loop — SDL insists
-// on it on some platforms — and hands events here one at a time, exactly as it
+// This module still pumps nothing. The caller owns the event loop - SDL insists
+// on it on some platforms - and hands events here one at a time, exactly as it
 // hands them to `Actions`.
 //
 // @tier L12 · client
@@ -46,13 +46,13 @@ namespace engine::input {
 		// edge is the difference between two frames, where a character was
 		// produced once and has no previous value to be compared against.
 		//
-		// **Call once before pumping that frame's events, not after them** —
+		// **Call once before pumping that frame's events, not after them** -
 		// `Actions::BeginFrame`'s rule and for the same reason: a delta cleared
 		// after the pump is a delta nobody ever read.
 		//
 		// The four are the keys, the buttons, the focus flag and the last source,
 		// and every one of them is rolled here because every one of them is read
-		// as an *edge* — `InputBegan`, `WindowFocused` and `LastInputTypeChanged`
+		// as an *edge* - `InputBegan`, `WindowFocused` and `LastInputTypeChanged`
 		// are all the difference between two frames.
 		void BeginFrame();
 
@@ -98,7 +98,7 @@ namespace engine::input {
 		// **On the translator rather than on `scene::InputState`, which is where
 		// every other frame delta lives, and it stayed here once it had a
 		// reader.** `InputState` is a registered trivially-copyable component and
-		// a `std::string` on it would cost a hand-written serialiser — the price
+		// a `std::string` on it would cost a hand-written serialiser - the price
 		// `gui::Label` paid, for a reason it had and this does not. The one
 		// consumer takes it from here instead: a host hands this to `gui::Type`,
 		// which writes the focused `TextBox`'s own `Label::Text`, so the string
@@ -112,7 +112,7 @@ namespace engine::input {
 		// Clears every key and button, and this frame's typed text with them.
 		//
 		// **What losing focus does.** Alt-tabbing away while holding W must not
-		// leave a character walking forever — SDL sends no key-up for a key
+		// leave a character walking forever - SDL sends no key-up for a key
 		// released in another window, so the release has to be manufactured here.
 		// `scene::InputState::Focused` records why, and the character controller
 		// checks it as a second belt.

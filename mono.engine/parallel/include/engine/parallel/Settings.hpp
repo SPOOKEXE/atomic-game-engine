@@ -10,11 +10,11 @@
 // Two settings, both of which were reachable only by a command-line flag on one
 // program:
 //
-// - `engine.jobs.workers` — how many worker threads the process-wide pool
+// - `engine.jobs.workers` - how many worker threads the process-wide pool
 //   starts, or zero to choose from the hardware. A deployment sharing a machine
 //   between several servers is the case that wants it, and there was no way to
 //   say so.
-// - `engine.serial-compute` — every parallel dispatch runs inline. `--force
+// - `engine.serial-compute` - every parallel dispatch runs inline. `--force
 //   -serial-compute` on the client was the only way to reach it, and the studio
 //   and the server had no equivalent at all.
 //
@@ -37,7 +37,7 @@ namespace engine::parallel {
 	//
 	// **Read where `Jobs::Start` is called rather than applied here**, because
 	// the automatic answer is `WorkersPerHost(processes)` and only the program
-	// knows how many processes are sharing the machine — the server works it
+	// knows how many processes are sharing the machine - the server works it
 	// out from its own placement plan. So the shape at every call site is
 	//
 	//     const unsigned configured = parallel::ConfiguredWorkers();

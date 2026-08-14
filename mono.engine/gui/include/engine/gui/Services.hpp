@@ -11,11 +11,11 @@
 //
 // The plan named `GuiService`, `Path2D` and `GuidRegistryService`. Only the
 // first is here, and the other two are refused for the reason the version's own
-// rule gives — the one that kept `VideoFrame` out of the class tree:
+// rule gives - the one that kept `VideoFrame` out of the class tree:
 //
 // > Fifty registered classes with no layout, no rendering and no input would
 // > put `TextLabel` in the insert palette, let somebody parent one under a
-// > `Part`, save it into a game file — and then draw nothing, forever, with no
+// > `Part`, save it into a game file - and then draw nothing, forever, with no
 // > error. That is worse than not having it.
 //
 //   - **`Path2D`** draws a stroked polyline, and `gui::DrawKind` has four
@@ -34,8 +34,8 @@
 // ## Selection is the behaviour
 //
 // **Directional, over the compiled draw list, not over the tree.** The list is
-// already flattened, clipped and in paint order — the same reason `Pick` walks
-// it backwards rather than descending — and a second traversal that re-derived
+// already flattened, clipped and in paint order - the same reason `Pick` walks
+// it backwards rather than descending - and a second traversal that re-derived
 // which elements are on screen would be a second answer to that question.
 //
 // @tier L7 · shared
@@ -50,7 +50,7 @@
 // **Added when this header stopped being included after `Layout.hpp` by
 // accident.** Every caller happened to include that one first, so the missing
 // include was invisible until `mono.server` reached for `ResetPlayerGui` on its
-// own — a header is only self-contained when something proves it.
+// own - a header is only self-contained when something proves it.
 #include <engine/gui/Layout.hpp>
 
 namespace engine::ecs {
@@ -78,7 +78,7 @@ namespace engine::gui {
 	//
 	// **A replica is furnished by the wire and this only completes it.** No
 	// `gui.` component is replicated, so a client is shown a `GuiService` that
-	// is a name and a class and nothing else — and `Select` and `Focus` both
+	// is a name and a class and nothing else - and `Select` and `Focus` both
 	// answer `false` without the state on it. So this adds the state to whatever
 	// service the world holds, and mints one only where minting is legal:
 	// `ecs::Store::AdoptOnly` is the test, because an authoritative index minted
@@ -114,8 +114,8 @@ namespace engine::gui {
 	// declared properties, so what a game *decides* is reachable; what it cannot
 	// reach is this, because the answer is a fact about the surface being drawn
 	// and the scripting layer at L9 cannot name a `Screen`. It would also be
-	// `(0, 0)` in every world today — `Screen::TopInset` is zero because this
-	// engine has no top bar — so a binding would be a member that exists, answers
+	// `(0, 0)` in every world today - `Screen::TopInset` is zero because this
+	// engine has no top bar - so a binding would be a member that exists, answers
 	// one constant forever and looks decided. `PlayerGui`'s `SetTopbarTransparency`
 	// pair is absent for the same missing thing; `script/src/GuiMethods.cpp` names
 	// it where an author would look for it.
@@ -127,7 +127,7 @@ namespace engine::gui {
 	// Points the selection at one element, or clears it.
 	//
 	// **Refuses an element that cannot be selected**, rather than accepting it
-	// and leaving the selection somewhere a move can never leave — which is the
+	// and leaving the selection somewhere a move can never leave - which is the
 	// state a game recovers from by rebooting. An element is selectable when it
 	// carries `Element::Selectable`.
 	//
@@ -141,15 +141,15 @@ namespace engine::gui {
 	// **Nearest along the axis, breaking ties across it**, which is what a
 	// player means by "the one above this". Scored rather than sorted: the
 	// candidate set is one frame's visible elements, and a comparator would
-	// have to be a total order over a relation that is not one — B can be above
+	// have to be a total order over a relation that is not one - B can be above
 	// A while A is above C.
 	//
 	// Candidates are the `Selectable` elements of `list`, which is this frame's
-	// compiled draw list — so an element scrolled out of view or under a
+	// compiled draw list - so an element scrolled out of view or under a
 	// disabled collector is not reachable, because it is not in the list.
 	//
 	// **With nothing selected it seeds rather than moves**, picking the
-	// first selectable element in paint order — unless
+	// first selectable element in paint order - unless
 	// `GuiServiceState::AutoSelectGuiEnabled` is false, which is a game saying
 	// it drives selection itself.
 	//
@@ -166,7 +166,7 @@ namespace engine::gui {
 	// focused box that has since been destroyed answerable instead of fatal: the
 	// stored handle carries a generation, so `Store::Alive` tells a live box from
 	// a recycled row, and a stale one reads as no focus at all. Nothing has to
-	// hook `DestroyInstance` for that to be true — which is the same argument
+	// hook `DestroyInstance` for that to be true - which is the same argument
 	// `gui/AGENTS.md` makes for `Rendered` being swept rather than maintained.
 	//
 	// **Reparenting deliberately does not release it.** A handle does not change
@@ -184,7 +184,7 @@ namespace engine::gui {
 	// **Refuses anything that is not a `TextBox`**, for the reason `Select`
 	// refuses an unselectable element: focus parked on something that cannot take
 	// a character is a state nothing in the engine can leave. `Entry` is the test
-	// and no class lookup is needed for it — that component is on `TextBox` and
+	// and no class lookup is needed for it - that component is on `TextBox` and
 	// on nothing else, which is the same trick `ElementsAt` plays with `Element`.
 	//
 	// **Capturing applies `ClearTextOnFocus` and places the caret**, because
@@ -208,7 +208,7 @@ namespace engine::gui {
 	//
 	// **Roblox's respawn rule, and this engine did not have it at all.**
 	// `Layout` draws a `ScreenGui` from `StarterGui` *or* from a player's
-	// `PlayerGui` — see `STARTER_GUI` — which is a shortcut that works in single
+	// `PlayerGui` - see `STARTER_GUI` - which is a shortcut that works in single
 	// player and is wrong the moment there are two of them: every client draws
 	// the same instances, so a script that hid one player's health bar hid
 	// everybody's, and a script that parented something into `StarterGui` at
@@ -224,7 +224,7 @@ namespace engine::gui {
 	//      what makes a fresh life start with a fresh interface.
 	//   2. Every collector whose `ResetOnSpawn` is false stays exactly as it is,
 	//      with whatever state a script has put in it. That is what the field is
-	//      *for* — a minimap or a settings panel that must not blink on death.
+	//      *for* - a minimap or a settings panel that must not blink on death.
 	//   3. Every child of `StarterGui` is then cloned in, **unless a child of
 	//      that name survived step 2**. A survivor is the copy the player
 	//      already has; cloning beside it would give them two, one of which
@@ -232,14 +232,14 @@ namespace engine::gui {
 	//
 	// **Cloned rather than moved**, so the template is still there for the next
 	// player and the next life. Anything under `StarterGui` that is not a
-	// collector is copied too — a `Folder` of assets, a `ModuleScript` — because
+	// collector is copied too - a `Folder` of assets, a `ModuleScript` - because
 	// what Roblox copies is the container's contents rather than a filtered set,
 	// and a rule that filtered would silently drop the one thing a game put
 	// there.
 	//
 	// **Called by whoever spawns**, not by a system here. `scene::LoadCharacter`
-	// cannot call it — `scene` may not link `gui`, which is the refusal
-	// `gui/AGENTS.md` states and `STARTER_GUI` above is the other half of — so
+	// cannot call it - `scene` may not link `gui`, which is the refusal
+	// `gui/AGENTS.md` states and `STARTER_GUI` above is the other half of - so
 	// the host that decides a player has respawned is the one that says so. That
 	// is the same split `replication::Authority::SetInterest` uses for the rule
 	// about who may see what.
@@ -250,7 +250,7 @@ namespace engine::gui {
 	//        built without going through `scene::AddPlayer`.
 	// @return How many children were cloned in. Zero for a world with no
 	//         `StarterGui`, an empty one, or a player whose surviving copies
-	//         already cover it — none of which is a failure.
+	//         already cover it - none of which is a failure.
 	// @since v0.15
 	size_t ResetPlayerGui(ecs::Store &store, ecs::Entity player);
 }

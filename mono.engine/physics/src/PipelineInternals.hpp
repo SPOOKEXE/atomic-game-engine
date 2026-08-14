@@ -4,7 +4,7 @@
 //
 // The two indexes, the proxy and record arrays and the pair list are written by
 // the systems in this directory and read by the suites and benchmarks beside
-// them — and not one of those is another module. A set of public setters would
+// them - and not one of those is another module. A set of public setters would
 // turn the layout into an API somebody outside could depend on, so this is a
 // friend instead. `spatial/src/GridInternals.hpp` does the same for the same
 // reason, and the symmetry is deliberate.
@@ -163,7 +163,7 @@ namespace engine::physics {
 		}
 
 		// The cell size the world was constructed with, for a reader that has
-		// to reconstruct the grids — a snapshot, above all.
+		// to reconstruct the grids - a snapshot, above all.
 		static float CellSize(const PhysicsWorld &world) {
 			return world.DynamicIndex.CellSize();
 		}

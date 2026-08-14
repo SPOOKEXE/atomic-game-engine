@@ -47,7 +47,7 @@ namespace {
 	// How many times each benchmark is measured, unless told otherwise.
 	//
 	// Small, because the statistic taken is the minimum and a minimum converges
-	// quickly — the samples above it are the machine's noise and collecting
+	// quickly - the samples above it are the machine's noise and collecting
 	// more of them buys precision about the noise.
 	constexpr int DEFAULT_SAMPLES = 7;
 

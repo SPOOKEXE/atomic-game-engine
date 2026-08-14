@@ -28,7 +28,7 @@ namespace {
 	// **This is the point of the case.** The form column was merged into the
 	// routing table from a second list that used to sit beside it, so the guard
 	// that the merge changed nothing has to be an independent statement of what
-	// every extension means — a test that asked the table what the table says
+	// every extension means - a test that asked the table what the table says
 	// would pass against any merge at all.
 	struct Expectation {
 		const char *Extension;
@@ -120,7 +120,7 @@ TEST_CASE("a form's name round-trips and is its canonical extension", "[content]
 	}
 
 	// Where two extensions name one form, the canonical one is what a setting
-	// is written with — and the other still resolves.
+	// is written with - and the other still resolves.
 	CHECK(std::string(Describe(ContentForm::Jpeg)) == "jpeg");
 	CHECK(FormOfName("photo.jpg") == ContentForm::Jpeg);
 
@@ -138,7 +138,7 @@ TEST_CASE("a name with no extension of its own has no form", "[content][form]") 
 	CHECK(FormOfName("v1.2/rock") == ContentForm::Unknown);
 	CHECK(KindOfName("v1.2/rock") == AssetKind::Unknown);
 
-	// And `Unknown` is not a source, so a name with no extension is readable —
+	// And `Unknown` is not a source, so a name with no extension is readable -
 	// the answer `IsRuntimeReadable` has always given it.
 	CHECK_FALSE(IsSourceForm(ContentForm::Unknown));
 	CHECK(IsRuntimeReadable("plain"));
@@ -161,7 +161,7 @@ TEST_CASE("AllForms holds every form once and no unknown", "[content][form]") {
 		CHECK(std::find(forms.begin(), forms.end(), row.Form) != forms.end());
 	}
 
-	// And nothing is in the table that this case does not know about — the
+	// And nothing is in the table that this case does not know about - the
 	// other direction, which is the one that catches an *addition*.
 	for (const ContentForm form : forms) {
 		INFO(Describe(form));

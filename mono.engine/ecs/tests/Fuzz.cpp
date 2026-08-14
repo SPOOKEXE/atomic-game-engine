@@ -1,8 +1,8 @@
 // The ECS checked against a model that is obviously correct.
 //
 // Every other suite in this module tests one type against what its header
-// promises. This one tests the *whole* store against a `std::map` — slow,
-// stupid, and impossible to get subtly wrong — by driving both with the same
+// promises. This one tests the *whole* store against a `std::map` - slow,
+// stupid, and impossible to get subtly wrong - by driving both with the same
 // random operation stream and comparing them after every step.
 //
 // That is the test worth having for hand-written storage. An archetype graph
@@ -14,7 +14,7 @@
 // intuition about which orders are interesting.
 //
 // `core::Random` rather than a standard generator, so a failure reproduces from
-// its seed on any machine — which is the whole reason that type exists.
+// its seed on any machine - which is the whole reason that type exists.
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Random.hpp>
@@ -41,7 +41,7 @@ using engine::ecs::Store;
 namespace fuzz_test {
 	// Eight distinct component types, so the archetype graph has 256 reachable
 	// shapes rather than a handful. Templated on an index so they are genuinely
-	// different types with the same layout — which is also the case that would
+	// different types with the same layout - which is also the case that would
 	// catch a registry keying on size instead of identity.
 	template <int Index> struct Slot {
 		int64_t Value = 0;
@@ -173,7 +173,7 @@ namespace fuzz_test {
 	}
 
 	// Every entity the store thinks carries `slot`, by iteration rather than by
-	// lookup — so a query that disagrees with Has/Get is caught.
+	// lookup - so a query that disagrees with Has/Get is caught.
 	std::map<uint64_t, int64_t> IterateSlot(Store &store, int slot) {
 		std::map<uint64_t, int64_t> found;
 		const auto collect = [&found](Entity entity, int64_t value) { found.emplace(entity.Id, value); };
@@ -398,7 +398,7 @@ TEST_CASE("many independent streams all match", "[ecs][fuzz]") {
 TEST_CASE("a world driven only by adds and removes stays consistent", "[ecs][fuzz]") {
 	// No destroys, so entities live the whole run and every archetype
 	// transition is an add or a remove. This is the path that exercises the
-	// archetype graph hardest — the same entity walks the lattice repeatedly.
+	// archetype graph hardest - the same entity walks the lattice repeatedly.
 	Store store("fuzz");
 	Model model;
 	std::vector<Entity> entities;
@@ -459,7 +459,7 @@ TEST_CASE("every archetype in the lattice is reachable and correct", "[ecs][fuzz
 	REQUIRE(wrong == 0);
 
 	// 255, not 256. Mask zero is the entity with no components, and an entity
-	// with no components occupies no table at all — it is a directory slot, and
+	// with no components occupies no table at all - it is a directory slot, and
 	// a row is what a component buys. The empty set is reachable and interned;
 	// nothing ever builds a table for it.
 	REQUIRE(store.TableCount() == 255);
@@ -558,7 +558,7 @@ TEST_CASE("structural changes inside Each land after it, exactly once", "[ecs][f
 
 TEST_CASE("a destroy inside Each does not disturb the rows still to come", "[ecs][fuzz]") {
 	// Swap-back removal moves the last row into the hole. If a destroy were
-	// applied immediately, the loop would skip whichever entity got moved —
+	// applied immediately, the loop would skip whichever entity got moved -
 	// and it would skip a different one every run.
 	Store store("defer");
 
@@ -744,7 +744,7 @@ TEST_CASE("change tracking matches a model under churn", "[ecs][fuzz]") {
 }
 
 TEST_CASE("a world survives being cleared and rebuilt repeatedly", "[ecs][fuzz]") {
-	// Clear has to leave the store as usable as a fresh one — including its
+	// Clear has to leave the store as usable as a fresh one - including its
 	// query plans, which hold table indices that no longer exist.
 	Store store("cycles");
 

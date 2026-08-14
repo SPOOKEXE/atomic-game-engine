@@ -352,7 +352,7 @@ TEST_CASE("a world tick really reaches another thread", "[world]") {
 		});
 	}
 
-	// Retried, because one dispatch is allowed to stay on the calling thread —
+	// Retried, because one dispatch is allowed to stay on the calling thread -
 	// the driver drains ranges too.
 	for (int attempt = 0; attempt < 25 && elsewhere.load() == 0; attempt++) {
 		universe.Tick(1.0f / 60.0f);
@@ -406,7 +406,7 @@ TEST_CASE("destroying a world from inside a tick lands at the next barrier", "[w
 // --- faults ---------------------------------------------------------------
 
 TEST_CASE("a throwing system faults one world and spares its neighbours", "[world]") {
-	// The soft fault. A hard fault takes the host and cannot be caught — see
+	// The soft fault. A hard fault takes the host and cannot be caught - see
 	// the module's AGENTS.md.
 	Pool pool{4};
 	Universe universe;
@@ -588,7 +588,7 @@ TEST_CASE("a universe survives random creation, destruction and suspension", "[w
 //
 // `ecs`'s own suite covers what a signal is. What only a world can show is
 // *where* the boundary lands: after the simulation phases, before presentation,
-// once per tick — which is the arrangement that lets a render pass still see
+// once per tick - which is the arrangement that lets a render pass still see
 // what the tick changed.
 
 namespace universe_test {
@@ -627,7 +627,7 @@ TEST_CASE("a world fires change signals once a tick, after the simulation", "[wo
 
 TEST_CASE("presentation still sees what the tick changed", "[world]") {
 	// Changes are cleared at the *start* of a tick rather than the end, because
-	// render invalidation runs in PreRender — a separate call, after. Clearing
+	// render invalidation runs in PreRender - a separate call, after. Clearing
 	// at the end would hand the renderer an empty set every frame.
 	Universe universe;
 	const WorldId id = universe.Create(Named("signals.present"));

@@ -14,7 +14,7 @@
 // Three decisions, and each replaced something worse:
 //
 // **Beside the content store, not beside the binary.** `studio-layout.ini`,
-// `studio-content.ini` and `studio-keybinds.ini` lived in `Paths::Base()` —
+// `studio-content.ini` and `studio-keybinds.ini` lived in `Paths::Base()` -
 // which is `.cache/build/<preset>/` for anybody working on the engine. So every
 // `just build` against a different preset was a fresh install, and deleting the
 // build directory threw away somebody's keybinds and their origin list. The CDN
@@ -28,7 +28,7 @@
 // writes for a person to read is JSON.
 //
 // **A read never fails for a missing file.** A fresh install has none of these,
-// and that is the ordinary case rather than an error — every `Load` here answers
+// and that is the ordinary case rather than an error - every `Load` here answers
 // `false` and leaves the caller's defaults alone, so nothing has to distinguish
 // "not configured yet" from "configured to the default".
 //
@@ -36,7 +36,7 @@
 //
 // A preference is a thing **somebody set and expects to find again**. A command
 // line flag is a thing they said *for one run*, so a flag always wins over the
-// file and the file is never written from one — otherwise `--headless` once
+// file and the file is never written from one - otherwise `--headless` once
 // would make an editor headless forever.
 //
 // A signing seed does not belong here for the reason `ContentSources.hpp` gives
@@ -59,7 +59,7 @@ namespace studio {
 	// The folder every document below lives in.
 	//
 	// `~/Documents/atomic-game-engine/studio`, or the working directory when
-	// there is no home to find — which is a container or a service account
+	// there is no home to find - which is a container or a service account
 	// rather than a person, and neither is a case to abort in.
 	//
 	// @return The directory, which may not exist yet.
@@ -70,7 +70,7 @@ namespace studio {
 	//
 	// **For tests, and for a second editor on one machine.** Every path below is
 	// derived from the root rather than computed, so this is the only override
-	// there needs to be — and a suite that wrote into a real person's folder
+	// there needs to be - and a suite that wrote into a real person's folder
 	// would be a suite nobody could run twice.
 	//
 	// @param root Where to keep configuration. An empty path restores the
@@ -109,7 +109,7 @@ namespace studio {
 	// Writes one document, creating the folder if it has to.
 	//
 	// Pretty-printed, because every one of these is a file somebody may open in
-	// an editor and fix by hand — which is most of the reason for JSON over a
+	// an editor and fix by hand - which is most of the reason for JSON over a
 	// binary form.
 	//
 	// @param leaf     The file name.
@@ -133,7 +133,7 @@ namespace studio {
 		// Puts one at the front.
 		//
 		// **Moved rather than added when it is already in the list**, which is
-		// what "most recent" means — otherwise opening one file five times would
+		// what "most recent" means - otherwise opening one file five times would
 		// fill the menu with five copies of it and push out everything else.
 		//
 		// An empty path is ignored, because "no file" is the state a new game is
@@ -188,7 +188,7 @@ namespace studio {
 		Both,
 
 		// Both faces move by half the increment. The part grows by the
-		// increment and stays centred — which is what a snapped drag wants,
+		// increment and stays centred - which is what a snapped drag wants,
 		// since the size lands on the step rather than on twice it.
 		BothHalf,
 	};
@@ -204,8 +204,8 @@ namespace studio {
 
 	// What the interface looks like and how it behaves, between sessions.
 	//
-	// **Deliberately not `EditorSettings`.** That struct is the command line —
-	// what somebody asked for on one run — and this is what they configured. The
+	// **Deliberately not `EditorSettings`.** That struct is the command line -
+	// what somebody asked for on one run - and this is what they configured. The
 	// two overlap on purpose in a few places and the rule at every one of them
 	// is the same: a flag given wins, and the file is never written from a flag.
 	//
@@ -222,7 +222,7 @@ namespace studio {
 		// **These three are `Editor::SnapEnabled`, `SnapDistance` and
 		// `SnapDegrees`, spelled the same and holding the same numbers.** They
 		// are here rather than duplicated because a step is the first thing
-		// anybody changes and the last thing they want to set again tomorrow —
+		// anybody changes and the last thing they want to set again tomorrow -
 		// and a second pair of fields meaning the same thing is the debt the
 		// root `AGENTS.md` calls the most expensive kind.
 		bool SnapEnabled = false;
@@ -252,13 +252,13 @@ namespace studio {
 		//
 		// **A mode, because the handles are the same ones.** Roblox spells it
 		// "Edit Pivot" and it is the same translate and rotate gizmo pointed at
-		// `PivotOffset` — see `Editor::PivotEditing`.
+		// `PivotOffset` - see `Editor::PivotEditing`.
 		bool PivotEditing = false;
 
 		// The loopback port the control surface offers in its panel.
 		//
 		// **Not whether it is listening.** A port is a preference and an open
-		// socket is a decision somebody makes while working — `SECURITY.md` is
+		// socket is a decision somebody makes while working - `SECURITY.md` is
 		// why the second is never restored from a file.
 		int ControlPort = 8720;
 
@@ -274,8 +274,8 @@ namespace studio {
 		//
 		// **Here rather than in the layout ini, unlike the global theme.** The
 		// global override is one line of numbers and belongs beside the palette
-		// it overrides; this is a document — a map of maps that grows with every
-		// panel somebody recolours — and the header above is explicit that JSON
+		// it overrides; this is a document - a map of maps that grows with every
+		// panel somebody recolours - and the header above is explicit that JSON
 		// is where documents go and the INI convention for saying so was the
 		// thing that replaced.
 		//

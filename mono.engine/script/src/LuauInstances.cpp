@@ -24,7 +24,7 @@ namespace engine::script {
 		//
 		// Reached through the context on a light-userdata upvalue rather than a
 		// global, so two runtimes over two worlds cannot reach each other's
-		// store — the mistake a file-static would make available.
+		// store - the mistake a file-static would make available.
 		Store &StoreOf(lua_State *state) {
 			return *UpvalueContext(state).World;
 		}
@@ -80,7 +80,7 @@ namespace engine::script {
 		// The `Players` service's class, resolved once.
 		//
 		// A `ClassId` is a registration index and registration is process-wide
-		// and idempotent, so this is stable for the life of the process — which
+		// and idempotent, so this is stable for the life of the process - which
 		// is what lets the test below be two integer compares rather than a
 		// lookup per tree change.
 		ecs::ClassId PlayersClass() {
@@ -197,7 +197,7 @@ namespace engine::script {
 
 			// **A player's own pair, offered on every instance for the reason
 			// the two above it are.** Nothing fires one at a subject that is not
-			// a `Player`, so a connection on a `Part` is inert by construction —
+			// a `Player`, so a connection on a `Part` is inert by construction -
 			// which is the same answer a class gate would give, at none of the
 			// cost of testing a class on every field access in the world.
 			if (name == "CharacterAdded") {
@@ -215,14 +215,14 @@ namespace engine::script {
 			// **Offered on every instance rather than only on a `GuiObject`.**
 			// Roblox does gate them by class, and matching that would mean a
 			// class test on a lookup that already runs for every field access on
-			// every instance — to produce, in the failing case, a connection
+			// every instance - to produce, in the failing case, a connection
 			// that never fires instead of an error. `gui::Router` only ever
 			// names elements it found in a compiled draw list, so a connection
 			// on a `Part` is inert by construction, which is the same answer at
 			// none of the cost.
 			// **`MouseButton1Click` beside `Activated`, and they are one signal
-			// under two names rather than two lists.** Roblox has both — the
-			// second on `GuiButton` — and this engine's router produces exactly
+			// under two names rather than two lists.** Roblox has both - the
+			// second on `GuiButton` - and this engine's router produces exactly
 			// one primary button, so the two questions have one answer here. A
 			// second `SignalKind` would be a second list to fan the same event
 			// out to, and the first handler an author wrote against the name
@@ -260,8 +260,8 @@ namespace engine::script {
 			}
 
 			// **A `TextBox`'s pair, offered on every instance for the reason the
-			// six above it are.** Only a `TextBox` can take the keyboard —
-			// `gui::Focus` refuses anything with no `Entry` component — so a
+			// six above it are.** Only a `TextBox` can take the keyboard -
+			// `gui::Focus` refuses anything with no `Entry` component - so a
 			// connection on a `Frame` is inert by construction rather than by a
 			// class test on every field access in the world.
 			if (name == "Focused") {
@@ -280,7 +280,7 @@ namespace engine::script {
 				// inconsistency. Every other property is trivially copyable, so
 				// a `descriptor.Get` into raw bytes is a copy into storage that
 				// needed no construction. A `PropertyType::String` value owns an
-				// allocation and its getter *assigns* — assigning into
+				// allocation and its getter *assigns* - assigning into
 				// uninitialised bytes is undefined behaviour, not a fast path.
 				//
 				// So this one gets a real object to be assigned into. The cost
@@ -300,7 +300,7 @@ namespace engine::script {
 				// **Through the descriptor this function already found**, not
 				// through its name. The by-name overload would call
 				// `Classes::Describe` and scan the class's property list a
-				// second time, for a descriptor that is in scope — which is
+				// second time, for a descriptor that is in scope - which is
 				// half the class-table traffic of a scripted frame.
 				alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 				if (property->Size > sizeof(bytes) ||
@@ -329,7 +329,7 @@ namespace engine::script {
 			// `Raycast` is a query against a world and `CurrentCamera` is which
 			// eye is live; offering either on a `Folder` would be offering an
 			// answer that means nothing. They were on the world object before
-			// this and they stay together now that the world object is gone —
+			// this and they stay together now that the world object is gone -
 			// what changed is which instance they hang off, not what they are.
 			//
 			// Checked after the shared methods and before a child by name, so
@@ -387,7 +387,7 @@ namespace engine::script {
 				luaL_errorL(state, "'%s' is read-only", field);
 			}
 
-			// The write half of the same exception — see the getter above.
+			// The write half of the same exception - see the getter above.
 			// `luaL_checklstring` rather than `luaL_checkstring`, so an embedded
 			// zero in a string a script built survives instead of truncating the
 			// value at it.
@@ -472,7 +472,7 @@ namespace engine::script {
 			// Roblox's behaviour and now means what it says: the part exists, it
 			// is fully formed, no draw list contains it and no walk of the tree
 			// reaches it until somebody sets `.Parent`. That is what makes an
-			// object usable as pure data — a template, a marker, a thing a
+			// object usable as pure data - a template, a marker, a thing a
 			// script holds and never shows.
 			if (!lua_isnoneornil(state, 2)) {
 				if (!store.SetParent(instance, CheckInstance(state, 2))) {
@@ -497,7 +497,7 @@ namespace engine::script {
 	// --- marshalling, shared with the ECS surface ---------------------------
 	//
 	// **The type and the enum name, never a descriptor.** A property has one and
-	// a component field does not, and both carry exactly the same values — so a
+	// a component field does not, and both carry exactly the same values - so a
 	// second switch for fields would be the duplicate `script/AGENTS.md` calls
 	// the marshalling design's whole reason for existing.
 
@@ -537,7 +537,7 @@ namespace engine::script {
 			// rather than corrupt a heap.
 			return false;
 		case PropertyType::Enum:
-			// An `EnumItem`, not a string — that is the whole difference
+			// An `EnumItem`, not a string - that is the whole difference
 			// this type buys. The value is an interned `Name` exactly as
 			// `PropertyType::Name` is; what changes is that userland gets a
 			// value it can compare against `Enum.AlphaMode.Clip` and be
@@ -581,7 +581,7 @@ namespace engine::script {
 			// therefore belonged to it. Now `workspace` is an instance like
 			// any other, `Workspace` is somewhere a thing can be parented,
 			// and having no parent is an ordinary state a script can both
-			// produce and read back — which is what makes
+			// produce and read back - which is what makes
 			// `Instance.new("Part")` an object nothing draws and nothing
 			// lists until somebody says where it goes.
 			const Entity referenced = *static_cast<const Entity *>(bytes);
@@ -661,7 +661,7 @@ namespace engine::script {
 
 		// **Placement-new, where every case above assigns.** `out` is
 		// uninitialised stack bytes, and assigning a 328-byte value over it is
-		// harmless only because these types are trivially copyable — which
+		// harmless only because these types are trivially copyable - which
 		// they are, and which the caller's zeroed buffer already relies on.
 		// Written as a plain assignment for the same reason as the rest: one
 		// shape, so a future non-trivial member is caught by the compiler here
@@ -674,7 +674,7 @@ namespace engine::script {
 			return true;
 		case PropertyType::Reference:
 			// `part.Parent = nil` detaches. `part.Parent = workspace` is now
-			// an ordinary instance reference and needs no case of its own —
+			// an ordinary instance reference and needs no case of its own -
 			// which is the whole of what collapsing the two notions of "the
 			// workspace" bought.
 			if (lua_isnil(state, index)) {
@@ -717,7 +717,7 @@ namespace engine::script {
 		lua_newtable(state);
 		lua_setfield(state, LUA_REGISTRYINDEX, "engine.instance.methods");
 
-		// One trampoline per row — see `ScriptCall.hpp`.
+		// One trampoline per row - see `ScriptCall.hpp`.
 		InstallLuauNeutralMethods(state);
 
 		luaL_newmetatable(state, "Instance");
@@ -743,7 +743,7 @@ namespace engine::script {
 		lua_pushstring(state, "Instance");
 		lua_setfield(state, -2, "__metatable");
 
-		// What `typeof` reads — see `LuauValues.cpp`'s `Install`.
+		// What `typeof` reads - see `LuauValues.cpp`'s `Install`.
 		lua_pushstring(state, "Instance");
 		lua_setfield(state, -2, "__type");
 
@@ -766,7 +766,7 @@ namespace engine::script {
 		context.Changes.Drain([&](ecs::Entity instance, core::Name property) {
 			// **Both signals, from one queue entry.** `.Changed` takes the
 			// property's name and `GetPropertyChangedSignal` takes nothing,
-			// which is Roblox's split and the reason the second exists at all —
+			// which is Roblox's split and the reason the second exists at all -
 			// a handler that only cares about one property should not be called
 			// for every other one and made to filter.
 			lua_pushstring(state, property.Text().data());
@@ -807,7 +807,7 @@ namespace engine::script {
 			return ecs::NULL_ENTITY;
 		}
 
-		// The nearest ancestor only — see the declaration for why the gate is
+		// The nearest ancestor only - see the declaration for why the gate is
 		// what makes this fire once rather than once per level.
 		if (store.ParentOf(instance) != container) {
 			return ecs::NULL_ENTITY;
@@ -822,7 +822,7 @@ namespace engine::script {
 		}
 
 		// **Taken, not read.** A handler may reparent something, and a swap
-		// leaves the store's list empty before the first one runs — so the move
+		// leaves the store's list empty before the first one runs - so the move
 		// it makes belongs to the next delivery instead of being appended to
 		// the list being walked.
 		std::vector<ecs::TreeChange> changes;
@@ -841,7 +841,7 @@ namespace engine::script {
 		for (const ecs::TreeChange &change : changes) {
 			// **The parent's signals first, then the subtree's.** Roblox orders
 			// them the same way, and a handler that reads `Parent` from an
-			// `AncestryChanged` should see the move already finished — which it
+			// `AncestryChanged` should see the move already finished - which it
 			// does here whatever the order, because the delivery is a whole
 			// tick after the write.
 			if (change.From != ecs::NULL_ENTITY) {
@@ -855,8 +855,8 @@ namespace engine::script {
 
 				// **`PlayerAdded` is that same arrival, filtered.** Fired here
 				// rather than anywhere else because a player joining *is* a
-				// reparent — `scene::AddPlayer` puts the instance under the
-				// service — so a separate recording would be a second place the
+				// reparent - `scene::AddPlayer` puts the instance under the
+				// service - so a separate recording would be a second place the
 				// same fact lived, and the two would come apart the first time
 				// something parented a player by hand.
 				if (IsPlayerOfService(*context.World, change.To, change.Instance)) {
@@ -865,7 +865,7 @@ namespace engine::script {
 				}
 
 				// `DescendantAdded` is every ancestor's, not just the new
-				// parent's — that is the whole difference between it and
+				// parent's - that is the whole difference between it and
 				// `ChildAdded`. Walked upwards from the parent, which is a
 				// handful of steps rather than a search.
 				for (Entity above = change.To; above != ecs::NULL_ENTITY;
@@ -918,7 +918,7 @@ namespace engine::script {
 			const CallbackRef reference = held->second;
 			context.Threads.erase(held);
 
-			// One value, and nil for a wait that ran out — which is what Roblox's
+			// One value, and nil for a wait that ran out - which is what Roblox's
 			// timeout form answers and what `if child then` reads.
 			if (resumption.Child == ecs::NULL_ENTITY) {
 				lua_pushnil(thread);
@@ -927,8 +927,8 @@ namespace engine::script {
 			}
 
 			// **A yield here is success rather than failure**, for the reason
-			// `PumpDeliveries` gives: a resumed script may wait again — on
-			// another child, on a bus reply, on `task.wait` — and reading an
+			// `PumpDeliveries` gives: a resumed script may wait again - on
+			// another child, on a bus reply, on `task.wait` - and reading an
 			// error message off a thread that merely suspended is reading
 			// whatever the yield left on its stack. The old reference goes either
 			// way, because whatever it suspended on has registered a fresh one.
@@ -965,8 +965,8 @@ namespace engine::script {
 			// destroyed already fired `CharacterRemoving` synchronously from
 			// `OnDescendantRemoving` with the instance still readable, and a body
 			// that arrived and went inside one tick is one no handler could act
-			// on. What is left is the release that did not destroy —
-			// `player.Character = nil` — which the hook cannot see.
+			// on. What is left is the release that did not destroy -
+			// `player.Character = nil` - which the hook cannot see.
 			if (!context.World->Alive(change.Character)) {
 				continue;
 			}
@@ -1003,7 +1003,7 @@ namespace engine::script {
 			// **An element may have been destroyed since the router named it.**
 			// The events were produced from the previous frame's compiled list
 			// and a handler earlier in *this* loop may have deleted what a later
-			// one is about — which is the ordinary case for a close button, not
+			// one is about - which is the ordinary case for a close button, not
 			// an edge one. Firing at a dead entity would push a userdata for a
 			// row that is gone.
 			if (!context.World->Alive(event.Instance)) {
@@ -1044,7 +1044,7 @@ namespace engine::script {
 			case gui::EventKind::FocusReleased:
 				// **`enterPressed`, read off the event rather than assumed.**
 				// Roblox's first argument, which a handler written
-				// `function(enterPressed)` reads — see `SignalKind::GuiFocusLost`
+				// `function(enterPressed)` reads - see `SignalKind::GuiFocusLost`
 				// for why the second argument it also declares is not here. True
 				// when Return released the box and false when a press elsewhere
 				// did, which is the difference `GuiEvent::Entered` carries.
@@ -1069,7 +1069,7 @@ namespace engine::script {
 		// which is exactly this call site.
 		// **A replica is not asked, because asking is what logs.** Its fixtures
 		// arrive from the authority, and `Store::MayMintAuthoritative` reports a
-		// refused mint at error level once per store — so a client that opened a
+		// refused mint at error level once per store - so a client that opened a
 		// VM over its replica said "refusing CreateInstance" on every join, which
 		// reads as a fault and is the ordinary state of a world that owns
 		// nothing. Whatever the authority has already sent is what this resolves
@@ -1091,7 +1091,7 @@ namespace engine::script {
 
 		// The table `InstanceIndex` consults for the two members only the
 		// Workspace has. Created empty here and filled by `OpenQueries`, which
-		// runs after this — `LuauBindings.hpp` states that ordering, and it is why
+		// runs after this - `LuauBindings.hpp` states that ordering, and it is why
 		// the table has to exist by the time this returns.
 		lua_newtable(state);
 		lua_setfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");

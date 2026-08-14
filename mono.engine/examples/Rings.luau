@@ -3,9 +3,9 @@
 --
 -- Written the way a Roblox script is written: `game:GetService`, `Instance.new`,
 -- properties by name, `part.Parent = workspace`, and behaviour on
--- `RunService.Heartbeat`. The motion is **CFrame composition** — an orbit is a
+-- `RunService.Heartbeat`. The motion is **CFrame composition** - an orbit is a
 -- rotation times an offset, and a spin is a CFrame multiplied into itself each
--- beat — rather than trigonometry and Euler angles done by hand.
+-- beat - rather than trigonometry and Euler angles done by hand.
 --
 -- **The script is the simulation.** There is no `Orbit` component and no engine
 -- system reading one; the engine does not know what an orbit is. What it knows
@@ -86,7 +86,7 @@ for index = 0, COUNT - 1 do
 
 	-- Nothing here is simulated by physics; the script places every part every
 	-- beat. Anchoring says so, and it is a real archetype move rather than a
-	-- flag — an anchored part carries no RigidBody and no Motion, so the
+	-- flag - an anchored part carries no RigidBody and no Motion, so the
 	-- dynamic queries never visit it.
 	part.Anchored = true
 	part.Parent = workspace

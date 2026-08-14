@@ -1,7 +1,7 @@
 --!strict
 -- One bay per kind of asset, so a single frame says which kinds work.
 --
--- `MeshGrid.luau` answers one question thoroughly — did every *mesh* arrive and
+-- `MeshGrid.luau` answers one question thoroughly - did every *mesh* arrive and
 -- draw. This answers a wider and shallower one: of the six kinds this engine
 -- can name, which reach the screen at all. A bay that shows its fallback is a
 -- pipeline that broke, and which bay it is says where.
@@ -9,28 +9,28 @@
 -- ## Why bays rather than a grid
 --
 -- A grid is right when every cell is the same kind of thing and the question is
--- "which of them". Here every cell is a *different* path — a mesh goes through
+-- "which of them". Here every cell is a *different* path - a mesh goes through
 -- `MeshTable`, a texture through `TextureTable`, an image through
--- `InterfacePass`, a sound through the mixer — so the useful layout is one
+-- `InterfacePass`, a sound through the mixer - so the useful layout is one
 -- labelled bay each, in a fixed order, with the label rendered in world rather
 -- than written down here. A frame nobody has to hold a key for is the point.
 --
 -- ## What each bay proves, and what its failure looks like
 --
---   * **MeshPart** — geometry resolved by name. Failure draws `MeshTable`'s
+--   * **MeshPart** - geometry resolved by name. Failure draws `MeshTable`'s
 --     fallback cube, so a cube in the mesh bay is a name that did not match.
---   * **Texture** — a still sheet sampled in the 3D pass. Failure wears the
+--   * **Texture** - a still sheet sampled in the 3D pass. Failure wears the
 --     purple checkerboard `MissingTexture` hands back.
---   * **GIF** — the same path with `TextureData`'s flipbook triple set, so the
+--   * **GIF** - the same path with `TextureData`'s flipbook triple set, so the
 --     sheet is a grid of frames and the shader walks it. Failure is a bay that
 --     shows one frame and never moves, which is why the bay beside it is a
 --     still on purpose: the pair is the comparison.
---   * **Image** — the same bytes through the *interface* pass instead, on a
+--   * **Image** - the same bytes through the *interface* pass instead, on a
 --     `SurfaceGui`. Two bays wearing the same texture and only one of them
 --     right says the fault is in a pass rather than in content.
---   * **Audio** — nothing to look at, so the marker above it moves while the
+--   * **Audio** - nothing to look at, so the marker above it moves while the
 --     sound is playing. A still marker is a sound that did not load.
---   * **Video** — a placeholder that says so. `AssetKind::Video` is a routing
+--   * **Video** - a placeholder that says so. `AssetKind::Video` is a routing
 --     label today: `mp4` maps to it and nothing decodes it, so a bay pretending
 --     otherwise would be the one lie in the scene.
 --
@@ -119,7 +119,7 @@ makeBay(4, "Image")
 makeBay(5, "Audio")
 makeBay(6, "Video")
 
--- **Bay 1 — geometry.** Starts on a built-in so the bay is never empty, and is
+-- **Bay 1 - geometry.** Starts on a built-in so the bay is never empty, and is
 -- re-pointed at the first published mesh when one arrives. `engine.Cube` is
 -- generated in process by `assets::MakeBuiltin` and cannot fail to resolve, so
 -- a wrong-looking bay here before content lands is a renderer fault.
@@ -131,7 +131,7 @@ meshShow.Size = Vector3.new(SHOWPIECE_SIZE, SHOWPIECE_SIZE, SHOWPIECE_SIZE)
 meshShow.CFrame = showpieceFrame(1)
 meshShow.Parent = workspace
 
--- **Bay 2 — a still sheet in the 3D pass**, and bay 3 the animated one. Both
+-- **Bay 2 - a still sheet in the 3D pass**, and bay 3 the animated one. Both
 -- start on the built-in checker so the difference between them is visible
 -- before anything is published: same mesh, same size, one texture each.
 local textureShow = Instance.new("MeshPart")
@@ -152,7 +152,7 @@ gifShow.Size = Vector3.new(SHOWPIECE_SIZE, SHOWPIECE_SIZE, SHOWPIECE_SIZE)
 gifShow.CFrame = showpieceFrame(3)
 gifShow.Parent = workspace
 
--- **Bay 4 — the same bytes through the interface pass.** A flat pane carrying a
+-- **Bay 4 - the same bytes through the interface pass.** A flat pane carrying a
 -- `SurfaceGui`, so the texture is sampled by `interface.frag` rather than by
 -- `opaque.frag`. Two bays wearing one texture through two passes is what makes
 -- a broken pass distinguishable from broken content.
@@ -179,7 +179,7 @@ imageLabel.BackgroundTransparency = 1
 imageLabel.Image = "engine.Checker"
 imageLabel.Parent = imageSurface
 
--- **Bay 5 — audio, which has nothing to draw.** The marker is the readout: it
+-- **Bay 5 - audio, which has nothing to draw.** The marker is the readout: it
 -- rises and falls while the sound is playing, so a bay that never moves is a
 -- sound that did not load. Cheaper and more honest than a fake waveform, which
 -- would animate whether or not anything was audible.
@@ -196,7 +196,7 @@ sound.Name = "Showpiece"
 sound.Volume = 0.4
 sound.Parent = audioMarker
 
--- **Bay 6 — the honest one.** `AssetKind::Video` exists as a routing label and
+-- **Bay 6 - the honest one.** `AssetKind::Video` exists as a routing label and
 -- `mp4` maps to it; there is no decoder, no player and no runtime path. A bay
 -- showing a stand-in picture would be the only thing in this scene claiming
 -- something works when it does not, so it shows its own absence instead.
@@ -229,7 +229,7 @@ local view = Instance.new("Camera")
 view.Name = "AssetsCamera"
 
 -- Back far enough for six bays and high enough to see the floor they stand on,
--- looking at the middle of the row rather than at the origin — the row is
+-- looking at the middle of the row rather than at the origin - the row is
 -- centred on X but its interesting half is above the pedestals.
 view.CFrame = CFrame.lookAt(Vector3.new(0, 9, 34), Vector3.new(0, 4, 0))
 view.Parent = workspace
@@ -249,7 +249,7 @@ local placedFlipbook = false
 local reported = false
 
 -- **Counted rather than read off a clock.** `tick()` is the wall, so the same
--- frame of two runs holds a different pose — which makes this scene impossible
+-- frame of two runs holds a different pose - which makes this scene impossible
 -- to compare against a capture of itself, and comparing captures is how a
 -- rendering change gets checked at all. A frame counter costs one add and makes
 -- frame four hundred mean one thing.
@@ -260,7 +260,7 @@ RunService.Heartbeat:Connect(function()
 	local elapsed = beats / 60
 
 	-- The mesh bay turns, because a still frame hides the half of a mesh facing
-	-- away — and a reversed winding is exactly the bug that looks fine from the
+	-- away - and a reversed winding is exactly the bug that looks fine from the
 	-- front.
 	meshShow.CFrame = showpieceFrame(1) * CFrame.Angles(0, elapsed * 0.6, 0)
 
@@ -280,7 +280,7 @@ RunService.Heartbeat:Connect(function()
 		if #meshes > 0 then
 			meshShow.MeshId = meshes[1]
 			placedMesh = true
-			print(`assets: mesh bay showing {meshes[1]} — {ContentService:GetTriangleCount(meshes[1])} triangle(s)`)
+			print(`assets: mesh bay showing {meshes[1]} - {ContentService:GetTriangleCount(meshes[1])} triangle(s)`)
 		end
 	end
 
@@ -296,7 +296,7 @@ RunService.Heartbeat:Connect(function()
 				gifShow.TextureID = texture
 				placedFlipbook = true
 				print(
-					`assets: gif bay showing {texture} — {flipbook.Frames} frame(s) at {flipbook.FrameRate} fps`
+					`assets: gif bay showing {texture} - {flipbook.Frames} frame(s) at {flipbook.FrameRate} fps`
 				)
 			elseif flipbook == nil and not placedStill then
 				textureShow.TextureID = texture
@@ -311,10 +311,10 @@ RunService.Heartbeat:Connect(function()
 	if not reported and elapsed > 3 then
 		reported = true
 		if not (placedMesh or placedStill or placedFlipbook) then
-			print("assets: nothing published in this world — run with --cdn to fill the content bays")
+			print("assets: nothing published in this world - run with --cdn to fill the content bays")
 		end
 		if not placedFlipbook then
-			print("assets: no animated texture published — the gif bay is showing a still")
+			print("assets: no animated texture published - the gif bay is showing a still")
 		end
 	end
 end)

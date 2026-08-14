@@ -2,7 +2,7 @@
 //
 // **`Renderer.hpp` needs a GPU and this does not.** The marker is pixels built
 // from a parity test on the host, so everything that makes it *work as a marker*
-// — the pattern, the two colours, the fact that it tiles without a seam — is
+// - the pattern, the two colours, the fact that it tiles without a seam - is
 // checkable here. What is not checkable here is the binding, and the suite says
 // so rather than mocking a device to pretend otherwise.
 
@@ -55,7 +55,7 @@ TEST_CASE("the marker is a full RGBA sheet", "[render][missing]") {
 	CHECK(image.Format == engine::assets::TextureFormat::RGBA8);
 	CHECK(image.Pixels.size() == static_cast<size_t>(MISSING_TEXTURE_SIDE) * MISSING_TEXTURE_SIDE * 4);
 
-	// A still image, not a flipbook — the three sheet fields stay zero or
+	// A still image, not a flipbook - the three sheet fields stay zero or
 	// `TextureTable` would try to animate it.
 	CHECK(image.FlipbookSide == 0);
 	CHECK(image.FlipbookFrames == 0);
@@ -73,7 +73,7 @@ TEST_CASE("the marker is two colours in a checkerboard", "[render][missing]") {
 	// than a marker, and it would also stop the pattern reading at a distance.
 	REQUIRE(colours.size() == 2);
 
-	// Diagonal neighbours match and orthogonal ones do not — which *is* a
+	// Diagonal neighbours match and orthogonal ones do not - which *is* a
 	// checkerboard, stated as the property rather than as four sampled pixels.
 	const uint32_t step = MISSING_TEXTURE_CHECK;
 	CHECK(At(0, 0) == At(step, step));
@@ -100,7 +100,7 @@ TEST_CASE("the marker is purple against a black that survives being lit", "[rend
 	CHECK(purple[1] < 64);
 
 	// **Not pure black.** A zero check is the same pixel as an unlit surface, so
-	// the pattern would vanish in shadow — exactly where somebody is most likely
+	// the pattern would vanish in shadow - exactly where somebody is most likely
 	// to be hunting for what went wrong.
 	CHECK(black[0] > 0);
 	CHECK(black[0] < 64);
@@ -115,7 +115,7 @@ TEST_CASE("the marker is purple against a black that survives being lit", "[rend
 TEST_CASE("the marker tiles without a seam", "[render][missing]") {
 	// The sampler repeats, and imported UVs routinely exceed one. An odd number
 	// of checks across would put two same-coloured checks against each other at
-	// every tile boundary — a visible stripe through the pattern that reads as
+	// every tile boundary - a visible stripe through the pattern that reads as
 	// part of the picture.
 	REQUIRE(MISSING_TEXTURE_SIDE % MISSING_TEXTURE_CHECK == 0);
 	CHECK((MISSING_TEXTURE_SIDE / MISSING_TEXTURE_CHECK) % 2 == 0);
@@ -126,8 +126,8 @@ TEST_CASE("the marker tiles without a seam", "[render][missing]") {
 }
 
 TEST_CASE("the marker is not the default material", "[render][missing]") {
-	// **The whole reason it exists.** The two answer different questions — "no
-	// texture" and "a texture that is not here" — and a change that quietly made
+	// **The whole reason it exists.** The two answer different questions - "no
+	// texture" and "a texture that is not here" - and a change that quietly made
 	// one delegate to the other would put the engine back where an author's typo
 	// looked like a finished part.
 	const engine::assets::TextureData &missing = MissingTexture();
@@ -140,13 +140,13 @@ TEST_CASE("the marker is not the default material", "[render][missing]") {
 TEST_CASE("both compiled-in sheets arrive with a mip chain", "[render][missing]") {
 	// **The sampler has had `max_lod` open since v0.14 and these two had nothing
 	// to fetch.** Both are generated below the importers, so until v0.15 they
-	// uploaded at level zero and shimmered — the filter lived at L9 in `bake`,
+	// uploaded at level zero and shimmered - the filter lived at L9 in `bake`,
 	// which nothing a shipped game links may link. It is `assets::BuildMipChain`
 	// now, one tier below this module, so a texture that is *made* here can carry
 	// a chain the same way a texture that is *baked* does.
 	//
 	// The marker's smallest level is the mean of its two colours for the reason
-	// the checker's is — half the sheet is each, so a chain built by copying
+	// the checker's is - half the sheet is each, so a chain built by copying
 	// rather than filtering would have the right length and the wrong texel.
 	using engine::assets::MipLevelCount;
 
@@ -163,7 +163,7 @@ TEST_CASE("both compiled-in sheets arrive with a mip chain", "[render][missing]"
 	}
 
 	// The default is a photographed tile rather than a pattern, so there is no
-	// arithmetic to predict — the chain's length and `IsValid` are the whole of
+	// arithmetic to predict - the chain's length and `IsValid` are the whole of
 	// what can be said about it here, and `IsValid` is not weak: it refuses any
 	// level that is not exactly the size its position implies.
 	const engine::assets::TextureData &fallback = engine::render::DefaultTexture();
@@ -185,13 +185,13 @@ TEST_CASE("a sheet still on its way is not a missing one", "[render][missingtext
 	using engine::render::ChooseTexture;
 	using engine::render::TextureChoice;
 
-	// Here. Nothing else matters — a name that resolves is the answer whatever
+	// Here. Nothing else matters - a name that resolves is the answer whatever
 	// anybody expected.
 	CHECK(ChooseTexture(true, true, false) == TextureChoice::Named);
 	CHECK(ChooseTexture(true, true, true) == TextureChoice::Named);
 
 	// Named nothing. The default material, which is what an untextured part is
-	// made of — see `DefaultTexture.hpp` for why that is not the fallback texel.
+	// made of - see `DefaultTexture.hpp` for why that is not the fallback texel.
 	CHECK(ChooseTexture(false, false, false) == TextureChoice::Default);
 
 	// **Named something, and it is coming.** White, not purple. This is the
@@ -201,14 +201,14 @@ TEST_CASE("a sheet still on its way is not a missing one", "[render][missingtext
 	CHECK(ChooseTexture(false, true, true) == TextureChoice::Default);
 
 	// **Named something, and nothing is coming.** The marker, and now it means
-	// only that — which is the only meaning that is useful.
+	// only that - which is the only meaning that is useful.
 	CHECK(ChooseTexture(false, true, false) == TextureChoice::Missing);
 
 	// **A name nobody expects can never be the middle case**, which is the
 	// property that keeps the marker honest: there is no state where a part
 	// draws white for ever because somebody forgot to unmark it. That is a
 	// claim about the hosts rather than about this function, and the hosts
-	// unmark on the request *finishing* rather than on it succeeding — which is
+	// unmark on the request *finishing* rather than on it succeeding - which is
 	// what makes it true in the branch that matters, a misspelled name that
 	// fails.
 	CHECK(ChooseTexture(false, true, false) != TextureChoice::Default);

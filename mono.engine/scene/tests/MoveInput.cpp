@@ -4,7 +4,7 @@
 // and the difference is where the bugs actually were. Every case in that file
 // passed while a character in the studio refused to walk, because each of them
 // drives `UpdateCharacterControl` on a world holding exactly one humanoid and
-// exactly one keyboard — the arrangement in which nothing can be overwritten by
+// exactly one keyboard - the arrangement in which nothing can be overwritten by
 // anything.
 //
 // The two failures below are what a real host looks like instead:
@@ -68,7 +68,7 @@ namespace {
 			return *Store_.ResourceMutable<InputState>();
 		}
 
-		// A bare humanoid nobody owns — an NPC, or a scripted character in an
+		// A bare humanoid nobody owns - an NPC, or a scripted character in an
 		// examples scene.
 		Entity Npc(const char *name = "Npc") {
 			const Entity row = Store_.CreateInstance(engine::scene::PartClass(), name);
@@ -110,7 +110,7 @@ namespace {
 TEST_CASE("a key tapped between two ticks still reaches the tick", "[scene][moveinput]") {
 	// The bug both hosts had grown a private latch to hide. Frames outnumber
 	// ticks, so a press and its release can land entirely inside one tick's
-	// gap — `WasKeyPressed` is true on a frame nobody sampled and false by the
+	// gap - `WasKeyPressed` is true on a frame nobody sampled and false by the
 	// time the simulation asks.
 	World world;
 
@@ -135,7 +135,7 @@ TEST_CASE("a tap is consumed once and does not fire again", "[scene][moveinput]"
 	world.Input().ConsumeTaps();
 	CHECK_FALSE(world.Input().WasKeyTapped(KeyCode::Space));
 
-	// Still held, and holding is not tapping again — a jump has to be released
+	// Still held, and holding is not tapping again - a jump has to be released
 	// and pressed to fire twice.
 	world.Frame({KeyCode::Space});
 	CHECK_FALSE(world.Input().WasKeyTapped(KeyCode::Space));
@@ -195,7 +195,7 @@ TEST_CASE("the jump in an intent comes from the latch, not the frame", "[scene][
 
 TEST_CASE("an unfocused panel produces neither a step nor a jump", "[scene][moveinput]") {
 	// A viewport that lost the pointer must let go of the character, including
-	// a jump it had already latched — otherwise clicking away mid-press jumps.
+	// a jump it had already latched - otherwise clicking away mid-press jumps.
 	World world;
 	world.Frame({KeyCode::W, KeyCode::Space});
 	world.Input().Focused = false;
@@ -211,7 +211,7 @@ TEST_CASE("a keyboardless authority leaves an owned character alone", "[scene][m
 	// **The bug.** A studio playing both halves, and a dedicated server, have no
 	// `LocalPlayer` and no keyboard. The local input pass took that to mean
 	// "drive every humanoid" and wrote its empty direction over the one
-	// `game::ApplyMoveInput` had just delivered — every tick, between the
+	// `game::ApplyMoveInput` had just delivered - every tick, between the
 	// message arriving and `StepCharacters` reading it.
 	//
 	// Jump survived because it is latched with `||` and a direction is

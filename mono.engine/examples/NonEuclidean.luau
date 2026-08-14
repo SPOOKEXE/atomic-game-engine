@@ -17,7 +17,7 @@
 --
 -- `Face` is resolved on the destination as well as on the source, so a hole
 -- shows whatever that face points at on the part it leads to. Every gate here
--- uses `Back` — local +Z — and the two ends mean the same thing by it:
+-- uses `Back` - local +Z - and the two ends mean the same thing by it:
 --
 -- * **the source's `Back` faces whoever is looking**, because that is the face
 --   the image is drawn on;
@@ -25,19 +25,19 @@
 --   the direction you would come out travelling.
 --
 -- They are one statement about which way you go through. Get the second wrong
--- and nothing complains — the pane renders, the camera is placed, the frustum
+-- and nothing complains - the pane renders, the camera is placed, the frustum
 -- fits, and the picture is the back of a wall. `mouth()` and `throat()` below
 -- exist so that neither end can be built by hand.
 --
 -- ## What these cannot do yet, said plainly
 --
 -- **You can look through them and not walk through them.** Traversal is
--- `ROADMAP.md` v0.15's character controller — `docs/DEFERRED.md` D00112 — so
+-- `ROADMAP.md` v0.15's character controller - `docs/DEFERRED.md` D00112 - so
 -- every exhibit is arranged to make its point from outside, which is also how
 -- they read in a video.
 --
 -- **And none of them changes scale.** The map is rigid, so the shrinking tunnel
--- — round once and you are smaller, round again and you fit — is the one trick
+-- - round once and you are smaller, round again and you fit - is the one trick
 -- on that list this engine cannot currently express. It needs a similarity
 -- rather than a rigid transform, in the placement and in the traversal that does
 -- not exist yet. Filed with the rest of `D00112`.
@@ -50,7 +50,7 @@ local RunService = game:GetService("RunService")
 local GATE_SIZE = Vector3.new(768, 768)
 
 -- The exhibits stand in a row, and what each opens onto is built a long way off
--- — the illusion is that they are adjacent, and building them adjacent would let
+-- - the illusion is that they are adjacent, and building them adjacent would let
 -- one exhibit's lighting and geometry arrive at the edges of another.
 local STAGE_STEP = 44
 local AWAY = 500
@@ -196,7 +196,7 @@ do
 	passage("LongInside", inside, 60, Color3.fromRGB(90, 150, 210))
 
 	-- Posts down its length, because a corridor with nothing in it gives the eye
-	-- no way to judge how far the end is — which is the whole claim being made.
+	-- no way to judge how far the end is - which is the whole claim being made.
 	for step = 1, 5 do
 		marker(
 			"LongInsidePost" .. step,
@@ -254,7 +254,7 @@ end
 -- **Two objects in the frame at once that are in different spaces.** The pillar
 -- has a hole down each side; the left opens onto one room and the right onto
 -- another, and both are visible together. Walking round it does not bring you
--- back where you started — the cycle is longer than the pillar is.
+-- back where you started - the cycle is longer than the pillar is.
 do
 	local at = Vector3.new(STAGE_STEP * 3, 0, 0)
 
@@ -381,7 +381,7 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	--
 	-- **Not square on, and that is what makes half of these legible.** The first
 	-- two exhibits are about how long a tunnel *looks* from outside, which a
-	-- camera staring straight down the mouth cannot show — it sees the hole and
+	-- camera staring straight down the mouth cannot show - it sees the hole and
 	-- none of the shell. Standing off to one side puts the outside and the
 	-- inside in one frame, which is the comparison every one of them is making.
 	local lap = elapsed % (LAST * 2)
@@ -395,5 +395,5 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 end)
 
 print(
-	`non-euclidean: 6 exhibits, {holes} holes — shorter inside, longer inside, a room that is not there, a pillar with no end, a hill climbed downwards, and four times the volume in one room`
+	`non-euclidean: 6 exhibits, {holes} holes - shorter inside, longer inside, a room that is not there, a pillar with no end, a hill climbed downwards, and four times the volume in one room`
 )

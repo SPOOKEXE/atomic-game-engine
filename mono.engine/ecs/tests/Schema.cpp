@@ -25,8 +25,8 @@ using engine::ecs::Store;
 namespace {
 	// The component table is process-wide and nothing unregisters, so every
 	// case here has to name something no other case and no engine module will.
-	// A counter is not enough on its own — the suites in one binary share the
-	// table — so the prefix is this file's.
+	// A counter is not enough on its own - the suites in one binary share the
+	// table - so the prefix is this file's.
 	std::string Unique(const char *what) {
 		static int counter = 0;
 		return std::string("engine.ecs.schema.test.") + what + "." + std::to_string(counter++);
@@ -105,7 +105,7 @@ TEST_CASE("a different field set under one name is refused", "[schema]") {
 
 TEST_CASE("a name a C++ type already holds is a conflict, not an abort", "[schema]") {
 	// `Entity` is registered by the storage itself long before this runs, under
-	// whatever `TypeNameOf` spells — so instead this registers a type here and
+	// whatever `TypeNameOf` spells - so instead this registers a type here and
 	// then tries to describe over it. Aborting would be right for two C++ types
 	// and wrong for a script that mistyped a name.
 	struct Occupied {
@@ -303,7 +303,7 @@ TEST_CASE("a described component's padding is zeroed rather than left alone", "[
 	// The layout below pads: a bool followed by nothing wide enough to fill the
 	// tail. `TypeDescriptor` warns that uninitialised padding makes two runs of
 	// one scene produce different bytes, and a derived layout cannot promise
-	// there is no padding — so it promises the padding is defined.
+	// there is no padding - so it promises the padding is defined.
 	const std::string name = Unique("padding");
 	const FieldSpec fields[] = {
 		{"Wide", PropertyType::Double},
@@ -363,11 +363,11 @@ TEST_CASE("a slot past the last one is refused rather than overrunning", "[schem
 	// **The table is bounded and the boundary has to be a refusal.** A
 	// registration past the end would index an array of generated hook sets out
 	// of range, which is the one failure in this file that would not look like a
-	// failure — the schema would register and its first row would call whatever
+	// failure - the schema would register and its first row would call whatever
 	// the bytes after the table happened to be.
 	//
-	// Filling the table to prove it is not affordable — it is two thousand
-	// process-wide registrations that nothing can undo — so what is checked is
+	// Filling the table to prove it is not affordable - it is two thousand
+	// process-wide registrations that nothing can undo - so what is checked is
 	// that the guard is a comparison against the same constant the table is
 	// sized from, by asking for a schema when the table is already full. The
 	// registry has no way to fake that from outside, which leaves this as the

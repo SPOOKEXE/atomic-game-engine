@@ -2,14 +2,14 @@
 // draws.
 //
 // **A demo and not a feature, said out loud.** Nothing in the engine reads this
-// graph. It is here ahead of the two node systems the roadmap wants — the render
-// pipeline as an editor, and `Engine::bakegraph`'s pipeline documents — and what
+// graph. It is here ahead of the two node systems the roadmap wants - the render
+// pipeline as an editor, and `Engine::bakegraph`'s pipeline documents - and what
 // it proves is that the vendored library is enough for both: a registry, a model
 // with a cycle guard, a layout, a canvas, and an evaluator that can run
 // something slow without stopping the frame.
 //
 // **The node set is not here and neither is the canvas.** Both are
-// `mono.vendor/nodegraph`, which is where this design lives after D00113 — the
+// `mono.vendor/nodegraph`, which is where this design lives after D00113 - the
 // terrain types, the colouriser and the two async tasks are its
 // `demo/Nodes.cpp`, and this file is only the panel around them. What is left in
 // this repository is what an engine has and a library cannot: a texture for a
@@ -18,15 +18,15 @@
 // ## The panel
 //
 // A canvas, a breadcrumb bar when the view is inside a fold, and three tabs
-// answering three different questions about one selection: **Library** — what
-// can I add; **Inspector** — what is this and what did it make; **Types** —
+// answering three different questions about one selection: **Library** - what
+// can I add; **Inspector** - what is this and what did it make; **Types** -
 // what will connect to what. They are tabs and not three panels because only
 // one of the three is being asked at a time.
 //
 // The inspector's middle is the only part that varies by node type, and it is
 // dispatched through `nodegraph::Inspectors` rather than switched on here.
 // Around it the panel draws what every type has: a name, how long it took, its
-// knobs and its ports — drawn from `WidgetsOf`/`InputsOf`/`OutputsOf` so a
+// knobs and its ports - drawn from `WidgetsOf`/`InputsOf`/`OutputsOf` so a
 // compressed node shows the interface it derived rather than the empty
 // declaration it was placed from.
 //
@@ -84,7 +84,7 @@ namespace studio {
 	void Editor::PumpNodeDemoImages() {
 		// **A ceiling, and it drops the lot rather than the oldest.** Every
 		// preview is a texture in video memory, and a session spent dragging one
-		// slider produces a new result — and so a new key — on every frame it
+		// slider produces a new result - and so a new key - on every frame it
 		// moves. Thumbnails evict least-recently-drawn because a store is browsed
 		// in one direction; this is a graph whose visible set is small and
 		// rebuilt in a frame, so the simple rule costs one frame of pictures and
@@ -124,7 +124,7 @@ namespace studio {
 			return nullptr;
 		}
 
-		// **Prefixed, so a preview can never be sampled as content** — the same
+		// **Prefixed, so a preview can never be sampled as content** - the same
 		// rule `ThumbnailTextureName` states: the renderer resolves a part's
 		// texture out of this table by name, and an unprefixed key would let a
 		// node's thumbnail become a wall.
@@ -203,7 +203,7 @@ namespace studio {
 	void Editor::CommitNodeDemo() {
 		// **Compared against what the graph already read as.** A commit is
 		// called from every gesture that might have changed something, and most
-		// of them did not — a drag that moved a node one pixel and back is not
+		// of them did not - a drag that moved a node one pixel and back is not
 		// an undo step.
 		std::string now = nodegraph::Save(NodeDemoGraph);
 		if (now == NodeDemoLast) {
@@ -232,7 +232,7 @@ namespace studio {
 		}
 
 		// **The selection is dropped rather than repointed.** `Load` hands out
-		// new ids, so a held one names a different node — which is worse than
+		// new ids, so a held one names a different node - which is worse than
 		// nothing selected, because it looks like it worked.
 		NodeDemoCanvas.Select(nodegraph::NO_NODE);
 		NodeDemoSignature = 0;
@@ -311,7 +311,7 @@ namespace studio {
 
 		// **Built on the first open rather than at start-up.** A panel nobody
 		// opens must cost nothing, which is this program's rule for every panel
-		// that answers a question occasionally — and a graph built before the
+		// that answers a question occasionally - and a graph built before the
 		// node types were registered would be an empty one.
 		if (NodeDemoGraph.Nodes().empty() && NodeDemoLast.empty()) {
 			nodegraph::BuildDemoGraph(NodeDemoGraph);
@@ -326,7 +326,7 @@ namespace studio {
 			NodeDemoCanvas.Signals.Rerun = [this](nodegraph::NodeId) {
 				// **The whole cache and not one entry.** A result is keyed by a
 				// hash of the node *and everything above it*, so "recompute this
-				// one" would have to invalidate every hash that folded it in —
+				// one" would have to invalidate every hash that folded it in -
 				// and the graph is small enough that starting over is cheaper
 				// than the bookkeeping to do it precisely.
 				NodeDemoRunner.Forget();
@@ -381,7 +381,7 @@ namespace studio {
 
 		// **Re-run when the graph moved, and every frame while anything is
 		// working.** The signature covers parameters and topology and
-		// deliberately not position, so dragging a node recomputes nothing —
+		// deliberately not position, so dragging a node recomputes nothing -
 		// while a running node needs a call a frame to collect its result and to
 		// move its bar.
 		const uint64_t now = NodeDemoGraph.Signature();
@@ -434,7 +434,7 @@ namespace studio {
 
 			if (ImGui::MenuItem("Save")) {
 				// **Written as the text `nodegraph::Save` produces**, which is three
-				// flat lists and no parser — a graph anybody can read in a diff
+				// flat lists and no parser - a graph anybody can read in a diff
 				// and hand-edit without a schema.
 				std::ofstream out(NodeDemoPath, std::ios::binary | std::ios::trunc);
 				if (out) {
@@ -470,7 +470,7 @@ namespace studio {
 
 			ImGui::Separator();
 
-			// A real PNG, written by `EncodePng` — stored deflate blocks, so
+			// A real PNG, written by `EncodePng` - stored deflate blocks, so
 			// nothing new is linked for it.
 			const std::vector<nodegraph::NodeId> &chosen = NodeDemoCanvas.Selection();
 			if (ImGui::MenuItem("Export the selected node's picture", nullptr, false, chosen.size() == 1)) {
@@ -718,7 +718,7 @@ namespace studio {
 		};
 
 		// **The custom types first**, because they are the ones this graph is
-		// about — a library of eight built-in categories with one entry
+		// about - a library of eight built-in categories with one entry
 		// somebody made is a list whose useful row is at the bottom.
 		if (!NodeDemoGraph.Templates().empty()) {
 			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
@@ -739,7 +739,7 @@ namespace studio {
 					}
 					if (ImGui::IsItemHovered()) {
 						ImGui::SetTooltip(
-							"place a copy — each one is independent of the fold it was made from"
+							"place a copy - each one is independent of the fold it was made from"
 						);
 					}
 					ImGui::PopID();
@@ -760,7 +760,7 @@ namespace studio {
 				continue;
 			}
 
-			// Open by default, and a filter forces it open — a search that left
+			// Open by default, and a filter forces it open - a search that left
 			// its answers behind a closed heading would be a search that failed.
 			ImGui::SetNextItemOpen(true, wanted.empty() ? ImGuiCond_Once : ImGuiCond_Always);
 			if (!ImGui::CollapsingHeader(category.c_str())) {
@@ -897,7 +897,7 @@ namespace studio {
 		//
 		// **Dispatched rather than switched on.** A field node gets its picture
 		// with its inputs beside it, an async one gets its stages, and a readout
-		// gets its number — and a node type added tomorrow gets whichever of
+		// gets its number - and a node type added tomorrow gets whichever of
 		// those fits what it produced, with nothing here changing.
 		nodegraph::Inspection what;
 		what.Node = node;
@@ -989,7 +989,7 @@ namespace studio {
 		ImGui::PopStyleColor();
 
 		if (nodegraph::InputsOf(*node).empty() && nodegraph::OutputsOf(*node).empty()) {
-			ImGui::TextDisabled("none — this node is a note");
+			ImGui::TextDisabled("none - this node is a note");
 		}
 
 		for (int side = 0; side < 2; side++) {
@@ -1124,7 +1124,7 @@ namespace studio {
 		}
 
 		// **Remembered until the widget is let go.** A slider drag is one undo
-		// step, so it cannot be committed while the value is still moving — and
+		// step, so it cannot be committed while the value is still moving - and
 		// it cannot be committed on the frame the value last changed either,
 		// because that frame is mid-drag. What is left is a flag that survives
 		// to the frame nothing is being held.
@@ -1148,7 +1148,7 @@ namespace studio {
 		ImGui::Spacing();
 
 		// **Cleared every frame and set by whichever row is hovered**, so the
-		// canvas never keeps a highlight for a panel nobody is looking at — and
+		// canvas never keeps a highlight for a panel nobody is looking at - and
 		// so leaving the tab needs no notification.
 		NodeDemoCanvas.Highlight.clear();
 
@@ -1208,7 +1208,7 @@ namespace studio {
 			ImGui::TextWrapped("%s", type.Id.c_str());
 			ImGui::TextWrapped("%s", type.Description.c_str());
 			if (!type.Preview) {
-				ImGui::TextWrapped("no picture — this wire's payloads are read rather than looked at");
+				ImGui::TextWrapped("no picture - this wire's payloads are read rather than looked at");
 			}
 			ImGui::PopStyleColor();
 
@@ -1242,7 +1242,7 @@ namespace studio {
 			ImGui::SetWindowFocus("Demo Nodes");
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("A typed node graph with live evaluation — Vendor::nodegraph");
+			ImGui::SetTooltip("A typed node graph with live evaluation - Vendor::nodegraph");
 		}
 
 		ImGui::SameLine();
@@ -1250,7 +1250,7 @@ namespace studio {
 		ImGui::SameLine();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		ImGui::TextUnformatted(
-			"demos of engine parts, built to be looked at — nothing here changes the scene"
+			"demos of engine parts, built to be looked at - nothing here changes the scene"
 		);
 		ImGui::PopStyleColor();
 	}

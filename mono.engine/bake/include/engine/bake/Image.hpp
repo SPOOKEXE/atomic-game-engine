@@ -38,7 +38,7 @@ namespace engine::bake {
 		// this engine draws animated is a flipbook, so the frames are laid out as
 		// a square power-of-two grid and become an ordinary texture that every
 		// existing path handles. `bake/src/Gif.cpp` carries the argument and
-		// states what it costs — a 12-frame GIF wastes four cells of a 4x4, and
+		// states what it costs - a 12-frame GIF wastes four cells of a 4x4, and
 		// anything past 64 frames is truncated.
 		//
 		// @since v0.10
@@ -51,8 +51,8 @@ namespace engine::bake {
 		// an SVG states a coordinate system, so the raster target is a decision
 		// somebody has to take. `Graph`'s `Rasterize` node is where it is taken.
 		//
-		// A deliberately small subset — shapes, solid paint, `translate` and
-		// `scale` — and everything outside it is refused by name rather than
+		// A deliberately small subset - shapes, solid paint, `translate` and
+		// `scale` - and everything outside it is refused by name rather than
 		// approximated. `bake/src/Svg.cpp` carries the list and the argument.
 		//
 		// @since v0.14
@@ -75,7 +75,7 @@ namespace engine::bake {
 	// `ModelFormatOfName` is. The reason it exists at all is that SVG carries no
 	// signature: it is XML, so the only honest sniff is a `<svg` or `<?xml`
 	// prefix, and a prefix over text claims every text file that starts that way
-	// — the argument `Graph`'s import dispatch already makes about `.gltf` being
+	// - the argument `Graph`'s import dispatch already makes about `.gltf` being
 	// JSON. A `<?xml` sniff would take the next XML-shaped format this module
 	// learns to read, whatever it turns out to be, and hand it to the
 	// rasteriser.
@@ -116,14 +116,14 @@ namespace engine::bake {
 	// drawing that was never that sharp, and the edges it produces are the
 	// resampler's rather than the shape's.
 	//
-	// The subset is small and everything outside it is refused by name — see
+	// The subset is small and everything outside it is refused by name - see
 	// `ImageFormat::Svg` and `bake/src/Svg.cpp`. The document's own counts are
 	// all bounded before they are used, and a DOCTYPE or entity declaration is
 	// refused outright.
 	//
 	// @param bytes   The document.
 	// @param width   The target width in pixels. Zero, with a zero `height`,
-	//                means the size the document declares — which is the only
+	//                means the size the document declares - which is the only
 	//                size it can be said to have.
 	// @param height  The target height, under the same rule.
 	// @param out     Filled on success, left alone on failure.

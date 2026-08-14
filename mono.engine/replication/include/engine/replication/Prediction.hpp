@@ -21,7 +21,7 @@
 // the player back to where they were a round trip ago and then let them walk
 // forward again, which is the rubber-band.
 //
-// **This needs no cross-machine determinism.** The client drifting is expected —
+// **This needs no cross-machine determinism.** The client drifting is expected -
 // two machines do not compute the same floats and nothing here assumes they do.
 // What matters is that a correction is applied *and then replayed from*, so the
 // error is bounded by one round trip rather than accumulating.
@@ -44,7 +44,7 @@ namespace engine::replication {
 		//
 		// **Bounded, because the server may simply stop acknowledging.** An
 		// unbounded history is a memory leak driven by the other end, and the
-		// replay cost is linear in it — a client a thousand ticks ahead would
+		// replay cost is linear in it - a client a thousand ticks ahead would
 		// spend a whole frame replaying and still be wrong.
 		//
 		// At the cap the oldest is dropped and counted. Dropping the oldest is
@@ -104,7 +104,7 @@ namespace engine::replication {
 		// Not zero means the server stopped acknowledging for longer than the
 		// buffer covers, and the client has predicted from an input the server
 		// will never see. Visible rather than silent, because the symptom on
-		// screen — a player who slides — has a dozen other possible causes.
+		// screen - a player who slides - has a dozen other possible causes.
 		//
 		// @return The dropped count.
 		uint64_t Dropped() const {

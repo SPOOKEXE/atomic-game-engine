@@ -4,7 +4,7 @@
 //
 // One definition each, for every program. Before this module the client and the
 // server each carried their own `Transform` and their own position component,
-// which was deliberate only while there was nowhere shared to put them —
+// which was deliberate only while there was nowhere shared to put them -
 // `mono.client/AGENTS.md` and `mono.server/include/server/Simulation.hpp` both
 // said so in as many words. Two definitions of one fact is the debt this
 // module exists to pay off.
@@ -13,19 +13,19 @@
 // instance tree is organisational, exactly as Roblox's is: parenting a part to
 // a model moves nothing and re-resolves nothing. That is what buys the engine a
 // world with no transform-hierarchy pass, no dirty cascade and a physics step
-// that reads `Transform` directly — see `ecs/Instance.hpp`, which makes the
+// that reads `Transform` directly - see `ecs/Instance.hpp`, which makes the
 // same point from the storage side.
 //
 // **What is a component and what is a resource is not a naming question.**
-// `ecs/AGENTS.md` gives the rule — componentise what you iterate, one-of-a-kind
-// state is a resource — and this file is where it gets applied. `Surface` is a
+// `ecs/AGENTS.md` gives the rule - componentise what you iterate, one-of-a-kind
+// state is a resource - and this file is where it gets applied. `Surface` is a
 // name rather than two floats because friction and restitution are the same
 // two floats on thousands of rows; the floats live in a `SurfaceTable`
 // resource, which the narrow phase reads once.
 //
 // **Padding is named where it exists.** A trivially copyable component is
 // serialised as its object representation, padding included, and padding is
-// never initialised — so two runs of one scene produce different bytes and
+// never initialised - so two runs of one scene produce different bytes and
 // `just determinism` fails somewhere far from here. `ecs::WorldTime` learned
 // this the expensive way; the `Reserved` fields below are that lesson.
 //
@@ -104,11 +104,11 @@ namespace engine::scene {
 	//
 	// **A record rather than a movement, and the difference is which machine
 	// needs it.** `scene::CrossPortals` maps a crossing body's placement and its
-	// velocity, and that is the whole of the simulation — but a player's view
+	// velocity, and that is the whole of the simulation - but a player's view
 	// direction is not in either. It lives in `CameraController::Angles`, which
 	// is a *resource on whichever host is looking*: a client's own, never the
 	// authority's. So the host that moves the body cannot turn the camera, and
-	// the host that owns the camera never sees the crossing — it receives a
+	// the host that owns the camera never sees the crossing - it receives a
 	// transform that has already arrived somewhere else.
 	//
 	// This is the fact that crosses between them. It hangs off the body, so
@@ -117,7 +117,7 @@ namespace engine::scene {
 	//
 	// **The serial is what makes it an event.** A `Turn` on its own is a value
 	// that happens to be the same after two identical crossings, so a delta
-	// carrying only the angle would deliver the first and swallow the second —
+	// carrying only the angle would deliver the first and swallow the second -
 	// a portal that works once. A counter changes on every crossing whatever the
 	// angle was, and a consumer that has seen a number knows it has acted.
 	//
@@ -155,7 +155,7 @@ namespace engine::scene {
 	// How fast a thing is going, and how fast it is turning.
 	//
 	// **Split from `RigidBody` on purpose.** Anything with a `Transform` and a
-	// `Motion` moves — a platform, a projectile, a demo cube — and none of them
+	// `Motion` moves - a platform, a projectile, a demo cube - and none of them
 	// needs a mass. So `Integrate` runs over `<Transform, const Motion>` and
 	// never loads a mass it does not use, which is the same reasoning that took
 	// the half-extent out of the rows it was repeated on.
@@ -163,7 +163,7 @@ namespace engine::scene {
 	// @since v0.4
 	struct Motion {
 		// Metres per second in world space. Integrated against the fixed tick
-		// delta, never against measured frame time — a tick is a function of
+		// delta, never against measured frame time - a tick is a function of
 		// its state, so a recorded run replays.
 		core::Vector3 Linear;
 
@@ -203,7 +203,7 @@ namespace engine::scene {
 		// **Three bytes and not two, because a `Sleeping` flag used to sit
 		// here.** It does not any more: `v02v03v04.md`'s allocation table puts
 		// sleeping in a different archetype so the query never visits a
-		// sleeping row, and a flag on this row is the opposite of that — it is
+		// sleeping row, and a flag on this row is the opposite of that - it is
 		// only readable by making the visit the archetype move exists to avoid,
 		// and it is the same state the solver already has to keep. `physics`
 		// owns it now, and `physics/AGENTS.md` carries the whole decision.
@@ -214,7 +214,7 @@ namespace engine::scene {
 	//
 	// **Absent means the server owns it, and that is the whole default.** Every
 	// world this engine has ever run is server-owned throughout, so ownership had
-	// to cost an unowned world nothing — a component nobody attaches is an
+	// to cost an unowned world nothing - a component nobody attaches is an
 	// archetype nobody visits, where a `bool ServerOwned = true` on `RigidBody`
 	// would have been a byte on every body in every scene to say what all of them
 	// already said.
@@ -229,7 +229,7 @@ namespace engine::scene {
 	// **What this does *not* yet do**: nothing reads it. Physics still integrates
 	// every body on the server and `Authority` still sends every replicated
 	// component to every interested client, exactly as before. It is here first
-	// so ownership is expressible and observable before it is load-bearing —
+	// so ownership is expressible and observable before it is load-bearing -
 	// making it load-bearing means a client→server state path, and that is a wire
 	// change with a trust decision inside it rather than a component.
 	//
@@ -240,7 +240,7 @@ namespace engine::scene {
 	// @since v0.13
 	struct NetworkOwner {
 		// The `Player` instance that simulates this body. A null entity is the
-		// same statement as having no component at all — a script that sets the
+		// same statement as having no component at all - a script that sets the
 		// owner to `nil` removes it rather than storing a hole.
 		ecs::Entity Player;
 	};
@@ -249,7 +249,7 @@ namespace engine::scene {
 	//
 	// **Occupancy is a host's question and this is the game's answer to it.**
 	// `world::DecideLifecycle` suspends a world nobody is in, and a host can see
-	// players and viewports and nothing else — so a world whose NPCs are walking
+	// players and viewports and nothing else - so a world whose NPCs are walking
 	// a route, whose economy is settling, or which is counting down between
 	// rounds looks exactly like an abandoned one from outside. A script attaching
 	// this to any entity says otherwise, and it is the only way to say it that
@@ -257,7 +257,7 @@ namespace engine::scene {
 	//
 	// **Attached to an entity rather than set on the world**, because the thing
 	// that needs the world awake is a thing in it: the NPC, the conveyor, the
-	// round timer. That makes the lifetime automatic — destroy the entity and the
+	// round timer. That makes the lifetime automatic - destroy the entity and the
 	// claim goes with it, which is the failure mode a world-level flag has, where
 	// somebody sets it and the code that would have cleared it never runs.
 	//
@@ -265,7 +265,7 @@ namespace engine::scene {
 	// least one does. Cheap on the shape every game actually has: the host walks
 	// this component, and a game that never attaches one has no rows to walk.
 	//
-	// **Deliberately not replicated** — see `replication::LocalToTheClient`. It
+	// **Deliberately not replicated** - see `replication::LocalToTheClient`. It
 	// is a statement about hosting rather than about what the world looks like,
 	// and a client has no use for it and no business setting it.
 	//
@@ -295,13 +295,13 @@ namespace engine::scene {
 	// nothing on the far side, so a far room whose floor is a stud higher lets it
 	// clip and one a stud lower lets it hang. `scene::CutAndCloneSeams` answers
 	// the same question for the picture; this is the contact half, and the two
-	// are deliberately different mechanisms — a picture and a contact have
+	// are deliberately different mechanisms - a picture and a contact have
 	// nothing to share but the seam.
 	//
 	// **What is mapped is the far room's geometry, not the body.** The obvious
 	// arrangement is a kinematic twin of the body placed on the far side, and it
 	// needs every contact the twin resolves mapped back through the seam as an
-	// impulse on the original — a second solver path, in a module that has one.
+	// impulse on the original - a second solver path, in a module that has one.
 	// Mapping the other way needs none of that: the far room's colliders are
 	// copied *into the near room* through the inverse seam, where they are
 	// ordinary static geometry and the body is pushed by them in its own space.
@@ -323,8 +323,8 @@ namespace engine::scene {
 	// What a part collides as, which is not what it draws as.
 	//
 	// **Separate from `Visual` deliberately.** A part's picture and its shape
-	// are different questions — an invisible wall is a collider with no visual
-	// and a decoration is a visual with no collider — and folding them into one
+	// are different questions - an invisible wall is a collider with no visual
+	// and a decoration is a visual with no collider - and folding them into one
 	// row would make every part pay for both.
 	struct Collider {
 		// The shape's dimensions, in metres, read according to `Shape`: box
@@ -370,7 +370,7 @@ namespace engine::scene {
 	// not a replacement for it.
 	//
 	// **`Custom` decides, and it is a field rather than the component's
-	// presence.** The component is on every `BasePart` — `SurfaceAppearance`
+	// presence.** The component is on every `BasePart` - `SurfaceAppearance`
 	// carries the argument for a dense column over an optional one, and a
 	// properties panel that could only show these fields on *some* parts would
 	// be a panel with a hole in it. So the flag is what says "use these numbers
@@ -397,7 +397,7 @@ namespace engine::scene {
 		// Coulomb friction, replacing the material's when `Custom` is set.
 		float Friction = 0.5f;
 
-		// Restitution — 0 for a dead stop, 1 for a lossless bounce — replacing
+		// Restitution - 0 for a dead stop, 1 for a lossless bounce - replacing
 		// the material's when `Custom` is set.
 		float Elasticity = 0.0f;
 
@@ -429,7 +429,7 @@ namespace engine::scene {
 	// What a thing looks like.
 	//
 	// Names rather than handles, because a mesh reference has to survive a save
-	// file and a wire — `core::Name` is the type that rule has a name for. A
+	// file and a wire - `core::Name` is the type that rule has a name for. A
 	// presentation module resolves a name to whatever device object it keeps;
 	// nothing about that resolution belongs in a component.
 	//
@@ -438,22 +438,22 @@ namespace engine::scene {
 		// Flat multiplier over whatever the material produces.
 		core::Color3 Tint{1.0f, 1.0f, 1.0f};
 
-		// The mesh to draw. An invalid name means the consumer's own default —
+		// The mesh to draw. An invalid name means the consumer's own default -
 		// a unit cube, today.
 		core::Name Mesh;
 
 		// Which mesh `Bounds::HalfExtent` was last shaped to fit.
 		//
 		// **`Size` is a box the mesh is stretched into**, so a part whose box is
-		// the wrong shape distorts whatever is put in it — and only the geometry
+		// the wrong shape distorts whatever is put in it - and only the geometry
 		// knows the right shape. An editor therefore reshapes the box when a mesh
 		// is chosen. The question this field answers is *when it may stop*.
 		//
 		// **A name rather than a "fitted" flag, because the flag has no good
 		// value to be reset by.** What must happen is: fit when the mesh changes,
 		// and never again. A bool needs somebody to clear it on every write to
-		// `Mesh`, in every path that writes one — a property panel, a script, a
-		// game file, a replication delta — and the one that forgets produces a
+		// `Mesh`, in every path that writes one - a property panel, a script, a
+		// game file, a replication delta - and the one that forgets produces a
 		// part that silently stops fitting. Recording *which* mesh the box was
 		// shaped for makes the comparison the condition: `Fitted != Mesh` is
 		// exactly "the mesh changed since the box was shaped", with nothing to
@@ -461,7 +461,7 @@ namespace engine::scene {
 		//
 		// **Saved, which is what makes reopening a place leave sizes alone.** A
 		// part somebody deliberately squashed would otherwise be reshaped the
-		// first time its mesh arrived in a new session — a scene that quietly
+		// first time its mesh arrived in a new session - a scene that quietly
 		// rearranges itself on load, which is the worst kind of surprise because
 		// nothing did it.
 		//
@@ -477,7 +477,7 @@ namespace engine::scene {
 		// arrived with a renderer feature rather than with a binding. Opaque
 		// geometry draws in any order and transparent geometry does not, so a
 		// non-zero value here puts the entity in a second pass sorted
-		// back-to-front per view — the first thing the renderer does that
+		// back-to-front per view - the first thing the renderer does that
 		// depends on *which camera is looking*.
 		//
 		// **Distinct from `Visible`, and they must not be conflated.** A part at
@@ -509,7 +509,7 @@ namespace engine::scene {
 		// inside a building is drawn and would only double-shadow the wall
 		// around it.
 		//
-		// **Only opaque geometry reaches the shadow pass anyway** — a blended
+		// **Only opaque geometry reaches the shadow pass anyway** - a blended
 		// fragment writing full depth would cast a solid shadow, which is the
 		// most obviously wrong thing glass can do, and the renderer already
 		// draws the opaque head alone. So this is the switch for the case the
@@ -522,15 +522,15 @@ namespace engine::scene {
 
 		// Explicit padding. `Visual` is registered with an explicit writer
 		// because it holds names, so these bytes do not reach a snapshot today
-		// — they are named anyway, because the day somebody re-registers this
+		// - they are named anyway, because the day somebody re-registers this
 		// type without one is the day three uninitialised bytes start ending up
 		// in a recording.
 		//
 		// **`Surface`, `CastShadow` and `Locked` each took one of the three
 		// bytes this originally held**, which is what named padding is for: a
 		// field that fits goes in the hole rather than widening the row.
-		// `Transparency` did not fit — a float needs four-byte alignment and
-		// these are the tail after a `bool` — so the struct grew by four for
+		// `Transparency` did not fit - a float needs four-byte alignment and
+		// these are the tail after a `bool` - so the struct grew by four for
 		// that one and by nothing for the other three.
 		//
 		// **Widened back to four at v0.12, deliberately and once.** The hole was
@@ -540,7 +540,7 @@ namespace engine::scene {
 		// total, paid at a moment somebody chose.
 		//
 		// **What the four bytes cost, stated rather than waved at.** `Visual` is
-		// on every drawable, so a scene of 4096 parts pays 16 KB — one L2 way on
+		// on every drawable, so a scene of 4096 parts pays 16 KB - one L2 way on
 		// most machines, against a component the draw-list walk reads once per
 		// entity per frame. `client::CollectInstances` is the loop that would
 		// feel it and it is bandwidth-bound on `Transform` long before this.
@@ -554,7 +554,7 @@ namespace engine::scene {
 		//
 		// **Roblox's `BasePart.Locked`, and it is authoring data rather than an
 		// editor mode.** A locked part is one somebody deliberately took out of
-		// reach — a baseplate, a wall they keep catching while boxing over it —
+		// reach - a baseplate, a wall they keep catching while boxing over it -
 		// and the whole value of saying so is that it survives a save and comes
 		// back tomorrow. An editor-side set of "parts I am ignoring" would be a
 		// second copy of a fact the world could have held, kept nowhere the
@@ -576,7 +576,7 @@ namespace engine::scene {
 		//
 		// **Explicit, because padding is never initialised and this component
 		// reaches a snapshot.** `Visual` is registered with a written serialiser
-		// so these bytes do not cross today — they are named anyway, because the
+		// so these bytes do not cross today - they are named anyway, because the
 		// day somebody re-registers this type without one is the day four
 		// uninitialised bytes start ending up in a recording and every
 		// comparison of two worlds becomes unreliable. `ecs::WorldTime` learned
@@ -587,8 +587,8 @@ namespace engine::scene {
 	// The text a `StringValue` or a `LocalizationTable` carries.
 	//
 	// **One component for both, because both are an instance whose whole content
-	// is a string.** Roblox has a `ValueBase` family — `StringValue`, `IntValue`,
-	// `BoolValue` and the rest — and this engine has the one member of it that
+	// is a string.** Roblox has a `ValueBase` family - `StringValue`, `IntValue`,
+	// `BoolValue` and the rest - and this engine has the one member of it that
 	// something already needs: Rojo maps `*.txt` onto a `StringValue` and
 	// `*.csv` onto a `LocalizationTable`, and a folder sync that could not build
 	// either is a folder sync that silently drops files.
@@ -601,7 +601,7 @@ namespace engine::scene {
 	//
 	// **A `LocalizationTable` here holds its CSV and does not resolve
 	// anything.** Translation lookup is a service with a locale, a fallback
-	// chain and a runtime API, and none of that is a file mapping — what this
+	// chain and a runtime API, and none of that is a file mapping - what this
 	// buys is that the file survives a sync and a save, in the instance Roblox
 	// would have put it in, ready for whoever writes the service.
 	//
@@ -610,7 +610,7 @@ namespace engine::scene {
 		// The file's contents, verbatim.
 		//
 		// **Not interned.** A `core::Name` never releases, and this is a value a
-		// game *computes* as often as it reads one — `ecs::PropertyType::String`
+		// game *computes* as often as it reads one - `ecs::PropertyType::String`
 		// exists for exactly this distinction and `D00020` is the leak that
 		// established it.
 		std::string Value;
@@ -620,7 +620,7 @@ namespace engine::scene {
 	//
 	// **Fragment stage only, and the omission is the design.** A vertex shader
 	// has to agree with the renderer's instance layout, and `render/AGENTS.md`
-	// says that layout is private and stays private — so an author who could
+	// says that layout is private and stays private - so an author who could
 	// supply one would be authoring against a struct nobody promised to keep.
 	// The fragment stage needs only the varyings and the sampler and uniform
 	// slots `opaque.frag` already declares, which are a stated interface.
@@ -628,7 +628,7 @@ namespace engine::scene {
 	// **Not device data, which is what makes it legal here at all.** Apply this
 	// module's own test: a headless server can hold this string, save it and
 	// replicate it, exactly as it holds a Luau script's source. What it cannot
-	// do is compile it — that is `render::ShaderLibrary`, at L12.
+	// do is compile it - that is `render::ShaderLibrary`, at L12.
 	//
 	// @since v0.15
 	struct ShaderSource {
@@ -648,7 +648,7 @@ namespace engine::scene {
 		// still current" with an integer compare, per script, per frame.
 		//
 		// Zero is a script nobody has written to. It is not a version anybody
-		// saves against — it counts writes in this process and starts again at
+		// saves against - it counts writes in this process and starts again at
 		// whatever a file restores.
 		uint32_t Revision = 0;
 	};
@@ -656,13 +656,13 @@ namespace engine::scene {
 	// What a surface is made of, beyond the flat colour `Visual` carries.
 	//
 	// Roblox's `SurfaceAppearance`, and `ROADMAP.md` v0.9 asks for it "as
-	// components" rather than as a child instance — which is the right shape
+	// components" rather than as a child instance - which is the right shape
 	// here for `Surface`'s reason: it is read once per drawable per frame, and
 	// a child object would make that a tree walk.
 	//
 	// **On `BasePart` rather than on `MeshPart`, so every drawable has one.**
-	// That is a real cost — a name and two more fields on a column that holds
-	// four thousand cubes — and it is paid deliberately. The alternative is an
+	// That is a real cost - a name and two more fields on a column that holds
+	// four thousand cubes - and it is paid deliberately. The alternative is an
 	// optional component, which means the draw-list pass either joins it per
 	// row or walks the world twice; `client::CollectInstances` is a batched
 	// parallel loop over a fixed signature, and an optional column is precisely
@@ -683,7 +683,7 @@ namespace engine::scene {
 		// A name, for `Visual::Mesh`'s reason: a texture reference has to
 		// survive a save file and a wire. An invalid name means the submesh's
 		// own texture is used, and a submesh with none draws its base colour
-		// flat — which is how an untextured import looks right rather than
+		// flat - which is how an untextured import looks right rather than
 		// black.
 		core::Name ColourMap = {};
 
@@ -716,7 +716,7 @@ namespace engine::scene {
 		//
 		// **Derived, exactly as the maps above are.** `ResolveMaterials` writes
 		// it from the `Material` child's `MaterialRef::Shader`, so a part is
-		// authored in one place and the draw-list pass reads one column — the
+		// authored in one place and the draw-list pass reads one column - the
 		// same arrangement, and the same reason, as `ColourMap`.
 		//
 		// **A name and not a handle**, rule 4: it survives a save file and a
@@ -758,13 +758,13 @@ namespace engine::scene {
 	//
 	// @since v0.10
 	struct MaterialRef {
-		// The material asset's name — what a publisher called the `.amat`.
+		// The material asset's name - what a publisher called the `.amat`.
 		//
 		// A name, for `Visual::Mesh`'s reason: the reference has to survive a
 		// save file and a wire. **An invalid one is `Material = None`**: an
 		// instance somebody added and has not chosen a material for, which
 		// resolves to no texture and draws `render::DefaultTexture`. That is the
-		// default a fresh `Material` starts at, deliberately — the enum this
+		// default a fresh `Material` starts at, deliberately - the enum this
 		// replaces defaulted to `Plastic`, a value the renderer could not act on,
 		// and a default that means "nothing yet" is the honest one.
 		core::Name Asset;
@@ -780,7 +780,7 @@ namespace engine::scene {
 		// that decides which it found.
 		//
 		// **On the material rather than on the part**, which is what makes it a
-		// decision an author makes once for everything wearing it — the reason
+		// decision an author makes once for everything wearing it - the reason
 		// `Material` is an instance at all. A part with no `Material` child is
 		// never visited by the resolve pass and draws with the engine's shader.
 		//
@@ -797,13 +797,13 @@ namespace engine::scene {
 	//
 	// **A mask and not a list of names, and the names live in a `TagTable`
 	// resource.** `AGENTS.md` rule 4 in both directions: a tag crosses a save
-	// file as its string, and inside one process it is a bit — so a render pass
+	// file as its string, and inside one process it is a bit - so a render pass
 	// asking "is this instance in the group this surface draws" is an `and`
 	// rather than a string compare per instance per view.
 	//
 	// The alternative was a `std::vector<core::Name>` per entity, which is a
 	// heap allocation on a component that has to survive being memcpy'd across
-	// a process boundary — rule 3 forbids it outright.
+	// a process boundary - rule 3 forbids it outright.
 	//
 	// Thirty-two tags per world is the ceiling, and it is a real one:
 	// `Tagging.hpp` says what happens at thirty-three.
@@ -817,7 +817,7 @@ namespace engine::scene {
 
 	// A point of view on a world.
 	//
-	// **A component, and there may be several** — a spectator, a cutscene, a
+	// **A component, and there may be several** - a spectator, a cutscene, a
 	// security monitor. Which one is live, and its resolved matrices, is the
 	// `ActiveCamera` resource, so "where is the camera" stays a lookup rather
 	// than a search over every row.
@@ -844,8 +844,8 @@ namespace engine::scene {
 	// component's**, and that is the whole shape of the design. A `Sound` under
 	// `Workspace` is heard everywhere at one level; a `Sound` inside a part is
 	// heard from that part and falls off with distance. Roblox's rule, kept for
-	// `scene/AGENTS.md`'s standing reason — a tree that differs from the one
-	// scripts expect is a migration nobody asked for — and it is also the right
+	// `scene/AGENTS.md`'s standing reason - a tree that differs from the one
+	// scripts expect is a migration nobody asked for - and it is also the right
 	// rule: it means "attach a sound to a thing" is `Parent = thing` rather than
 	// a second field naming what a hierarchy already says.
 	//
@@ -854,7 +854,7 @@ namespace engine::scene {
 	// thing is, which is rule 2 with a speaker attached.
 	//
 	// **This module holds what a sound *is*; it plays nothing.** `scene` is
-	// `shared` and a server has no mixer — it decides what is audible and
+	// `shared` and a server has no mixer - it decides what is audible and
 	// replicates that, and the sound is produced where somebody is listening.
 	// The client walks these rows and drives `engine::audio`.
 	//
@@ -863,7 +863,7 @@ namespace engine::scene {
 	//
 	// @since v0.9
 	struct Sound {
-		// The published asset that plays — a manifest name, extension
+		// The published asset that plays - a manifest name, extension
 		// included, exactly as `Visual::Mesh` names a mesh.
 		//
 		// **A name and never a path.** The manifest is the one place a name
@@ -897,7 +897,7 @@ namespace engine::scene {
 		//
 		// **A property rather than a `Play()` method, and that is a statement
 		// about the binding rather than about audio.** Script methods live on
-		// one metatable shared by every instance — `script/src/LuauInstances.cpp` —
+		// one metatable shared by every instance - `script/src/LuauInstances.cpp` -
 		// so a `Play` there would be a method on every `Part` in the world.
 		// Roblox has this property too and `sound.Playing = true` is what it
 		// means; the day classes can carry their own methods, `Play()` sets
@@ -909,7 +909,7 @@ namespace engine::scene {
 	//
 	// **A second component beside `Camera`, not a field on it.** Most cameras
 	// do not render to a texture, and a field would put two numbers on every one
-	// of them — but more than that, the presence of this component is what a
+	// of them - but more than that, the presence of this component is what a
 	// consumer queries for. A flag would mean walking every camera to find the
 	// one that has it set.
 	//
@@ -936,19 +936,19 @@ namespace engine::scene {
 		// different things.** `Visual::Transparency` is how much of the *world*
 		// shows through the pane; this is how much of the *pane* shows through
 		// the reflection. A mirror is a transparent sheet of glass with an
-		// opaque image on it, and one number cannot say both — which is exactly
+		// opaque image on it, and one number cannot say both - which is exactly
 		// what went wrong: fading a mirror faded its reflection with it, so
 		// there was no way to author glass that reflects.
 		//
 		// At 0 the image is solid and covers whatever the part would have drawn,
-		// **whatever the part's own transparency is** — a fully transparent pane
+		// **whatever the part's own transparency is** - a fully transparent pane
 		// still shows its reflection, which is what a mirror is. At 1 the image
 		// is gone and the part draws as itself.
 		float ImageTransparency = 0.0f;
 
 		// Which tags an instance must carry to appear in this camera's texture.
 		//
-		// **The half of tagging `ROADMAP.md` v0.9 asks for by name** — "render
+		// **The half of tagging `ROADMAP.md` v0.9 asks for by name** - "render
 		// pipeline capabilities for filtering tagged objects for redirected
 		// pipeline work". A surface camera with a filter draws its group and
 		// nothing else, which is what makes a second pipeline *redirected*
@@ -981,7 +981,7 @@ namespace engine::scene {
 		// world at its own rate and the mirrors at this one.
 		//
 		// **Zero is uncapped**, which is what a surface wants when it is the
-		// subject rather than the scenery — a camera feed somebody is looking
+		// subject rather than the scenery - a camera feed somebody is looking
 		// straight at, or a test that needs one render per frame.
 		//
 		// **Frames are dropped, never queued.** A surface past its interval
@@ -997,8 +997,8 @@ namespace engine::scene {
 		// What the image is put through before a pane shows it.
 		//
 		// **A grade on the way out, not a second render.** The surface pass is
-		// unchanged whatever this says — the texture holds an ordinary picture
-		// of the world — and the effect is applied where the pane samples it, in
+		// unchanged whatever this says - the texture holds an ordinary picture
+		// of the world - and the effect is applied where the pane samples it, in
 		// `opaque.frag`. So it costs nothing to render and nothing to bind, and
 		// two panes sampling one surface could in principle show it two ways.
 		//
@@ -1008,7 +1008,7 @@ namespace engine::scene {
 		// Which surface index this camera writes.
 		//
 		// One today, and the field exists because the pipeline that replaces
-		// this one will have several — a stage list that had to be rewritten to
+		// this one will have several - a stage list that had to be rewritten to
 		// add a second mirror would be a stage list that encoded the count.
 		int8_t Surface = 0;
 
@@ -1021,7 +1021,7 @@ namespace engine::scene {
 		// keeps whatever `CFrame` it was given, because there is no face to
 		// project off.
 		//
-		// **When it is parented, the lens is the engine's too** — `NearPlaneZ`
+		// **When it is parented, the lens is the engine's too** - `NearPlaneZ`
 		// is put at the glass and `FieldOfView` is fitted to the pane, because a
 		// frustum that does not cover the pane draws a hard-edged rectangle of
 		// reflection on a bare wall. A script setting either on a parented camera
@@ -1049,14 +1049,14 @@ namespace engine::scene {
 	// stands, and this component is that rule.** Everything downstream is
 	// unchanged: the camera is still placed by `AimSurfaceCameras`, still
 	// rendered by the surface pass, still projected onto the pane by
-	// `opaque.frag`, still filtered by `TagFilter`. What changes is one matrix —
+	// `opaque.frag`, still filtered by `TagFilter`. What changes is one matrix -
 	// a mirror reflects the eye through its own plane, and a portal maps it
 	// through `destination · source⁻¹`.
 	//
 	// **The non-Euclidean part is that nothing constrains the pair of frames to
 	// describe one space.** A destination rotated, moved or scaled anywhere at
 	// all gives a room bigger on the inside, or a corridor that turns through
-	// more than four right angles — with no separate feature, no exotic maths
+	// more than four right angles - with no separate feature, no exotic maths
 	// and no second renderer. `NON-EUCLIDEAN.md` is the investigation that
 	// settled this, and it is the whole insight of the demo it was filed
 	// against.
@@ -1081,8 +1081,8 @@ namespace engine::scene {
 		//
 		// **A name and not a handle, which is the only shape rule 3 allows.** An
 		// `ecs::Entity` names a row in one store and means something else in
-		// every other; a world's name is what already crosses — `Postbox::
-		// Teleport` addresses by it for the same reason — so this is the same
+		// every other; a world's name is what already crosses - `Postbox::
+		// Teleport` addresses by it for the same reason - so this is the same
 		// arrangement a teleport uses, applied to what a camera draws instead of
 		// to where a player goes.
 		//
@@ -1093,7 +1093,7 @@ namespace engine::scene {
 		// is authored as a local stand-in placed where the far world's pane is,
 		// and this field then says whose *instances* are drawn through it.
 		//
-		// That is exact when the two worlds share a coordinate frame — which is
+		// That is exact when the two worlds share a coordinate frame - which is
 		// the arrangement anybody builds a portal pair in, and the one the
 		// `immersive-portals-demo` scenes use. A far world laid out somewhere
 		// else entirely wants its offset baked into the stand-in's placement,
@@ -1108,7 +1108,7 @@ namespace engine::scene {
 		//
 		// **Defaulted rather than left to the aggregate.** Every construction
 		// site names the members before this one and stops, and
-		// `-Wmissing-field-initializers` is fatal under the `ci` preset — so
+		// `-Wmissing-field-initializers` is fatal under the `ci` preset - so
 		// this said "not set" in thirty-five warnings rather than in one `= {}`.
 		// A default-constructed `Name` is the invalid one, which is already what
 		// "no destination" means here.
@@ -1119,7 +1119,7 @@ namespace engine::scene {
 		// Explicit padding, for the reason every other `Reserved` gives.
 		//
 		// An `Entity` is eight bytes and a `Name` is four, so the type's own
-		// alignment leaves four the compiler inserted and nobody declared —
+		// alignment leaves four the compiler inserted and nobody declared -
 		// written to a save file by `Column::Write`, which sends `sizeof(T)`
 		// bytes and does not know which of them a member claimed.
 		uint8_t Reserved[4] = {};
@@ -1135,13 +1135,13 @@ namespace engine::scene {
 	//
 	// **It does not cross the wire.** A reflection is *of the viewer*, so a lens
 	// computed on the authority is correct for the authority's camera and wrong
-	// for every client watching — `client/Replicated.hpp` states that rule for
+	// for every client watching - `client/Replicated.hpp` states that rule for
 	// the placement and this is the same fact. `replication::LocalToTheClient`
 	// names it, and both ends recompute it from the mirror that *does* cross.
 	//
 	// **Off-axis, which is what makes it a window rather than a cone.** The four
 	// extents are independent, so a viewer standing to one side gets a frustum
-	// that leans — covering exactly the pane and nothing else. The symmetric fit
+	// that leans - covering exactly the pane and nothing else. The symmetric fit
 	// this replaces spent half its texels on the far side of the face normal,
 	// and `SurfaceCameras.hpp` named an off-axis frustum as what it was waiting
 	// for.
@@ -1152,7 +1152,7 @@ namespace engine::scene {
 		//
 		// Signed and independent: `Left` is negative and `Right` positive for a
 		// viewer square on, and both slide the same way as the viewer moves
-		// aside. That asymmetry is the point — see the type's comment.
+		// aside. That asymmetry is the point - see the type's comment.
 		//@{
 		float Left = -0.1f;
 		float Right = 0.1f;
@@ -1172,7 +1172,7 @@ namespace engine::scene {
 		// **A real oblique clip, and on a portal it is not optional.** The
 		// destination is set into a wall, so the wall itself, its back face and
 		// whatever stands behind it are all inside the frustum and would draw
-		// over the view — the hole would show the back of the wall it leads
+		// over the view - the hole would show the back of the wall it leads
 		// through. Skewing the projection's near plane onto this one is
 		// Lengyel's method and is what removes them.
 		//
@@ -1193,7 +1193,7 @@ namespace engine::scene {
 		//
 		// **The other half of the portal, and without it a hole shows nothing.**
 		// A pane reads its image by projecting *its own world position* through
-		// the camera's matrix — `opaque.vert` does exactly that. For a mirror
+		// the camera's matrix - `opaque.vert` does exactly that. For a mirror
 		// the camera was fitted to the pane where it stands, so the raw position
 		// lands on the image. For a portal the camera was fitted to the pane
 		// **mapped to the destination**, three hundred units away in the demo,
@@ -1209,7 +1209,7 @@ namespace engine::scene {
 		// **Identity for a mirror rather than the reflection**, and the two
 		// agree wherever it matters: a reflection fixes every point of the plane
 		// it reflects through, so on the pane's own face they are the same map.
-		// They differ off it — the sides and back of the pane's box — and
+		// They differ off it - the sides and back of the pane's box - and
 		// identity is what a mirror has always sampled with there.
 		//
 		// **The rigid half only.** A hole between two panes of different sizes
@@ -1224,7 +1224,7 @@ namespace engine::scene {
 		//
 		// **Carried rather than derived from the pane**, because the pane a
 		// consumer has is a box and the centre this needs is the centre of one
-		// *face* of it — which is `ReachOf` and a face id away, and is exactly
+		// *face* of it - which is `ReachOf` and a face id away, and is exactly
 		// the sort of second derivation that ends up disagreeing by a
 		// half-extent.
 		//
@@ -1234,7 +1234,7 @@ namespace engine::scene {
 		// How much bigger the far pane is, from `scene::PortalSeam::Scale`.
 		//
 		// One for a mirror, one for a matched pair, and one for anything a host
-		// fills in by hand — so a consumer that has never heard of a scaled
+		// fills in by hand - so a consumer that has never heard of a scaled
 		// portal composes the same matrix it always did.
 		//
 		// @since v0.15
@@ -1248,22 +1248,22 @@ namespace engine::scene {
 	// a `PVInstance` and carries no `Transform`: it holds *its own* pair of
 	// frames, one authored relative to a parent part and one derived from it by
 	// a single flat pass. So there is still no transform hierarchy, no dirty
-	// cascade and no per-entity parent walk in the simulation — there is one
+	// cascade and no per-entity parent walk in the simulation - there is one
 	// loop over one component type, and everything else in this file is
 	// untouched.
 	//
 	// **The derived frame is a field rather than a getter, and the reason is a
 	// beam.** A beam reads both of its attachments' world frames every frame,
 	// and a getter that resolved by walking to the parent would be two hierarchy
-	// lookups and two `CFrame` products per beam per frame — for a value that is
+	// lookups and two `CFrame` products per beam per frame - for a value that is
 	// the same for every reader within one frame. `ecs/AGENTS.md`'s rule against
 	// two copies of a fact bends here for the reason `CameraMatrices` bends it:
 	// the second copy is a *cache with one writer*, and `ResolveAttachments` is
 	// that writer.
 	//
 	// **An attachment on nothing keeps its local frame as its world frame.**
-	// Roblox's rule — an `Attachment` parented to a `Model` or to the tree root
-	// has no part to be relative to — and it is what makes an attachment usable
+	// Roblox's rule - an `Attachment` parented to a `Model` or to the tree root
+	// has no part to be relative to - and it is what makes an attachment usable
 	// as a bare point in space, which is what a beam between two world positions
 	// needs.
 	//
@@ -1281,7 +1281,7 @@ namespace engine::scene {
 		//
 		// **Derived, never authored.** A script writing this is writing a value
 		// that is overwritten before anything reads it, which is why the property
-		// surface exposes `WorldCFrame` as read-only and `CFrame` as writable —
+		// surface exposes `WorldCFrame` as read-only and `CFrame` as writable -
 		// the same split `GuiObject`'s absolutes have.
 		core::CFrame WorldFrame;
 	};
@@ -1309,7 +1309,7 @@ namespace engine::scene {
 	// Something that gives off light.
 	//
 	// **Where it shines from is its parent's business**, exactly as `Sound`'s is
-	// — a `PointLight` inside a part lights the world from that part, and one
+	// - a `PointLight` inside a part lights the world from that part, and one
 	// parented to an `Attachment` lights from the attachment. So there is no
 	// position here and there must not be one, for `Sound`'s reason: a second
 	// opinion about where a thing is, is rule 2 with a bulb attached.
@@ -1348,7 +1348,7 @@ namespace engine::scene {
 		// Which face of the parent part a spot or surface light points out of.
 		//
 		// Stored as the enum so the component stays trivially copyable, and its
-		// ordinals are the format — `scene/Enums.hpp` says why `NormalId` is the
+		// ordinals are the format - `scene/Enums.hpp` says why `NormalId` is the
 		// one enum here whose numbers may never be reordered.
 		NormalId Face = NormalId::Front;
 
@@ -1377,13 +1377,13 @@ namespace engine::scene {
 	// **This is the fallback and it must stay labelled as one.** Change
 	// detection is `ecs::ChangeChannel`: a column carries a version, a write
 	// through `Set` or `GetMutable` advances it, and that covers almost
-	// everything. The gap is the batch path — a system writing through a raw
+	// everything. The gap is the batch path - a system writing through a raw
 	// column pointer advances no per-row stamp, because there is no per-row
 	// write to hang one on, and `Store::MarkAllChanged` over-reports by design.
 	//
 	// So a consumer that must know exactly which rows differ recomputes this at
 	// `PostSimulation` and compares. It costs a pass over the data it is
-	// hashing, every tick, whether anything moved or not — which is why the
+	// hashing, every tick, whether anything moved or not - which is why the
 	// answer is almost always the column version instead.
 	//
 	// Add one only where the batch path is genuinely the writer. If this starts
@@ -1403,7 +1403,7 @@ namespace engine::scene {
 	// **A resource, and that is the whole point of the type.** It arrived here
 	// as two: `mono.server`'s `WorldBounds`, the cube entities bounce inside,
 	// and `mono.client`'s `SceneBounds`, the radius the camera frames. Both are
-	// one number describing the whole world, so both are this — and the server's
+	// one number describing the whole world, so both are this - and the server's
 	// was a *component* first, which is what makes the reasoning worth keeping:
 	// it was the same four bytes on every one of four thousand entities, a
 	// column in the archetype and a load in the bounce loop's inner body for a
@@ -1417,7 +1417,7 @@ namespace engine::scene {
 	//
 	// **The replication wire's position grid is the other half of this
 	// number.** `Wire.hpp` quantises a `Transform` over a stated extent, and
-	// how coarse that grid is depends entirely on how far the world reaches —
+	// how coarse that grid is depends entirely on how far the world reaches -
 	// two millimetres over 128 metres is a different figure over four
 	// kilometres. `WireCoversWorld` is the check, and it belongs beside
 	// whatever authors this value rather than inside the encoder, which sees

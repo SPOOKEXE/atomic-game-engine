@@ -2,12 +2,12 @@
 //
 // **The handle and never the service.** `TweenService.cpp` describes `GetValue`
 // and `Create` once and both VMs install them; what is here is the object
-// `Create` answers with — a tagged userdata carrying the tween's entity, a
+// `Create` answers with - a tagged userdata carrying the tween's entity, a
 // metatable, and the three methods on it.
 //
 // **Those three are the one place this module deliberately did not use
 // `ScriptCall`.** The neutral instance methods are installed flat on *every*
-// instance, and `Play` is a name Roblox puts on three classes — claiming it
+// instance, and `Play` is a name Roblox puts on three classes - claiming it
 // there would take it from every part, sound and animation in the engine. Three
 // small methods written twice is the cheaper of the two, and it is what
 // `RBXScriptConnection` already pays. `Tweens.hpp` carries the whole argument.
@@ -39,7 +39,7 @@ namespace engine::script {
 		// Drops a tween nothing holds any more: its connections, then its row.
 		//
 		// **The callables are released here rather than by `TweenTable`**,
-		// because only a VM knows what a `CallbackRef` means — the same split
+		// because only a VM knows what a `CallbackRef` means - the same split
 		// `SignalTable::DropSubject` is on, and the same one
 		// `ScriptCall::ForgetSubject` puts on the neutral interface for
 		// `TweenService:Create`'s benefit.
@@ -132,7 +132,7 @@ namespace engine::script {
 		LuauContext &context = ContextOf(state);
 
 		// The method table, in the registry so `__index` hands a closure back
-		// rather than building one per access — `LuauInstances.cpp` does the same
+		// rather than building one per access - `LuauInstances.cpp` does the same
 		// with `engine.instance.methods`, and for the same reason.
 		static constexpr LuauServiceMethod TWEEN_METHODS[] = {
 			{"Play", Play},
@@ -178,7 +178,7 @@ namespace engine::script {
 		std::string firstError;
 		for (const ecs::Entity tween : completed) {
 			// Every handler runs even when one raises, and the first error is
-			// what the host hears about — `FireSignal`'s own rule, one level up.
+			// what the host hears about - `FireSignal`'s own rule, one level up.
 			const std::string failed = FireSignal(state, SignalKind::TweenCompleted, tween, 0);
 			if (firstError.empty()) {
 				firstError = failed;
@@ -186,7 +186,7 @@ namespace engine::script {
 		}
 
 		// After the signals, so a tween dropped because its target died still
-		// had whatever it was going to do this tick — and so a handler cannot be
+		// had whatever it was going to do this tick - and so a handler cannot be
 		// called on a subject whose connections have already been released.
 		for (const ecs::Entity tween : dropped) {
 			ReleaseTween(state, context, tween);

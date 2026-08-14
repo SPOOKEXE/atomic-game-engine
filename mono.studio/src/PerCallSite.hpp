@@ -5,7 +5,7 @@
 // **Three widgets grew the same fifteen lines independently**, and the third
 // one's comment says so: *"Same shape as the class picker's per-id search
 // state."* A widget drawn from two places needs two copies of whatever it is
-// remembering — the toolbar's class filter and the tree's class filter are two
+// remembering - the toolbar's class filter and the tree's class filter are two
 // lists with two queries, and one shared record would make typing in one filter
 // the other. The lookup is by the id the caller already passes imgui.
 //
@@ -32,7 +32,7 @@ namespace studio {
 	//
 	// **The reference stays valid for the call and no longer.** The table is a
 	// vector and the next new id reallocates it, so use the reference and let
-	// it go — do not store one across frames.
+	// it go - do not store one across frames.
 	//
 	// @tparam T   What this widget remembers. Default-constructed on first use.
 	// @param  id  The caller's imgui id, which is what separates the copies.

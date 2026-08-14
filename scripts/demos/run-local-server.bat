@@ -5,7 +5,7 @@ REM One server and several clients, all on this machine.
 REM
 REM Each client is admitted, given a blocky character on the spawn pad and told
 REM which player it is; WASD walks it and Space jumps. Every client sees every
-REM other character move, because the movement happens once — on the server —
+REM other character move, because the movement happens once - on the server -
 REM and what crosses is the intent going up and the transform coming down.
 REM
 REM   scripts\demos\run-local-server.bat              a server and two clients
@@ -15,7 +15,7 @@ REM   set SCENE=Slide.luau (then run it)             a different world
 REM   set PRESET=release   (then run it)             the shipped numbers
 REM
 REM This is not mono.unified_server_client: that harness cuts `net` out of the
-REM middle, and this puts the socket, the handshake and the cipher back — and
+REM middle, and this puts the socket, the handshake and the cipher back - and
 REM adds the thing neither of them had, more than one player.
 REM
 REM Each program opens its own window. Close them to stop the demo.
@@ -43,7 +43,7 @@ call cmake --build "%build%" --target client server || exit /b 1
 set "client=%build%\client\client.exe"
 set "server=%build%\server\server.exe"
 
-REM The staged copy, not the source — a demo that ran the source tree would work
+REM The staged copy, not the source - a demo that ran the source tree would work
 REM here and nowhere a staged tree was copied to.
 set "staged=%build%\client\assets\examples\%SCENE%"
 if not exist "%staged%" set "staged=%build%\assets\examples\%SCENE%"
@@ -71,6 +71,6 @@ exit /b 0
 
 :pause_briefly
 REM `timeout` refuses to run when input is redirected, which is what happens
-REM inside a build step — `ping` to the loopback is the portable sleep.
+REM inside a build step - `ping` to the loopback is the portable sleep.
 ping -n 2 127.0.0.1 > nul
 exit /b 0

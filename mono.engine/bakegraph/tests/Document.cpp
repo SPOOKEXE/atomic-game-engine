@@ -1,12 +1,12 @@
 // A bake graph as edits: recorded, written and read back.
 //
 // **Replaying one is `bake`'s and is tested there.** This module is the format
-// and the vocabulary, and it links no importer — which is the whole reason it
+// and the vocabulary, and it links no importer - which is the whole reason it
 // exists, so a suite that reached for `Graph` here would be a suite proving the
 // split had not happened.
 //
 // The property the format work hangs on is that `Read(Write(d))` is `d`, so it
-// is asserted against every operation kind rather than a representative one —
+// is asserted against every operation kind rather than a representative one -
 // and, since v0.15, against the named set a world document carries, where the
 // second property is that the bytes do not depend on the order an editor
 // happened to add things in.
@@ -104,7 +104,7 @@ TEST_CASE("undo drops the last edit and nothing else", "[bakegraph]") {
 	CHECK(document.NodeCount() == 3);
 
 	// **The whole of undo, and the reason the log is the document.** There is no
-	// inverse operation to write and no state to unwind — the graph is whatever
+	// inverse operation to write and no state to unwind - the graph is whatever
 	// replaying what is left produces.
 	CHECK(document.Operations().back().Kind == OperationKind::Connect);
 }
@@ -147,7 +147,7 @@ TEST_CASE("a document round trips through text", "[bakegraph]") {
 
 TEST_CASE("every operation kind round trips", "[bakegraph]") {
 	// **Every kind rather than a representative one**, because the failure this
-	// guards is a field that is written and not parsed — which is invisible
+	// guards is a field that is written and not parsed - which is invisible
 	// until somebody saves the one pipeline that uses it.
 	Document document;
 	Operation source;
@@ -404,8 +404,8 @@ TEST_CASE("an unnamed pipeline is refused, in memory and in text", "[bakegraph]"
 
 TEST_CASE("a pipeline naming a node kind this build lacks is refused", "[bakegraph]") {
 	// **The load-time validation the split was taken to keep.** A newer editor's
-	// `bevel` is indistinguishable from a typo — the vocabulary is a closed list
-	// — so the text is refused here and the caller decides what that costs. For
+	// `bevel` is indistinguishable from a typo - the vocabulary is a closed list
+	// - so the text is refused here and the caller decides what that costs. For
 	// a world document it costs the pipelines and not the world; see
 	// `game::ReadAssetPipelines`.
 	PipelineSet set;

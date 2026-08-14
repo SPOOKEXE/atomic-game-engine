@@ -229,7 +229,7 @@ TEST_CASE("an oversized texture is shrunk and keeps its aspect", "[assetc][bake]
 
 TEST_CASE("a baked texture carries its mip chain", "[assetc][bake]") {
 	// **The wiring, which is the half a unit test of `BuildMipChain` cannot
-	// reach.** The node has to sit after the resize — a chain built before one is
+	// reach.** The node has to sit after the resize - a chain built before one is
 	// dropped again on the way past, and the file that reaches disk has no levels
 	// and nothing saying why.
 	const Scratch scratch("mips");
@@ -312,7 +312,7 @@ TEST_CASE("a missing input directory is a run that does not start", "[assetc][ba
 
 TEST_CASE("a material's colour map is rewritten to the baked texture", "[assetc][bake]") {
 	// **The whole point of the `.mat` step.** A material source names the file
-	// beside it — `oak_Color.png` — and the baked tree holds `oak_Color.atex`. If
+	// beside it - `oak_Color.png` - and the baked tree holds `oak_Color.atex`. If
 	// the rewrite used any rule other than `BakedName`, the material would
 	// resolve to a name no manifest carries and the part would draw the engine
 	// default with nothing saying why.
@@ -328,8 +328,8 @@ TEST_CASE("a material's colour map is rewritten to the baked texture", "[assetc]
 }
 
 TEST_CASE("a material may name no texture at all", "[assetc][bake]") {
-	// An untextured material is a real state rather than a malformed file —
-	// `assets/Material.hpp` — so this bakes and draws the engine's default.
+	// An untextured material is a real state rather than a malformed file -
+	// `assets/Material.hpp` - so this bakes and draws the engine's default.
 	const Scratch scratch("material-blank");
 	scratch.Write("materials/blank.mat", std::string_view("# nothing chosen yet\n"));
 
@@ -396,7 +396,7 @@ TEST_CASE("one source goes through the whole baker", "[assetc][bake]") {
 	// this hold: a material picked on its own still has its colour map rewritten
 	// through `BakedName`. A shortcut path would be a second spelling of that
 	// rule, and the failure would be a material resolving to a name no manifest
-	// carries — on the editor's path only, which is the half nobody tests.
+	// carries - on the editor's path only, which is the half nobody tests.
 	const Scratch scratch("only-material");
 	scratch.Write("materials/oak_Color.bmp", BMP);
 	scratch.Write("materials/oak.mat", std::string_view("color = oak_Color.bmp\n"));
@@ -434,7 +434,7 @@ namespace {
 	//
 	// **A PMX and not the `.obj` the tests above use, because an `.obj` cannot
 	// express this bug.** `bake::ReadObj` reads `usemtl` into `Submesh::Material`
-	// and never sets `Submesh::Texture` — it does not open a `.mtl` at all — so a
+	// and never sets `Submesh::Texture` - it does not open a `.mtl` at all - so a
 	// model built from one has no texture reference to dangle. That is also why
 	// the existing "texture references become baked asset names" case only
 	// asserts that the bitmap baked: there was never a reference in the mesh for
@@ -475,7 +475,7 @@ TEST_CASE("a texture reference to nothing is refused rather than written", "[ass
 	// so a model naming `tex/skin.png` in a tree with no such file baked
 	// `tex/skin.atex` into the mesh, the publisher signed it, and the client's
 	// miss was indistinguishable from a texture still streaming in. The model
-	// arrived, drew, and had no textures — which is what every PMX character in
+	// arrived, drew, and had no textures - which is what every PMX character in
 	// this repository's own store did.
 	const Scratch scratch("dangling");
 	scratch.Write("characters/doll.pmx", PmxWithSheet());
@@ -483,7 +483,7 @@ TEST_CASE("a texture reference to nothing is refused rather than written", "[ass
 
 	const Report report = Baked(scratch, Settings{});
 
-	// The model still bakes — geometry is not what failed, and a run that
+	// The model still bakes - geometry is not what failed, and a run that
 	// refused the mesh would lose the half that works.
 	CHECK(report.Failures == 0);
 	CHECK(fs::exists(scratch.Out() / "characters/doll.amesh"));
@@ -524,7 +524,7 @@ TEST_CASE("a texture reference beside the model still resolves", "[assetc][bake]
 TEST_CASE("a resolver places a texture the tree cannot", "[assetc][bake]") {
 	// **The flattened-store case, which is what a `cdn` import produces.** The
 	// model and its sheet are both `<hash><extension>` in one directory, so
-	// `tex/skin.png` names nothing — and only the import log knows the two belong
+	// `tex/skin.png` names nothing - and only the import log knows the two belong
 	// together. `cdn::StoreTextureResolver` is the real one; this stands in for
 	// it so the wiring is checked without a store.
 	const Scratch scratch("resolved");
@@ -560,8 +560,8 @@ TEST_CASE("a unit bake keeps a model inside the box its bounds describe", "[asse
 	// the culling delete things.**
 	//
 	// `MeshPart.Size` multiplies a mesh's own coordinates rather than fitting the
-	// mesh into a box, while `scene::Bounds::HalfExtent` — which is what
-	// `graph::CullAndBound` tests against the frustum — is `Size / 2`. Those two
+	// mesh into a box, while `scene::Bounds::HalfExtent` - which is what
+	// `graph::CullAndBound` tests against the frustum - is `Size / 2`. Those two
 	// agree only when the mesh's own coordinates fit inside ±0.5. A store baked
 	// at authored scale held PMX characters about twenty units tall, so every one
 	// of them was culled against a box a tenth of its size: the model vanished
@@ -579,7 +579,7 @@ TEST_CASE("a unit bake keeps a model inside the box its bounds describe", "[asse
 
 	const engine::assets::MeshData mesh = ReadMesh(scratch.Out() / "huge.amesh");
 
-	// Every vertex, not just the derived box — the box is computed from the
+	// Every vertex, not just the derived box - the box is computed from the
 	// vertices and would agree with itself either way.
 	for (const engine::assets::MeshVertex &vertex : mesh.Vertices) {
 		REQUIRE(std::abs(vertex.Position[0]) <= 0.5f + 1e-4f);
@@ -588,7 +588,7 @@ TEST_CASE("a unit bake keeps a model inside the box its bounds describe", "[asse
 	}
 
 	// And the longest axis actually reaches the box, so "fits" is not "shrunk to
-	// nothing" — a model scaled to a speck would also pass the check above.
+	// nothing" - a model scaled to a speck would also pass the check above.
 	const float longest = std::max(
 		{mesh.Maximum.X - mesh.Minimum.X, mesh.Maximum.Y - mesh.Minimum.Y, mesh.Maximum.Z - mesh.Minimum.Z}
 	);
@@ -620,7 +620,7 @@ TEST_CASE("an empty output bakes into the report and writes nothing", "[assetc][
 	REQUIRE_FALSE(baked.Payload.empty());
 	REQUIRE(baked.Bytes == baked.Payload.size());
 
-	// The bytes are a texture and not the source file — the whole point is that
+	// The bytes are a texture and not the source file - the whole point is that
 	// the *bake* happened, only the writing did not.
 	engine::core::ByteReader reader({baked.Payload.data(), baked.Payload.size()});
 	engine::assets::TextureData image;
@@ -642,7 +642,7 @@ TEST_CASE("a bake to disk carries no payload", "[assetc][memory]") {
 
 	// **A run with an output writes files and holds none of them.** Keeping a
 	// copy of every asset as well would make a large tree a bake that runs out
-	// of memory on success — `Baked::Payload` says so and this is what checks it.
+	// of memory on success - `Baked::Payload` says so and this is what checks it.
 	REQUIRE(report.Assets.front().Payload.empty());
 	REQUIRE(fs::exists(scratch.Out() / "tile.atex"));
 }
@@ -651,7 +651,7 @@ TEST_CASE("a drawing bakes to a texture at the cap rather than past it", "[asset
 	// **The half a unit test of the rasteriser cannot reach**: which node opens
 	// the chain, and what `--max-texture` does to a source that has no size of
 	// its own. The drawing declares 64 and the cap is 16, so the honest answer
-	// is to draw it again at 16 — resampling a 64-pixel rasterisation down would
+	// is to draw it again at 16 - resampling a 64-pixel rasterisation down would
 	// give edges belonging to the box filter instead of to the shapes.
 	const Scratch scratch("svg");
 	scratch.Write(
@@ -675,7 +675,7 @@ TEST_CASE("a drawing bakes to a texture at the cap rather than past it", "[asset
 	CHECK(texture.Height == 16);
 
 	// Solid green to the edge, which a downscale of a rasterisation would also
-	// give — the assertion that separates them is that nothing was drawn at 64
+	// give - the assertion that separates them is that nothing was drawn at 64
 	// at all, and the mip chain below is what says the texture arrived whole.
 	CHECK(static_cast<int>(texture.Pixels[1]) == 255);
 	CHECK(texture.LevelCount() == 5);
@@ -708,7 +708,7 @@ TEST_CASE("a drawing this cannot draw fails its own row and not the run", "[asse
 
 TEST_CASE("a refused form is not decoded, not copied and says why", "[assetc][content]") {
 	// **The refusal has to land before the dispatch on extension**, because the
-	// point of turning a form off is that its parser is never reached — an SVG
+	// point of turning a form off is that its parser is never reached - an SVG
 	// this deployment does not want must not go through the rasteriser first
 	// and be discarded after. The evidence is that nothing was written for it,
 	// including under `CopyUnknown`, which is the branch a late gate would miss.

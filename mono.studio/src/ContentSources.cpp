@@ -36,8 +36,8 @@ namespace studio {
 		// the fallback cube, a `ColorMap` drew nothing, and the assets panel
 		// listed a store full of content none of which the viewport could show.
 		//
-		// The client already defaults to the same folder — `client/app/main.cpp`
-		// — and to `cdn::DevelopmentPublisher` for it, which is what makes the
+		// The client already defaults to the same folder - `client/app/main.cpp`
+		// - and to `cdn::DevelopmentPublisher` for it, which is what makes the
 		// key here safe to fill in: it verifies only the store this editor
 		// publishes to, and pointing a row anywhere else means supplying the
 		// real one. `cdn::DevelopmentSigningKey` carries what that identity is
@@ -58,8 +58,8 @@ namespace studio {
 		);
 
 		// **The origin next door is kept and turned off**, rather than dropped.
-		// A row that is off is one somebody can switch on — `ContentSources.hpp`
-		// says why a disabled row is kept — and this is the address a deployment
+		// A row that is off is one somebody can switch on - `ContentSources.hpp`
+		// says why a disabled row is kept - and this is the address a deployment
 		// uses, so deleting it would make the common remote case something to
 		// retype rather than something to enable.
 		const engine::delivery::DeliverySettings defaults = engine::delivery::DeliverySettings::Default();
@@ -78,8 +78,8 @@ namespace studio {
 			settings.Publisher = *key;
 		}
 		// **`AllowedHosts` is deliberately left empty here.** That check exists
-		// for a source list a *server* sent — `repo_layout.md` §11's
-		// request-forgery note — and this list is one a person typed into their
+		// for a source list a *server* sent - `repo_layout.md` §11's
+		// request-forgery note - and this list is one a person typed into their
 		// own preferences. Restricting what somebody may point their own editor
 		// at would be security theatre with a real cost.
 		return settings;
@@ -118,7 +118,7 @@ namespace studio {
 		if (!in) {
 			// **Not an error.** A fresh install has no file and gets the
 			// default, which is what somebody expects the first time they open
-			// the editor — `Keybinds::Load`'s rule.
+			// the editor - `Keybinds::Load`'s rule.
 			return false;
 		}
 
@@ -129,7 +129,7 @@ namespace studio {
 
 		// **Not reset to `true` with the rest.** A file written before raw
 		// folders existed says nothing about this, and the default is the safe
-		// answer — a store that quietly started collecting baked copies of
+		// answer - a store that quietly started collecting baked copies of
 		// somebody's art folder would be the wrong way to be wrong.
 		MemoryOnly = true;
 
@@ -175,9 +175,9 @@ namespace studio {
 			// list looking configured and refuse every fetch.
 			//
 			// **The last two are optional, and a file written before roles
-			// existed still loads.** Not for compatibility's sake — this is a
+			// existed still loads.** Not for compatibility's sake - this is a
 			// preferences file and `save-format breaks are acceptable` is the
-			// standing rule — but because the absent case has an obviously
+			// standing rule - but because the absent case has an obviously
 			// right answer: a list written when there was no choice meant
 			// `Both`, and reading it as anything else would silently stop a
 			// working setup from fetching or from uploading.

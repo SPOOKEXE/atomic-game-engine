@@ -2,7 +2,7 @@
 #
 # It links `mono_suites` and nothing else: a benchmark binary answers
 # `--mono-suites` the way a test binary does, so mono.tools/benchrunner gets the
-# same discovery and the same cascading signature — but it links no test
+# same discovery and the same cascading signature - but it links no test
 # framework, because a benchmark measures and does not assert, and a framework's
 # per-case overhead would land inside the numbers.
 

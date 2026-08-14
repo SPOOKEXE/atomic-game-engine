@@ -4,7 +4,7 @@
 // layer's first act was closing a real gap rather than churning code that works:
 // `LuauInstances.cpp` held thirty methods and `JsSurface.cpp` twenty-one, and the
 // pivot pair, the three tag calls and the four attribute calls were reachable
-// from Luau and absent from JavaScript — while `mono.tools/bindings` declared
+// from Luau and absent from JavaScript - while `mono.tools/bindings` declared
 // every one of them in the TypeScript surface an author writes against.
 //
 // **The migration is finished, and the last twenty crossed at v0.18.** There is
@@ -12,7 +12,7 @@
 // surface, the signal branches and `Instance.new`, and `JsSurface.cpp` keeps
 // their JavaScript twins, and neither holds a method. Three of the twenty were
 // named in `script/AGENTS.md` as not a straight lift and each is answered here
-// rather than skipped —
+// rather than skipped -
 //
 //   - **`Destroy` and `ClearAllChildren`** mutate the tree under a walk and
 //     release the VM's own refs while doing it. What crosses is an entity and a
@@ -35,7 +35,7 @@
 // Every other row answers from the store on the tick it was called; this one
 // registers in `ChildWaiters` and hands the script back at the barrier, either
 // with the child that arrived or with nothing once its deadline has passed. What
-// that cost the interface is two members — a table accessor and `AwaitChild` —
+// that cost the interface is two members - a table accessor and `AwaitChild` -
 // and what it cost the *surface* is Roblox's no-timeout form, which is refused
 // here rather than approximated. The method's own comment carries that decision.
 //
@@ -84,7 +84,7 @@ namespace engine::script {
 		//
 		// **Roblox's pair, and the whole reason it is a pair.** A `Transform`
 		// says where the *centre* of something is; almost nothing an author
-		// places is placed by its centre — a door turns on its hinge, a lid sits
+		// places is placed by its centre - a door turns on its hinge, a lid sits
 		// on its rim, a character stands on the ground under its feet.
 		// `PivotOffset` is where the handle is and these two are how it is used.
 		//
@@ -119,7 +119,7 @@ namespace engine::script {
 		// rare case where the two surfaces differ because a *language* does.**
 		// Luau compares two instance userdata with `==` and gets the right answer
 		// from the metatable. JavaScript has no operator overloading and `===` on
-		// two objects is identity — and `MakeJsInstance` builds a fresh object
+		// two objects is identity - and `MakeJsInstance` builds a fresh object
 		// per call, so two handles to one part are never `===`. A JavaScript
 		// script had no way at all to ask whether two handles name the same
 		// instance.
@@ -131,7 +131,7 @@ namespace engine::script {
 		// lists `a.Equals(b)` among the differences that *are* the language.
 		//
 		// Neutral rather than JavaScript-only, because a method that exists in
-		// one language is the drift this layer was built to end — and on the Luau
+		// one language is the drift this layer was built to end - and on the Luau
 		// side it is simply a second, longer spelling of `==`.
 		void Equals(ScriptCall &call) {
 			call.ReturnBoolean(call.Subject() == call.AsInstance(0));
@@ -141,8 +141,8 @@ namespace engine::script {
 		//
 		// **On `Instance` like everything else here, and declared on `Players` and
 		// `Player` in the binding file.** That is this engine's existing shape
-		// rather than a new decision — `GetPlayers` has always been an instance
-		// method that happens to be useful on one instance — and the type
+		// rather than a new decision - `GetPlayers` has always been an instance
+		// method that happens to be useful on one instance - and the type
 		// declarations are where an author is told which one to call it on.
 		//
 		// **Written once, which is the whole point of the layer they are the
@@ -160,7 +160,7 @@ namespace engine::script {
 		//
 		// **Neutral since v0.17, and it was the last twin in the pair this layer
 		// exists to end.** It was a `lua_CFunction` in `LuauInstances.cpp` and a
-		// `JSCFunction` in `JsSurface.cpp` — two walks of one container, in two
+		// `JSCFunction` in `JsSurface.cpp` - two walks of one container, in two
 		// calling conventions, which is exactly the drift `ScriptCall.hpp`
 		// opens by describing.
 		void GetPlayers(ScriptCall &call) {
@@ -190,21 +190,21 @@ namespace engine::script {
 		// `Players:GetPlayerFromCharacter(model)`
 		//
 		// **`CharacterOf`'s inverse and a read rather than a search.**
-		// `scene::Character::Owner` already holds the answer — the field exists so
-		// a server admitting a client can find the character it spawned again — so
+		// `scene::Character::Owner` already holds the answer - the field exists so
+		// a server admitting a client can find the character it spawned again - so
 		// this never walks every player asking whose model it is. A walk would
 		// also be wrong the moment two rows disagreed.
 		void GetPlayerFromCharacter(ScriptCall &call) {
 			// **Nil for an NPC, which is Roblox's answer too.** Anything that is
 			// not a person at a keyboard leaves `Owner` unset, and a game asking
 			// "whose is this" about a wandering monster wants nil rather than an
-			// error — `if player then` is how the question is written.
+			// error - `if player then` is how the question is written.
 			call.ReturnInstance(scene::PlayerOf(call.World(), call.AsInstance(0)));
 		}
 
 		// `Player:LoadCharacter()`
 		//
-		// **Roblox's, and it destroys the old body first** — `scene::LoadCharacter`
+		// **Roblox's, and it destroys the old body first** - `scene::LoadCharacter`
 		// carries that rule and this is the binding it never had. A game could
 		// spawn a player only by whatever its host happened to do at admission; a
 		// script had no way to respawn anybody.
@@ -214,9 +214,9 @@ namespace engine::script {
 		// Roblox takes no argument here either.
 		void LoadCharacter(ScriptCall &call) {
 			// **The model is returned, where Roblox returns nothing.** A script
-			// that has just made a body almost always wants it — the alternative
+			// that has just made a body almost always wants it - the alternative
 			// is reading `player.Character` on the next line and hoping the
-			// assignment has landed — and a caller ignoring the answer reads
+			// assignment has landed - and a caller ignoring the answer reads
 			// exactly as Roblox's does.
 			call.ReturnInstance(scene::LoadCharacter(call.World(), call.Subject()));
 		}
@@ -229,8 +229,8 @@ namespace engine::script {
 		// thing being tagged is already in hand; `scene::AddTag` takes the store
 		// and the entity and there is nothing a service would add but a lookup.
 		//
-		// `AddTag` answers `false` when the world's tag table is full — see
-		// `TagTable::MAXIMUM` — rather than raising, because a scene that has run
+		// `AddTag` answers `false` when the world's tag table is full - see
+		// `TagTable::MAXIMUM` - rather than raising, because a scene that has run
 		// out of tags is a scene mistake and not a script one, and a script that
 		// wanted to know can read the answer.
 
@@ -249,12 +249,12 @@ namespace engine::script {
 			call.ReturnBoolean(scene::HasTag(call.World(), call.Subject(), Name(call.AsString(0))));
 		}
 
-		// `instance:GetTags()` — every tag this instance carries, sorted.
+		// `instance:GetTags()` - every tag this instance carries, sorted.
 		//
 		// **Roblox has this on `Instance` and this engine only had it on the
 		// service.** `CollectionService:GetTags(instance)` answered the same
 		// question and `AddTag`, `RemoveTag` and `HasTag` were already on both,
-		// so the instance surface was three quarters of a pair — which is the
+		// so the instance surface was three quarters of a pair - which is the
 		// shape a script copied from a Roblox place trips over.
 		//
 		// Empty for an instance whose class has no `Tags` component, which is
@@ -272,7 +272,7 @@ namespace engine::script {
 
 			// `Describe` hands them back in bit order, which is registration
 			// order; sorting is what makes the answer independent of which
-			// script ran first — the same rule `CollectionService:GetTags` keeps.
+			// script ran first - the same rule `CollectionService:GetTags` keeps.
 			std::vector<Name> names = table->Describe(tags->Mask);
 			std::sort(names.begin(), names.end(), [](const Name &left, const Name &right) {
 				return left.Text() < right.Text();
@@ -290,7 +290,7 @@ namespace engine::script {
 		// --- the attributes ----------------------------------------------------
 		//
 		// **The same marshalling as a property and deliberately so.** An
-		// attribute and a property are one question — what can userland hold —
+		// attribute and a property are one question - what can userland hold -
 		// asked at run time and at declaration time. What differs is that an
 		// attribute has no descriptor, so the *type* comes from the script value
 		// itself on the way in and from the stored value on the way out, which is
@@ -311,7 +311,7 @@ namespace engine::script {
 				return;
 			}
 
-			// An `Opaque` value lands as nil through the same door — see
+			// An `Opaque` value lands as nil through the same door - see
 			// `ScriptCall::ReturnAttribute`.
 			call.ReturnAttribute(value);
 		}
@@ -319,7 +319,7 @@ namespace engine::script {
 		// `instance:SetAttribute(name, value)`
 		//
 		// **Omitting the value removes**, which is `SetAttribute(name, nil)` in
-		// both languages and the only spelling that takes an attribute back —
+		// both languages and the only spelling that takes an attribute back -
 		// `ecs::SetAttribute` carries the argument for why removal is not a
 		// method of its own.
 		void SetAttribute(ScriptCall &call) {
@@ -342,20 +342,20 @@ namespace engine::script {
 			}
 
 			// **Queued rather than fired**, so an attribute signals on the same
-			// barrier a property does and with the same dedup —
+			// barrier a property does and with the same dedup -
 			// `ChangeQueue::Record` carries the argument. Each language's pump is
 			// what turns this into `.Changed` and into whatever
 			// `GetAttributeChangedSignal` connected.
 			call.Changes().Record(call.Subject(), name);
 		}
 
-		// `instance:GetAttributes()` — every attribute, as a map.
+		// `instance:GetAttributes()` - every attribute, as a map.
 		//
 		// Roblox's name and Roblox's shape: a map from name to value rather than
 		// an array, because that is what a caller iterates.
 		void GetAttributes(ScriptCall &call) {
 			// Collected before anything is returned, because the adapter builds
-			// the whole map at once — a two-call "open then add" protocol would
+			// the whole map at once - a two-call "open then add" protocol would
 			// be state a method body could get wrong, and this is the surface
 			// nobody should be able to get wrong twice.
 			std::vector<std::pair<Name, AttributeValue>> found;
@@ -374,7 +374,7 @@ namespace engine::script {
 		void GetAttributeChangedSignal(ScriptCall &call) {
 			// **The property-changed signal, keyed by the attribute's name.**
 			// `SignalKind::PropertyChanged` already filters by a `core::Name`, and
-			// an attribute name and a property name live in the same registry — so
+			// an attribute name and a property name live in the same registry - so
 			// a second signal kind would be a second table to fan out from for a
 			// filter that already exists.
 			//
@@ -405,7 +405,7 @@ namespace engine::script {
 		void IsA(ScriptCall &call) {
 			const ecs::ClassId wanted = ClassArgument(call, 0);
 			if (!wanted.IsValid()) {
-				// False rather than an error, matching Roblox — see
+				// False rather than an error, matching Roblox - see
 				// `ClassArgument`.
 				call.ReturnBoolean(false);
 				return;
@@ -433,7 +433,7 @@ namespace engine::script {
 				// **The connections are already given up and that is correct.**
 				// `Forget` releases what a script had attached to this instance,
 				// and a refused destroy leaves the instance rather than the
-				// handlers — which is the same state a script would be in after
+				// handlers - which is the same state a script would be in after
 				// disconnecting them itself. Re-attaching them would mean the
 				// signal table remembering what it had, which is a second
 				// record of something the VM owns.
@@ -447,13 +447,13 @@ namespace engine::script {
 
 			// Collected first. `DestroyInstance` unlinks from the sibling list
 			// the walk is standing in, so destroying inside `EachChild` would
-			// visit whatever moved into the slot — or nothing.
+			// visit whatever moved into the slot - or nothing.
 			std::vector<Entity> children;
 			store.EachChild(call.Subject(), [&](Entity child) { children.push_back(child); });
 
 			for (const Entity child : children) {
 				// The child's whole subtree, because that is what destroying it
-				// takes — forgetting only the child leaves every grandchild's
+				// takes - forgetting only the child leaves every grandchild's
 				// connections pointing at rows that no longer exist.
 				call.Forget(child);
 				store.DestroyInstance(child);
@@ -463,7 +463,7 @@ namespace engine::script {
 		// `instance:Clone()`
 		//
 		// Nil for something unclonable, matching Roblox, and a script can test
-		// for it — `ReturnInstance` is what turns a null entity into each
+		// for it - `ReturnInstance` is what turns a null entity into each
 		// language's own nothing.
 		void Clone(ScriptCall &call) {
 			call.ReturnInstance(call.World().CloneInstance(call.Subject()));
@@ -496,7 +496,7 @@ namespace engine::script {
 		//
 		// **The second argument, which both halves used to read and ignore.** A
 		// script calling `FindFirstChild("Humanoid", true)` got the non-recursive
-		// answer — nil for anything not a direct child — and nothing said so.
+		// answer - nil for anything not a direct child - and nothing said so.
 		void FindFirstChild(ScriptCall &call) {
 			call.ReturnInstance(
 				call.World().FindFirstChild(call.Subject(), call.AsString(0), call.OptionalBoolean(1, false))
@@ -509,7 +509,7 @@ namespace engine::script {
 		// than waiting for ever.** That is a deliberate divergence from every
 		// script that would be ported in, and it is the only honest one
 		// available: Roblox's `WaitForChild(name)` waits until the child
-		// arrives — warning after five seconds and otherwise never giving up —
+		// arrives - warning after five seconds and otherwise never giving up -
 		// and a script that waits for ever is a script that never finishes its
 		// tick. `Runtime::Run` refuses a suspended thread that nothing will
 		// resume, `script/AGENTS.md` records that as a decision rather than a
@@ -527,7 +527,7 @@ namespace engine::script {
 		// answers nil in exactly the case the method exists for.
 		//
 		// So an author porting a place gets an error naming the fix, once, on
-		// the line that needs it — and `mono.tools/bindings` declares the second
+		// the line that needs it - and `mono.tools/bindings` declares the second
 		// argument as required, so the Luau and TypeScript halves both refuse it
 		// before the script ever runs.
 		void WaitForChild(ScriptCall &call) {
@@ -561,7 +561,7 @@ namespace engine::script {
 			);
 
 			if (waiter == 0) {
-				// Refused rather than evicting somebody else's wait — see
+				// Refused rather than evicting somebody else's wait - see
 				// `ChildWaiters::Add`, which carries the direction and why.
 				call.Raise("too many instances are waiting for a child at once");
 			}
@@ -611,7 +611,7 @@ namespace engine::script {
 		// No case for the workspace, and losing it was the point:
 		// `part:IsDescendantOf(workspace)` used to be true for every live
 		// instance in the world, because the world was every root's ancestor. It
-		// is the real subtree question — the same one the renderer asks — so a
+		// is the real subtree question - the same one the renderer asks - so a
 		// script and the render gate cannot disagree about whether something is
 		// in the scene.
 		void IsDescendantOf(ScriptCall &call) {
@@ -657,7 +657,7 @@ namespace engine::script {
 			// **The reason is required**, which is the one thing this surface
 			// insists on. A world that will not sleep costs a machine until
 			// somebody works out what is holding it up, and the answer should be
-			// a sentence rather than an entity id — see `scene/Awake.hpp`.
+			// a sentence rather than an entity id - see `scene/Awake.hpp`.
 			const Name reason(call.AsString(0));
 			if (!scene::KeepWorldAwake(call.World(), call.Subject(), reason)) {
 				call.Raise("KeepWorldAwake needs a live instance");
@@ -785,8 +785,8 @@ namespace engine::script {
 	std::span<const InstanceMethod> NeutralInstanceMethods() {
 		// **One table built from two arrays, and a function-local static because
 		// the order across a translation-unit boundary is otherwise nobody's.**
-		// Both VMs install every row and each carries the row's *index* — the
-		// Luau trampoline on an upvalue and the JavaScript one as magic — so the
+		// Both VMs install every row and each carries the row's *index* - the
+		// Luau trampoline on an upvalue and the JavaScript one as magic - so the
 		// concatenation has to happen once and hand back the same span forever.
 		static const std::vector<InstanceMethod> ALL = [] {
 			std::vector<InstanceMethod> rows(METHODS.begin(), METHODS.end());

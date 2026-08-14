@@ -27,7 +27,7 @@ namespace cdn {
 				built.Text(
 					"cdn.grant-key",
 					"",
-					"64 hex characters — the secret shared with the server that issues grants"
+					"64 hex characters - the secret shared with the server that issues grants"
 				);
 
 				built.Boolean(

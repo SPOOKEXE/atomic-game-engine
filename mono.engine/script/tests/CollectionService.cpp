@@ -2,13 +2,13 @@
 //
 // **The failure this closes is a second list.** `Instance:AddTag` has existed
 // since v0.9 and answers one direction only, so a scene that wanted "every
-// door" kept its own table of them beside the tags — and that table is wrong
+// door" kept its own table of them beside the tags - and that table is wrong
 // the first time a door is destroyed, in a way nothing reports.
 //
 // What is pinned here is that there is **one** mechanism: a tag set from the
 // service is the tag the instance reports and the other way round, both
 // spellings reaching `scene::Tagging`. Plus the two answers this surface owes
-// and Roblox does not state — a deterministic order for `GetTagged`, and an
+// and Roblox does not state - a deterministic order for `GetTagged`, and an
 // empty list rather than an error for a tag nothing has added yet.
 
 #include <engine/ecs/Store.hpp>
@@ -49,8 +49,8 @@ namespace {
 TEST_CASE("the service and the instance tag one thing", "[scripting][collection]") {
 	// **The whole point of the service being a view rather than a store.** Two
 	// mechanisms would agree until the first time one of them was fixed, and a
-	// scene mixing the spellings — which every real one does, because the
-	// instance form is shorter when the instance is in hand — would see half
+	// scene mixing the spellings - which every real one does, because the
+	// instance form is shorter when the instance is in hand - would see half
 	// its doors.
 	Store store = Fresh("collection_one_mechanism");
 	const auto runtime = MakeRuntime(store, Language::Luau);
@@ -67,7 +67,7 @@ TEST_CASE("the service and the instance tag one thing", "[scripting][collection]
 		assert(#CollectionService:GetTagged('hinge') == 1, 'from either side it is one tag')
 
 		-- Sorted by text, so the answer does not depend on which was added
-		-- first — 'hinge' was registered second and sorts second regardless.
+		-- first - 'hinge' was registered second and sorts second regardless.
 		local tags = CollectionService:GetTags(part)
 		assert(#tags == 2, 'both tags, got ' .. #tags)
 		assert(tags[1] == 'door' and tags[2] == 'hinge', 'sorted by name')
@@ -85,8 +85,8 @@ TEST_CASE("the service and the instance tag one thing", "[scripting][collection]
 
 TEST_CASE("GetTagged answers in world order", "[scripting][collection]") {
 	// **The ordering rule, and the case that discriminates it.** `Anchored` is
-	// a structural property — an anchored part carries no `RigidBody`, so it
-	// sits in a different archetype — and the parts here alternate, so the
+	// a structural property - an anchored part carries no `RigidBody`, so it
+	// sits in a different archetype - and the parts here alternate, so the
 	// order `Store::Each` hands rows over is by table and interleaves. A scene
 	// laying its doors out from this list would arrange itself differently the
 	// moment somebody anchored one, which is the non-determinism sorting is
@@ -157,7 +157,7 @@ TEST_CASE("a tag nothing carries is an empty list", "[scripting][collection]") {
 TEST_CASE("a removed tag leaves the list and stays in the world", "[scripting][collection]") {
 	// **Two answers that look inconsistent and are not.** `GetTagged` drops the
 	// instance immediately, because that is a mask bit. `GetAllTags` keeps the
-	// name forever, because `scene::RemoveTag` never frees a bit — freeing one
+	// name forever, because `scene::RemoveTag` never frees a bit - freeing one
 	// would renumber nothing while changing what a mask already stored on
 	// another row means, which is the alias failure `Tagging.hpp` exists to
 	// prevent.

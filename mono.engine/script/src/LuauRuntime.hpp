@@ -2,7 +2,7 @@
 
 // The Luau half of the two-VM surface.
 //
-// Private to this module. Nothing outside constructs one — `MakeRuntime` picks
+// Private to this module. Nothing outside constructs one - `MakeRuntime` picks
 // an implementation and hands back a `Runtime`, which is what keeps a
 // `lua_State` from ever reaching a public header.
 

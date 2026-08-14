@@ -11,8 +11,8 @@
 //
 // **This header answers *which services exist*; `ServiceSurface.hpp` answers
 // *what is on one*.** The second was VM-shaped until v0.16 and cost the same
-// thing one level down — a service described in `lua_CFunction`s can only be
-// built by Luau — which is why `ContentService`, `CollectionService`,
+// thing one level down - a service described in `lua_CFunction`s can only be
+// built by Luau - which is why `ContentService`, `CollectionService`,
 // `HttpService`, `CrossWorldService` and `ContextActionService` stayed
 // Luau-only after the catalogue had already named the gap. `UserInputService`
 // and `SoundService` outlasted those five by one mechanism, a live *property*,
@@ -23,20 +23,20 @@
 // and switches Luau into single-step mode; `Debugger::Add` refuses a `.js`,
 // `.mjs`, `.cjs`, `.ts` or `.tsx` chunk outright, so the JavaScript half would
 // answer "nothing can be armed" to everything. A JavaScript debugger is a
-// feature and not a binding — see `DEFERRED.md` D00106.
+// feature and not a binding - see `DEFERRED.md` D00106.
 //
 // **A catalogue rather than self-registration, and the difference is a linker
 // one.** The obvious shape is a static registrar per service file, each adding
 // itself to a vector at load. It does not survive this build: modules here are
 // static libraries, and an object file whose only exported symbol is a registrar
-// nobody references is one the archive is free to drop — so the service compiles,
+// nobody references is one the archive is free to drop - so the service compiles,
 // links, and is absent at runtime, typically in the release build and typically
 // months later. `scene::RegisterSceneComponents` and `RegisterSceneClasses` are
 // explicit for the same reason.
 //
 // `ServiceCatalogue.cpp` is the one file that names every installer, which is
 // what makes the linker keep them, and it is the only place a service is
-// declared. Everything else — both runtimes and the binding generator — reads
+// declared. Everything else - both runtimes and the binding generator - reads
 // it.
 //
 // **A service missing from a language is a stated fact and not an absence.** A
@@ -85,8 +85,8 @@ namespace engine::script {
 		// Every host. The ordinary case.
 		Always,
 
-		// A studio only. The installer still decides — `OpenBreakpointService`
-		// checks the debugger pointer as well — so this is what the *catalogue*
+		// A studio only. The installer still decides - `OpenBreakpointService`
+		// checks the debugger pointer as well - so this is what the *catalogue*
 		// knows, which is what a generator and a refusal message need. It is not
 		// a second gate on the install.
 		Studio,
@@ -96,7 +96,7 @@ namespace engine::script {
 	//
 	// **No installer here, and that is what keeps this header clean.** A
 	// function pointer taking a `lua_State *` would pull Luau into every
-	// JavaScript translation unit and a `JSContext *` would do the reverse —
+	// JavaScript translation unit and a `JSContext *` would do the reverse -
 	// which is precisely the coupling `mono.engine/script/CMakeLists.txt`
 	// refuses when it keeps both VMs `VENDOR` rather than `VENDOR_PUBLIC`. The
 	// installers live in `ServiceCatalogue.cpp`, which is the one file allowed

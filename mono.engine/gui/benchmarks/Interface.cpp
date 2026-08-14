@@ -17,7 +17,7 @@
 //
 // **The `Compiled` rows are where the design either pays or does not.** A
 // signature is computed over the whole tree every frame in order to skip a
-// rebuild — so the unchanged path costs one signature pass, and it is only
+// rebuild - so the unchanged path costs one signature pass, and it is only
 // worth having if that pass is far cheaper than the rebuild it avoids. Both are
 // measured. If they are close, the class is doing twice the work on every frame
 // that *does* change and saving nothing on the frames that do not.
@@ -34,8 +34,8 @@
 //     modifier is a `UIComponent` and one `Get<Element>` rules out all seven.
 //     A container is usually a frame full of frames, so that was seven misses
 //     per child per frame. → 275 to 243.
-//   - It then ran **twice per element** — once to measure the node and once to
-//     place it — over the same child list. The result is carried on `Item` now.
+//   - It then ran **twice per element** - once to measure the node and once to
+//     place it - over the same child list. The result is carried on `Item` now.
 //     → 243 to 200.
 //   - `ChildItems` heap-allocated a fresh list per container per frame, and
 //     `InstanceNameOf` took the process-wide name registry's lock for every
@@ -43,14 +43,14 @@
 //
 // That left one structural cost: `EachChild` walks an intrusive
 // `FirstChild`/`NextSibling` list through a `std::function`, so each child is a
-// type-erased call and a pointer chase into another table — and *two* such walks
+// type-erased call and a pointer chase into another table - and *two* such walks
 // per element remained, because measuring a node and placing it both need its
 // child list and the two happen at different times.
 //
 //   - Merged, by having the one walk produce both answers at once and parking
 //     the child run in a shared arena that `Place` reads back. The arena is a
-//     stack: a node marks it, measures its children — which appends each
-//     child's own children on top — places them, and releases to the mark
+//     stack: a node marks it, measures its children - which appends each
+//     child's own children on top - places them, and releases to the mark
 //     through a destructor rather than a statement. → 173 to **152**.
 //
 // **So the pass now walks each child list exactly once, and 152 ns is what a
@@ -61,8 +61,8 @@
 // about layout, which is why it is written down here and not attempted.
 //
 // A 10 000-element interface went from 2.9 ms a frame to 1.5 ms over these four
-// changes, with the whole steady-state frame — layout plus the compile
-// signature — at about 179 ns an element.
+// changes, with the whole steady-state frame - layout plus the compile
+// signature - at about 179 ns an element.
 
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
@@ -118,7 +118,7 @@ namespace interface_bench {
 	// Registers the class tree exactly once for the process.
 	//
 	// Registration interns names, and doing it per world would make the first
-	// tree in a run pay for something none of the others do — which would show
+	// tree in a run pay for something none of the others do - which would show
 	// up as the 1000-element row being dearer than the 4000-element one.
 	void EnsureRegistered() {
 		static const bool once = [] {
@@ -178,7 +178,7 @@ namespace interface_bench {
 					store.SetParent(element, parent);
 
 					// `GetMutable` rather than `Get`, which hands back a
-					// `const T *` — the store's read and write paths are
+					// `const T *` - the store's read and write paths are
 					// separate so that a change is always an explicit one.
 					if (auto *shape = store.GetMutable<engine::gui::Element>(element)) {
 						// Scale plus offset, so resolving it needs the parent's
@@ -209,7 +209,7 @@ namespace interface_bench {
 
 	// A `Compiled` per tree shape, kept across frames the way a surface keeps
 	// one. Holding one per frame would compute a signature, find nothing to
-	// compare it against and rebuild every time — every cost of the design and
+	// compare it against and rebuild every time - every cost of the design and
 	// none of its benefit.
 	Compiled &CompiledFor(size_t count, size_t depth) {
 		static std::vector<std::pair<std::pair<size_t, size_t>, std::unique_ptr<Compiled>>> built;
@@ -242,7 +242,7 @@ BENCH("Layout · 1k elements, 3 deep", 1000) {
 
 BENCH("Layout · 10k elements, 3 deep", 10'000) {
 	// **A ten-thousand-element interface is an inventory grid, not an absurdity**
-	// — a hundred slots with a hundred badges each is exactly this. If the
+	// - a hundred slots with a hundred badges each is exactly this. If the
 	// per-element cost is flat from a hundred up to here, layout is linear and a
 	// large interface is merely proportionally expensive; if it climbs, there is
 	// a per-element search and the grid is quadratic.
@@ -254,7 +254,7 @@ BENCH("Layout · 10k elements, 3 deep", 10'000) {
 //
 // **The same element count in a deeper tree.** Every level resolves against its
 // parent's rectangle, so a deep tree does the same number of resolves as a wide
-// one — unless something is recomputed on the way down, in which case this
+// one - unless something is recomputed on the way down, in which case this
 // ladder climbs and the wide one does not.
 
 BENCH("Layout · 1k elements, 2 deep", 1000) {
@@ -281,7 +281,7 @@ BENCH("Compiled::Rebuild · 1k elements, unchanged", 1000) {
 	// **The frame that should be nearly free**, and the one an interface spends
 	// almost all of its frames in: nothing moved, so the signature matches and
 	// no list is built. What it costs is one signature pass over the whole tree
-	// — which is not nothing, and is the price of the optimisation.
+	// - which is not nothing, and is the price of the optimisation.
 	Interface &tree = TreeOf(1000, 3);
 	Compiled &compiled = CompiledFor(1000, 3);
 
@@ -359,7 +359,7 @@ BENCH("frame · 1k elements laid out and compiled, nothing changed", 1000) {
 }
 
 BENCH("frame · 1k elements with the pointer moving over them", 1000) {
-	// **Hover is an input to compilation, not a result** — it shifts an
+	// **Hover is an input to compilation, not a result** - it shifts an
 	// `AutoButtonColor` fill, so it changes the compiled list and belongs in the
 	// signature. Which means a moving mouse invalidates the list every frame,
 	// and this row is what an interface costs while the player is simply moving

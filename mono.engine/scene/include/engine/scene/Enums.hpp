@@ -10,12 +10,12 @@
 //
 // **They live here rather than beside the component that holds them**, which is
 // where `NormalId` was written first: an enum next to one struct reads as that
-// struct's private business, and the moment a second thing needs a face — a
-// decal, a surface gui, a hinge — it is either included through a component
+// struct's private business, and the moment a second thing needs a face - a
+// decal, a surface gui, a hinge - it is either included through a component
 // header that has nothing to do with it or copied. One file for the named sets
 // is what stops the second of those.
 //
-// **Names are the format, numbers are not — with one deliberate exception.**
+// **Names are the format, numbers are not - with one deliberate exception.**
 // `BodyKind` and `ShapeKind` sit in components whose registration declares a
 // writer that writes them by name, so their underlying numbers stay free to move
 // and must never be written anywhere by hand.
@@ -23,7 +23,7 @@
 // `NormalId` is the exception and it is one on purpose: it is stored as its
 // ordinal in a trivially-copied component, so the number *is* the format. That
 // is why its values are written out below rather than left to the compiler, and
-// why they are Roblox's — a `Face` of 1 has to mean `Top` in a game file this
+// why they are Roblox's - a `Face` of 1 has to mean `Top` in a game file this
 // engine wrote and in one it did not. **Reordering that enum is a format
 // change**, which is exactly the thing this paragraph exists to stop somebody
 // doing casually to the other two.
@@ -40,7 +40,7 @@ namespace engine::scene {
 	// How the solver is allowed to move a body.
 	//
 	// Separate from whether the entity has a `RigidBody` at all. A part with no
-	// `RigidBody` is not a static body — it is not a body, and no query the
+	// `RigidBody` is not a static body - it is not a body, and no query the
 	// physics pipeline runs will ever visit it. This says what to do with the
 	// ones it does visit.
 	//
@@ -50,7 +50,7 @@ namespace engine::scene {
 		// whatever put it there.
 		Static,
 
-		// Moved by whoever owns it — a platform, an animation, a script — and
+		// Moved by whoever owns it - a platform, an animation, a script - and
 		// never by a contact. Pushes dynamic bodies and is pushed by nothing.
 		Kinematic,
 
@@ -141,7 +141,7 @@ namespace engine::scene {
 	// How a surface's alpha channel is treated.
 	//
 	// **A closed list whose ordinals are on the wire**, so an entry may be
-	// appended and never reordered — `assets::TextureFormat`'s rule and for the
+	// appended and never reordered - `assets::TextureFormat`'s rule and for the
 	// same reason.
 	//
 	// @since v0.9
@@ -193,7 +193,7 @@ namespace engine::scene {
 	// limit rather than a stub. This pipeline has one fragment program for
 	// opaque geometry; a mirror naming an arbitrary program would need a
 	// pipeline per program, a compilation path, and an answer to what happens
-	// when the file is missing on somebody else's machine — which is the render
+	// when the file is missing on somebody else's machine - which is the render
 	// graph `ROADMAP.md` puts behind a prototype project, not a field.
 	//
 	// What a closed list *does* buy is exactly what a mirror wants: a camera
@@ -202,7 +202,7 @@ namespace engine::scene {
 	// for the surfaces that do not ask.
 	//
 	// **The ordinals are on the wire**, so an entry may be appended and never
-	// reordered — `AlphaMode`'s rule, and for the same reason.
+	// reordered - `AlphaMode`'s rule, and for the same reason.
 	//
 	// @since v0.13
 	enum class SurfaceEffect : uint8_t {
@@ -214,7 +214,7 @@ namespace engine::scene {
 		NightVision,
 
 		// A heat map. Luminance stands in for temperature, which is a lie an
-		// engine with no thermal model cannot avoid and should say out loud —
+		// engine with no thermal model cannot avoid and should say out loud -
 		// it looks right because bright things in a lit scene usually are the
 		// hot ones.
 		Thermal,
@@ -246,7 +246,7 @@ namespace engine::scene {
 	// is for a log line and nothing parses it back; these names are the ones
 	// `ecs::EnumTable` registers and a script assigns, so they are the surface
 	// rather than a diagnostic. Kept here beside the enum so the two cannot
-	// drift — `scene/Part.cpp` registers the same six in the same order, and the
+	// drift - `scene/Part.cpp` registers the same six in the same order, and the
 	// order is the format.
 	//
 	// @param face The face to name.

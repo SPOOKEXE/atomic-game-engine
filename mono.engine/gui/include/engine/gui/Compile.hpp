@@ -8,13 +8,13 @@
 // visible element. A UI is a thing somebody looks at all day, and on almost
 // every one of those frames the answer is the same answer as last frame.
 //
-// So the scan computes a **signature** — a rolling hash of every field the
-// compile reads — and when it matches the last one, the compiled list is still
+// So the scan computes a **signature** - a rolling hash of every field the
+// compile reads - and when it matches the last one, the compiled list is still
 // correct and is kept. This is `scene::QuickHash`'s pattern and
 // `studio::HierarchyView`'s, one layer over, and it is the same fallback for
 // the same reason: `ecs::Hierarchy`, `gui::Element` and the rest are not
 // observed components, so `Store::ChangeVersion` does not move when an element
-// is reparented, resized or renamed — and it *does* move when a physics tick
+// is reparented, resized or renamed - and it *does* move when a physics tick
 // writes a transform, which would rebuild the UI sixty times a second for
 // nothing.
 //
@@ -38,7 +38,7 @@
 // **The direction matters and only one way round is safe.** A signature that
 // *collides* keeps a list the world has moved on from, which is a UI showing
 // what is no longer there; a signature that changes when nothing really did
-// costs one rebuild nobody sees. Every choice here leans the second way — an
+// costs one rebuild nobody sees. Every choice here leans the second way - an
 // archetype that reshuffles its rows without changing a value still
 // re-compiles.
 //
@@ -104,7 +104,7 @@ namespace engine::gui {
 		// The signature of what the list was built from.
 		//
 		// Exposed for tests and for a panel reporting why a rebuild happened.
-		// Zero before the first `Rebuild`, and zero is not a reserved value —
+		// Zero before the first `Rebuild`, and zero is not a reserved value -
 		// what makes a comparison meaningful is that both sides came out of the
 		// same function, exactly as `scene::QuickHash` says of its own.
 		uint64_t Signature() const {
@@ -130,8 +130,8 @@ namespace engine::gui {
 
 		// Forgets the signature so the next `Rebuild` rebuilds.
 		//
-		// For a caller whose *backend* state was lost — a device reset, a
-		// resized target — where the list is correct and the thing that
+		// For a caller whose *backend* state was lost - a device reset, a
+		// resized target - where the list is correct and the thing that
 		// consumed it is not.
 		void Invalidate() {
 			Stamp = 0;

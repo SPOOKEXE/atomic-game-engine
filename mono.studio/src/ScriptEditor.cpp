@@ -40,7 +40,7 @@ namespace studio {
 
 				// The instance's *current* name, read every frame rather than
 				// cached. A cached one is wrong for one frame after a rename,
-				// and one frame is enough to be seen — `ui/AGENTS.md` states
+				// and one frame is enough to be seen - `ui/AGENTS.md` states
 				// that rule and this is the panel most tempted to break it.
 				std::string label = "(deleted)";
 				bool alive = false;
@@ -63,7 +63,7 @@ namespace studio {
 				// **`###` pins the tab's id to the instance, and this is not a
 				// nicety.** imgui derives a widget's id from its label, so appending
 				// the modified marker made the tab a *different tab* the instant
-				// anybody typed — which closed the old one, rebuilt the field inside
+				// anybody typed - which closed the old one, rebuilt the field inside
 				// it, and dropped keyboard focus after exactly one character. The
 				// symptom was a script editor that took the first keystroke and
 				// ignored every one after it, and it took a screenshot to see.
@@ -82,7 +82,7 @@ namespace studio {
 						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 						ImGui::Text(
 							"%s   in %s",
-							tab.Path.IsValid() ? Label(tab.Path) : "(unsaved — a path is chosen on save)",
+							tab.Path.IsValid() ? Label(tab.Path) : "(unsaved - a path is chosen on save)",
 							Label(Universe->NameOf(tab.World))
 						);
 						ImGui::PopStyleColor();
@@ -109,7 +109,7 @@ namespace studio {
 						}
 
 						// **The same control the output panel has**, rather
-						// than a second copy of the step and the clamp — two
+						// than a second copy of the step and the clamp - two
 						// panels that disagreed about what a zoom level is
 						// would disagree the first time either was tuned.
 						ImGui::SameLine();
@@ -125,7 +125,7 @@ namespace studio {
 						// **Find and Replace All, and deliberately not Find
 						// Next.** Jumping the caret to a match means setting the
 						// selection inside `InputTextMultiline`, which imgui
-						// does not expose — reaching into `ImGuiInputTextState`
+						// does not expose - reaching into `ImGuiInputTextState`
 						// to do it would tie the script editor to a private
 						// layout that changes between imgui releases. A match
 						// count and a whole-file replace are the two thirds of
@@ -205,7 +205,7 @@ namespace studio {
 						// It has to be the pushed size specifically:
 						// `SetWindowFontScale` scales the window it is called
 						// on, and both the code and the gutter draw into child
-						// windows — which imgui begins at scale 1 whatever their
+						// windows - which imgui begins at scale 1 whatever their
 						// parent was set to. That zoomed the frame and the row
 						// spacing measured out here, and left every glyph inside
 						// them exactly the size it started at.
@@ -220,7 +220,7 @@ namespace studio {
 						// **The gutter, and it is a sibling of the code rather
 						// than part of it.** `CodeField` is an
 						// `InputTextMultiline`, which owns its own scrolling
-						// child — so a breakpoint column has to be drawn beside
+						// child - so a breakpoint column has to be drawn beside
 						// it and told where that child has scrolled to.
 						//
 						// See `DrawScriptGutter` for why reading one window's
@@ -233,7 +233,7 @@ namespace studio {
 						// **The navigation keys are claimed before the field is
 						// submitted, not after.** The text widget polls them
 						// during its own submission, so an owner set afterwards
-						// would arrive a frame late — Down would move the caret
+						// would arrive a frame late - Down would move the caret
 						// a line *and* the highlighted row, and Enter would
 						// insert a newline before accepting. `LockThisFrame` is
 						// what makes the widget's owner-agnostic poll fail
@@ -398,7 +398,7 @@ namespace studio {
 		const CompletionQuery query = ScanBackwards(tab.Text, caret);
 
 		// **Opened on a separator, on one character, or on being asked.** A
-		// separator is unambiguous — nobody types `part.` meaning to stop there.
+		// separator is unambiguous - nobody types `part.` meaning to stop there.
 		//
 		// **One and not two, which was a deliberate reversal at v0.15.** The
 		// argument for two was that one character offers every identifier in the
@@ -410,7 +410,7 @@ namespace studio {
 		// crowded frame and the benefit is that "as you type" means what it says.
 		//
 		// The escape from a popup that is in the way is Escape, and it already
-		// works — `DrawScriptCompletion` owns that key while the popup is up.
+		// works - `DrawScriptCompletion` owns that key while the popup is up.
 		const bool worthOpening =
 			asked || ScriptPopupOpen || query.Separator != '\0' || !query.Prefix.empty();
 
@@ -421,7 +421,7 @@ namespace studio {
 		}
 
 		// **The language the script will actually run as**, which is the
-		// selector's answer and not the file extension's — a tab whose
+		// selector's answer and not the file extension's - a tab whose
 		// `CodeSourceContainerSelector` says JavaScript must be offered
 		// JavaScript's globals however the path is spelled.
 		engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
@@ -451,7 +451,7 @@ namespace studio {
 		// *index* across a re-query points it at whatever now happens to sit
 		// there. Typing another letter narrows the offers, so an author who had
 		// arrowed down to the sixth entry and kept typing was left highlighting
-		// the sixth entry of a different list — and Enter inserted it without
+		// the sixth entry of a different list - and Enter inserted it without
 		// anything on screen having looked wrong.
 		//
 		// The clamp is still what a caret move wants: moving along a line
@@ -491,7 +491,7 @@ namespace studio {
 
 		// **Where the caret is, computed rather than asked for, and exact
 		// because the face is monospace.** Every glyph is one advance wide, so a
-		// column is a multiplication — `ScriptEditor` pushes
+		// column is a multiplication - `ScriptEditor` pushes
 		// `Typeface::Monospace` a few lines above this and that is what makes it
 		// true. A proportional face would need the run measured, which is the
 		// sort of thing that is nearly right and drifts a character per line.
@@ -507,7 +507,7 @@ namespace studio {
 		const float rowHeight = ImGui::GetTextLineHeight();
 		const float glyph = ImGui::CalcTextSize("0").x;
 
-		// The field's own scroll, from the window it made — the same lookup and
+		// The field's own scroll, from the window it made - the same lookup and
 		// the same justification `DrawScriptGutter` gives above.
 		ImVec2 scroll(0.0f, 0.0f);
 		if (const ImGuiWindow *code = ImGui::FindWindowByName("##text"); code != nullptr) {
@@ -580,7 +580,7 @@ namespace studio {
 
 		// **Requested rather than written.** `CodeEdit::Insert` is applied
 		// inside the field's own callback next frame, which keeps imgui's undo
-		// stack describing text that is actually there — see `Widgets.hpp`.
+		// stack describing text that is actually there - see `Widgets.hpp`.
 		const Completion &chosen = ScriptCompletions[static_cast<size_t>(ScriptPopupChoice)];
 		tab.Edit.Insert = chosen.Text;
 		tab.Edit.ReplaceFrom = ScriptPopupAnchor;
@@ -617,7 +617,7 @@ namespace studio {
 		//
 		// This is `imgui_internal.h`, and it is worth saying why it is allowed
 		// here when this file refuses `ImGuiInputTextState` a couple of hundred
-		// lines up. That struct is a private *layout* — its fields move between
+		// lines up. That struct is a private *layout* - its fields move between
 		// releases and reading one is reading whatever happens to be at an
 		// offset. A window's `Scroll` is the same value `GetScrollY` returns for
 		// the current window in public API; what is internal is only *looking
@@ -681,7 +681,7 @@ namespace studio {
 				}
 			} else if (hovered && breakable) {
 				// A hollow mark under the cursor, so the column reads as
-				// clickable before anything has been clicked — and not offered
+				// clickable before anything has been clicked - and not offered
 				// at all on a script no breakpoint could fire in, because an
 				// affordance that refuses when used is worse than none.
 				const ImVec2 centre(origin.x + (rowHeight * 0.5f), y + (rowHeight * 0.5f));
@@ -715,7 +715,7 @@ namespace studio {
 		const std::string source(path.Text());
 
 		// **The editor's list is the one that survives a Stop**, and a runtime's
-		// is a copy it was handed at `BeginRun` — so both are written, in that
+		// is a copy it was handed at `BeginRun` - so both are written, in that
 		// order. Writing only the live ones would make a breakpoint disappear
 		// the next time somebody pressed Stop.
 		if (BreakpointAt(path, line) != nullptr) {

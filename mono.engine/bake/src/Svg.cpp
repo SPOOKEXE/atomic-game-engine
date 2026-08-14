@@ -18,7 +18,7 @@
 // Text needs fonts and shaping; gradients, filters and masks need an offscreen
 // compositor; `<use>` and `xlink:href` need a reference graph; a `style`
 // attribute needs CSS. Every one of those, half-implemented, produces a picture
-// that is recognisably the right drawing and wrong — the failure
+// that is recognisably the right drawing and wrong - the failure
 // `bake/AGENTS.md` refuses interlaced PNG and progressive JPEG over. So the
 // subset below is drawn tightly and **everything outside it is refused by
 // name**, which is what makes a refusal a message somebody can act on rather
@@ -33,7 +33,7 @@
 //
 // **The bomb here is XML, not the geometry.** A `<!DOCTYPE>` with an `<!ENTITY>`
 // in it is the billion-laughs expansion and the external-entity file read, and
-// both are refused outright rather than bounded — there is nothing an SVG icon
+// both are refused outright rather than bounded - there is nothing an SVG icon
 // needs a document type declaration for. Everything else an uploaded file states
 // is a count, and every count is checked before it is used: the markup's length,
 // the element count, the nesting depth, the path command count, the flattened
@@ -41,7 +41,7 @@
 
 namespace engine::bake {
 
-	// The scanner is `core`'s since v0.15 — `D00128`, and `core/Xml.hpp` carries
+	// The scanner is `core`'s since v0.15 - `D00128`, and `core/Xml.hpp` carries
 	// why it is at the bottom rather than beside a format that reads markup.
 	namespace xml = core::xml;
 
@@ -58,11 +58,11 @@ namespace engine::bake {
 
 		// Elements opened, over the whole document. A refusal here is what stops
 		// a hundred megabytes of `<rect/>` from being a hundred megabytes of
-		// work — the byte bound alone would still allow it.
+		// work - the byte bound alone would still allow it.
 		constexpr uint32_t MAXIMUM_ELEMENTS = 4096;
 
 		// How deep `<g>` may nest. The walk keeps an explicit stack rather than
-		// recursing, so this bounds memory rather than the C stack — but a
+		// recursing, so this bounds memory rather than the C stack - but a
 		// drawing nested thirty-two deep is a generator's output and not a
 		// drawing, and the bound is what says so.
 		constexpr uint32_t MAXIMUM_DEPTH = 32;
@@ -85,7 +85,7 @@ namespace engine::bake {
 		// **Tighter than `Texture::MAXIMUM_DIMENSION` squared, and deliberately.**
 		// A rasteriser allocates the whole canvas before it draws anything and
 		// holds four floats a pixel so that a stack of translucent shapes
-		// composites without drift — four megapixels is sixty-four megabytes of
+		// composites without drift - four megapixels is sixty-four megabytes of
 		// working set, and an SVG is an icon or a panel rather than a sixteen-k
 		// sheet. Each axis is still checked against `MAXIMUM_DIMENSION`, so the
 		// refusal names whichever bound was actually hit.
@@ -96,7 +96,7 @@ namespace engine::bake {
 		// **The bound the other counts do not imply.** Four thousand elements is
 		// cheap and half a million points is cheap; four thousand *four-point
 		// rectangles that each cover the whole canvas* is neither, and nothing
-		// above notices — a rectangle is four points however big it is. A single
+		// above notices - a rectangle is four points however big it is. A single
 		// path of half a million edges crossing every scanline is the same
 		// problem from the other end, and a point bound tight enough to stop it
 		// would refuse ordinary illustrations. So the work itself is budgeted, in
@@ -108,8 +108,8 @@ namespace engine::bake {
 		// through `assetc` on the `dev` preset, which is `-O0`: a 512-pixel
 		// illustration of nine hundred stroked circles spends 34M of it and takes
 		// 0.3s; four thousand stacked full-canvas rectangles at 2048 are refused
-		// after 0.8s; the single densest fill this admits — 7400 edges crossing
-		// all 2048 rows — takes 10s, which is the honest ceiling on what one
+		// after 0.8s; the single densest fill this admits - 7400 edges crossing
+		// all 2048 rows - takes 10s, which is the honest ceiling on what one
 		// hostile file costs here. Raising it raises that ceiling in proportion.
 		constexpr uint64_t MAXIMUM_FILL_WORK = 1u << 26;
 
@@ -121,7 +121,7 @@ namespace engine::bake {
 		constexpr uint32_t JOIN_SEGMENTS = 8;
 
 		// Scanline samples a pixel row is split into vertically. Coverage across
-		// a row is exact — a span contributes its clipped length — so this is
+		// a row is exact - a span contributes its clipped length - so this is
 		// only the vertical resolution of an edge, and four is where the
 		// remaining stair-stepping stops being visible.
 		constexpr uint32_t SUBSAMPLES = 4;
@@ -177,7 +177,7 @@ namespace engine::bake {
 		//
 		// **Hand-written rather than `from_chars`**, which is the house style
 		// here and also the portable answer: floating-point `from_chars` is a
-		// library version question, and `strtod` reads the process locale — a
+		// library version question, and `strtod` reads the process locale - a
 		// decimal comma would turn `0.5` into `0` on somebody's machine and
 		// nowhere else.
 		bool TakeNumber(std::string_view &text, double &out) {
@@ -229,7 +229,7 @@ namespace engine::bake {
 					exponentDigits = true;
 				}
 
-				// An `e` with no digits after it is not part of the number — it
+				// An `e` with no digits after it is not part of the number - it
 				// is the next token, which in a path is a command letter.
 				if (exponentDigits) {
 					value *= std::pow(10.0, exponentNegative ? -exponent : exponent);
@@ -266,7 +266,7 @@ namespace engine::bake {
 			}
 
 			failure = "svg: " + std::string(property) + " '" + std::string(Trimmed(text)) +
-					  "' — only unitless and px lengths are read, and %, em, ex, pt, pc, cm, mm and in "
+					  "' - only unitless and px lengths are read, and %, em, ex, pt, pc, cm, mm and in "
 					  "are refused";
 			return false;
 		}
@@ -283,7 +283,7 @@ namespace engine::bake {
 		// A translate and a scale, and nothing else.
 		//
 		// **Not a 2x3 matrix, because `rotate`, `matrix` and the skews are
-		// refused** — carrying the general form would be an invitation to accept
+		// refused** - carrying the general form would be an invitation to accept
 		// them without deciding to, and the pair below is exactly what the
 		// supported `transform` functions and the `viewBox` fit produce.
 		struct Transform {
@@ -297,7 +297,7 @@ namespace engine::bake {
 			}
 
 			// The larger axis, which is what a curve's flattening is measured
-			// against — one segment per device pixel of the bigger direction.
+			// against - one segment per device pixel of the bigger direction.
 			double DeviceScale() const {
 				return std::max(std::abs(ScaleX), std::abs(ScaleY));
 			}
@@ -388,7 +388,7 @@ namespace engine::bake {
 		) {
 			const std::string_view value = Trimmed(text);
 			const auto refuse = [&](std::string_view because) {
-				failure = "svg: " + std::string(property) + " '" + std::string(value) + "' — " +
+				failure = "svg: " + std::string(property) + " '" + std::string(value) + "' - " +
 						  std::string(because);
 				return false;
 			};
@@ -466,7 +466,7 @@ namespace engine::bake {
 				}
 			}
 
-			return refuse("not a colour name this knows — #rgb, #rrggbb and rgb() always work");
+			return refuse("not a colour name this knows - #rgb, #rrggbb and rgb() always work");
 		}
 
 		// ---------------------------------------------------------------------
@@ -485,7 +485,7 @@ namespace engine::bake {
 		using xml::Tag;
 
 		// What a failure here is called, what one element may carry, and that a
-		// prefix means nothing to a drawing — `<svg:rect>` is a `<rect>`.
+		// prefix means nothing to a drawing - `<svg:rect>` is a `<rect>`.
 		constexpr xml::Options XML{"svg", MAXIMUM_ATTRIBUTES, true};
 
 		// The scanner with this format's settings already bound, so that a call
@@ -556,7 +556,7 @@ namespace engine::bake {
 				for (const auto &[name, because] : REFUSED_ATTRIBUTES) {
 					if (attribute.Name == name) {
 						failure = "svg: <" + std::string(element) + "> carries '" + std::string(name) +
-								  "' — " + std::string(because);
+								  "' - " + std::string(because);
 						return false;
 					}
 				}
@@ -614,7 +614,7 @@ namespace engine::bake {
 		// `translate` and `scale`, composed left to right.
 		//
 		// **`rotate`, `matrix`, `skewX` and `skewY` are refused by name.** They
-		// are not hard — they are a 2x3 matrix — but a rotated stroke is an
+		// are not hard - they are a 2x3 matrix - but a rotated stroke is an
 		// elliptical pen and a rotated ellipse is no longer axis-aligned, so
 		// accepting them would quietly widen what every shape below has to
 		// handle. The refusal is the honest bound.
@@ -667,7 +667,7 @@ namespace engine::bake {
 					local.ScaleY = hasSecond ? second : first;
 				} else {
 					failure = "svg: transform '" + std::string(name) +
-							  "' is refused — only translate and scale are read, because a rotation or a "
+							  "' is refused - only translate and scale are read, because a rotation or a "
 							  "skew turns a stroke into an elliptical pen";
 					return false;
 				}
@@ -692,7 +692,7 @@ namespace engine::bake {
 			bool Take(size_t count, std::string &failure) {
 				if (count > Points) {
 					failure = "svg: past " + std::to_string(MAXIMUM_POINTS) +
-							  " flattened points — the drawing is too dense to rasterise";
+							  " flattened points - the drawing is too dense to rasterise";
 					Points = 0;
 					return false;
 				}
@@ -703,7 +703,7 @@ namespace engine::bake {
 			bool TakeFillWork(uint64_t count, std::string &failure) {
 				if (count > FillWork) {
 					failure = "svg: past " + std::to_string(MAXIMUM_FILL_WORK) +
-							  " units of fill work — the drawing is too many layers deep, or too "
+							  " units of fill work - the drawing is too many layers deep, or too "
 							  "dense, to rasterise";
 					FillWork = 0;
 					return false;
@@ -851,7 +851,7 @@ namespace engine::bake {
 		// **A, Q, T and S are refused by name.** An arc is a different
 		// parameterisation with three flag-driven branches in it, and a smooth
 		// or quadratic curve read as anything else is a curve of the wrong shape
-		// through the right endpoints — which is the "recognisably right and
+		// through the right endpoints - which is the "recognisably right and
 		// wrong everywhere" failure this file exists to avoid.
 		bool ReadPath(
 			std::string_view text,
@@ -1004,7 +1004,7 @@ namespace engine::bake {
 				}
 
 				failure = "svg: path command '" + std::string(1, command) +
-						  "' is refused — only M, L, H, V, C and Z are read, and arcs, quadratics and "
+						  "' is refused - only M, L, H, V, C and Z are read, and arcs, quadratics and "
 						  "smooth curves are not";
 				return false;
 			}
@@ -1025,7 +1025,7 @@ namespace engine::bake {
 		// per segment.** Compositing per segment double-blends every join, so a
 		// translucent stroke shows a darker dot at each corner; unioning under
 		// nonzero blends the whole stroke once. Every piece therefore has to wind
-		// the same way — see `AppendEllipse`.
+		// the same way - see `AppendEllipse`.
 		bool StrokeOutline(
 			const std::vector<SubPath> &shape,
 			double halfWidth,
@@ -1070,8 +1070,8 @@ namespace engine::bake {
 					out.push_back(std::move(quad));
 				}
 
-				// Round joins at every corner, and butt caps — which is SVG's
-				// default — at the two ends of an open run. A closed run has no
+				// Round joins at every corner, and butt caps - which is SVG's
+				// default - at the two ends of an open run. A closed run has no
 				// ends, so its start point is a corner like any other.
 				const size_t firstJoin = subPath.Closed ? 0u : 1u;
 				const size_t lastJoin = points.size() - 1;
@@ -1214,7 +1214,7 @@ namespace engine::bake {
 
 			// **The shape's own columns, not the canvas's.** Clearing and
 			// compositing a full row for a shape twelve pixels wide is what turns
-			// a drawing of many small shapes into canvas-area work per shape —
+			// a drawing of many small shapes into canvas-area work per shape -
 			// and it is what would make the budget below fire on files that are
 			// perfectly reasonable.
 			const int firstColumn = std::max(0, static_cast<int>(std::floor(minimumX)));
@@ -1244,7 +1244,7 @@ namespace engine::bake {
 			}
 
 			// Sorted by their top edge so a row only looks at the edges that
-			// reach it — over a drawing of many small shapes this is the
+			// reach it - over a drawing of many small shapes this is the
 			// difference between linear and quadratic.
 			std::sort(edges.begin(), edges.end(), [](const Edge &left, const Edge &right) {
 				return left.TopY < right.TopY;
@@ -1494,7 +1494,7 @@ namespace engine::bake {
 		// **After the root tag, and that ordering is the whole point.** A
 		// billion-laughs document is both a declaration and a swarm of
 		// references to it; scanning for the references first would refuse it
-		// while naming `&lol;` — which reads like a typo — instead of naming the
+		// while naming `&lol;` - which reads like a typo - instead of naming the
 		// `<!ENTITY>` that is the actual thing to remove. XML puts any
 		// declaration before the root, so by here the scanner has already met it.
 		//
@@ -1502,7 +1502,7 @@ namespace engine::bake {
 		// unescapes**: an attribute value is used exactly as written, so there is
 		// no point at which a reference would otherwise have been met. `.rbxmx`
 		// takes the other route for the reason `xml::ReadContent` gives, and the
-		// two must not be collapsed into one policy — `core/Xml.hpp` says what
+		// two must not be collapsed into one policy - `core/Xml.hpp` says what
 		// breaks either way round.
 		if (!CheckEntityReferences(whole, failure)) {
 			return false;
@@ -1573,8 +1573,8 @@ namespace engine::bake {
 		}
 
 		// **The raster target is the pipeline's, and only its fallback is the
-		// file's.** An SVG has no pixels — that is the whole of what makes it
-		// different from every other format here — so a caller that asked for a
+		// file's.** An SVG has no pixels - that is the whole of what makes it
+		// different from every other format here - so a caller that asked for a
 		// size gets exactly it, and a caller that asked for nothing gets what the
 		// document declared.
 		uint32_t canvasWidth = width;
@@ -1641,7 +1641,7 @@ namespace engine::bake {
 			if (scan == Scan::End) {
 				// A document that stops without closing its root still drew
 				// everything it named, and refusing it would refuse a file that
-				// is merely impolite — the rule `ReadImage`'s truncation case
+				// is merely impolite - the rule `ReadImage`'s truncation case
 				// already follows.
 				break;
 			}
@@ -1671,7 +1671,7 @@ namespace engine::bake {
 							   tag.Name == "path";
 			if (!shape && tag.Name != "g") {
 				failure = "svg: <" + std::string(tag.Name) +
-						  "> is not an element this rasterises — the whole list is svg, g, rect, circle, "
+						  "> is not an element this rasterises - the whole list is svg, g, rect, circle, "
 						  "ellipse, line, polyline, polygon and path";
 				return false;
 			}
@@ -1720,7 +1720,7 @@ namespace engine::bake {
 						return false;
 					}
 					if (Find(attributes, "rx") != nullptr || Find(attributes, "ry") != nullptr) {
-						failure = "svg: <rect> carries 'rx' or 'ry' — rounded corners are elliptical arcs, "
+						failure = "svg: <rect> carries 'rx' or 'ry' - rounded corners are elliptical arcs, "
 								  "which are refused";
 						return false;
 					}
@@ -1730,7 +1730,7 @@ namespace engine::bake {
 						}
 						SubPath box;
 						box.Closed = true;
-						// Clockwise in image space, matching every other piece —
+						// Clockwise in image space, matching every other piece -
 						// see `AppendEllipse`.
 						box.Points = {
 							{x, y},

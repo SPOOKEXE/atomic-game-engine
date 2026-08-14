@@ -36,7 +36,7 @@ namespace engine::assets {
 		// row with a source column now, so the two answers cannot disagree.
 		//
 		// A name with no extension, or one the table has no row for, is
-		// `ContentForm::Unknown` — not a source, so readable, which is the
+		// `ContentForm::Unknown` - not a source, so readable, which is the
 		// answer this function has always given it.
 		return !IsSourceForm(FormOfName(name));
 	}

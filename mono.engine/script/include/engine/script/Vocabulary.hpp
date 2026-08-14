@@ -5,14 +5,14 @@
 // **Read out of a live VM rather than written down beside it.** Every global
 // this engine installs is one of about thirty `lua_setglobal` calls and twenty
 // five `JS_SetPropertyStr` calls spread across fifteen source files, and there
-// is no table of them anywhere — so a list here would be a fourth copy after
+// is no table of them anywhere - so a list here would be a fourth copy after
 // the two VMs and `mono.tools/bindings`' prelude strings, and the one nobody
 // would regenerate.
 //
 // This module has already paid for that mistake twice, and both are recorded
 // where they happened. `LuauValues.cpp` carries `Magnitude` and `Unit`, which
 // `engine.d.luau` promised for two versions while the run time answered
-// "Vector3 has no member 'Unit'" — a script that typechecked clean and failed
+// "Vector3 has no member 'Unit'" - a script that typechecked clean and failed
 // anyway, invisible to `bindings-check` because it compares the declarations
 // against the *class table* and a value type's members are in neither.
 // `JsSurface.cpp` carries a hand-written `10` on a list of sixteen methods,
@@ -24,8 +24,8 @@
 // removed stops being offered in the same commit.
 //
 // **What cannot be walked is said rather than guessed, and there is one of
-// those.** A member reached through an `__index` *function* — `Vector3.Unit`,
-// `Rect.Width`, `game.Workspace`, `part.Changed` — is a string comparison
+// those.** A member reached through an `__index` *function* - `Vector3.Unit`,
+// `Rect.Width`, `game.Workspace`, `part.Changed` - is a string comparison
 // rather than an entry in a table, and nothing can enumerate a branch. Instance
 // *methods* are fine: they live in a real table, Luau's in the registry under
 // `engine.instance.methods` and JavaScript's in `__instanceMethods`, so a walk
@@ -53,7 +53,7 @@ namespace engine::script {
 	//
 	// **Three cases and not a type system.** A walk of a global table can tell
 	// a function from a container from a plain value, and that is genuinely
-	// everything it can tell — anything finer would be a guess dressed as a
+	// everything it can tell - anything finer would be a guess dressed as a
 	// fact.
 	//
 	// @since v0.14
@@ -64,7 +64,7 @@ namespace engine::script {
 		// Holds members worth offering after a dot. `task`, `math`, `Enum`.
 		Container,
 
-		// Anything else — a number, a string, an instance, a userdata.
+		// Anything else - a number, a string, an instance, a userdata.
 		Value,
 	};
 
@@ -85,7 +85,7 @@ namespace engine::script {
 		// **The two are not distinguished, deliberately.** A table whose members
 		// come from an `__index` function and a table with nothing in it both
 		// answer nothing to a walk, and inventing a third state would mean
-		// claiming to know which — the guess this file exists to avoid.
+		// claiming to know which - the guess this file exists to avoid.
 		std::vector<std::string> Members;
 	};
 
@@ -117,11 +117,11 @@ namespace engine::script {
 
 	// Names a walk finds that an editor should not offer.
 	//
-	// Two kinds, and both would be worse than an absence. **Refusal stubs** —
-	// `wait`, `spawn`, `delay`, `loadstring`, `getfenv`, `setfenv` — exist so
+	// Two kinds, and both would be worse than an absence. **Refusal stubs** -
+	// `wait`, `spawn`, `delay`, `loadstring`, `getfenv`, `setfenv` - exist so
 	// that a script written elsewhere fails with a sentence instead of "attempt
 	// to call a nil value"; offering one is offering a name that always throws.
-	// **Internals** — JavaScript's `__instanceMethods`, Luau's `_G` — are
+	// **Internals** - JavaScript's `__instanceMethods`, Luau's `_G` - are
 	// reachable but are not surface anybody should be writing against.
 	//
 	// @param language Which VM's surface.
@@ -140,7 +140,7 @@ namespace engine::script {
 	// code, and the only thing that would have said so was somebody re-reading a
 	// comment.
 	//
-	// `just bindings-check` is what closes it now — the generator builds both
+	// `just bindings-check` is what closes it now - the generator builds both
 	// unions from this list, so a new status that has not reached the checked-in
 	// declarations fails the check by name.
 	//

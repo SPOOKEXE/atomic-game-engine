@@ -79,7 +79,7 @@ namespace studio {
 
 		// The old entity's reverse row goes first. Leaving it would let `Track`
 		// hand out this id for a handle that has been recycled into something
-		// else entirely — the store reuses indices, so a stale reverse row is
+		// else entirely - the store reuses indices, so a stale reverse row is
 		// not merely useless but actively wrong.
 		if (const auto previous = Entities.find(id.Value); previous != Entities.end()) {
 			Ids.erase(previous->second);
@@ -174,7 +174,7 @@ namespace studio {
 		Open.DepthAtStart = Done.size();
 
 		// A recording is a new action, so the branch that had been undone is
-		// not reachable any more — the same rule `Push` applies.
+		// not reachable any more - the same rule `Push` applies.
 		Undone.clear();
 		Cut = Done.size();
 
@@ -213,7 +213,7 @@ namespace studio {
 
 		case FinishOperation::Append: {
 			// Folded into the waypoint before it. Nothing moves and nothing is
-			// re-applied — the commands are already in order and already
+			// re-applied - the commands are already in order and already
 			// applied, so all that changes is which step one undo reverses.
 			if (finished.DepthAtStart > 0) {
 				const uint64_t into = Done[finished.DepthAtStart - 1].Waypoint;
@@ -233,7 +233,7 @@ namespace studio {
 		}
 
 		// **Published on commit and on append, and not on cancel.** A peer has
-		// to be told about an appended recording — the changes happened — and
+		// to be told about an appended recording - the changes happened - and
 		// must not be told about a cancelled one, because the rollback above
 		// already put everything back and there is nothing for them to apply.
 		if (operation != FinishOperation::Cancel && Listener.Committed &&
@@ -256,7 +256,7 @@ namespace studio {
 			Command command = std::move(Done.back());
 			Done.pop_back();
 			if (!Apply(command, false)) {
-				ENGINE_WARN("could not roll back '{}' — its subject is gone", command.Description);
+				ENGINE_WARN("could not roll back '{}' - its subject is gone", command.Description);
 			}
 		}
 		Replaying = wasReplaying;
@@ -275,8 +275,8 @@ namespace studio {
 		}
 
 		// **Merges everything since the previous cut into one step and names
-		// it.** That is Roblox's semantics — changes between two waypoints are
-		// one undo — expressed over a log whose default is one command per
+		// it.** That is Roblox's semantics - changes between two waypoints are
+		// one undo - expressed over a log whose default is one command per
 		// step. A plugin that writes forty properties and then calls this gets
 		// one Ctrl+Z; the editor, which never calls it, is unaffected, and that
 		// asymmetry is the point rather than an oversight.
@@ -301,7 +301,7 @@ namespace studio {
 
 	void CommandLog::ResetWaypoints() {
 		// Nothing is reverted. This establishes a floor rather than restoring
-		// one — what it is for is the moment after a load or a save, where
+		// one - what it is for is the moment after a load or a save, where
 		// reaching back past the current state means reaching into a document
 		// that is no longer open.
 		Done.clear();
@@ -468,7 +468,7 @@ namespace studio {
 				if (rebuilding) {
 					// The parent may itself have been rebuilt since, which is
 					// what the id table is for. A parent that no longer resolves
-					// rebuilds as a root rather than refusing — the subtree is
+					// rebuilds as a root rather than refusing - the subtree is
 					// still the author's work and losing it to a missing parent
 					// would be the delete-nobody-asked-for this log exists to
 					// undo.
@@ -565,12 +565,12 @@ namespace studio {
 
 			// **A command whose subject has gone is dropped, not retried.** The
 			// alternative is applying it to whatever now occupies the row, and
-			// the store reuses indices — so the wrong instance is not a remote
+			// the store reuses indices - so the wrong instance is not a remote
 			// possibility but the ordinary case.
 			if (Apply(command, false)) {
 				landed++;
 			} else {
-				ENGINE_WARN("nothing to undo for '{}' — its subject is gone", command.Description);
+				ENGINE_WARN("nothing to undo for '{}' - its subject is gone", command.Description);
 			}
 
 			// **Kept on the redo stack even when it did not land**, so a group
@@ -604,7 +604,7 @@ namespace studio {
 		const bool wasReplaying = Replaying;
 		Replaying = true;
 
-		// Forwards, which is the order they were made in — the reverse of the
+		// Forwards, which is the order they were made in - the reverse of the
 		// order `Undo` reversed them in, and the reason `Undone` holds them
 		// newest-last.
 		size_t landed = 0;
@@ -616,7 +616,7 @@ namespace studio {
 			if (Apply(command, true)) {
 				landed++;
 			} else {
-				ENGINE_WARN("nothing to redo for '{}' — its subject is gone", command.Description);
+				ENGINE_WARN("nothing to redo for '{}' - its subject is gone", command.Description);
 			}
 
 			named = command.Description;
@@ -643,7 +643,7 @@ namespace studio {
 		// The ids the dropped commands referred to go too. An `EditId` left
 		// bound to a handle in a destroyed world is a row that `Track` could
 		// hand back for an entity the store has since recycled into something
-		// else — the same reasoning as `Rebind`'s reverse-row erase.
+		// else - the same reasoning as `Rebind`'s reverse-row erase.
 		const auto forgetIds = [this](const Command &command) {
 			for (const EditId id : {command.Subject, command.OldParent, command.NewParent}) {
 				if (!id) {

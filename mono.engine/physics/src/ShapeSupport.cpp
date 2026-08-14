@@ -19,7 +19,7 @@ namespace engine::physics {
 		// Below it there is no radial direction to build a rim from, and
 		// normalising would produce a NaN that reaches every later clip. The
 		// fallback is the cylinder's own local X, which is deterministic and
-		// exactly as good — a cap seen end-on has no preferred rim vertex.
+		// exactly as good - a cap seen end-on has no preferred rim vertex.
 		constexpr float RADIAL_EPSILON = 1.0e-6f;
 
 		// A cylinder's local X and Z, as world directions perpendicular to its
@@ -45,7 +45,7 @@ namespace engine::physics {
 
 		// The face of a box whose outward normal is closest to `direction`.
 		//
-		// `shape.Axis` is right-handed, so `X.Cross(Y) == Z` — which is what the
+		// `shape.Axis` is right-handed, so `X.Cross(Y) == Z` - which is what the
 		// face winding below relies on to point its edge planes inward.
 		SupportFeature BoxFace(const ShapeInstance &shape, const core::Vector3 &direction) {
 			size_t best = 0;
@@ -182,7 +182,7 @@ namespace engine::physics {
 
 		// Unreachable for a value that came from the enum. A `ShapeKind` read
 		// off a wire and corrupted gets zero reach, so it separates from
-		// everything rather than producing a contact with a made-up depth —
+		// everything rather than producing a contact with a made-up depth -
 		// the same instinct as `ShapeWorldBounds`, aimed the other way because
 		// here the conservative answer is "no contact" rather than "a bigger
 		// box".
@@ -226,7 +226,7 @@ namespace engine::physics {
 		case scene::ShapeKind::Sphere: {
 			// One point, and that is not a limitation to work around. A sphere
 			// touches a plane at exactly one place, so a manifold with more
-			// points would be inventing constraints — and a ball resting on a
+			// points would be inventing constraints - and a ball resting on a
 			// floor is *supposed* to be free to roll.
 			SupportFeature feature;
 			feature.Plane = direction;

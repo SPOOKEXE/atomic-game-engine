@@ -17,14 +17,14 @@ namespace engine::physics {
 		const float delta = store.Time().Delta;
 
 		// `const Motion`, so the query cannot be widened into one that writes
-		// velocity — that is the solver's job and it runs in another phase. No
+		// velocity - that is the solver's job and it runs in another phase. No
 		// `RigidBody` term: this loads no mass, which is the reason the two
 		// components are separate at all.
 		//
 		// Nothing marks the transforms changed. `Store::MarkAllChanged` claims
 		// *every* row carrying `Transform` moved, including the anchored ones,
 		// and `SyncBroadphase` reads those same stamps to decide whether static
-		// geometry has to be re-indexed — so over-reporting here would rebuild
+		// geometry has to be re-indexed - so over-reporting here would rebuild
 		// the static index every tick, forever. A consumer that needs a
 		// replication delta out of an integrated world marks it in its own
 		// publish step, where the claim belongs.

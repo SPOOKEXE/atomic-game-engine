@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://json.schemastore.org/clang-format-21.x.json
 #
 # **Written for clang-format 21, and the tool has no field to say so.** The
-# major is pinned in one place — `clang_format_major` in the `Justfile` — and
+# major is pinned in one place - `clang_format_major` in the `Justfile` - and
 # `just format` refuses anything else rather than taking whichever binary
 # answered first. Two majors do not agree on this file: include grouping and the
 # wrapping of a long call both differ, so an unpinned run reformats sources

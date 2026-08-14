@@ -32,13 +32,13 @@ namespace engine::script {
 		} REFUSED[] = {
 			{".tsx",
 			 "TypeScript is turned into JavaScript before it runs, and the JavaScript runtime "
-			 "has no debug hook — see D00106"},
+			 "has no debug hook - see D00106"},
 			{".ts",
 			 "TypeScript is turned into JavaScript before it runs, and the JavaScript runtime "
-			 "has no debug hook — see D00106"},
-			{".mjs", "the JavaScript runtime has no debug hook — see D00106"},
-			{".cjs", "the JavaScript runtime has no debug hook — see D00106"},
-			{".js", "the JavaScript runtime has no debug hook — see D00106"},
+			 "has no debug hook - see D00106"},
+			{".mjs", "the JavaScript runtime has no debug hook - see D00106"},
+			{".cjs", "the JavaScript runtime has no debug hook - see D00106"},
+			{".js", "the JavaScript runtime has no debug hook - see D00106"},
 		};
 
 		for (const auto &refused : REFUSED) {
@@ -55,7 +55,7 @@ namespace engine::script {
 	bool Debugger::Add(std::string source, int line, BreakAction action) {
 		if (!BreakpointsRefused(source).empty()) {
 			// **Refused here rather than at every caller**, so a dead breakpoint
-			// cannot reach the list through any path — including `Adopt`, which
+			// cannot reach the list through any path - including `Adopt`, which
 			// copies a list somebody else built.
 			return false;
 		}
@@ -133,7 +133,7 @@ namespace engine::script {
 		// **The oldest goes, not the newest.** A breakpoint in a loop produces
 		// hits faster than anybody reads them, and keeping the first sixty-four
 		// would mean the panel filled up in the first tick and then showed
-		// nothing that happened afterwards — which is the opposite of what
+		// nothing that happened afterwards - which is the opposite of what
 		// somebody watching a loop wants.
 		if (Caught.size() >= MAXIMUM_HITS) {
 			Caught.erase(Caught.begin());

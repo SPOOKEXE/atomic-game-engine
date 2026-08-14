@@ -83,7 +83,7 @@ namespace studio {
 			return projection;
 		}
 
-		// The camera this panel is looking through, as it stands *now* — which
+		// The camera this panel is looking through, as it stands *now* - which
 		// is after `DriveCamera` and is therefore the camera `PresentWorld` is
 		// about to render with.
 		const ViewportState *extra = ExtraAt(viewport);
@@ -101,7 +101,7 @@ namespace studio {
 		const Entity follow = extra != nullptr ? extra->Follow : FollowCamera;
 
 		// A followed camera brings its own field of view, exactly as
-		// `PresentWorld` honours it — looking through a camera while ignoring
+		// `PresentWorld` honours it - looking through a camera while ignoring
 		// its lens is looking through something else.
 		if (follow != NULL_ENTITY && shown.IsValid() && Universe != nullptr) {
 			Universe->Enter(shown, [&](Store &store) {
@@ -115,8 +115,8 @@ namespace studio {
 
 		// **A client view is drawn from the client's own camera, so the overlay
 		// has to be too.** `PresentWorld` reads a replica's `ActiveCamera` back
-		// after presenting it — a replica holding a character places its eye
-		// behind the body and `AimReplicaViewer` steps aside — and this
+		// after presenting it - a replica holding a character places its eye
+		// behind the body and `AimReplicaViewer` steps aside - and this
 		// projection was still the editor's free camera. Everything built from
 		// it was therefore aimed somewhere the panel was not looking: the grid
 		// slid across the floor as the player walked, the selection outline sat
@@ -125,7 +125,7 @@ namespace studio {
 		//
 		// **Read rather than resolved.** `AimReplicaViewer` writes, and an
 		// overlay pass that placed a camera would be a second author of the
-		// eye — running in the imgui half of the frame, where the store is being
+		// eye - running in the imgui half of the frame, where the store is being
 		// read by three other passes.
 		if (shown.IsValid() && Universe != nullptr && IsReplicaWorld(shown)) {
 			Universe->Enter(shown, [&](Store &store) {
@@ -171,8 +171,8 @@ namespace studio {
 
 	void Editor::DrawViewportOverlays() {
 		// **One projection per panel, resolved once and shared by everything
-		// below.** Three passes want it — the gizmo, the pending pick, and the
-		// grid and outline — and each `ProjectionFor` is a `glm::inverse`, a
+		// below.** Three passes want it - the gizmo, the pending pick, and the
+		// grid and outline - and each `ProjectionFor` is a `glm::inverse`, a
 		// `glm::perspective`, a matrix product and, for a followed camera, a
 		// `Universe::Enter` that builds two `std::function`s. Resolving it once
 		// per panel per frame turns two-and-a-bit computations into one.
@@ -185,7 +185,7 @@ namespace studio {
 		//
 		// **This is not the cached world state `mono.studio/AGENTS.md` forbids.**
 		// A local dies at the end of this function, so nothing here can be one
-		// frame stale — it cannot outlive the frame that read the camera. The
+		// frame stale - it cannot outlive the frame that read the camera. The
 		// rule is about a panel keeping a copy of something the store owns
 		// *between* frames; a value read once and used three times inside one
 		// frame is the same read the three call sites were each making.
@@ -199,7 +199,7 @@ namespace studio {
 		}
 
 		// **The gizmo goes first, and it can swallow the pending pick.** A
-		// click that lands on a handle is a drag, not a selection — and which
+		// click that lands on a handle is a drag, not a selection - and which
 		// it is cannot be known in `DrawViewport`, because the handle's screen
 		// position comes from a projection that is only correct after
 		// `DriveCamera`. So the click is recorded there and adjudicated here.
@@ -289,7 +289,7 @@ namespace studio {
 			// `Play` still simulate a world the author owns and keeps placing
 			// things in, and Roblox's studio keeps its grid through both for the
 			// same reason. The author who wants the clean picture turns
-			// `ShowGrid` off, which is one click and already exists — the mode
+			// `ShowGrid` off, which is one click and already exists - the mode
 			// does not need to decide it for them.
 			//
 			// Per scene rather than per universe, like everything else about
@@ -344,7 +344,7 @@ namespace studio {
 				}
 
 				// The origin axes, in the conventional colours: X red, Z blue.
-				// Y is not drawn along the ground because it is not on it —
+				// Y is not drawn along the ground because it is not on it -
 				// a vertical line at the origin instead, so "up" has a mark.
 				const float reachAxis = GRID_RADIUS * GRID_STEP;
 				segment(
@@ -427,7 +427,7 @@ namespace studio {
 						// **A box says nothing about its orientation.** Two
 						// parts sitting identically may be turned a quarter
 						// apart, and nothing in the outline distinguishes them
-						// — which matters the moment anything is placed by
+						// - which matters the moment anything is placed by
 						// script, welded, or driven along its own look.
 						//
 						// So: a line out of the front face to a ball, and a
@@ -585,7 +585,7 @@ namespace studio {
 		// **Every ray measurement is made from where the drag began, not from
 		// where the selection is now.** `Grabbed` is a distance along the axis
 		// from the centre at grab time, and a live centre has already moved by
-		// the delta being applied — so the next frame measures nothing, puts
+		// the delta being applied - so the next frame measures nothing, puts
 		// everything back, and the frame after measures the full delta again.
 		// That is the flicker between the old and the new position, and this
 		// line is the fix. See `GizmoDrag::Centre`.
@@ -595,8 +595,8 @@ namespace studio {
 		// **Two arms per axis since v0.13.** One arm is a handle you cannot
 		// reach from half the angles a person orbits to: the negative side of
 		// the part faces you and there is nothing on it to grab. Both arms of a
-		// move do the same thing — the delta is measured along the axis either
-		// way — and both arms of a scale differ only in which face grows, which
+		// move do the same thing - the delta is measured along the axis either
+		// way - and both arms of a scale differ only in which face grows, which
 		// is what `GizmoDrag::Sign` carries.
 		//
 		// A rotate ring is already both-sided, so it takes none of this.
@@ -716,7 +716,7 @@ namespace studio {
 
 				// **Lit per arm, not per axis.** Both arms of an axis do the
 				// same thing to a move, but the one under the cursor is the one
-				// a person is about to take hold of — and for a scale in
+				// a person is about to take hold of - and for a scale in
 				// `ScaleSide::Side` they genuinely differ, so highlighting the
 				// pair would be the manipulator lying about which face grows.
 				const int sign = static_cast<int>(SIGN_OF[side]);
@@ -749,7 +749,7 @@ namespace studio {
 		// **Built only when something below will read it.** `PanelToRay`
 		// inverts the matrix, and `Projection.cpp` declines to cache that
 		// inverse on the grounds that a panel issues one ray per click rather
-		// than one per pixel — which was true of the ray's *consumers* and not
+		// than one per pixel - which was true of the ray's *consumers* and not
 		// of this line, which ran every frame for every panel with a selection
 		// in it. The guard is what makes the premise hold again.
 		//
@@ -935,7 +935,7 @@ namespace studio {
 								// while every part spun.
 								//
 								// Translate to the centre, turn, translate back
-								// — which is the composition, written out,
+								// - which is the composition, written out,
 								// rather than a position and an orientation
 								// computed separately and hoped to agree.
 								const glm::quat spin =
@@ -973,7 +973,7 @@ namespace studio {
 								switch (Dragging.Sides) {
 								case ScaleSide::Side:
 									// One face moves by `growth`, so the half
-									// gains half of it — and the centre has to
+									// gains half of it - and the centre has to
 									// move the same amount, or the other face
 									// would move too. That shift is applied
 									// below.
@@ -1020,8 +1020,8 @@ namespace studio {
 
 								// **Along the part's own axis, not the world
 								// one.** The size that changed is a local
-								// component — `grown.X` is the part's X however
-								// it is turned — so the centre has to move
+								// component - `grown.X` is the part's X however
+								// it is turned - so the centre has to move
 								// along the same local direction or a rotated
 								// part would slide sideways as it grew.
 								if (Dragging.Sides == ScaleSide::Side) {
@@ -1034,7 +1034,7 @@ namespace studio {
 
 								// **Through the property, not onto the component.**
 								// This wrote `Bounds` directly, and `Size` is
-								// declared as writing `Bounds` *and* `Collider` —
+								// declared as writing `Bounds` *and* `Collider` -
 								// `scene::SizeProperty` says why in as many
 								// words: a setter that moves only the first
 								// leaves a part drawn at one size and collided at
@@ -1045,7 +1045,7 @@ namespace studio {
 								//
 								// `Size` is the full extent over a stored half,
 								// which is the same conversion the undo command
-								// below makes — and making both go through the
+								// below makes - and making both go through the
 								// property is what keeps them one answer.
 								const Vector3 full = grown * 2.0f;
 								(void)store.SetProperty(
@@ -1071,12 +1071,12 @@ namespace studio {
 				}
 			} else {
 				// Released. One command for the whole drag, and only when it
-				// actually moved something — see `GizmoDrag`.
+				// actually moved something - see `GizmoDrag`.
 				if (Dragging.Moved && Commands != nullptr) {
 					// **Which property the command names has to match what the
 					// drag changed.** A scale that recorded a `CFrame` would
 					// undo by restoring a position nothing had moved, and leave
-					// the size it actually changed exactly where it was — an
+					// the size it actually changed exactly where it was - an
 					// undo that reports success and reverses nothing.
 					const bool scaling = Dragging.Mode == ToolMode::Scale;
 					const engine::core::Name property(
@@ -1089,7 +1089,7 @@ namespace studio {
 
 					// **One waypoint for the whole drag.** Without this each
 					// property recorded is its own undo step, so dragging five
-					// parts took five presses of Ctrl+Z to put back — and a
+					// parts took five presses of Ctrl+Z to put back - and a
 					// one-sided resize, which writes a size *and* a placement
 					// for every part, took ten. A drag is one action to the
 					// person who made it.
@@ -1124,7 +1124,7 @@ namespace studio {
 
 								// `Size` is the full extent and `Bounds` holds
 								// the half, which is the conversion
-								// `scene::Part` already makes — recording the
+								// `scene::Part` already makes - recording the
 								// half under the full name would halve the part
 								// on undo.
 								before.Type = engine::ecs::PropertyType::Vector3;
@@ -1221,7 +1221,7 @@ namespace studio {
 					// locking a wall was for.
 					//
 					// `Visual` rather than a set the editor keeps: locking is
-					// authoring data that survives a save — see
+					// authoring data that survives a save - see
 					// `scene::Visual::Locked`.
 					if (const auto *visual = store.Get<engine::scene::Visual>(entity);
 						visual != nullptr && visual->Locked) {
@@ -1281,7 +1281,7 @@ namespace studio {
 
 		if (!holding) {
 			// **Past the threshold, not on the press.** A click is a selection
-			// and a drag is a move, and imgui already draws that line — the
+			// and a drag is a move, and imgui already draws that line - the
 			// pick in `DrawViewport` is recorded only for a release that never
 			// crossed it, so the two cannot both fire.
 			if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left) || !panel.ContainsPanel(cursor)) {
@@ -1292,7 +1292,7 @@ namespace studio {
 				return false;
 			}
 
-			// The part under where the drag *began*, not under the cursor now —
+			// The part under where the drag *began*, not under the cursor now -
 			// by the time this fires the pointer has already moved, and picking
 			// from where it is would grab whatever it happened to have travelled
 			// over.
@@ -1302,7 +1302,7 @@ namespace studio {
 			);
 
 			// A drag that began outside this panel is somebody else's gesture
-			// arriving over the top of it — a slider released across the
+			// arriving over the top of it - a slider released across the
 			// viewport, most often.
 			const glm::vec2 from(began.x, began.y);
 			if (!panel.ContainsPanel(from)) {
@@ -1356,7 +1356,7 @@ namespace studio {
 		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
 			if (SurfaceDragging.Moved && Commands != nullptr) {
 				// One waypoint for the whole drag, exactly as the gizmo's
-				// release does — a drag is one action to the person who made it
+				// release does - a drag is one action to the person who made it
 				// however many parts it carried.
 				const std::optional<std::string> group = Commands->TryBeginRecording("Move", "Move");
 
@@ -1540,11 +1540,11 @@ namespace studio {
 		// **imgui owns the mouse whenever it is over its own chrome**, and a
 		// panel docked over the viewport is exactly that. Without this the
 		// game's UI would receive clicks meant for the explorer sitting on top
-		// of it — the keyboard twin of which `DrawShortcuts` already fixed.
+		// of it - the keyboard twin of which `DrawShortcuts` already fixed.
 		//
 		// **And it owns the mouse while an item is held, which used to swallow
 		// every press.** `IsWindowHovered` is false whenever *any* item is
-		// active — imgui's `g.ActiveId != 0` test — and the item active through
+		// active - imgui's `g.ActiveId != 0` test - and the item active through
 		// a click in the viewport is this panel's own `##surface`, the button
 		// `DrawViewport` lays over the image so the camera can be driven. So on
 		// the frame the mouse went down, `Inside` went false, `Pick` found
@@ -1553,7 +1553,7 @@ namespace studio {
 		//
 		// **This panel's own drag is the one blocked item worth seeing
 		// through**, rather than `AllowWhenBlockedByActiveItem`, which would
-		// see through all of them — a slider being dragged in the properties
+		// see through all of them - a slider being dragged in the properties
 		// panel is imgui's mouse and the game's UI should not light up under it
 		// on the way past.
 		const ViewportState *held = ExtraAt(index);
@@ -1570,7 +1570,7 @@ namespace studio {
 			// **Per panel, because a panel is a canvas with its own camera.**
 			// A billboard is as many pixels across as the viewport it is
 			// projected into makes it, so two panels looking at one world from
-			// two distances are *supposed* to disagree — which is why this is
+			// two distances are *supposed* to disagree - which is why this is
 			// resolved here rather than once for the world.
 			//
 			// Before `Rebuild`, which runs the layout inside itself.
@@ -1596,7 +1596,7 @@ namespace studio {
 		// it is allowed to know about.
 		//
 		// **Only for a world that is running**, because a runtime is what a
-		// `WorldRun` holds — an edit-mode viewport routes and paints so that
+		// `WorldRun` holds - an edit-mode viewport routes and paints so that
 		// hover and press shades behave while authoring, and there is no VM to
 		// tell. That is the same split `RunMode` already draws everywhere else.
 		if (!events.empty()) {
@@ -1618,13 +1618,13 @@ namespace studio {
 
 		// **The hook `ui::ImageSource` exists for, connected.** `engine::ui` is
 		// the editor's toolkit and has no business resolving a game's content
-		// names — so it takes this, and until v0.10 nothing supplied one and
+		// names - so it takes this, and until v0.10 nothing supplied one and
 		// every `ImageLabel` in a viewport panel drew the missing-image marker
 		// whatever had loaded. The seam was right and one end of it was never
 		// connected; `client::Client` had the same gap on its own pass.
 		//
 		// **The size travels with the handle** because a nine-sliced or tiled
-		// image is laid out in source pixels — `Renderer::TextureSize` says why.
+		// image is laid out in source pixels - `Renderer::TextureSize` says why.
 		engine::ui::ImageSource images;
 		images.Resolve = [this](const engine::core::Name &name) -> engine::ui::ImageSource::Resolved {
 			engine::ui::ImageSource::Resolved resolved;
@@ -1643,7 +1643,7 @@ namespace studio {
 
 			// **The editor's own clock, not the world's.** A world paused in the
 			// editor is still a world somebody is looking at, and its interface
-			// should go on animating — the same reason a paused game's menus do.
+			// should go on animating - the same reason a paused game's menus do.
 			const engine::render::FlipbookCell cell = Renderer.TextureCell(name, AnimationSeconds);
 			resolved.CellMin = ImVec2(cell.OffsetU, cell.OffsetV);
 			resolved.CellMax = ImVec2(cell.OffsetU + cell.Scale, cell.OffsetV + cell.Scale);

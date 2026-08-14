@@ -7,8 +7,8 @@ namespace engine::input {
 
 	KeyCode KeyOf(SDL_Keycode code) {
 		// **A switch and not a table indexed by keycode.** SDL's keycodes are not
-		// dense — the letters are their ASCII values and the function keys are up
-		// past 0x40000000 — so an array would be four gigabytes or a hash. A
+		// dense - the letters are their ASCII values and the function keys are up
+		// past 0x40000000 - so an array would be four gigabytes or a hash. A
 		// switch compiles to a jump table over the dense run and compares over the
 		// rest, which is what a compiler is for.
 		switch (code) {
@@ -204,7 +204,7 @@ namespace engine::input {
 		case SDL_EVENT_KEY_DOWN:
 		case SDL_EVENT_KEY_UP: {
 			// **A repeat is not an edge.** SDL sends key-down again while a key is
-			// held, and setting the bit again is harmless — but it is worth
+			// held, and setting the bit again is harmless - but it is worth
 			// skipping rather than relying on that, because a future edge derived
 			// from anything other than the two bitsets would fire once per repeat.
 			if (event.key.repeat != 0) {
@@ -218,7 +218,7 @@ namespace engine::input {
 			Current.Down.Set(key, event.type == SDL_EVENT_KEY_DOWN);
 
 			// **Set on the release as well as the press**, because letting go of
-			// a key is the keyboard speaking too — a place that swapped its
+			// a key is the keyboard speaking too - a place that swapped its
 			// prompts on the press and swapped them back on the release would
 			// flicker every time somebody walked.
 			Current.LastSource = scene::InputSource::Keyboard;
@@ -227,9 +227,9 @@ namespace engine::input {
 
 		case SDL_EVENT_TEXT_INPUT:
 			// **Appended whole, because one byte is not one character.** SDL
-			// hands over the composed UTF-8 a keystroke produced — one byte for
+			// hands over the composed UTF-8 a keystroke produced - one byte for
 			// `a`, two for `é`, four for an emoji, and more than one character
-			// at once when an input method commits a word — so anything here
+			// at once when an input method commits a word - so anything here
 			// that took a byte at a time, or assumed one event was one letter,
 			// would cut a codepoint in half the first time somebody typed in
 			// their own language.
@@ -268,7 +268,7 @@ namespace engine::input {
 
 			// **The button and not `MouseButton1` for all three**, because
 			// `InputSource` shares its first three ordinals with `MouseButton` by
-			// construction — see the `static_assert`s in `scene/Input.cpp` — so a
+			// construction - see the `static_assert`s in `scene/Input.cpp` - so a
 			// right-click reports as `MouseButton2` and a script asking which
 			// device is live gets the one it saw in `InputBegan`.
 			Current.LastSource = static_cast<scene::InputSource>(button);

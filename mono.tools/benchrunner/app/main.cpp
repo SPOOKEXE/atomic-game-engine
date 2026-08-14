@@ -1,7 +1,7 @@
 // The selective benchmark runner.
 //
 // **The same runner, renamed.** Discovery, the cascading signature and the skip
-// cache are `Tool::testrunner`'s and are used here unchanged — that is the shim
+// cache are `Tool::testrunner`'s and are used here unchanged - that is the shim
 // the roadmap asks for, and it is the right shape for one reason: a second
 // implementation of "what could this change have affected" is a second thing to
 // keep correct, and the neglected one would be the one that silently stopped
@@ -63,7 +63,7 @@ namespace {
 		uint64_t Spread = 0;
 		uint64_t Iterations = 0;
 
-		// What one iteration is — `call` or `item`. See `BenchUnit`.
+		// What one iteration is - `call` or `item`. See `BenchUnit`.
 		std::string Unit;
 	};
 
@@ -213,7 +213,7 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 
-	// Inside the build directory, unlike the test runner's — and this is the
+	// Inside the build directory, unlike the test runner's - and this is the
 	// one place the two deliberately differ. A signature covers sources, not
 	// compiler flags, so the same benchmark built at -O0 and at -O2 signs
 	// identically and measures nothing like the same. A cache beside the
@@ -356,7 +356,7 @@ int main(int argc, char **argv) {
 
 			// A move smaller than this run's own spread is not a result. Saying
 			// so is the difference between a tool that measures and one that
-			// generates confident noise — and the counters below only count
+			// generates confident noise - and the counters below only count
 			// what survived the test, so "2 slower" means two that moved
 			// further than the measurement could explain.
 			if (std::abs(delta) <= noise) {

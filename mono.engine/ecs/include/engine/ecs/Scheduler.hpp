@@ -52,7 +52,7 @@ namespace engine::ecs {
 	// **Both halves are the contract, and the second one used to be denied.**
 	// This said "phase order is the only ordering contract" and that
 	// registration order "must not be used to express a dependency between
-	// systems in the same phase" — while `client::InstallPresentation` did
+	// systems in the same phase" - while `client::InstallPresentation` did
 	// exactly that, in four systems, and said so in its own comments: a pass
 	// that resolves a material runs before the pass that reads it, and a pass
 	// that decides what is drawn runs before the one that aims mirrors into it.
@@ -63,7 +63,7 @@ namespace engine::ecs {
 	// options were to make the scheduler sort by declared dependencies or to
 	// admit what it does. A dependency sort is a second mechanism for something
 	// insertion order already expresses exactly, and it would have to be
-	// declared at every one of those call sites to say the same thing — so this
+	// declared at every one of those call sites to say the same thing - so this
 	// is the admission. `ecs.scheduler`'s "systems in one phase run in the order
 	// they were added" is the test that holds it.
 	//
@@ -82,7 +82,7 @@ namespace engine::ecs {
 		// separate names.
 		//
 		// The signature is also the reason a system can be a plain function.
-		// Anything it needs is in the world, so there is nothing to capture —
+		// Anything it needs is in the world, so there is nothing to capture -
 		// and a system that captures nothing is one the L13 bindings can
 		// register, a recording can replay, and a second world can reuse.
 		using System = std::function<void(Store &)>;
@@ -115,7 +115,7 @@ namespace engine::ecs {
 		void Tick(Store &store, float deltaSeconds);
 
 		// Runs `first` through `last` inclusive, accumulating into the timings
-		// rather than replacing them. Advances no clock — the caller decides
+		// rather than replacing them. Advances no clock - the caller decides
 		// when time moves, which is the whole point of splitting the frame.
 		//
 		// This is what lets simulation and rendering advance at different

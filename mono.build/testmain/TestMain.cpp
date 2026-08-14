@@ -66,7 +66,7 @@ namespace {
 			const char *outcome = cases.failed > 0 ? "fail" : (cases.skipped > 0 ? "skip" : "pass");
 
 			// Microseconds, as an integer. A decimal here would put the report's
-			// numbers at the mercy of whatever locale the binary started in —
+			// numbers at the mercy of whatever locale the binary started in -
 			// half of Europe writes 1,5 and the runner splits on tabs, not
 			// commas, so it would parse and be wrong by a factor of ten.
 			m_stream << "case\t" << outcome << '\t' << stats.totals.assertions.passed << '\t'

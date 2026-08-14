@@ -3,7 +3,7 @@
 // Who is waiting for which child, and until which tick.
 //
 // **The shared half of `WaitForChild`, beside `DebrisQueue` and for its
-// reasons.** What a script is waiting for — a parent, a name and a deadline —
+// reasons.** What a script is waiting for - a parent, a name and a deadline -
 // names no VM, and what has to be one implementation is the order two waiters
 // answered on the same tick resume in: a script that waits for two children of
 // one parent should see them arrive in the order it asked, on every run of the
@@ -23,7 +23,7 @@
 //
 // - **`TakeTreeChanges` is a *take*.** Whichever pump drains it first empties
 //   it, so a second consumer of that list would be a second claim on one
-//   swap — and the tree pump is per language, where this is not.
+//   swap - and the tree pump is per language, where this is not.
 // - **A tree change is only recorded once something calls `ObserveTree`**, which
 //   is opt-in with no way back off. A `WaitForChild` in a world where nothing
 //   connected a tree signal would wait for a list nobody is filling, and making
@@ -34,7 +34,7 @@
 //   all. Asking the store is the question the script actually asked.
 //
 // The cost is a sibling walk per waiter per beat, and it is paid only while
-// something is waiting — `Empty` is the guard, and the ordinary state of a world
+// something is waiting - `Empty` is the guard, and the ordinary state of a world
 // is that nothing is.
 //
 // @tier L9 · shared
@@ -87,8 +87,8 @@ namespace engine::script {
 		// **Refuses rather than evicting when full, which is the opposite trade
 		// from `DebrisQueue` and the same one as `TweenTable`.** Dropping the
 		// oldest waiter would resume a script with nil for a child that was
-		// about to arrive — a wrong answer, silently, in the one case the method
-		// exists for — where refusing is an error at the call site of the script
+		// about to arrive - a wrong answer, silently, in the one case the method
+		// exists for - where refusing is an error at the call site of the script
 		// that filled the queue.
 		//
 		// @param parent  The instance whose children to watch.
@@ -129,7 +129,7 @@ namespace engine::script {
 		}
 
 		// **There is no `Cancel`, and nothing asks for one.** A script cannot
-		// abandon a `WaitForChild` — it is suspended inside the call — and a
+		// abandon a `WaitForChild` - it is suspended inside the call - and a
 		// world being torn down takes the VM's threads with it, which is
 		// `DebrisQueue`'s reason for having no `Clear`.
 
@@ -140,7 +140,7 @@ namespace engine::script {
 
 			// The name as the script spelled it, rather than a `core::Name`.
 			// Interning is process-wide and permanent, and a script may wait for
-			// a child that never arrives — so a typo would otherwise leave a row
+			// a child that never arrives - so a typo would otherwise leave a row
 			// in the registry for the life of the process.
 			std::string Name;
 
@@ -157,7 +157,7 @@ namespace engine::script {
 		// both are answered, and the walk is bounded by `MAXIMUM`.
 		std::vector<Wait> Waits;
 
-		// Starts at one, leaving zero to mean "no waiter" — the same convention
+		// Starts at one, leaving zero to mean "no waiter" - the same convention
 		// `LuauContext::NextHostCallback` uses.
 		uint64_t NextSequence = 1;
 	};

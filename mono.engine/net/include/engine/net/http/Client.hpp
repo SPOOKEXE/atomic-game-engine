@@ -11,7 +11,7 @@
 //
 // That is CDN.md §3's boundary. The origin may finish a transfer whenever it
 // likes; a world applies the result at the barrier, because a chunk that becomes
-// visible to a system mid-tick is a desync — two machines whose networks
+// visible to a system mid-tick is a desync - two machines whose networks
 // happened to differ would simulate different things. `AGENTS.md` rule 5 with no
 // exception, and this class is what makes obeying it the easy path.
 //
@@ -19,11 +19,11 @@
 // wants N groups streaming concurrently so a slow group does not hold up the
 // others and a dropped connection re-fetches one group rather than restarting
 // the run. Multiplexing them onto one socket would reintroduce exactly the
-// head-of-line blocking that arrangement exists to avoid — §9 leaves HTTP/2 or
+// head-of-line blocking that arrangement exists to avoid - §9 leaves HTTP/2 or
 // /3 open for the same question.
 //
 // **Every byte that arrives is hostile.** An origin is something anyone can run
-// — `repo_layout.md` §1 — so a response is bounded before it is buffered, and
+// - `repo_layout.md` §1 - so a response is bounded before it is buffered, and
 // what it decompresses to is bounded by the *signed manifest* rather than by
 // anything the origin said. That second check is the delivery client's;
 // this one bounds the transfer.
@@ -59,7 +59,7 @@ namespace engine::net::http {
 
 		// How many polls a fetch may go without progress before it fails.
 		//
-		// Counted in polls rather than wall time — `net/AGENTS.md`'s rule that
+		// Counted in polls rather than wall time - `net/AGENTS.md`'s rule that
 		// time is passed in rather than read, which is what lets the suite
 		// state a timeout instead of sleeping for one. Zero disables it.
 		uint32_t IdlePolls = 0;
@@ -131,7 +131,7 @@ namespace engine::net::http {
 		//
 		// @param to Where to send it.
 		// @param request What to ask for. `Host` is written from `host`.
-		// @param host The `Host` header's value — the name the origin is known
+		// @param host The `Host` header's value - the name the origin is known
 		//        by, which is not always the address it is reached at.
 		// @return A handle, or an invalid one when `MaximumOutstanding` is
 		//         reached or the endpoint cannot be addressed.
@@ -159,7 +159,7 @@ namespace engine::net::http {
 
 		// Abandons a fetch and closes its connection.
 		//
-		// **Cancellation is load-bearing, not a convenience** — the absence of
+		// **Cancellation is load-bearing, not a convenience** - the absence of
 		// it is what produces a game that hitches every time a player turns
 		// around, which is the sentence `cdn::Origin::Cancel` already carries.
 		//
@@ -172,7 +172,7 @@ namespace engine::net::http {
 
 		// How many body bytes have arrived over this client's life.
 		//
-		// The measurement that answers "did this actually travel compressed" —
+		// The measurement that answers "did this actually travel compressed" -
 		// which is a question about the wire, so it is counted at the wire.
 		virtual uint64_t ReceivedBytes() const = 0;
 	};

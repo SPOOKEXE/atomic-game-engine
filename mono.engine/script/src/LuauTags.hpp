@@ -4,7 +4,7 @@
 //
 // **Split out of `LuauBindings.hpp` because a tag is not a VM.** The block below
 // is a plain enum of ints, but it used to sit inside the umbrella header that
-// includes `<lua.h>` — so a *neutral* service surface naming its own tag, which
+// includes `<lua.h>` - so a *neutral* service surface naming its own tag, which
 // `UserInputService` and `SoundService` each have to, pulled the whole Luau API
 // into a translation unit that does not otherwise mention it. This header is
 // what those two include instead, and it is why they compile in a build that
@@ -21,10 +21,10 @@ namespace engine::script {
 
 	// Userdata tags. Luau checks these on every access, so a `Color3` handed to
 	// something expecting a `Vector3` is caught by the VM rather than by a
-	// reinterpret_cast that happens to line up — the two are three floats each.
+	// reinterpret_cast that happens to line up - the two are three floats each.
 	//
 	// **Values are explicit and must not be reordered.** Nothing serialises one,
-	// so this is not rule 4 — it is that a tag is compared against a userdata
+	// so this is not rule 4 - it is that a tag is compared against a userdata
 	// created earlier in the same process, and renumbering mid-edit is the kind
 	// of change that produces a type confusion nothing reports.
 	enum : int {
@@ -35,7 +35,7 @@ namespace engine::script {
 
 		// **Retired at v0.7, and the number is held down rather than reused.**
 		// This tagged `workspace`, back when `workspace` was the world itself
-		// rather than an instance in it. It is a `TAG_INSTANCE` now — see
+		// rather than an instance in it. It is a `TAG_INSTANCE` now - see
 		// `OpenWorkspace` for why the two notions were collapsed.
 		//
 		// Not deleted, because the paragraph above this enum gives the reason:
@@ -79,7 +79,7 @@ namespace engine::script {
 		//
 		// What changed is that a sequence is now a *property*: an emitter's
 		// `Transparency` is read back, and `emitter.Transparency.Keypoints[1]`
-		// handed back a bare `{time, value, envelope}` table — three anonymous
+		// handed back a bare `{time, value, envelope}` table - three anonymous
 		// numbers with no `typeof`, no way to tell one from a `ColorSequence`'s
 		// stop, and nothing to compare against. Reading a value back in a shape
 		// its own constructor accepts is the round trip a property surface owes,
@@ -95,7 +95,7 @@ namespace engine::script {
 		// **Because a table cannot hold a property that changes.** `luaL_sandbox`
 		// freezes the globals and enables `safeenv`, and Luau then compiles
 		// `Service.Field` on a constant global table into a `GETIMPORT` resolved
-		// once per closure — so `UserInputService.MouseBehavior` would read
+		// once per closure - so `UserInputService.MouseBehavior` would read
 		// whatever it was the first time a script asked, forever. A userdata's
 		// field access always goes through `__index`.
 		//
@@ -110,7 +110,7 @@ namespace engine::script {
 		// What an input signal hands its listener.
 		//
 		// **Roblox's `InputObject`, and the reason it is a userdata rather than
-		// a table is not `safeenv` this time** — it is that a table would be a
+		// a table is not `safeenv` this time** - it is that a table would be a
 		// value a handler could write into and hand on, and an input report is
 		// a fact about a frame rather than a document. The tag is also what
 		// makes `typeof` answer `"InputObject"`.
@@ -119,7 +119,7 @@ namespace engine::script {
 		// What `TweenService:Create` hands back.
 		//
 		// **A userdata of its own rather than the ordinary instance handle**,
-		// even though a tween *is* an entity — see `Tweens.hpp`. The neutral
+		// even though a tween *is* an entity - see `Tweens.hpp`. The neutral
 		// instance methods are installed flat on every instance, so a `Play`
 		// there would claim the name for every part and folder in the engine,
 		// and `Play` is a name Roblox puts on three classes.

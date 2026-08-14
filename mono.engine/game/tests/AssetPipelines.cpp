@@ -5,7 +5,7 @@
 // panel call the runtime directly. A pipeline that lived only in memory would
 // make an Assets Pipeline widget a toy.
 //
-// The format underneath is `bakegraph`'s and is tested there — it round trips,
+// The format underneath is `bakegraph`'s and is tested there - it round trips,
 // it refuses a malformed line, it escapes a name that could forge structure.
 // What is tested here is the *wiring*: that a world writes what it holds, reads
 // back what it wrote, costs nothing when it holds none, and survives a file
@@ -95,7 +95,7 @@ namespace {
 	// refusal in `icons` happens with `boxes` already parsed and sitting in the
 	// reader's hand. A file broken in its first pipeline would leave the reader
 	// holding nothing, and a wiring that ignored the status entirely would still
-	// end up putting nothing on the world — passing a test that had proved
+	// end up putting nothing on the world - passing a test that had proved
 	// nothing.
 	PipelineSet TwoPipelines() {
 		Document box;
@@ -136,7 +136,7 @@ namespace {
 
 TEST_CASE("a world's asset pipelines survive a save and a load", "[game]") {
 	// `RegisterGameClasses` names the pipeline resource beside the classes, so
-	// nothing here has to remember to — which is the point of it being there.
+	// nothing here has to remember to - which is the point of it being there.
 	engine::game::RegisterGameClasses();
 
 	Universe source;
@@ -226,7 +226,7 @@ TEST_CASE("a node kind this build does not have loses the pipelines and keeps th
 	REQUIRE(SaveGame(source, Name("Future"), path, error));
 
 	// A node kind from a build that does not exist, in the *second* pipeline and
-	// leaving the XML itself well formed — the failure has to be the pipeline's
+	// leaving the XML itself well formed - the failure has to be the pipeline's
 	// and not the document's.
 	Rewrite(path, "node opaque", "node bevel");
 

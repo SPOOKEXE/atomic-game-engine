@@ -214,7 +214,7 @@ TEST_CASE("a subscription made this tick does not receive this tick", "[world]")
 	universe.Tick(1.0f / 60.0f);
 
 	// The subscribe and the publish were applied in the same barrier, in
-	// (From, Sequence) order — and whether the subscribe won depends only on
+	// (From, Sequence) order - and whether the subscribe won depends only on
 	// the world names, not on thread timing.
 	const size_t heard = Received(universe, listener).size();
 	universe.Tick(1.0f / 60.0f);
@@ -693,7 +693,7 @@ TEST_CASE("a replica still receives everything sent to it", "[world]") {
 
 TEST_CASE("clearing the replica flag restores the handle", "[world]") {
 	// Present-and-false is the same as absent, so a world can be promoted
-	// without the resource having to be removed — which a snapshot round trip
+	// without the resource having to be removed - which a snapshot round trip
 	// would make awkward.
 	Universe universe;
 	const WorldId world = universe.Create(Named("bus.replica.promote"));
@@ -742,8 +742,8 @@ TEST_CASE("the replica flag survives a snapshot", "[world]") {
 
 TEST_CASE("a channel message reaches the channel it names and nobody else", "[world]") {
 	// **The addressed route, and the address is two names.** `Publish` is a topic
-	// fan-out with no destination — right for "the boss died", wrong for "world
-	// B, here is the score you asked me for" — and the only other operation that
+	// fan-out with no destination - right for "the boss died", wrong for "world
+	// B, here is the score you asked me for" - and the only other operation that
 	// named a world moved a *person*. v0.15 closed the first half and left the
 	// second: one unnamed pipe per pair of worlds, so a match controller and a
 	// chat relay talking between the same two worlds each heard the other.
@@ -771,7 +771,7 @@ TEST_CASE("a channel message reaches the channel it names and nobody else", "[wo
 	REQUIRE(arrived.size() == 2);
 
 	// **`Key` is the channel and `From` is the sender**, which is `Messaging`'s
-	// shape. v0.15 put the sender in both, because there was no channel to name —
+	// shape. v0.15 put the sender in both, because there was no channel to name -
 	// so a receiver could not tell two conversations apart without opening the
 	// payload.
 	CHECK(arrived[0].Key == Name("scores"));
@@ -793,7 +793,7 @@ TEST_CASE("a channel is not a teleport, and a receiver can tell", "[world]") {
 	// two look alike on the wire and mean entirely different things to whoever
 	// receives them: a teleport is a person arriving, and a receiving world
 	// builds a `Player` and a character out of it. `script::AdmitTeleports` runs
-	// on every world whether or not it is running scripts — so a channel message
+	// on every world whether or not it is running scripts - so a channel message
 	// arriving as a `Teleport` would have it trying to construct a player out of
 	// a chat line.
 	Universe universe;
@@ -828,7 +828,7 @@ TEST_CASE("every way a channel send can fail is a status the sender reads", "[wo
 	// `Publish`.** A publish with no subscribers is a quiet afternoon and cannot
 	// be told from a publish nobody wanted. Every case below is something the
 	// sender has to be able to act on, and each is a different thing to go and
-	// fix — which is why they are four statuses rather than one.
+	// fix - which is why they are four statuses rather than one.
 	Universe universe;
 	const WorldId sender = universe.Create(Named("channel.asker"));
 	const WorldId listener = universe.Create(Named("channel.listener"));
@@ -908,7 +908,7 @@ TEST_CASE("a full destination is Overflow rather than an unbounded queue", "[wor
 
 	// **The bound is per barrier, not for ever.** The next barrier's fanout is
 	// cleared with the counter, so a destination that was full once is not
-	// permanently refused — which is what makes `Overflow` backpressure rather
+	// permanently refused - which is what makes `Overflow` backpressure rather
 	// than a broken channel.
 	universe.Enter(sender, [](Store &store) {
 		REQUIRE(Postbox(store).SendTo("channel.flood.victim", "firehose", Bytes("x")).Expected());
@@ -924,7 +924,7 @@ TEST_CASE("a world may not hold more channels than the universe allows", "[world
 	// **The bound on the channel *table*, where `ChannelQueueLimit` bounds the
 	// queue.** A channel costs one bus operation to open and one entry in the
 	// router's table for ever after, and `BusBudgetPerTick` bounds the rate rather
-	// than the total — a world opening a distinct channel every tick for an hour
+	// than the total - a world opening a distinct channel every tick for an hour
 	// leaves two hundred thousand live entries that every snapshot then carries.
 	UniverseSettings settings;
 	settings.ChannelsPerWorld = 3;
@@ -947,7 +947,7 @@ TEST_CASE("a world may not hold more channels than the universe allows", "[world
 
 	// **The refusal arrives, which is the whole reason an open grew a reply.** The
 	// world that asked is the only party that can act on it, and the answer is a
-	// status rather than a silence — the same promise every other verdict on this
+	// status rather than a silence - the same promise every other verdict on this
 	// bus makes.
 	const std::vector<Delivery> verdicts = Received(universe, hoarder);
 	REQUIRE(verdicts.size() == 5);
@@ -957,7 +957,7 @@ TEST_CASE("a world may not hold more channels than the universe allows", "[world
 	CHECK(verdicts[4].Status == BusStatus::TooManyChannels);
 
 	// A refused open opened nothing, and a world under the cap is untouched by
-	// its neighbour spending one — the bound is per world and not per universe.
+	// its neighbour spending one - the bound is per world and not per universe.
 	universe.Enter(sender, [](Store &store) {
 		Postbox box(store);
 		box.SendTo("channel.cap.hoarder", "cap.c2", Bytes("x"));
@@ -1006,7 +1006,7 @@ TEST_CASE("a world may not hold more channels than the universe allows", "[world
 
 TEST_CASE("what a world holds is what it comes back holding", "[world]") {
 	// The cap is a count of what is in the router's table, and a snapshot carries
-	// that table — so the count has to be rebuilt from it. Otherwise saving and
+	// that table - so the count has to be rebuilt from it. Otherwise saving and
 	// loading is how a world gets a second allowance, and the entries it came back
 	// with are the ones nothing will ever close.
 	UniverseSettings settings;
@@ -1040,7 +1040,7 @@ TEST_CASE("what a world holds is what it comes back holding", "[world]") {
 
 TEST_CASE("two senders into one receiver arrive in sender-name order", "[world]") {
 	// **The ordering rule, and the sort key it turns on.** Traffic is applied in
-	// `(From.Text(), Sequence)` order — both recorded in the envelope, neither a
+	// `(From.Text(), Sequence)` order - both recorded in the envelope, neither a
 	// function of which worker claimed a world or of the order the registry
 	// happened to be walked in.
 	//
@@ -1050,7 +1050,7 @@ TEST_CASE("two senders into one receiver arrive in sender-name order", "[world]"
 	// interning order. A universe restored from a snapshot interns in file order
 	// where the run that wrote it interned in creation order, so the same two
 	// envelopes applied in the opposite order and a replay diverged from its
-	// recording. Under the id, "zulu" — interned first here — arrives first.
+	// recording. Under the id, "zulu" - interned first here - arrives first.
 	const auto arrivalsInto = [](WorldId first, WorldId second, Universe &universe, WorldId sink) {
 		universe.Enter(sink, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("race").Expected()); });
 		universe.Tick(1.0f / 60.0f);
@@ -1072,7 +1072,7 @@ TEST_CASE("two senders into one receiver arrive in sender-name order", "[world]"
 		return order;
 	};
 
-	// Named — and therefore interned — zulu first, alpha second.
+	// Named - and therefore interned - zulu first, alpha second.
 	Universe universe;
 	const WorldId zulu = universe.Create(Named("order.zulu"));
 	const WorldId alpha = universe.Create(Named("order.alpha"));
@@ -1085,8 +1085,8 @@ TEST_CASE("two senders into one receiver arrive in sender-name order", "[world]"
 
 	// **Run twice, and the second universe creates its worlds in the opposite
 	// order.** Registry index decides which outbox the barrier collects first, so
-	// a comparator that was not a total order over recorded data — or a barrier
-	// that skipped the sort — would answer differently here and identically above.
+	// a comparator that was not a total order over recorded data - or a barrier
+	// that skipped the sort - would answer differently here and identically above.
 	Universe again;
 	const WorldId sinkAgain = again.Create(Named("order.sink"));
 	const WorldId alphaAgain = again.Create(Named("order.alpha"));
@@ -1097,7 +1097,7 @@ TEST_CASE("two senders into one receiver arrive in sender-name order", "[world]"
 
 TEST_CASE("an open channel survives a snapshot", "[world]") {
 	// Otherwise a restored universe answers `NoSuchChannel` to every addressed
-	// send until each world happens to open its channels again — which for a
+	// send until each world happens to open its channels again - which for a
 	// world whose open ran once at startup is never. A topic subscription has
 	// been carried since v0.2 for the same reason.
 	Universe universe;

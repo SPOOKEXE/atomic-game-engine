@@ -6,18 +6,18 @@
 // could only ever be built by a client. It is here because **a scene is not a
 // client-tier idea**: a server authors the same world and replicates it, and
 // the unified harness runs both halves against one. One `.luau` file, three
-// programs, and the differences between them stay where they belong — a client
+// programs, and the differences between them stay where they belong - a client
 // adds a camera and a draw list, a server adds neither.
 //
 // **Two ways to move a world, and both are here on purpose.**
 //
 // The C++ path uses `Orbit` and `Spin` as components and iterates them in
-// systems — which is what an ECS is for, and what a shipped game's hot loops
+// systems - which is what an ECS is for, and what a shipped game's hot loops
 // should look like. The scripted path does not use them at all: a script
 // connects to `RunService.Heartbeat` and assigns `Position` and `Orientation`
 // itself, because that is how somebody writing a game actually writes one.
 //
-// There is deliberately **no third thing** — no component a script fills in for
+// There is deliberately **no third thing** - no component a script fills in for
 // an engine system to animate. That arrangement reads like scripting and is a
 // scene format wearing its clothes: the game describes, the engine decides.
 // `Orbit` was that shape once and stopped being it.
@@ -91,7 +91,7 @@ namespace engine::examples {
 	//
 	// Registers the components and the class first, so a script can name them,
 	// then runs the file, then measures how far the result reaches and installs
-	// that as `scene::WorldBounds` — measured rather than declared by the
+	// that as `scene::WorldBounds` - measured rather than declared by the
 	// script, because a scene that set its own bounds would be two sources of
 	// truth for one fact and the camera frames from it.
 	//
@@ -100,14 +100,14 @@ namespace engine::examples {
 	//
 	// **The runtime is handed back as well as kept**, and it was not until
 	// v0.15. The scheduler holds the last reference and drops it with the world,
-	// which is right — but a caller that needs to *reach* the VM had no way to,
+	// which is right - but a caller that needs to *reach* the VM had no way to,
 	// and one does: `Runtime::DeliverGuiEvents` is how a `TextButton`'s
 	// `Activated` gets from `gui::Router` to a script, and it needs the runtime
 	// for the world being drawn.
 	//
 	// So a shipped client running a `--script` scene routed its interface input
 	// correctly, produced the events correctly, and had nowhere to deliver them
-	// — every button in every scripted scene was silent, in the one program a
+	// - every button in every scripted scene was silent, in the one program a
 	// game ships. `game::StartWorldScripts` already returned its runtime for the
 	// same reason; this is the other loader catching up.
 	//

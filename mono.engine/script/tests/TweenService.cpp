@@ -2,7 +2,7 @@
 //
 // **Two halves, and they answer different questions.** The neutral cases drive
 // `TweenTable` directly, because the cap, the repeat maths and the reclaim
-// policy are decisions with no script in them — reaching them through a VM would
+// policy are decisions with no script in them - reaching them through a VM would
 // mean a thousand `Instance.new` calls to test an integer. The parity cases run
 // the same tween in Luau and in JavaScript and compare the answers, because that
 // is the property the whole service layer exists to buy: one `TweenTable`, one
@@ -54,7 +54,7 @@ namespace {
 		return Store(name);
 	}
 
-	// `a:b(...)` in Luau and `a.b(...)` in JavaScript — `ScriptCall.cpp`'s
+	// `a:b(...)` in Luau and `a.b(...)` in JavaScript - `ScriptCall.cpp`'s
 	// helper, which is the whole of what differs between most halves below.
 	std::string Send(Language language, std::string_view receiver, std::string_view call) {
 		return std::string(receiver) + (language == Language::Luau ? ":" : ".") + std::string(call) + "\n";
@@ -80,7 +80,7 @@ namespace {
 	}
 
 	// A heartbeat connection, which is how a case does something *between*
-	// beats — a script cannot run in the middle of the harness's loop.
+	// beats - a script cannot run in the middle of the harness's loop.
 	std::string EachBeat(Language language, std::string_view body) {
 		return "RunService.Heartbeat" + std::string(language == Language::Luau ? ":" : ".") + "Connect(" +
 			   Does(language, body);
@@ -158,7 +158,7 @@ namespace {
 TEST_CASE("GetValue answers the same curve in both languages", "[scripting][tween]") {
 	// **The first thing to get right and the easiest thing to check.** Every
 	// case here is a value that is exact in a float, so the assertion is an
-	// equality rather than a tolerance — `Linear` and the polynomial family at
+	// equality rather than a tolerance - `Linear` and the polynomial family at
 	// a half are quarters and eighths, and a curve that has drifted shows up as
 	// a different string rather than as a rounding argument.
 	//
@@ -184,7 +184,7 @@ TEST_CASE("GetValue answers the same curve in both languages", "[scripting][twee
 		{"quad at one", [&](Language l) { return value(l, "1", "Quad", "In"); }, "1"},
 
 		// The third style is here because `InOut` is the one direction that is
-		// not derived from the other two by a single subtraction — it joins two
+		// not derived from the other two by a single subtraction - it joins two
 		// halves, and the join is what a mistake shows up in.
 		{"cubic half way in", [&](Language l) { return value(l, "0.5", "Cubic", "In"); }, "0.125"},
 		{"cubic half way in and out", [&](Language l) { return value(l, "0.5", "Cubic", "InOut"); }, "0.5"},
@@ -202,7 +202,7 @@ TEST_CASE("GetValue answers the same curve in both languages", "[scripting][twee
 TEST_CASE("a tween reaches its goal and completes", "[scripting][tween]") {
 	// **Sixty beats of a one-second tween, which is the arithmetic the whole
 	// thing rests on.** The delta is the fixed tick delta and nothing here reads
-	// a clock, so this is the same number of beats on every machine — which is
+	// a clock, so this is the same number of beats on every machine - which is
 	// the point of the delta being what it is.
 	Check({
 		{"the goal is reached exactly",
@@ -336,7 +336,7 @@ TEST_CASE("a goal a tween cannot drive is refused by name", "[scripting][tween]"
 	// **By name, which is the difference between a minute and an afternoon.** A
 	// tween pointed at a `Bool` has nothing to interpolate through, and the
 	// alternative to refusing is a tween that runs for its whole duration and
-	// moves nothing — which reads as a broken engine rather than as a scene
+	// moves nothing - which reads as a broken engine rather than as a scene
 	// asking for something that does not mean anything.
 	struct Refusal {
 		const char *Goal;
@@ -528,7 +528,7 @@ TEST_CASE("the table is capped, and it reclaims a finished tween before it refus
 
 TEST_CASE("a tween writes its goals in property-name order", "[scripting][tween]") {
 	// **Two goals of one instance may project onto one component**, so which of
-	// them lands last is observable — `Position` and `CFrame` both write
+	// them lands last is observable - `Position` and `CFrame` both write
 	// `Transform`. The order is sorted by spelling in both bindings, so a Luau
 	// table's hash order cannot decide what a scene looks like.
 	//
@@ -555,7 +555,7 @@ TEST_CASE("a tween writes its goals in property-name order", "[scripting][tween]
 	std::memcpy(position.Goal, &elsewhere, sizeof(elsewhere));
 
 	// `CFrame` sorts before `Position`, so the second write is the one that
-	// survives — which is what a scene naming both should see.
+	// survives - which is what a scene naming both should see.
 	TweenTable table;
 	std::vector<Entity> dropped;
 	const Entity tween = table.Create(store, part, TweenInfo(1.0f), {cframe, position}, dropped);

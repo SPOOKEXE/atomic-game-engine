@@ -164,7 +164,7 @@ namespace engine::render {
 			} else {
 				// **Said out loud rather than passed over.** A misspelled shader
 				// and a part deliberately left on the engine's default look
-				// identical from the frame — `MissingTexture` makes the same
+				// identical from the frame - `MissingTexture` makes the same
 				// argument for a texture and exists for the same reason.
 				module.Error = "no ShaderScript named '" + std::string(name.Text()) +
 							   "' and the engine ships no shader of that name";

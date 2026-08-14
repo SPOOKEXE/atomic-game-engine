@@ -7,7 +7,7 @@
 // file's header for why the list and this directory are added to together.
 //
 // **The second default, and the reason there are two rather than six.** One
-// shader proves a name resolves; two prove the *selection* does — a scene with
+// shader proves a name resolves; two prove the *selection* does - a scene with
 // an unlit sign and a toon character draws two pipelines from one frame, which
 // is the thing `Renderer::AddShader` and the per-run pipeline bind in
 // `DrawSlots` exist to do. A third would prove nothing further and would be a
@@ -21,7 +21,7 @@
 // **What this deliberately does not do is sample the shadow map.** A cel shader
 // with a four-tap percentage-closer filter has a soft shadow edge inside a hard
 // band, which reads as the bands being broken rather than as a soft shadow. A
-// toon shadow is its own decision — a hard tap against the same map — and it
+// toon shadow is its own decision - a hard tap against the same map - and it
 // belongs to whoever wants it, in a `ShaderScript`, over this file as a
 // starting point.
 
@@ -83,21 +83,21 @@ void main() {
 
 	// **Quantised before the ambient is added, not after.** Banding the final
 	// colour would put a step in the shadow side as well, where there is no
-	// light to step — and the ambient is what keeps the darkest band from being
+	// light to step - and the ambient is what keeps the darkest band from being
 	// black.
 	float lambert = max(dot(normal, toLight), 0.0);
 	float banded = floor(lambert * TOON_BANDS + 0.5) / TOON_BANDS;
 
 	// A rim light along the silhouette, which is the other half of what makes
 	// this read as cel shading: the bands give the form and the rim gives the
-	// outline. Cheap — it is the same normal against the same eye direction the
+	// outline. Cheap - it is the same normal against the same eye direction the
 	// rasteriser already interpolated.
 	//
 	// **Derived from the world position rather than from a camera uniform**,
 	// because this block carries no eye position and adding one would change a
 	// struct every pass pushes. `dFdx`/`dFdy` of the world position give the
 	// surface's own screen-space frame, whose cross product is the facing
-	// direction — one that is right whichever camera is looking, including the
+	// direction - one that is right whichever camera is looking, including the
 	// several a mirror renders through.
 	vec3 facing = normalize(cross(dFdx(inWorldPosition), dFdy(inWorldPosition)));
 	float rim = 1.0 - abs(dot(normal, facing));

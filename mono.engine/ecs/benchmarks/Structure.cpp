@@ -2,7 +2,7 @@
 //
 // `benchmarks/Iteration.cpp` measures the steady state: rows that already exist,
 // in tables that already exist, being read and written. This file measures the
-// other thing a tick does — adding and removing components, which moves a row
+// other thing a tick does - adding and removing components, which moves a row
 // from one table to another.
 //
 // **This is the measurement the archetype edge cache is gated on.** `Set` on a
@@ -130,7 +130,7 @@ BENCH("overwrite · 100k rows", 1) {
 // --- the transition --------------------------------------------------------
 //
 // Add a component to every row, then take it away again. Two transitions per
-// entity, and the world ends in the shape it started in — which is what makes
+// entity, and the world ends in the shape it started in - which is what makes
 // the body repeatable, and is also the honest case: a component that goes on
 // and stays on is a one-off, while a component that toggles is what a gameplay
 // tick actually does.

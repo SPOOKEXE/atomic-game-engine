@@ -15,7 +15,7 @@ namespace engine::script {
 		// Written as text with a length, never as the object representation.
 		//
 		// The row holds a `core::Name` and a `std::string`, and both would be a
-		// pointer on the wire — the same reason `scene` registers explicit
+		// pointer on the wire - the same reason `scene` registers explicit
 		// writers for everything holding a name. `WriteName` writes the text;
 		// `WriteString` writes a length and the bytes.
 		void WriteSourceCaches(core::ByteWriter &writer, const void *source, size_t count) {
@@ -95,7 +95,7 @@ namespace engine::script {
 
 	void RegisterScriptComponents() {
 		// **Three where there was one `script.Source`.** An instance holds a
-		// program per language and something choosing between them —
+		// program per language and something choosing between them -
 		// `LuaSourceContainer` carries why that is not one field with a flag.
 		// A game file written before this reads as a world of scripts with no
 		// containers, which is a world of empty scripts rather than a world that
@@ -130,7 +130,7 @@ namespace engine::script {
 
 		// An absolute path is used as it stands. `operator/` already drops the
 		// left side for an absolute right side, so this is what the standard
-		// does anyway — said out loud because a reader checking whether
+		// does anyway - said out loud because a reader checking whether
 		// `--script /tmp/x.luau` works should not have to know that.
 		const std::filesystem::path named(path.Text());
 		const std::filesystem::path resolved = named.is_absolute() ? named : core::Paths::Assets() / named;

@@ -41,7 +41,7 @@ build="$root/.cache/build/$preset"
 # inside CMake with `unknown target`, and the reason for it is not in the
 # message. Say what the preset is for instead.
 if [ "$preset" = "server" ]; then
-    echo "the 'server' preset builds no client — the studio needs one to draw with." >&2
+    echo "the 'server' preset builds no client - the studio needs one to draw with." >&2
     echo "  try:  PRESET=dev $0" >&2
     exit 1
 fi
@@ -52,7 +52,7 @@ if ! command -v cmake > /dev/null; then
 fi
 
 # Configure is quiet and the build is not. Re-running the editor should show
-# what it is compiling, if anything, and nothing else — the configure has no
+# what it is compiling, if anything, and nothing else - the configure has no
 # news.
 #
 # The build is by directory rather than by preset, which is the one place these

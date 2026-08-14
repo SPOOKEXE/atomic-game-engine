@@ -25,7 +25,7 @@ namespace engine::script {
 		//
 		// **A script needs to be able to ask before it tries.**
 		// `Store::SetProperty` already refuses a write on an adopt-only store
-		// and says why, but a refusal is an error a script has to catch — and
+		// and says why, but a refusal is an error a script has to catch - and
 		// the whole point of a client-side script is that it knows it is one.
 		// These are the question that makes the refusal avoidable.
 		void IsServer(ScriptCall &call) {
@@ -40,7 +40,7 @@ namespace engine::script {
 			call.ReturnBoolean(call.Role().Studio);
 		}
 
-		// `RunService:IsReplica()` — whether this world's rows belong to somebody
+		// `RunService:IsReplica()` - whether this world's rows belong to somebody
 		// else.
 		//
 		// **Not Roblox's, and it is the more precise question.** `IsServer()`
@@ -70,14 +70,14 @@ namespace engine::script {
 
 		// `Heartbeat` is a real signal rather than a list of its own, so
 		// `:Connect` hands back an `RBXScriptConnection` a script can
-		// `:Disconnect` — which is the thing v0.5 said was worse to fake than to
+		// `:Disconnect` - which is the thing v0.5 said was worse to fake than to
 		// omit. It is a *field* rather than a method, which is why
 		// `ServiceSurface` carries two lists.
 		//
 		// **No `RenderStepped`, `PreSimulation` or `PostSimulation`.** Each is a
 		// different point in a frame, this engine's barrier has one, and a signal
 		// that exists and fires at the wrong moment is worse than one an author
-		// has to notice is missing — `CollectionService.cpp` argues the general
+		// has to notice is missing - `CollectionService.cpp` argues the general
 		// case at length.
 		constexpr std::array<ServiceSignal, 1> SIGNALS{{
 			{"Heartbeat", SignalKind::Heartbeat},

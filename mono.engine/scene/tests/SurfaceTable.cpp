@@ -45,7 +45,7 @@ TEST_CASE("an invalid name never matches a row", "[scene][surfacetable]") {
 
 TEST_CASE("setting a material twice replaces its row", "[scene][surfacetable]") {
 	// Appending instead would leave a table holding a history, where `Find`
-	// returns whichever copy it reached first — so a reload would keep the old
+	// returns whichever copy it reached first - so a reload would keep the old
 	// values and look like the new ones had not been applied.
 	const Name rubber("surfacetable_test.Rubber");
 

@@ -67,7 +67,7 @@ namespace client {
 
 		// World units between adjacent views.
 		//
-		// A compositor's decision, not a simulation's — which is why it is a
+		// A compositor's decision, not a simulation's - which is why it is a
 		// client option and not a world setting.
 		float ViewSpacing = 40.0f;
 
@@ -84,7 +84,7 @@ namespace client {
 		// and the renderer decide.
 		//
 		// **An override and not a setting, which is what changed at v0.15.** The
-		// depth is the world's — `workspace.SurfaceBounces` — and where a world
+		// depth is the world's - `workspace.SurfaceBounces` - and where a world
 		// says nothing the renderer measures the frame it just drew and follows
 		// it. Both are better answers than a session-wide constant, because how
 		// deep a chain of mirrors goes is a fact about the scene.
@@ -92,8 +92,8 @@ namespace client {
 		// What this is still for is measuring: pinning the number is how two
 		// depths are compared on one scene, and the run that did that is what
 		// found the knob had never had a caller at all. Each level multiplies
-		// the passes rather than adding one — `panes × (panes - 1) ^ (levels -
-		// 1)` — so it is a number worth pinning deliberately and not by default.
+		// the passes rather than adding one - `panes × (panes - 1) ^ (levels -
+		// 1)` - so it is a number worth pinning deliberately and not by default.
 		int SurfaceBounces = 0;
 
 		// Open the F3 statistics panel at startup, rather than waiting for
@@ -129,7 +129,7 @@ namespace client {
 		// limiter the loop then spins as fast as the GPU allows, which on a
 		// scene that costs 2 ms a frame is 500 fps of heat for a display that
 		// shows 165. This is how a run says "do not wait for the display, and
-		// do not run away from it either" — which is what a variable-refresh
+		// do not run away from it either" - which is what a variable-refresh
 		// monitor wants, and what a like-for-like measurement between two
 		// machines needs.
 		//
@@ -140,7 +140,7 @@ namespace client {
 
 		// Seconds to wait for a Tracy profiler to attach before starting.
 		// Zero means do not wait. Tracy is on-demand, so a short run with
-		// nothing attached records nothing at all — which looks identical to a
+		// nothing attached records nothing at all - which looks identical to a
 		// broken profiler until you know.
 		double ProfilerWaitSeconds = 0.0;
 
@@ -153,7 +153,7 @@ namespace client {
 		// The scene script to build the world from. Empty means `Rings.luau`.
 		//
 		// The extension picks the VM, so this is the only place either one is
-		// chosen — and since v0.6 it is the *only* way this program gets a
+		// chosen - and since v0.6 it is the *only* way this program gets a
 		// world. The C++ scene it used to fall back to is deleted, because two
 		// ways to build one and only one of them exercising the bindings meant
 		// the bindings were the untested half.
@@ -186,7 +186,7 @@ namespace client {
 		// How long to look before giving up, in seconds.
 		//
 		// **A blocking wait, and the only one in this program.** It happens
-		// once, before the loop starts, in the same place as binding a socket —
+		// once, before the loop starts, in the same place as binding a socket -
 		// which is the one moment where waiting is not a stall in a tick. A
 		// beacon announces once a second, so anything under two is a coin flip.
 		//
@@ -198,7 +198,7 @@ namespace client {
 		// @since v0.13
 		std::string SessionName;
 
-		// Join the session with this id — 32 hex characters.
+		// Join the session with this id - 32 hex characters.
 		//
 		// Also what reaches a session through a rendezvous point, because a
 		// private one is never listed and possession of its id is what stands
@@ -218,7 +218,7 @@ namespace client {
 		// @since v0.13
 		std::string RendezvousAddress;
 
-		// Content origins, in priority order — the first one that answers wins.
+		// Content origins, in priority order - the first one that answers wins.
 		//
 		// Sources are tried in order; `dir:` selects a local store.
 		std::vector<std::string> ContentSources;
@@ -245,8 +245,8 @@ namespace client {
 		//
 		// **What makes a shipped client drivable by something that is not a
 		// person**. The studio has had `--headless` since v0.7 and is therefore
-		// checkable by `just studio-smoke`, while the *client* — the binary a
-		// game actually ships — could only be checked by somebody looking at it
+		// checkable by `just studio-smoke`, while the *client* - the binary a
+		// game actually ships - could only be checked by somebody looking at it
 		// until v0.15. That is the worst place for a gap to be, because the bugs
 		// it hides are the ones that work in the editor and not in the game.
 		// `just client-smoke` is what this makes possible.
@@ -277,7 +277,7 @@ namespace client {
 		// **By name and not by coordinates**, because a coordinate is a second
 		// statement of where the layout put something and would go stale the
 		// first time a padding changed. `gui::Resolved` is the one answer to
-		// where an element is — `gui/AGENTS.md` refuses a second — so this asks
+		// where an element is - `gui/AGENTS.md` refuses a second - so this asks
 		// it and presses the middle of what it says.
 		//
 		// The press is synthesised into `input::Translator` as an ordinary SDL
@@ -300,8 +300,8 @@ namespace client {
 		//
 		// **Synthesised as an `SDL_EVENT_TEXT_INPUT` into `input::Translator`**,
 		// for the reason the press is synthesised as a real button event: the
-		// string then travels the path a real keystroke travels — the same
-		// translator, the same `Translator::TypedText`, the same `gui::Type` —
+		// string then travels the path a real keystroke travels - the same
+		// translator, the same `Translator::TypedText`, the same `gui::Type` -
 		// and a shortcut past any of it would be a check of the shortcut.
 		//
 		// **What it cannot check is `SDL_StartTextInput`**, which is the other
@@ -400,7 +400,7 @@ namespace client {
 		// Finds a session to connect to, and fills in `ConnectAddress`.
 		//
 		// **The one blocking wait in this program**, and it is before the loop
-		// rather than inside it — the same place as binding a socket. A beacon
+		// rather than inside it - the same place as binding a socket. A beacon
 		// announces once a second, so a search has to be able to sit still for
 		// longer than that or it is a coin flip.
 		//
@@ -408,7 +408,7 @@ namespace client {
 		// router's NAT mapping belongs to a port: a hole punched on some other
 		// socket punches a hole to a socket the server will never send to. The
 		// connector then drains that socket and routes rendezvous traffic back
-		// through the presence — `replication::Connector::SetForeign`.
+		// through the presence - `replication::Connector::SetForeign`.
 		//
 		// @return `false` when nothing was found, or when what was given does
 		//         not parse. A client that meant to find a session and silently
@@ -420,7 +420,7 @@ namespace client {
 		// **Reports what is reachable rather than loading anything**, because
 		// there is nothing yet to load it into: mesh and texture importing are
 		// `ROADMAP.md` v0.9's and land beside this. What this does earn today is
-		// real — it proves the configured origins answer, that their manifest
+		// real - it proves the configured origins answer, that their manifest
 		// verifies against the publisher key, and what is available by kind. A
 		// content misconfiguration then shows up at start-up with a reason,
 		// instead of as missing geometry much later.
@@ -432,18 +432,18 @@ namespace client {
 		// Advances content delivery and registers whatever arrived.
 		//
 		// Called once a frame, before the simulation and outside every render
-		// pass — the two constraints that decide where this can go at all.
+		// pass - the two constraints that decide where this can go at all.
 		void PumpContent();
 
 		// Asks for everything the simulated worlds name and has not asked for.
 		//
 		// **Demand rather than by kind**, which is what makes a large store
-		// usable at all — `client/ContentDemand.hpp` carries the two failures
+		// usable at all - `client/ContentDemand.hpp` carries the two failures
 		// that forced it.
 		// Hands every world the mesh names the store published.
 		//
 		// **Names, not content**, and the only way a scene can discover what
-		// there is to name — see `scene/PublishedCatalogue.hpp`. Naming one is
+		// there is to name - see `scene/PublishedCatalogue.hpp`. Naming one is
 		// still what fetches it.
 		void OfferPublishedContent();
 
@@ -493,8 +493,8 @@ namespace client {
 		// **The intent and never the result**, which is the division
 		// `Server::ApplyInputs` already states for shooting: a client says which
 		// way it is walking and the host decides where that puts it. The
-		// alternative — simulating the character here and submitting its
-		// transform — puts a physics step on both ends and hands a client the
+		// alternative - simulating the character here and submitting its
+		// transform - puts a physics step on both ends and hands a client the
 		// ability to state where its own body is.
 		//
 		// @param nowSeconds The current time.
@@ -504,7 +504,7 @@ namespace client {
 		//
 		// **Not `const`, and not idempotent.** A byte *rate* is a derivative and
 		// `net` only keeps the integral, so this reads the cumulative counters,
-		// subtracts what it read last time, and remembers the new reading —
+		// subtracts what it read last time, and remembers the new reading -
 		// calling it twice in one frame would report the second call's window as
 		// zero seconds long. Called once per panel redraw and nowhere else.
 		//
@@ -515,7 +515,7 @@ namespace client {
 		// Logs what the replicated world received, drew and interpolated.
 		//
 		// Nothing when this client never connected. See the body for why it is
-		// four numbers rather than one — "joined and drew nothing" and "never
+		// four numbers rather than one - "joined and drew nothing" and "never
 		// joined" look identical from outside, and telling them apart is the
 		// whole reason this exists.
 		void ReportReplica();
@@ -535,8 +535,8 @@ namespace client {
 		engine::render::OverlayImage Overlay;
 
 		// **What draws a `ScreenGui` in a shipped client.** `mono.client` does
-		// not link `Engine::ui` and must not — that is what keeps Dear ImGui out
-		// of a game binary — so the interface hook here is the engine's own
+		// not link `Engine::ui` and must not - that is what keeps Dear ImGui out
+		// of a game binary - so the interface hook here is the engine's own
 		// renderer over `gui::DrawList` rather than the editor's.
 		//
 		// One per client rather than one per world, because a client draws one
@@ -563,7 +563,7 @@ namespace client {
 		//
 		// **Three states in one counter**: not started, pressed and waiting to
 		// release, done. A press and a release on one frame is a click no
-		// `gui::Router` can see — it holds the press across frames on purpose,
+		// `gui::Router` can see - it holds the press across frames on purpose,
 		// because that is what a press *is*.
 		int ClickFrames = -1;
 
@@ -580,7 +580,7 @@ namespace client {
 
 		// The compiled list the pass draws, kept across frames so its signature
 		// can be compared. Holding one per frame would compute a signature, find
-		// nothing to compare it against and rebuild every time — every cost of
+		// nothing to compare it against and rebuild every time - every cost of
 		// the design and none of its benefit.
 		engine::gui::Compiled InterfaceList;
 
@@ -610,7 +610,7 @@ namespace client {
 		engine::scene::MouseBehavior AppliedPointerMode = engine::scene::MouseBehavior::Default;
 
 		// Whether a script wants the cursor drawn, and what the window was last
-		// told. The pair above's arrangement, for the pair above's reason —
+		// told. The pair above's arrangement, for the pair above's reason -
 		// `SDL_ShowCursor` is the same kind of round trip.
 		bool PointerIconEnabled = true;
 		bool AppliedPointerIcon = true;
@@ -622,15 +622,15 @@ namespace client {
 		// there is no second question to ask: `gui::FocusedTextBox` is the
 		// authority and this is only the record of the last call made about it.
 		// `SDL_StartTextInput` is a round trip for the same reason
-		// `SDL_SetWindowRelativeMouseMode` is — it raises an on-screen keyboard
-		// on a phone and starts an input method's composition on a desktop — so
+		// `SDL_SetWindowRelativeMouseMode` is - it raises an on-screen keyboard
+		// on a phone and starts an input method's composition on a desktop - so
 		// it is made on the frame the answer changes and no other.
 		bool TextInputActive = false;
 		engine::core::FrameClock Clock;
 
 		// The world, and the only place simulation state lives. Everything
-		// below this line is the *program* — window, frame budget, panel
-		// scroll — which is not world state and does not belong in the store.
+		// below this line is the *program* - window, frame budget, panel
+		// scroll - which is not world state and does not belong in the store.
 		// The universe this client drives, and the world it draws.
 		//
 		// A client renders one world while the rest keep simulating, which is
@@ -665,7 +665,7 @@ namespace client {
 		// **The one the local player is standing in, which is not always the one
 		// in front.** A connected client draws its local scene beside the
 		// server's, and a person's `PlayerGui` is a subtree of their own
-		// `Player` — a row in the replica. Compiling `Rendered` and delivering
+		// `Player` - a row in the replica. Compiling `Rendered` and delivering
 		// the press there is what made every button in a replicated world
 		// silent: the router picked the right element and the event went to the
 		// wrong VM.
@@ -687,7 +687,7 @@ namespace client {
 		//
 		// **A guard so installing happens on a world change and not per frame.**
 		// `client::InstallWorldPipelines` compiles every pipeline it installs
-		// and reports what is wrong with each — worth paying when the world
+		// and reports what is wrong with each - worth paying when the world
 		// changes, and sixty complaints a second about a half-wired one if it
 		// were not guarded.
 		engine::world::WorldId PipelinesInstalledFor;
@@ -716,7 +716,7 @@ namespace client {
 		// established the address is on the same socket the connector uses.
 		std::unique_ptr<network::Presence> Discovery;
 
-		// This tick's time, for the foreign-datagram handler — see
+		// This tick's time, for the foreign-datagram handler - see
 		// `server::Server::DiscoveryNow`, which has the same problem for the
 		// same reason.
 		double DiscoveryNow = 0.0;
@@ -737,7 +737,7 @@ namespace client {
 		engine::delivery::IntakeBudget ContentBudget;
 
 		// Whether the catalogue has arrived and the requests have been issued.
-		// Once, not per frame — see `PumpContent`.
+		// Once, not per frame - see `PumpContent`.
 		bool ContentRequested = false;
 		bool ContentReported = false;
 
@@ -757,7 +757,7 @@ namespace client {
 		size_t ContentSounds = 0;
 
 		// The decoded audio this client has, by the name the manifest published
-		// it under. **Converted to the device's format once, here** — the graph
+		// it under. **Converted to the device's format once, here** - the graph
 		// must never resample on the callback thread, and a buffer converted
 		// per voice would do it once per part playing a footstep.
 		SoundCatalogue Audible;
@@ -802,7 +802,7 @@ namespace client {
 
 		// The previous reading of the link's cumulative counters, and when it
 		// was taken. `SampleNetwork` differences against these to turn totals
-		// into rates — see its declaration for why the differencing lives here
+		// into rates - see its declaration for why the differencing lives here
 		// rather than in `net`.
 		bool NetworkSampled = false;
 		double NetworkSampledAt = 0.0;
@@ -822,7 +822,7 @@ namespace client {
 		// **Every surface camera the drawn world holds, rebuilt each frame.**
 		// A vector rather than one view and a flag: the pipeline renders a
 		// surface per index since v0.8, and rebuilding is also how a mirror that
-		// was deleted stops being drawn — a list assembled from what is in the
+		// was deleted stops being drawn - a list assembled from what is in the
 		// world cannot outlive what is in the world.
 		std::vector<engine::render::SurfaceView> Surfaces;
 
@@ -837,7 +837,7 @@ namespace client {
 		//
 		// **The standalone client did not assemble these at all until v0.15**,
 		// which meant a `Portal::DestinationWorld` pane worked in the studio and
-		// showed its own world here — a mirror where a window was authored, with
+		// showed its own world here - a mirror where a window was authored, with
 		// nothing in any log to say so. `client::AttachForeignSurfaces` fills it
 		// and points the pane's `SurfaceView` at a range of it.
 		std::vector<engine::scene::DrawInstance> Foreign;
@@ -847,7 +847,7 @@ namespace client {
 		//
 		// **A copy, and only taken when there is a cross-world pane in the
 		// world.** `Views` owns the published list and hands out a `const` span
-		// — rightly, since it is the buffer the renderer reads — so the return
+		// - rightly, since it is the buffer the renderer reads - so the return
 		// leg has nowhere to be appended without one. That copy is a memcpy of
 		// the whole draw list, which is worth paying for a world with a window
 		// in it and not worth paying for every other world, so `Windowed` below
@@ -858,7 +858,7 @@ namespace client {
 		//
 		// Set while the world is open, because that is the only place the
 		// question can be asked cheaply, and read after every `Enter` has closed
-		// — `Universe::Enter` is not re-entrant and attaching enters the far
+		// - `Universe::Enter` is not re-entrant and attaching enters the far
 		// world.
 		bool Windowed = false;
 
@@ -870,7 +870,7 @@ namespace client {
 		// the difference between one allocation and one a frame.
 		//
 		// **Only the rendered world fills it.** A batch is a span into that
-		// world's pool, and a second world's pool is a different allocation — so
+		// world's pool, and a second world's pool is a different allocation - so
 		// mixing two worlds' batches in one list would hand the renderer spans
 		// with nothing in common but a type.
 		std::vector<engine::render::ParticleBatch> Particles;
@@ -878,8 +878,8 @@ namespace client {
 		// This frame's beams and trails, as spans into the drawn world's buffer.
 		//
 		// **Spans and not vectors, unlike `Particles`.** A particle batch has to
-		// be assembled — the shared half comes off the emitter and the particles
-		// come out of the pool — so there is a list to own. A ribbon buffer is
+		// be assembled - the shared half comes off the emitter and the particles
+		// come out of the pool - so there is a list to own. A ribbon buffer is
 		// already exactly what the renderer takes, so copying it would be moving
 		// the vertices twice to gain nothing.
 		//
@@ -923,7 +923,7 @@ namespace client {
 		//
 		// The overlay texture holds the last image drawn into it and is
 		// presented from there every frame, so the panels are regenerated on a
-		// clock rather than per frame — a person cannot read a number that
+		// clock rather than per frame - a person cannot read a number that
 		// changes a thousand times a second, and rasterising one costs the same
 		// whether they can or not.
 		//

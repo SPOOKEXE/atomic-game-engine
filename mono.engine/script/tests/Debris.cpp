@@ -1,8 +1,8 @@
 // When `Debris` destroys something, and what it does when a script fills it.
 //
 // **The beat here advances the world's tick, unlike the tween suite's.** A
-// deadline is a tick number — `Debris.hpp` says why seconds in and ticks
-// underneath — so a heartbeat on a world whose clock never moves would test a
+// deadline is a tick number - `Debris.hpp` says why seconds in and ticks
+// underneath - so a heartbeat on a world whose clock never moves would test a
 // queue that never comes due. `Scripting.cpp`'s `Beat` is the shape, because it
 // is the order `World::Tick` actually runs in.
 
@@ -40,7 +40,7 @@ namespace {
 		return Store(name);
 	}
 
-	// One beat of the world, in `World::Tick`'s own order — `Scripting.cpp`'s
+	// One beat of the world, in `World::Tick`'s own order - `Scripting.cpp`'s
 	// helper, and the tick advance is the part this suite cannot do without.
 	void Beat(Store &store, Runtime &runtime) {
 		store.ClearChanges();
@@ -113,7 +113,7 @@ TEST_CASE("an item is destroyed on its beat and not before", "[scripting][debris
 TEST_CASE("an item destroyed before its beat is not a problem", "[scripting][debris]") {
 	// **Ordinary, and the queue must neither crash nor hold the slot.** A script
 	// that queues something and then destroys it itself is what a cleanup path
-	// looks like when two of them run — and `DestroyInstance` on a row that has
+	// looks like when two of them run - and `DestroyInstance` on a row that has
 	// gone is already a no-op, which is why there is no second removal path for
 	// this to get wrong.
 	for (const Language language : LANGUAGES) {
@@ -139,7 +139,7 @@ TEST_CASE("an item destroyed before its beat is not a problem", "[scripting][deb
 
 TEST_CASE("a lifetime is rounded up and never to zero", "[scripting][debris]") {
 	// **`task.wait`'s rule, settled the same way rather than differently.** A
-	// zero lifetime destroys on the next beat rather than inside the call —
+	// zero lifetime destroys on the next beat rather than inside the call -
 	// where the instance would go while the script that named it is still
 	// running, and `part.Parent` on the next line would be reading a row that
 	// has gone.
@@ -202,7 +202,7 @@ TEST_CASE("the queue drains in deadline order, then insertion order", "[scriptin
 
 TEST_CASE("adding one instance twice keeps the earlier deadline", "[scripting][debris]") {
 	// **One entry, not two.** A script counting something down in a loop would
-	// otherwise fill the queue with one instance — and the second destruction of
+	// otherwise fill the queue with one instance - and the second destruction of
 	// an entity is a no-op, so the extra entries were only ever dead weight.
 	Store store("debris_twice");
 	const Entity part = store.Create();
@@ -258,7 +258,7 @@ TEST_CASE("a full queue destroys its oldest item early", "[scripting][debris]") 
 TEST_CASE("a debris deadline and a wait of the same length come due together", "[scripting][debris]") {
 	// **One arithmetic, asserted from both sides.** `script/AGENTS.md` states
 	// that a debris deadline is a tick number "computed by the same
-	// `ceil(seconds / delta)` `task.wait` uses" — and until v0.18 that sentence
+	// `ceil(seconds / delta)` `task.wait` uses" - and until v0.18 that sentence
 	// was true only because three files happened to contain the same four lines.
 	// `TicksFor` had a copy in `DebrisService.cpp`, one in `LuauTask.cpp` and one
 	// in `JsSurface.cpp`, each taking a different handle to the same world, so
@@ -284,7 +284,7 @@ TEST_CASE("a debris deadline and a wait of the same length come due together", "
 		const std::string wait = "task.wait(" + std::to_string(seconds) + ")";
 
 		// **The waiter parents a part rather than setting a global**, because
-		// each chunk's globals are its own — and rather than writing the
+		// each chunk's globals are its own - and rather than writing the
 		// workspace's name, which is what the rest of this suite reads its
 		// answer out of and which the two would then be racing for.
 		const std::string mark =

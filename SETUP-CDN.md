@@ -22,13 +22,13 @@ different keys turn up below and why none of them is optional:
 | **grant key** | the origin and the server | who may spend the origin's bandwidth |
 
 The publisher key is the public half of the signing key, and `cdn --publish`
-prints it. A client with no publisher key fetches **nothing** — not "everything
+prints it. A client with no publisher key fetches **nothing** - not "everything
 unverified", nothing at all.
 
 **A runtime does not decode.** It reads `.atex`, `.amesh` and `.amat`, never
 `.png` or `.gltf`. Something has to bake first, and that something is `assetc`
 or the editor. Publishing a folder of PNGs succeeds, serves, verifies, and
-delivers files nothing can read — which looks exactly like a broken renderer.
+delivers files nothing can read - which looks exactly like a broken renderer.
 
 ---
 
@@ -48,7 +48,7 @@ The smallest thing that works. No server, no ports, no keys to type.
 
 The signing seed the panel asks for is the only awkward part, and only because a
 publish signs. For the store on your own disk there is a development identity
-built in — `cdn::DevelopmentSigningKey` — which is what `contentimport` uses when
+built in - `cdn::DevelopmentSigningKey` - which is what `contentimport` uses when
 you give it no key:
 
 ```sh
@@ -64,7 +64,7 @@ of friction. An origin serving other machines supplies its own.
 For "I am still moving the wall around", there is one step less. In
 **Preferences → Content → Raw folders**, add the directory your art is in. The
 assets panel grows a tab for it, listing every file under the name it *would*
-have once baked — `props/crate.png` shows as `props/crate.atex` — and a **Load**
+have once baked - `props/crate.png` shows as `props/crate.atex` - and a **Load**
 button bakes that one file and hands it to the viewport.
 
 **Memory-only is on by default**, which means nothing is written anywhere: not
@@ -104,10 +104,10 @@ Point anything at the folder with `dir:`:
 ```sh
 just run --cdn dir:./store --publisher-key ba42458e83ba...
 # content: 1 source(s), first is 'dir:./store'
-# delivery: catalogue from 'dir:./store' — 2 assets, 1 bundles
+# delivery: catalogue from 'dir:./store' - 2 assets, 1 bundles
 ```
 
-Republishing is cheap — content already in the store is a no-op — so the loop of
+Republishing is cheap - content already in the store is a no-op - so the loop of
 "bake, publish, look" costs what changed.
 
 ---
@@ -127,7 +127,7 @@ are sitting at.
 
 `--grant-key` is **required**, and it is not a formality to remove. Delivery
 costs bandwidth, and who is allowed to spend it is a decision the *server* makes
-by issuing grants — an origin that admitted everybody would be making that
+by issuing grants - an origin that admitted everybody would be making that
 decision itself, which is the one thing it must not do.
 
 Check it with anything:
@@ -142,12 +142,12 @@ And fetch:
 ```sh
 just run --cdn 127.0.0.1:9080 --publisher-key ba42458e83ba... --content-cache ./cache
 # content: 1 source(s), first is '127.0.0.1:9080'
-# delivery: catalogue from '127.0.0.1:9080' — 2 assets, 1 bundles
+# delivery: catalogue from '127.0.0.1:9080' - 2 assets, 1 bundles
 ```
 
 In the editor the same list is **Preferences → Content**. Add a row, kind
-`http`, location `127.0.0.1:9080`. The order of the rows is the priority — the
-first source that answers wins, and one that fails is passed over — so a local
+`http`, location `127.0.0.1:9080`. The order of the rows is the priority - the
+first source that answers wins, and one that fails is passed over - so a local
 folder above a remote origin *is* "cache locally, otherwise ask".
 
 ### Watching it
@@ -177,15 +177,15 @@ into its ingest key.
 and no client will look at it until a publisher has signed a manifest naming it.
 That is why the ingest secret is only an admission check: whoever holds it can
 spend this origin's disk, and cannot store anything under a name that is not its
-own true content hash — the body is hashed and compared against the address it
+own true content hash - the body is hashed and compared against the address it
 was uploaded to. A wrong key is `403`; on an origin with no `--ingest-key` the
 route answers `404`, as though it were not there.
 
 ### Letting it be listed *(v0.15)*
 
 An origin serves by name, so nothing about fetching needs it to say what it
-holds. The editor's assets panel wants exactly that, though — a tab per origin
-is not much of a tab if it cannot show the origin's contents — so there is one
+holds. The editor's assets panel wants exactly that, though - a tab per origin
+is not much of a tab if it cannot show the origin's contents - so there is one
 route that enumerates, and it is off until asked for:
 
 ```sh
@@ -200,20 +200,20 @@ Content**, and the row's tab in the assets panel lists what that origin holds.
 **Off by default, and it is the default that matters.** An open write route
 costs an operator disk; an open listing hands whoever asks the name of
 everything here, and names that have been scraped cannot be un-scraped. So it is
-one flag, admitted by the key that already exists — `--list-contents` without
+one flag, admitted by the key that already exists - `--list-contents` without
 `--ingest-key` refuses to start rather than enumerating for anybody.
 
 `GET /catalogue` answers a page and a `next` cursor to follow;
 `GET /catalogue/<cursor>` is the next one. Without the key it is `403`, and on
 an origin started without the flag it is `404`, as though the route were not
-there — which is why the editor's tab says "switched off there, or an older
+there - which is why the editor's tab says "switched off there, or an older
 build" rather than claiming to know which.
 
 ---
 
 ## 4. Reaching it from another machine
 
-The origin already binds every interface — the log line says `0.0.0.0:9080` —
+The origin already binds every interface - the log line says `0.0.0.0:9080` -
 so on a LAN there is nothing more to do than use the machine's address:
 
 ```sh
@@ -222,7 +222,7 @@ just run --cdn 192.168.1.20:9080 --publisher-key ba42458e83ba...
 
 For anything past that, in rough order of how much you have to trust:
 
-**A tunnel or an overlay network** — Tailscale, WireGuard, `ssh -R` — is the
+**A tunnel or an overlay network** - Tailscale, WireGuard, `ssh -R` - is the
 honest first answer for "my friend needs my content". The origin stays bound to
 a private address and the network decides who is on it.
 
@@ -232,12 +232,12 @@ keep these in mind:
 - The origin speaks **plain HTTP**. It has no certificate handling, so anything
   reachable from the internet wants nginx, Caddy or a CDN in front of it.
 - Content is **content-addressed and signed**, so a proxy cannot alter it
-  undetected — a modified chunk fails the hash and a modified manifest fails the
+  undetected - a modified chunk fails the hash and a modified manifest fails the
   signature. What a proxy *can* see is which assets somebody fetched.
 - The routes are `GET /health`, `GET /manifest`, `GET /bundle/<root>`,
   `GET /catalogue[/<cursor>]` and `PUT|HEAD /ingest/<hash>`. If uploads are not
   wanted from outside, do not proxy `/ingest`; if the contents should not be
-  enumerable from outside, do not proxy `/catalogue` — though an origin started
+  enumerable from outside, do not proxy `/catalogue` - though an origin started
   without `--list-contents` answers it `404` anyway.
 
 **A cache in front of a cache.** Two flags make a second origin a mirror that
@@ -263,15 +263,15 @@ grant key, which still gates delivery.
 
 | What you see | What it usually is |
 |---|---|
-| client fetches nothing, says nothing | no `--publisher-key` — nothing can be verified, so nothing is requested |
+| client fetches nothing, says nothing | no `--publisher-key` - nothing can be verified, so nothing is requested |
 | `catalogue from …` then no assets registered | the world names no published asset; assets are fetched as they are named |
-| assets arrive and draw as the fallback cube or a magenta checkerboard | the store holds source art, not baked art — run `assetc` first |
+| assets arrive and draw as the fallback cube or a magenta checkerboard | the store holds source art, not baked art - run `assetc` first |
 | `no content store at …` | `--store` points somewhere nothing was published into |
 | `403` on upload | wrong ingest key |
 | `404` on upload | the origin was started without `--ingest-key` |
 | an origin's tab in the assets panel says it does not list | the origin was started without `--list-contents` |
 | that tab says the key was refused | the row's ingest key is not the origin's `--ingest-key` |
-| editor lists a store as empty | it has never been published — `raw/` is not the manifest |
+| editor lists a store as empty | it has never been published - `raw/` is not the manifest |
 
 The editor's **Network** panel is the readout for everything above: sources
 tried, what verified, what was refused, bytes moved.

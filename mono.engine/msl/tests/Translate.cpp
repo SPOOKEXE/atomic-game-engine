@@ -17,7 +17,7 @@ namespace {
 	// One compiled fragment shader, and the GLSL it came from.
 	//
 	// **A fixture rather than an assembled instruction stream.** SPIRV-Cross
-	// needs a complete module — types, a function body, a return — so the
+	// needs a complete module - types, a function body, a return - so the
 	// word-by-word builder `mono.tools/shadercheck` uses for its negative cases
 	// produces nothing this can translate. What matters about a fixture is that
 	// its provenance is beside it rather than in somebody's shell history:
@@ -109,7 +109,7 @@ TEST_CASE("the entry point is renamed to main0", "[msl]") {
 }
 
 // The reason this module exists. SPIRV-Cross left to itself numbers resources in
-// id order, which for this shader puts `colourMap` at [[texture(0)]] — and SDL's
+// id order, which for this shader puts `colourMap` at [[texture(0)]] - and SDL's
 // Metal backend binds the shadow map there.
 TEST_CASE("resources land on the indices SDL_CreateGPUShader documents", "[msl]") {
 	const Translation translation = Translate(FRAGMENT);

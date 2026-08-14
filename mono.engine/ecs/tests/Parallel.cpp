@@ -163,8 +163,8 @@ TEST_CASE("work actually reaches more than one thread", "[parallel]") {
 
 TEST_CASE("a table above the dispatch floor still wakes the pool", "[parallel]") {
 	// **The chunk split must never reach the dispatch decision.** `Jobs::For`
-	// refuses to hand over anything below `MINIMUM_GRAINS` grains — 32 768
-	// indices at the default — and it is handed `slice.Rows`. So a `VisitTables`
+	// refuses to hand over anything below `MINIMUM_GRAINS` grains - 32 768
+	// indices at the default - and it is handed `slice.Rows`. So a `VisitTables`
 	// that yielded one slice per chunk instead of one per table would put every
 	// dispatch under that floor, and a 500k parallel iteration would quietly run
 	// serially: a measured 3.5x, lost with every other case in this file still
@@ -198,7 +198,7 @@ TEST_CASE("ten thousand rows at the default grain never reach the pool", "[paral
 	// **The size `engine.ecs.bench.iteration` measures `EachParallel` at, pinned
 	// here so that suite's numbers cannot be misread.** 10k rows is under
 	// `DEFAULT_GRAIN * MINIMUM_GRAINS`, so that benchmark times the inline path
-	// and any movement in it is the optimiser or the storage — never the job
+	// and any movement in it is the optimiser or the storage - never the job
 	// system. D00012 nearly concluded the opposite from it.
 	//
 	// Not a retry loop, unlike the cases above: those allow one participant and
@@ -401,7 +401,7 @@ TEST_CASE("batched parallel spans archetypes without colliding", "[parallel]") {
 	Store store("test");
 
 	// Two tables, so `first` has to carry across the boundary rather than
-	// restarting — the bug that silently overwrites the first table's output
+	// restarting - the bug that silently overwrites the first table's output
 	// with the second table's.
 	constexpr size_t WITH_MARKER = 3'000;
 	constexpr size_t WITHOUT = 4'000;

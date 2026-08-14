@@ -118,7 +118,7 @@ namespace engine::script {
 		JS_SetRuntimeOpaque(Vm, budget);
 
 		// **Built up from nothing rather than trimmed down**, which is the same
-		// stance the Luau side takes with `os` and `debug` — and it is not
+		// stance the Luau side takes with `os` and `debug` - and it is not
 		// stylistic. `JS_NewContext` adds every intrinsic including **`Date`**,
 		// and a script that branches on `Date.now()` produces a run that does
 		// not replay; `just replay-check` would then fail a long way from the
@@ -133,7 +133,7 @@ namespace engine::script {
 		// does not.
 		//
 		// `JS_AddIntrinsicEval` is here and was not at first, which cost a run:
-		// **`JS_Eval` — the C entry point that runs a script at all — needs
+		// **`JS_Eval` - the C entry point that runs a script at all - needs
 		// it.** Excluding it did not produce a sandbox, it produced
 		// "TypeError: eval is not supported" for every script. The global
 		// `eval` it also installs is deleted below.
@@ -149,7 +149,7 @@ namespace engine::script {
 		// **`BigInt` is absent because it does not free cleanly on a raw
 		// context**, not because it was unwanted. `JS_AddIntrinsicBigInt` over
 		// `JS_NewContextRaw` leaves an object alive, and `JS_FreeRuntime`
-		// asserts `list_empty(&rt->gc_obj_list)` on teardown — reproduced
+		// asserts `list_empty(&rt->gc_obj_list)` on teardown - reproduced
 		// against upstream in isolation, with every other intrinsic in this
 		// list clean and `JS_NewContext` (which adds them all) clean too.
 		//
@@ -170,7 +170,7 @@ namespace engine::script {
 		// removing `Function` would take every function expression with it. A
 		// script assembling its own source is a script no manifest describes,
 		// which is a reason to keep watching this rather than a hole a game can
-		// be exploited through — it is the same VM, the same bindings and the
+		// be exploited through - it is the same VM, the same bindings and the
 		// same refusals on the other side of it.
 		{
 			JSValue global = JS_GetGlobalObject(Context);
@@ -185,7 +185,7 @@ namespace engine::script {
 		// **The store's listeners go before the VM does.** The removal hook
 		// captures this `JSContext *`, and a store that outlived the runtime
 		// would call into a freed context the next time anything in the world
-		// was destroyed — which is the ordinary case, because a world is
+		// was destroyed - which is the ordinary case, because a world is
 		// destroyed after the scripts that built it. `CloseJsBindings` takes
 		// the change subscriptions back for the same reason.
 		Store.ClearDescendantRemoving();
@@ -206,7 +206,7 @@ namespace engine::script {
 		// reason a JavaScript VM can live under `world::Driver` at all.**
 		//
 		// A runtime that owned its own event loop would resolve promise
-		// reactions whenever it liked — mid-tick, in an order nothing chose —
+		// reactions whenever it liked - mid-tick, in an order nothing chose -
 		// and that is the desync rule 5 names. `JS_ExecutePendingJob` hands
 		// that decision to us, so reactions run at a point the engine picks and
 		// in the order the queue holds them. An embeddable JS engine without
@@ -236,7 +236,7 @@ namespace engine::script {
 		// **Strict mode, and it is load-bearing rather than tidy.** An instance
 		// is made non-extensible so a script cannot bolt a field onto it, and
 		// in sloppy mode assigning to a non-extensible object *silently does
-		// nothing* — so `part.Transparency = 0.5` would look like it worked and
+		// nothing* - so `part.Transparency = 0.5` would look like it worked and
 		// read back as undefined. Strict mode turns that into the TypeError a
 		// Luau script already gets from `__newindex`.
 		JSValue result = JS_Eval(
@@ -256,7 +256,7 @@ namespace engine::script {
 
 		// Drained here rather than left for later. Nothing in this version gives
 		// a script anything to await, so a pending job at this point is work the
-		// script started and did not finish — and finishing the tick with one
+		// script started and did not finish - and finishing the tick with one
 		// outstanding is exactly the tick-crossing v0.6 has to decide about
 		// deliberately.
 		if (!DrainJobs()) {
@@ -275,7 +275,7 @@ namespace engine::script {
 
 		// **The active container, not a component of its own.** An instance
 		// may hold a program per language and `ActiveSourceOf` is the one place
-		// that says which one runs — see `script::CodeSourceContainerSelector`.
+		// that says which one runs - see `script::CodeSourceContainerSelector`.
 		const core::Name path = ActiveSourceOf(Store, instance);
 		if (!path.IsValid()) {
 			return true;
@@ -295,7 +295,7 @@ namespace engine::script {
 		// real**: `JS_Eval` with `JS_EVAL_TYPE_GLOBAL` shares one global object
 		// across every chunk, where `luaL_sandboxthread` gives each Luau chunk
 		// its own. So `script` is rebound before each and cleared after, and two
-		// JavaScript scripts in one world can see each other's globals — which
+		// JavaScript scripts in one world can see each other's globals - which
 		// is JavaScript's own model rather than something this engine chose.
 		{
 			JSValue global = JS_GetGlobalObject(Context);
@@ -328,13 +328,13 @@ namespace engine::script {
 		};
 
 		// **The world's own timed work first, exactly where the Luau side puts
-		// it** — see `LuauRuntime::Heartbeat`, which carries the whole argument:
+		// it** - see `LuauRuntime::Heartbeat`, which carries the whole argument:
 		// a tween and a deadline are not resumes, and everything the rest of the
 		// barrier delivers should see the world they already moved.
 		note(PumpJsTweens(Context, delta));
 		PumpDebris(Store, JsOf(Context).Debris);
 
-		// **Input first, and that ordering is the useful one** — the same place
+		// **Input first, and that ordering is the useful one** - the same place
 		// `LuauRuntime::Heartbeat` puts it, and for its reason: a bound action's
 		// handler writes properties, and those writes should reach their
 		// listeners on *this* barrier rather than the next.
@@ -354,7 +354,7 @@ namespace engine::script {
 		note(PumpJsTree(Context));
 
 		// **The tree's other listener, second within this step and never before
-		// it** — the same place and the same reason the Luau side puts it: a
+		// it** - the same place and the same reason the Luau side puts it: a
 		// `ChildAdded` handler and a resumed `WaitForChild` are two scripts told
 		// about one arrival, and the signal every listener shares goes first.
 		note(PumpJsChildWaiters(Context));
@@ -366,7 +366,7 @@ namespace engine::script {
 		note(PumpJsCharacters(Context));
 
 		// Last within step 2 and before the tasks, exactly as the Luau side
-		// orders it — see `LuauRuntime::Heartbeat`, which also gives the reason
+		// orders it - see `LuauRuntime::Heartbeat`, which also gives the reason
 		// the queue is moved out before the walk rather than drained in place.
 		{
 			std::vector<gui::GuiEvent> events;
@@ -419,7 +419,7 @@ namespace engine::script {
 		}
 
 		// **The object `InstallJsInstanceMethods` built**, which already holds
-		// the signals as accessors — so unlike Luau there is no second list to
+		// the signals as accessors - so unlike Luau there is no second list to
 		// keep, and the five `JsEcs` appends arrive with the rest.
 		JSValue methods = JS_GetPropertyStr(Context, global, "__instanceMethods");
 		surface.InstanceMembers = OwnPropertyNames(Context, methods);

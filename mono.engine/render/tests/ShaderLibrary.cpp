@@ -7,8 +7,8 @@
 // name lookup. What a device is needed for is turning the words into a pipeline,
 // and that is the one thing `ShaderLibrary` does not do.
 //
-// The half of D00110 that lives here is the resolution order — a `ShaderScript`
-// in the world first, an engine built-in second, a diagnostic third — because
+// The half of D00110 that lives here is the resolution order - a `ShaderScript`
+// in the world first, an engine built-in second, a diagnostic third - because
 // that is what makes a default shader file reachable by name rather than a file
 // nothing loads.
 
@@ -49,7 +49,7 @@ using engine::scene::SetShaderSource;
 using engine::scene::ShaderScriptClass;
 
 namespace {
-	// The first word of a SPIR-V module — what separates "some bytes" from
+	// The first word of a SPIR-V module - what separates "some bytes" from
 	// "SPIR-V", the same check `tests/ShaderCompiler.cpp` makes.
 	constexpr uint32_t SPIRV_MAGIC = 0x07230203u;
 
@@ -62,7 +62,7 @@ void main() { outColour = vec4(1.0); }
 )";
 
 	// The assets override is process-wide state, so a case that leaves it set
-	// breaks every later one — `engine.resources.shaders` carries the guard.
+	// breaks every later one - `engine.resources.shaders` carries the guard.
 	struct Staged {
 		fs::path Root;
 
@@ -195,8 +195,8 @@ TEST_CASE("a built-in is what a name resolves to when no script holds it", "[ren
 	REQUIRE(module->Error.empty());
 	REQUIRE(module->SpirV.front() == SPIRV_MAGIC);
 
-	// A built-in cannot change while the engine runs — `glslc` compiled it
-	// during the build — so a second refresh reloads nothing.
+	// A built-in cannot change while the engine runs - `glslc` compiled it
+	// during the build - so a second refresh reloads nothing.
 	REQUIRE(library.Refresh(store) == 0);
 }
 
@@ -214,7 +214,7 @@ TEST_CASE("a script overrides the built-in of the same name", "[render][shaders]
 	REQUIRE(library.Find(Name(first))->BuiltIn);
 
 	// **The order is the design.** An author's script replaces the engine's
-	// shader of that name and nothing else changes — which is what makes a
+	// shader of that name and nothing else changes - which is what makes a
 	// built-in a default rather than a separate mechanism.
 	Author(store, first.c_str(), VALID);
 	REQUIRE(library.Refresh(store) == 1);

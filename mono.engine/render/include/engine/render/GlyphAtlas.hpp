@@ -6,7 +6,7 @@
 // decision inside it, unchanged: whichever module ends up owning the four
 // faces, only one does". This module owns them.
 //
-// `ui` owned them first, through imgui's atlas — and that was right while the
+// `ui` owned them first, through imgui's atlas - and that was right while the
 // editor was the only thing drawing text. It stops being right the moment a
 // shipped client has to draw a `ScreenGui`: `mono.client` does not link
 // `Engine::ui` and must not, so an atlas that lived there would mean a second
@@ -55,7 +55,7 @@ namespace engine::render {
 		// Headings and anything wanting more presence. Roboto.
 		Display,
 
-		// Broad Unicode coverage, for text this engine did not author — an
+		// Broad Unicode coverage, for text this engine did not author - an
 		// instance named in a script, a path, a player's name. Noto Sans.
 		Fallback,
 
@@ -76,7 +76,7 @@ namespace engine::render {
 		//@}
 
 		// Where to put it relative to the pen, in pixels. Y grows downward, so
-		// a glyph's top is usually negative — which is the one sign everybody
+		// a glyph's top is usually negative - which is the one sign everybody
 		// gets backwards once.
 		//@{
 		float OffsetX = 0.0f;
@@ -102,7 +102,7 @@ namespace engine::render {
 		// **Latin-1 and no more, deliberately.** The whole of Unicode is a
 		// hundred megabytes of sheet nobody looks at; what a fallback face is
 		// *for* is the rest, and paging it in on demand is the shape that
-		// works — filed rather than pretended at. A codepoint outside this range
+		// works - filed rather than pretended at. A codepoint outside this range
 		// resolves to nothing and a caller draws the missing-glyph box, which is
 		// visible on purpose for `ImageSource`'s reason.
 		//@{
@@ -158,7 +158,7 @@ namespace engine::render {
 		// **Baked into every atlas so a filled rectangle and a glyph go through
 		// one pipeline.** Without it an untextured quad would need a second
 		// pipeline with no texture bound, and two pipelines is two places for
-		// the blend state to be set differently — which shows as interface
+		// the blend state to be set differently - which shows as interface
 		// panels that are subtly the wrong opacity and nowhere else.
 		//
 		// Meaningless before `Build`; `Ready` says whether there is one.
@@ -178,7 +178,7 @@ namespace engine::render {
 		// **The measurement a layout should use rather than
 		// `gui::AVERAGE_ADVANCE`.** That constant is an estimate `gui` needs
 		// because it is `shared` and cannot rasterise anything; this is the real
-		// number, and a backend that has an atlas should use it — the estimate
+		// number, and a backend that has an atlas should use it - the estimate
 		// exists so the two do not disagree about *where* an element is, not so
 		// the text stays wrong.
 		//
@@ -196,7 +196,7 @@ namespace engine::render {
 		core::Vector2 White;
 
 		// Indexed `[face][codepoint - FIRST_CODEPOINT]`, so a lookup is
-		// arithmetic rather than a hash — this runs per character per frame.
+		// arithmetic rather than a hash - this runs per character per frame.
 		std::vector<Glyph> Glyphs;
 	};
 }

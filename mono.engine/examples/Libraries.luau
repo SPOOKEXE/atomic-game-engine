@@ -2,7 +2,7 @@
 -- The shipped Luau libraries, loaded and exercised.
 --
 -- `MagicCore` and `TerrainCore` came from a Rojo project where they sat under
--- `ReplicatedStorage`, and they are here **unchanged** — not one line of either
+-- `ReplicatedStorage`, and they are here **unchanged** - not one line of either
 -- library was edited to make it run in this engine. What makes that possible is
 -- `script::MountModuleTree`: the staged `assets/lib/` directory is mirrored into
 -- `ModuleScript` instances under `ReplicatedStorage` before any scene runs, so
@@ -17,13 +17,13 @@
 -- Very little, which is the interesting part. Between them the two libraries
 -- reach outside pure Luau in three places:
 --
---   * `Random.new(seed)` — this engine has it, and its sequence is a pure
+--   * `Random.new(seed)` - this engine has it, and its sequence is a pure
 --     function of the seed and the draw index, which is exactly what
 --     `RandomStreams` needs. The *numbers* differ from Roblox's, so anything
 --     asserting a literal draw would disagree; nothing does.
---   * `typeof` — a Luau fastcall builtin, so it is there whether or not a host
+--   * `typeof` - a Luau fastcall builtin, so it is there whether or not a host
 --     installs a global.
---   * `bit32` and `table.freeze` — Luau, not Roblox.
+--   * `bit32` and `table.freeze` - Luau, not Roblox.
 --
 -- `MagicCore.Vector3` is the library's own module and shadows nothing, and
 -- neither library ever touches an Instance. That is what "pure data core" bought.
@@ -31,7 +31,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local MagicCore = ReplicatedStorage:FindFirstChild("MagicCore")
-assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted — is assets/lib staged?")
+assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted - is assets/lib staged?")
 
 local TerrainCore = ReplicatedStorage:FindFirstChild("TerrainCore")
 assert(TerrainCore ~= nil, "ReplicatedStorage.TerrainCore was not mounted")
@@ -58,7 +58,7 @@ for _, name in Presets.names() do
 	local program, graphDiagnostics = Compiler.compileGraph(graph.root, graph.recipes)
 	if program == nil then
 		failed += 1
-		warn(`{name}: compile failed at {graphDiagnostics[1].path} — {graphDiagnostics[1].message}`)
+		warn(`{name}: compile failed at {graphDiagnostics[1].path} - {graphDiagnostics[1].message}`)
 		continue
 	end
 

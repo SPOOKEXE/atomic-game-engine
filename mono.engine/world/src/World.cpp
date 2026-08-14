@@ -13,8 +13,8 @@ namespace engine::world {
 		: Handle(id), Settings_(settings), Store_(settings.Name.Text()), Timestep(settings.TickRate) {
 		// **Before anything can touch a mailbox, including this world's own
 		// tick.** A `Store::Resource<T>` on a type nobody registered mints one
-		// under the *compiler's* spelling — `engine::world::Inbox` rather than
-		// `world.Inbox` — and the failure is not here: it is the next `Universe`
+		// under the *compiler's* spelling - `engine::world::Inbox` rather than
+		// `world.Inbox` - and the failure is not here: it is the next `Universe`
 		// to register them properly, aborting with "a type has one name" in
 		// whichever test order happened to reach it first.
 		//
@@ -63,7 +63,7 @@ namespace engine::world {
 		try {
 			for (int tick = 0; tick < ticks; tick++) {
 				// Cleared at the *start* of a tick rather than the end, so
-				// what a tick recorded is still there for `Present` to read —
+				// what a tick recorded is still there for `Present` to read -
 				// render invalidation runs in `PreRender`, which is a separate
 				// call after this one. Clearing at the end would hand the
 				// renderer an empty set every frame.
@@ -72,7 +72,7 @@ namespace engine::world {
 				// **Catch-up ticks after the first see an empty inbox, and that
 				// is exactly-once delivery.** A barrier fills this world's inbox
 				// at most once per host frame and this loop may run several
-				// ticks in that frame — so without this, a world owing three
+				// ticks in that frame - so without this, a world owing three
 				// ticks handed the same message to its systems three times. It
 				// was found as a teleport that admitted the same player three
 				// times into the destination world.
@@ -81,7 +81,7 @@ namespace engine::world {
 				// the delivery: the barrier ran immediately before this call and
 				// `Universe::Tick` is what orders the two. The mail also
 				// survives this whole call, so a caller reading `Postbox::
-				// Deliveries` after a tick still sees what arrived — which is
+				// Deliveries` after a tick still sees what arrived - which is
 				// what every bus suite does and what the router's own
 				// replace-on-next-mail rule was already promising.
 				if (tick > 0) {
@@ -95,7 +95,7 @@ namespace engine::world {
 
 				// The phase boundary the change signals are named for. After
 				// the simulation phases, so a property written three times in
-				// one tick signals once with the value it ended up at — and
+				// one tick signals once with the value it ended up at - and
 				// never inside a batch, where a listener could mutate the world
 				// in the middle of a loop over it.
 				Store_.FlushSignals();
@@ -103,7 +103,7 @@ namespace engine::world {
 			ConsecutiveFaults = 0;
 		} catch (const std::exception &failure) {
 			// A soft fault: one world stops, its neighbours never notice. A
-			// hard fault is not caught and cannot be — see AGENTS.md.
+			// hard fault is not caught and cannot be - see AGENTS.md.
 			Stats.Faults++;
 			ConsecutiveFaults++;
 			State_ = WorldState::Faulted;

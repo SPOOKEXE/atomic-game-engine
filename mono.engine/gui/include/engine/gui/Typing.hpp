@@ -10,7 +10,7 @@
 //
 // A frame's characters go into `Label::Text` on the focused box and the caret
 // into `Entry::CursorPosition` beside it. Nothing here keeps a buffer, an edit
-// history or a "string being edited" of its own — rule 2, and the specific bug it
+// history or a "string being edited" of its own - rule 2, and the specific bug it
 // would buy is a box a script wrote to and a person typed into disagreeing about
 // what it says, with the disagreement visible only after the next repaint.
 // `Type` is therefore a free function over a store rather than an object with
@@ -19,8 +19,8 @@
 // ## A keystroke here is not a platform's
 //
 // `Typing` names what a keyboard *meant* and no key codes at all. This module
-// links `core` and `ecs` and nothing else — `gui/AGENTS.md` refuses `scene`, so
-// `scene::KeyCode` is not nameable here and `SDL_Keycode` is three tiers up —
+// links `core` and `ecs` and nothing else - `gui/AGENTS.md` refuses `scene`, so
+// `scene::KeyCode` is not nameable here and `SDL_Keycode` is three tiers up -
 // and the host that owns the pump is the one that knows which key a player
 // bound to what. Five meanings is the whole of what a single-line text field
 // needs, and a sixth arrives when something can produce it: there is no `Delete`
@@ -32,7 +32,7 @@
 // **No clipboard and no undo.** Both are a host's, not a widget's: a paste is
 // text arriving from somewhere other than a keyboard, which is `Typing::Text`
 // already, and an undo stack is state that would have to live somewhere and rule
-// 2 says where — a component, once something asks for one.
+// 2 says where - a component, once something asks for one.
 //
 // **No caret drawing.** `DrawKind` has four members and none of them is a line
 // blinking at a character offset. `Entry::CursorPosition` is where the answer is
@@ -74,7 +74,7 @@ namespace engine::gui {
 		// Whether Backspace was pressed.
 		//
 		// **Deletes the selection when there is one and one *character* when
-		// there is not** — never one byte, which would leave a lone continuation
+		// there is not** - never one byte, which would leave a lone continuation
 		// byte behind and turn the rest of the string into a question mark.
 		bool Backspace = false;
 
@@ -92,7 +92,7 @@ namespace engine::gui {
 
 		// Whether Return was pressed.
 		//
-		// What it does is `Entry::MultiLine`'s to decide — see `Type`.
+		// What it does is `Entry::MultiLine`'s to decide - see `Type`.
 		bool Submit = false;
 	};
 
@@ -112,7 +112,7 @@ namespace engine::gui {
 		// Whether Return released the focus.
 		//
 		// **The caller owes a `FocusReleased` event for this and the router will
-		// not produce one**, because no press happened — which is the same split
+		// not produce one**, because no press happened - which is the same split
 		// `Input.hpp` states from the other side. `GuiEvent::Entered` is the flag
 		// that tells a script this release was Return rather than a click.
 		bool Released = false;
@@ -121,7 +121,7 @@ namespace engine::gui {
 	// Applies one frame's keyboard to whichever `TextBox` has the focus.
 	//
 	// **In one order, and it is the order a person would have meant.** The
-	// characters land first, then Backspace, then the caret moves, then Return —
+	// characters land first, then Backspace, then the caret moves, then Return -
 	// so a frame that typed `a` and pressed Backspace ends where it started, and
 	// a frame that typed `hi` and pressed Return submits `hi` rather than the text
 	// from before it. A frame produces at most one of each of the last three, so
@@ -129,7 +129,7 @@ namespace engine::gui {
 	//
 	// **The caret is clamped into the text before anything reads it.** A script
 	// may set `TextBox.Text` at any time and the property is a plain field with
-	// no setter to hook — see `gui/AGENTS.md` — so a box holding `"hello"` with
+	// no setter to hook - see `gui/AGENTS.md` - so a box holding `"hello"` with
 	// the caret at 6 can be handed `"hi"` between two frames, and every insertion
 	// point derived from that caret would then be past the end. Clamping here
 	// rather than at the write is what makes that a no-op instead of a crash, and
@@ -144,7 +144,7 @@ namespace engine::gui {
 	//
 	// **`TextEditable` stops the text changing and does not stop the caret
 	// moving.** A box a game has locked is still one a person can move through
-	// and select in — which is what the property means in Roblox, and what makes
+	// and select in - which is what the property means in Roblox, and what makes
 	// a read-only box that a script fills in still legible. Return still releases
 	// it, because being done with a box is not an edit.
 	//

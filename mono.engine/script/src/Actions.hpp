@@ -3,9 +3,9 @@
 // What `ContextActionService` has claimed, and the report a handler is handed.
 //
 // **The stack is shared and the callables are not**, which is `Signals.hpp`'s
-// arrangement one door along and for the same reason. What a bound action *is* —
+// arrangement one door along and for the same reason. What a bound action *is* -
 // a name, the keys it claims, a priority, and the rule that the highest claim
-// hears the press first and decides whether anything below it does — names no
+// hears the press first and decides whether anything below it does - names no
 // VM, and the order two actions at one priority fire in is a thing a recording
 // depends on. Two hand-written copies of that would agree until the first time
 // one was fixed.
@@ -13,7 +13,7 @@
 // **What a frame *did* is here too, and for the same argument one size down.**
 // The four report builders and the pair behind `gameProcessedEvent` answer
 // questions about an input rather than about the stack, and two pumps answering
-// either one is two answers — an engine where a click carried a position, or
+// either one is two answers - an engine where a click carried a position, or
 // read as handled, in one language and not the other is one nobody could port a
 // handler between.
 //
@@ -48,9 +48,9 @@ namespace engine::script {
 	// One input event, as a script sees it.
 	//
 	// **Roblox's `InputObject`, and what this engine used to hand nobody.** Both
-	// languages build a value of their own from one of these — a tagged userdata
+	// languages build a value of their own from one of these - a tagged userdata
 	// on the Luau side and an object of a registered class on the JavaScript one
-	// — which is the same split `ScriptCall::ReturnSignal` is on: the *fact* is
+	// - which is the same split `ScriptCall::ReturnSignal` is on: the *fact* is
 	// one thing and only its wrapper is two.
 	//
 	// Trivially copyable on purpose: the Luau half placement-news it into
@@ -71,7 +71,7 @@ namespace engine::script {
 		//
 		// **A name rather than an ordinal**, because the member list is
 		// registered in `scene/Part.cpp` and an ordinal here would be a second
-		// statement of its order — the kind that agrees until somebody inserts a
+		// statement of its order - the kind that agrees until somebody inserts a
 		// member.
 		core::Name State;
 
@@ -86,7 +86,7 @@ namespace engine::script {
 	// --- the four reports a frame can produce ---------------------------------
 	//
 	// **All four are shared, since `UserInputService` stopped being Luau's.**
-	// The key report always was — both pumps hand one to a bound action — and the
+	// The key report always was - both pumps hand one to a bound action - and the
 	// other three lived beside the Luau signal loop while that loop was the only
 	// one. Two pumps building a report each is two answers to "what did this
 	// frame do", which is the drift the whole neutral layer exists to close: an
@@ -132,7 +132,7 @@ namespace engine::script {
 	// **The router's own events are the evidence, because they are the only
 	// record of a press being taken.** `gui::Router` emits an event naming an
 	// element exactly when the pointer is over or pressed on something that takes
-	// input — `Pick` walks past anything inactive — so an event in this beat's
+	// input - `Pick` walks past anything inactive - so an event in this beat's
 	// queue *is* the interface having consumed the pointer. `MouseLeave` is the
 	// one exception and it is the important one: it is emitted for the element
 	// the pointer has just left, which is the frame the interface stopped having
@@ -153,7 +153,7 @@ namespace engine::script {
 	// **A `TextBox` with focus is the whole of it, which is Roblox's rule.**
 	// While somebody is typing into a box, `W` is a letter rather than a step
 	// forward, and a place that moves its character on `InputBegan` has to be
-	// told so — that is what `gameProcessedEvent` is for on a key.
+	// told so - that is what `gameProcessedEvent` is for on a key.
 	//
 	// **A state and not a queue, where the pointer's half is the other way
 	// round.** A press is an event and having the keyboard is a condition that
@@ -174,7 +174,7 @@ namespace engine::script {
 	//
 	// **The selector between the two answers above, and it used to be a gate.**
 	// While the interface could only take the pointer, this was what kept a
-	// `true` off a key — `processed && IsPointerReport(report)`. Now that a
+	// `true` off a key - `processed && IsPointerReport(report)`. Now that a
 	// `TextBox` can hold the keyboard there are two answers rather than one and a
 	// veto, and the shape a pump wants is
 	// `IsPointerReport(report) ? pointerTaken : keyboardTaken`. Both pumps use
@@ -210,15 +210,15 @@ namespace engine::script {
 	// `GetBoundActionInfo` record.
 	//
 	// **`InputReport`'s shape one door along, and it is here for that struct's
-	// reason.** The record holds `Enum.KeyCode` members, and `ScriptValue` — the
-	// tree a method may return — has no tag for an `EnumItem` and must not gain
+	// reason.** The record holds `Enum.KeyCode` members, and `ScriptValue` - the
+	// tree a method may return - has no tag for an `EnumItem` and must not gain
 	// one, because it crosses a world and `Codec.hpp` is a wire format. So the
 	// *fact* is one struct and only the wrapper is two: each VM builds the table
 	// or object and its own `EnumItem`s from this, exactly as each builds its own
 	// `InputObject`.
 	//
 	// **The keys arrive as member names rather than as ordinals**, so
-	// `scene::Describe` is called once here rather than once per adapter — the
+	// `scene::Describe` is called once here rather than once per adapter - the
 	// same rule `KeyReport` and its three neighbours keep.
 	//
 	// @since v0.16
@@ -234,7 +234,7 @@ namespace engine::script {
 
 		// **Inverted from this engine's own order, so higher still wins.**
 		// `ActionStack` is sorted highest priority *first* and Roblox's
-		// `stackOrder` counts the other way — the largest number is the claim
+		// `stackOrder` counts the other way - the largest number is the claim
 		// that gets the key. Reporting the index under Roblox's name would be the
 		// same word meaning the opposite thing, which is worse than not reporting
 		// it.
@@ -258,7 +258,7 @@ namespace engine::script {
 		// handler twice per press, forever.
 		//
 		// **Sorted here rather than searched at press time**, because binding is
-		// rare where pressing is not — and stably, so two actions at one
+		// rare where pressing is not - and stably, so two actions at one
 		// priority fire in bind order. That is the only tie-break that is
 		// reproducible; an unstable sort would make which one wins depend on the
 		// allocator.
@@ -292,7 +292,7 @@ namespace engine::script {
 		// **An index and not an iterator, so a handler may rebind mid-walk without
 		// a dangling pointer.** A handler that binds or unbinds shifts the stack
 		// under this loop; the position is then approximate, which is the honest
-		// cost of letting a handler do it at all — Roblox does not define that case
+		// cost of letting a handler do it at all - Roblox does not define that case
 		// either. What it must not be is a use-after-free.
 		//
 		// @param key      A `scene::KeyCode` ordinal.

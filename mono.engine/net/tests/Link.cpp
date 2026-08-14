@@ -113,7 +113,7 @@ TEST_CASE("a refused packet still proves the peer is alive", "[net][link]") {
 
 	CHECK(link.OnPacket(Arrival(10), 16, 1.0));
 
-	// Stale, so the payload is not acted on — but something arrived, and the
+	// Stale, so the payload is not acted on - but something arrived, and the
 	// timeout is about the peer rather than about whether its last packet was
 	// useful.
 	CHECK_FALSE(link.OnPacket(Arrival(5), 16, 4.0));
@@ -196,7 +196,7 @@ TEST_CASE("a reliable resend does not make a later unreliable packet stale", "[n
 
 	// A join: several reliable packets, then the first unreliable delta. One
 	// high-water mark for the whole link would have been dragged to 20 by the
-	// reliable traffic, and every unreliable packet below that thrown away —
+	// reliable traffic, and every unreliable packet below that thrown away -
 	// which is the failure the per-channel counters exist to prevent, and it
 	// was live until v0.4 as a warm-up `replication`'s loss suite worked around.
 	for (uint16_t sequence = 0; sequence <= 20; sequence++) {
@@ -212,7 +212,7 @@ TEST_CASE("a reliable resend does not make a later unreliable packet stale", "[n
 TEST_CASE("a channel's first packet is not a duplicate", "[net][link]") {
 	Link link = Connected();
 
-	// Zero is a legitimate sequence — it is the first one `NextHeader` stamps —
+	// Zero is a legitimate sequence - it is the first one `NextHeader` stamps -
 	// so no value can stand for "nothing has arrived". A mark that started at
 	// zero and was trusted would read this as a repeat of a packet that never
 	// existed.
@@ -234,7 +234,7 @@ TEST_CASE("one channel wrapping does not disturb another", "[net][link]") {
 	// The unreliable channel is about to wrap; the reliable one is nowhere
 	// near. Each mark has to wrap-compare against its own, because `IsNewer` is
 	// a half-range comparison and 0 against 65534 means "newer" while 0 against
-	// 3 means "older" — one shared mark answers one of those two questions for
+	// 3 means "older" - one shared mark answers one of those two questions for
 	// both channels.
 	CHECK(link.OnPacket(Arrival(65534), 8, 1.0));
 	CHECK(link.OnPacket(Arrival(3, ChannelKind::Reliable), 8, 1.0));
@@ -249,7 +249,7 @@ TEST_CASE("one channel wrapping does not disturb another", "[net][link]") {
 	CHECK(link.Stats().PacketsStale == 1);
 
 	// And the reliable channel, four sequences in, was never touched by any of
-	// it — a late one is still delivered.
+	// it - a late one is still delivered.
 	CHECK(link.OnPacket(Arrival(4, ChannelKind::Reliable), 8, 1.0));
 	CHECK(link.OnPacket(Arrival(2, ChannelKind::Reliable), 8, 1.0));
 	CHECK(link.Stats().PacketsStale == 1);
@@ -342,7 +342,7 @@ TEST_CASE("an oversized send is refused rather than fragmented", "[net][link]") 
 	// **The tag is the difference between the two limits, and this is the
 	// assertion that keeps the budget honest.** A payload that fits the wire
 	// once sealed is smaller than the wire, and a `Reserve` measured against
-	// the wire would book a message the framing then refuses — which is a
+	// the wire would book a message the framing then refuses - which is a
 	// message that can never be sent and reads at the call site as a busy link.
 	CHECK(Packet::MAXIMUM_MESSAGE_BYTES + Cipher::OVERHEAD_BYTES == Packet::MAXIMUM_PAYLOAD_BYTES);
 	CHECK_FALSE(link.Reserve(Packet::MAXIMUM_PAYLOAD_BYTES));
@@ -614,7 +614,7 @@ TEST_CASE("a gap near the front is a reorder rather than a loss", "[net][link]")
 	}
 
 	// Acknowledging eight, with six and seven still missing. They are inside
-	// the reordering threshold, so they are not judged yet — a gap that close
+	// the reordering threshold, so they are not judged yet - a gap that close
 	// to the front is far more often a reorder about to resolve than a packet
 	// that is gone, and a controller cutting its rate on every reorder spends a
 	// routed path permanently backed off.
@@ -666,7 +666,7 @@ TEST_CASE("a stale packet's acknowledgement still counts", "[net][link]") {
 		link.NextHeader(ChannelKind::Reliable);
 	}
 
-	// Open the unreliable window at five, then deliver four — stale, refused,
+	// Open the unreliable window at five, then deliver four - stale, refused,
 	// and carrying an acknowledgement that is not stale at all. The payload is
 	// about a moment that has passed; the acknowledgement is about what the far
 	// side has, which is the newest thing it knows.
@@ -685,7 +685,7 @@ TEST_CASE("a stale packet's acknowledgement still counts", "[net][link]") {
 TEST_CASE("a tick is measured between advances and not between mentions of the time", "[net][link]") {
 	// **Packets arrive inside a tick and name the same instant it does.** The
 	// controller is stamped with the last time this link was told, but a tick's
-	// *length* is the gap between two advances — measuring it against the last
+	// *length* is the gap between two advances - measuring it against the last
 	// mention of the time reads every tick as zero, which reads as a stalled
 	// tick, which clamps the allowance to almost nothing.
 	LinkSettings settings;

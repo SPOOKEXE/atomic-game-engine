@@ -12,7 +12,7 @@
 // constructor call, and it is why `:Clone()` needs no separate machinery: both
 // are the same copy from a different source row. It is also the only form a
 // default can take that a snapshot can carry and the v0.5 bindings manifest can
-// describe — a constructor function is neither.
+// describe - a constructor function is neither.
 //
 // **Inheritance is set inclusion.** A derived class's set contains its base's,
 // so `:IsA` is an ancestor test and a query for the base matches every derived
@@ -27,7 +27,7 @@
 
 #include <engine/core/Name.hpp>
 // The three value types a property can carry beyond the primitives. `ecs` is
-// storage and must not know what a `Transform` is — it still has to be able to
+// storage and must not know what a `Transform` is - it still has to be able to
 // *name* the types userland holds, and these are `core/types` primitives rather
 // than anything about a scene. Nothing here reads a field of one.
 #include <engine/core/types/CFrame.hpp>
@@ -52,7 +52,7 @@ namespace engine::ecs {
 	// What a property is, for a binding or an editor that has to type it.
 	//
 	// Deliberately small and closed. A property type that needs a case here is
-	// a decision about what userland can hold, not an implementation detail —
+	// a decision about what userland can hold, not an implementation detail -
 	// so adding one is a visible change rather than a template specialisation
 	// somebody slips in.
 	//
@@ -67,12 +67,12 @@ namespace engine::ecs {
 		Float,
 		Double,
 
-		// `core::Name` — written as text, never as its process-local id.
+		// `core::Name` - written as text, never as its process-local id.
 		//
 		// **For text drawn from a bounded set**, which is what interning is for:
 		// a material, an asset id, a class name. Every distinct string ever
 		// assigned to one of these is kept for the life of the process, so a
-		// property whose value a game *computes* is the wrong shape for it — see
+		// property whose value a game *computes* is the wrong shape for it - see
 		// `String` below, which exists because that was found the hard way.
 		Name,
 
@@ -99,7 +99,7 @@ namespace engine::ecs {
 		// registry that never releases: `label.Text = tostring(score)` at sixty
 		// hertz interns a new string every frame, forever, and takes that
 		// registry's mutex inside the frame loop to do it. A score counter is not
-		// an exotic case — it is the first thing anybody writes.
+		// an exotic case - it is the first thing anybody writes.
 		//
 		// So the two are a real choice rather than a stylistic one, and the rule
 		// is short: **a value the game picks from a set is a `Name`; a value the
@@ -107,17 +107,17 @@ namespace engine::ecs {
 		// the first; a score, a timer and a chat line are the second.
 		//
 		// The cost is paid where it belongs. A `String` property makes its
-		// component non-trivial — an allocation per row rather than a shared id —
+		// component non-trivial - an allocation per row rather than a shared id -
 		// so a component holding one needs a written serialiser and does not
 		// memcpy. `ecs::Column` has carried that path since v0.2 and this is the
 		// first component set to use it.
 		String,
 
-		// `Entity` — a handle within this world, and meaningless outside it.
+		// `Entity` - a handle within this world, and meaningless outside it.
 		Reference,
 
 		// The `core/types` values a script actually holds. These describe what
-		// **userland** sees, not what a component stores — a property whose
+		// **userland** sees, not what a component stores - a property whose
 		// getter doubles a half-extent is a `Vector3` here and the storage is
 		// whatever `Bounds` says. That is why this list stays short no matter
 		// what the components grow: `spatial::LayerMask` will never need a case,
@@ -132,7 +132,7 @@ namespace engine::ecs {
 		// `core/types` gained four headers.** All four have existed since v0.6
 		// and none of them was a `PropertyType`, so a component holding one
 		// could not be saved, could not appear in a properties panel and could
-		// not be set from a script — which makes `Frame.Size` unauthorable, and
+		// not be set from a script - which makes `Frame.Size` unauthorable, and
 		// an unauthorable size is a widget set nobody can use.
 		//
 		// The list stays closed and this is what growing it looks like: four
@@ -152,14 +152,14 @@ namespace engine::ecs {
 		// local in a script. A particle emitter holds eight of them, and an
 		// emitter whose `Size` could not be saved, could not appear in a
 		// properties panel and could not be set from a script would be an emitter
-		// nobody can author — the same gap `UDim2` had at v0.8, in the same words.
+		// nobody can author - the same gap `UDim2` had at v0.8, in the same words.
 		//
 		// **They are big, and that is the one thing about them worth checking
 		// against the closed-list rule.** A `NumberSequence` is 328 bytes and a
 		// `ColorSequence` is 328; every other member of this enum is 32 or fewer.
 		// `PropertyDescriptor::Size` already carries the width and every path
 		// checks a caller's buffer against it, so nothing here assumes a property
-		// value fits in a register — but a marshaller that copied by value into a
+		// value fits in a register - but a marshaller that copied by value into a
 		// stack temporary per read is a marshaller that just grew its frame by a
 		// third of a kilobyte. `control/src/Tools.cpp` reads through a shared
 		// buffer for exactly this reason and is where the size is felt.
@@ -175,7 +175,7 @@ namespace engine::ecs {
 
 	// How a property reaches the components underneath it.
 	//
-	// Every property is a conversion — see `PropertyDescriptor` — so this does
+	// Every property is a conversion - see `PropertyDescriptor` - so this does
 	// not select a *mechanism*. It tells a caller what a write is going to cost
 	// and whether it is allowed where they are standing.
 	//
@@ -199,7 +199,7 @@ namespace engine::ecs {
 
 	// How one property projects onto the components underneath it.
 	//
-	// **This used to be a component and a byte offset, and that was wrong** — it
+	// **This used to be a component and a byte offset, and that was wrong** - it
 	// could describe `Visible` and could not describe `Size`, `Position` or
 	// `Anchored`, which is most of what a script reaches for. Roblox's `Size` is
 	// a full extent and `Bounds::HalfExtent` is half of one; a member pointer
@@ -209,7 +209,7 @@ namespace engine::ecs {
 	// produces a userland value, and a setter that takes one and writes them
 	// back. A plain field is the degenerate case and its conversion is
 	// generated, so there is one mechanism rather than a fast path and a slow
-	// one — two would be two places to forget the change mark in.
+	// one - two would be two places to forget the change mark in.
 	//
 	// **The conversion cost is paid only by callers who arrived through a
 	// name.** `Each<Transform, const Motion>` never sees any of this; physics
@@ -224,7 +224,7 @@ namespace engine::ecs {
 		//
 		// **`core::Name::Text()` takes the process-wide name registry's lock**,
 		// and a binding matching a script's key against a class's property list
-		// calls it once per descriptor it walks — five times for `Position` on a
+		// calls it once per descriptor it walks - five times for `Position` on a
 		// `Part`, thirteen for `CFrame`, and the whole list on a miss. At two
 		// hundred property writes a frame that is over a thousand lock
 		// acquisitions to compare strings that never change.
@@ -232,7 +232,7 @@ namespace engine::ecs {
 		// `script/src/LuauInstances.cpp` compares keys as *text* rather than
 		// interning them, and its comment records the measurement behind that:
 		// interning takes the same registry lock plus a hash. That reasoning is
-		// still right — what it assumed was that reading the text was free, and
+		// still right - what it assumed was that reading the text was free, and
 		// it is not. This is what makes it free.
 		//
 		// Safe to hold forever: `core/src/Name.cpp` keeps its strings in a deque
@@ -240,7 +240,7 @@ namespace engine::ecs {
 		// property `Text()`'s own return relies on.
 		//
 		// Filled by `Declare`, so every path that can produce a descriptor fills
-		// it — `Property`, `ClampedProperty` and `Computed` all go through it.
+		// it - `Property`, `ClampedProperty` and `Computed` all go through it.
 		//
 		// @since v0.8
 		std::string_view Spelling;
@@ -261,7 +261,7 @@ namespace engine::ecs {
 		// **This flag is the whole enforcement, which is why it is worth
 		// naming what checks it.** `Store::SetProperty`, both script bindings
 		// and the properties panel each refuse on this alone, and the bindings
-		// generator turns it into `readonly` in TypeScript and `read` in Luau —
+		// generator turns it into `readonly` in TypeScript and `read` in Luau -
 		// so a script that tries is stopped at typecheck rather than at run
 		// time. A read-only property therefore needs no `Set`, and leaving that
 		// pointer null is the second refusal for a caller that reached past the
@@ -277,7 +277,7 @@ namespace engine::ecs {
 		//
 		// **A different question from `Writable`, and the difference is who is
 		// asking.** `Writable` is about the value: a mass derived from a density
-		// has no assignment that could mean anything, so nobody may write it —
+		// has no assignment that could mean anything, so nobody may write it -
 		// not a script, not a panel, not a file. This is about the *caller*: a
 		// script container's source is edited by an author every day, and a
 		// script rewriting another script's source is the sandbox escape that
@@ -285,7 +285,7 @@ namespace engine::ecs {
 		//
 		// **Enforced in the two script bindings and nowhere else.** The
 		// properties panel, a game file, the Rojo sync and the control surface
-		// all write through `Store::SetProperty` and are unaffected — they are
+		// all write through `Store::SetProperty` and are unaffected - they are
 		// the author, not the program. The bindings generator leaves a
 		// non-scriptable property out of the Luau and TypeScript declarations
 		// entirely, so a script that reaches for one fails at typecheck rather
@@ -300,7 +300,7 @@ namespace engine::ecs {
 		// Which set an `Enum` property's value must belong to.
 		//
 		// Invalid for every other type. Named rather than pointed at, so the
-		// enum can be registered after the property that uses it — a class tree
+		// enum can be registered after the property that uses it - a class tree
 		// is built by several files in whatever order the linker ran them, which
 		// is the same reason `Classes` merges inherited properties lazily.
 		core::Name EnumName;
@@ -309,7 +309,7 @@ namespace engine::ecs {
 		//
 		// Not decoration. The manifest reports them, a future editor needs to
 		// know what dirties what, and v0.6's per-instance `.Changed` has to fan
-		// one component write out to every property name observing it — writing
+		// one component write out to every property name observing it - writing
 		// `Transform` fires `CFrame`, `Position` *and* `Orientation`.
 		const ComponentSet *Reads = nullptr;
 
@@ -343,8 +343,8 @@ namespace engine::ecs {
 		// This class and every ancestor, nearest first.
 		//
 		// Stored rather than walked, so `:IsA` is a scan of a handful of ids
-		// instead of a chain of lookups. Class trees are shallow — `Instance`,
-		// `PVInstance`, `BasePart`, `Part` — so a scan beats an interval
+		// instead of a chain of lookups. Class trees are shallow - `Instance`,
+		// `PVInstance`, `BasePart`, `Part` - so a scan beats an interval
 		// numbering that would have to be recomputed on every registration.
 		std::span<const ClassId> Ancestry;
 
@@ -392,12 +392,12 @@ namespace engine::ecs {
 		//     Classes::Property<&Visual::Visible>(part, "Visible");
 		//
 		// The field is reached through `Store::GetMutable`, so a write is
-		// **marked changed for free** — handing out a mutable pointer already
+		// **marked changed for free** - handing out a mutable pointer already
 		// counts as a write in `StoreState`. A setter that reached the bytes any
 		// other way would be a script write `replication` never sends.
 		//
 		// **Defined in `Property.hpp`, not here**, because the generated
-		// conversion calls `Store` and this header is below it — `Store.hpp`
+		// conversion calls `Store` and this header is below it - `Store.hpp`
 		// does not include this one and must not have to. Include
 		// `engine/ecs/Property.hpp` to declare a property; include this header
 		// to read one.
@@ -412,7 +412,7 @@ namespace engine::ecs {
 		// **Because `PropertyDescriptor` could not say "this is a fraction", and
 		// the first two properties that needed to say it abandoned the generated
 		// form to do it.** Each became thirty-odd lines that were character for
-		// character `Property<Member>` plus one `std::clamp` — and the next 0..1
+		// character `Property<Member>` plus one `std::clamp` - and the next 0..1
 		// float would have been a third copy.
 		//
 		// **Clamped rather than refused**, which is the right answer for a
@@ -424,8 +424,8 @@ namespace engine::ecs {
 		//
 		// **The bounds are template arguments, not parameters, and that is
 		// forced rather than stylistic.** `PropertyDescriptor::Set` is a raw
-		// function pointer — `Property` is written the way it is precisely so the
-		// generated setter is captureless — so bounds passed as values would need
+		// function pointer - `Property` is written the way it is precisely so the
+		// generated setter is captureless - so bounds passed as values would need
 		// a capturing lambda and would not convert. As template arguments they
 		// are baked into the generated function and the descriptor stays a
 		// pointer.
@@ -460,7 +460,7 @@ namespace engine::ecs {
 		// `InstanceName` and `Hierarchy` are this module's own types, so the two
 		// properties projecting them are this module's to declare. `scene` owned
 		// them until v0.8, which was fine while `scene` was the only class tree
-		// — and stopped being fine the moment `gui` needed the same root without
+		// - and stopped being fine the moment `gui` needed the same root without
 		// being allowed to link `scene`.
 		//
 		// Idempotent, like every registration here: the second caller gets the
@@ -516,7 +516,7 @@ namespace engine::ecs {
 
 		// Closes the table to new classes.
 		//
-		// After this, registering a class that has no id aborts — for the same
+		// After this, registering a class that has no id aborts - for the same
 		// reason `Components::Seal` exists: a class first seen during a tick
 		// would take an id decided by whichever world ran first.
 		static void Seal();
@@ -540,7 +540,7 @@ namespace engine::ecs {
 		};
 
 		// The property type for a C++ type, or Opaque when there is no better
-		// answer. Not a failure — a component may hold something userland never
+		// answer. Not a failure - a component may hold something userland never
 		// sees, and the storage still handles it.
 		template <class T> static constexpr PropertyType TypeOf() {
 			using Bare = std::remove_cv_t<T>;

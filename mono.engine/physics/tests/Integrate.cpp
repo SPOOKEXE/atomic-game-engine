@@ -59,7 +59,7 @@ namespace {
 	// The pool, started and joined around the case that needs one.
 	//
 	// Left running, its workers are still parked when the process tears its
-	// statics down and the binary never exits — which reads as a hung test
+	// statics down and the binary never exits - which reads as a hung test
 	// rather than as a missing `Stop`.
 	struct Pool {
 		explicit Pool(unsigned workers) {
@@ -96,7 +96,7 @@ TEST_CASE("the system and the free function are one implementation", "[physics][
 	// authority has stopped describing calls the free function; a tick calls the
 	// system; and a client integrating different arithmetic from the server is a
 	// disagreement that only ever surfaces as drift. So the two are asserted to
-	// agree bit for bit rather than approximately — they are the same code, and
+	// agree bit for bit rather than approximately - they are the same code, and
 	// the day they are not this is what says so.
 	Store store = MakeStore("integrate.shared");
 	const Vector3 linear{3.0f, -1.5f, 0.25f};
@@ -130,7 +130,7 @@ TEST_CASE("the system and the free function are one implementation", "[physics][
 TEST_CASE("integration never loads a mass", "[physics][integrate]") {
 	// The whole reason `Motion` and `RigidBody` are separate components. A
 	// platform, a projectile and a demo cube all move and none of them has a
-	// mass, so an entity with no `RigidBody` has to be integrated — and adding
+	// mass, so an entity with no `RigidBody` has to be integrated - and adding
 	// `RigidBody` to the query would silently stop moving all three.
 	Store store = MakeStore("integrate.massless");
 	const Entity entity = Moving(store, Vector3::Zero, Vector3{1.0f, 0.0f, 0.0f}, Vector3::Zero);
@@ -211,7 +211,7 @@ TEST_CASE("zero entities does nothing and never wakes the pool", "[physics][inte
 	// happen rather than about two zeroes.
 	//
 	// `Jobs::For` returns before touching the timing when the count is zero, so
-	// what this catches is a dispatch with real work in it — a scratch pass
+	// what this catches is a dispatch with real work in it - a scratch pass
 	// over `CountMatching`, say, or a fixed-size loop that runs whether or not
 	// there is anything to integrate.
 	volatile uint64_t sink = 0;
@@ -241,7 +241,7 @@ TEST_CASE("two runs of one scene integrate to identical bytes", "[physics][integ
 	// Same binary, same platform, same result. The parallel path partitions
 	// rows within a table and each range writes only its own rows, so a run
 	// that happened to be split differently across workers must still produce
-	// the same floats — which is what makes a recorded run replay.
+	// the same floats - which is what makes a recorded run replay.
 	const auto run = [](const char *name) {
 		Store store = MakeStore(name);
 		for (uint32_t index = 0; index < 200; index++) {

@@ -94,7 +94,7 @@ namespace engine::replication {
 		delta.Tick = tick;
 
 		// **One part, and marked final.** A submission is small by construction
-		// — it is what one client owns — so the splitting `Authority` does for a
+		// - it is what one client owns - so the splitting `Authority` does for a
 		// whole world would be machinery for a case that does not arise. If one
 		// ever does, it is a client that has been handed more of the world than
 		// a client should hold, and the fix is upstream of here.

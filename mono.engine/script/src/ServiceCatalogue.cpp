@@ -2,7 +2,7 @@
 //
 // **This file exists to be the only list.** `ServiceCatalogue.hpp` carries the
 // argument in full; the short version is that "which services exist" was two
-// lists — one per VM, each written as control flow inside an install function —
+// lists - one per VM, each written as control flow inside an install function -
 // so Luau bound nine and JavaScript bound five, four of them were reachable from
 // one language and not the other, and nothing in the build said so. The
 // TypeScript declarations claimed two of the four anyway.
@@ -10,19 +10,19 @@
 // **It is also the only file that has met both VMs**, which is what lets the
 // table hold a function pointer per language. A `void (*)(lua_State *)` in a
 // shared header would pull Luau into every quickjs translation unit and the
-// reverse would do the same — the coupling `mono.engine/script/CMakeLists.txt`
+// reverse would do the same - the coupling `mono.engine/script/CMakeLists.txt`
 // refuses when it keeps both VMs `VENDOR` rather than `VENDOR_PUBLIC`. So the
 // two runtimes each get a view of this table in their own currency, built here.
 //
 // **What "met both" buys is the two *walks*, and nothing more, since v0.18.**
 // Turning one `ServiceSurface` into a service object is per language and lives
-// per language — `LuauServiceSurface.cpp` and `JsServiceSurface.cpp` — because
+// per language - `LuauServiceSurface.cpp` and `JsServiceSurface.cpp` - because
 // the JavaScript half sitting inline here was the twin of a hundred-line file
 // nobody could find it beside. This file decides *which* services install and in
 // *what order*; neither installer's body is its business.
 //
 // **And naming every installer is what keeps them.** Modules here are static
-// libraries, and an object file no symbol reaches is one the archive may drop —
+// libraries, and an object file no symbol reaches is one the archive may drop -
 // which is why self-registration was refused. Every row below is a reference,
 // so every service survives the link.
 //
@@ -45,21 +45,21 @@ namespace engine::script {
 		// One row: what the service is, and how it is built.
 		//
 		// **Two ways, and the first is the one to reach for.** A `Surface` is a
-		// `ServiceSurface` — data, with no VM in it — so both installers below
+		// `ServiceSurface` - data, with no VM in it - so both installers below
 		// read the same description and the service exists in both languages by
 		// construction. Every `Always` row is one.
 		//
 		// **`Luau` is the escape hatch and exactly one row uses it.**
 		// `BreakpointService` arms `lua_callbacks()->debugstep` and reads the
 		// runtime's `Debugger` to decide whether to install at all, which is not
-		// a method, a property or a signal — so it is a function that has met the
+		// a method, a property or a signal - so it is a function that has met the
 		// VM. There is no `JavaScript` twin of that field any more: the last row
 		// that needed one became a surface at v0.16, and a pointer nothing sets
 		// is a hole the next service would be tempted to fall into rather than
 		// describing itself.
 		//
 		// **A null in both is a language that does not bind this service.** It is
-		// not a hole to be filled in silently — `ServiceLanguages` says the same
+		// not a hole to be filled in silently - `ServiceLanguages` says the same
 		// fact in a form a refusal message and the binding generator can read,
 		// and the two are checked against each other by
 		// `engine.script.servicecatalogue` so a row cannot claim a language it
@@ -81,7 +81,7 @@ namespace engine::script {
 		// **The order is the tick's, not the alphabet's.** Nothing here may be
 		// sorted: the bus services need the mailbox types registered, and the
 		// studio row installs after the debugger pointer is set and before
-		// `luaL_sandbox` freezes the globals — which is why it is walked in a
+		// `luaL_sandbox` freezes the globals - which is why it is walked in a
 		// second pass rather than moved up the list.
 		constexpr std::array<Row, 14> ROWS{{
 			// --- the bus, which is the only route out of a world ---------------
@@ -89,13 +89,13 @@ namespace engine::script {
 			// **All four described once since v0.16, and the last of them is what
 			// retired `ServiceSurface::LuauMethods`' last excuse.**
 			// `TeleportService::GetTeleportData` was a per-*method* gap inside a
-			// service both languages bound — something the language mask cannot
-			// express — and it closed with no new mechanism: it is a
+			// service both languages bound - something the language mask cannot
+			// express - and it closed with no new mechanism: it is a
 			// `ServiceMethod` row, and both VMs install every row.
 			//
 			// What made the two stores describable is `ScriptCall::Await`. They
-			// suspend, and the two languages suspend differently — a yielded
-			// coroutine and a `Promise` — which is one member on the interface
+			// suspend, and the two languages suspend differently - a yielded
+			// coroutine and a `Promise` - which is one member on the interface
 			// rather than seven methods written twice.
 			{{"MessagingService", ServiceAvailability::Always, ServiceLanguages::Both},
 			 MessagingServiceSurface,
@@ -120,7 +120,7 @@ namespace engine::script {
 			// something to one named world.
 			//
 			// **The first service described once**, which is what made it
-			// reachable from JavaScript — its signal needed nothing new, because
+			// reachable from JavaScript - its signal needed nothing new, because
 			// a signal has crossed languages since v0.6. What it needed was
 			// `PumpJsDeliveries` learning `BusKind::Channel`.
 			//
@@ -145,7 +145,7 @@ namespace engine::script {
 			// `ServiceProperty` is what closed it, and the shape it took is
 			// decided by JavaScript rather than by Luau: a native accessor runs on
 			// every read and needs no userdata at all, but is registered *per
-			// name* — so the catch-all `__index` had to become a list before the
+			// name* - so the catch-all `__index` had to become a list before the
 			// other language could have one. The Luau half walks that same list
 			// now, which also retires a chain of `if (field == ...)`.
 			{{"UserInputService", ServiceAvailability::Always, ServiceLanguages::Both},
@@ -166,7 +166,7 @@ namespace engine::script {
 			// rewrite.** Its handler is a callable, so `ActionStack` had to
 			// become shared state with the callables left opaque; and a bound
 			// action that never fires is worse than one that cannot be bound, so
-			// this language gained an input pump — `PumpJsInput` — at the same
+			// this language gained an input pump - `PumpJsInput` - at the same
 			// time.
 			{{"ContextActionService", ServiceAvailability::Always, ServiceLanguages::Both},
 			 ContextActionServiceSurface,
@@ -196,7 +196,7 @@ namespace engine::script {
 			// where they are installed.
 			//
 			// **`TweenService` hands back a handle whose three methods are still
-			// per language, and that is a decision rather than a remainder** —
+			// per language, and that is a decision rather than a remainder** -
 			// `Tweens.hpp` and `ScriptCall::ReturnTween` carry it. The apparatus
 			// is installed with the datatypes rather than from a row here, because
 			// a `Tween` is a value type a method answers with and not a service.
@@ -218,8 +218,8 @@ namespace engine::script {
 		//
 		// **`BreakpointService` is Luau's alone because breakpoints are, and
 		// that is a feature gap rather than a binding one.** `Debugger::Add`
-		// refuses a `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` chunk outright — see
-		// `BreakpointsRefused` — so a JavaScript binding would be a service every
+		// refuses a `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` chunk outright - see
+		// `BreakpointsRefused` - so a JavaScript binding would be a service every
 		// method of which reports that nothing can be armed. That is the surface
 		// `HttpService`'s absent three are refused for being: one that looks
 		// decided. Closing it means teaching QuickJS to report a line, which is
@@ -275,12 +275,12 @@ namespace engine::script {
 		// **The mailbox types, before the services that need them, and this is
 		// not a formality.** A `Postbox` is a view over two resources, and
 		// reading one on a store that never registered them mints them under the
-		// *compiler's* spelling — `engine::world::Inbox` rather than
+		// *compiler's* spelling - `engine::world::Inbox` rather than
 		// `world.Inbox`. Nothing fails at that moment. What fails is the next
 		// `Universe` to register them properly, which aborts with "a type has one
 		// name", in whichever test order happened to reach it first.
 		//
-		// Idempotent, so the studio phase calling it again costs a hash lookup —
+		// Idempotent, so the studio phase calling it again costs a hash lookup -
 		// and `OpenJsBindings` makes the same call for the same reason, which is
 		// why the JavaScript walk below has none.
 		if (phase == ServiceAvailability::Always) {

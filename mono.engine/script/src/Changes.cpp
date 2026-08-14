@@ -25,8 +25,8 @@ namespace engine::script {
 
 			for (const ComponentId component : property.Reads->Ids()) {
 				// Once per component for the whole world. The sets overlap
-				// heavily — `CFrame`, `Position` and `Orientation` all read
-				// `Transform` — so a part's eleven properties buy far fewer
+				// heavily - `CFrame`, `Position` and `Orientation` all read
+				// `Transform` - so a part's eleven properties buy far fewer
 				// than eleven subscriptions.
 				if (!Subscribed.insert(component.Index).second) {
 					continue;
@@ -93,7 +93,7 @@ namespace engine::script {
 		}
 
 		// Moved out before anything runs. A handler may write a property, and
-		// that write belongs to the *next* barrier — appending to the vector
+		// that write belongs to the *next* barrier - appending to the vector
 		// being walked would fire it in this one and, for a handler that writes
 		// what it listens to, would never stop.
 		std::vector<Change> draining;

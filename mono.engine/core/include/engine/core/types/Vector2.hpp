@@ -2,8 +2,8 @@
 
 // A pure two-component value, spelled the way Roblox spells it.
 //
-// **Not a truncated `Vector3`.** The two answer different questions — a screen
-// position, a texture coordinate and a UI offset are all genuinely flat — and a
+// **Not a truncated `Vector3`.** The two answer different questions - a screen
+// position, a texture coordinate and a UI offset are all genuinely flat - and a
 // three-component value carrying a zero Z is a third of a cache line spent
 // saying nothing. Everything here is the two-dimensional case written out
 // rather than `Vector3` with a component ignored.
@@ -82,7 +82,7 @@ namespace engine::core {
 			return X * other.X + Y * other.Y;
 		}
 
-		// Returns the two-dimensional cross product — the signed area of the
+		// Returns the two-dimensional cross product - the signed area of the
 		// parallelogram the two vectors span.
 		//
 		// A scalar rather than a vector, because the only direction a flat cross

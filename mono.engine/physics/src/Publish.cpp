@@ -25,7 +25,7 @@ namespace engine::physics {
 		// touching.
 		//
 		// **A body that falls asleep leaves the dynamic index**, and two
-		// anchored colliders are never a pair — so the tick a resting box
+		// anchored colliders are never a pair - so the tick a resting box
 		// sleeps, the contact holding it up disappears from the broad phase.
 		// Reporting that as `Ended` would tell a listener the box left the
 		// floor, which is the one thing it definitely did not do.
@@ -67,14 +67,14 @@ namespace engine::physics {
 		//
 		// The correction velocity, added to the transforms and then dropped.
 		// This is the one place physics moves something outside
-		// `IntegrateMotion`, and it moves positions only — see
+		// `IntegrateMotion`, and it moves positions only - see
 		// `SolverBody::CorrectionLinear`, which is why there is no quaternion
 		// step here to keep in agreement with the integrator's.
 		//
 		// **Written through the reference an `Each` hands out, and never
 		// through `Store::Set`.** A write through `Set` stamps the row, and
 		// `SyncBroadphase` reads those stamps to decide whether *static*
-		// geometry moved — a stamp left on a body that later falls asleep, and
+		// geometry moved - a stamp left on a body that later falls asleep, and
 		// therefore has no `Motion` to exclude it, rebuilds the static index
 		// every tick forever. `Store::Each` documents a write through the
 		// reference as a direct memory write, which is exactly what is wanted.
@@ -103,7 +103,7 @@ namespace engine::physics {
 			if (world->Sleeping(body.Owner)) {
 				// **The archetype move.** Losing `scene::Motion` takes the row
 				// out of `IntegrateMotion`'s query and out of the dynamic half
-				// of the broad phase — the query never visits it, which is what
+				// of the broad phase - the query never visits it, which is what
 				// `v02v03v04.md`'s allocation table asks a sleeping tag to do
 				// and what a tag could not deliver without a "without this
 				// component" query term the ECS does not have.
@@ -114,7 +114,7 @@ namespace engine::physics {
 			}
 
 			// A kinematic body and a piece of static geometry are both in the
-			// body array — they take part in every contact — and neither has a
+			// body array - they take part in every contact - and neither has a
 			// velocity the solver is allowed to have changed. Writing one back
 			// would overwrite whatever moves the platform.
 			if (!body.Movable) {
@@ -131,7 +131,7 @@ namespace engine::physics {
 		//
 		// **The transform, which nothing was claiming.** `IntegrateMotion` moves
 		// it through `EachParallel` and says in as many words that it will not
-		// mark it — a parallel body may not write a shared bitset, and
+		// mark it - a parallel body may not write a shared bitset, and
 		// `MarkAllChanged` would cover the anchored rows and rebuild the static
 		// index every tick for ever. It leaves the claim to "a consumer that
 		// needs a replication delta out of an integrated world", and for three
@@ -141,7 +141,7 @@ namespace engine::physics {
 		//
 		// **Every row with a `Motion`, and not the solver's body array**, which
 		// is the correction. `PhysicsWorld::Bodies` holds only the bodies a
-		// manifold names — a body nothing touches has no constraint to solve —
+		// manifold names - a body nothing touches has no constraint to solve -
 		// so marking from that loop marks exactly the bodies that are *resting
 		// on something* and misses every body in the air. A character standing
 		// on a floor replicated; the moment it jumped it was in contact with
@@ -151,11 +151,11 @@ namespace engine::physics {
 		// nothing was watching for it.
 		//
 		// The right set is the one `IntegrateMotion` moved, which is every row
-		// carrying a `Motion` — awake, dynamic, and therefore integrated. A
+		// carrying a `Motion` - awake, dynamic, and therefore integrated. A
 		// sleeping body has had its `Motion` taken away by the loop above, so it
 		// is excluded by construction rather than by a second test, and
-		// `SyncBroadphase`'s inner gate — "was a changed row one without a
-		// `Motion`" — still answers no for every row this touches.
+		// `SyncBroadphase`'s inner gate - "was a changed row one without a
+		// `Motion`" - still answers no for every row this touches.
 		store.Each<const scene::Motion>([&store](ecs::Entity entity, const scene::Motion &) {
 			store.MarkChanged<scene::Transform>(entity);
 		});

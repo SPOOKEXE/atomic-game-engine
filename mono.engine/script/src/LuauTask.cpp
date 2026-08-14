@@ -31,13 +31,13 @@ namespace engine::script {
 			lua_unref(context.State, reference);
 		}
 
-		// `task.wait(seconds)` — resumes at a tick boundary.
+		// `task.wait(seconds)` - resumes at a tick boundary.
 		//
 		// **Seconds in, ticks underneath**, which `docs/retired/SCRIPT_CONCURRENCY.md`
 		// §2 settled. Seconds because that is what an author means and what
 		// Roblox takes; ticks because a wall-clock sleep resumes after a
 		// different amount of *simulation* on a busy machine than on an idle
-		// one — the desync rule 5 names, arriving through the call an author
+		// one - the desync rule 5 names, arriving through the call an author
 		// writes first.
 		int TaskWait(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
@@ -140,7 +140,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `task.cancel(thread)` — forgets a scheduled resume.
+		// `task.cancel(thread)` - forgets a scheduled resume.
 		int TaskCancel(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
 			luaL_checktype(state, 1, LUA_TTHREAD);
@@ -179,7 +179,7 @@ namespace engine::script {
 			luaL_errorL(
 				state,
 				"wait() does not exist here. Use task.wait(seconds), which resumes at a tick boundary "
-				"— a wait measured against a wall clock resumes after a different amount of simulation "
+				"- a wait measured against a wall clock resumes after a different amount of simulation "
 				"on a busy machine, and the recording stops replaying"
 			);
 		}
@@ -281,7 +281,7 @@ namespace engine::script {
 
 		// **Delayed work first, then deferred.** A `task.delay` due this tick
 		// belongs to the tick, and a `task.defer` belongs to the end of the
-		// beat — so the deferred pass sees everything the delayed one did. The
+		// beat - so the deferred pass sees everything the delayed one did. The
 		// other order would make `task.defer` mean "before some of this tick"
 		// depending on what else was scheduled.
 		context.Tasks.Advance(context.World->Time().Tick, resume);

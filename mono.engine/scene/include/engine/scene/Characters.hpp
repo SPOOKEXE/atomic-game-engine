@@ -3,8 +3,8 @@
 // The blocky thing a player drives, and how it is put together.
 //
 // **One body and five passengers.** A character looks like six parts and is
-// simulated as one: `HumanoidRootPart` is the whole capsule — a box the full
-// height of the character — and the head, torso, arms and legs are anchored
+// simulated as one: `HumanoidRootPart` is the whole capsule - a box the full
+// height of the character - and the head, torso, arms and legs are anchored
 // parts carried along by `PoseCharacters`. Roblox welds six colliders together
 // with `Motor6D`s and lets the solver hold them in formation; that needs joints,
 // a constraint solver that respects them, and a mass distribution nobody
@@ -13,7 +13,7 @@
 //
 // So the limbs are `CharacterLimb` rows: a root and a rest offset, resolved in
 // one flat pass. That is `Attachments.hpp`'s design and its argument applies
-// unchanged — a limb's parent is a part, a part's transform is already world
+// unchanged - a limb's parent is a part, a part's transform is already world
 // space, so a limb's world frame is one `CFrame` product with no chain to walk.
 //
 // **The pass runs wherever the character is drawn, not only where it is
@@ -49,7 +49,7 @@ namespace engine::scene {
 	// What a character is, held on its `Model`.
 	//
 	// **On the model rather than on the root part**, because the model is what
-	// a script is handed — `Player.Character` is a model in Roblox and the
+	// a script is handed - `Player.Character` is a model in Roblox and the
 	// engine has no reason to disagree. The two entities it names are how the
 	// rest of the engine reaches the parts without walking children by name; a
 	// name lookup per frame is how `FindFirstChild("Humanoid")` becomes a
@@ -89,7 +89,7 @@ namespace engine::scene {
 	// **The character's own `Model` carries one too, with an identity offset.**
 	// A model's `Transform` is what `PivotTo` and a camera subject read, so a
 	// model left where it spawned would be a character whose handle stayed
-	// behind — and giving it a limb row rather than a special case in the pass
+	// behind - and giving it a limb row rather than a special case in the pass
 	// is one rule instead of two.
 	//
 	// @since v0.14
@@ -99,7 +99,7 @@ namespace engine::scene {
 		// **Widest first, and it was not until v0.15.** An `ecs::Entity` is
 		// eight-byte aligned and a `core::CFrame` is twenty-eight bytes, so with
 		// the frame first this struct had a four-byte hole after it *and* four
-		// bytes of tail padding — eight bytes `Reserved` was named to prevent
+		// bytes of tail padding - eight bytes `Reserved` was named to prevent
 		// and did not, because it was put after the member that caused them.
 		// The object representation is what a snapshot writes, so those eight
 		// bytes reached every save file and every wire delta uninitialised.
@@ -112,7 +112,7 @@ namespace engine::scene {
 
 		// Explicit padding, so the object representation a snapshot writes
 		// holds no uninitialised bytes. The reason every other `Reserved` here
-		// gives — and see `Root` for why the order of these three is the part
+		// gives - and see `Root` for why the order of these three is the part
 		// that makes it true.
 		uint32_t Reserved = 0;
 	};
@@ -121,7 +121,7 @@ namespace engine::scene {
 	//
 	// @since v0.14
 	struct CharacterDesc {
-		// Where the character stands. **The feet, not the centre** — an author
+		// Where the character stands. **The feet, not the centre** - an author
 		// placing a character places it on a floor, and asking them to add half
 		// its height is the conversion that is wrong in one direction forever.
 		core::CFrame Frame;
@@ -143,7 +143,7 @@ namespace engine::scene {
 	//
 	// **Stated once here and read by everything that has to agree with it.**
 	// `Humanoid::Height` defaults to the same figure and `GroundCharacters`
-	// takes half of it to find the feet — a rig whose parts added up to
+	// takes half of it to find the feet - a rig whose parts added up to
 	// something else would cast its ground ray from inside its own shins, which
 	// is a character that can never jump and gives no clue why.
 	inline constexpr float CHARACTER_HEIGHT = 5.0f;
@@ -164,7 +164,7 @@ namespace engine::scene {
 	// **Recorded rather than dispatched, because `scene` is L7 and signals are
 	// L9.** `Player.CharacterAdded` and `CharacterRemoving` are script-facing
 	// facts and this module cannot fire a signal; what it can do is write down
-	// what happened, in order, and let whoever owns a scripting layer drain it —
+	// what happened, in order, and let whoever owns a scripting layer drain it -
 	// which is the same split `gui::Router` uses for input and
 	// `ecs::Store::TakeTreeChanges` for the tree.
 	//
@@ -177,7 +177,7 @@ namespace engine::scene {
 		// is inherent rather than an oversight: the record is written where the
 		// *link* is broken, which is after the destroy in every path but a
 		// script's own `player.Character = nil`. Dying is no longer the same
-		// thing as being destroyed — see `UpdateRespawns` — but a respawn still
+		// thing as being destroyed - see `UpdateRespawns` - but a respawn still
 		// destroys the body it replaces, so this is unchanged.
 		// Roblox's guarantee that the handler runs
 		// while the body is still there needs a synchronous fire from inside a
@@ -196,8 +196,8 @@ namespace engine::scene {
 
 	// Every character arrival and departure since the last drain.
 	//
-	// **A resource rather than a component, because there is one of it** —
-	// `ecs/AGENTS.md`'s rule — and because the order two players respawning on
+	// **A resource rather than a component, because there is one of it** -
+	// `ecs/AGENTS.md`'s rule - and because the order two players respawning on
 	// one tick are reported in is a fact a recording depends on.
 	//
 	// @since v0.17
@@ -206,7 +206,7 @@ namespace engine::scene {
 		//
 		// **Order is the point of the vector.** Two players respawning on one
 		// tick are reported in the order the tick produced them, which is a fact
-		// a recording reproduces — a set or a map would make it whatever the
+		// a recording reproduces - a set or a map would make it whatever the
 		// hash happened to be.
 		std::vector<CharacterChange> Pending;
 	};
@@ -215,7 +215,7 @@ namespace engine::scene {
 	//
 	// **Taken, not read**, for `Store::TakeTreeChanges`' reason: a handler may
 	// respawn somebody, and a swap leaves the list empty before the first one
-	// runs — so the spawn it causes belongs to the next drain instead of being
+	// runs - so the spawn it causes belongs to the next drain instead of being
 	// appended to the list being walked.
 	//
 	// @param store The world.
@@ -229,22 +229,22 @@ namespace engine::scene {
 	// one.** `LoadCharacter` says it is the authority's and relies on nobody
 	// calling it elsewhere; damage cannot afford that, because the machine most
 	// likely to want to write its own health is the one that loses it.
-	// `ecs::Store::SetProperty` already refuses a property write in a replica —
-	// that is where this engine answers "who owns a row" — and this makes the
+	// `ecs::Store::SetProperty` already refuses a property write in a replica -
+	// that is where this engine answers "who owns a row" - and this makes the
 	// same refusal for the C++ door, so a hosted client and a hosted script get
 	// one answer instead of two.
 	//
 	// **It kills once.** A humanoid already at zero takes nothing and reports
 	// `false`, so the second hit of a burst that arrived in the same tick is not
-	// a second death — which is what a `Died` signal would otherwise need a flag
+	// a second death - which is what a `Died` signal would otherwise need a flag
 	// on the row to promise. That is also why the return value is "this call
 	// killed it" rather than the health left: a caller wanting the number reads
 	// it, and a caller wanting the *transition* cannot derive it from a number.
 	//
 	// What happens at zero is `UpdateRespawns`', not this function's: the body
 	// stays where it fell, `StepCharacters` stops driving it, and the respawn
-	// clock starts. Destroying it here would be the old rule — a character dying
-	// by being destroyed — wearing a new name.
+	// clock starts. Destroying it here would be the old rule - a character dying
+	// by being destroyed - wearing a new name.
 	//
 	// @param store    The world. Must be the authority's.
 	// @param humanoid The `Humanoid` instance, which is the row `Health` is on.
@@ -270,7 +270,7 @@ namespace engine::scene {
 	//      way.
 	//   3. On that tick they are handed a new character through `LoadCharacter`,
 	//      which is the same door a script's `player:LoadCharacter()` goes
-	//      through and therefore runs the whole spawn pipeline — including
+	//      through and therefore runs the whole spawn pipeline - including
 	//      destroying whatever body they were still standing in.
 	//
 	// **A tick number rather than a countdown of seconds**, which is
@@ -284,19 +284,19 @@ namespace engine::scene {
 	// the clock started from the tick a player was first seen with no body, which
 	// is Roblox's delay with Roblox's trigger missing. Both now schedule the same
 	// deadline, and both had to, because a game that destroys a character
-	// outright — a teleport, a script tidying up, a host dropping a client — is
+	// outright - a teleport, a script tidying up, a host dropping a client - is
 	// not a game that failed to set health to zero first.
 	//
 	// **So the corpse stays for the delay and is then replaced**, which is the
 	// visible half of the change and the whole of what Roblox does: a body at
 	// zero health is left where it fell, `StepCharacters` stops driving it, and
 	// `LoadCharacter` destroys it at the deadline on its way to building the next
-	// one. Nothing had to be added to do the destroying — that function has
+	// one. Nothing had to be added to do the destroying - that function has
 	// removed the old body since v0.14.
 	//
 	// **The interface half is not here and cannot be.** `StarterGui` is copied
 	// into a player's `PlayerGui` on every spawn and `scene` may not link `gui`,
-	// so a caller loops over `spawned` calling `gui::ResetPlayerGui` — the same
+	// so a caller loops over `spawned` calling `gui::ResetPlayerGui` - the same
 	// split that function's own header states.
 	//
 	// @param store   The world.
@@ -321,7 +321,7 @@ namespace engine::scene {
 	// Gives a player a character, replacing whatever they had.
 	//
 	// **Roblox's `Player:LoadCharacter()`, and it destroys the old one first**
-	// — a player holding two characters is two things a camera could follow and
+	// - a player holding two characters is two things a camera could follow and
 	// two humanoids the controls would drive at once.
 	//
 	// The character is named after the player, which is what makes
@@ -337,7 +337,7 @@ namespace engine::scene {
 	//      is what records the `CharacterAdded` this drain will report.
 	//   4. Every child of `StarterPlayer.StarterCharacterScripts` is cloned into
 	//      the model. **Every spawn**, because what it holds is a script about a
-	//      body and the body is new each time — the opposite of
+	//      body and the body is new each time - the opposite of
 	//      `StarterPlayerScripts`, which `AddPlayer` copies once.
 	//   5. `Player.Backpack` is emptied and refilled from `Player.StarterGear`.
 	//      That direction is the whole reason there are two containers: gear a
@@ -345,7 +345,7 @@ namespace engine::scene {
 	//      dropped straight into `Backpack` does not.
 	//
 	// **The interface is deliberately not a sixth step.** `StarterGui` is copied
-	// into `PlayerGui` on every spawn too, and `scene` may not link `gui` — so
+	// into `PlayerGui` on every spawn too, and `scene` may not link `gui` - so
 	// `gui::ResetPlayerGui` is the caller's to run, which its own header states
 	// from the other side.
 	//
@@ -365,7 +365,7 @@ namespace engine::scene {
 	// The same, standing them wherever `FindSpawn` says for *them*.
 	//
 	// **The player is handed to `FindSpawn`, so a side decides where they
-	// appear** — see the two-argument overload of that function.
+	// appear** - see the two-argument overload of that function.
 	//
 	// @param store  The world.
 	// @param player The `Player` instance.
@@ -400,7 +400,7 @@ namespace engine::scene {
 	// pressing W and watching nothing happen.
 	//
 	// **Clearing is allowed and it stops the body.** `player.Character = nil`
-	// zeroes the old humanoid's `MoveDirection` and drops its latched jump —
+	// zeroes the old humanoid's `MoveDirection` and drops its latched jump -
 	// without that a character released mid-stride keeps walking for ever,
 	// because the pass that would have cleared it no longer has an owner to
 	// clear it for.
@@ -417,7 +417,7 @@ namespace engine::scene {
 	// **The polling half of `SetPlayerCharacter`, and it exists because the
 	// assignment is not always local.** A client never runs the setter: it
 	// receives `PlayerCharacter` over the wire and has to build the same link
-	// from its own store. A model destroyed under a player is the other case —
+	// from its own store. A model destroyed under a player is the other case -
 	// the reference dangles, and a humanoid still holding a `MoveDirection` is a
 	// corpse that walks.
 	//
@@ -432,7 +432,7 @@ namespace engine::scene {
 	//
 	// **The other direction of `LinkPlayerCharacters`, and the one nothing was
 	// doing.** That function handles a model destroyed under a player. This is a
-	// player destroyed under a model — and a `Character` is not a child of the
+	// player destroyed under a model - and a `Character` is not a child of the
 	// `Player`, it is a `Model` under Workspace, so nothing takes it along.
 	//
 	// **A rule rather than a line in each caller, because there were only ever
@@ -440,9 +440,9 @@ namespace engine::scene {
 	// `TeleportService:Teleport` each call `RemoveCharacter` by hand before
 	// destroying the instance, and the comment in the first says why it must:
 	// *"`RemoveCharacter` is what `DestroyInstance` on a `Player` cannot do for
-	// itself"*. Every other way a player can stop existing — a script calling
+	// itself"*. Every other way a player can stop existing - a script calling
 	// `player:Destroy()`, an author deleting one in the explorer, a host
-	// dropping a client that timed out — left a rig standing on the spawn with
+	// dropping a client that timed out - left a rig standing on the spawn with
 	// a `Humanoid` nobody drives, a root part the solver keeps awake and six
 	// limbs `PoseCharacters` follows for the rest of the session.
 	//
@@ -451,7 +451,7 @@ namespace engine::scene {
 	// backstop for everything that does not.
 	//
 	// **`Character::Owner` is the test**, which is the same field
-	// `UpdateCharacterControl` reads to decide whose keyboard drives what — an
+	// `UpdateCharacterControl` reads to decide whose keyboard drives what - an
 	// NPC leaves it null and is never collected.
 	//
 	// @param store The world.
@@ -468,8 +468,8 @@ namespace engine::scene {
 	// The player driving a model, or a null entity.
 	//
 	// **`CharacterOf`'s inverse, and it is a read rather than a search.**
-	// `Character::Owner` already holds the answer — the field exists so a server
-	// admitting a client can find the character it spawned again — so this is one
+	// `Character::Owner` already holds the answer - the field exists so a server
+	// admitting a client can find the character it spawned again - so this is one
 	// component read and never a walk over every player asking whose model this
 	// is. A walk would also be wrong the moment two rows disagreed, which is
 	// exactly what a second table beside the store would eventually do.
@@ -491,12 +491,12 @@ namespace engine::scene {
 	// **The first neutral `SpawnLocation` under `Workspace`, and the origin
 	// otherwise.** This used to say that a spawn was a part *named*
 	// `SpawnLocation` and that inventing the class before teams existed would
-	// have been a class with a footnote. Teams exist — `Teams.hpp` — so the
+	// have been a class with a footnote. Teams exist - `Teams.hpp` - so the
 	// class does too, and the name still resolves: a plain `Part` wearing it is
 	// read as an enabled, neutral spawn, which is what keeps every scene in
 	// `mono.engine/examples` spawning people with nothing edited.
 	//
-	// The frame returned is *feet* height — the top face of the spawn part, so
+	// The frame returned is *feet* height - the top face of the spawn part, so
 	// a character put there stands on it rather than in it.
 	//
 	// @param store The world.
@@ -507,8 +507,8 @@ namespace engine::scene {
 	//
 	// **A team's own pad beats a neutral one, and another team's is never
 	// used.** A `SpawnLocation` is taken when it is `Enabled` and either its
-	// `TeamColor` matches the player's team or it is `Neutral` — Roblox's rule
-	// — and of everything that qualifies this takes the player's own colour
+	// `TeamColor` matches the player's team or it is `Neutral` - Roblox's rule
+	// - and of everything that qualifies this takes the player's own colour
 	// first. That preference is what turns a team from a coloured name into a
 	// place you appear, which is `docs/DEFERRED.md` D00119's own test of
 	// whether the class was worth adding.
@@ -518,8 +518,8 @@ namespace engine::scene {
 	// recording that does not replay, and `just replay-check` would fail a long
 	// way from here.
 	//
-	// A player on no side — including `ecs::NULL_ENTITY`, which is what the
-	// overload above passes — takes the first neutral pad and never a
+	// A player on no side - including `ecs::NULL_ENTITY`, which is what the
+	// overload above passes - takes the first neutral pad and never a
 	// team-locked one.
 	//
 	// @param store  The world.
@@ -535,7 +535,7 @@ namespace engine::scene {
 	// character a viewer follows may appear three different ways: spawned in
 	// this process, arriving over the wire into a replica, or replaced by a
 	// respawn. A camera aimed at the moment of spawning gets the first and
-	// misses the other two — a connected client would follow nothing at all,
+	// misses the other two - a connected client would follow nothing at all,
 	// because nothing on a client ever calls `LoadCharacter`.
 	//
 	// **The subject is the root and not the model**, because the root is what
@@ -554,14 +554,14 @@ namespace engine::scene {
 	// **One flat pass over one component type**, for `ResolveAttachments`'
 	// reason: a limb's root is a part whose transform is already world space, so
 	// this is a product and never a walk. A limb whose root is gone is left
-	// alone rather than moved to the origin — a dead root is a character being
+	// alone rather than moved to the origin - a dead root is a character being
 	// torn down, and a pile of limbs at the origin is a worse picture than a
 	// pile where it died.
 	//
 	// **It decides which handles are limbs before it places them**, by calling
 	// `scene::UpdateToolGrips`. An equipped `Tool`'s handle is carried by the
-	// same rest-offset row a forearm is — `Tools.hpp` carries the whole argument
-	// — and what makes a handle one is where its tool is parented, which is a
+	// same rest-offset row a forearm is - `Tools.hpp` carries the whole argument
+	// - and what makes a handle one is where its tool is parented, which is a
 	// fact a script or a wire delta can change without calling anything. So the
 	// pass that hangs limbs off a root is where that is worked out: one call,
 	// one phase, and every host that draws a character already runs this one.
@@ -573,7 +573,7 @@ namespace engine::scene {
 	// The `Model` class id, registering the scene tree on first call.
 	//
 	// **A `Model` is a `PVInstance` and not a `BasePart`.** It has a place in
-	// the world — that is what makes `PivotTo` on a character mean something —
+	// the world - that is what makes `PivotTo` on a character mean something -
 	// and it is not drawn, bounded or collided. Roblox's arrangement, for the
 	// reason `MeshPart` gives: a class tree that differs from the one scripts
 	// expect is a migration nobody asked for.

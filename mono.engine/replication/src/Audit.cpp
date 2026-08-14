@@ -17,7 +17,7 @@ namespace engine::replication {
 		// decode of the encoding produced. Writing that back out gives both
 		// ends `encode(decode(encode(v)))` from one input, which is one
 		// expression over one buffer rather than an assumption that the
-		// quantiser is idempotent — and `replication/AGENTS.md` is explicit
+		// quantiser is idempotent - and `replication/AGENTS.md` is explicit
 		// that a hash with a tolerance is not a hash.
 		void WriteHeldValue(
 			core::ByteWriter &into,

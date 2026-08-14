@@ -10,7 +10,7 @@
 //
 // **Two forms of every shader are staged, and the caller says which it wants.**
 // The build writes `opaque.frag.spv` and, beside it, the `opaque.frag.msl` that
-// `mono.tools/shadercross` translated — because SDL's Vulkan backend takes one
+// `mono.tools/shadercross` translated - because SDL's Vulkan backend takes one
 // and its Metal backend takes the other, and which is loaded is a property of
 // the device rather than of the build.
 //
@@ -30,7 +30,7 @@ namespace engine::resources {
 
 	// The compiled forms a shader is staged in.
 	//
-	// The values are the file suffixes, because that is what they are — a
+	// The values are the file suffixes, because that is what they are - a
 	// caller passes one to `Shader` rather than translating an enumerator into
 	// a string of its own.
 	enum class ShaderForm {
@@ -49,7 +49,7 @@ namespace engine::resources {
 	// @param form Which compiled form to open. Ask the device rather than the
 	//        platform: `SDL_GetGPUShaderFormats` is what answers it.
 	// @return `<assets>/shaders/resources/<name>.<suffix>`. Not checked for
-	//         existence — a missing built-in is a build that did not stage, and
+	//         existence - a missing built-in is a build that did not stage, and
 	//         the caller that opens it is the one that can say what it wanted.
 	//
 	// No default. Which form a caller wants is the question this overload exists

@@ -4,7 +4,7 @@
 -- **The shape is the whole demonstration, so it is worth stating before any
 -- code.** From outside this is an ordinary block: eighty metres square, one
 -- door in the west wall, four quarters' worth of building. Inside there are
--- three rooms — hall, library, garden — laid out clockwise around the middle,
+-- three rooms - hall, library, garden - laid out clockwise around the middle,
 -- and the fourth quarter is walled off with no way in.
 --
 -- The way round is a loop. Out of the hall through its east doorway into the
@@ -36,18 +36,18 @@
 -- The two panes are the two inner walls that bound the empty quarter: the
 -- hall's south wall, which runs east-west, and the garden's west wall, which
 -- runs north-south. They are **perpendicular to each other**, so the map
--- between them carries a quarter turn — walk west out of the garden and you
+-- between them carries a quarter turn - walk west out of the garden and you
 -- come out walking north into the hall, having turned nothing yourself.
 --
 -- That is where the deficit lives. An earlier version of this scene put three
 -- rooms three hundred metres apart and paired parallel walls, which is an
--- impossible *adjacency* — two rooms through opposite walls of a third. This is
+-- impossible *adjacency* - two rooms through opposite walls of a third. This is
 -- an impossible *angle*, it fits in one building, and you can walk it.
 --
 -- **The gluing is coherent**, which is the one thing that had to be got right
 -- by hand: the end of each pane at the middle of the building maps to the other
 -- pane's end at the middle. Get that backwards and the corner is a twist rather
--- than a cone — every check still passes and the room arrives mirrored.
+-- than a cone - every check still passes and the room arrives mirrored.
 --
 -- ## The rule that catches the mistake this file used to make
 --
@@ -59,7 +59,7 @@
 -- and the picture is the empty space behind the far wall.
 --
 -- Both portals here use `Right`, and the hall's south wall is therefore the one
--- part in this file with a rotation on it — turned a quarter so its own +X
+-- part in this file with a rotation on it - turned a quarter so its own +X
 -- points north, into the hall. The rotation is not decoration: it *is* the
 -- corner, written where the engine reads it.
 --
@@ -67,7 +67,7 @@
 --
 -- **You can walk through these.** `scene::CrossPortals` moves a body through
 -- the same matrix the camera goes through and `scene::OpenPortals` takes the
--- pane's collider out of the solver's way, so a character walks the loop —
+-- pane's collider out of the solver's way, so a character walks the loop -
 -- press Play in the studio, or host this file with
 -- `scripts/demos/run-local-server.sh`. The `SpawnLocation` below is inside the
 -- door for exactly that.
@@ -77,7 +77,7 @@
 -- rooms, through the hole, round again, forever.
 --
 -- **A portal's image is one frame old**, because the surface pass draws with
--- last frame's textures — which is what breaks the cycle between a surface and
+-- last frame's textures - which is what breaks the cycle between a surface and
 -- the scene it shows. On a mirror that is invisible. Crossing one, it is a seam
 -- on the frame you cross, and removing it means rendering the portal chain
 -- inside the frame, deepest first. That is what remains of `D00112`.
@@ -112,14 +112,14 @@ local WALL_THICKNESS = 2
 
 -- **A hole is thinner than a wall, and this is not a detail.** A pane's
 -- rectangle is its *face*, and `scene::CrossPortals` fires when a body's step
--- changes side of that plane — so a two-metre pane has two metres of slab
+-- changes side of that plane - so a two-metre pane has two metres of slab
 -- between its faces that a body can stand in, with the near half of itself in
 -- one room and the far half in another. That is what "standing in the middle of
 -- the mirror" is, and no amount of arithmetic fixes it: there is simply room in
 -- there.
 --
 -- A quarter of a metre is thinner than one tick of walking, so the state exists
--- and cannot be occupied. It also lines the two floors up at the seam — with a
+-- and cannot be occupied. It also lines the two floors up at the seam - with a
 -- thick pane the imaged floor starts a metre late, which is a step the eye
 -- catches even when nothing else is wrong.
 local PANE_THICKNESS = 0.25
@@ -132,13 +132,13 @@ local GROUND = 240
 local GROUND_TILE = 20
 
 -- Wide rather than square, because a pane is forty by fifteen and a square
--- texture would spend half of itself on nothing — the ratio is the pane's, so
+-- texture would spend half of itself on nothing - the ratio is the pane's, so
 -- a texel is square on the wall.
 --
 -- **Large, because there are two of them.** A hole is not a mirror glimpsed
 -- across a room: you walk up to this one until it fills the screen, and at that
 -- range the far room is magnified from whatever this says. Two targets against
--- the sixteen `MAX_SURFACES` allows is what pays for it — the six the old scene
+-- the sixteen `MAX_SURFACES` allows is what pays for it - the six the old scene
 -- had could not have afforded a quarter of this each.
 local SURFACE_SIZE = Vector3.new(2048, 768)
 
@@ -148,7 +148,7 @@ local GRASS: Checker = { A = Color3.fromRGB(104, 176, 72), B = Color3.fromRGB(14
 -- **Near white, because a wall in this engine is as bright as its albedo lets
 -- it be.** The renderer's ambient term is a constant 0.26 and the sun is a
 -- fixed direction, so an interior face turned away from it is lit by ambient
--- alone — a mid-grey wall comes out at a quarter of mid-grey, which is black
+-- alone - a mid-grey wall comes out at a quarter of mid-grey, which is black
 -- with a hint. The checker is what keeps it readable at that brightness.
 local STONE: Checker = { A = Color3.fromRGB(242, 242, 246), B = Color3.fromRGB(178, 178, 186) }
 local ROOF: Checker = { A = Color3.fromRGB(26, 26, 26), B = Color3.fromRGB(52, 52, 52) }
@@ -161,8 +161,8 @@ local RED: Checker = { A = Color3.fromRGB(196, 20, 30), B = Color3.fromRGB(140, 
 local LIME: Checker = { A = Color3.fromRGB(150, 220, 40), B = Color3.fromRGB(96, 184, 32) }
 
 -- **White, and it is not a colour choice.** `opaque.frag` multiplies the
--- projected image by the pane's own colour — "tinted rather than replaced, so a
--- coloured mirror is possible and a white one is unchanged" — so a pane painted
+-- projected image by the pane's own colour - "tinted rather than replaced, so a
+-- coloured mirror is possible and a white one is unchanged" - so a pane painted
 -- wall-grey shows the far room at half brightness. It reads as the far room
 -- being dimly lit, which is a scene bug that looks like a lighting bug.
 local PANE = Color3.new(1, 1, 1)
@@ -176,7 +176,7 @@ type Room = {
 }
 
 -- Clockwise from the north-west, which is the order the walk visits them in.
--- The fourth quarter — south-west, behind the two panes — is not in this list
+-- The fourth quarter - south-west, behind the two panes - is not in this list
 -- because it is not a room: it has outer walls so the building is a square from
 -- outside, and no floor, no ceiling and no door, because nothing can ever be in
 -- it to see them.
@@ -260,7 +260,7 @@ end
 
 -- One room-length of wall, tiled, standing on the floor at `at` and running
 -- `ROOM` metres along `axis`. `door` cuts the two-by-two opening out of the
--- middle — every doorway in this scene is in the middle of its wall, because
+-- middle - every doorway in this scene is in the middle of its wall, because
 -- the walk goes room centre to room centre and a door anywhere else would put a
 -- kink in it.
 local function tileWall(name: string, at: Vector3, axis: Vector3, tile: Vector3, shade: Checker, door: boolean)
@@ -309,12 +309,12 @@ for _, room in ROOMS do
 	)
 
 	-- **A lamp per room, and it is a pool of light rather than room lighting.**
-	-- A world's `Lighting` service round-trips and nothing reads it —
-	-- `scene::LightingServiceComponent` says so in as many words — so the only
+	-- A world's `Lighting` service round-trips and nothing reads it -
+	-- `scene::LightingServiceComponent` says so in as many words - so the only
 	-- light a scene can actually add is a `PointLight`, and `opaque.frag`'s
 	-- falloff is a windowed inverse square. Over a forty-metre room that cannot
 	-- be flat: whatever brightness lights the far corner blows out the ceiling
-	-- it hangs from. So this is authored as what it can be — a fitting with
+	-- it hangs from. So this is authored as what it can be - a fitting with
 	-- light under it, brightest at the middle of the room the walk turns in.
 	--
 	-- **A hundred and twenty is not a typo.** `Brightness = 1` against
@@ -365,15 +365,15 @@ tileWall("LibrarySouth", Vector3.new(HALF, 0, 0), ALONG_X, WALL_X, STONE, true)
 
 -- **One part each, not a course of tiles.** A pane is the rectangle the surface
 -- camera is fitted to and the rectangle `CrossPortals` tests against, so a wall
--- built out of sixteen blocks would be sixteen holes in a row — sixteen
+-- built out of sixteen blocks would be sixteen holes in a row - sixteen
 -- surfaces against a budget of sixteen, and fifteen seams down the middle of
 -- the picture.
 --
 -- **Anchored and not collidable, which is a pair and not two settings.**
 -- `scene::OpenPortals` turns a pane's collider into a trigger for exactly this
 -- reason, but it is installed with the *character* systems: a host that never
--- registers them — the studio's edit view, a scene loaded by a tool, anything
--- looking at the world rather than simulating a body in it — leaves the pane
+-- registers them - the studio's edit view, a scene loaded by a tool, anything
+-- looking at the world rather than simulating a body in it - leaves the pane
 -- solid, and a solid pane is a wall a walker is parked on the face of.
 -- Authoring it here is the same fact stated where it cannot be missed, and
 -- anchored keeps it a wall rather than something the solver drops through the
@@ -388,7 +388,7 @@ local gardenWest = pane("GardenWest", Vector3.new(0, WALL_HEIGHT / 2, HALF))
 
 -- **The one rotation in this file, and it is the corner itself.** Unrotated,
 -- this slab's `Right` face would point east along the wall's own length, which
--- names no room at all. Turned a quarter, its +X points north into the hall —
+-- names no room at all. Turned a quarter, its +X points north into the hall -
 -- and because `Face` is resolved on the destination too, that is what makes the
 -- garden's west wall show the hall rather than the space behind it.
 local hallSouth = pane("HallSouth", Vector3.new(-HALF, WALL_HEIGHT / 2, 0))
@@ -403,8 +403,8 @@ hallSouth.CFrame = CFrame.new(hallSouth.Position) * CFrame.Angles(0, math.pi / 2
 -- **`Enum.NormalId` in the annotation, which is the spelling everywhere else in
 -- this file.** An enum is `Enum.<set>.<member>` as a value, so it is
 -- `Enum.<set>` as a type; `mono.tools/scriptcheck` registers the `Enum` prefix
--- and `just typecheck` resolves it. The editor resolves it too —
--- `docs/retired/DEFERRED.md` D00031 — so a line the build accepts is a line
+-- and `just typecheck` resolves it. The editor resolves it too -
+-- `docs/retired/DEFERRED.md` D00031 - so a line the build accepts is a line
 -- luau-lsp accepts.
 local function link(pane: Part, face: Enum.NormalId, destination: Part, name: string)
 	local portal = Instance.new("Portal")
@@ -423,14 +423,14 @@ local function link(pane: Part, face: Enum.NormalId, destination: Part, name: st
 end
 
 -- `Right` on both, because both panes have their own +X pointing into the room
--- they are seen from — the garden's west wall by being unrotated on the west
+-- they are seen from - the garden's west wall by being unrotated on the west
 -- side of the garden, the hall's south wall by the quarter turn above.
 link(gardenWest, Enum.NormalId.Right, hallSouth, "ToHall")
 link(hallSouth, Enum.NormalId.Right, gardenWest, "ToGarden")
 
 -- Where a character starts, just inside the door. The name is the contract:
 -- `scene::FindSpawn` looks for exactly this under `Workspace` and a world
--- without one spawns everybody at the origin — which here is inside the wall
+-- without one spawns everybody at the origin - which here is inside the wall
 -- between two rooms.
 block("SpawnLocation", Vector3.new(TILE * 2, 1, TILE * 2), Vector3.new(-ROOM + TILE * 2, 0.5, -HALF), PAD)
 
@@ -490,7 +490,7 @@ end
 
 -- --- the lap, walked on rails ---------------------------------------------
 --
--- **A position only** — every portal is placed from wherever this camera is,
+-- **A position only** - every portal is placed from wherever this camera is,
 -- every frame, so moving it moves both images with it rather than leaving them
 -- correct for one spot.
 --
@@ -505,7 +505,7 @@ end
 -- `destination · half-turn · source⁻¹` for a body; for the one point this walk
 -- crosses at, that product is a quarter turn about Y and a nudge of one wall
 -- thickness, and the two legs are its answer. `examples/tests/Scene.cpp` runs
--- the real pass over the real panes and checks it lands where these say — so if
+-- the real pass over the real panes and checks it lands where these say - so if
 -- the geometry above moves and this does not, a test says so.
 local EAST = Vector3.new(1, 0, 0)
 local SOUTH = Vector3.new(0, 0, 1)
@@ -526,7 +526,7 @@ local LEGS: { Leg } = {
 	-- Outside, walking at the break. Walked once and never again: the loop has
 	-- no way back out of the building, which is the joke.
 	-- Thirty metres of lawn, then the wall, then half a room to the middle of
-	-- the hall — which is where the lap starts.
+	-- the hall - which is where the lap starts.
 	{ Start = Vector3.new(-OUTER - 30, 0, -HALF), Heading = EAST, Length = 30 + HALF, Turn = false },
 
 	{ Start = HALL.Centre, Heading = EAST, Length = ROOM, Turn = true },
@@ -591,5 +591,5 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 end)
 
 print(
-	`portals: one building, four quarters, three rooms — a lap of three right angles that closes`
+	`portals: one building, four quarters, three rooms - a lap of three right angles that closes`
 )

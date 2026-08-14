@@ -39,7 +39,7 @@ namespace engine::assets {
 		// Staged and renamed, so a reader sees a whole file or no file.
 		//
 		// A chunk is named by the hash of its contents, so a half-written file
-		// under the right name is a claim the next reader has to disprove — and
+		// under the right name is a claim the next reader has to disprove - and
 		// two publishers writing the same chunk at once is ordinary rather than
 		// exotic, because content addressing means they often will.
 		bool WriteWholeFile(const fs::path &path, std::span<const std::byte> bytes) {
@@ -87,7 +87,7 @@ namespace engine::assets {
 		if (!fs::is_directory(directory, failure)) {
 			// A reader pointed at a path that is not there fails here rather
 			// than creating an empty store and then reporting every asset as
-			// missing — which reads as "the content is gone" instead of "the
+			// missing - which reads as "the content is gone" instead of "the
 			// path is wrong".
 			return std::nullopt;
 		}
@@ -106,7 +106,7 @@ namespace engine::assets {
 		}
 		if (Hasher::Of(*bytes) != hash) {
 			// The name is the hash, so this is a corrupt disk, a partial write
-			// or a tampered store — and catching it here says *which chunk*,
+			// or a tampered store - and catching it here says *which chunk*,
 			// where catching it at the asset root would only say that the asset
 			// was wrong.
 			core::Metrics::Count("assets.chunkstore.corrupt", 1.0);
@@ -152,7 +152,7 @@ namespace engine::assets {
 		}
 
 		// Against the chunk list and the tree, which is what an asset root is.
-		// One implementation of that check — `assets::VerifyAsset` — because the
+		// One implementation of that check - `assets::VerifyAsset` - because the
 		// delivery client makes the identical one against bytes off a wire and
 		// against bytes out of its own cache.
 		if (!VerifyAsset(asset, whole)) {

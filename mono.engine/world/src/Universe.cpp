@@ -13,7 +13,7 @@ namespace engine::world {
 
 	Universe::Universe(const UniverseSettings &settings)
 		: Settings_(settings), Router(std::make_unique<BusRouter>()), Driver(std::this_thread::get_id()) {
-		// The mailbox resource types need serialisers of their own — an outbox
+		// The mailbox resource types need serialisers of their own - an outbox
 		// holds a vector and a Name, neither of which survives being written as
 		// its object representation.
 		RegisterMailboxTypes();
@@ -271,7 +271,7 @@ namespace engine::world {
 		}
 
 		// Taken by move before replaying, because applying one may queue
-		// another — a create whose settings name a world that is also being
+		// another - a create whose settings name a world that is also being
 		// destroyed this barrier.
 		std::vector<Control> controls;
 		controls.swap(Pending);
@@ -420,7 +420,7 @@ namespace engine::world {
 
 			// The host holding it, or an invalid Name for a world this process
 			// holds. Without it a restored driver would bring every remote
-			// world back as a local one — with an empty store, ticking, and
+			// world back as a local one - with an empty store, ticking, and
 			// answering for a world that is still running somewhere else.
 			writer.WriteName(index < Hosts.size() ? Hosts[index] : core::Name{});
 
@@ -564,7 +564,7 @@ namespace engine::world {
 
 		// Longest first, by what the world's last tick cost. `Jobs::For` claims
 		// ranges in order, so starting with the expensive ones keeps the tail
-		// of the batch short — the cheap worlds fill in behind them rather than
+		// of the batch short - the cheap worlds fill in behind them rather than
 		// one long world finishing alone.
 		std::vector<size_t> order(ActiveList.size());
 		for (size_t index = 0; index < order.size(); index++) {
@@ -586,7 +586,7 @@ namespace engine::world {
 
 		// **The flag is read here as well as inside `Jobs::For`, and one is not
 		// enough.** Forcing the dispatch inline would already put every world on
-		// this thread — but this branch would still report an aggregate
+		// this thread - but this branch would still report an aggregate
 		// `worlds (workers)` bar *beside* the real spans that are now being
 		// kept, and the flame graph would count the tick twice. A measurement
 		// instrument that makes the picture wrong in a new way is worse than no
@@ -601,7 +601,7 @@ namespace engine::world {
 			// Two, explicitly: a world tick is tens of microseconds, so the
 			// pool repays its wake cost at the second one. The grain-derived
 			// default assumes an index is a row and would refuse to dispatch
-			// below eight worlds — measured, that costs 1.9x at four.
+			// below eight worlds - measured, that costs 1.9x at four.
 			parallel::Jobs::For(
 				order.size(),
 				1,
@@ -616,7 +616,7 @@ namespace engine::world {
 
 			// **The workers' time, reported rather than timed from here.**
 			// Every span a world opened ran on a worker thread, and the frame
-			// graph refuses those — so without this the most expensive thing a
+			// graph refuses those - so without this the most expensive thing a
 			// driver does shows up only in the drop counter. The workers
 			// measured themselves; this is the number they handed back.
 			//

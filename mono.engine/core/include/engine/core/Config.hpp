@@ -36,7 +36,7 @@
 //
 // `ATOMIC_CONTENT_GIF=false` sets `content.gif`. The prefix marks the variables
 // that are meant for this engine, the rest of the name is lowercased, and `_`
-// becomes `.` — except that a flag name's own words are joined with `-`, so the
+// becomes `.` - except that a flag name's own words are joined with `-`, so the
 // mapping is against the **declared table** rather than by string surgery. That
 // is deliberate: guessing that `SERVER_TICK_RATE` means `server.tick-rate`
 // rather than `server.tick.rate` is not something a rule can do, and looking it
@@ -70,7 +70,7 @@ namespace engine::core {
 		size_t Applied = 0;
 
 		// Keys that named a declared flag already set by something of higher
-		// precedence. Not an error — it is the precedence rule working — but
+		// precedence. Not an error - it is the precedence rule working - but
 		// worth reporting, because "my config file does nothing" is otherwise a
 		// mystery.
 		size_t Outranked = 0;
@@ -113,7 +113,7 @@ namespace engine::core {
 		// Declares the settings `core` itself owns, and applies them.
 		//
 		// `engine.log-level` today, which is what `--verbose` was the only way
-		// to reach. Applied by `Apply` because both live in this module — a
+		// to reach. Applied by `Apply` because both live in this module - a
 		// setting whose owner is above `core` declares and applies its own,
 		// which is what `parallel::DeclareFlags` does.
 		//

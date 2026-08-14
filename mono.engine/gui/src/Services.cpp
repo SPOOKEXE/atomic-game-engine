@@ -32,7 +32,7 @@ namespace engine::gui {
 
 		// Whether an element can hold the selection.
 		//
-		// `Selectable` and nothing else — deliberately not "or it is a
+		// `Selectable` and nothing else - deliberately not "or it is a
 		// `GuiButton`", which is the rule for *input*. A button is clickable by
 		// default because a pointer is aimed; selection is moved a step at a
 		// time and a game that did not opt an element in did not want the
@@ -45,7 +45,7 @@ namespace engine::gui {
 		// The middle of an element's drawn rectangle, or nothing.
 		//
 		// Taken from the compiled list rather than from `Resolved`, because the
-		// list is what says an element is on screen at all — `Resolved` keeps
+		// list is what says an element is on screen at all - `Resolved` keeps
 		// its rectangle after the element stops being drawn, which is
 		// deliberate and is exactly the wrong source for "where can the
 		// selection go".
@@ -68,8 +68,8 @@ namespace engine::gui {
 		// **Along the axis first, across it as the tiebreak.** A player pressing
 		// up means "the nearest thing above", and of two things equally above,
 		// the one more nearly straight up. Scoring rather than sorting, because
-		// "is above" is not a total order — B can be above A while A is above C
-		// — and a comparator over a non-order is where a sort produces a
+		// "is above" is not a total order - B can be above A while A is above C
+		// - and a comparator over a non-order is where a sort produces a
 		// different answer depending on the input's initial arrangement.
 		//
 		// The across-axis term is weighted so it only ever breaks ties: a
@@ -123,7 +123,7 @@ namespace engine::gui {
 			// **A replica does not author its own services, so it waits for
 			// one.** An instance minted here would take an authoritative index
 			// the authority is also handing out, which is what
-			// `Store::SetAdoptOnly` refuses — and even if it did not, the join
+			// `Store::SetAdoptOnly` refuses - and even if it did not, the join
 			// snapshot applies `ApplyMode::Authoritative` and sweeps everything
 			// it does not mention. The service arrives with the world instead.
 			if (store.AdoptOnly()) {
@@ -141,8 +141,8 @@ namespace engine::gui {
 		}
 
 		// **The row can arrive without the state, and the state is what the
-		// service is for.** What crosses a wire is what an instance *is* —
-		// `ecs.Hierarchy`, `ecs.InstanceName`, `ecs.InstanceClass` — and no
+		// service is for.** What crosses a wire is what an instance *is* -
+		// `ecs.Hierarchy`, `ecs.InstanceName`, `ecs.InstanceClass` - and no
 		// `gui.` component is replicated, so a client is shown a `GuiService`
 		// carrying nothing. `Select` and `Focus` both read this component and
 		// both answer `false` without it, which is a client whose keyboard never
@@ -201,8 +201,8 @@ namespace engine::gui {
 
 		const Entity current = state->SelectedObject;
 
-		// **Each element once**, because one emits up to four commands — a
-		// background, an outline, an image and a label — and scoring it four
+		// **Each element once**, because one emits up to four commands - a
+		// background, an outline, an image and a label - and scoring it four
 		// times would make an element with a border beat one without for no
 		// reason a player could see.
 		std::unordered_set<uint64_t> seen;
@@ -227,7 +227,7 @@ namespace engine::gui {
 
 		Vector2 from;
 		if (!CentreOf(list, current, from)) {
-			// Selected but not drawn this frame — scrolled away, or its
+			// Selected but not drawn this frame - scrolled away, or its
 			// collector was disabled. Nothing to move relative to.
 			return false;
 		}
@@ -339,7 +339,7 @@ namespace engine::gui {
 		}
 
 		// **After the text is decided, because the caret is counted off it.**
-		// One-based and in characters — see `Entry::CursorPosition`.
+		// One-based and in characters - see `Entry::CursorPosition`.
 		const Label *label = store.Get<Label>(textBox);
 		taking->CursorPosition = static_cast<int32_t>(Characters(label != nullptr ? label->Text : "")) + 1;
 		taking->SelectionStart = -1;
@@ -361,7 +361,7 @@ namespace engine::gui {
 		//
 		// **`ResetOnSpawn` is read off `Layer`, and anything with no `Layer` is
 		// left alone.** A collector has one; a `Folder` a script put there does
-		// not, and Roblox does not clear those either — what the field describes
+		// not, and Roblox does not clear those either - what the field describes
 		// is a *collector's* lifetime.
 		std::vector<Entity> clearing;
 		std::unordered_set<core::Name> surviving;
@@ -380,7 +380,7 @@ namespace engine::gui {
 		}
 
 		// **Step 3: the template, cloned in.** `StarterGui` is a root like every
-		// other service — see `STARTER_GUI` for why this module spells the name
+		// other service - see `STARTER_GUI` for why this module spells the name
 		// again rather than linking `scene` for it.
 		const Entity starter = store.FindFirstRoot(STARTER_GUI);
 		if (starter == ecs::NULL_ENTITY) {
@@ -395,7 +395,7 @@ namespace engine::gui {
 		store.EachChild(starter, [&](Entity source) {
 			// **A survivor of the same name is the copy the player already
 			// has.** Cloning beside it would leave them holding two, one of
-			// which nothing updates — and the one a script has a handle to would
+			// which nothing updates - and the one a script has a handle to would
 			// be whichever it found first.
 			if (surviving.count(store.InstanceNameOf(source)) == 0) {
 				sources.push_back(source);

@@ -2,8 +2,8 @@
 //
 // **A scene that fails to load is one nobody notices is broken** until they run
 // the client and see a black screen. Neither the shadow pass nor the surface
-// pass can be asserted against without a GPU — `AGENTS.md` names that exception
-// and refuses a mock renderer to close it on paper — so what this suite asserts
+// pass can be asserted against without a GPU - `AGENTS.md` names that exception
+// and refuses a mock renderer to close it on paper - so what this suite asserts
 // is what can be: that each scene builds the *inputs* those passes need, in the
 // world, through the same bindings a game would use.
 
@@ -62,7 +62,7 @@ namespace {
 	// now decides.
 	//
 	// Falls back to a root, because some of these scripts deliberately leave an
-	// instance unparented — an orphan is still reachable from C++ through
+	// instance unparented - an orphan is still reachable from C++ through
 	// `EachRoot`, and only a *script* is unable to list one. A test about
 	// signals or tasks should not have to care which of the two its fixture is.
 	Entity InScene(Store &store, std::string_view name) {
@@ -146,7 +146,7 @@ TEST_CASE("the rings scene builds and moves itself", "[examples][scene]") {
 
 	// The bounds are measured from what the script built rather than declared
 	// by it, so a scene that produced nothing would frame a world one unit
-	// across — which is exactly the bug the settle beat in `LoadScene` exists
+	// across - which is exactly the bug the settle beat in `LoadScene` exists
 	// for.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 5.0f);
@@ -200,7 +200,7 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 		REQUIRE(surface != nullptr);
 		CHECK(surface->Face == wall.Face);
 
-		// **Wide rather than square, and all four the same** — because all four
+		// **Wide rather than square, and all four the same** - because all four
 		// walls are the same shape, not because they share a target. Each index
 		// owns its own pair since v0.8.
 		CHECK(surface->Width == 2048);
@@ -323,7 +323,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// `scene/tests/SurfaceCameras.cpp` does; what a *scene* gets wrong is which
 	// part it points a hole at, and the failure is silent: `Face` is resolved on
 	// the destination as well, so naming a wall whose matching face points out of
-	// its room places a camera, fits a frustum, renders — and shows the empty
+	// its room places a camera, fits a frustum, renders - and shows the empty
 	// space behind that wall. Every assertion this suite had before would have
 	// passed on it, and it did.
 	//
@@ -348,7 +348,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	INFO(error);
 	REQUIRE(loaded);
 
-	// The middles of the two rooms the pair joins. The third — the library —
+	// The middles of the two rooms the pair joins. The third - the library -
 	// has no hole in it, because an ordinary doorway is what the walk uses to
 	// get there and that is the contrast the scene is built on.
 	const engine::core::Vector3 HALL{-20.0f, 7.5f, -20.0f};
@@ -376,7 +376,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	};
 
 	// Found by component rather than by name, so renaming a portal in the scene
-	// is not a test failure — what it leads to is.
+	// is not a test failure - what it leads to is.
 	const auto portalOn = [&store](Entity pane) {
 		Entity found = engine::ecs::NULL_ENTITY;
 		store.EachChild(pane, [&](Entity child) {
@@ -445,13 +445,13 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		const auto &placed = store.Get<engine::scene::Transform>(portal)->Frame;
 
 		// And the camera is outside that room looking into it, rather than
-		// standing in it looking out — the other half of the same mistake.
+		// standing in it looking out - the other half of the same mistake.
 		CHECK(lens->ClipNormal.Dot(placed.Position) - lens->ClipDistance < 0.0f);
 		CHECK(placed.LookVector().Dot(lens->ClipNormal) > 0.9f);
 
 		// **Rigid, which is what separates a portal from a badly scaled one.**
 		// The map is a rotation and a translation, so the camera stands as far
-		// from the destination's face as the eye does from the source's — and
+		// from the destination's face as the eye does from the source's - and
 		// that is measured here rather than assumed, because a scale slipped into
 		// the matrix would leave every other check in this case passing.
 		const auto *source = store.Get<engine::scene::Transform>(pane);
@@ -462,7 +462,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		// **Rotated into the world, because one pane in this scene is turned.**
 		// The hall's south wall carries the quarter turn that makes the corner,
 		// so `NormalOf(Face)` is the axis in the *part's* frame and only the
-		// reach is measurable there — a test that treated the local normal as the
+		// reach is measurable there - a test that treated the local normal as the
 		// world one would measure the wrong gap on exactly the pane the scene
 		// exists to demonstrate.
 		const engine::core::Vector3 local = engine::scene::NormalOf(store.Get<SurfaceCamera>(portal)->Face);
@@ -485,9 +485,9 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 
 	// **And the walk closes, which is the claim the pictures cannot make.**
 	// `scene/tests/SurfaceCameras.cpp` proves `CrossPortals` maps a body through
-	// the same matrix as the camera; what is scene-specific — and what a pair of
+	// the same matrix as the camera; what is scene-specific - and what a pair of
 	// perpendicular panes can get backwards while every image still looks right
-	// — is *which way round* the two ends are glued. Walk west out of the garden
+	// - is *which way round* the two ends are glued. Walk west out of the garden
 	// and the hall has to arrive ahead of you, not behind or beside you.
 	//
 	// It is also what pins the rails camera in the scene file: those legs are
@@ -496,7 +496,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 
 	// **Watched by a camera, because a player is a body and an eye.** The yaw is
 	// where a player's view direction actually lives, so a pair that turns a
-	// corner has to turn it — a body that comes out walking north under a camera
+	// corner has to turn it - a body that comes out walking north under a camera
 	// still pointing west is the view snapping to a wall on the frame you cross,
 	// and W walking you sideways from then on. West is a yaw of a quarter turn
 	// under `PlaceCamera`'s convention.
@@ -521,13 +521,13 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// **As far past the hall's face as it went past the garden's**, at the
 	// height it left at, and at the middle of the wall because that is where it
 	// crossed. The panes are a quarter of a metre thick, so a body that stepped
-	// to the middle of one steps out an eighth past the other — the thinness is
+	// to the middle of one steps out an eighth past the other - the thinness is
 	// the scene's, and it is what stops "inside the pane" being somewhere a
 	// character can stand.
 	//
 	// **And exactly there, because `scene`'s `LANDING_CLEARANCE` is a floor
 	// rather than an offset.** A crosser whose step already ended clear of the
-	// plane gets nothing added — adding it unconditionally moved a body a little
+	// plane gets nothing added - adding it unconditionally moved a body a little
 	// on every crossing, so walking through a hole and back landed you beside
 	// where you started.
 	const engine::core::Vector3 landed = store.Get<engine::scene::Transform>(walker)->Frame.Position;
@@ -542,7 +542,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	CHECK(speed.X == Approx(0.0f).margin(1e-3f));
 	CHECK(speed.Z == Approx(-16.0f).margin(1e-3f));
 
-	// **And the eye turns with it — on the machine the eye is on.** The
+	// **And the eye turns with it - on the machine the eye is on.** The
 	// crossing writes `scene::PortalTransit` on the body rather than reaching
 	// for a camera, because the host that moves a character and the host that
 	// draws for its player are two different worlds the moment a server is
@@ -603,7 +603,7 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	CHECK(eastWalk == Approx(28.0f));
 
 	// Something moving in each, because a still portal is indistinguishable from
-	// a painted mural — and because the timing of a crossing is the half of the
+	// a painted mural - and because the timing of a crossing is the half of the
 	// illusion a screenshot cannot carry.
 	CHECK(CountNamed(store, "LongDrifter") == 1);
 	CHECK(CountNamed(store, "ShortDrifter") == 1);
@@ -642,8 +642,8 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 
 	// A body walking one step, put down where the step ended.
 	//
-	// **The seam is the pane's *face*, not its middle** — `GatherSeams` pushes
-	// the centre out by the reach along the normal — so a pane a quarter thick
+	// **The seam is the pane's *face*, not its middle** - `GatherSeams` pushes
+	// the centre out by the reach along the normal - so a pane a quarter thick
 	// standing at `z` has its plane an eighth beyond that. Each step below ends
 	// five eighths past its plane and therefore lands five eighths past the far
 	// one: `LANDING_CLEARANCE` is a floor rather than an offset, and a step that
@@ -677,7 +677,7 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 
 	// **Short outside, long inside, and it lands in the other building.** One
 	// stud into a four stud box, and the arrival is twenty-six studs of corridor
-	// inside the west tunnel's middle — the space the walk above stepped over.
+	// inside the west tunnel's middle - the space the walk above stepped over.
 	const engine::core::Vector3 entered = step(20.0f, 1.5f, 20.0f, 0.5f);
 	CHECK(entered.X == Approx(-20.0f).margin(1e-3f));
 	CHECK(entered.Z == Approx(12.25f).margin(1e-3f));
@@ -818,7 +818,7 @@ TEST_CASE("the gui containment names match the services scene installs", "[examp
 TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][scene][gui][panel]") {
 	// **The point of the whole 2D branch, and deliberately the last step.**
 	// `mono.studio` keeps Dear ImGui until the engine's own tree can draw a
-	// property grid — because an editor half on each is two widget sets — so
+	// property grid - because an editor half on each is two widget sets - so
 	// this is not a replacement for the imgui panels. It is the proof that the
 	// tree can carry one, which is what has to be true before any of them move.
 	//
@@ -830,7 +830,7 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 	// What it exercises, and none of it had a caller before this version:
 	// `UIListLayout` stacking rows, `UIPadding` insetting them, a
 	// `ScrollingFrame` whose canvas is longer than its panel, `.Activated` on a
-	// generated row — the `gui`-to-`script` join — and `StarterGui` containment,
+	// generated row - the `gui`-to-`script` join - and `StarterGui` containment,
 	// without which the whole thing draws nothing.
 	const StagedAssets assets;
 
@@ -849,8 +849,8 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 	REQUIRE(loaded);
 
 	// Ten rows, each a `TextButton` with a key and a value label under it. The
-	// count is asserted so that a panel which silently built nothing — the
-	// failure a containment or layout regression produces — cannot pass.
+	// count is asserted so that a panel which silently built nothing - the
+	// failure a containment or layout regression produces - cannot pass.
 	CHECK(CountElements(store, "Position") == 1);
 	CHECK(CountElements(store, "Transparency") == 1);
 	CHECK(CountElements(store, "Key") == 10);
@@ -872,7 +872,7 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 	// The panel is anchored to the right edge, so its rows sit in the right half
 	// of a 1920-wide screen. A layout that ignored `AnchorPoint` would put them
 	// at the far right *edge* rather than inset from it, and one that ignored
-	// `Position` would put them at zero — this separates all three.
+	// `Position` would put them at zero - this separates all three.
 	CHECK(placed->AbsolutePosition.X > 960.0f);
 	CHECK(placed->AbsolutePosition.X < 1920.0f - 300.0f);
 }
@@ -882,7 +882,7 @@ namespace {
 	// Every voxel box the terrain scene built, as a canonical sorted list.
 	//
 	// Sorted rather than taken in iteration order, because two worlds built the
-	// same way are only guaranteed to hold the same *set* of rows — an
+	// same way are only guaranteed to hold the same *set* of rows - an
 	// archetype walk is free to visit them in a different sequence, and a
 	// determinism check that compared sequences would fail for a reason that has
 	// nothing to do with the generator.
@@ -922,7 +922,7 @@ TEST_CASE("the terrain scene generates a voxel world from noise", "[examples][sc
 	REQUIRE(loaded);
 
 	// The prefill runs before the first frame, so a world exists the moment the
-	// scene is loaded rather than one beat later. Nine chunks of it — the exact
+	// scene is loaded rather than one beat later. Nine chunks of it - the exact
 	// count depends on the terrain the camera starts over, so this asserts the
 	// order of magnitude and not a number that would have to be edited every
 	// time a constant moved.
@@ -960,7 +960,7 @@ TEST_CASE("the terrain scene generates a voxel world from noise", "[examples][sc
 	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 34.0f);
 
 	// Measured bounds, not declared. A streamed world reaches as far as what is
-	// loaded, which is the camera's neighbourhood rather than the whole map —
+	// loaded, which is the camera's neighbourhood rather than the whole map -
 	// the 16384-block extent exists as a function and never as geometry.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 100.0f);
@@ -971,7 +971,7 @@ TEST_CASE("the terrain generator is a pure function of its seed", "[examples][sc
 
 	// **Rule 5, asserted rather than asserted-in-a-comment.** The map is
 	// 268 million columns and is never stored, so every block anybody ever sees
-	// comes out of `HeightAt` — which means a recording replays if and only if
+	// comes out of `HeightAt` - which means a recording replays if and only if
 	// two runs of that function agree. The integer hashing exists for this, and
 	// a change that reached for `math.random` or wall time would pass every
 	// other check in this file.
@@ -987,7 +987,7 @@ TEST_CASE("the terrain generator is a pure function of its seed", "[examples][sc
 		INFO(error);
 		REQUIRE(loaded);
 
-		// Ten fixed ticks each, so the camera moves and the streaming runs —
+		// Ten fixed ticks each, so the camera moves and the streaming runs -
 		// comparing only the prefill would pin the generator and leave the part
 		// of the file that decides *when* a chunk is built untested.
 		for (int tick = 0; tick < 10; tick++) {
@@ -1092,7 +1092,7 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	// **The first scene that reads `Players` at all**, and the assertion is that
 	// it reads it *per player*. The panel is built into each player's own
 	// `PlayerGui` rather than into `StarterGui`, because a `StarterGui` is a
-	// template that `gui::ResetPlayerGui` clones at spawn — a list built there
+	// template that `gui::ResetPlayerGui` clones at spawn - a list built there
 	// is correct for exactly one instant per player and stale for ever after.
 	//
 	// This is what a GPU is not needed for: whether the *rows exist* and say the
@@ -1121,13 +1121,13 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	REQUIRE(loaded);
 
 	// A few ticks, because the panel is finished on the `Heartbeat` that
-	// notices a player with no panel — see the scene's last paragraph for why
+	// notices a player with no panel - see the scene's last paragraph for why
 	// the signal alone is not enough.
 	for (int tick = 0; tick < 4; tick++) {
 		systems.Tick(store, 1.0f / 60.0f);
 	}
 
-	// One panel per player, in that player's own container — not two in one, and
+	// One panel per player, in that player's own container - not two in one, and
 	// not one shared.
 	for (const Entity player : {first, second}) {
 		INFO(store.InstanceNameOf(player).Text());
@@ -1146,7 +1146,7 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 
 		// Two players, two rows. **Counted under this player's own panel**,
 		// which is what makes the count mean "everybody" rather than "somebody"
-		// — a global count of rows named `Row1` would be two whether the second
+		// - a global count of rows named `Row1` would be two whether the second
 		// panel held one row or none.
 		size_t named = 0;
 		store.EachChild(rows, [&](Entity row) {

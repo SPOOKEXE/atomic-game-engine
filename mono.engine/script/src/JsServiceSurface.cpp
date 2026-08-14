@@ -5,7 +5,7 @@
 // that the catalogue is the one file allowed to have met both VMs, which is true
 // and did not follow: `ServiceSurface.hpp` only *forward-declares* `lua_State`,
 // so a JavaScript translation unit reading it compiles against no Luau at all.
-// What the arrangement actually cost was findability — the Luau installer was a
+// What the arrangement actually cost was findability - the Luau installer was a
 // file of its own and its twin was fifty lines under a heading, which is the
 // asymmetry that lets one of a pair drift.
 //
@@ -32,7 +32,7 @@ namespace engine::script {
 
 		for (const ServiceSignal &signal : surface.Signals) {
 			// No subject: a service signal is the world's, not any
-			// instance's — which is what `NULL_ENTITY` means here. The name
+			// instance's - which is what `NULL_ENTITY` means here. The name
 			// filter is what tells `UserInputService`'s five apart, since
 			// they share one `SignalKind`.
 			JS_SetPropertyStr(
@@ -51,7 +51,7 @@ namespace engine::script {
 		InstallJsServiceMethods(context, service, surface.Methods);
 
 		// **After the methods, so an accessor wins a name a method also
-		// claims** — the order `InstallService` fixes for the signals, for
+		// claims** - the order `InstallService` fixes for the signals, for
 		// the same reason. Nothing is in both lists today.
 		InstallJsServiceProperties(context, service, surface.Name, surface.Properties);
 

@@ -7,11 +7,11 @@
 // `PropertyType` and never on a property's name.
 //
 // **The two files share a rule rather than code.** They marshal into different
-// VMs with different object models — Luau has metatables, JavaScript has
-// prototypes and accessors — so a common implementation would be an abstraction
+// VMs with different object models - Luau has metatables, JavaScript has
+// prototypes and accessors - so a common implementation would be an abstraction
 // over two runtimes' internals. What is actually shared is the thing that
-// matters: one class table, one descriptor list, one set of conversions, and —
-// since v0.6 — one `SignalTable`, one `ChangeQueue`, one `TaskQueue` and one
+// matters: one class table, one descriptor list, one set of conversions, and -
+// since v0.6 - one `SignalTable`, one `ChangeQueue`, one `TaskQueue` and one
 // codec. Everything about *ordering* is shared, because ordering is what a
 // recording depends on.
 //
@@ -26,7 +26,7 @@
 //   reads a `__type` metafield.
 // - **A `Promise` rather than a coroutine.** `task.wait` suspends by returning
 //   a promise an `await` consumes, because that is JavaScript's own suspension
-//   primitive — and `JS_ExecutePendingJob` means the *host* decides when a
+//   primitive - and `JS_ExecutePendingJob` means the *host* decides when a
 //   reaction runs, which is what makes it legal under rule 5 at all.
 //
 // None of those is one language pretending to be the other.
@@ -67,7 +67,7 @@ namespace engine::script {
 	// datatype vocabulary, the clock, `typeOf`/`warn` and the store services.
 	//
 	// A second function rather than more of the first, because the two halves
-	// are reviewed differently — one is the property surface and the other is
+	// are reviewed differently - one is the property surface and the other is
 	// everything an author reaches for after it.
 	void OpenJsSurface(JSContext *context);
 
@@ -89,7 +89,7 @@ namespace engine::script {
 	// prototype behind this object and *caches the result*; a prototype built
 	// before it existed fell back to a plain one and was then kept forever. The
 	// `workspace` global is built during `OpenJsBindings`, so it had no
-	// `IsA`, no `GetChildren` and no signals at all — silently, because a
+	// `IsA`, no `GetChildren` and no signals at all - silently, because a
 	// missing method in JavaScript is `undefined` until something calls it.
 	//
 	// @param context The VM to install into.
@@ -99,7 +99,7 @@ namespace engine::script {
 	//
 	// **The JavaScript half of `ScriptCall.hpp`.** A method that is written once
 	// is installed by both VMs from one table, which is what makes parity a
-	// property of the build rather than of somebody comparing two files — see
+	// property of the build rather than of somebody comparing two files - see
 	// `InstallLuauNeutralMethods` for the drift that motivated it.
 	//
 	// Called by `InstallJsInstanceMethods`, on the object it is building.
@@ -113,8 +113,8 @@ namespace engine::script {
 	//
 	// **The JavaScript half of what made five services reachable here.** A
 	// `ServiceSurface` is data, so `ServiceCatalogue.cpp` reads one description
-	// twice — `InstallService` builds the Luau table and this fills in the
-	// JavaScript object — and a method added to that table is a member in both
+	// twice - `InstallService` builds the Luau table and this fills in the
+	// JavaScript object - and a method added to that table is a member in both
 	// languages in the same commit.
 	//
 	// @param context The VM.
@@ -129,7 +129,7 @@ namespace engine::script {
 	// **The JavaScript half of what made the last two reachable here**, and it
 	// is native accessors rather than anything resembling the Luau side.
 	// `JS_DefinePropertyGetSet` runs the getter on every read, so the service
-	// stays a plain object — no userdata, no tag, no registry key. What it needs
+	// stays a plain object - no userdata, no tag, no registry key. What it needs
 	// in exchange is the property *names* at install time, which is why
 	// `ServiceProperty` is a list and not a catch-all.
 	//
@@ -148,7 +148,7 @@ namespace engine::script {
 	// One whole service, as a JavaScript object on the global.
 	//
 	// **`InstallService`'s twin, and `JsServiceSurface.cpp` is where it lives.**
-	// Signals, then methods, then properties — the order the Luau installer fixes
+	// Signals, then methods, then properties - the order the Luau installer fixes
 	// for the same reason, so a name claimed twice resolves the same way in both
 	// languages. `ServiceCatalogue.cpp` is the only caller.
 	//
@@ -190,15 +190,15 @@ namespace engine::script {
 	// `ContextActionService` crossed at v0.16 with no input pump in this
 	// language, so a JavaScript `BindAction` would have taken a handler and
 	// forgotten it; `UserInputService` crossed with the property mechanism, and
-	// its six signals would have been connectable and silent — which is the
+	// its six signals would have been connectable and silent - which is the
 	// state this module names twice as reading like a broken engine.
 	//
 	// **Six things, in `PumpInput`'s order**: the focus edges, the device change,
-	// key edges, mouse button edges, pointer motion and the wheel — so a listener
+	// key edges, mouse button edges, pointer motion and the wheel - so a listener
 	// sees `WindowFocusReleased` before the releases losing focus caused, in
 	// either language.
 	//
-	// Called at the same place in the barrier the Luau pump is — before the
+	// Called at the same place in the barrier the Luau pump is - before the
 	// changes, so a handler's writes reach their listeners on this beat rather
 	// than the next.
 	//
@@ -224,7 +224,7 @@ namespace engine::script {
 	// The JavaScript half of `PumpChildWaiters`: resolves every `WaitForChild`
 	// whose child has arrived or whose wait has run out.
 	//
-	// **After `PumpJsTree`, exactly as the Luau side orders it** — and for its
+	// **After `PumpJsTree`, exactly as the Luau side orders it** - and for its
 	// reason: a `ChildAdded` handler and a resumed `WaitForChild` are two scripts
 	// told about one arrival, and the signal every listener shares goes first.
 	//
@@ -260,7 +260,7 @@ namespace engine::script {
 	// Advances every tween by one tick and fires what completed.
 	//
 	// **The twin of `PumpTweens`, at the same place in the barrier**, which is
-	// the head of it — see `LuauRuntime::Heartbeat` for the whole order and why
+	// the head of it - see `LuauRuntime::Heartbeat` for the whole order and why
 	// the world's own timed work goes before the pumps that deliver to scripts.
 	// `delta` is the fixed tick delta and never wall time.
 	//
@@ -330,7 +330,7 @@ namespace engine::script {
 	// not a property. One switch per language rather than two per language that
 	// agree until somebody edits one.
 	//
-	// `PropertyType::String` is refused by both, and the refusal is the design —
+	// `PropertyType::String` is refused by both, and the refusal is the design -
 	// `bytes` is uninitialised storage and a `std::string` cannot be assigned into
 	// it, so every caller takes strings down a path of its own.
 	//
@@ -366,13 +366,13 @@ namespace engine::script {
 	// **The list is `ServiceCatalogue.cpp`'s and not this file's**, which is what
 	// makes "which services exist" one fact rather than one per VM. A service
 	// this language has no installer for installs nothing, and `GetService`
-	// refuses it by name saying which language does bind it — see
+	// refuses it by name saying which language does bind it - see
 	// `ServiceCatalogue.hpp`.
 	//
 	// @param context The VM.
 	// @param global  The global object to hang each service on.
 	// @param phase   Which set to install. This language has no studio services
-	//        today, so the second phase is a walk over an empty selection — kept
+	//        today, so the second phase is a walk over an empty selection - kept
 	//        because the *catalogue* has one and a second signature would be a
 	//        second place that fact lives.
 	// @since v0.15
@@ -414,7 +414,7 @@ namespace engine::script {
 	// to be installed before `OpenJsBindings` seals it.
 	void InstallJsQueries(JSContext *context, JSValueConst global, JSValueConst workspace);
 
-	// An `EnumItem`, and reading one back — the JavaScript spellings.
+	// An `EnumItem`, and reading one back - the JavaScript spellings.
 	bool ReadJsEnumValue(JSContext *context, JSValueConst value, core::Name enumName, core::Name &out);
 
 	// A JavaScript value to the shared tree, and back.

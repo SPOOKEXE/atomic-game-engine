@@ -146,7 +146,7 @@ TEST_CASE("every kind reads what a person would write", "[flags]") {
 	Fresh();
 
 	// A bare flag with no value is `true`, which is what a command line hands
-	// over — and is not a value at all for the other three kinds.
+	// over - and is not a value at all for the other three kinds.
 	CHECK(Flags::Set("test.switch", "", FlagSource::CommandLine) == FlagStatus::Applied);
 	CHECK(Flag("test.switch").Boolean());
 	CHECK(Flags::Set("test.count", "", FlagSource::CommandLine) == FlagStatus::NotAValue);
@@ -219,8 +219,8 @@ TEST_CASE("a frozen flag refuses every later set", "[flags]") {
 }
 
 TEST_CASE("a handle resolved before a reset does not answer the wrong flag after one", "[flags]") {
-	// The failure this guards is a test's and not a program's — nothing else
-	// resets — and it is the kind that reads as the code under test being
+	// The failure this guards is a test's and not a program's - nothing else
+	// resets - and it is the kind that reads as the code under test being
 	// wrong, because a stale index answers a *plausible* value from the wrong
 	// row.
 	Fresh();
@@ -396,8 +396,8 @@ TEST_CASE("a list appends within a source and is replaced by one that outranks i
 	CHECK(sources.Items()[0] == "dir:/one");
 	CHECK(sources.Items()[1] == "dir:/two");
 
-	// **Order is kept**, because these are priority orders — the first origin
-	// that answers wins — and a set would lose the only thing they carry.
+	// **Order is kept**, because these are priority orders - the first origin
+	// that answers wins - and a set would lose the only thing they carry.
 	CHECK(sources.Text() == "dir:/one, dir:/two");
 
 	REQUIRE(Flags::Set("test.sources", "host:9080", FlagSource::CommandLine) == FlagStatus::Applied);
@@ -456,7 +456,7 @@ TEST_CASE("a repeated key in a config file is a list and not a last-one-wins", "
 
 	// **The whole point of not splitting on a separator.** A path somebody chose
 	// may contain anything, and a list that split its entries would make that a
-	// bug nobody could see — which is exactly why the key repeats instead.
+	// bug nobody could see - which is exactly why the key repeats instead.
 	CHECK(sources.Items()[1] == "dir:/with, a comma");
 	CHECK(sources.Items()[2] == "host:9080");
 

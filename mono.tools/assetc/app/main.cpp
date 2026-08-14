@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
 	// would carry the answer from halfway through startup.
 	assetc::Settings settings;
 	if (const std::string refused = settings.Content.RefusedText(); !refused.empty()) {
-		ENGINE_INFO("assetc: not baking — {}", refused);
+		ENGINE_INFO("assetc: not baking - {}", refused);
 	}
 
 	const auto input = arguments.Get("input");
@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
 	for (const assetc::Baked &baked : report.Assets) {
 		if (!baked.Failure.empty()) {
 			// Failures remain visible in quiet mode.
-			ENGINE_WARN("assetc: {} — {}", baked.Source, baked.Failure);
+			ENGINE_WARN("assetc: {} - {}", baked.Source, baked.Failure);
 		} else if (!quiet) {
 			ENGINE_INFO(
 				"assetc: {} -> {} [{}] {} bytes",
@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
 	}
 
 	ENGINE_INFO(
-		"assetc: {} assets, {} failed — {} bytes in, {} bytes out",
+		"assetc: {} assets, {} failed - {} bytes in, {} bytes out",
 		report.Assets.size(),
 		report.Failures,
 		report.SourceBytes,

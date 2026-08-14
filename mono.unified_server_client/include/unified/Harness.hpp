@@ -6,7 +6,7 @@
 // suspects and no way to tell them apart from outside.** Running `server
 // --listen` beside `client --connect` puts a handshake, a UDP socket, packet
 // framing, an encrypted stream, a reliability window and a bandwidth budget
-// between the thing that serialises and the thing that draws — so a blank scene
+// between the thing that serialises and the thing that draws - so a blank scene
 // is equally consistent with a component that never got named, a datagram that
 // never arrived, and a draw list that was filled and never read. Two programs
 // and no shared address space is the worst possible place to find out which.
@@ -15,16 +15,16 @@
 // `replication::Authority::Outgoing` hands its byte vectors **directly** to
 // `replication::Replica::Receive`. Serialise straight into deserialise. There
 // is no socket, no `net::Packet` header, no `net::Session`, no cipher, no
-// acknowledgement window and no MTU — a message the authority produced is a
+// acknowledgement window and no MTU - a message the authority produced is a
 // message the replica sees, in the order it was produced, complete.
 //
 // **What that buys is a bisection, and it is the only thing it buys.** A
 // failure that reproduces here is above `net`: a component nobody called
 // `Replicate` on, a name the two ends spell differently, a snapshot the replica
 // refused, a store the draw pass never walked. A failure that does *not*
-// reproduce here is below it, and `mono.engine/replication/tests/Wire.hpp` —
+// reproduce here is below it, and `mono.engine/replication/tests/Wire.hpp` -
 // which runs this same exchange over a real loopback with real framing, real
-// encryption and `net::LossyTransport` losing a seeded share of it — is where
+// encryption and `net::LossyTransport` losing a seeded share of it - is where
 // that one gets cornered. **Neither replaces the other.** This one cannot see a
 // message that did not fit in a datagram, and that class of bug has bitten this
 // module four times.
@@ -91,7 +91,7 @@ namespace unified {
 		// authority.
 		//
 		// Counted across the whole run from zero. **Silent, which is what makes
-		// it loss** — `Authority::Unsent` is a refusal the sender knows about
+		// it loss** - `Authority::Unsent` is a refusal the sender knows about
 		// and is repaired next tick, and the interesting failure is the one
 		// nobody is told about. There is no percentage here on purpose: a
 		// nominated ordinal is a test and a percentage is a flake with a story
@@ -115,8 +115,8 @@ namespace unified {
 
 	// What crossed in one tick, and what came out the other side.
 	//
-	// **Every field is a fact about one of the four stages** — produced, sent,
-	// applied, drawn — because the whole point is to say which stage lost it.
+	// **Every field is a fact about one of the four stages** - produced, sent,
+	// applied, drawn - because the whole point is to say which stage lost it.
 	//
 	// @since v0.5
 	struct Report {
@@ -131,7 +131,7 @@ namespace unified {
 		// **Not what would go on a wire.** `net` adds a header and a tag per
 		// datagram and this counts neither, so a figure near
 		// `net::MAXIMUM_MESSAGE_BYTES` here is already a message that would not
-		// fit — which is the one thing this harness can say about the wire
+		// fit - which is the one thing this harness can say about the wire
 		// without having one.
 		size_t Bytes = 0;
 
@@ -158,7 +158,7 @@ namespace unified {
 		// Rows the client's draw pass produced on the last frame of this tick.
 		//
 		// Below `ClientEntities` means rows arrived without a `Bounds` or a
-		// `Visual` — the components that are sent once in the snapshot and
+		// `Visual` - the components that are sent once in the snapshot and
 		// never again, so losing them is permanent and invisible everywhere
 		// else.
 		size_t Drawn = 0;

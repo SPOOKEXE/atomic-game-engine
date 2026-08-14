@@ -2,7 +2,7 @@
 //
 // Split out of `TestMain.cpp` because a benchmark binary declares suites the
 // same way and is discovered by the same `--mono-suites` listing, but links no
-// Catch2 — a benchmark measures, it does not assert. One registry rather than
+// Catch2 - a benchmark measures, it does not assert. One registry rather than
 // two means one cascading-signature mechanism and one thing to keep correct.
 
 #include <engine/testing/Suite.hpp>

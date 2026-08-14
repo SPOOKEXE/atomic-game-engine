@@ -1,11 +1,11 @@
 // Replaying a document into a graph.
 //
 // **All of it headless, which is the point of the design.** `Build` takes a
-// `SourceResolver`, so the one place a filesystem would enter is a callback —
+// `SourceResolver`, so the one place a filesystem would enter is a callback -
 // and every case below hands it a map. `bake` touches no disk and this file
 // does not make it start.
 //
-// The format itself — recording, writing and reading back — is
+// The format itself - recording, writing and reading back - is
 // `Engine::bakegraph`'s and is tested there. What is here is the half that
 // needs an importer.
 
@@ -104,7 +104,7 @@ TEST_CASE("a document builds the graph it describes", "[bake]") {
 	REQUIRE(Build(document, graph, ResolverOver(files), offender) == DocumentStatus::Ok);
 	CHECK(offender.empty());
 
-	// It runs, which is the only claim worth making about a built graph — that
+	// It runs, which is the only claim worth making about a built graph - that
 	// it is a pipeline rather than a set of disconnected nodes.
 	std::string failure;
 	REQUIRE(graph.Run(failure));
@@ -267,7 +267,7 @@ TEST_CASE("a rasterize operation replays with its size", "[bake]") {
 	REQUIRE(graph.Baked().size() == 1);
 
 	// Through the text format as well, because that is the shape a saved
-	// pipeline arrives in — and a size written and not parsed is invisible until
+	// pipeline arrives in - and a size written and not parsed is invisible until
 	// somebody reloads the one pipeline that uses it.
 	Document reloaded;
 	REQUIRE(Read(Write(document), reloaded, offender) == DocumentStatus::Ok);

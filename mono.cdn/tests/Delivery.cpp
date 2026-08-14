@@ -28,14 +28,14 @@
 // **The whole path, end to end**, and the reason this suite is in `mono.cdn`
 // rather than in `delivery`: it needs both halves, and `cdn` is the side that
 // links the other. A publisher writes a store, an origin serves it over a real
-// socket on a real port, and a headless delivery client fetches through it —
+// socket on a real port, and a headless delivery client fetches through it -
 // with nothing mocked between them.
 //
 // What it is really checking is that the two ends agree about four things that
 // are each defined in one place and used in two:
 //
 // - the manifest format and its signed root
-// - the group layout — members concatenated in member order
+// - the group layout - members concatenated in member order
 // - the compressed frame, and the length it must expand to
 // - the grant, issued with one function and opened with another
 //
@@ -141,7 +141,7 @@ namespace {
 			std::error_code failure;
 			fs::remove_all(Root, failure);
 
-			// A mesh, an image and a sound — the three kinds the task named,
+			// A mesh, an image and a sound - the three kinds the task named,
 			// each big enough to be cut into several chunks.
 			Write("meshes/rock.mesh", Structured("vert", 4000));
 			Write("meshes/tree.mesh", Structured("vert", 3000));
@@ -363,7 +363,7 @@ TEST_CASE("assets can be fetched by kind", "[cdn][delivery][e2e]") {
 
 TEST_CASE("a group that lands brings its neighbours with it", "[cdn][delivery][e2e]") {
 	// CDN.md §5 seen from the client: the unit that travels is a group, so
-	// asking for one asset puts the others in the cache — which is the whole of
+	// asking for one asset puts the others in the cache - which is the whole of
 	// "the game progressively builds".
 	World world;
 	const fs::path cache = world.Root / "cache";
@@ -425,8 +425,8 @@ TEST_CASE("a cache means the second run costs no network", "[cdn][delivery][e2e]
 TEST_CASE("a failed request still says what it was for", "[cdn][delivery][e2e]") {
 	// **The half `D00107` warned about.** A request that succeeds carries its
 	// name in the `Asset`; one that fails answers nothing at all, so a caller
-	// undoing something it did at request time — marking a texture as expected,
-	// most of all — had no way to know which name to undo it for. Without this
+	// undoing something it did at request time - marking a texture as expected,
+	// most of all - had no way to know which name to undo it for. Without this
 	// a misspelled sheet stays "on its way" for ever and never wears the marker
 	// that exists for exactly that case.
 	World world;
@@ -522,7 +522,7 @@ TEST_CASE("an asset the manifest does not describe fails", "[cdn][delivery][e2e]
 
 TEST_CASE("a local directory source needs no wire and no grant", "[cdn][delivery][e2e]") {
 	// CDN.md §6's "local store": the server serving its own disk. Same manifest,
-	// same verification, no transport — so there is no group to compress and
+	// same verification, no transport - so there is no group to compress and
 	// nothing to admit.
 	World world;
 
@@ -590,7 +590,7 @@ TEST_CASE("a dead source is passed over and the next one serves", "[cdn][deliver
 }
 
 TEST_CASE("the local directory is preferred over the remote origin", "[cdn][delivery][e2e]") {
-	// "Download from local first, otherwise request external" — which is not a
+	// "Download from local first, otherwise request external" - which is not a
 	// policy in the code, it is what this order *means*.
 	World world;
 

@@ -4,12 +4,12 @@
 //
 // ChaCha20-Poly1305, RFC 8439, which is what DATATYPES_LIBRARIES.md picks for
 // the transport. One pass over the bytes, no lookup tables, and constant time on
-// hardware with no AES instructions — a phone, which is exactly where AES-GCM in
+// hardware with no AES instructions - a phone, which is exactly where AES-GCM in
 // software is both slow and a timing risk.
 //
 // **That constant time is now measured rather than asserted.**
 // `engine.net.bench.crypto` opens the same frame authentic, forged, and under
-// rewritten associated data, and reports 1656, 1664 and 1728 nanoseconds — the
+// rewritten associated data, and reports 1656, 1664 and 1728 nanoseconds - the
 // same figure to within the noise of the machine. A refusal that came back
 // *faster* than an accept would be the bug, not the good news it looks like: it
 // would mean the tag comparison returns on the first differing byte, which
@@ -17,8 +17,8 @@
 // million guesses. Those rows are the regression test for that, and they are
 // the one place in this repository where a smaller number is a failure.
 //
-// The one refusal that is allowed to be cheap is a frame shorter than the tag —
-// 31 ns against 1656 — because there is nothing to compare in constant time
+// The one refusal that is allowed to be cheap is a frame shorter than the tag -
+// 31 ns against 1656 - because there is nothing to compare in constant time
 // against, and the length it leaks is the length the attacker chose.
 //
 // **A nonce must never repeat under one key, and this file is built so that it
@@ -38,14 +38,14 @@
 //   the key itself is never handed to a second Sealer.
 //
 // An Opener is the other half and its rules are the opposite ones. It never
-// chooses a nonce — the counter arrives on the wire from a peer assumed hostile
-// — so accepting key material from a caller costs nothing that is not already
+// chooses a nonce - the counter arrives on the wire from a peer assumed hostile
+// - so accepting key material from a caller costs nothing that is not already
 // the attacker's to choose. That asymmetry is why Opener::FromKey exists and
 // Sealer::FromKey deliberately does not.
 //
 // **This refuses a forgery, not a replay.** A frame captured and sent again is
 // authentic by construction and opens cleanly. Discarding it is the sequence
-// window's job one layer out — `Packet::IsNewer` and the channel's counter —
+// window's job one layer out - `Packet::IsNewer` and the channel's counter -
 // because that layer is the one that knows whether a repeat is an attack or an
 // ordinary reliable resend.
 //
@@ -79,8 +79,8 @@ namespace engine::net {
 
 		// The fixed part of the nonce, which the counter is appended to.
 		//
-		// RFC 8439 §2.8 builds a nonce this way — a fixed 32-bit part plus a
-		// 64-bit counter — and the fixed part comes out of the handshake's key
+		// RFC 8439 §2.8 builds a nonce this way - a fixed 32-bit part plus a
+		// 64-bit counter - and the fixed part comes out of the handshake's key
 		// derivation alongside the key, one per direction. It buys nothing on its
 		// own, since distinct keys already make the nonce spaces disjoint; it
 		// costs four bytes of derived material and means the two directions do
@@ -114,7 +114,7 @@ namespace engine::net {
 
 			// Ciphertext followed by the 16-byte tag.
 			//
-			// A view into the Sealer that produced it, not a copy — the frame is
+			// A view into the Sealer that produced it, not a copy - the frame is
 			// written into an outgoing buffer within the same call chain, and a
 			// per-packet allocation here would be one per connection per tick.
 			//
@@ -127,7 +127,7 @@ namespace engine::net {
 		//
 		// One per direction per connection, obtained from Handshake::TakeKeys.
 		// There is no constructor taking a key, and that absence is load-bearing
-		// — see the file comment.
+		// - see the file comment.
 		class Sealer {
 		  public:
 			// Zeroes the key.
@@ -154,13 +154,13 @@ namespace engine::net {
 			// exists while there is still no way to set, reset or reach one. A
 			// frame's associated data is the packet header it travels under and
 			// that header carries the counter, so the header has to be written
-			// before the frame is sealed — and this is the only way to write it
+			// before the frame is sealed - and this is the only way to write it
 			// under the counter the seal will actually use. A caller that reads
 			// this and then does not seal has skipped one value out of 2^64 and
 			// repeated nothing.
 			//
 			// @return The next counter, or UINT64_MAX for a Sealer that has been
-			//         moved from or has exhausted its counter — both of which
+			//         moved from or has exhausted its counter - both of which
 			//         make the next Seal refuse.
 			uint64_t NextCounter() const {
 				return Counter;
@@ -168,7 +168,7 @@ namespace engine::net {
 
 			// Seals a frame under the next counter.
 			//
-			// @param plaintext The bytes to encrypt. May be empty — a frame
+			// @param plaintext The bytes to encrypt. May be empty - a frame
 			//        carrying only authenticated associated data is 16 bytes.
 			// @param associatedData Authenticated but not encrypted, and the
 			//        place to put the packet header so that a rewritten channel
@@ -217,7 +217,7 @@ namespace engine::net {
 			// Builds an Opener from key material.
 			//
 			// The direction where this is safe. An Opener chooses no nonce, so a
-			// caller holding its key cannot cause a nonce to repeat under it —
+			// caller holding its key cannot cause a nonce to repeat under it -
 			// the counter is the sender's, and on the wire it is the attacker's
 			// anyway. That is why the sealing half has no equivalent.
 			//

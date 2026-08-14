@@ -1,4 +1,4 @@
-# mono.unified_server_client — module invariants
+# mono.unified_server_client - module invariants
 
 A diagnostic product: the server's world and the client's replicated world in
 one process, with `net` cut out of the middle.
@@ -10,7 +10,7 @@ one process, with `net` cut out of the middle.
 a reliability window and a bandwidth budget between the thing that serialises
 and the thing that draws. A world that does not appear is equally consistent
 with a component nobody called `Replicate` on, a datagram that never arrived,
-and a draw list that was filled and never read — and two processes with no
+and a draw list that was filled and never read - and two processes with no
 shared address space is the worst place there is to find out which.
 
 So this joins the two halves at the only seam that matters:
@@ -19,7 +19,7 @@ So this joins the two halves at the only seam that matters:
 
 **A failure that reproduces here is above `net`. A failure that does not is
 below it**, and `mono.engine/replication/tests/Wire.hpp` is where that one gets
-cornered — it runs the same exchange over a real loopback with real framing,
+cornered - it runs the same exchange over a real loopback with real framing,
 real encryption and `net::LossyTransport` losing a seeded share of it.
 
 **Neither replaces the other, and this one is the weaker.** It cannot see a
@@ -37,7 +37,7 @@ the harness.
 The cost is real and is accepted rather than hidden: linking `Mono::client`
 brings `Engine::render` onto the link line and stages its shaders beside a
 binary that opens no window. **Do not fix that by reimplementing the draw
-pass** — the day the two diverge is the day this program stops answering the
+pass** - the day the two diverge is the day this program stops answering the
 question it was built for.
 
 ## The tier escape
@@ -49,7 +49,7 @@ program that hosts a server and draws its world in one process is precisely the
 arrangement the rule exists to make deliberate.
 
 **It is not single-player.** That edge belongs in `mono.client/CMakeLists.txt`,
-is written out in a comment there, and is still not declared — reaching for this
+is written out in a comment there, and is still not declared - reaching for this
 one to avoid declaring that one would be the precedent D00008 is about.
 
 ## The replicated component list is duplicated on purpose
@@ -66,7 +66,7 @@ this exists to find.
 ## Time is passed in, never read
 
 A tick is a call and a frame is a call. `Settings` alone determines a run, so
-two runs of the same command agree — which is what `tests/Harness.cpp`'s probe
+two runs of the same command agree - which is what `tests/Harness.cpp`'s probe
 case asserts, and why `Settings::Workers` defaults to one rather than to the
 machine.
 
@@ -79,14 +79,14 @@ Loss is nominated by ordinal and never by percentage, for the reason
 The columns are the four stages in order and the first one that stops making
 sense is the answer:
 
-- `msgs`/`bytes` zero — the authority produced nothing. A component is not
+- `msgs`/`bytes` zero - the authority produced nothing. A component is not
   replicated, or nothing is dirty.
-- `applied` stuck at zero — the replica refused what it got. Its own counters
+- `applied` stuck at zero - the replica refused what it got. Its own counters
   say which kind, and none of them can be loss, because there is none.
-- `cli-ent` below `srv-ent` — rows did not arrive.
-- `drawn` below `cli-ent` — rows arrived without a `Bounds` or a `Visual`.
+- `cli-ent` below `srv-ent` - rows did not arrive.
+- `drawn` below `cli-ent` - rows arrived without a `Bounds` or a `Visual`.
   Those cross once, in the joining snapshot, so losing them is permanent.
-- `drawn` equal to `cli-ent` and the scene still empty — it is being drawn and
+- `drawn` equal to `cli-ent` and the scene still empty - it is being drawn and
   not being *looked at*. That is a camera problem, not a replication one.
-- `frozen` equal to `frames-per-tick - 1` — the world is stepping once per tick
+- `frozen` equal to `frames-per-tick - 1` - the world is stepping once per tick
   rather than being interpolated. `D00010`.

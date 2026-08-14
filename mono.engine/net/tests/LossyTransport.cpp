@@ -4,7 +4,7 @@
 // one of them: a case that fails through a lossy link has to be a case about the
 // code underneath, and the first question anybody asks of a failure found this
 // way is whether the harness invented it. So this suite states the four things
-// every later case leans on — a dropped datagram is not delivered, a seeded drop
+// every later case leans on - a dropped datagram is not delivered, a seeded drop
 // is the same drop twice, nothing is lost when loss is off, and a link with the
 // wrapper on it and nothing armed behaves exactly like the link without it.
 
@@ -103,7 +103,7 @@ TEST_CASE("a nominated datagram does not arrive", "[net][transport][lossy]") {
 TEST_CASE("a drop does not stop the drain that follows it", "[net][transport][lossy]") {
 	// **The failure mode of a naive wrapper.** A caller polls until `Empty`, so
 	// reporting `Empty` for a datagram that was dropped would leave everything
-	// behind it in the queue underneath for a tick — which is not loss, it is a
+	// behind it in the queue underneath for a tick - which is not loss, it is a
 	// stall, and it would show up as a bug in whatever was being tested.
 	LossSettings settings;
 	settings.Drop = {0, 1};
@@ -174,7 +174,7 @@ TEST_CASE("a link that loses nothing behaves like the link underneath", "[net][t
 	// Every statement `Transport.hpp` makes about the interface, asked of the
 	// wrapper. A case found through a lossy link is only evidence about the code
 	// underneath if the wrapper answers the same way when it is not losing
-	// anything — and the statuses are the part a wrapper is most likely to get
+	// anything - and the statuses are the part a wrapper is most likely to get
 	// wrong, because they are the part it would have to invent if it dropped on
 	// the way out instead.
 	std::vector<std::unique_ptr<Transport>> ends = MakeLoopbackTransport(2);

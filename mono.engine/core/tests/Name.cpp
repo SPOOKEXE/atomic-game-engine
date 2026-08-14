@@ -154,7 +154,7 @@ TEST_CASE("an auto-assigned id never lands on a reserved one", "[name]") {
 
 		// And it stays *dense*. Jumping the counter past a high pin would be
 		// the easy way to avoid the collision, and it would throw away the
-		// reason for having a counter — as well as consuming every id below
+		// reason for having a counter - as well as consuming every id below
 		// the pin that something else might want to reserve later.
 		REQUIRE(fresh.Id() < pinned.Id());
 	}
@@ -196,14 +196,14 @@ TEST_CASE("a racing first sighting still yields one id and one entry", "[name]")
 	// silently.** `Name(text)` looks the registry up under a *shared* lock,
 	// because the hit is almost every call and excluding readers for it made
 	// eight threads slower than one. A `shared_mutex` cannot upgrade, so a miss
-	// drops that lock and takes an exclusive one — and in the gap between the
+	// drops that lock and takes an exclusive one - and in the gap between the
 	// two, another thread may have interned the very same text.
 	//
 	// The re-check under the exclusive lock is what handles that. Without it,
 	// both threads insert: `Texts` gains two rows, `AllocateId` hands out two
 	// ids, and `Ids` keeps whichever landed first. The two threads then hold
 	// different ids for one string, which is the single thing this type exists
-	// to make impossible — and everything downstream that compares names by
+	// to make impossible - and everything downstream that compares names by
 	// integer is quietly wrong for the rest of the process.
 	//
 	// The case above races one text with threads started in a loop, which is a

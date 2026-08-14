@@ -66,7 +66,7 @@ namespace engine::ecs {
 		// Sorted by the component's *name text* before writing.
 		//
 		// An unordered map iterates in whatever order its buckets happen to be
-		// in, so two saves of the same world produced different bytes — and a
+		// in, so two saves of the same world produced different bytes - and a
 		// re-save after a load produced different bytes again, because the load
 		// inserted in a different order. A snapshot that is not byte-stable
 		// cannot be compared, which is what a recording and a CI determinism
@@ -209,7 +209,7 @@ namespace engine::ecs {
 			return ordinal < resolved.size() ? resolved[ordinal] : ComponentId{};
 		};
 
-		// Two runs, one per index region — see `SaveSnapshot`. Each count is
+		// Two runs, one per index region - see `SaveSnapshot`. Each count is
 		// checked against what its region can actually hold before anything is
 		// allocated: a corrupt or hostile stream claiming four billion entries
 		// would otherwise have the loop below walk to it one failed read at a
@@ -364,7 +364,7 @@ namespace engine::ecs {
 					if (SparseSet::IsPredicted(key.Index)) {
 						// **A predicted entity is never stale.** "The sender did
 						// not mention it" is the whole definition of a
-						// prediction — the authority allocates nothing from this
+						// prediction - the authority allocates nothing from this
 						// range, so its snapshot cannot mention one, and
 						// destroying it here would delete every prediction on
 						// the first correction. Whether a prediction has outlived
@@ -385,9 +385,9 @@ namespace engine::ecs {
 				// and the sibling walk stops at the first of those rather than
 				// stepping over it.
 				//
-				// Masked here rather than harmless — the sweep takes every
+				// Masked here rather than harmless - the sweep takes every
 				// unmentioned entity and the pass below rewrites `Hierarchy` on
-				// the ones that survive — but a second reader should not have
+				// the ones that survive - but a second reader should not have
 				// to reconstruct that argument to know this line is safe, and
 				// it stops being true the moment the sweep narrows.
 				DetachFromTree(state, entity);
@@ -400,7 +400,7 @@ namespace engine::ecs {
 			const EntityId key = EntityId::Of(entity);
 
 			if (!state.Directory.Alive(key.Index, key.Generation)) {
-				// Not here, or here at a different generation — which means the
+				// Not here, or here at a different generation - which means the
 				// sender destroyed and recreated it, so this is a different
 				// entity and the old one goes.
 				if (state.Directory.Live(key.Index)) {
@@ -408,7 +408,7 @@ namespace engine::ecs {
 
 					// **This is the one that was reachable.** It sits outside
 					// the authoritative-only sweep above, so it runs in Overlay
-					// mode — where nothing rewrites the `Hierarchy` of entities
+					// mode - where nothing rewrites the `Hierarchy` of entities
 					// the snapshot does not mention. A surviving parent kept
 					// naming the freed row, `EachChild` ended its walk there,
 					// and every sibling behind it was alive, in the save file,
@@ -418,7 +418,7 @@ namespace engine::ecs {
 				}
 
 				// Restored at the sender's index *and* generation, so a handle
-				// held anywhere — including inside another component — still
+				// held anywhere - including inside another component - still
 				// names the same entity on both sides.
 				state.Directory.Adopt(key.Index, key.Generation);
 			}

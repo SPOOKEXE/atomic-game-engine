@@ -1,8 +1,8 @@
 // The addressed route out of a world, and the channels it is addressed on.
 //
 // **`MessagingService` is a fan-out and this is a channel**, which is the whole
-// distinction: a topic has no destination — right for "the boss died", wrong for
-// "world B, here is the score you asked me for" — and the only other operation
+// distinction: a topic has no destination - right for "the boss died", wrong for
+// "world B, here is the score you asked me for" - and the only other operation
 // that names a world moves a *person*. So a game wanting to say one thing to one
 // world had to broadcast it to everybody or send a player carrying it.
 // `world::BusKind::Channel` is the kind, appended beside `Teleport` because a
@@ -12,8 +12,8 @@
 // `Send(world, message)` delivered to a single `MessageReceived` on the far side,
 // so every listener in the destination heard everything the pair exchanged and
 // had to work out from the payload whether the message was for it. Two
-// subsystems talking between one pair of worlds is the ordinary case — a match
-// controller and a chat relay, say — and the version where they read each
+// subsystems talking between one pair of worlds is the ordinary case - a match
+// controller and a chat relay, say - and the version where they read each
 // other's traffic is one where each has to be written knowing about the other.
 //
 // So the address is `(world, channel)` on both halves:
@@ -23,7 +23,7 @@
 //   what makes `NoSuchChannel` answerable rather than a delivery that lands
 //   somewhere and is discarded.
 // - **`SendAsync(world, channel, message)` is what a sender does**, and it
-//   suspends on the reply. Every refusal is a `BusStatus` a script reads — see
+//   suspends on the reply. Every refusal is a `BusStatus` a script reads - see
 //   `world::BusStatus` for the table.
 //
 // **The per-channel signal costs nothing new, which is why it is the shape.** A
@@ -37,7 +37,7 @@
 // **There is no catch-all `MessageReceived` any more, and it could not be kept
 // honestly.** A message on a channel this world never opened is refused at the
 // bus, so a signal promising "anything addressed to this world" would fire for
-// exactly the channels a script had already named — the same set, reached by a
+// exactly the channels a script had already named - the same set, reached by a
 // route where nothing tells it which one arrived. Two ways to do one job, and the
 // second one worse.
 //
@@ -67,12 +67,12 @@ namespace engine::script {
 		//
 		// **The one refusal this cannot hand back is `TooManyChannels`, and that
 		// is the shape of the member rather than an oversight.** The cap is a
-		// total the barrier holds — `UniverseSettings::ChannelsPerWorld` — so the
+		// total the barrier holds - `UniverseSettings::ChannelsPerWorld` - so the
 		// verdict arrives a tick later, on the ticket, where every other barrier
 		// verdict arrives. This member returns the signal *now* because a script
 		// writes `OpenChannel('c'):Connect(...)` as one expression, and making it
 		// suspend to collect the verdict would turn it into a promise in
-		// JavaScript and a yield in Luau — a different member, not a stricter one.
+		// JavaScript and a yield in Luau - a different member, not a stricter one.
 		// A world that hits the cap is named in the log at the barrier and its
 		// senders are told `NoSuchChannel`, which is what a channel that never
 		// opened looks like from outside either way.
@@ -80,7 +80,7 @@ namespace engine::script {
 			const std::string channel = call.AsString(0);
 
 			if (!world::Postbox(call.World()).OpenChannel(channel.c_str()).Expected()) {
-				// Over budget, named rather than silent — `PublishAsync`'s rule.
+				// Over budget, named rather than silent - `PublishAsync`'s rule.
 				// A channel that quietly failed to open is a receiver that never
 				// hears anything and a sender told `NoSuchChannel` for ever.
 				call.Raise(("OpenChannel: over this world's budget for '" + channel + "'").c_str());
@@ -93,7 +93,7 @@ namespace engine::script {
 		//
 		// **Connections on the channel's signal are left alone**, because the
 		// script that made them is the only thing that knows whether it is done
-		// with them — reopening the channel later must find its handlers still
+		// with them - reopening the channel later must find its handlers still
 		// there, which is what a `:Connect` outside any tick means. What stops is
 		// the delivery: the bus answers a sender `NoSuchChannel` from the next
 		// barrier on.
@@ -109,7 +109,7 @@ namespace engine::script {
 		//
 		// **It suspends, and the previous version's answer was the reason it had
 		// to.** `Send` returned a boolean that meant "the budget took it" and
-		// threw the bus's own reply away — so `NoSuchWorld` was decided at the
+		// threw the bus's own reply away - so `NoSuchWorld` was decided at the
 		// barrier, delivered to the sender, matched against nothing, and dropped.
 		// A script could not tell a message that arrived from one addressed to a
 		// world that had closed, which is precisely the distinction this service
@@ -117,7 +117,7 @@ namespace engine::script {
 		//
 		// The three values are the store methods': `(value, status, version)` in
 		// Luau and `{ Value, Status, Version }` in JavaScript. A channel send
-		// carries nothing back, so the value is nil and the status is the answer —
+		// carries nothing back, so the value is nil and the status is the answer -
 		// `Ok`, `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady` or `Overflow`.
 		void SendAsync(ScriptCall &call) {
 			const std::string world = call.AsString(0);

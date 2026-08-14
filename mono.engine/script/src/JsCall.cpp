@@ -1,7 +1,7 @@
 // `ScriptCall` in JavaScript's currency.
 //
 // The twin of `LuauCall.cpp`, and deliberately the same shape: one adapter, two
-// trampolines — one for an instance method and one for a service's — and a table
+// trampolines - one for an instance method and one for a service's - and a table
 // walked at install time, so a neutral method costs a row in its own file and
 // nothing here.
 //
@@ -52,7 +52,7 @@ namespace engine::script {
 		// One stored attribute as the JavaScript value it holds.
 		//
 		// `JS_NULL` for a type with no form here, which cannot happen for a value
-		// this binding stored and can for one a future build wrote — so it is a
+		// this binding stored and can for one a future build wrote - so it is a
 		// fallback rather than an assert.
 		//
 		// **`Name` and `Enum` land as plain strings**, matching the Luau half:
@@ -106,7 +106,7 @@ namespace engine::script {
 		//
 		// **`this` is the receiver and `argv` starts at the first argument**,
 		// which is the whole of what differs from the Luau adapter's slot
-		// arithmetic — and the reason the neutral methods count from zero.
+		// arithmetic - and the reason the neutral methods count from zero.
 		class JsCall final : public ScriptCall {
 		  public:
 			JsCall(JSContext *context, JSValueConst self, int argc, JSValueConst *argv)
@@ -117,7 +117,7 @@ namespace engine::script {
 			//
 			// **A tag rather than a flag**, matching `LuauCall::OnService`: a
 			// service method's `Subject()` is `NULL_ENTITY`, and asking
-			// `JsEntityOf` about a plain object would answer that anyway — the
+			// `JsEntityOf` about a plain object would answer that anyway - the
 			// tag is what says it was meant.
 			struct OnService {};
 
@@ -138,7 +138,7 @@ namespace engine::script {
 			//
 			// **`undefined` for nothing, the value itself for one, and an
 			// `Array` for several.** A method with more than one answer is a Luau
-			// shape — `ScriptCall` states the trade at the `Return` block — and an
+			// shape - `ScriptCall` states the trade at the `Return` block - and an
 			// array is what a JavaScript author destructures. Nothing packs a
 			// single answer, so `GetPivot()` is a `CFrame` here exactly as it is
 			// there.
@@ -217,7 +217,7 @@ namespace engine::script {
 				// **A string or a number and nothing else**, which is what
 				// `luaL_checklstring` accepts on the other side. Letting
 				// `JS_ToCString` decide would turn `AddTag({})` into the tag
-				// `"[object Object]"` where Luau raises — a wrong argument
+				// `"[object Object]"` where Luau raises - a wrong argument
 				// answered in one language and refused in the other.
 				if (index >= Argc || !(JS_IsString(Argv[index]) || JS_IsNumber(Argv[index]))) {
 					Raise("expected a string");
@@ -250,7 +250,7 @@ namespace engine::script {
 
 			bool OptionalBoolean(size_t index, bool fallback) override {
 				// `JS_ToBool` and not a type check, which is this language's own
-				// truthiness — see the interface for why the two are allowed to
+				// truthiness - see the interface for why the two are allowed to
 				// disagree about `0` here.
 				return IsNil(index) ? fallback : JS_ToBool(Context, Argv[index]) == 1;
 			}
@@ -322,8 +322,8 @@ namespace engine::script {
 				}
 
 				// **The datatypes by class id, in the order the vocabulary was
-				// added.** A class check is exact — `Vector2` and `UDim` are both
-				// two floats — so the order is legibility and not correctness.
+				// added.** A class check is exact - `Vector2` and `UDim` are both
+				// two floats - so the order is legibility and not correctness.
 				if (const core::Vector3 *held = AsVector3(Context, value); held != nullptr) {
 					out.Type = ecs::PropertyType::Vector3;
 					out.Vector3 = *held;
@@ -360,7 +360,7 @@ namespace engine::script {
 			}
 
 			bool ReadValue(size_t index, ScriptValue &out, CodecStatus &why) override {
-				// **The shared walker and never a second one** — see the Luau
+				// **The shared walker and never a second one** - see the Luau
 				// adapter, which says why one table rule cannot be written twice.
 				if (index >= Argc) {
 					why = CodecStatus::Unsupported;
@@ -384,7 +384,7 @@ namespace engine::script {
 
 				// **Copied out and every atom freed before anything else runs.**
 				// `JS_GetOwnPropertyNames` hands back reference-counted atoms, and
-				// the caller reads a value per name — which may raise — so a walk
+				// the caller reads a value per name - which may raise - so a walk
 				// that held them would strand one per field it had taken.
 				for (uint32_t next = 0; next < count; next++) {
 					if (const char *text = JS_AtomToCString(Context, properties[next].atom);
@@ -536,7 +536,7 @@ namespace engine::script {
 			}
 
 			void ReturnInstance(ecs::Entity value) override {
-				// Nil for a null, which this language spells `null` — see the
+				// Nil for a null, which this language spells `null` - see the
 				// interface. `MakeJsInstance` makes the same call.
 				Set(MakeJsInstance(Context, value));
 			}
@@ -597,7 +597,7 @@ namespace engine::script {
 
 			void AwaitChild(uint64_t waiter) override {
 				// **The same promise under a different key**, resolved by
-				// `PumpJsChildWaiters` with one instance or `null` — which is
+				// `PumpJsChildWaiters` with one instance or `null` - which is
 				// what the Luau half resumes its coroutine with, so a script
 				// reads the same answer in either language and only the syntax
 				// for waiting on it differs.
@@ -639,7 +639,7 @@ namespace engine::script {
 			// One action's record as a plain object.
 			//
 			// Roblox's four fields, and the two it does not have are absent from
-			// the *binding* rather than from the record — see the Luau twin.
+			// the *binding* rather than from the record - see the Luau twin.
 			JSValue MakeBoundAction(const BoundActionReport &report) {
 				JSValue record = JS_NewObject(Context);
 
@@ -664,7 +664,7 @@ namespace engine::script {
 
 			void Set(JSValue value) {
 				// **Appended rather than replacing**, so a method with more than
-				// one answer keeps them all — see `Take`. Every method but
+				// one answer keeps them all - see `Take`. Every method but
 				// `SoundService::GetListener` calls this once, and one value is
 				// handed back unpacked.
 				Results.push_back(value);
@@ -687,7 +687,7 @@ namespace engine::script {
 
 			try {
 				// **The receiver is checked here rather than in every method**,
-				// which is where the Luau adapter checks it too — a neutral method
+				// which is where the Luau adapter checks it too - a neutral method
 				// body may assume `Subject()` names a real row.
 				if (call.Subject() == ecs::NULL_ENTITY) {
 					call.Raise("not an instance");
@@ -712,7 +712,7 @@ namespace engine::script {
 		// table**, which is where this differs from the instance trampoline
 		// above: there is one instance method table and each service has a table
 		// of its own, so the rows are flattened into the context as they are
-		// installed. The Luau twin puts the row's address on an upvalue instead —
+		// installed. The Luau twin puts the row's address on an upvalue instead -
 		// `lua_pushcclosure` takes any number of values and
 		// `JS_NewCFunctionMagic` takes one integer, which is the whole of the
 		// difference.
@@ -740,7 +740,7 @@ namespace engine::script {
 		// to exist.** The Luau half can string-compare a field inside one
 		// `__index`; `JS_DefinePropertyGetSet` registers a getter and a setter
 		// against one atom, so the names are needed at install time and a
-		// catch-all cannot supply them. There is no `Proxy` to fall back on —
+		// catch-all cannot supply them. There is no `Proxy` to fall back on -
 		// `JsBindings.cpp` excludes it deliberately, because a script could wrap
 		// an instance and intercept the property surface.
 		//
@@ -850,7 +850,7 @@ namespace engine::script {
 
 			// **The object stays a plain object, unlike the Luau half's
 			// userdata.** An accessor runs on every read here, so there is no
-			// `GETIMPORT` to defeat and nothing to tag — which is the asymmetry
+			// `GETIMPORT` to defeat and nothing to tag - which is the asymmetry
 			// `ServiceSurface::Properties` describes.
 			const JSAtom atom = JS_NewAtom(context, property.Name);
 			JS_DefinePropertyGetSet(context, service, atom, getter, setter, JS_PROP_C_W_E);

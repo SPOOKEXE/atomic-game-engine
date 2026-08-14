@@ -1,7 +1,7 @@
 // Content going the other way: an origin that accepts writes, and the uploader
 // that fills it.
 //
-// **In `mono.cdn` for `Delivery.cpp`'s reason** — it needs both halves and this
+// **In `mono.cdn` for `Delivery.cpp`'s reason** - it needs both halves and this
 // is the side that links the other. Nothing is mocked: a real listener on a real
 // port, a real `PUT` across a socket, and the file checked on disk afterwards.
 //
@@ -224,7 +224,7 @@ TEST_CASE("uploading the same bytes twice costs a probe and not a transfer", "[c
 	const fs::path first = WriteFile(host.Root / "out" / "a.txt", "identical");
 
 	// **A second file with the same bytes and a different name.** The bytes are
-	// the identity, so this is the same upload — the property that makes
+	// the identity, so this is the same upload - the property that makes
 	// re-uploading a content tree cheap, and the one an operator is watching
 	// `IngestDuplicates` for.
 	const fs::path second = WriteFile(host.Root / "out" / "b.txt", "identical");
@@ -255,7 +255,7 @@ TEST_CASE("uploading the same bytes twice costs a probe and not a transfer", "[c
 TEST_CASE("an origin with writes off answers as though the route were not there", "[cdn][ingest]") {
 	// **The default, and the reason it is the default.** An origin reachable on
 	// a network that accepts writes because a field was left blank is an open
-	// dropbox — so no key means no writes rather than no check.
+	// dropbox - so no key means no writes rather than no check.
 	Host host("readonly", false);
 
 	const fs::path source = WriteFile(host.Root / "out" / "a.txt", "not going anywhere");
@@ -438,7 +438,7 @@ TEST_CASE("two write destinations both receive every file", "[cdn][ingest]") {
 
 TEST_CASE("what an origin ingests can then be published and fetched", "[cdn][ingest]") {
 	// **The point of the whole route.** An inbox is not content until somebody
-	// signs a manifest naming it — CDN.md §1 — so this pins that what lands
+	// signs a manifest naming it - CDN.md §1 - so this pins that what lands
 	// there is in the shape `Publish` reads, extension and all.
 	Host host("publishable", true);
 

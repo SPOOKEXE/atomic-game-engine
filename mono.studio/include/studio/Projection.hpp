@@ -10,7 +10,7 @@
 // `mono.studio/AGENTS.md`: the viewport is a `render::SceneTarget` shown with
 // `ImGui::Image`, and the image is the *previous* frame's texture, because imgui
 // records its draw lists before the renderer runs. Anything drawn over that
-// image — a grid, a selection outline, a gizmo — is composited this frame.
+// image - a grid, a selection outline, a gizmo - is composited this frame.
 //
 // So an overlay projected with *this* frame's camera sits over a world drawn
 // from *last* frame's, and the two disagree by exactly one frame of camera
@@ -21,7 +21,7 @@
 // The fix is not a smaller error; it is the right matrix. A panel keeps the
 // `ViewProjection` that produced the texture it is currently displaying, and the
 // overlay uses that. The one-frame lag is then shared by the world and the
-// things drawn on it, so they agree — which is the same trade `world::ViewChannel`
+// things drawn on it, so they agree - which is the same trade `world::ViewChannel`
 // and `SurfaceView` already make.
 //
 // ## The image rect is not the panel rect
@@ -41,7 +41,7 @@
 // `mono.engine/render` has no debug-line facility at all, and adding one at L12
 // for an editor's furniture is the wrong place for it. The overlay is drawn into
 // the panel's imgui draw list; this header is the arithmetic that makes that
-// possible, and it is pure — no imgui, no store, no device — which is why
+// possible, and it is pure - no imgui, no store, no device - which is why
 // `tests/Projection.cpp` can exercise it at all.
 //
 // @tier L12 · client
@@ -65,7 +65,7 @@ namespace studio {
 	// **Refuses a ray parallel to the plane**, and refuses a hit behind the eye.
 	// Both produce a point, and both produce the wrong one: a near-parallel ray
 	// crosses a plane thousands of metres away, so the angle it reads swings
-	// wildly for a pixel of mouse movement — which is a rotation gizmo that
+	// wildly for a pixel of mouse movement - which is a rotation gizmo that
 	// spins the selection when you nudge it edge-on.
 	//
 	// @param origin Any point on the plane.
@@ -84,7 +84,7 @@ namespace studio {
 	//
 	// **What a translate gizmo is made of.** Dragging an axis handle means
 	// "where along this line is the mouse pointing", and the honest answer is
-	// the point on the axis closest to the eye ray — not the axis point that
+	// the point on the axis closest to the eye ray - not the axis point that
 	// projects nearest the cursor in screen space, which drifts as the camera
 	// turns and makes a drag creep after the mouse has stopped.
 	//
@@ -110,7 +110,7 @@ namespace studio {
 	//
 	// **The support function, which is what "resting on it" needs.** A box laid
 	// on a slope touches it at one corner, and the distance from the centre to
-	// that corner along the surface normal is exactly this sum — using half the
+	// that corner along the surface normal is exactly this sum - using half the
 	// height instead would sink a tilted part into the ground by however much it
 	// is tilted.
 	//
@@ -136,7 +136,7 @@ namespace studio {
 	//
 	// **`LookVector` is `-Z`**, so the basis's third column is the *back*.
 	// Getting that the other way round mirrors every part that is dropped, which
-	// reads as the model being wrong rather than the maths — which is most of
+	// reads as the model being wrong rather than the maths - which is most of
 	// why this is a named function with a suite rather than eight lines inside a
 	// drag.
 	//
@@ -149,7 +149,7 @@ namespace studio {
 
 	// One viewport panel's mapping, for one frame.
 	//
-	// Built from what the renderer reported for the texture now on screen — see
+	// Built from what the renderer reported for the texture now on screen - see
 	// the header note. Every field is in the space its name says: `Matrix` takes
 	// world to clip, and the two rect fields are in the panel's own coordinates
 	// with the origin at the panel's content top-left.
@@ -164,7 +164,7 @@ namespace studio {
 		// the same lens and the same aspect ratio that `PresentWorld` is about
 		// to resolve, so the two agree by construction rather than by being one
 		// object. Sharing the renderer's copy would mean the overlay pass
-		// reading a matrix produced after it — the frame order the header note
+		// reading a matrix produced after it - the frame order the header note
 		// describes runs the wrong way for that.
 		//
 		// The usual objection to computing a thing twice is that the two copies
@@ -173,7 +173,7 @@ namespace studio {
 		// `-z_view`, so where a point lands in x and y comes from the frame, the
 		// field of view and the aspect ratio and from neither clipping plane. A
 		// near or far plane changed in one place and not the other moves nothing
-		// this struct projects — which is why `ProjectionFor` deliberately omits
+		// this struct projects - which is why `ProjectionFor` deliberately omits
 		// `PresentWorld`'s far-plane stretch rather than copying it. `Near`
 		// below is carried explicitly for the one thing that does need a plane,
 		// the clip in `ProjectSegment`.
@@ -197,7 +197,7 @@ namespace studio {
 		// **Used as the clip plane for `ProjectSegment`, and an epsilon will not
 		// do.** For a standard perspective matrix clip-space `w` *is* the
 		// distance in front of the camera, so clipping at a tiny `w` puts the
-		// cut point at the eye itself — where the perspective divide sends it to
+		// cut point at the eye itself - where the perspective divide sends it to
 		// coordinates in the millions, and imgui rasterises that as a stripe
 		// across the whole viewport. Clipping at the near plane puts it where
 		// the geometry genuinely stops being visible, which is finite and
@@ -216,7 +216,7 @@ namespace studio {
 		// **Returns `false` for anything at or behind the eye plane**, rather
 		// than a point. A clip-space `w` of zero or less is a point the
 		// perspective divide turns into a mirrored ghost in front of the camera
-		// — a grid line behind you drawn across the sky — and there is no
+		// - a grid line behind you drawn across the sky - and there is no
 		// sensible panel coordinate to hand back instead. Callers clip the
 		// segment, or skip it.
 		//
@@ -253,7 +253,7 @@ namespace studio {
 		// point on the near plane the pointer is over. What `spatial::Raycast`
 		// takes, and therefore what viewport picking is made of.
 		//
-		// A point outside the image rect still yields a ray — the arithmetic is
+		// A point outside the image rect still yields a ray - the arithmetic is
 		// the same and refusing would make the caller ask twice. Ask
 		// `ContainsPanel` when the distinction matters.
 		//

@@ -13,12 +13,12 @@
 // above this is shared with `ui::PaintGui`: one `gui::Compiled`, one
 // `gui::DrawList`, one `render::InterfaceMesh`. What differs is only what the
 // triangles are handed to. That is what stops the two halves drifting about
-// where an element is — the failure a second layout pass would guarantee.
+// where an element is - the failure a second layout pass would guarantee.
 //
 // **A class rather than a branch inside `Renderer`.** The renderer already
 // takes a hook for exactly this, and adding an interface path to its own
 // recording would put a `gui` concern inside three thousand lines of pipeline
-// state — where the tier check would not have caught the edge and a reviewer
+// state - where the tier check would not have caught the edge and a reviewer
 // would have had to.
 //
 // @tier L12 · client
@@ -53,7 +53,7 @@ namespace engine::render {
 		//
 		// **The atlas is uploaded once here rather than per frame.** It changes
 		// only when the size it was baked at does, which is a settings change
-		// and not a frame event — re-uploading a megabyte every frame to save a
+		// and not a frame event - re-uploading a megabyte every frame to save a
 		// dirty flag would be the whole cost of the design.
 		//
 		// @param device         The `SDL_GPUDevice *` the renderer opened.
@@ -95,7 +95,7 @@ namespace engine::render {
 		// the caller's for the same reason: this module has no business
 		// resolving a game's content names, and `gui::DrawCommand::Image` is a
 		// name rather than a handle precisely so that whoever owns the textures
-		// decides. Unset means every image draws the atlas's white texel — a
+		// decides. Unset means every image draws the atlas's white texel - a
 		// visible flat rectangle rather than nothing, so a missing image reads
 		// as missing.
 		//

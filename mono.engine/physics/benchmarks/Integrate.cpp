@@ -86,7 +86,7 @@ namespace integrate_bench {
 
 			// Every row spins. A world where the angular velocity is zero would
 			// measure a quaternion product against a zero vector, which is the
-			// same instruction count and a different branch predictor's day —
+			// same instruction count and a different branch predictor's day -
 			// and it would flatter the parallel case for the wrong reason.
 			store->Set<Motion>(entity, Motion{Vector3{1.0f, 0.0f, -1.0f}, Vector3{0.3f, 1.1f, -0.7f}});
 		}
@@ -168,7 +168,7 @@ BENCH("Each · 100000 entities", 20) {
 //
 // Read these against the rows above. Where the parallel figure is larger, the
 // system is paying for a handover it cannot repay, and `INTEGRATE_GRAIN` is
-// the knob — it sets both the range size and, through
+// the knob - it sets both the range size and, through
 // `Jobs::MINIMUM_GRAINS`, the count below which the span runs inline anyway.
 
 BENCH("IntegrateMotion · 1000 entities", 500) {
@@ -190,7 +190,7 @@ BENCH("IntegrateMotion · 4000 entities", 200) {
 BENCH("IntegrateMotion · 6000 entities", 200) {
 	// The first rung above the floor. `INTEGRATE_GRAIN` is 512, so
 	// `Jobs::For` runs anything under 4096 rows inline and 4000 above is the
-	// same code as `Each` — the crossover cannot be below this row, only at or
+	// same code as `Each` - the crossover cannot be below this row, only at or
 	// above it.
 	Store &store = WorldOf(6000);
 	for (int pass = 0; pass < 200; pass++) {

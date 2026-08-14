@@ -10,7 +10,7 @@
 // selection onto the part the draw path reads.
 //
 // Nothing here compiles anything. Compilation needs `libshaderc` and lives at
-// L12 — `mono.engine/render/tests/ShaderLibrary.cpp` is the other end.
+// L12 - `mono.engine/render/tests/ShaderLibrary.cpp` is the other end.
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -48,7 +48,7 @@ using engine::scene::ShaderTextOf;
 using engine::scene::SurfaceAppearance;
 
 namespace {
-	// Registered before the store exists — `tests/Materials.cpp` carries the
+	// Registered before the store exists - `tests/Materials.cpp` carries the
 	// reason: a resource keyed by a component id minted before the explicit
 	// registration lands takes the compiler's spelling of the type.
 	Store Fresh(const char *name) {
@@ -118,7 +118,7 @@ TEST_CASE("editing a shader script moves its revision", "[scene][shaders]") {
 	REQUIRE(second.Revision > first);
 
 	// It counts writes rather than differences, so it moves for identical text
-	// too. One writer and one meaning — `SetShaderSource` carries the argument.
+	// too. One writer and one meaning - `SetShaderSource` carries the argument.
 	REQUIRE(SetShaderSource(store, toon, "two"));
 	REQUIRE(ShaderTextOf(store, Name("Toon")).Revision > second.Revision);
 
@@ -162,7 +162,7 @@ TEST_CASE("a material selects a shader by name and the part reads it", "[scene][
 	Store store = Fresh("shaders.select");
 
 	// The property an author uses. `Shader` rather than `ShaderId`, because it
-	// is not a name a publisher owns — it may be a script in this very world.
+	// is not a name a publisher owns - it may be a script in this very world.
 	const PropertyDescriptor *shader = PropertyOf(MaterialClass(), "Shader");
 	REQUIRE(shader != nullptr);
 	REQUIRE(shader->Type == engine::ecs::PropertyType::Name);

@@ -35,7 +35,7 @@ namespace linecount {
 		// out what it is a share of.
 		std::string Share(size_t part, size_t whole) {
 			if (whole == 0) {
-				return "—";
+				return "-";
 			}
 			char buffer[16];
 			const double percent = 100.0 * static_cast<double>(part) / static_cast<double>(whole);
@@ -49,7 +49,7 @@ namespace linecount {
 		std::string Group(const std::string &path, size_t depth) {
 			const size_t lastSlash = path.rfind('/');
 			// A depth of zero is "do not group", which is one row holding
-			// everything rather than a row per file — the per-file table is
+			// everything rather than a row per file - the per-file table is
 			// what `IncludeFiles` is for.
 			if (lastSlash == std::string::npos || depth == 0) {
 				return ".";

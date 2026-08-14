@@ -17,7 +17,7 @@ namespace network {
 		// Fixed, and the header says why at length: both ends have to derive
 		// the same key from the same words with nothing exchanged, so there is
 		// nowhere for a per-key salt to come from. It names the version because
-		// changing the derivation has to change the label that goes with it —
+		// changing the derivation has to change the label that goes with it -
 		// two builds disagreeing about how a passphrase becomes a key is a
 		// session nobody can join, and the reason would be invisible.
 		constexpr char PASSPHRASE_SALT[] = "atomic.network.session.v1";

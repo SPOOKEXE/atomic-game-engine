@@ -4,7 +4,7 @@
 // **The default is the thing under test here.** A listing route is not
 // dangerous because of what it does; it is dangerous because of what it does
 // when nobody configured it, and that is a property no amount of care at the
-// call site can restore afterwards — a name that has been scraped stays
+// call site can restore afterwards - a name that has been scraped stays
 // scraped. So the first two cases are an origin that was never told to
 // enumerate and an origin that was told to without a key, and both of them must
 // answer as though the route did not exist.
@@ -192,7 +192,7 @@ namespace {
 			if (!line.starts_with("asset ")) {
 				continue;
 			}
-			// `asset <root> <kind> <bytes> <name>` — the name is the rest of
+			// `asset <root> <kind> <bytes> <name>` - the name is the rest of
 			// the line, which is the whole reason it is last.
 			size_t field = std::string("asset ").size();
 			for (int skipped = 0; skipped < 3; skipped++) {
@@ -235,7 +235,7 @@ TEST_CASE("an origin nobody configured to list answers as though there were no r
 }
 
 TEST_CASE("switched on with no key to admit it, the route stays shut", "[cdn][catalogue]") {
-	// Half-configured reads as off — `IngestSettings::Accepts`'s rule on the
+	// Half-configured reads as off - `IngestSettings::Accepts`'s rule on the
 	// read side. A flag with no key would be an origin enumerating for anybody,
 	// which is precisely what the flag exists to keep deliberate.
 	Host host(cdn::CatalogueSettings{.Enabled = true}, "");

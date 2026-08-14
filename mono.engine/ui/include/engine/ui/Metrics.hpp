@@ -5,7 +5,7 @@
 // **Ported from the reference this editor's look is based on**, and the comment
 // there says the thing worth keeping: everything picks from these rather than
 // inventing a number, so gaps line up across panels that know nothing about
-// each other — a tree row's padding matches a toolbar's, a panel's inset
+// each other - a tree row's padding matches a toolbar's, a panel's inset
 // matches its own button row.
 //
 // **A value between two steps is a mistake, not a choice.** That is the whole
@@ -44,7 +44,7 @@ namespace engine::ui {
 	//
 	// @since v0.7
 	struct Radius {
-		// Buttons, fields, pills — anything you click.
+		// Buttons, fields, pills - anything you click.
 		static constexpr float Control = 3.0f;
 
 		// Panels and popups, which read as surfaces rather than controls.
@@ -84,7 +84,7 @@ namespace engine::ui {
 		// **A number rather than `-1`, and that is the whole point of it
 		// being here.** A negative width means "the content region minus
 		// this", and the content region of an auto-resizing window is
-		// derived from what the window measured *last* frame — so the field
+		// derived from what the window measured *last* frame - so the field
 		// shrinks the window, the smaller window shrinks the field, and the
 		// modal deflates a few pixels per frame until it bottoms out on the
 		// widest thing left in it. See `studio::PathPrompt`.

@@ -40,12 +40,12 @@ namespace engine::assets {
 		std::string Texture;
 
 		// The material's flat colour, multiplied into whatever the texture
-		// gives — red, green, blue, alpha.
+		// gives - red, green, blue, alpha.
 		//
 		// **Carried because dropping it loses the model.** Every format this
 		// imports from has one: glTF calls it `baseColorFactor` and PMX calls
 		// it the diffuse colour, and an untextured model is *nothing but* these
-		// — the fox this was built against has ten material runs, no texture at
+		// - the fox this was built against has ten material runs, no texture at
 		// all, and is recognisably a fox only because each run is a different
 		// colour. Without this field it would import as a uniformly tinted
 		// blob, which looks exactly like a broken importer.
@@ -86,7 +86,7 @@ namespace engine::assets {
 		// whose length is not a multiple of three, an index past the end of the
 		// vertices, a submesh run reaching past the end of the indices, and a
 		// non-finite coordinate. It deliberately does not check that normals
-		// are unit length or that the submeshes cover every index — both are
+		// are unit length or that the submeshes cover every index - both are
 		// authoring quality rather than safety, and refusing them would mean
 		// refusing real models over something a consumer handles fine.
 		//
@@ -154,7 +154,7 @@ namespace engine::assets {
 		// refusal and a decompression bomb.
 		//
 		// @param reader The bytes to parse.
-		// @param out    Filled in on success, left alone otherwise — so a
+		// @param out    Filled in on success, left alone otherwise - so a
 		//               caller reusing one cannot act on a mixture of the last
 		//               good mesh and a bad one.
 		// @return `false` on anything malformed. Drop it and count it.

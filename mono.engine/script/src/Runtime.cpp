@@ -30,7 +30,7 @@ namespace engine::script {
 	void Runtime::DeliverGuiEvents(std::span<const gui::GuiEvent> events) {
 		// **Appended rather than assigned**, because a host may poll more than
 		// one canvas between beats. The studio compiles and routes one
-		// `gui::Router` per viewport panel — a panel *is* a canvas — so two
+		// `gui::Router` per viewport panel - a panel *is* a canvas - so two
 		// panels open is two calls here before a single heartbeat, and an
 		// assignment would deliver whichever ran last and silently drop the
 		// other.
@@ -74,7 +74,7 @@ namespace engine::script {
 			const uint64_t after = StepsTaken();
 
 			// Saturating, because the counter resets when a script blows its
-			// budget — and a reset read as a delta would be an enormous figure
+			// budget - and a reset read as a delta would be an enormous figure
 			// attributed to whichever script ran next.
 			ScriptCosts.push_back(ScriptCost{instance, after >= before ? after - before : 0, ok});
 

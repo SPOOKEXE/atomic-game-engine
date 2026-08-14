@@ -4,7 +4,7 @@
 -- What a Luau script can name, typed. The class tree and the enums come out
 -- of the class table; the globals come out of what the VM installs. Both
 -- halves are written by one program alongside the TypeScript declarations, so
--- the two surfaces cannot drift into two APIs by accident — where they do
+-- the two surfaces cannot drift into two APIs by accident - where they do
 -- differ, they differ because the two VMs do, and the difference is written
 -- down rather than smoothed over.
 --
@@ -63,7 +63,7 @@ end
 
 declare CFrame: {
 	new: ((x: number?, y: number?, z: number?) -> CFrame) & ((position: Vector3) -> CFrame),
-	-- Radians, because Roblox's is radians — while `Orientation` is degrees.
+	-- Radians, because Roblox's is radians - while `Orientation` is degrees.
 	Angles: (pitch: number, yaw: number, roll: number) -> CFrame,
 	lookAt: (from: Vector3, to: Vector3, up: Vector3?) -> CFrame,
 }
@@ -97,7 +97,7 @@ end
 -- **Roblox's `InputObject`, added at v0.16 because the three signals were
 -- passing something no declaration described.** `InputBegan` fired with a bare
 -- `Enum.KeyCode`, the bound-action handler took one as its third argument, and
--- these declarations said the signals passed *nothing at all* — three answers to
+-- these declarations said the signals passed *nothing at all* - three answers to
 -- one question, none of them Roblox's. A script copied from a Roblox place
 -- indexed `input.KeyCode` and got nil.
 --
@@ -107,7 +107,7 @@ declare extern type InputObject with
 	-- The key, or `Enum.KeyCode.Unknown` for anything that is not one.
 	read KeyCode: Enum_KeyCode
 
-	-- Where it came from — a mouse button, the keyboard, pointer motion or the
+	-- Where it came from - a mouse button, the keyboard, pointer motion or the
 	-- wheel. `Enum.UserInputType` is shorter here than in Roblox; every member
 	-- absent is one nothing in this engine can produce.
 	read UserInputType: Enum_UserInputType
@@ -120,7 +120,7 @@ declare extern type InputObject with
 	read Position: Vector3
 
 	-- How far it moved since the previous frame, in the same space. Zero for a
-	-- keyboard event and for a button edge — motion is reported by its own
+	-- keyboard event and for a button edge - motion is reported by its own
 	-- `InputChanged`, so counting it on the click as well would double it.
 	read Delta: Vector3
 end
@@ -133,7 +133,7 @@ end
 -- **`gameProcessedEvent` is Roblox's second argument and it is real here**: it
 -- is true when the 2D interface took the pointer this beat, which is what a
 -- click on a `TextButton` is. It is always false for a keyboard event, because
--- `gui` has no keyboard focus to take one with — `InterfaceHasPointer` in
+-- `gui` has no keyboard focus to take one with - `InterfaceHasPointer` in
 -- `script/src/Actions.cpp` carries what would close that.
 declare extern type InputSignal with
 	function Connect(
@@ -165,7 +165,7 @@ declare extern type UserInputServiceType with
 
 	-- **Present and always false.** There is no gamepad, touch surface, headset
 	-- or motion sensor anywhere in `engine::input`, and a Roblox place branches
-	-- on these to pick a control scheme — a missing property raises where a
+	-- on these to pick a control scheme - a missing property raises where a
 	-- false one takes the other branch.
 	read GamepadEnabled: boolean
 	read TouchEnabled: boolean
@@ -223,7 +223,7 @@ end
 -- migrating author needs most. `script/src/UserInputService.cpp` names each and
 -- what closing it would take; the short version is that there is no gamepad, no
 -- touch surface, no cursor image in `render` and no keyboard-layout query below
--- L12 — so `GetConnectedGamepads`, `GetGamepadState`, the six touch signals,
+-- L12 - so `GetConnectedGamepads`, `GetGamepadState`, the six touch signals,
 -- `MouseIcon` and `GetStringForKeyCode` are absent rather than present and
 -- useless. `TextBoxFocused` and its twin are absent for a different reason: the
 -- fact exists and reaches a script as `textBox.Focused`, and a world-subject row
@@ -234,7 +234,7 @@ declare UserInputService: UserInputServiceType
 -- What `GetBoundActionInfo` reports about one bound action.
 --
 -- **Four of Roblox's six fields.** `title` and `description` come from
--- `SetTitle` and `SetDescription`, which decorate a touch button — there is no
+-- `SetTitle` and `SetDescription`, which decorate a touch button - there is no
 -- touch surface, so the pair is not bound and reporting them as empty strings
 -- would claim they had been set to nothing.
 declare extern type BoundActionInfo with
@@ -260,7 +260,7 @@ declare extern type ContextActionServiceType with
 	--
 	-- **The handler's third argument is an `InputObject` since v0.16**, which is
 	-- what Roblox has always passed. It was an `Enum.KeyCode`, so a handler
-	-- reading `input.KeyCode` — the form every Roblox place is written in — got
+	-- reading `input.KeyCode` - the form every Roblox place is written in - got
 	-- nil.
 	--
 	-- **What it returns decides who else hears the key.**
@@ -328,7 +328,7 @@ end
 --
 -- **The datatype exists since v0.16 and this still takes none**, which is a
 -- narrower gap than it was. `gui::GuiEvent` carries a kind, an entity and two
--- points — no key, no button, no `Enum.UserInputType` — so an `InputObject`
+-- points - no key, no button, no `Enum.UserInputType` - so an `InputObject`
 -- built for these would have to *invent* the field a handler reads it for. What
 -- closing it needs is `gui::Router` recording which button produced an event.
 declare extern type GuiSignal with
@@ -369,7 +369,7 @@ end
 -- `textBox.FocusLost`, which takes `enterPressed` and nothing after it.
 --
 -- **One of Roblox's two arguments.** The second is the `InputObject` that took
--- the focus away, and the router deals in `gui::GuiEvent` — there is no report
+-- the focus away, and the router deals in `gui::GuiEvent` - there is no report
 -- to hand over that would not be invented at the call site, which is the trade
 -- `GuiSignal` above is on.
 --
@@ -859,7 +859,7 @@ declare NumberRange: {
 -- The stops, added at v0.10 because a sequence became a *property* and a value
 -- read back has to come back in a shape its own constructor accepts. Until then
 -- `Keypoints` handed out `{time, value, envelope}` tables, and those are still
--- accepted by both constructors — the table form is how a gradient is written
+-- accepted by both constructors - the table form is how a gradient is written
 -- inline and is not deprecated.
 -- What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
 --
@@ -1627,7 +1627,7 @@ end
 -- The service every game asks who is in it. `LocalPlayer` and the
 -- rest are below; `GetPlayers`, `GetPlayerByUserId`,
 -- `GetPlayerFromCharacter`, `PlayerAdded` and `PlayerRemoving` are
--- inherited from `Instance` and are about this one — nothing fires a
+-- inherited from `Instance` and are about this one - nothing fires a
 -- player signal at any other subject.
 declare extern type Players extends Service with
 	CharacterAutoLoads: boolean
@@ -1708,13 +1708,13 @@ end
 -- each other's traffic.
 --
 -- There is deliberately no `GetWorlds`. A world's storage cannot see its
--- siblings — the directory belongs to the barrier's router — so answering it
+-- siblings - the directory belongs to the barrier's router - so answering it
 -- would mean the barrier stamping a list into every world every tick, which is
 -- machinery nobody has asked for. `SendAsync` answering `NoSuchWorld` is the
 -- honest half of the same question.
 declare extern type CrossWorldService with
 	-- Listens on a named channel and hands back that channel's signal. The
-	-- handler is called `(message, fromWorldName)` — the sender's name is second
+	-- handler is called `(message, fromWorldName)` - the sender's name is second
 	-- because answering is the point, and the receiver already named the channel.
 	--
 	-- Takes effect at the next barrier, so a message sent in the same tick is
@@ -1727,7 +1727,7 @@ declare extern type CrossWorldService with
 
 	-- Sends a value to a named channel on a named world, and suspends until the
 	-- barrier answers. `Ok`, or `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady`
-	-- or `Overflow` — a channel send carries no value back, so the status is the
+	-- or `Overflow` - a channel send carries no value back, so the status is the
 	-- answer. Raises when this world is over its bus budget for the tick.
 	function SendAsync(self, world: string, channel: string, message: any): (any, BusStatus, number)
 end
@@ -1747,7 +1747,7 @@ end
 
 -- What content this world holds, which is the other half of naming an asset.
 --
--- A `MeshId` is a name a publisher wrote — an id does not cross — and until
+-- A `MeshId` is a name a publisher wrote - an id does not cross - and until
 -- this there was no way for a script to ask what those names were. Every list
 -- is sorted, so a scene that lays content out arranges itself the same way on
 -- every run.
@@ -1756,7 +1756,7 @@ declare extern type ContentService with
 	-- and before content has arrived, which are the same honest answer.
 	function GetMeshes(self): { string }
 
-	-- Every mesh the *store* published, sorted — the signed manifest, which a
+	-- Every mesh the *store* published, sorted - the signed manifest, which a
 	-- client verifies before it can fetch anything.
 	--
 	-- **This is what there is to name; `GetMeshes` is what has been named.** The
@@ -1774,14 +1774,14 @@ declare extern type ContentService with
 	--
 	-- **What a model is wearing, which nothing else can answer.** A `MeshPart`
 	-- naming no `TextureID` shows whatever each submesh recorded at bake time,
-	-- and those names live inside the mesh file — so swapping a character's
+	-- and those names live inside the mesh file - so swapping a character's
 	-- outfit meant guessing, with no way to learn the current sheet and no name
 	-- to put back.
 	--
 	-- **Not sorted and not deduplicated**, unlike every other list here: which
 	-- run wears which is a fact, and a character with twenty submeshes sharing
 	-- four sheets is four names repeated. Empty for a built-in, which names
-	-- none, and for a mesh this world has not been told about — the same two
+	-- none, and for a mesh this world has not been told about - the same two
 	-- answers `GetTriangleCount` folds into zero, for the same reason.
 	--
 	-- `TextureID` overrides *every* run at once, so naming one of several is a
@@ -1796,7 +1796,7 @@ declare extern type ContentService with
 	function GetFlipbook(self, texture: string): { Side: number, Frames: number, FrameRate: number }?
 
 	-- The same number `MeshPart.TrianglesCount` gives, asked about a mesh
-	-- rather than a part — so a layout can be sized before anything is built.
+	-- rather than a part - so a layout can be sized before anything is built.
 	function GetTriangleCount(self, mesh: string): number
 end
 
@@ -1808,7 +1808,7 @@ end
 -- first time one is destroyed.
 --
 -- **`Tags` is a `BasePart` component**, so `AddTag` on a `Folder` answers
--- `false` rather than raising — the same answer `Instance:AddTag` gives.
+-- `false` rather than raising - the same answer `Instance:AddTag` gives.
 --
 -- No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
 -- here would never fire, and one that never fires reads as a broken engine.
@@ -1825,7 +1825,7 @@ declare extern type CollectionService with
 	function HasTag(self, instance: Instance, tag: string): boolean
 
 	-- Every instance in this world carrying the tag, and empty for a tag
-	-- nothing has ever added — a script polling before another has run is the
+	-- nothing has ever added - a script polling before another has run is the
 	-- ordinary case, not a mistake.
 	--
 	-- **Sorted by the order the world was built in**, so a scene laying its
@@ -1839,7 +1839,7 @@ declare extern type CollectionService with
 	function GetAllTags(self): { string }
 end
 
--- JSON, a GUID and a URL escape — and **no `RequestAsync`, `GetAsync` or
+-- JSON, a GUID and a URL escape - and **no `RequestAsync`, `GetAsync` or
 -- `PostAsync`**, which are absent on purpose rather than missing.
 --
 -- Arbitrary outbound HTTP from a game script is a security decision nobody has
@@ -1849,7 +1849,7 @@ end
 -- exist; `script/src/HttpService.cpp` says what taking the decision would need.
 --
 -- The four that are here observe nothing, which is what lets them exist in a VM
--- whose runs have to replay. `GenerateGUID` is *deterministic* for that reason —
+-- whose runs have to replay. `GenerateGUID` is *deterministic* for that reason -
 -- read its note before using one as a name anything outside this world has to
 -- agree is unique.
 declare extern type HttpService with
@@ -1860,7 +1860,7 @@ declare extern type HttpService with
 	--
 	-- Keys are written in sorted order, so one table is one document on every
 	-- run. Raises for a cycle, for nesting past sixteen deep, for a NaN or an
-	-- infinity, and for anything with no JSON form — an `Instance`, a function,
+	-- infinity, and for anything with no JSON form - an `Instance`, a function,
 	-- a `Vector3`, a `Color3` or a `CFrame`.
 	function JSONEncode(self, value: any): string
 
@@ -1884,14 +1884,14 @@ declare extern type HttpService with
 	function UrlEncode(self, text: string): string
 end
 
--- A master volume and where the ear is — **and eleven Roblox members that are
+-- A master volume and where the ear is - **and eleven Roblox members that are
 -- absent on purpose rather than missing.**
 --
 -- `engine::audio` is L12 `client` and the script layer is L9 `shared`, so
 -- nothing in the binding can name a mixer: what a script decides lands on
 -- `scene::AudioState` and the client walks it, which is the seam
 -- `scene::InputState` established. Everything that would need a *node* the
--- graph does not have is therefore not here — reverb needs a filter node,
+-- graph does not have is therefore not here - reverb needs a filter node,
 -- `DopplerScale` and `DistanceFactor` need a Doppler one, `VolumetricAudio`
 -- needs a shape in the emitter, and `RolloffScale` needs a rolloff curve where
 -- the engine has two distances. `script/src/SoundService.cpp` lists all eleven
@@ -1901,8 +1901,8 @@ end
 -- already is it.
 declare extern type SoundService with
 	-- **Not a Roblox property.** Roblox turns a group of sounds down with a
-	-- `SoundGroup`, this engine has no such class — every `Sound` gets one fader
-	-- straight into the output — and a whole-world level is the honest one-line
+	-- `SoundGroup`, this engine has no such class - every `Sound` gets one fader
+	-- straight into the output - and a whole-world level is the honest one-line
 	-- version of what a group is for. Linear, 1 being every sound as authored,
 	-- and above 1 is legal for the reason `Sound.Volume` is.
 	Volume: number
@@ -1914,7 +1914,7 @@ declare extern type SoundService with
 	-- **`Enum.ListenerType` has two members here and four in Roblox.** The two
 	-- missing ones place the ear *and turn it*, and the mixer is posted a
 	-- position with no facing, so they are absent from the enum rather than
-	-- refused by this method — a script naming one fails where it names it.
+	-- refused by this method - a script naming one fails where it names it.
 	function SetListener(self, listenerType: Enum_ListenerType, listener: Instance?): ()
 end
 
@@ -1922,7 +1922,7 @@ end
 --
 -- **A tween is not an instance and is not parented.** `TweenService:Create`
 -- hands back the only handle there is, and dropping it does not stop a tween
--- that is playing — the service holds it until it finishes, exactly as Roblox
+-- that is playing - the service holds it until it finishes, exactly as Roblox
 -- does.
 --
 -- **Only a value with a midpoint may be tweened**: the numbers, `Vector2`,
@@ -1940,8 +1940,8 @@ declare extern type Tween with
 	-- Holds it where it is. False when it was not playing.
 	function Pause(self): boolean
 
-	-- Stops it and rewinds. **The properties are left where they are** — a
-	-- cancel is a stop and not an undo — and `Completed` does not fire.
+	-- Stops it and rewinds. **The properties are left where they are** - a
+	-- cancel is a stop and not an undo - and `Completed` does not fire.
 	function Cancel(self): boolean
 
 	Completed: TweenCompletedSignal
@@ -1960,7 +1960,7 @@ declare extern type TweenService with
 	-- ahead of time interpolates from wherever the instance has got to.
 	--
 	-- Raises for a property this instance does not have, for one a script may
-	-- not assign, and for one whose type has no midpoint — each named.
+	-- not assign, and for one whose type has no midpoint - each named.
 	function Create(self, instance: Instance, info: TweenInfo, goals: { [string]: any }): Tween
 end
 
@@ -2017,7 +2017,7 @@ declare workspace: Workspace
 -- entity in the archetype the `Part` class names, and `World:Query` is that
 -- archetype asked about directly.
 --
--- A component a script declares is a real component — the same dense id, the
+-- A component a script declares is a real component - the same dense id, the
 -- same column, iterated by a C++ system that never heard of the script. What it
 -- is not is *typed*: the field list is a run-time fact, so every value table
 -- here is `{ [string]: any }` and a definition file cannot do better. See
@@ -2026,9 +2026,9 @@ declare extern type EngineWorld with
 	-- Declares a component, or agrees with one already declared with exactly
 	-- these fields. Returns whether this call created it.
 	--
-	-- The field types are the engine's own spellings — `number`, `boolean`,
+	-- The field types are the engine's own spellings - `number`, `boolean`,
 	-- `string`, `float`, `int32`, `Vector3`, `CFrame`, `Color3`, `Instance` and
-	-- the rest — or `Enum.<set>` for a value that must be a registered member.
+	-- the rest - or `Enum.<set>` for a value that must be a registered member.
 	function DefineComponent(self, component: string, fields: { [string]: string }): boolean
 
 	function HasComponentType(self, component: string): boolean
@@ -2060,7 +2060,7 @@ declare script: LuaSourceContainer
 -- checker**: seeing a call to the global, it hands the argument to a module
 -- resolver expecting a path, and reports `Unknown require: unsupported path` for
 -- anything else. Every argument in this engine is an instance, so every module
--- a script loaded was an error — which made `require` unusable under
+-- a script loaded was an error - which made `require` unusable under
 -- `scriptcheck` even where it worked perfectly at run time.
 --
 -- Declaring it overrides the global and the resolver leaves it alone. The return

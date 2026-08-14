@@ -3,7 +3,7 @@
 # **The one thing nobody runs, run automatically: `preset=ci`.**
 #
 # `docs/retired/DEFERRED.md` D00005 records this preset going uncompilable three
-# times while being named as the standard — `-Wmissing-field-initializers` at
+# times while being named as the standard - `-Wmissing-field-initializers` at
 # v0.4, then twice inside v0.15, the second a `-Wdangling-reference` in
 # `mono.cdn` that was live while a roadmap line said the preset exited 0. Each
 # lasted for however long it took somebody to think of typing `preset=ci`.
@@ -11,8 +11,8 @@
 # only thing that can run the strict preset is the push.
 #
 # **It builds and does not test, and that is the whole design.** The failure
-# class this exists for is a warning going fatal — the `ci` preset compiling at
-# all — and that is a compile-time property. Tests are already run by
+# class this exists for is a warning going fatal - the `ci` preset compiling at
+# all - and that is a compile-time property. Tests are already run by
 # `just check`, cost two and a half minutes, and are red in this tree whenever
 # somebody else's half-finished module is. A gate that goes red for work that is
 # not yours is a gate that gets `--no-verify`'d every time, which is the entry
@@ -23,7 +23,7 @@
 #
 # Deliberately escapable, and only deliberately: `git push --no-verify`.
 #
-# Installed by `just install-hooks`, which `just setup` also runs — the hook has
+# Installed by `just install-hooks`, which `just setup` also runs - the hook has
 # to be checked in rather than left in one clone's `.git/hooks`, or it is a rule
 # that exists only in the memory of whoever set it up.
 
@@ -43,7 +43,7 @@ if [ "$only_deletions" = "1" ]; then
 	exit 0
 fi
 
-# Missing tool is a failure, not a skip — `just format-check` argues this at
+# Missing tool is a failure, not a skip - `just format-check` argues this at
 # length and it is the same argument: a gate that exits 0 having run nothing is
 # worse than no gate, because the push looks checked.
 if ! command -v just > /dev/null; then
@@ -52,11 +52,11 @@ if ! command -v just > /dev/null; then
 	exit 1
 fi
 
-echo "pre-push: building the ci preset — every warning fatal." >&2
+echo "pre-push: building the ci preset - every warning fatal." >&2
 if ! just preset=ci build; then
 	echo "" >&2
 	echo "pre-push: the ci preset does not compile, so the push is refused." >&2
-	echo "  Fix the warning. Relaxing the preset is not the fix — being strict" >&2
+	echo "  Fix the warning. Relaxing the preset is not the fix - being strict" >&2
 	echo "  is the entire content of the preset." >&2
 	echo "  Deliberately anyway:  git push --no-verify" >&2
 	exit 1

@@ -19,7 +19,7 @@ namespace engine::net {
 		// **The payload size rather than the datagram size, because the budget
 		// this feeds counts payload.** The path carries the header and the
 		// framing on top, so the controller's idea of a packet is about two per
-		// cent smaller than the real one — a systematic understatement, and it
+		// cent smaller than the real one - a systematic understatement, and it
 		// errs toward less queueing rather than more.
 		constexpr double PACKET_BYTES = static_cast<double>(Packet::MAXIMUM_PAYLOAD_BYTES);
 	}
@@ -86,8 +86,8 @@ namespace engine::net {
 
 	void CongestionControl::OnRoundTrip(double smoothedSeconds, double varianceSeconds, double nowSeconds) {
 		if (!(smoothedSeconds > 0.0)) {
-			// Zero means unknown rather than instant — `ReliableSender` says so
-			// — and a controller that took it literally would compute an
+			// Zero means unknown rather than instant - `ReliableSender` says so
+			// - and a controller that took it literally would compute an
 			// infinite target rate on its first tick.
 			return;
 		}
@@ -130,8 +130,8 @@ namespace engine::net {
 
 		// **The velocity starts again from a congestion event, and without this
 		// the cut does not stick.** A path that is losing packets with no
-		// queueing delay to show for it — a policer, a shallow buffer, a
-		// permanently full one whose round trip never varies — offers the delay
+		// queueing delay to show for it - a policer, a shallow buffer, a
+		// permanently full one whose round trip never varies - offers the delay
 		// signal nothing to read, so the window law keeps saying "faster" and
 		// accelerating while the loss keeps cutting. Measured on a 20 kB/s path
 		// with a 50 ms buffer: at a velocity of 64 the increase is more than the
@@ -143,7 +143,7 @@ namespace engine::net {
 		if (Competitive) {
 			// The multiplicative half of the AIMD the competitive mode is
 			// playing. Outside that mode the target queue is a constant and loss
-			// is answered by the window cut alone — a delay-based controller that
+			// is answered by the window cut alone - a delay-based controller that
 			// also shrank its target on every loss would ratchet itself down on a
 			// path that merely has a shallow buffer.
 			TargetQueue = std::max(Paced.TargetQueuePackets, TargetQueue * 0.5);
@@ -164,7 +164,7 @@ namespace engine::net {
 		const double trip = RoundTrip > 0.0 ? RoundTrip : Paced.AssumedRoundTripSeconds;
 
 		// The cap arrives per tick and the law runs on a window, so it is turned
-		// into the window that would exactly spend it — anything else and the
+		// into the window that would exactly spend it - anything else and the
 		// two disagree about what a tick is.
 		const double ceiling =
 			std::max(static_cast<double>(ceilingBytes) * trip / elapsed, Paced.MinimumWindowBytes);
@@ -191,7 +191,7 @@ namespace engine::net {
 
 			if (!drained) {
 				// The path pushed back. Give up the last doubling rather than
-				// the whole search — the window that produced the queue is
+				// the whole search - the window that produced the queue is
 				// roughly the path's, and Copa steers from here.
 				SlowStart = false;
 				Window /= Paced.SlowStartGrowth;
@@ -250,7 +250,7 @@ namespace engine::net {
 			// **The mode switch asks a different question from the window law
 			// and therefore reads a different thing.** The window law wants to
 			// know whether there is a queue worth dividing by. This wants to
-			// know whether the queue is *this flow's* — and the answer is
+			// know whether the queue is *this flow's* - and the answer is
 			// whether it followed the window down. A period spent steering down
 			// with the delay unmoved is a period somebody else was holding the
 			// bottleneck.

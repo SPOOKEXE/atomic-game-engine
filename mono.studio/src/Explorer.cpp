@@ -57,8 +57,8 @@ namespace studio {
 				Results.clear();
 
 				// **The filter is `InsertableClasses`, not a copy of it here.**
-				// Which classes an author may name is now asked in two places —
-				// this palette and the script editor's completion popup — and
+				// Which classes an author may name is now asked in two places -
+				// this palette and the script editor's completion popup - and
 				// `mono.tools/bindings` says why the answer may only live in
 				// one: the abstract bases are excluded by name, the run time
 				// would mint them perfectly happily, and two lists of names
@@ -141,7 +141,7 @@ namespace studio {
 	void Editor::DrawInsertMenu(const char *id, WorldId world, engine::ecs::Entity parent) {
 		// **No `Store` parameter, and that is what lets three call sites share
 		// it.** An instance's menu is drawn from inside `Universe::Enter` and a
-		// world's menu is drawn from outside it — the world row is above the
+		// world's menu is drawn from outside it - the world row is above the
 		// `Enter` that walks its tree. A helper that took a store could only
 		// ever be called from the first, which is how "Insert Object is on the
 		// tree but not on the world" happens.
@@ -241,7 +241,7 @@ namespace studio {
 		RenameBuffer.clear();
 
 		// Seeded with the name it has, because a rename is almost always an
-		// edit of the current name rather than a replacement for it — and a
+		// edit of the current name rather than a replacement for it - and a
 		// field that opened empty would make "Part" into "Part2" a retype.
 		if (SelectionWorld.IsValid()) {
 			Universe->Enter(SelectionWorld, [&](Store &store) {
@@ -259,8 +259,8 @@ namespace studio {
 
 		WorldTree &tree = TreeFor(world);
 
-		// **The store, not the compiled view.** This is reached from actions —
-		// an insert, a paste, a Find result — and the view describing the world
+		// **The store, not the compiled view.** This is reached from actions -
+		// an insert, a paste, a Find result - and the view describing the world
 		// as it was *before* that action has never heard of what was just made.
 		Universe->Enter(world, [&](Store &store) {
 			for (engine::ecs::Entity walk = store.ParentOf(instance);
@@ -321,7 +321,7 @@ namespace studio {
 		const float step = ImGui::GetStyle().IndentSpacing;
 
 		// Resolved before the clipper, because a row it is going to skip cannot
-		// be scrolled to — `IncludeItemByIndex` is what keeps it submitted.
+		// be scrolled to - `IncludeItemByIndex` is what keeps it submitted.
 		size_t reveal = HierarchyView::NO_ROW;
 		if (RevealSelection && world == SelectionWorld && !Selection.empty()) {
 			reveal = tree.View.RowOf(Selection.front());
@@ -340,14 +340,14 @@ namespace studio {
 				// **Keyed by the instance, not by the row number.** A row's
 				// index moves whenever anything above it opens, closes or is
 				// filtered away, and an imgui id that moves takes its state
-				// with it — most visibly the open context menu, which would
+				// with it - most visibly the open context menu, which would
 				// detach from the row it was opened on and reattach to whoever
 				// inherited the number.
 				ImGui::PushID(static_cast<int>(row.Instance.Id));
 				if (row.Depth > 0) {
 					// **`Indent` rather than `TreePush`.** A push has to be
 					// matched by a pop in the same order, which is a recursion
-					// — and a recursion is the one thing a clipper cannot skip
+					// - and a recursion is the one thing a clipper cannot skip
 					// through. Indenting by depth costs the same pixels and
 					// leaves every row independent of the ones above it.
 					ImGui::Indent(static_cast<float>(row.Depth) * step);
@@ -373,13 +373,13 @@ namespace studio {
 				// **The node is still submitted while renaming, with no
 				// label.** It keeps the row's height, its arrow and its
 				// indentation, so the tree does not jump as the field opens and
-				// closes — and it keeps the clipper's rows uniform, which is
+				// closes - and it keeps the clipper's rows uniform, which is
 				// what lets it skip by arithmetic.
 				ImGui::TreeNodeEx("##node", flags, "%s", renaming ? "" : row.Text);
 
 				// **Everything that asks about "the last item" happens here,
 				// before anything else is drawn.** imgui has exactly one last
-				// item, and it is whatever was submitted most recently — so the
+				// item, and it is whatever was submitted most recently - so the
 				// dimmed class name below would become it, and
 				// `BeginDragDropSource` would then be asked to drag a `Text`
 				// with no id. That is an assertion rather than a subtle bug,
@@ -408,7 +408,7 @@ namespace studio {
 
 				// **A right-click inside the selection keeps it.** It used to
 				// collapse to the one row, so "select five parts, right-click,
-				// Delete" deleted one — the gesture every author uses, doing
+				// Delete" deleted one - the gesture every author uses, doing
 				// four fifths less than it looked like it would.
 				if (ImGui::IsItemClicked(ImGuiMouseButton_Right) &&
 					!(world == SelectionWorld && IsSelected(row.Instance))) {
@@ -448,8 +448,8 @@ namespace studio {
 						// is what picks between them.** Within one store a move
 						// is a `SetParent` and the instance keeps its handle,
 						// its id and everything pointing at it. Across two
-						// stores none of that is possible — an `Entity` means
-						// nothing in another world — so the subtree is written
+						// stores none of that is possible - an `Entity` means
+						// nothing in another world - so the subtree is written
 						// out, rebuilt on the other side and the original
 						// destroyed. Same gesture, and the cost is not the
 						// same, which is why they are not one code path
@@ -533,7 +533,7 @@ namespace studio {
 				if (static_cast<size_t>(index) == reveal) {
 					// The row somebody selected somewhere else, brought to the
 					// middle rather than to whichever edge it happened to be
-					// nearest — an author who has just clicked a part in the
+					// nearest - an author who has just clicked a part in the
 					// viewport wants to see what is around it in the tree.
 					ImGui::SetScrollHereY(0.5f);
 				}
@@ -570,7 +570,7 @@ namespace studio {
 		// **Tagged "(universe)" rather than "(game)", and the worlds below are
 		// each "(world)".** The two words were doing one job badly: the root
 		// said "game" and a world said nothing, except the active one, which
-		// said "(workspace)" — so the tag on a row changed as somebody clicked
+		// said "(workspace)" - so the tag on a row changed as somebody clicked
 		// around, and `Workspace` is now a real instance *inside* a world,
 		// which made that word mean two things one line apart. What a row is
 		// does not depend on which row is selected; selection is what the
@@ -586,7 +586,7 @@ namespace studio {
 		// the note in `DrawTreeNode`: imgui has exactly one "last item".
 		if (ImGui::BeginPopupContextItem("##universe-actions")) {
 			// Insert lands in the active world, because a universe holds worlds
-			// and not instances — there is no other honest answer, and refusing
+			// and not instances - there is no other honest answer, and refusing
 			// outright would make the root the one row with no menu.
 			DrawInsertMenu("insert-universe", Active, NULL_ENTITY);
 
@@ -634,7 +634,7 @@ namespace studio {
 				// **A replica says so on its own row**, because the tag is the
 				// only thing that distinguishes it. A client view holds the same
 				// instances under the same names as the scene it is a view of,
-				// so an author who scrolled to the wrong one has no other cue —
+				// so an author who scrolled to the wrong one has no other cue -
 				// and an edit made there reaches one client and is overwritten
 				// by the next delta. See `EditAuthority`.
 				const bool clientView = AuthorityOf(world) == EditAuthority::ClientLocal;
@@ -653,7 +653,7 @@ namespace studio {
 				// **A world row takes a drop too**, and it means "a root of
 				// this world". Without it the only way to move something
 				// between worlds would be to drop it onto an instance that
-				// happened to already be there — which is impossible for the
+				// happened to already be there - which is impossible for the
 				// case somebody reaches for first, an empty world.
 				if (ImGui::BeginDragDropTarget()) {
 					if (const ImGuiPayload *dropped = ImGui::AcceptDragDropPayload(DRAG_TYPE)) {
@@ -756,8 +756,8 @@ namespace studio {
 		}
 
 		// **Consumed here, whatever happened to it.** A reveal that could not
-		// land — the world is collapsed, the selection was emptied, the panel
-		// is showing something else — must not stay pending, or the tree
+		// land - the world is collapsed, the selection was emptied, the panel
+		// is showing something else - must not stay pending, or the tree
 		// scrolls itself back to the selection on some later frame for a reason
 		// nobody can connect to anything they did.
 		RevealSelection = false;
@@ -791,7 +791,7 @@ namespace studio {
 		}
 
 		// **Read first, in its own `Enter`.** Two worlds cannot be entered at
-		// once — the affinity check aborts on re-entry — so the subtree becomes
+		// once - the affinity check aborts on re-entry - so the subtree becomes
 		// a document while the source is open, and the document is what crosses.
 		std::string document;
 		Name moved;
@@ -823,7 +823,7 @@ namespace studio {
 			// **The original is still there**, which is the whole reason the
 			// destroy is last. A move that deleted first and then failed to
 			// rebuild would be a delete somebody did not ask for, with no undo
-			// to reach for — see `mono.studio/AGENTS.md`.
+			// to reach for - see `mono.studio/AGENTS.md`.
 			Say("could not move '" + std::string(Label(moved)) + "': " + error,
 				engine::core::LogLevel::Error);
 			return false;
@@ -887,7 +887,7 @@ namespace studio {
 		//
 		// Two reasons, and the second was a bug. Drawing a world's tree happens
 		// inside `Enter` and every action here enters a world itself, so it
-		// cannot run where it was asked for — `Enter` aborts on re-entry rather
+		// cannot run where it was asked for - `Enter` aborts on re-entry rather
 		// than allowing it, which is the affinity check doing its job.
 		//
 		// And it cannot run at the end of the panel that asked, either, because
@@ -919,7 +919,7 @@ namespace studio {
 			size_t refused = 0;
 
 			// **The nested members dropped before the world is entered**, by
-			// `TopMost` — a free function over the compiled tree, tested as
+			// `TopMost` - a free function over the compiled tree, tested as
 			// one. Dragging a model and one of its own parts together means
 			// "move the model", and moving both would take the part out of the
 			// model on the way.
@@ -942,9 +942,9 @@ namespace studio {
 					std::string named(Label(store.InstanceNameOf(instance)));
 
 					// **Refused rather than allowed to cycle.** `SetParent`
-					// already refuses to make an instance its own ancestor — a
+					// already refuses to make an instance its own ancestor - a
 					// cycle in the tree is a hang in every walk of it rather
-					// than a wrong answer — and this reports the refusal
+					// than a wrong answer - and this reports the refusal
 					// instead of leaving a drag that silently did nothing.
 					if (store.SetParentAuthored(instance, parent)) {
 						applied.push_back(Applied{instance, was, std::move(named)});
@@ -1000,7 +1000,7 @@ namespace studio {
 				}
 
 				// **Recorded as a write to the `Name` property**, which is a
-				// real registered property here — so undo, the properties panel
+				// real registered property here - so undo, the properties panel
 				// and a script all reverse this the same way rather than the
 				// tree having a private path to the same field.
 				before.Type = engine::ecs::PropertyType::Name;
@@ -1033,7 +1033,7 @@ namespace studio {
 			PendingLookThrough = NULL_ENTITY;
 
 			Say(FollowCamera == NULL_ENTITY ? "back to the editor camera"
-											: "looking through the scene's camera — right-drag to fly");
+											: "looking through the scene's camera - right-drag to fly");
 		}
 
 		if (PendingOpenScript.World.IsValid()) {

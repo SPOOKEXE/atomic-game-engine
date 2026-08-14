@@ -43,7 +43,7 @@ namespace engine::net {
 			CryptoPP::OS_GenerateRandomBlock(false, secret.data(), secret.size());
 		} catch (const CryptoPP::Exception &) {
 			// Protecting against one thing: the operating system refusing
-			// entropy — no /dev/urandom inside a sandbox, or a handle exhausted.
+			// entropy - no /dev/urandom inside a sandbox, or a handle exhausted.
 			// The answer is to refuse the connection. A fallback to a weaker
 			// source here would be a session anybody can decrypt, reported as a
 			// success.
@@ -68,8 +68,8 @@ namespace engine::net {
 		std::memcpy(handshake.Secret.data(), ephemeralSecret.data(), SECRET_BYTES);
 
 		// Donna clamps the scalar itself, which is why any 32 bytes are a valid
-		// secret and why the published RFC 7748 vectors — whose private keys are
-		// written unclamped — produce the public keys the RFC prints.
+		// secret and why the published RFC 7748 vectors - whose private keys are
+		// written unclamped - produce the public keys the RFC prints.
 		if (CryptoPP::Donna::curve25519_mult(handshake.Public.data(), handshake.Secret.data()) != 0) {
 			handshake.Forget();
 			handshake.Phase = HandshakeState::Refused;
@@ -149,7 +149,7 @@ namespace engine::net {
 		}
 
 		// Every low-order point on the curve agrees to all zeros against a
-		// clamped scalar, so this one check refuses the whole family of them —
+		// clamped scalar, so this one check refuses the whole family of them -
 		// the SHOULD in RFC 7748 §6.1. Without it a peer can force a session key
 		// it knows in full, because it knows the agreement was zero.
 		const std::array<uint8_t, MESSAGE_BYTES> zero{};
@@ -236,7 +236,7 @@ namespace engine::net {
 
 		// Taken once and gone. A handshake a caller keeps around holds no key
 		// material afterwards, and a second call answers nothing rather than
-		// handing a second Sealer the same key — which is the one thing that
+		// handing a second Sealer the same key - which is the one thing that
 		// would let a nonce repeat.
 		Forget();
 		Phase = HandshakeState::Complete;

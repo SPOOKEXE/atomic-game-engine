@@ -11,7 +11,7 @@
 // differ by exactly that turn. `scene::CutAndCloneSeams` is what maps it, and it
 // cannot reach a constant in the renderer's anonymous namespace.
 //
-// **A resource, because it is authored** — `scene::Gravity` is the same idea and
+// **A resource, because it is authored** - `scene::Gravity` is the same idea and
 // says why: a world underground, at night, or seen from above wants a different
 // vector, and one that wants none turns the brightness down rather than fighting
 // a constant. A world that never sets one gets `SUN_DIRECTION` and
@@ -19,7 +19,7 @@
 // nothing that existed before this looks any different.
 //
 // **What it deliberately is not is `Lighting.ClockTime`.** That service already
-// carries a clock and a latitude, and Roblox derives a sun arc from the pair —
+// carries a clock and a latitude, and Roblox derives a sun arc from the pair -
 // which is the right feature and a different one: it would move the light in
 // every scene that has ever been authored against a fixed vector. When it
 // arrives it writes this resource, and everything downstream is unchanged.
@@ -39,7 +39,7 @@ namespace engine::scene {
 	//
 	// **Towards and not from**, matching `opaque.frag`, which negates it to get
 	// the direction to the light. Down and across, so a box has a lit face, a
-	// shaded face and a shadow with a length to it — a light straight overhead
+	// shaded face and a shadow with a length to it - a light straight overhead
 	// gives every upright surface the same tone and reads as no lighting at all.
 	inline constexpr core::Vector3 SUN_DIRECTION{-0.45f, -0.8f, -0.4f};
 

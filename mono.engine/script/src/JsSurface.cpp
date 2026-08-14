@@ -1,8 +1,8 @@
 // Everything a JavaScript author reaches for once the property surface exists.
 //
 // **The second consumer for every binding, which is the point of having two
-// VMs.** `JsBindings.cpp` is the property surface — `Instance.new`, accessors,
-// `Enum`, `workspace` — and this is signals, the instance methods, `task`, the
+// VMs.** `JsBindings.cpp` is the property surface - `Instance.new`, accessors,
+// `Enum`, `workspace` - and this is signals, the instance methods, `task`, the
 // datatype vocabulary, the clock and the store services. Split because the two
 // halves are reviewed differently and one file would have been four thousand
 // lines.
@@ -17,7 +17,7 @@
 //
 // **A suspended script is a `Promise`, not a coroutine.** Luau has coroutines
 // and JavaScript does not; what JavaScript has is `await`, and a promise
-// resolved by the host at a barrier is exactly the same contract —
+// resolved by the host at a barrier is exactly the same contract -
 // `docs/retired/SCRIPT_CONCURRENCY.md` §1's "a script may only resume from something
 // the barrier delivers in a deterministic order". `JS_ExecutePendingJob` is what
 // makes that true rather than aspirational: the host drives the microtask
@@ -120,7 +120,7 @@ namespace engine::script {
 
 		// What a signal object carries: which signal, and whose.
 		//
-		// Three fields and no list — the connections live in `SignalTable`, so
+		// Three fields and no list - the connections live in `SignalTable`, so
 		// two scripts that reached the same signal by different routes hold the
 		// same thing rather than two objects that behave alike.
 		struct SignalPayload {
@@ -303,7 +303,7 @@ namespace engine::script {
 		// in this file is the half a language genuinely decides: the signal
 		// getters below, the codec bridge and the datatype vocabulary.
 		//
-		// A getter still checks its own receiver where a method no longer does —
+		// A getter still checks its own receiver where a method no longer does -
 		// `NeutralJsMethod` does that once for every row, and there is no
 		// equivalent trampoline for a `JS_CGETSET_DEF`.
 
@@ -311,7 +311,7 @@ namespace engine::script {
 			return JsEntityOf(context, self);
 		}
 
-		// `instance.Changed` — a getter, because it takes no arguments and
+		// `instance.Changed` - a getter, because it takes no arguments and
 		// Roblox spells it as a property.
 		JSValue InstanceChanged(JSContext *context, JSValueConst self) {
 			const Entity instance = SelfEntity(context, self);
@@ -347,8 +347,8 @@ namespace engine::script {
 		//
 		// `JS_NewPromiseCapability` hands back the promise and the two functions
 		// that settle it. The resolver is retained through the same `CallbackRef`
-		// machinery a connection uses, so `TaskQueue` — which knows nothing about
-		// JavaScript — can name it.
+		// machinery a connection uses, so `TaskQueue` - which knows nothing about
+		// JavaScript - can name it.
 		JSValue MakePendingPromise(JSContext *context, CallbackRef &resolver) {
 			JSValue settle[2];
 			JSValue promise = JS_NewPromiseCapability(context, settle);
@@ -416,7 +416,7 @@ namespace engine::script {
 			return JS_NewInt32(context, reference);
 		}
 
-		// `task.cancel(handle)` — the integer `task.delay` returned.
+		// `task.cancel(handle)` - the integer `task.delay` returned.
 		//
 		// **A number rather than a thread object**, because JavaScript has no
 		// thread to hand back. Luau returns the coroutine; here the handle is
@@ -480,7 +480,7 @@ namespace engine::script {
 
 		// --- typeOf and warn -------------------------------------------------
 
-		// `typeOf(value)` — **not `typeof`**, which is a JavaScript keyword and
+		// `typeOf(value)` - **not `typeof`**, which is a JavaScript keyword and
 		// cannot be rebound. Luau's is an ordinary global reading a `__type`
 		// metafield; this is a function, and the difference is the language's.
 		JSValue TypeOf(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
@@ -629,7 +629,7 @@ namespace engine::script {
 			// **Depth is how a cycle is caught here**, rather than a visited
 			// set as on the Luau side. QuickJS has no cheap identity map for
 			// objects reachable from C, and a cyclic object cannot nest past the
-			// limit without hitting it first — so the refusal arrives, with a
+			// limit without hitting it first - so the refusal arrives, with a
 			// less specific name than `Cyclic`. Stated rather than hidden: the
 			// status a script sees for a self-referencing object is `TooDeep`.
 			why = CodecStatus::TooDeep;
@@ -686,7 +686,7 @@ namespace engine::script {
 		if (JS_IsFunction(context, value)) {
 			// A function, an instance, or anything holding a pointer. **An
 			// `Entity` is meaningless outside this world**, so a reference must
-			// cross as whatever the game uses to name things — rule 3, as a
+			// cross as whatever the game uses to name things - rule 3, as a
 			// refusal an author can read.
 			why = CodecStatus::Unsupported;
 			return false;
@@ -765,7 +765,7 @@ namespace engine::script {
 			// **Every connection runs even when one throws**, and the first
 			// error is what the host hears about. A handler that threw once
 			// would otherwise silently stop everything registered after it, and
-			// the symptom — half a scene animating — points nowhere near the
+			// the symptom - half a scene animating - points nowhere near the
 			// cause.
 			if (JS_IsException(result)) {
 				const std::string message = ExceptionOf(context, "a connection failed");
@@ -807,7 +807,7 @@ namespace engine::script {
 			}
 
 			// `GetPropertyChangedSignal` takes no argument and fires only for
-			// its own name, which is Roblox's split and the reason it exists —
+			// its own name, which is Roblox's split and the reason it exists -
 			// a handler that cares about one property should not be called for
 			// every other one and made to filter.
 			bound.Signals.Fire(SignalKind::PropertyChanged, instance, [&](const Connection &connection) {
@@ -838,7 +838,7 @@ namespace engine::script {
 		}
 
 		// **Taken, not read.** A handler may reparent something, and a swap
-		// leaves the store's list empty before the first one runs — so the move
+		// leaves the store's list empty before the first one runs - so the move
 		// it makes belongs to the next delivery instead of being appended to
 		// the list being walked.
 		std::vector<ecs::TreeChange> changes;
@@ -855,7 +855,7 @@ namespace engine::script {
 		};
 
 		// One argument for three of the four signals, freed once per use rather
-		// than once per fire — `MakeJsInstance` mints an object per call, and
+		// than once per fire - `MakeJsInstance` mints an object per call, and
 		// leaking one per reparent is a leak per reparent.
 		const auto fire = [&](SignalKind kind, Entity subject, Entity argument) {
 			JSValue value = MakeJsInstance(context, argument);
@@ -879,7 +879,7 @@ namespace engine::script {
 				}
 
 				// `DescendantAdded` is every ancestor's, not just the new
-				// parent's — that is the whole difference between it and
+				// parent's - that is the whole difference between it and
 				// `ChildAdded`.
 				for (Entity above = change.To; above != ecs::NULL_ENTITY;
 					 above = bound.World->ParentOf(above)) {
@@ -928,7 +928,7 @@ namespace engine::script {
 			bound.AwaitedChildren.erase(waiting);
 
 			// **`null` and not `undefined` for a wait that ran out**, which is
-			// what every other lookup on this surface answers with — see
+			// what every other lookup on this surface answers with - see
 			// `ReturnInstance`. A promise resolving to `undefined` would read as
 			// one nobody gave a value to.
 			JSValue child =
@@ -1097,7 +1097,7 @@ namespace engine::script {
 			Release(context, reference);
 		};
 
-		// Delayed work first, then deferred — the same order the Luau side
+		// Delayed work first, then deferred - the same order the Luau side
 		// uses, so a world scripted in either language sees one sequence.
 		bound.Tasks.Advance(bound.World->Time().Tick, resume);
 		bound.Tasks.DrainDeferred(resume);
@@ -1163,7 +1163,7 @@ namespace engine::script {
 			JS_CGETSET_DEF("CharacterRemoving", InstanceTreeSignal<SignalKind::CharacterRemoving>, nullptr),
 
 			// The 2D tree's input. Same template, because a gui signal is a
-			// handle onto `SignalTable` exactly as a tree signal is — what
+			// handle onto `SignalTable` exactly as a tree signal is - what
 			// differs is only who records it, and that is the pump's business
 			// rather than this getter's.
 			JS_CGETSET_DEF("Activated", InstanceTreeSignal<SignalKind::GuiActivated>, nullptr),
@@ -1185,14 +1185,14 @@ namespace engine::script {
 			JS_CGETSET_DEF("MouseMoved", InstanceTreeSignal<SignalKind::GuiMouseMoved>, nullptr),
 
 			// A `TextBox`'s pair. On every instance and inert anywhere else, for
-			// the reason the six above are — `LuauInstances.cpp` says the same
+			// the reason the six above are - `LuauInstances.cpp` says the same
 			// from the other VM.
 			JS_CGETSET_DEF("Focused", InstanceTreeSignal<SignalKind::GuiFocused>, nullptr),
 			JS_CGETSET_DEF("FocusLost", InstanceTreeSignal<SignalKind::GuiFocusLost>, nullptr),
 		};
 		// **`std::size`, not a number somebody has to remember.** This read
-		// `10` while the list held sixteen, so the last six — including
-		// `IsDescendantOf`, `GetPropertyChangedSignal` and `Changed` — were
+		// `10` while the list held sixteen, so the last six - including
+		// `IsDescendantOf`, `GetPropertyChangedSignal` and `Changed` - were
 		// simply not installed. Nothing warned: a method that is not there
 		// is `undefined`, and `undefined` only fails at the call site, in
 		// whatever script reaches it first.
@@ -1203,7 +1203,7 @@ namespace engine::script {
 		JS_SetPropertyFunctionList(context, methods, entries, static_cast<int>(std::size(entries)));
 
 		// **Every method, written once for both languages.** There is no
-		// hand-written JavaScript instance method left — the twenty that stood
+		// hand-written JavaScript instance method left - the twenty that stood
 		// beside this list until v0.18 are rows in `ScriptMethods.cpp` and
 		// `GuiMethods.cpp` and land here through one trampoline. A row added there
 		// is reachable from both VMs in the same commit, which is what the drift
@@ -1289,7 +1289,7 @@ namespace engine::script {
 		// **Before the services, because one of them produces it.** A bound
 		// action's handler is handed an `InputObject`, and a class registered
 		// after the service that hands one over would be a class id of zero at
-		// the first press — the same ordering `LuauRuntime` keeps for the Luau
+		// the first press - the same ordering `LuauRuntime` keeps for the Luau
 		// metatable, and `UserInputService`'s three input signals hand one over too.
 		InstallJsInputObject(context);
 
@@ -1311,7 +1311,7 @@ namespace engine::script {
 		InstallJsServices(context, global, ServiceAvailability::Always);
 		InstallJsServices(context, global, ServiceAvailability::Studio);
 
-		// After `InstallJsInstanceMethods`, which `OpenJsBindings` ran — this
+		// After `InstallJsInstanceMethods`, which `OpenJsBindings` ran - this
 		// adds the component half of the ECS surface to the table it built.
 		InstallJsEcs(context, global);
 

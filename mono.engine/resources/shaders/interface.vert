@@ -4,7 +4,7 @@
 //
 // **Positions arrive in canvas pixels and are turned into clip space here.**
 // `render::InterfaceMesh` builds vertices in the coordinates the layout worked
-// in — top-left origin, Y down — so the only thing that knows the target's size
+// in - top-left origin, Y down - so the only thing that knows the target's size
 // is this shader, and a panel drawn at a different resolution needs no rebuild
 // of the mesh.
 
@@ -28,8 +28,8 @@ void main() {
 
 	const vec2 normalised = inPosition / canvas.Size;
 
-	// SDL's GPU clip space is Y-up on every backend — its Vulkan path submits a
-	// negative-height viewport to make that true — while a canvas has its origin
+	// SDL's GPU clip space is Y-up on every backend - its Vulkan path submits a
+	// negative-height viewport to make that true - while a canvas has its origin
 	// at the top left with Y growing downward. So Y is flipped here and X is
 	// not, which is the one asymmetry in this file and the one everybody writes
 	// symmetrically the first time.

@@ -84,7 +84,7 @@ declare interface ChangedSignal {
 	Equals(other: ChangedSignal): boolean;
 }
 
-// The instance tree's signals, matching the Luau half — undeclared until v0.13
+// The instance tree's signals, matching the Luau half - undeclared until v0.13
 // for the reason given there.
 declare interface InstanceSignal {
 	Connect(handler: (instance: Instance) => void): RBXScriptConnection;
@@ -99,7 +99,7 @@ declare interface AncestrySignal {
 // What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
 //
 // **Named at file scope rather than nested**, because TypeScript has no
-// interface-scoped type alias the way the Luau half does — so the name is
+// interface-scoped type alias the way the Luau half does - so the name is
 // prefixed to say where it belongs rather than risking a collision with a game's
 // own `Attribute`.
 // --- input ------------------------------------------------------------------
@@ -107,20 +107,20 @@ declare interface AncestrySignal {
 // **`UserInputService` is declared here at last, and the history is the reason
 // to say so.** `engine.d.ts` once declared it and `ContextActionService` because
 // its prelude was written by mirroring Luau's, and neither global existed in
-// that VM — a TypeScript file naming one typechecked and then failed. That is
+// that VM - a TypeScript file naming one typechecked and then failed. That is
 // the failure `ServiceCatalogue.hpp` opens by naming, and the rule that came out
 // of it is that a declaration here is a claim the catalogue has to back.
 //
 // It does now. `ServiceProperty` gave a live property a neutral shape, so both
-// VMs install `UserInputService` and `SoundService` from one description —
+// VMs install `UserInputService` and `SoundService` from one description -
 // `MouseBehavior` and `Volume` are accessors here where they are a userdata's
-// `__index` there — and `engine.script.servicecatalogue` asks a running VM
+// `__index` there - and `engine.script.servicecatalogue` asks a running VM
 // whether every row it claims is reachable.
 //
 // **The two that were absent here are declared now**, which is what
 // `ScriptCall::ReturnBoundAction` bought: `GetBoundActionInfo` and
 // `GetAllBoundActionInfo` answer a record holding `Enum.KeyCode` members, and a
-// record with an `EnumItem` in it still has no `ScriptValue` form — so the *fact*
+// record with an `EnumItem` in it still has no `ScriptValue` form - so the *fact*
 // became a `BoundActionReport` and each adapter builds its own record, exactly as
 // each builds its own `InputObject`.
 
@@ -173,7 +173,7 @@ declare interface UserInputService {
 
 	// **Present and always false.** There is no gamepad, touch surface, headset
 	// or motion sensor anywhere in `engine::input`, and a Roblox place branches
-	// on these to pick a control scheme — a missing property is `undefined` here
+	// on these to pick a control scheme - a missing property is `undefined` here
 	// where a false one takes the other branch.
 	readonly GamepadEnabled: boolean;
 	readonly TouchEnabled: boolean;
@@ -211,7 +211,7 @@ declare interface UserInputService {
 	GetMouseButtonsPressed(): InputObject[];
 
 	// `Enum.UserInputType.Keyboard` on a world nobody has touched, where Roblox
-	// answers `None` — there is no such member here.
+	// answers `None` - there is no such member here.
 	GetLastInputType(): Enum.UserInputType;
 
 	// The `TextBox` a person is typing into, or null. A lookup rather than a
@@ -326,7 +326,7 @@ declare interface RaycastResult {
 	readonly Normal: Vector3;
 	readonly Distance: number;
 
-	// The `Surface` name — what the part is like to touch, not what it looks
+	// The `Surface` name - what the part is like to touch, not what it looks
 	// like. See the Luau declaration above for why it is a string.
 	readonly Material: string;
 }
@@ -1560,7 +1560,7 @@ declare interface CrossWorldService {
 	// the channel later finds them still there.
 	CloseChannel(channel: string): void;
 
-	// `Ok`, or `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady` or `Overflow` — a
+	// `Ok`, or `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady` or `Overflow` - a
 	// channel send carries no value back, so the status is the answer.
 	SendAsync(world: string, channel: string, message: unknown): Promise<StoreReply>;
 }
@@ -1575,7 +1575,7 @@ declare interface ContentService {
 	// `MeshId` from this list is what fetches that one asset.
 	GetPublishedMeshes(): string[];
 
-	// The sheets a mesh's own submeshes name, in submesh order — not sorted and
+	// The sheets a mesh's own submeshes name, in submesh order - not sorted and
 	// not deduplicated, unlike every other list here. An untextured run keeps
 	// its slot as an empty string.
 	GetMeshTextures(mesh: string): string[];
@@ -1611,7 +1611,7 @@ declare interface CollectionService {
 	GetAllTags(): string[];
 }
 
-// JSON, a GUID and a URL escape — and **no `RequestAsync`, `GetAsync` or
+// JSON, a GUID and a URL escape - and **no `RequestAsync`, `GetAsync` or
 // `PostAsync`**, which are absent on purpose rather than missing. See the Luau
 // half, which carries the whole argument.
 declare interface HttpService {
@@ -1625,7 +1625,7 @@ declare interface HttpService {
 	// and on a number a double cannot hold.
 	JSONDecode(text: string): unknown;
 
-	// **Deterministic**, and that is a decision rather than an oversight — two
+	// **Deterministic**, and that is a decision rather than an oversight - two
 	// runs of one world hand out the same sequence, so this is an identifier for
 	// things inside a world and never a token or a secret.
 	//
@@ -1642,7 +1642,7 @@ declare interface HttpService {
 // What `GetBoundActionInfo` reports about one bound action.
 //
 // **Four of Roblox's six fields.** `title` and `description` come from
-// `SetTitle` and `SetDescription`, which decorate a touch button — there is no
+// `SetTitle` and `SetDescription`, which decorate a touch button - there is no
 // touch surface, so the pair is not bound and reporting them as empty strings
 // would claim they had been set to nothing.
 declare interface BoundActionInfo {
@@ -1728,7 +1728,7 @@ declare interface Tween {
 	readonly Completed: TweenCompletedSignal;
 
 	// **Two handles to one tween are not `===`**, because `Create` and every
-	// return build a fresh object — the same reason `Instance.Equals` exists.
+	// return build a fresh object - the same reason `Instance.Equals` exists.
 	Equals(other: Tween): boolean;
 }
 
@@ -1736,7 +1736,7 @@ declare interface TweenService {
 	GetValue(alpha: number, easingStyle: Enum.EasingStyle, easingDirection: Enum.EasingDirection): number;
 
 	// Raises for a property this instance does not have, for one a script may
-	// not assign, and for one whose type has no midpoint — each named.
+	// not assign, and for one whose type has no midpoint - each named.
 	Create(instance: Instance, info: TweenInfo, goals: { [property: string]: unknown }): Tween;
 }
 
@@ -1758,7 +1758,7 @@ declare const RunService: RunService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
 
-// The seven that stopped being Luau's at v0.16 — five when `ServiceSurface`
+// The seven that stopped being Luau's at v0.16 - five when `ServiceSurface`
 // stopped naming a VM, and the last two when `ServiceProperty` gave a live
 // property a neutral shape. **Every surface service this engine has is now in
 // both languages**, and `BreakpointService` is not one: it is absent outside a

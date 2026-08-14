@@ -171,7 +171,7 @@ namespace engine::bake {
 
 				// **OBJ's `v` runs up the image and every other format here runs
 				// it down.** Flipped once, at import, because a renderer that
-				// flipped would flip the formats that are already right —
+				// flipped would flip the formats that are already right -
 				// `assets::MeshVertex::TexCoord` states the convention.
 				coordinate[1] = 1.0f - coordinate[1];
 				texCoords.push_back(coordinate);
@@ -226,7 +226,7 @@ namespace engine::bake {
 
 					// **Resolved before the lookup, not after.** OBJ lets one
 					// corner be spelled `1/1/1` or `-4/-4/-1` in the same file,
-					// and those are the same vertex — so a cache keyed on what
+					// and those are the same vertex - so a cache keyed on what
 					// was *written* emits it twice, splits the normal across
 					// the copies and leaves a visible seam down a surface that
 					// should be smooth.

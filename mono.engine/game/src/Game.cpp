@@ -49,7 +49,7 @@ namespace engine::game {
 		// Whether an instance belongs to the viewer rather than to the game.
 		//
 		// See `scene::TransientComponent`. Asked here rather than by class,
-		// because "is this a camera" is the wrong question — a script may make
+		// because "is this a camera" is the wrong question - a script may make
 		// a camera that *is* content, and a viewer may make something that is
 		// not a camera.
 		bool IsTransient(const Store &store, Entity instance) {
@@ -72,7 +72,7 @@ namespace engine::game {
 		// properties and a scene sets three; writing all fifteen turns a file
 		// into a wall and a one-property change into a diff nobody can read. So
 		// each property is compared against a fresh instance of the same class
-		// and skipped when it matches — which costs one throwaway instance per
+		// and skipped when it matches - which costs one throwaway instance per
 		// class in the file, not per instance.
 		//
 		// The scratch store is this object's own. Creating the probe in the
@@ -128,8 +128,8 @@ namespace engine::game {
 		// each one's document-local id.
 		//
 		// Built before anything is written, because a reference may point
-		// forward — a spotlight naming the part it follows, declared later in
-		// the tree — and a writer that assigned ids as it went could not
+		// forward - a spotlight naming the part it follows, declared later in
+		// the tree - and a writer that assigned ids as it went could not
 		// resolve one.
 		struct Numbering {
 			std::unordered_map<uint64_t, uint32_t> Ids;
@@ -151,7 +151,7 @@ namespace engine::game {
 
 			static uint64_t Key(Entity instance) {
 				// The whole id, which already carries the generation in its
-				// high bits — so a recycled slot is not mistaken for the
+				// high bits - so a recycled slot is not mistaken for the
 				// instance that used to live in it. Reading the two halves
 				// apart would be this file depending on a layout `Entity`
 				// deliberately does not expose.
@@ -163,8 +163,8 @@ namespace engine::game {
 			XmlWriter &writer, Store &store, Entity instance, const Numbering &numbering, Defaults &defaults
 		) {
 			// **The viewer's own instances are not the file's.** A camera is
-			// made by whoever is looking — the editor for its viewport, a client
-			// for its player, one each when several people edit together — and
+			// made by whoever is looking - the editor for its viewport, a client
+			// for its player, one each when several people edit together - and
 			// writing one out would put somebody's point of view into everyone
 			// else's copy. Skipped with its whole subtree, because anything
 			// parented to a camera belongs to that camera.
@@ -174,8 +174,8 @@ namespace engine::game {
 
 			const ClassId id = store.ClassOf(instance);
 			if (!id.IsValid()) {
-				// Not every entity is an instance — a resource-carrying row, a
-				// predicted entity — and a document holds instances. Skipped
+				// Not every entity is an instance - a resource-carrying row, a
+				// predicted entity - and a document holds instances. Skipped
 				// rather than written as a class nobody can read back.
 				return;
 			}
@@ -207,8 +207,8 @@ namespace engine::game {
 				if (descriptor.Type == PropertyType::Reference) {
 					// **Only a reference inside this document is written.** One
 					// pointing at an instance in another world is meaningless in
-					// a file — `Entity` is a handle within one world and says so
-					// — and writing a dangling id would resolve to whatever
+					// a file - `Entity` is a handle within one world and says so
+					// - and writing a dangling id would resolve to whatever
 					// happened to take that number on load.
 					const uint32_t target =
 						value.Reference == NULL_ENTITY ? 0 : numbering.Of(value.Reference);
@@ -343,7 +343,7 @@ namespace engine::game {
 					// **Compared as tags rather than as enum members.** `Name` and
 					// `String` are both written `string`, because whether the
 					// engine interns text is a storage decision and a file holds
-					// text either way — so moving a property between them must
+					// text either way - so moving a property between them must
 					// not turn every saved game into a load error.
 					if (TypeFromTag(child->Attribute("type"), declared) &&
 						TypeTag(declared) != TypeTag(descriptor->Type)) {
@@ -361,7 +361,7 @@ namespace engine::game {
 					if (std::from_chars(text.data(), text.data() + text.size(), target).ec == std::errc{} &&
 						target != 0) {
 						// Deferred, because the instance it names may not exist
-						// yet — a reference pointing forward in the tree is
+						// yet - a reference pointing forward in the tree is
 						// ordinary, and resolving in one pass would silently
 						// drop every one of them.
 						pending.push_back(PendingReference{instance, property, target});
@@ -495,7 +495,7 @@ namespace engine::game {
 		// TODO(render-pipeline): a world's render pipelines were saved here.
 		//
 		// `WritePipelines` and `ReadPipelines` lived at this point and carried a
-		// `graph::PipelineSet` as one CDATA block — the set's own line-oriented
+		// `graph::PipelineSet` as one CDATA block - the set's own line-oriented
 		// format embedded verbatim rather than restated as XML, so there was one
 		// grammar for a pipeline rather than two that could disagree while both
 		// parsing. A malformed block warned and dropped rather than failing the
@@ -514,7 +514,7 @@ namespace engine::game {
 		// the render half used and the reason it used it: `bake::PipelineSet`
 		// already has a line-oriented format that round trips and refuses a
 		// malformed line, and restating it as XML would be a second grammar for
-		// one thing — with the interesting failure that the two could disagree
+		// one thing - with the interesting failure that the two could disagree
 		// about what a pipeline is while both parsing.
 		//
 		// CDATA for `WriteSources`'s reason: this is meant to be read in the
@@ -522,8 +522,8 @@ namespace engine::game {
 		//
 		// **A world writes this and an instance document does not**, unlike
 		// `<Sources>`, which travels with the instance that names it. No
-		// instance owns a bake pipeline — it names an asset, and the asset is
-		// already baked — so copying a part into another world has nothing to
+		// instance owns a bake pipeline - it names an asset, and the asset is
+		// already baked - so copying a part into another world has nothing to
 		// carry and must not invent something.
 		//
 		// **No format bump for the new element.** A world with no pipelines
@@ -531,7 +531,7 @@ namespace engine::game {
 		// content is byte-identical to the last one's; and an older build skips
 		// a child it does not recognise, so a file with the block still loads
 		// there minus its pipelines. Moving `FORMAT_VERSION` would turn that
-		// into a refusal and buy nothing — the version is for a change that
+		// into a refusal and buy nothing - the version is for a change that
 		// makes an old *reading* wrong, which is what `2` was.
 		void WriteAssetPipelines(XmlWriter &writer, const Store &store) {
 			const auto *set = store.Resource<bake::PipelineSet>();
@@ -548,7 +548,7 @@ namespace engine::game {
 		// pipelines and keeps the world**, which is the decision `D00102` left
 		// open and is the render half's answer to the same question.
 		//
-		// `bake::Read` refuses an unknown kind as a malformed line — the node
+		// `bake::Read` refuses an unknown kind as a malformed line - the node
 		// vocabulary is a closed list, so `node bevel` from a newer editor is
 		// indistinguishable from a typo and neither is worth guessing at. The
 		// cost of that refusal is set here: a world whose parts all loaded and
@@ -557,7 +557,7 @@ namespace engine::game {
 		// the document would lose the parts too, which is a worse answer to the
 		// same file, and dropping the offending pipeline while keeping its
 		// neighbours would be this function deciding that half a saved set is a
-		// set — it is not, it is a file from a build somebody should be told to
+		// set - it is not, it is a file from a build somebody should be told to
 		// upgrade from.
 		void ReadAssetPipelines(const XmlElement &element, Store &store) {
 			bake::PipelineSet set;
@@ -566,7 +566,7 @@ namespace engine::game {
 			const bake::DocumentStatus status = bake::Read(element.Text, set, offender);
 			if (status != bake::DocumentStatus::Ok) {
 				ENGINE_WARN(
-					"world asset pipelines: {} at '{}' — the world loads and bakes nothing",
+					"world asset pipelines: {} at '{}' - the world loads and bakes nothing",
 					bake::Describe(status),
 					offender
 				);
@@ -641,9 +641,9 @@ namespace engine::game {
 		}
 
 		// **What a world *is*, and it stays on the element.** A name is the
-		// world's identity — it is what a bus envelope, a subscription and a
+		// world's identity - it is what a bus envelope, a subscription and a
 		// teleport carry, and what `<World>` is looked up by while reading a
-		// game — so it reads as part of the tag rather than as one of the
+		// game - so it reads as part of the tag rather than as one of the
 		// settings underneath it. The same split `<Item name=... >` already
 		// makes against its `<Property>` children.
 		void WriteWorldAttributes(XmlWriter &writer, const world::WorldSettings &settings) {
@@ -675,7 +675,7 @@ namespace engine::game {
 			// Not keyed off the format number, deliberately. A reader that
 			// branched on `format == 1` would be a reader that breaks on a file
 			// somebody hand-edited into the new shape without touching the
-			// version — and the shape is the thing being read either way.
+			// version - and the shape is the thing being read either way.
 			const XmlElement *properties = ChildNamed(document, element, WORLD_PROPERTIES);
 			const XmlElement &source = properties != nullptr ? *properties : element;
 
@@ -765,7 +765,7 @@ namespace engine::game {
 
 		// **The bake pipelines a world carries, named here rather than by the
 		// module that owns the type.** `bakegraph` links `core` and nothing
-		// else — that is the whole point of it, and `ecs::Components::Register`
+		// else - that is the whole point of it, and `ecs::Components::Register`
 		// is out of its reach, so the alternative to this line is a link edge
 		// that undoes the split. It is the exception `scene`'s registration
 		// rule is stated against rather than a violation of it.
@@ -773,7 +773,7 @@ namespace engine::game {
 		// Registered rather than left to `SetResource`, for the reason every
 		// other line in this function exists: a resource is keyed by a component
 		// id, and one first minted by `SetResource` takes the compiler's
-		// spelling of the type — a world that saves, loads, and quietly has no
+		// spelling of the type - a world that saves, loads, and quietly has no
 		// pipelines because the two spellings never met.
 		//
 		// No writer or reader: a pipeline set is authored content that travels
@@ -785,12 +785,12 @@ namespace engine::game {
 		// **The render pipelines a world carries.** Registered here rather than
 		// left to a caller for the reason every other line in this function
 		// exists: a resource is keyed by a component id, and one first minted by
-		// `SetResource` takes the compiler's spelling of the type — a world that
+		// `SetResource` takes the compiler's spelling of the type - a world that
 		// saves, loads, and quietly has no pipelines because the two spellings
 		// never met. Naming it beside the classes is what makes the order
 		// impossible to get wrong from outside.
 		// TODO(render-pipeline): `graph::RegisterPipelineComponents();` went
-		// here, beside the class registrations and for their reason — a resource
+		// here, beside the class registrations and for their reason - a resource
 		// is keyed by a component id, and one first minted by `SetResource`
 		// takes the compiler's spelling of the type, which is a world that saves,
 		// loads, and quietly has no pipelines because the two spellings never
@@ -839,7 +839,7 @@ namespace engine::game {
 			//
 			// **Still matched, and deliberately.** Worlds saved while the old
 			// pipeline system existed carry this element, and the fall-through
-			// below only skips things that are not `Item` — so leaving it out
+			// below only skips things that are not `Item` - so leaving it out
 			// would work by accident rather than on purpose. Skipping it here
 			// says the element is known and currently unused, which is a
 			// different fact from "unrecognised".
@@ -863,7 +863,7 @@ namespace engine::game {
 			if (found == byId.end()) {
 				// Dangling. A warning rather than a refusal: the file names an
 				// instance that is not in it, which is a file that was edited
-				// by hand or exported from a partial selection — and leaving
+				// by hand or exported from a partial selection - and leaving
 				// the property at its default is what a missing target means.
 				ENGINE_WARN(
 					"game file: reference '{}' names instance {} which is not in this world",
@@ -894,7 +894,7 @@ namespace engine::game {
 		// **Before the scripts run, and that ordering is the whole point.** A
 		// script's top level has already executed by the time this function
 		// returns, so breakpoints adopted afterwards would silently never fire
-		// on it — which is the failure a debugger can least afford.
+		// on it - which is the failure a debugger can least afford.
 		if (breakpoints != nullptr) {
 			runtime->Debug().Adopt(*breakpoints);
 		}
@@ -906,7 +906,7 @@ namespace engine::game {
 
 		// **The fixed tick delta, never wall time.** A script integrating
 		// against a real clock puts the scene in a different place on a busy
-		// machine, and the recording stops replaying — the desync rule 5 names,
+		// machine, and the recording stops replaying - the desync rule 5 names,
 		// arriving through the call a script uses most.
 		scheduler.Add("script-heartbeat", ecs::Phase::Simulation, [runtime](Store &world) {
 			if (!runtime->Heartbeat(world.Time().Delta)) {
@@ -941,8 +941,8 @@ namespace engine::game {
 
 		for (const world::WorldId id : universe.Worlds()) {
 			// **A replica is not authored here, so it is not written here.**
-			// A game file is authored content — that is the whole reason it is a
-			// different format from a snapshot — and a world whose rows arrived
+			// A game file is authored content - that is the whole reason it is a
+			// different format from a snapshot - and a world whose rows arrived
 			// from somebody else's authority is a *view* of a game rather than
 			// part of one. Writing it would put a second copy of the same scene
 			// in the file under a second name, and loading that file would give
@@ -951,7 +951,7 @@ namespace engine::game {
 			// Asked of the store rather than of the caller, because the store
 			// already knows: `Store::AdoptOnly` is set on every world a
 			// `replication::Connector` or the studio's own client view writes
-			// into, and it is set for a reason that is exactly this one — the
+			// into, and it is set for a reason that is exactly this one - the
 			// rows are not this process's to mint. A flag passed in by each
 			// caller would be the same fact recorded in three programs.
 			if (!universe.IsRemote(id)) {
@@ -964,7 +964,7 @@ namespace engine::game {
 
 			// **What the world is, not what a default-constructed one would
 			// be.** This used to build a fresh `WorldSettings` and fill in only
-			// the name, so every `<World>` in every file claimed 60Hz — a scene
+			// the name, so every `<World>` in every file claimed 60Hz - a scene
 			// authored at 30 saved as 60 and loaded as 60, and the number that
 			// was lost was one nobody would think to check. `SettingsOf` exists
 			// because moving these into an element made the lie legible.
@@ -976,13 +976,13 @@ namespace engine::game {
 			// **Every attribute before the first child element**, which is now
 			// a rule this loop has to keep rather than a thing it got for free.
 			// `WriteWorldProperties` opens a child, and an `Attribute` call
-			// after that lands on the child instead of on `<World>` — so the
+			// after that lands on the child instead of on `<World>` - so the
 			// host of a remote world is written here, above it.
 			const bool remote = universe.IsRemote(id);
 			if (remote) {
 				// **A name and a host, not content.** A world held by a
 				// supervised host has no store here, so its instances are not
-				// this process's to write — and an empty `<World>` would be a
+				// this process's to write - and an empty `<World>` would be a
 				// save file that quietly deleted somebody's scene.
 				writer.Attribute("host", universe.HostOf(id).Text());
 			}
@@ -1048,7 +1048,7 @@ namespace engine::game {
 			// **A clash gets a suffix rather than a refusal.** Two worlds
 			// cannot share a name, and importing a game that shares one scene
 			// name with the open game is the ordinary case rather than the
-			// exception — being told "Lobby is taken" and made to guess a free
+			// exception - being told "Lobby is taken" and made to guess a free
 			// name is a worse answer than being given one. `ImportWorld` and
 			// `DuplicateWorld` both already do this.
 			if (universe.Find(settings.Name).IsValid()) {
@@ -1115,7 +1115,7 @@ namespace engine::game {
 
 		// Everything first, then nothing left over on a failure. The universe
 		// is emptied up front so that a load which fails halfway leaves an
-		// empty universe rather than a hybrid — `ecs::Store::Load`'s rule, one
+		// empty universe rather than a hybrid - `ecs::Store::Load`'s rule, one
 		// layer up.
 		for (const world::WorldId existing : universe.Worlds()) {
 			universe.Destroy(existing);
@@ -1238,7 +1238,7 @@ namespace engine::game {
 			if (child->Name == "Sources") {
 				// **Merged rather than set.** `ReadSources` replaces the
 				// resource outright, which is right when it is filling an empty
-				// world and catastrophic here — pasting one part into a world
+				// world and catastrophic here - pasting one part into a world
 				// would delete every script that world already had.
 				MergeSources(parsed, *child, store);
 				continue;
@@ -1260,7 +1260,7 @@ namespace engine::game {
 			if (found == byId.end()) {
 				// **A reference out of the subtree, and it dangles.** Moving a
 				// part that something outside it pointed at cannot carry that
-				// pointer across — the target is a handle in the world being
+				// pointer across - the target is a handle in the world being
 				// left. Left at its default and said out loud, which is the
 				// same answer `ReadWorldBody` gives a dangling id.
 				ENGINE_WARN(

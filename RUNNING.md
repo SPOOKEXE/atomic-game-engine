@@ -21,7 +21,7 @@ just edit                   # the editor, on a new game
 just test                   # only the suites your change could have affected
 ```
 
-Needs CMake 3.24+, Ninja and a C++20 compiler — nothing else. `glslc` is built
+Needs CMake 3.24+, Ninja and a C++20 compiler - nothing else. `glslc` is built
 from the vendored shaderc, so it is not a prerequisite. Everything derived lands
 in `.cache/`.
 
@@ -38,7 +38,7 @@ missing, and `scripts\build-windows.bat` is the build that arranges it itself.
 
 ```sh
 cmake --preset dev       # everything, tests, Tracy, unoptimised first-party code
-cmake --preset release   # optimised — the only preset that turns -O0 off
+cmake --preset release   # optimised - the only preset that turns -O0 off
 cmake --preset server    # no client at all, and therefore no graphics stack
 cmake --preset cdn       # the content origin alone, on a machine with nothing installed
 cmake --preset ci        # dev, with warnings fatal
@@ -55,13 +55,13 @@ cmake --preset bench     # release, plus the benchmark binaries
 
 `server` and `cdn` are the two presets that prove something rather than build
 something. `server` proves the client tier is absent; `cdn` proves the content
-origin needs no graphics stack at all — it configures where there is no Vulkan
+origin needs no graphics stack at all - it configures where there is no Vulkan
 SDK, no SDL and no shader compiler.
 
 ## The `ci` preset, and the hook that runs it
 
 `ci` is `dev` with `MONO_WERROR=ON`, which makes every warning fatal. Nothing on
-GitHub runs it and nothing on GitHub is going to — that is a decision, and
+GitHub runs it and nothing on GitHub is going to - that is a decision, and
 `docs/retired/DEFERRED.md` D00005 carries it. What runs it is your own push:
 
 ```sh
@@ -72,7 +72,7 @@ which points `core.hooksPath` at the checked-in `.githooks/`, and
 `.githooks/pre-push` builds the `ci` preset before a push leaves the machine.
 
 **It exists because this preset went uncompilable three times while being
-described as the standard.** At v0.4 — a `-Wmissing-field-initializers` in
+described as the standard.** At v0.4 - a `-Wmissing-field-initializers` in
 `core::Arguments` and a `-Wdangling-reference` across `world`'s suites. Twice
 more inside v0.15, the second a `-Wdangling-reference` in `cdn::OriginFromFlags`
 iterating a `std::span` straight off a temporary `Flag`, live while a roadmap
@@ -91,7 +91,7 @@ that is not yours is a gate that gets skipped every time.
 |---|---|
 | `just preset=ci build`, nothing changed | ~1 s |
 | `just preset=ci build`, a day of another preset's drift | ~1 min |
-| `just preset=ci build`, from an empty `.cache/build/ci/` | ~3 min, once — 1,998 targets, vendors included |
+| `just preset=ci build`, from an empty `.cache/build/ci/` | ~3 min, once - 1,998 targets, vendors included |
 | `just preset=ci check`, warm | ~3 min, and `test-all` is 2.5 of them |
 
 `ci` builds into `.cache/build/ci/`, a tree of its own, so the first push after
@@ -104,11 +104,11 @@ accidentally, and that asymmetry is the point.
 It compiles the working tree rather than the commits being pushed, so in a tree
 several people or agents are editing at once, somebody else's live warning
 refuses your push. That is the tree you are publishing, so it is the right
-answer — but it is worth knowing before it happens.
+answer - but it is worth knowing before it happens.
 
 **Third-party code is optimised in every preset, and only first-party code is
-not.** `AGENTS.md`'s argument for `-O0` — a profile should measure what this
-engine does rather than what the optimiser rescued — is about this engine, and
+not.** `AGENTS.md`'s argument for `-O0` - a profile should measure what this
+engine does rather than what the optimiser rescued - is about this engine, and
 SDL is not it. Measured on the editor: `SDL_SubmitGPUCommandBuffer` is where the
 Vulkan backend turns a recorded command buffer into queue submissions, and the
 `submit` span read **17 ms in a `dev` build against a p50 of 0.2 ms in
@@ -137,7 +137,7 @@ just preset=server test
 ```
 
 It is not a recipe argument. `build` is derived from `preset` when the Justfile
-is read, and an argument cannot reach a derived variable — which is what made
+is read, and an argument cannot reach a derived variable - which is what made
 the older `just test server` configure one preset and then run another's
 binaries. The override is applied before anything is derived, so the configure,
 the build and the directory the binary is run from cannot disagree.
@@ -161,7 +161,7 @@ set PRESET=release  (then run it)                  :: any other preset
 
 The same configure and build as everywhere else, with the compiler environment
 put in front of them. That is the whole of what the script adds, and it is not
-optional: the presets generate Ninja, and Ninja has no per-command environment —
+optional: the presets generate Ninja, and Ninja has no per-command environment -
 `build.ninja` is a flat list of literal command lines, so CMake cannot record
 the toolchain's include and library paths in it. MSVC reads those from `INCLUDE`
 and `LIB` in the environment instead, and a plain `cmd` or PowerShell window has
@@ -176,7 +176,7 @@ fatal error C1083: Cannot open include file: 'cstddef': No such file or director
 
 which reads like the standard library is missing and is really the shell being
 wrong. `vcvars64.bat` is what sets those variables, and a Developer Command
-Prompt is nothing more than a `cmd` window that has already run it — so this
+Prompt is nothing more than a `cmd` window that has already run it - so this
 script runs it too, inside its own `setlocal`, and nothing it sets outlives the
 build. Started from a Developer Command Prompt it finds the environment already
 there and leaves it alone.
@@ -184,7 +184,7 @@ there and leaves it alone.
 `just build` has the same requirement, because the environment belongs to the
 shell rather than to the tool driving CMake. The Visual Studio generator is the
 one thing that does not, since MSBuild rebuilds the environment from the
-`.vcxproj` — but it is not the generator the presets pin, and it is not the one
+`.vcxproj` - but it is not the generator the presets pin, and it is not the one
 the build times here assume.
 
 Build once with this and the demo and studio scripts work from an ordinary
@@ -223,7 +223,7 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.engine/net` | `engine_net` | `Engine::net` | `test_net` | shared |
 | `mono.engine/delivery` | `engine_delivery` | `Engine::delivery` | `test_delivery` | shared |
 | `mono.engine/replication` | `engine_replication` | `Engine::replication` | `test_replication` | shared |
-| `mono.engine/control` | `engine_control` | `Engine::control` | — | shared |
+| `mono.engine/control` | `engine_control` | `Engine::control` | - | shared |
 | `mono.engine/audio` | `engine_audio` | `Engine::audio` | `test_audio` | client |
 | `mono.engine/input` | `engine_input` | `Engine::input` | `test_input` | client |
 | `mono.engine/render` | `engine_render` | `Engine::render` | `test_render` | client |
@@ -250,7 +250,7 @@ are the other tool entry points.
 `mono.engine/CMakeLists.txt` only adds them when `MONO_BUILD_CLIENT` is on, so a
 server configure never compiles SDL and never needs a shader compiler. That is
 what makes "the server contains no graphics stack" a property of the build
-rather than a claim about a link line — and it is why
+rather than a claim about a link line - and it is why
 `just preset=server build engine_render` fails with `unknown target` rather than
 quietly building it.
 
@@ -274,24 +274,24 @@ Each preset writes to `.cache/build/<preset>/`:
 
 ```
 .cache/build/dev/
-├─ client/       the client — binary, SDL3, shaders/resources/
-├─ server/       the server — no shaders, no SDL
-├─ cdn/          the content origin — no shaders, no SDL
+├─ client/       the client - binary, SDL3, shaders/resources/
+├─ server/       the server - no shaders, no SDL
+├─ cdn/          the content origin - no shaders, no SDL
 ├─ tools/        testrunner
 ├─ tests/        every test binary
 ├─ lib/          static libraries, intermediate and never shipped
 └─ shaderstage/  compiled SPIR-V, staged into each program that links it
 ```
 
-A program's directory is runnable as it stands — see
+A program's directory is runnable as it stands - see
 [Running from somewhere else](#running-from-somewhere-else). Libraries are
 intermediate and ship nowhere.
 
 ## Cleaning
 
 ```sh
-just clean       # .cache/build — every preset's build tree
-just clean-all   # .cache — including the smart-test cache
+just clean       # .cache/build - every preset's build tree
+just clean-all   # .cache - including the smart-test cache
 ```
 
 ## Formatting
@@ -308,14 +308,14 @@ conflict.
 **`mono.studio/` is not in that list, and it should be.** It is a first-party
 member that has never been swept, so its files are formatted by whoever last
 edited them. Adding it is a one-line change and a fifty-eight file diff, which
-is why it has not been folded into a feature commit — do it on its own.
+is why it has not been folded into a feature commit - do it on its own.
 
 ---
 
 # What there is to run
 
 `mono.engine/` is libraries. No `main.cpp` lives under it and nothing ships from
-it alone, so there is no single binary that "runs the engine" — there are thin
+it alone, so there is no single binary that "runs the engine" - there are thin
 mains over the parts of it they need.
 
 | You want to | Run | Adds, over the engine |
@@ -326,12 +326,12 @@ mains over the parts of it they need.
 | Host a simulation with no window | `server` | the tick loop, and the hosting half of networking |
 | Serve a game's content | `cdn` | a content store, published and signed, served over HTTP |
 | Exercise one module | its test binary | Catch2 |
-| Re-run only what your change affected | `testrunner` | — |
-| Check the architecture held | a CMake script | — |
+| Re-run only what your change affected | `testrunner` | - |
+| Check the architecture held | a CMake script | - |
 
 **The client and the server are shims, not the engine.** What they add is the
-part that has to exist between two machines — name resolution, peer-to-peer,
-hosting, the session — plus, on the client, presentation. A script that needs
+part that has to exist between two machines - name resolution, peer-to-peer,
+hosting, the session - plus, on the client, presentation. A script that needs
 none of that does not need either program, which is what the standalone runtime
 is for.
 
@@ -392,7 +392,7 @@ svg = false      # nor rasterise an SVG
 mp4 = false      # and an origin will not publish one
 ```
 
-**A key naming no setting this program has is an error**, not a shrug — the same
+**A key naming no setting this program has is an error**, not a shrug - the same
 position `--help` takes for an unknown option, and for the same reason: a typo
 that is silently ignored fails at the behaviour rather than at the file. Run
 `--flags` to see what a program actually has.
@@ -417,7 +417,7 @@ Two settings per format, and they are two because they are different verbs:
 | `content.<form>` | this process will not decode, route or hand it over |
 | `cdn.publish.<form>` | this form does not enter a publication |
 
-`<form>` is the extension — `gif`, `svg`, `mp4`, `png`, `glb`, `spv` — plus
+`<form>` is the extension - `gif`, `svg`, `mp4`, `png`, `glb`, `spv` - plus
 `unknown`, which is every extension this build has no row for. Turning
 `content.unknown` off closes the list to what the engine understands.
 
@@ -429,7 +429,7 @@ Two settings per format, and they are two because they are different verbs:
 An origin refuses at **publish** time and nowhere else, and that is a fact about
 an origin rather than an omission: after a publish there are only hashes, and a
 hash cannot be walked back to a name. A refused file is never chunked, never
-stored and never in the manifest — `cdn` says how many it refused, and `assetc`
+stored and never in the manifest - `cdn` says how many it refused, and `assetc`
 keeps a row per source saying which form it was.
 
 ---
@@ -455,13 +455,13 @@ just run  --game My.agame       # single-player, both roles in one process
 |---|---|---|
 | `--verbose` | off | log at trace level |
 | `--force-serial-compute` | off | run parallel dispatches on one thread |
-| `--game PATH` | — | open a game file at startup |
+| `--game PATH` | - | open a game file at startup |
 | `--rojo PATH` | `$ATOMIC_ROJO_PROJECT` | sync a Rojo project or universe once the scene exists |
 | `--width`, `--height` | 1600×900 | window size |
 | `--scale FACTOR` | 1.0 | multiplies every font and padding |
 | `--tick-rate HZ` | 60 | simulation rate while running |
-| `--frames N` | — | exit after N frames, for a script or a screenshot |
-| `--capture PATH` | — | write the viewport's world to a BMP and carry on |
+| `--frames N` | - | exit after N frames, for a script or a screenshot |
+| `--capture PATH` | - | write the viewport's world to a BMP and carry on |
 | `--headless` | off | run with no window at all; needs `--frames` |
 | `--run MODE` | `edit` | start in `edit`, `server` or `play` |
 | `--uncapped` | off | draw with no frame rate ceiling |
@@ -469,15 +469,15 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--stats`, `--graph` | off | open the statistics or frame-graph panel |
 | `--assets` | off | open the assets manager |
 | `--viewports N` | 1 | open N viewport panels; `--viewport2` is the old spelling of `--viewports 2` |
-| `--profile-snapshot PATH` | — | write a frame-graph snapshot on exit |
+| `--profile-snapshot PATH` | - | write a frame-graph snapshot on exit |
 | `--idle-close SECONDS` | 300 | close an empty world after this long |
 | `--mcp-port PORT` | off | open the loopback control surface |
-| `--override-assets-directory DIR` | — | read staged data from here |
+| `--override-assets-directory DIR` | - | read staged data from here |
 
 **`--rojo` is how an external project is checked without driving the menu.**
 Syncing is otherwise a file prompt and two clicks, which makes "does this
 repository still sync" something nobody verifies. With no flag the editor reads
-`ATOMIC_ROJO_PROJECT`, so a shell that works on one game can carry it — the flag
+`ATOMIC_ROJO_PROJECT`, so a shell that works on one game can carry it - the flag
 is for one run and the variable is for a day, and nothing writes the variable
 back. A path ending `.universe.json` syncs every world it names; anything else
 is read as one project into the scene that is open.
@@ -489,13 +489,13 @@ ATOMIC_ROJO_PROJECT=~/Documents/GitHub/raceapet/default.project.json \
 ```
 
 The count is the check. It should equal the number of `.luau`, `.lua` and
-`.json` files the project's `$path`s actually reach — a package whose
+`.json` files the project's `$path`s actually reach - a package whose
 `default.project.json` maps `lib` contributes `lib`, and nothing else it was
 published with.
 
 **`submit` is where the GPU is paid for, and one frame in flight is why.** The
 passes above it only *record* commands; `SDL_SubmitGPUCommandBuffer` is where the
-driver gets the work, and with `--frames-in-flight 1` — the default — it blocks
+driver gets the work, and with `--frames-in-flight 1` - the default - it blocks
 until the GPU has finished the previous frame. So a long `submit` on the frame
 graph means the GPU is the limit, not the code above it. Raising it to 2 lets the
 CPU run ahead and costs a frame of latency between the mouse and the picture,
@@ -504,8 +504,8 @@ four-world demo: p99 6.9 ms at one, 6.1 ms at two, and the same 0.21 ms median
 either way.
 
 **The editor is not paced by the display.** It starts with vertical sync off and
-a 120 fps ceiling, because sync puts a whole refresh — 16.7 ms on a 60 Hz panel,
-before the compositor takes its turn — between the mouse and the viewport, and
+a 120 fps ceiling, because sync puts a whole refresh - 16.7 ms on a 60 Hz panel,
+before the compositor takes its turn - between the mouse and the viewport, and
 that delay is what dragging something feels like. The ceiling is what stops the
 other extreme: a still scene redrawn nine hundred times a second is a laptop
 with its fans up for one picture.
@@ -513,13 +513,13 @@ with its fans up for one picture.
 Both are on the Preferences page under **Frames**, live, so a viewport that tears
 is one click from paced and the ceiling is a slider. `--uncapped` removes the
 ceiling for a run, which is what to pass when the number being read is the
-frame's own cost — otherwise the sleep padding each frame out to 8.3 ms is
+frame's own cost - otherwise the sleep padding each frame out to 8.3 ms is
 measured as that cost. On a device with no immediate present mode the editor says
 so and stays paced by the display.
 
 ### The Demo tab *(v0.14)*
 
-The ribbon's last tab, and its one entry is **Demo Nodes** — a typed node graph
+The ribbon's last tab, and its one entry is **Demo Nodes** - a typed node graph
 with live evaluation. It changes nothing in the scene; it is there to be looked
 at, and to be the place the two node systems `ROADMAP.md` wants get designed
 against rather than invented twice.
@@ -534,14 +534,14 @@ Del · F               delete the selection · fit
 ```
 
 What it computes is terrain. **Noise, Ridged, Domain Warp, Terrace, Slope,
-Threshold and Combine** are the sync half — they run inside the frame, so a
+Threshold and Combine** are the sync half - they run inside the frame, so a
 slider drag re-runs the chain between frames. **Colourise** turns a height field
 into an actual picture, which is what the thumbnails on the nodes are drawing.
 
 **Erode** and **Staged Task** are the async half. Erosion is genuinely slow at
 256², so it runs on a worker and the node grows a progress bar and the stage it
 is on; the frame keeps drawing. Two staged tasks in two branches run at once
-because the evaluator starts every node whose inputs are ready — there is no
+because the evaluator starts every node whose inputs are ready - there is no
 scheduler deciding it, readiness *is* the schedule.
 
 Three properties worth knowing while using it:
@@ -555,8 +555,8 @@ Three properties worth knowing while using it:
 - **Live** follows every edit; turn it off and drive it with **Build** when the
   graph has a six-second task in it.
 
-The inspector down the right-hand side shows the selected node's picture large —
-the same texture the node draws, so it costs one conversion — with its stages and
+The inspector down the right-hand side shows the selected node's picture large -
+the same texture the node draws, so it costs one conversion - with its stages and
 whatever number it produced.
 
 ### Driving it with no display
@@ -568,14 +568,14 @@ just edit --headless --frames 12 --run play --capture shot.bmp
 
 **`--headless` is a renderer with no window rather than a hidden one.** There is
 no swapchain, nothing is presented, and the overlay and editor chrome do not
-draw — but the game loads, the panels lay themselves out, `--run play` starts the
+draw - but the game loads, the panels lay themselves out, `--run play` starts the
 scripts, the worlds tick and the world is drawn into an offscreen target that
 `--capture` writes out. A hidden window would still own a swapchain, and whether
 one can be acquired for a window nobody can see is a per-platform answer nobody
 should have to know.
 
 That is what makes the editor checkable by a build server, by a golden-image
-comparison, or by something driving it that is not a person — none of which
+comparison, or by something driving it that is not a person - none of which
 should depend on a display being free.
 
 `--capture` works with a window too, and captures the world rather than the
@@ -604,7 +604,7 @@ instance and every script's text. It is meant to be read:
 
 Only properties that differ from their class default are written, which is what
 keeps a scene of a thousand parts a file you can read a diff of. A single world
-exports on its own as a `.aworld` — File ▸ Export Active World — and imports
+exports on its own as a `.aworld` - File ▸ Export Active World - and imports
 back into any universe.
 
 **It is not a snapshot and does not replace one.** `--record` still writes the
@@ -636,8 +636,8 @@ server --game path/to/game.agame
 `.ts` is TypeScript/JavaScript and `.luau` is Luau; which one a file is comes
 from its extension, and a game may mix them. TypeScript is transpiled to staged
 JavaScript during the build when the pinned compiler is available.
-`mono.engine/examples/` holds the demo scenes, each written twice — once in each
-language, doing the same thing — so that the binding surface is exercised from
+`mono.engine/examples/` holds the demo scenes, each written twice - once in each
+language, doing the same thing - so that the binding surface is exercised from
 both.
 
 ### Shared Luau libraries
@@ -671,7 +671,7 @@ just run --script .cache/build/dev/assets/examples/MagicTests.luau # their tests
 **`MagicRuntime` draws a body and nothing else.** The Roblox original builds a
 `ParticleEmitter` per authored emitter, plus a `Trail`, a muzzle `Beam` and a
 `PointLight`; this engine has none of those classes, so every tail, plume and
-impact burst has nothing to draw it — 42 of them across the five demo lanes,
+impact burst has nothing to draw it - 42 of them across the five demo lanes,
 which `Magic.luau` prints at startup. The data is intact and every solver still
 routes it. See the table in `lib/MagicRuntime/init.luau`.
 
@@ -688,7 +688,7 @@ editor knows what a script may name without anything being restated by hand:
 | `luau-lsp.json` | points the language server at the definitions | yes |
 | `tsconfig.json` | lists the type root; `types: []`, no DOM | yes |
 | `package.json` | pins the exact `tsc` the check runs | yes |
-| `.vscode/settings.json` | the same luau-lsp keys, for VS Code | **no** — `.vscode/` is gitignored |
+| `.vscode/settings.json` | the same luau-lsp keys, for VS Code | **no** - `.vscode/` is gitignored |
 
 **Nothing needs installing.** The language server is vendored at
 `mono.vendor/luau-lsp` and built on demand:
@@ -702,24 +702,24 @@ tree, and **stops rather than building without one**. There is one today: it
 registers the `Enum` prefix so `local face: Enum.NormalId` resolves the way it
 already does in `just typecheck`, and the file's own preamble says why it is a
 patch here rather than a fork. If it ever fails to apply, upstream moved the code
-it edits — the message names the file to read.
+it edits - the message names the file to read.
 
 Point your editor at that binary and at `luau-lsp.json`. `.vscode/` is
-gitignored — editor configuration is personal here — so `luau-lsp.json` is the
+gitignored - editor configuration is personal here - so `luau-lsp.json` is the
 copy that survives a fresh clone, and a VS Code `settings.json` should mirror it
 rather than diverge from it.
 
 **One of its settings is load-bearing rather than a preference.**
 `luau-lsp.fflags.enableNewSolver` must be on: the declarations use the `keyof`
 and `index` type functions, which exist only in Luau's new solver, and without
-it the definitions file fails to load *entirely* — every global reads as
+it the definitions file fails to load *entirely* - every global reads as
 unknown, which looks like the file is missing rather than misconfigured.
 
 TypeScript needs no separate setup: `tsconfig.json` lists the type root and
 `package.json` pins the compiler, which `just typecheck` installs on first run.
 
 Both languages are checked together by `just typecheck`, which `just check`
-runs — see [The script type check](#the-script-type-check) for what it catches
+runs - see [The script type check](#the-script-type-check) for what it catches
 that `just bindings-check` does not. The declarations themselves are regenerated
 by `just bindings`. **A change to either is a change to what every script can
 name**, so the diff is the review.
@@ -741,13 +741,13 @@ its own, and it needs no language server and no configuration:
 | `Up` / `Down` | move through it |
 | `Enter`, or a click | accept |
 | `Escape` | dismiss |
-| `Tab` | still indents — it is never the accept key |
+| `Tab` | still indents - it is never the accept key |
 
 It offers classes inside an `Instance.new` call, properties after a dot, methods
 and signals after a colon, enum sets and their members, the globals of whichever
 language the script's `CodeSourceContainerSelector` selected, that language's
 keywords, the identifiers already in the file, and **the names of the instances
-beside the script in the tree** — which is the one thing luau-lsp cannot know,
+beside the script in the tree** - which is the one thing luau-lsp cannot know,
 because it reads files and not a world.
 
 **None of that list is written down anywhere.** Classes, properties and enums
@@ -760,7 +760,7 @@ The reason it is built that way rather than from a list is in
 
 It does **not** infer types. A local from `Instance.new("Part")` resolves,
 because the class is written on the line; one from `FindFirstChild` gets the
-union of every scriptable property instead — a longer list, never a wrong one.
+union of every scriptable property instead - a longer list, never a wrong one.
 `D00114` carries what narrowing it would take and why the obvious answer only
 helps one of the two languages.
 
@@ -799,15 +799,15 @@ example, so seeing one is a command rather than a path to look up:
 
 | Script | Scene |
 |---|---|
-| `run-demo` | the default scripted scene — `mono.engine/examples/Rings.luau` |
-| `run-rings` | orbiting, spinning parts — the loading path |
+| `run-demo` | the default scripted scene - `mono.engine/examples/Rings.luau` |
+| `run-rings` | orbiting, spinning parts - the loading path |
 | `run-skygrid` | a lattice of blocks in empty sky |
 | `run-terrain` | 16384² voxel terrain, streamed around a camera |
 | `run-magic` | spells fired at terrain they dig holes in |
 | `run-magic-tests` | the ported libraries' 183 tests, run here |
 | `run-libraries` | `MagicCore` and `TerrainCore`, loaded and exercised |
 | `run-interface` | a `ScreenGui` built entirely from a script |
-| `run-mirrors` | one room of mirrors, each with a different effect — the rendering path |
+| `run-mirrors` | one room of mirrors, each with a different effect - the rendering path |
 | `run-mirrors-4-worlds` | four worlds composited into one frame |
 | `run-portals` | a square building with three rooms in it, and a lap that closes early |
 | `run-non-euclidean` | six exhibits, each a room that lies about its own size |
@@ -828,14 +828,14 @@ SCENE=Slide.luau scripts/demos/run-local-server.sh
 **A server hosting `Playground.luau`, and a client window per player.** Each one
 is admitted, given a blocky character on the spawn pad and told which player it
 is; WASD walks it, Space jumps, the right mouse button turns the camera. Every
-client sees every other character move, because the movement happens once — on
-the server — and what crosses is the intent going up and the transform coming
+client sees every other character move, because the movement happens once - on
+the server - and what crosses is the intent going up and the transform coming
 down.
 
 **This is not `mono.unified_server_client`, and the difference is the reason to
 run it.** That harness cuts `net` out of the middle to prove the
 serialise/deserialise seam; this puts the socket, the handshake, the cipher and
-the bandwidth budget back, and adds the thing neither of them had — more than
+the bandwidth budget back, and adds the thing neither of them had - more than
 one player. `--net` is on by default in the script because the F4 panel is where
 this demo is read from: two characters that do not move have three explanations,
 and the panel separates them.
@@ -848,7 +848,7 @@ SCENE=PlayerList.luau scripts/demos/run-local-server.sh 4
 
 **The same four clients, and a panel in each naming all four.** A name appears
 when a client starts and vanishes when one is closed, and each client's own row
-is tinted — with everybody called `Player1` through `Player4` there is otherwise
+is tinted - with everybody called `Player1` through `Player4` there is otherwise
 nothing on screen saying which of them you are.
 
 **The rows are written into each player's own `PlayerGui` and not into
@@ -859,7 +859,7 @@ place both are true. Watching one client's panel while another closes is the
 demonstration.
 
 **TAB holds the panel open where there is a keyboard, and there is not one on a
-dedicated server** — so in this arrangement the panels stay shown. Press Play in
+dedicated server** - so in this arrangement the panels stay shown. Press Play in
 the studio, or run `./client --script PlayerList.luau`, to see the toggle
 itself. Holding a key is a fact about a *viewer* and closing that gap needs a
 script running in the replica, which `docs/DEFERRED.md` `D00122` carries.
@@ -875,7 +875,7 @@ into "these two clients disagree". A new game opens with a **Playground** and an
 **Live Instances** is where those two halves are listed, and it opens itself when
 a run starts. A row per server and a row per client, each with the counts that
 say whether a client is keeping up, and a `View` on each that is the way back to
-that instance's viewport — closing a view no longer loses it. `Stop` on a client
+that instance's viewport - closing a view no longer loses it. `Stop` on a client
 row removes that client, which is also what the ribbon's Stop does while you are
 looking at one, and `+ Player` on a server row admits another. A client view is
 listed here rather than among the scenes in the Worlds panel: it exists only
@@ -883,14 +883,14 @@ between Play and Stop and there is nothing about it to author.
 
 ### Things fall *(v0.13)*
 
-A new game gained a fourth world at v0.13, and it is **Slide** — a curved
+A new game gained a fourth world at v0.13, and it is **Slide** - a curved
 ramp with blocks that spawn at the top, slide down, launch off the lip and are
 destroyed ten seconds later. It is the first world this engine ever simulated.
 
 **The physics module was complete and connected to nothing.** Integrate, broad
 phase, narrow phase and solver had suites, benchmarks and no consumer:
 `RegisterPhysicsSystems` was called from `physics/tests/` and nowhere else. Every
-world that shipped was anchored throughout, which is why nobody noticed — an
+world that shipped was anchored throughout, which is why nobody noticed - an
 anchored part carries no rigid body at all, so a scene of anchored geometry
 integrates nothing and solves nothing.
 
@@ -903,10 +903,10 @@ Two things were missing, and they are separate features:
 
 **`Engine::physics` deliberately has no gravity and should not gain one.** A
 top-down game should not have to switch one off, so `RigidBody` carries no
-gravity scale and the pipeline has no gravity step — weight is a rule the world
+gravity scale and the pipeline has no gravity step - weight is a rule the world
 holds. `scene::Gravity` is that rule: a resource, so a world under water or on
 the moon authors a different vector, defaulting to 9.81 m/s² down. Earth's, in
-metres, because this engine measures parts in metres — Roblox's 196.2 is the same
+metres, because this engine measures parts in metres - Roblox's 196.2 is the same
 acceleration in studs and copying it here would make everything fall twenty times
 too fast.
 
@@ -929,7 +929,7 @@ part.MeshId = "characters/hero.amesh"
 part.TextureID = "skins/hero-winter.atex"
 ```
 
-**Setting only `MeshId` still works** — the part wears whatever each of its
+**Setting only `MeshId` still works** - the part wears whatever each of its
 submeshes recorded at bake time, which is how a character with six sheets loads
 without a script knowing any of them. What it does not give you is a handle: the
 sheet names live *inside* the mesh file, so there is nothing to read and nothing
@@ -943,14 +943,14 @@ part.TextureID = worn[1]        -- the same picture, said out loud
 part.TextureID = "skins/summer.atex"  -- a different outfit
 ```
 
-It answers in **submesh order, unsorted, duplicates kept** — unlike every other
+It answers in **submesh order, unsorted, duplicates kept** - unlike every other
 list that service hands out. Which run wears which is a fact, and a character
 with twenty submeshes sharing four sheets is four names repeated. An untextured
 run is an empty string in its own slot rather than a hole, so the index keeps
 meaning "submesh number". A built-in wears nothing and answers an empty table,
 as does a mesh this world has not been told about.
 
-**`TextureID` overrides every run at once** — Roblox's rule and this one's — so a
+**`TextureID` overrides every run at once** - Roblox's rule and this one's - so a
 twenty-submesh character given one sheet wears that sheet all over. That is the
 thing to know before reaching for it on an imported model.
 
@@ -966,7 +966,7 @@ a different one:
 | `Enum.SurfaceEffect` | What it looks like |
 |---|---|
 | `None` | the reflection as rendered |
-| `NightVision` | an image intensifier — everything to green, lifted, grained, vignetted |
+| `NightVision` | an image intensifier - everything to green, lifted, grained, vignetted |
 | `Thermal` | a heat map, black through blue, magenta, red and yellow to white |
 | `Cctv` | grey, scanlined, with a bright band rolling down it |
 | `Swirl` | the image twisted about its own centre, turning slowly |
@@ -981,7 +981,7 @@ reflection.Parent = pane
 **A grade on the way out, not a second render.** The surface pass draws the world
 exactly as it would have whatever the effect says; the effect is applied in
 `opaque.frag` where the pane samples the texture. So a graded wall costs the same
-as an ungraded one — no extra target, no extra pipeline, no extra bind — and
+as an ungraded one - no extra target, no extra pipeline, no extra bind - and
 switching one at runtime redraws nothing.
 
 That is also why a reflection of a reflection is graded once. The texture holds
@@ -997,7 +997,7 @@ otherwise.
 **A closed list rather than a shader name**, and that is a deliberate limit. This
 pipeline has one fragment program for opaque geometry; a mirror naming an
 arbitrary program would need a pipeline per program, a compilation path, and an
-answer for what happens when the file is missing on somebody else's machine —
+answer for what happens when the file is missing on somebody else's machine -
 which is the render graph `ROADMAP.md` puts behind a prototype project, not a
 field. Every effect here is a handful of instructions on the fragment that
 samples an image somebody already rendered.
@@ -1016,9 +1016,9 @@ hole.Parent = pane
 
 A mirror puts its camera where the eye would be reflected through the pane's own
 plane. A portal puts it through `destination · half-turn · source⁻¹` instead.
-Everything after that is the mirror's path unchanged — the same surface pass, the
+Everything after that is the mirror's path unchanged - the same surface pass, the
 same projected sampling in `opaque.frag`, the same per-surface `TagFilter`, the
-same one-frame-old texture — so a hole costs a mirror and nothing else.
+same one-frame-old texture - so a hole costs a mirror and nothing else.
 
 **Nothing constrains the two panes to describe one space**, and that is the
 non-Euclidean part. A destination turned, moved, or placed three hundred units
@@ -1027,7 +1027,7 @@ can turn through more than four right angles. `run-portals` is a square building
 with four quarters and three rooms in it: hall, library and garden clockwise
 round the middle, and one pair of holes joining the garden's west wall to the
 hall's south wall, where the fourth room would have been. The two panes are
-perpendicular, so the pair carries a quarter turn — walk the loop and you make
+perpendicular, so the pair carries a quarter turn - walk the loop and you make
 three right turns and arrive where you started, facing the way you set off. The
 middle of that building is a cone point with ninety degrees missing.
 `NON-EUCLIDEAN.md` is the investigation behind it.
@@ -1036,7 +1036,7 @@ middle of that building is a cone point with ninety degrees missing.
 The far frame is built by applying the *portal's own* `Face` to the destination's
 transform, so the destination must be a part whose matching face points at the
 space the hole should show. Aim it at a wall whose matching face points the other
-way and nothing complains — the pane renders, and it shows the empty space behind
+way and nothing complains - the pane renders, and it shows the empty space behind
 that wall. For unrotated rooms that means the wall on the same side of the far
 room; rotating the destination is the general answer.
 
@@ -1044,8 +1044,8 @@ room; rotating the destination is the general answer.
 rather than to a blank pane. A surface that stopped reflecting reads as something
 to fix; a pane that vanished reads as a broken renderer.
 
-**You can walk through these.** `scene::CrossPortals` maps a body — and its
-velocity, and the camera's yaw when the body is the one the camera follows —
+**You can walk through these.** `scene::CrossPortals` maps a body - and its
+velocity, and the camera's yaw when the body is the one the camera follows -
 through the same product the picture goes through, and `scene::OpenPortals`
 takes the pane's collider out of the solver's way so a walker reaches it at all.
 Press Play in the studio on `run-portals`' scene, or host it with
@@ -1056,7 +1056,7 @@ frame, deepest first.
 
 **A pane must be one part and it should be white.** One part because the
 rectangle a surface camera is fitted to and the rectangle `CrossPortals` tests
-against is that part's face — a hole built out of several is several holes
+against is that part's face - a hole built out of several is several holes
 against a budget of sixteen. White because `opaque.frag` tints the projected
 image by the pane's own colour, so a grey pane shows the far room dimmed, which
 reads as a lighting bug in a room that is lit correctly.
@@ -1066,7 +1066,7 @@ in a row, twelve holes, and the camera sweeps past them: a tunnel shorter inside
 than out and one longer inside than out, a house with four doors onto three
 rooms, a pillar with a different room behind each side, a hill whose bottom
 opens onto its own top, and a cell that holds four times the volume it occupies.
-Every one of them is the same pair of panes with the destination moved — no new
+Every one of them is the same pair of panes with the destination moved - no new
 engine code, which is the point. The one shape it *cannot* express is the tunnel
 that changes your scale, because the map through a portal is rigid; that is
 filed with D00112 as well.
@@ -1082,20 +1082,20 @@ scripts\demos\run-terrain.bat                # Windows, same everything
 
 **`--uncapped --max-fps 165` is one decision rather than two**, and every script
 here makes it. `--uncapped` alone turns off the vblank wait and lets the loop
-run as fast as the GPU allows — several hundred frames a second of heat for a
+run as fast as the GPU allows - several hundred frames a second of heat for a
 display that shows a fraction of them. The vblank wait alone paces to whatever
 the display reports, which is not comparable between two machines and is not
 what a variable-refresh monitor does. So: do not wait for the display, and do
 not run away from it either.
 
-The pair is what `--max-fps` is for, and it does nothing without `--uncapped` —
+The pair is what `--max-fps` is for, and it does nothing without `--uncapped` -
 with the wait on, the display is already the limiter and a second one fighting
 it produces judder rather than a lower number.
 
 Everything shared lives in `_common.sh` and `_common.bat`; a scene script is a
 header, a filename and its own flags. They call CMake rather than `just`, so the
 two halves cannot drift apart, and they resolve the repository from their own
-path — run them from anywhere. The `.bat` wants a Developer Command Prompt,
+path - run them from anywhere. The `.bat` wants a Developer Command Prompt,
 because it builds before it runs and a plain `cmd` window has no compiler in it;
 `scripts\build-windows.bat` first leaves nothing for it to compile, and
 [On Windows](#on-windows) is the reason either is necessary.
@@ -1134,11 +1134,11 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 ```
 
 Naming a `--profiler-tab` opens the graph, and `--profile-seconds` turns
-collection on — asking to see something is not a separate flag from showing it.
+collection on - asking to see something is not a separate flag from showing it.
 
 `--game` plays a `.agame` written by the editor: every world in it is
 simulated, its scripts run with both roles true, and there is no socket and no
-server library involved — single-player is the format and a VM, not a server
+server library involved - single-player is the format and a VM, not a server
 hosted in this process. Given both `--game` and `--script`, the game file wins
 and the client says so rather than choosing quietly.
 
@@ -1154,7 +1154,7 @@ just bench --filter ecs     # one area
 The same selection as `just test`, over `bench/` instead of `tests/`: a
 benchmark declares `TEST_SUITE_ID` and gets the same cascading signature, so a
 change at the bottom of the stack re-measures everything above it and nothing
-else. That matters more here than for tests — a test suite costs milliseconds
+else. That matters more here than for tests - a test suite costs milliseconds
 and a benchmark suite costs seconds by design.
 
 Always against the `bench` preset, which optimises. A debug build measures the
@@ -1170,7 +1170,7 @@ engine.ecs.bench.iteration
 **A number is reported, never enforced.** `just bench` does not fail on a slow
 figure and it should not: a laptop on battery, a CI runner with a noisy
 neighbour and a desktop with a compile going all swing further than most real
-regressions — the `+33.6%` above is one of those, not a change to the code. Read
+regressions - the `+33.6%` above is one of those, not a change to the code. Read
 the number, then decide. `docs/CODE_QUALITY.md`'s rule about attaching a
 measurement to an algorithm change is what this exists to serve.
 
@@ -1185,14 +1185,14 @@ just run --worlds 3 --entities 512
 
 Three whole worlds, each with its own clock, its own store and its own view
 channel, drawn into one frame side by side. They are *placed* rather than
-overlaid because two worlds' coordinates do not mean the same thing — nothing
+overlaid because two worlds' coordinates do not mean the same thing - nothing
 says they should, and drawing two scenes inside each other and calling it one is
 the mistake `--view-spacing` exists to avoid.
 
 The renderer draws what the compositor took off the channels rather than
 reaching into a store. Between a world at its tick rate and a frame at the
 display's sit three slots and an atomic index, so a slow frame **drops rather
-than throttles a simulation** — and a producer that stalls keeps its last frame
+than throttles a simulation** - and a producer that stalls keeps its last frame
 instead of vanishing for one.
 
 `--name=value` works everywhere `--name value` does. Everything after a bare
@@ -1202,8 +1202,8 @@ instead of vanishing for one.
 
 | Key | Does |
 |---|---|
-| **F3** | frame counter — FPS now, and min/avg/max over the last twenty seconds |
-| **F5** | frame graph — last frame's scope tree |
+| **F3** | frame counter - FPS now, and min/avg/max over the last twenty seconds |
+| **F5** | frame graph - last frame's scope tree |
 | **F6** / **F7** | next / previous frame-graph view |
 | **PgUp** / **PgDn** | scroll a graph taller than the panel |
 | **-** / **=** | shallower / deeper flamegraph |
@@ -1216,7 +1216,7 @@ from the scheduler, and whatever was written to the metrics sink.
 #### Reading the flamegraph
 
 One row per span, indented by nesting, with a colour chip for its category and a
-timeline strip on the right showing *when* in the frame it ran — which the
+timeline strip on the right showing *when* in the frame it ran - which the
 numbers cannot say, because two systems costing 2 ms each read identically
 whether they ran back to back or with the GPU wait between them.
 
@@ -1237,8 +1237,8 @@ is marked `+`, so a collapsed subtree never looks like a leaf.
 
 #### F8, for what the panel cannot show
 
-The panel shows one frame. `F8` writes the retained window — five seconds or
-20,000 frames, whichever comes first — to `frame-graph-snapshot.txt`: mean, p50,
+The panel shows one frame. `F8` writes the retained window - five seconds or
+20,000 frames, whichever comes first - to `frame-graph-snapshot.txt`: mean, p50,
 p99 and max per span, then the forty worst frames and the biggest spans in each.
 That last section is what separates "this span spikes" from "the whole frame
 went with it".
@@ -1257,7 +1257,7 @@ frame is paced by your display, every frame reads as 16.7 ms, and the flamegraph
 is dominated by the swapchain wait. With it you see what the frame actually
 costs.
 
-Remember that `dev` builds first-party code at `-O0` on purpose — a profile
+Remember that `dev` builds first-party code at `-O0` on purpose - a profile
 there measures what the engine does rather than what the optimiser rescued. Use
 the `release` preset when you want the shipped number instead:
 
@@ -1273,16 +1273,16 @@ just run --frames 600 --entities 4000 --uncapped
 
 `--frames` makes the client usable from a script or a CI job. The demo scene is
 a function of elapsed time and is deterministic, so two runs with the same
-arguments simulate the same thing — which is what makes comparing them mean
+arguments simulate the same thing - which is what makes comparing them mean
 anything.
 
 **`--entities` is also the view channel's ceiling**, which is worth knowing
 before it bites: it sizes the buffer a world publishes its draw list through, so
 a scripted scene with more parts than that number publishes nothing at all and
-the window is empty. The log says so — *"N instances is past this channel's
-maximum"* — and the fix is to raise `--entities`, not to shrink the scene.
+the window is empty. The log says so - *"N instances is past this channel's
+maximum"* - and the fix is to raise `--entities`, not to shrink the scene.
 
-### Seeing a frame — `--capture`
+### Seeing a frame - `--capture`
 
 ```sh
 just run --frames 60 --capture shot.bmp
@@ -1307,7 +1307,7 @@ The closing log line is the other half of the same question: *"88302 triangle(s)
 in 136 draw call(s) at the busiest frame"*. A world of cubes is twelve triangles
 an instance and a world of imported meshes is tens of thousands, so a run whose
 triangle count did not move is one where every `MeshId` resolved to the fallback
-cube — which is the deliberate degraded state and looks like a scene of boxes.
+cube - which is the deliberate degraded state and looks like a scene of boxes.
 
 ---
 
@@ -1365,7 +1365,7 @@ complete because a world is deterministic given its state and its inbox.
 
 The third form is what `just replay-check` runs: `again.rec` has to come back
 byte-identical to `run.rec`, which says the snapshot, the frame times and every
-envelope all reproduced — not merely that the replay survived.
+envelope all reproduced - not merely that the replay survived.
 `just determinism` makes the weaker but broader claim, that two live runs of one scene
 produce identical files. Both are same-binary, same-machine; cross-machine
 agreement is deliberately not promised, because floating point differs between
@@ -1375,7 +1375,7 @@ compilers and chips.
 
 A host is not a different program. It is this one, holding some of a universe's
 worlds in its own address space so that a hard fault in one of them takes that
-process rather than the server — which is what makes the grouping a deployment
+process rather than the server - which is what makes the grouping a deployment
 decision instead of an engine one.
 
 You do not run the host side by hand. You run the *driver* side, and it spawns
@@ -1386,7 +1386,7 @@ what it needs:
 ```
 
 That starts one host holding both worlds, links it, and routes every bus
-operation through the driver's own MessagingService, MemoryStore and DataStore —
+operation through the driver's own MessagingService, MemoryStore and DataStore -
 there is one router, so a world behaves the same wherever it is held. `--chatter`
 exists because there is no game file yet and therefore no traffic: it makes every
 world publish its name and tick on a shared topic, which is the only thing that
@@ -1446,12 +1446,12 @@ messages can substitute their own key, hold one session with each side and read
 everything. `net/Handshake.hpp` has said so since v0.3.
 
 With them, every `Welcome` carries an Ed25519 signature over the transcript, and
-a relay cannot produce one — it would have to make the server sign a transcript
+a relay cannot produce one - it would have to make the server sign a transcript
 naming the relay's own ephemeral key. A client whose pin does not match refuses
 outright rather than connecting anyway:
 
 ```
-replication: this is not the server that was pinned — refusing to connect.
+replication: this is not the server that was pinned - refusing to connect.
 ```
 
 The server prints the public half on start-up, which is what to give a client:
@@ -1460,7 +1460,7 @@ The server prints the public half on start-up, which is what to give a client:
 replication identity f78b1da9b3dfb3fa3a3e54c43e79389d2f04d6bccb62984f28bd6f91798a750d
 ```
 
-**It is the same key a publisher signs content with** — `cdn --signing-key` and
+**It is the same key a publisher signs content with** - `cdn --signing-key` and
 `client --publisher-key`. A server and the content it serves are one identity as
 far as a player is concerned, and two keys would be two things to distribute and
 two chances to pin the wrong one.
@@ -1518,7 +1518,7 @@ derive the same key on both machines.
 
 **Private authenticates; it does not hide.** A private session on a subnet is
 visible to everybody on that subnet and joinable by nobody without the key. A
-browser shows it as locked, which is deliberate — the person about to be given
+browser shows it as locked, which is deliberate - the person about to be given
 the key has to be able to see it exists.
 
 ### Across the internet
@@ -1539,7 +1539,7 @@ program: it holds an id, an address and a timestamp, and it needs to be
 somewhere an operator has already put on an address.
 
 **A private session is not listed at the point and cannot be.** The point holds
-no key and must not — that would make every operator of one a holder of every
+no key and must not - that would make every operator of one a holder of every
 private session's secret. So reaching a private session needs its id, which the
 host hands over along with the key. `server --advertise` prints both:
 
@@ -1568,7 +1568,7 @@ cdn --store DIR --rendezvous POINT:47601          # listed for anyone off-subnet
 cdn --store DIR --rendezvous-listen 47601         # be the meeting place
 ```
 
-A stream is not a second kind of origin — the same six routes are served to
+A stream is not a second kind of origin - the same six routes are served to
 everybody. What a stream decides is how a client *finds* it and whether it was
 invited, and `--stream-key` gates discovery rather than delivery: a grant is
 still what admits a fetch.
@@ -1580,7 +1580,7 @@ other editors on the subnet or through a point, and hands over a session id and
 a key to invite somebody with.
 
 **Edits replicate.** Host a session, and every editor that joins sees what you
-do — a create, a delete, a reparent, a property write. A recording crosses as
+do - a create, a delete, a reparent, a property write. A recording crosses as
 one message, so "set these forty parts to neon" arrives whole or not at all.
 
 The panel lists the editors it can see; **Join** connects to one, and the row
@@ -1605,7 +1605,7 @@ moment they make it; what waits for the turn is the *message*. A queued editor
 carries on working and their waypoints go out in the order they made them.
 
 If somebody else's edit is ordered ahead of one you are still waiting to send,
-your machine re-applies yours on top when theirs arrives — so every editor ends
+your machine re-applies yours on top when theirs arrives - so every editor ends
 on the same answer, and it is the host's order that decides which.
 
 A turn covers a subtree, not one instance: a turn over a model that let
@@ -1621,7 +1621,7 @@ The panel shows whose turn it is and how many edits are waiting; a guest running
 a modified build cannot jump the queue.
 
 **Everybody has to have the project open already.** A join carries edits, not
-the document — a scene the peer does not have is an edit that is dropped and
+the document - a scene the peer does not have is an edit that is dropped and
 counted. Open the same `.agame` on both machines first.
 
 ### ChangeHistoryService
@@ -1645,7 +1645,7 @@ ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Co
 ```
 
 Forty property writes, one press of Ctrl+Z. That grouping is the reason the
-service exists and is also the unit a shared document will travel in — a peer
+service exists and is also the unit a shared document will travel in - a peer
 that applied half of a group would show a state the author never saw.
 
 `Commit` keeps the recording as its own step, `Cancel` reverts it and puts
@@ -1665,7 +1665,7 @@ nothing on the redo stack, and `Append` folds it into the step before.
 **Two differences from Roblox, and both are the seam rather than a choice.**
 
 `GetCanUndo` and `GetCanRedo` return a table, because a host call answers one
-value — `local can, name = table.unpack(ChangeHistoryService:GetCanUndo())`.
+value - `local can, name = table.unpack(ChangeHistoryService:GetCanUndo())`.
 
 The events are calls that take a handler rather than signals with `:Connect`,
 because the host seam has no `RBXScriptSignal` type and inventing one for four
@@ -1687,14 +1687,14 @@ unaffected, which is the point rather than an oversight.
 
 Serves a game's content out of a directory. Two deployments, one program: beside
 the game for single-player, LAN and split-screen, or on its own for a large
-content collection. Nothing inside the program tells them apart — the difference
+content collection. Nothing inside the program tells them apart - the difference
 is which directory it mounts and who can reach it.
 
 Publishing and serving are **two invocations, and the split is deliberate**: the
 signing key belongs to whoever publishes the game and the origin holds none,
 which is what makes it safe to deploy on hardware nobody here owns.
 
-[`SETUP-CDN.md`](SETUP-CDN.md) is the walkthrough — a folder on your own machine,
+[`SETUP-CDN.md`](SETUP-CDN.md) is the walkthrough - a folder on your own machine,
 a store served from a directory, an origin on localhost, and what it takes to
 reach one from somewhere else. What follows here is the reference.
 
@@ -1714,7 +1714,7 @@ manifest root. It prints the root and **the publisher key**, which is what a
 client has to be told:
 
 ```
-[info] cdn: published 5 assets in 1 bundles — 717432 bytes of content in 717432 bytes of chunks
+[info] cdn: published 5 assets in 1 bundles - 717432 bytes of content in 717432 bytes of chunks
 [info] cdn: manifest root 8a1c34d1d3f8...
 [info] cdn: publisher key ba42458e83ba...
 ```
@@ -1740,14 +1740,14 @@ curl -o group.zst -H "x-atomic-grant: HEX" http://127.0.0.1:9080/bundle/<root>
 ```
 --store DIR              The content store to serve or publish into
 --publish DIR            Publish this directory of files into the store, then exit
---signing-key HEX        64 hex characters — the Ed25519 seed to sign a publish with
---grant-key HEX          64 hex characters — the secret shared with the server
+--signing-key HEX        64 hex characters - the Ed25519 seed to sign a publish with
+--grant-key HEX          64 hex characters - the secret shared with the server
 --port N                 Port to listen on (default 9080; 0 binds an ephemeral one)
 --ingest-key SECRET      Accept uploads at /ingest from whoever sends this
 --inbox DIR              Where uploads land (default: the raw/ beside a processed store)
 --upstream NAME=HOST:PORT   An origin to forward a miss to. Repeatable
 --allow-upstream         Forward a miss. Off unless asked for
---no-local-first         Always ask an upstream — a pure proxy
+--no-local-first         Always ask an upstream - a pure proxy
 --no-cache-upstream      Do not keep what an upstream returned
 --compression-level N    Zstd level groups are prepared at (default 9)
 --cache-bytes N          What the prepared-group cache may hold
@@ -1766,7 +1766,7 @@ A scrolling terminal view of the origin, on the alternate screen, redrawn four
 times a second:
 
 ```
-atomic — content origin · 0.0.0.0:9080
+atomic - content origin · 0.0.0.0:9080
 
 NETWORK
   now         out   31.8 KB/s   in    4.9 KB/s
@@ -1797,7 +1797,7 @@ BY KIND …  LARGEST 5 …  ASSETS (4, largest first) …
 | `q` or Ctrl-C | leave, restoring the terminal |
 
 **Out and in are measured at the socket**, so they count headers, health checks
-and a request that never finished arriving — which is what an operator watching
+and a request that never finished arriving - which is what an operator watching
 bandwidth wants. `group payload served` is the other question, what delivery
 actually cost, and one number could not answer both.
 
@@ -1805,21 +1805,21 @@ actually cost, and one number could not answer both.
 dashboard share a screen and the log would win a line at a time. It goes back on
 the way out, and the summary still prints.
 
-`--gui` on something that is not a terminal — a pipe, a log file, a service
-manager — warns and serves without it. Escape sequences written into a log file
+`--gui` on something that is not a terminal - a pipe, a log file, a service
+manager - warns and serves without it. Escape sequences written into a log file
 are a log nobody can read.
 
 `--grant-key` is **required to serve**, and it is not a convenience to remove.
 An origin that admitted everyone would be deciding who may have what, which is
-the server's job — CDN.md §4.
+the server's job - CDN.md §4.
 
 CDN.md §6's three deployments are flag combinations rather than three programs:
 
 | Deployment | Flags |
 |---|---|
-| Local store — serve your own disk | the default |
-| Cache server — local first, forward a miss, keep it | `--allow-upstream --upstream a=host:port` |
-| Pure proxy — always ask, keep nothing | `--allow-upstream --no-local-first --no-cache-upstream` |
+| Local store - serve your own disk | the default |
+| Cache server - local first, forward a miss, keep it | `--allow-upstream --upstream a=host:port` |
+| Pure proxy - always ask, keep nothing | `--allow-upstream --no-local-first --no-cache-upstream` |
 
 ### Attached to a server instead
 
@@ -1830,7 +1830,7 @@ just host --content-store ./store --content-grant-key HEX --content-port 9080
 ```
 
 The grant is then issued and verified across a function call, and **both halves
-are real** — the MAC is computed and checked. A path skipped in the
+are real** - the MAC is computed and checked. A path skipped in the
 configuration people develop against is a path that breaks the first time
 somebody ships the other one.
 
@@ -1843,7 +1843,7 @@ just run --cdn dir:./store --publisher-key HEX        # a local store, no wire
 
 `--cdn` is repeatable and **the order is the priority**: the first source that
 answers wins, and one that fails is passed over. That is how "local cache first,
-otherwise ask the origin" is expressed — there is no policy flag, because the
+otherwise ask the origin" is expressed - there is no policy flag, because the
 order of the list *is* the policy. The studio edits the same list under
 Preferences → Content.
 
@@ -1861,7 +1861,7 @@ just run --sound ./assets/track.mp3        # the same, and the decoder is picked
 ```
 
 **Two formats, and the second arrived with a licence rather than with a change
-of mind.** RIFF/WAV — 8, 16 and 24-bit integer PCM and 32-bit float — and MPEG
+of mind.** RIFF/WAV - 8, 16 and 24-bit integer PCM and 32-bit float - and MPEG
 Layer I, II and III, behind minimp3, which is CC0. `.ogg` and `.flac` are still
 classified by the content manifest and **not decoded**: each is a vendored codec
 and a licence decision, and listing an extension without a decoder behind it
@@ -1874,7 +1874,7 @@ it is heard**:
 
 | Parented to | Heard |
 |---|---|
-| `workspace`, or any service | everywhere, at one level — music |
+| `workspace`, or any service | everywhere, at one level - music |
 | a part, or anything with a place in the world | from that part, falling off between `RollOffMinDistance` and `RollOffMaxDistance` |
 
 ```lua
@@ -1886,7 +1886,7 @@ music.Parent = workspace
 music.Playing = true
 ```
 
-`SoundId` names a **published asset**, exactly as `MeshId` names a mesh — so the
+`SoundId` names a **published asset**, exactly as `MeshId` names a mesh - so the
 client plays it when it is pointed at a store that has it and is silent when it
 is not. Setting `Playing` before the content has streamed is fine: the row keeps
 asking and it starts on the frame the asset lands.
@@ -1910,25 +1910,25 @@ just run --script .cache/build/dev/assets/examples/Terrain.luau \
 [info] content: 0 mesh(es), 0 texture(s) and 1 sound(s) registered
 ```
 
-Decoding and resampling happen **once, at load**, never on the device thread —
+Decoding and resampling happen **once, at load**, never on the device thread -
 which is why the line above reports the device's rate rather than the file's.
 
 **A machine with no audio output is not an error.** The client says so and runs
 quietly:
 
 ```
-[info]    audio: no output available (No available audio device) — running silently
+[info]    audio: no output available (No available audio device) - running silently
 [warning] audio: 'tone.wav' decoded (1.00s) but there is no output on this machine
 ```
 
 A file that cannot be read, or is not audio this engine decodes, **is** an error
-and stops start-up — and it is reported whether or not there is a device, so a
+and stops start-up - and it is reported whether or not there is a device, so a
 typo'd path is visible on a headless box too.
 
 ### What it is doing underneath
 
 The pipeline is a node graph: `Player` inputs, `Fader`, `Emitter` and `Bus`
-processors, one `Output`. A tick never touches it — it posts a command carrying
+processors, one `Output`. A tick never touches it - it posts a command carrying
 a **sample deadline**, and the mixer splits its block at every deadline inside
 it. That is the one thing here that is a requirement rather than a refinement: a
 game ticks at frame rate and audio runs at sample rate, so a sound applied at
@@ -1939,7 +1939,7 @@ the top of whichever block comes next is audibly early or late.
 A store that is missing, or that holds no manifest, is refused at start-up with
 exit code 1, rather than being accepted and failing one request at a time.
 
-What exists is `cdn::ContentRoot` — the boundary between a content name and the
+What exists is `cdn::ContentRoot` - the boundary between a content name and the
 filesystem. It refuses traversal by default, and both of its checks are
 load-bearing: components are checked before the disk is touched, which catches
 `..` and absolute names but cannot see a symlink, and the resolved path is then
@@ -1947,11 +1947,11 @@ checked for containment, which catches the symlink. A symlink that stays inside
 the root is served, because an atomically swapped `current` is the deployment
 pattern this is for.
 
-The design — content addressing, the hierarchical hash, grants, and how groups
-are streamed so a game builds progressively — is `CDN.md` in the design notes.
+The design - content addressing, the hierarchical hash, grants, and how groups
+are streamed so a game builds progressively - is `CDN.md` in the design notes.
 What is still open at v0.9 is `control/` (the upload API and dashboard, in
 TypeScript), invalidation, and chunk-level verification of what an upstream
-returned — today that is a length check against the signed manifest, which is
+returned - today that is a length check against the signed manifest, which is
 real and is not the whole of one.
 
 ### Proving it needs no graphics stack
@@ -1962,8 +1962,8 @@ just check-cdn-is-bare
 
 Configures with no client and no server, builds, and fails if the staged `cdn/`
 directory has grown a `shaders/` folder or if another program was built into a
-cdn-only preset. The tier rule is what actually enforces this — `mono.cdn` is
-`shared` tier, and a `shared` target may link only `shared` — so a presentation
+cdn-only preset. The tier rule is what actually enforces this - `mono.cdn` is
+`shared` tier, and a `shared` target may link only `shared` - so a presentation
 module reaching this link line fails the configure with the edge named. The
 recipe is the version of that anybody can see without a graph query.
 
@@ -1990,7 +1990,7 @@ just test-list                                # what it would run, and why
 --verbose     Name every skipped suite
 ```
 
-It prints what it skipped, and warns when it had to narrow — no header closure
+It prints what it skipped, and warns when it had to narrow - no header closure
 for a suite, an unknown `TEST_DEPENDS`, a dependency cycle. Those warnings mean
 the cascade is covering less than it claims to, so do not ignore them.
 
@@ -1999,7 +1999,7 @@ That file is text: one tab-separated line per suite, so you can also delete a
 single line to re-run one thing.
 
 `just preset=server test` runs the server preset's suites with the server
-preset's runner — the preset override reaches `--build` too, so the binaries and
+preset's runner - the preset override reaches `--build` too, so the binaries and
 the build directory cannot come from different presets.
 
 ## The report
@@ -2013,7 +2013,7 @@ second taxonomy to keep in step with the first.
 
 Both documents cover **every** suite, not only the ones this invocation ran. A
 suite the cascade skipped shows its last known numbers and says `pass (cached)`
-in its result column — a green row you cannot tell from a row nothing
+in its result column - a green row you cannot tell from a row nothing
 re-checked is a green row that lies by omission. The counts and durations behind
 those rows live in `smart-tests.txt`, which is why it is at `v2`; a `v1` cache is
 discarded on sight rather than reported as a tree of suites holding no tests and
@@ -2021,7 +2021,7 @@ costing no time.
 
 The numbers come from the test binaries. `mono.build/testmain` registers a
 Catch2 reporter named `mono` that writes one tab-separated line per test case,
-and the runner asks for it alongside the console reporter — so the output you
+and the runner asks for it alongside the console reporter - so the output you
 read when something goes red is unchanged, and the report is a record of the run
 rather than a parse of its console text. You can ask a binary for it directly:
 
@@ -2033,12 +2033,12 @@ Neither document carries a timestamp. Two runs that learned the same thing
 produce the same bytes, so a diff shows what moved rather than that it was
 written again.
 
-`ctest` writes no report. It never consults the cache either — see below.
+`ctest` writes no report. It never consults the cache either - see below.
 
 ### Timings
 
 The runner prints what each suite cost as it goes, and both documents carry the
-same numbers — `Time` and `Slowest case` columns in the Markdown tables, and a
+same numbers - `Time` and `Slowest case` columns in the Markdown tables, and a
 flamegraph in the HTML.
 
 **Two clocks, measuring two different things.** A suite is timed by the runner,
@@ -2057,14 +2057,14 @@ fraction of it is a lot of ordinary ones. Those want different fixes.
 ### The flamegraph
 
 `test-output.html` opens with one. Width is wall-clock, depth is the identifier
-one component at a time — everything, then `engine`, then `engine.core`, then the
+one component at a time - everything, then `engine`, then `engine.core`, then the
 suite, then its cases. Hover a box for its name and what it cost. Widest first,
 so what is worth looking at is where you are already looking.
 
 It is nested `div`s with percentage widths and no script, so it stays
 proportional when you resize the window and renders on a machine with no network.
 
-A suite the cascade skipped is a **leaf** — washed out, with no cases under it.
+A suite the cascade skipped is a **leaf** - washed out, with no cases under it.
 `smart-tests.txt` is one line per suite, so it keeps a suite's total and not its
 breakdown; one line per *case* would be a different file with a different
 contract. Run `just test-all` for a graph that goes all the way down.
@@ -2077,7 +2077,7 @@ ctest -N            # list without running
 ctest -R ecs        # only suites matching a pattern
 ```
 
-`ctest` never consults the cache. Use it before a pull request — there is no CI
+`ctest` never consults the cache. Use it before a pull request - there is no CI
 to use it in, and [the `ci` preset](#the-ci-preset-and-the-hook-that-runs-it)
 says why; use `just test` in the inner loop.
 
@@ -2112,7 +2112,7 @@ sources and hoping a regex holds.
 just test-architecture
 ```
 
-It needs a *configure*, not a build — its input is the `target-graph.json` that
+It needs a *configure*, not a build - its input is the `target-graph.json` that
 CMake emits. Directly:
 
 ```sh
@@ -2121,7 +2121,7 @@ cmake -DGRAPH=.cache/build/dev/target-graph.json \
       -P mono.tools/architecture/CheckTargetGraph.cmake
 ```
 
-This is not what enforces the tier rule — `mono_check_all_tiers` does that at
+This is not what enforces the tier rule - `mono_check_all_tiers` does that at
 configure time and fails the build with the offending edge named. This checks
 the graph against the checked-in expectation, so that an architectural change
 shows up as a diff somebody reviews.
@@ -2140,14 +2140,14 @@ names for its stage; bindings contiguous within a set; and no SPIR-V capability
 outside an allowlist of what MSL can express.
 
 It also reads the translation back. The build writes an `.msl` beside every
-`.spv` — `mono.tools/shadercross` runs `Engine::msl` over each one — and this
+`.spv` - `mono.tools/shadercross` runs `Engine::msl` over each one - and this
 holds each translation to the module it came from: one entry point, named
 `main0` because MSL reserves `main`, qualified for the right stage; the file
 structurally well-formed; and every `[[texture]]`, `[[buffer]]` and
 `[[sampler]]` index the one SDL's documented order derives. A `.spv` with no
 `.msl` beside it is a failure rather than a skip.
 
-Directly, and without `--quiet`, for the per-shader table — including the
+Directly, and without `--quiet`, for the per-shader table - including the
 `[[texture(n)]]` or `[[buffer(n)]]` each resource lands on:
 
 ```sh
@@ -2162,7 +2162,7 @@ One shader by hand, if you want to read what a translation looks like:
 ```
 
 **It says nothing about a Metal device.** There is no Metal compiler here, so
-"the MSL is valid" means balanced, prefaced and bound where SDL will look — a
+"the MSL is valid" means balanced, prefaced and bound where SDL will look - a
 type error inside a function body passes. What it is for is the half of
 `docs/DEFERRED.md` D00001 that a machine with no Mac can answer, and that half
 is now larger than it was: MSL, DXIL and DXBC all derive their bindings from
@@ -2187,7 +2187,7 @@ tests but are not included by the current `just typecheck` glob. Directly:
 ```
 
 The language server answers the same question, and asking it is a recipe rather
-than a habit — it enables Luau's feature flags where `scriptcheck` does not,
+than a habit - it enables Luau's feature flags where `scriptcheck` does not,
 which is how the `declare class` deprecation was caught:
 
 ```sh
@@ -2201,19 +2201,19 @@ Directly, once the tool is built:
 ```
 
 **It is in `just check`, and 1.5 s of it.** What is not free is the first
-`just luau-lsp`, which compiles that tool's own copy of Luau — 11 minutes of CPU,
+`just luau-lsp`, which compiles that tool's own copy of Luau - 11 minutes of CPU,
 39 s wall on 24 cores, once. Afterwards the dependency is a no-op.
 
 **The two frontends have disagreed, which is why this is checked rather than
 suggested.** `scriptcheck` registers `importedTypeBindings["Enum"]` on its own
-frontend — a host-side call no definitions file can make — so
+frontend - a host-side call no definitions file can make - so
 `local face: Enum.NormalId` compiled, passed, and was underlined in an editor for
 three versions. A patch under `mono.vendor/patches/` closed that, and this recipe
 is what reports it if the patch stops applying or the spelling stops resolving.
 `docs/retired/DEFERRED.md` D00031 is the whole story.
 
 **Both run the same Luau.** `mono.vendor/luau` and `mono.vendor/luau-lsp/luau`
-are pinned to one commit, and `just luau-lsp` refuses to build if they drift —
+are pinned to one commit, and `just luau-lsp` refuses to build if they drift -
 an editor reporting a language the engine does not run is worse than an editor
 reporting nothing. That pin currently holds the engine one release behind
 upstream; `docs/DEFERRED.md` D00019 is why, and what it would take to stop.
@@ -2226,7 +2226,7 @@ leaves every script that named it broken, with nothing reporting it until the
 scene fails to build.
 
 The Luau half is `mono.tools/scriptcheck` rather than upstream's `luau-analyze`,
-which has no flag for loading a definition file — it can only check against
+which has no flag for loading a definition file - it can only check against
 Luau's built-in globals, so every `Instance`, `Vector3` and `workspace` in this
 engine would come back as an unknown global. `scriptcheck` loads the definitions
 into the global scope first, which is what a language server does, so this check
@@ -2235,7 +2235,7 @@ whatever a file's own `--!` directive says, because a check a script can switch
 off from the inside is not one.
 
 The TypeScript half needs `bun` or `npm` on `PATH`. **Without either it is
-skipped and says so** — it is the only check here that needs something outside
+skipped and says so** - it is the only check here that needs something outside
 the C++ toolchain, and growing the prerequisite list by a Node runtime is a
 worse trade than a check that reports when it did not run.
 
@@ -2246,7 +2246,7 @@ committed: TypeScript pins its own per-platform binaries to the same exact
 version, so the version string is already the whole tree and a lockfile would
 only be a format for bun and npm to disagree about.
 
-## Driving the engine from outside — `--mcp-port`
+## Driving the engine from outside - `--mcp-port`
 
 The `server` and `studio` programs can open a socket that answers **Model
 Context Protocol**, so a language model or a script can watch them and steer
@@ -2256,7 +2256,7 @@ do not currently register `--mcp-port`.
 
 **It is off unless you ask.** Read
 [SECURITY.md](SECURITY.md#the-control-surface-is-a-third-boundary-and-it-is-opt-in-for-that-reason)
-before opening one — it binds loopback only, has no authentication, and must
+before opening one - it binds loopback only, has no authentication, and must
 never be enabled on a host in front of players.
 
 ```sh
@@ -2275,8 +2275,8 @@ one machine do not collide:
 ### Connecting a client to it
 
 MCP clients launch a server as a subprocess and talk to it over stdio. The
-engine cannot be that subprocess — it is a program with a renderer and a
-universe that outlives any one client — so it listens, and `mcpbridge` is the
+engine cannot be that subprocess - it is a program with a renderer and a
+universe that outlives any one client - so it listens, and `mcpbridge` is the
 subprocess:
 
 **`.mcp.json` in the repository root already does this for the editor**, so a
@@ -2299,18 +2299,18 @@ with nothing to set up. Another program is one more entry:
 ```
 
 The path is relative on purpose: `.mcp.json` is checked in, and an absolute one
-carries whoever wrote it. It points into `.cache/`, which is not — so a fresh
+carries whoever wrote it. It points into `.cache/`, which is not - so a fresh
 clone needs `just build mcpbridge` before a client can start it.
 
 **The program has to be running first.** The bridge connects on start-up and
 exits 1 if nothing is listening, saying which command would have opened it:
 
 ```
-mcpbridge: could not reach an editor at 127.0.0.1:8738 — connect: Connection refused
+mcpbridge: could not reach an editor at 127.0.0.1:8738 - connect: Connection refused
 Start one with: just edit --mcp-port 8738
 ```
 
-That is the ordinary case rather than a fault — a client launches the bridge
+That is the ordinary case rather than a fault - a client launches the bridge
 when *it* starts, and the editor is started by a person.
 
 The bridge parses nothing. It copies bytes between the client's stdio and the
@@ -2320,13 +2320,13 @@ it exists and the bridge never changes.
 ### What a program answers
 
 `mono.engine/control` carries the handshake and the tools any program with
-worlds can answer — `engine_info`, `world_list`, `world_tree`, `instance_get`,
+worlds can answer - `engine_info`, `world_list`, `world_tree`, `instance_get`,
 `instance_set`, `profile_frame`. A program adds its own on top: the editor
 replaces `engine_info` with one that also knows about the open game file, and
 adds `world_run`, `select`, `selection_get` and `log_tail`.
 
 **A tool runs on the program's own thread, between input and simulation.** That
-is not an implementation detail — `Universe::Enter` aborts on a foreign thread
+is not an implementation detail - `Universe::Enter` aborts on a foreign thread
 rather than racing, so a tool lands at exactly the point in the frame where a
 person's click would have. It also means a slow tool is a stutter, which is why
 the tree tools take a `depth` and a `limit`.
@@ -2349,14 +2349,14 @@ just docs-serve    # build it and serve it on http://localhost:8000
 just docs-check    # fail if a public entity is undocumented
 ```
 
-`docs/CODE_DOCUMENTING.md` is how to write the comments that end up in it —
+`docs/CODE_DOCUMENTING.md` is how to write the comments that end up in it -
 where each one lands, and the tags that are available.
 
 The site lands in `.cache/build/<preset>/docs/html/`, so `just clean` takes it
 with everything else derived. `just docs-serve 9000` picks another port.
 
 **Needs `doxygen` on PATH, and `graphviz` for the diagrams.** Neither is a build
-prerequisite — a machine without them builds and tests exactly as before, and
+prerequisite - a machine without them builds and tests exactly as before, and
 `just docs` says which one is missing and how to install it rather than failing
 as a missing target.
 
@@ -2377,7 +2377,7 @@ see what Doxygen is being shown:
 `mono.tools/docgen/AGENTS.md` is the reasoning, including why the line count is
 an invariant and why the filter is scoped to `*.hpp`.
 
-## Baking content — `assetc`
+## Baking content - `assetc`
 
 ```sh
 assetc --input ART --output content            # a whole tree
@@ -2386,8 +2386,8 @@ assetc --input ART --output content --model-size 0 --max-texture 0   # leave bot
 ```
 
 Reads a directory of source art and writes one a content origin can publish.
-Models — `.glb`, `.gltf`, `.obj`, `.pmx` — become `.amesh`; images — `.png`,
-`.jpg`, `.bmp` — become `.atex`; **anything else is copied across unchanged**,
+Models - `.glb`, `.gltf`, `.obj`, `.pmx` - become `.amesh`; images - `.png`,
+`.jpg`, `.bmp` - become `.atex`; **anything else is copied across unchanged**,
 because the output tree is what gets published and a baker that dropped every
 sound and script would produce a directory missing half the game.
 
@@ -2407,14 +2407,14 @@ color = Bricks075A_Color.png
 ```
 
 `assetc` turns that into `materials/…/Bricks075A.amat` naming
-`materials/…/Bricks075A_Color.atex` — through `BakedName`, the one function that
+`materials/…/Bricks075A_Color.atex` - through `BakedName`, the one function that
 decides what a baked file is called, because a second spelling of that rule is a
 material resolving to nothing. A `.mat` naming no texture bakes fine and draws
 the engine's own default; a reference that escapes the input tree is refused, as
 a model's is. Unknown keys are ignored, so a material written for a later engine
 still bakes on this one.
 
-## Filling the store with materials — `just materials`
+## Filling the store with materials - `just materials`
 
 ```sh
 just materials              # 100 per source, 1K, ~2.7 GB of source art
@@ -2422,7 +2422,7 @@ just materials count=25     # a smaller pull
 ```
 
 Downloads public-domain PBR material sets from **ambientCG**, **Poly Haven** and
-**cgbookcase** — all three CC0 — into the content store's `raw/`, then bakes and
+**cgbookcase** - all three CC0 - into the content store's `raw/`, then bakes and
 publishes. Two steps, and the recipe is the two:
 
 ```sh
@@ -2431,7 +2431,7 @@ contentimport --publish
 ```
 
 **No key is typed**, because a local store signs with `cdn::DevelopmentSigningKey`
-— a constant in the source, deliberately not a secret. `--key HEX` still supplies
+- a constant in the source, deliberately not a secret. `--key HEX` still supplies
 your own, and `cdn --publish` still requires one; see "The store's three folders"
 below for what that identity is and is not for.
 
@@ -2448,27 +2448,27 @@ materials/ambientcg/Bricks075A_Height.atex
 ```
 
 **Only the colour map is sampled today.** The other four are published and
-fetchable and nothing reads them — `ROADMAP.md` v0.11's G-buffer is where they
+fetchable and nothing reads them - `ROADMAP.md` v0.11's G-buffer is where they
 get a pass, and the `.mat` gains four keys with it.
 
 **A tree under `raw/`, not the flat hash-named import `contentimport` does.** A
 material has to *name* its texture, and a hash rename gives it no name to write.
 `cdn::Publish` has always walked recursively and named assets by their path
-relative to the root, so this needed nothing new — only the studio's raw listing,
+relative to the root, so this needed nothing new - only the studio's raw listing,
 which was not recursive and showed the whole tree as empty.
 
 ## The store's three folders
 
 ```
 ~/Documents/atomic-game-engine/cdn/
-    raw/          what you put in — .png, .glb, .mat, .wav
-    baked/        what a runtime reads — .atex, .amesh, .amat
+    raw/          what you put in - .png, .glb, .mat, .wav
+    baked/        what a runtime reads - .atex, .amesh, .amat
     processed/    chunks, groups and a signed manifest
 ```
 
 **`baked/` arrived at v0.10 and its absence was a four-version bug.**
 `PublishLocal` published `raw/` directly, so a PNG imported through the assets
-panel reached a client *as a PNG* — and `assets::Texture::Read` refuses one,
+panel reached a client *as a PNG* - and `assets::Texture::Read` refuses one,
 because a runtime does not decode. Nothing said why: an `ImageLabel` drew its
 missing-image marker, a part's `ColorMap` did nothing, and a `MeshPart` drew the
 fallback cube. Baking is `contentimport --publish` and the studio's Publish
@@ -2476,7 +2476,7 @@ button; publishing an unbaked store is refused rather than writing an empty
 manifest over a working one.
 
 **A local store signs with a constant.** `cdn::DevelopmentSigningKey` is in the
-source and is not a secret — a signature answers "did the publisher I trust
+source and is not a secret - a signature answers "did the publisher I trust
 produce this", and for a folder on your own disk serving your own editor the
 answer is always yes. A client with no `--publisher-key` trusts it **only** when
 it is using the default local store and nobody named an origin; name any source
@@ -2491,25 +2491,25 @@ separate failures forced it:
 
 - `render::TextureTable` holds 512 MB and an uncompressed 1K sheet is four
   megabytes, so a store of 1,637 textures spends the ceiling after about a
-  hundred and forty — in *manifest* order, which has nothing to do with what the
+  hundred and forty - in *manifest* order, which has nothing to do with what the
   scene needs. The rest were refused, so the texture you asked for usually was
   not there.
 - **The unit that travels is a bundle, not an asset.** Asking for every mesh and
   material by kind therefore asks for essentially every bundle in the store, and
   `AssetClient::Pump` resolves, verifies and decompresses all of it *on the
-  calling thread* — the contract forbids a background thread, because a
+  calling thread* - the contract forbids a background thread, because a
   completion arriving at a moment scheduling chose would be a desync. On this
   repository's own store that was 6.9 GB through one function on the frame the
   editor opened: about 29 seconds of frozen studio, now 1.4.
 
 Every place content can be named is in `client::CollectWantedContent`. Two things
-are asked for later rather than there, and both for the same reason — the name is
+are asked for later rather than there, and both for the same reason - the name is
 not readable yet:
 
 - **A mesh's own sheets** are asked for when the mesh arrives, because
   `Submesh::Texture` lives inside the mesh file.
 - **A material's sheet** is asked for by the *next* pass over the world, because
-  `ResolveMaterials` writes it into `SurfaceAppearance::ColourMap` — a field the
+  `ResolveMaterials` writes it into `SurfaceAppearance::ColourMap` - a field the
   collector already reads. Asking on arrival instead is requesting by kind again
   one step later, which is how it was written the first time.
 
@@ -2522,7 +2522,7 @@ issued on the next and there is no queue to keep in step.
 The fetcher is resumable: anything already on disk is skipped, so an interrupted
 run or a raised `--count` costs only what is new.
 
-## Animated textures — `.gif`
+## Animated textures - `.gif`
 
 A `.gif` bakes to one ordinary `.atex` carrying a square grid of its frames, how
 many of the cells hold one, and the rate the source was authored at. Nothing
@@ -2536,7 +2536,7 @@ screen.ColorMap = "fox_dance.atex"   -- baked from fox_dance.gif
 
 The same name on an `ImageLabel` animates too. **Every part showing one GIF shows
 the same frame**, because the cell is a function of the clock rather than of
-anything an entity carries — a per-instance phase is a real feature and a
+anything an entity carries - a per-instance phase is a real feature and a
 different one. A particle emitter's flipbook is already that: `effects` picks the
 cell from a particle's own age, so `OneShot` stretches a sheet over a lifetime.
 
@@ -2545,11 +2545,11 @@ a 4x4 and anything past 64 frames is truncated. `bake/Gif.cpp` carries why that
 trade rather than an animated-texture type.
 
 **A paused editor holds its frame.** The clock is whatever the client or the
-studio has accumulated from its own frame deltas — no module here reads a wall
-clock — so a stopped run stops animating and two runs of one recording show the
+studio has accumulated from its own frame deltas - no module here reads a wall
+clock - so a stopped run stops animating and two runs of one recording show the
 same frames.
 
-## Vector art — `.svg`
+## Vector art - `.svg`
 
 An `.svg` bakes to an ordinary `.atex` like any other image, and nothing
 downstream knows it was ever a drawing:
@@ -2561,7 +2561,7 @@ label.Image = "icons/leaf.atex"       -- baked from icons/leaf.svg
 
 **A drawing has no pixels, so somebody has to choose them.** `assetc` uses the
 `width` and `height` the document declares, and `--max-texture` shrinks an
-oversized one by *rasterising it again* at the cap rather than by resampling —
+oversized one by *rasterising it again* at the cap rather than by resampling -
 the sharp answer is still available for a drawing, which is the whole reason the
 size is a parameter of the bake rather than a resize after it. A pipeline built
 by hand names the size on the node:
@@ -2574,7 +2574,7 @@ const NodeId drawn = graph.AddRasterize(256, 256);   // 0, 0 for what it declare
 paths of M/L/H/V/C/Z, solid `fill` and `stroke` with their opacities, and a
 `transform` of `translate` and `scale`. Text, gradients, filters, masks, `<use>`,
 `style` attributes, rotations and arcs each fail the file with a message naming
-what stopped it — a bake report saying `<text> is not an element this rasterises`
+what stopped it - a bake report saying `<text> is not an element this rasterises`
 is something to act on, where an icon that quietly arrived blank is not.
 `mono.engine/bake/src/Svg.cpp` carries the full list and the argument, and a
 `<!DOCTYPE>` or `<!ENTITY>` is refused outright.
@@ -2583,7 +2583,7 @@ is something to act on, where an icon that quietly arrived blank is not.
 
 The content picker has two tabs. **Published** is the manifest: baked forms only,
 because a `.pmx` and a `.amesh` are both `AssetKind::Mesh` and only the second is
-something a runtime reads. **Raw** is the other half of the store — what somebody
+something a runtime reads. **Raw** is the other half of the store - what somebody
 dragged in and has not baked.
 
 Choosing a raw row **bakes that one source now**, hands the bytes to the editor's
@@ -2591,7 +2591,7 @@ own renderer so it appears in the viewport immediately, and writes the *baked*
 name into the property. A publish is still what a client needs; the tab says so.
 
 Baking one file is a filter on the same walk `assetc` does, so a material picked
-this way still has its colour map rewritten by the same rule — there is no second
+this way still has its colour map rewritten by the same rule - there is no second
 baker with its own opinion about names.
 
 ## Using a material
@@ -2609,7 +2609,7 @@ material.Parent = part
 ```
 
 **A part with no `Material` draws the engine's own white plastic**, which is
-compiled in and needs no content store — so a fresh part looks like a fresh part
+compiled in and needs no content store - so a fresh part looks like a fresh part
 on a machine with nothing published. Setting `MaterialId` back to `""` returns it
 to that.
 
@@ -2621,13 +2621,13 @@ produces a directory, and a publisher publishes directories.
 
 **Two defaults do something and both can be turned off.** `--model-size 4`
 scales every model so its longest axis measures four metres, because the formats
-disagree by an order of magnitude about what a unit is — a PMX character is
-about twenty units tall and a glTF one about two — so a tree baked without it
+disagree by an order of magnitude about what a unit is - a PMX character is
+about twenty units tall and a glTF one about two - so a tree baked without it
 gives a scene where one model fills the sky. `--max-texture 2048` shrinks
 anything larger, because a character pack routinely carries several 4096-pixel
 sheets and four of those is a hundred megabytes of video memory.
 
-**`--model-size` and `MeshPart.Size` multiply — they do not override.** A part's
+**`--model-size` and `MeshPart.Size` multiply - they do not override.** A part's
 `Size` scales the mesh's own coordinates, exactly as it scales the unit cube a
 built-in shape is; it does not fit the mesh into a box of that size. So a model
 baked at `--model-size 4` and given `Size = Vector3.new(4, 4, 4)` draws *sixteen
@@ -2641,7 +2641,7 @@ its header says the same thing at the point of use.
 
 **`MeshPart.TrianglesCount` is how a script checks a mesh arrived.** It reports
 how many triangles the world found behind that part's `MeshId`, and it is
-read-only — the number is a fact about the mesh, which a publisher owns, not
+read-only - the number is a fact about the mesh, which a publisher owns, not
 about the part. **Zero means "this world has not been told"**: a headless
 server, a client before the content pump has run, or a `MeshId` naming something
 no publisher published. That last case is the same condition that draws the
@@ -2659,7 +2659,7 @@ build script notices. One unreadable model in a directory of four hundred should
 cost that model.
 
 The importers live in `mono.engine/bake`, which is the only code in the engine
-that reads a foreign format — and **nothing a shipped game links may link it**.
+that reads a foreign format - and **nothing a shipped game links may link it**.
 `mono.engine/bake/AGENTS.md` is the reasoning; `mono.tools/architecture/` is the
 enforcement.
 
@@ -2674,7 +2674,7 @@ just linecount > LINECOUNT.md                   # keep it
 
 Empty, comment and code across every `.cpp`, `.hpp`, `.h`, `.inl` and their
 relatives, as a markdown table. Directory rows are grouped two path segments
-deep — so a walk of the root reports per module — and `--depth 3` splits each
+deep - so a walk of the root reports per module - and `--depth 3` splits each
 one into its `src/`, `include/` and `tests/`.
 
 **`mono.vendor` and every dot-directory are excluded.** The vendored libraries
@@ -2685,7 +2685,7 @@ configured. `--vendor` includes the first, and `--exclude TEXT` drops anything
 else by substring.
 
 The classification is a scan of the whole file rather than a test on each line,
-because two things outlive a line — an open `/* */` and an unterminated raw
+because two things outlive a line - an open `/* */` and an unterminated raw
 string. A blank line is empty wherever it is, including inside a comment block;
 a line with code and a comment after it is code; and the GLSL in a `R"(...)"`
 is code, not comment. `mono.tools/linecount/include/linecount/Counter.hpp`
@@ -2727,7 +2727,7 @@ an error, because keeping "takes a value" and "does not" as separate
 declarations is what makes a missing value an error rather than a silently
 swallowed next argument.
 
-Tracy and the F5 overlay are fed by the same macros. Tracy is the real one —
+Tracy and the F5 overlay are fed by the same macros. Tracy is the real one -
 every thread, full history, a second process. The overlay exists for the case
 Tracy cannot cover: seeing a frame breakdown inside the running game, with
 nothing attached, on a machine that is not yours.
@@ -2741,8 +2741,8 @@ The same for every program here:
 | Code | Means |
 |---|---|
 | `0` | it worked |
-| `1` | it started and then failed — a missing shader, a bad tick rate, a failing suite |
-| `2` | the command line was wrong — unknown option, missing value |
+| `1` | it started and then failed - a missing shader, a bad tick rate, a failing suite |
+| `2` | the command line was wrong - unknown option, missing value |
 
 `2` is worth distinguishing in a script: it means the invocation is wrong, so
 retrying will not help.
@@ -2759,8 +2759,8 @@ cp -r .cache/build/dev/client /somewhere/else
 ```
 
 The binary finds `libSDL3.so.0` and `shaders/resources/` beside itself, not
-relative to the working directory. If you need it to read data from elsewhere —
-pointing a release build at a working tree, or a test at a fixture directory —
+relative to the working directory. If you need it to read data from elsewhere -
+pointing a release build at a working tree, or a test at a fixture directory -
 use `--override-assets-directory`.
 
 That flag is read once at startup, before anything loads a file. Setting it

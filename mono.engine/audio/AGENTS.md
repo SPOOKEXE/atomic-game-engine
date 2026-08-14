@@ -1,4 +1,4 @@
-# audio — module invariants
+# audio - module invariants
 
 L12 `client`. The mixer graph, spatialisation and the device.
 `core-features.md` asks for a DAW-like node pipeline and
@@ -44,7 +44,7 @@ take a lock:
   tick posts, one device drains. Two of either corrupts it silently.
 - **Scratch buffers are sized when the graph changes**, never during a render.
 - **A `SoundRef` is copied on the tick side**, so the callback neither allocates
-  one nor drops the last reference to one — dropping it would free a buffer
+  one nor drops the last reference to one - dropping it would free a buffer
   inside the callback.
 
 A full queue **drops and counts** rather than blocking. The producer is a tick
@@ -65,7 +65,7 @@ source ever appears it goes through the same constants.
 ## Cycles are refused at the wire, not detected at the mix
 
 A feedback loop is either infinite recursion inside a callback with a hard
-deadline, or unbounded gain — the loudest possible failure. `Connect` walks the
+deadline, or unbounded gain - the loudest possible failure. `Connect` walks the
 graph and refuses; connecting is not on the audio path, so the walk is free
 where it matters.
 
@@ -77,7 +77,7 @@ the wire, and the suite pins both directions.
 ## Everything above the device is data, which is why it is all tested
 
 CI has no sound card and a developer's is in use, so `NullDevice` is not a
-convenience — it is what makes this module testable at all.
+convenience - it is what makes this module testable at all.
 `Renderer::Initialise(nullptr)` made the same choice for graphics, and
 `AGENTS.md`'s rule that a header needing a GPU has no unit suite would otherwise
 apply here too.
@@ -94,7 +94,7 @@ make a noise would be worse than one that is silent.
 sounds add, so a mixer using them attenuates defensively at every stage and
 loses headroom it cannot get back. Exceeding ±1.0 *inside* the graph is legal
 and expected; the clamp happens once, at the output stage, and `MixReport::Peak`
-reports what the graph produced rather than what survived — measured after
+reports what the graph produced rather than what survived - measured after
 clipping it reads exactly 1.0 for ever, which is the number that hides the
 problem.
 
@@ -107,8 +107,8 @@ middle, so a sound swept across the front sags as it passes the centre.
 
 ## The decoder refuses rather than guessing
 
-`DecodeWav` takes bytes an origin served — `repo_layout.md` §1 says anyone can
-run one — and RIFF is a chain of length-prefixed chunks, which is to say a list
+`DecodeWav` takes bytes an origin served - `repo_layout.md` §1 says anyone can
+run one - and RIFF is a chain of length-prefixed chunks, which is to say a list
 of numbers telling a parser how far to jump.
 
 **No length is acted on before it is checked against what actually arrived**,
@@ -122,12 +122,12 @@ inaudible until somebody wonders why a footstep got quieter.
 **A codec this engine does not have is refused, never guessed at.** A decoder
 that guessed would produce noise at full volume, which is the single worst
 failure this subsystem has. `.ogg` and `.flac` are classified by the manifest
-and are still not decoded here — each is a vendored codec and a licence
+and are still not decoded here - each is a vendored codec and a licence
 decision, and listing an extension is not the same as decoding it.
 
 ### MP3 is decoded, and the licence is why
 
-`.mp3` moved out of that list at v0.9 because **minimp3 is CC0** — no
+`.mp3` moved out of that list at v0.9 because **minimp3 is CC0** - no
 attribution obligation, no patent grant to read, nothing that follows a shipped
 game. A codec is usually where a licence question ends the conversation, so
 when one does not, take it: the format a person actually has a music file in is
@@ -137,7 +137,7 @@ before a submodule, not a decoder written first.
 **`DecodeMp3`'s bound is on its output, and that is the whole difference from
 `DecodeWav`.** A RIFF chunk length is checked against the bytes that arrived, so
 the worst a malformed file does is decode short. An MPEG frame is about a
-hundred bytes and expands to 1152 frames of stereo — nine kilobytes — so the
+hundred bytes and expands to 1152 frames of stereo - nine kilobytes - so the
 input's length bounds nothing and a small file can ask for gigabytes.
 `MAXIMUM_MP3_SAMPLES` is checked before each append, which is the same rule
 `CDN.md` §5 puts on a Zstd frame: size the result from something other than the
@@ -145,7 +145,7 @@ attacker's number, and refuse rather than truncate.
 
 **An ID3v2 tag is skipped, never scanned past.** A tag carrying cover art
 carries a JPEG, a JPEG is arbitrary bytes, and arbitrary bytes contain frame
-syncs — eleven set bits occur once in every 2048 random byte pairs. A decoder
+syncs - eleven set bits occur once in every 2048 random byte pairs. A decoder
 hunting for its first frame through an embedded image would sometimes start
 decoding one.
 
@@ -161,7 +161,7 @@ independently decodable, so half a file is half a song. A short `data` chunk
 means a RIFF header lied about its length, and nothing after that is trustworthy.
 
 The suite's fixture is 731 bytes of real MPEG and its assertions are **pinned
-against ffmpeg's decode of the same bytes** — the same 8064 frames, the same
+against ffmpeg's decode of the same bytes** - the same 8064 frames, the same
 peak to seven figures. A decoder checked only against its own output is a
 decoder nobody has checked.
 
@@ -174,8 +174,8 @@ the second user.* Today `graph` holds the description of a frame and none of the
 execution, so routing audio through it would mean building that runtime against
 a second consumer before it exists for the first.
 
-This graph is small and deliberately shaped like the eventual one — nodes,
-ports, a topological order — so folding it in later is a move rather than a
+This graph is small and deliberately shaped like the eventual one - nodes,
+ports, a topological order - so folding it in later is a move rather than a
 rewrite. **Do not "unify" them until `graph` has an executor and physics uses
 it.**
 
@@ -197,7 +197,7 @@ Named so nobody adds half of one:
   buffer. Music-length content wants a ring fed by a worker, and that is a
   second kind of player node.
 - **Scene components and a scripting surface.** `DATATYPES_LIBRARIES.md` §15.1
-  puts `audio` among the bound services — play, bus routing, spatialisation,
-  analysis taps — and none of that is bound yet. The mixer is driven from C++.
+  puts `audio` among the bound services - play, bus routing, spatialisation,
+  analysis taps - and none of that is bound yet. The mixer is driven from C++.
 - **`voice` is not `audio`.** Capture, codecs and jitter buffers are a different
   subsystem and `DATATYPES_LIBRARIES.md` says so explicitly.

@@ -13,7 +13,7 @@
 #
 # Not as a recipe parameter. `build` is derived from `preset` at parse time and
 # a parameter cannot reach it, so `just test server` used to configure the
-# server preset and then run the *dev* preset's binaries — a mismatch nothing
+# server preset and then run the *dev* preset's binaries - a mismatch nothing
 # reported. One override, applied before anything is derived, is the only form
 # that cannot go wrong that way.
 preset := "dev"
@@ -37,11 +37,11 @@ setup: install-hooks
 # **`core.hooksPath`, so the hook is a file in the tree rather than a thing
 # somebody remembers to copy.** `.git/hooks/` is not cloned and not reviewable;
 # `.githooks/` is both. The cost is that the pointer is per-clone local config,
-# which is why `just setup` runs this — a fresh clone's first command installs
+# which is why `just setup` runs this - a fresh clone's first command installs
 # it, and nobody has to be told twice.
 #
 # Safe to re-run, and it refuses rather than silently replacing a hooksPath
-# somebody else set — a hook you did not install running on your push is worse
+# somebody else set - a hook you did not install running on your push is worse
 # than no hook.
 #
 # Installs `.githooks/pre-push`, which builds `preset=ci` before a push.
@@ -50,13 +50,13 @@ install-hooks:
     set -euo pipefail
     existing=$(git config --local --get core.hooksPath || true)
     if [ -n "$existing" ] && [ "$existing" != ".githooks" ]; then
-        echo "core.hooksPath is already '$existing', not .githooks — leaving it alone." >&2
+        echo "core.hooksPath is already '$existing', not .githooks - leaving it alone." >&2
         echo "  Set it yourself if you meant to:  git config core.hooksPath .githooks" >&2
         exit 1
     fi
     git config --local core.hooksPath .githooks
     chmod +x .githooks/*
-    echo "hooks installed — .githooks/pre-push builds preset=ci before a push."
+    echo "hooks installed - .githooks/pre-push builds preset=ci before a push."
     echo "Escape one deliberately with: git push --no-verify"
 
 # Configure one preset. Safe to re-run; CMake reuses the cache.
@@ -96,7 +96,7 @@ test-list: build
 # them on every change is how a benchmark suite stops being run at all.
 #
 # Against the `bench` preset, which optimises. A debug build measures the debug
-# build, and the danger is not that it is slower — it is that the *ratios*
+# build, and the danger is not that it is slower - it is that the *ratios*
 # between two implementations invert.
 #
 # A number is reported, never enforced. A laptop on battery and a machine with a
@@ -125,7 +125,7 @@ bench-accept *args: (bench "--all" "--accept" args)
 linecount *args: (build "linecount")
     @./{{build}}/tools/linecount {{args}}
 
-# The architecture test on its own — the target graph against the expectation.
+# The architecture test on its own - the target graph against the expectation.
 # Needs a configure, not a build: it reads what CMake emitted.
 test-architecture:
     cmake --preset {{preset}} > /dev/null
@@ -136,8 +136,8 @@ test-architecture:
 # Every first-party object against the header dependencies ninja recorded for it.
 #
 # **The check for a bug that produced a working build and a broken binary.** At
-# v0.15 fifty-seven of four hundred first-party objects had `#deps 0` — no
-# recorded headers at all — so a change to a header rebuilt some translation
+# v0.15 fifty-seven of four hundred first-party objects had `#deps 0` - no
+# recorded headers at all - so a change to a header rebuilt some translation
 # units and not others, and the result held two different layouts of one struct.
 # `studio::Options` grew a field, `Settings.ControlPort` read as zero instead of
 # minus one in the objects that had not been rebuilt, and the studio died in
@@ -146,8 +146,8 @@ test-architecture:
 # **A full `cmake --build` does not find it and no test can.** Ninja believed
 # everything was current, so the build was silent and green; the suites link
 # whatever the objects say and cannot see that two of them disagree. That is the
-# third category `AGENTS.md` rule 6 refuses to allow — a constraint that lives in
-# nobody's memory — which is why this is a recipe rather than a paragraph.
+# third category `AGENTS.md` rule 6 refuses to allow - a constraint that lives in
+# nobody's memory - which is why this is a recipe rather than a paragraph.
 #
 # The pattern was files added since the deps log was last rebuilt, so this is
 # worth running after anything arrives through a `CONFIGURE_DEPENDS` glob.
@@ -169,11 +169,11 @@ deps-check: build
         fi
     done < <(find . -name '*.cpp.o' -path '*mono.*')
     if [ "$missing" -gt 0 ]; then
-        echo "deps-check FAILED — $missing of $total first-party object(s) track no headers."
+        echo "deps-check FAILED - $missing of $total first-party object(s) track no headers."
         echo "A header change will not reach them, and the binary will mix struct layouts."
         exit 1
     fi
-    echo "deps ok — $total first-party object(s) track their headers"
+    echo "deps ok - $total first-party object(s) track their headers"
 
 # Every compiled shader against the resource contract SDL documents.
 #
@@ -181,7 +181,7 @@ deps-check: build
 # has said since v0.1 that macOS compiles SPIR-V and not MSL, with no trigger on
 # it because nobody here has the machine that would trip it. Most of what that
 # machine would find is not about Metal: `SDL_CreateGPUShader` documents one
-# resource layout per shader format, and every one of them — MSL, DXIL, DXBC — is
+# resource layout per shader format, and every one of them - MSL, DXIL, DXBC - is
 # derived from the descriptor sets and bindings in the SPIR-V. If those are
 # wrong, the translation is wrong, and the SPIR-V is here.
 #
@@ -190,14 +190,14 @@ deps-check: build
 # explicitly decorated; every resource in the descriptor set SDL's contract names
 # for its stage; bindings contiguous within a set, because every other format
 # numbers them by counting and a gap shifts everything after it; and no SPIR-V
-# capability outside an allowlist of what MSL can express — `double` being the
+# capability outside an allowlist of what MSL can express - `double` being the
 # one that compiles happily for Vulkan and cannot be translated at all.
 #
 # **Since v0.15 it also reads the translation back.** The build writes an `.msl`
 # beside every `.spv`, and this holds each one to the module it came from: one
 # entry point, named `main0` because MSL reserves `main`, qualified for the right
 # stage, and every `[[texture]]`, `[[buffer]]` and `[[sampler]]` index the one
-# SDL's documented order derives. That last check is not decoration — SPIRV-Cross
+# SDL's documented order derives. That last check is not decoration - SPIRV-Cross
 # left to itself numbered `opaque.frag`'s textures in id order and put the last
 # one in the descriptor set at `[[texture(0)]]`.
 #
@@ -206,8 +206,8 @@ deps-check: build
 # and no more. A check that asserted something this machine cannot observe would
 # be the same untested claim D00001 already records, arriving a second time.
 #
-# `--quiet` here because `just check` runs it. Drop it — `shadercheck
-# .cache/build/dev/shaderstage` — for the per-shader table, including the
+# `--quiet` here because `just check` runs it. Drop it - `shadercheck
+# .cache/build/dev/shaderstage` - for the per-shader table, including the
 # `[[texture(n)]]` and `[[buffer(n)]]` index each resource lands on.
 shader-check: build
     #!/usr/bin/env bash
@@ -226,7 +226,7 @@ shader-check: build
 # Regenerate the scripting manifest and the type declarations.
 #
 # The class table is the source; these are its output. Run this after changing a
-# property declaration and review the diff — a change to what the manifest says
+# property declaration and review the diff - a change to what the manifest says
 # is a change to what every script in every language can name.
 bindings: (build "bindings")
     ./{{build}}/tools/bindings
@@ -236,7 +236,7 @@ bindings: (build "bindings")
 # The same shape as `test-architecture`, and mandatory for the same reason: rule
 # 6 says a rule the build does not check is documentation. Without this the
 # manifest is a generated artefact nothing consumes, which is the failure this
-# repository has already watched twice — `just docs-check` at v0.2 and
+# repository has already watched twice - `just docs-check` at v0.2 and
 # `just preset=ci check` at v0.4, both of which stopped being true while still
 # claiming to pass.
 bindings-check: (build "bindings")
@@ -251,7 +251,7 @@ bindings-check: (build "bindings")
 # scene fails to build.
 #
 # The Luau half is `mono.tools/scriptcheck`, which exists because upstream's
-# `luau-analyze` has no way to load a definition file — see MonoVendor.cmake.
+# `luau-analyze` has no way to load a definition file - see MonoVendor.cmake.
 # The TypeScript half is `tsc` against the checked-in `tsconfig.json`, which
 # already lists the generated `.d.ts` as its type root.
 #
@@ -274,33 +274,33 @@ typecheck: (build "scriptcheck")
     elif command -v npm > /dev/null; then
         npm install --silent --no-audit --no-fund
     else
-        echo "typecheck ok — luau. TypeScript skipped: no bun or npm on PATH."
+        echo "typecheck ok - luau. TypeScript skipped: no bun or npm on PATH."
         exit 0
     fi
 
     ./node_modules/.bin/tsc --noEmit
-    echo "typecheck ok — luau and typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
+    echo "typecheck ok - luau and typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
 
 # The same scripts again, through the language server an editor actually runs.
 #
 # **`just typecheck` and an editor are two frontends over one definitions file,
 # and they have disagreed.** `scriptcheck` registers `importedTypeBindings["Enum"]`
-# on its own frontend, which is a host-side call no definitions file can make — so
+# on its own frontend, which is a host-side call no definitions file can make - so
 # `local face: Enum.NormalId` compiled, passed, and was underlined in the editor
 # for three versions. `docs/retired/DEFERRED.md` D00031 is that gap and the patch
 # that closed it; this recipe is what stops it reopening unnoticed, because a
 # patch that stops applying and a spelling that stops resolving both land here.
 #
-# It also enables Luau's feature flags, which `scriptcheck` does not — that is how
+# It also enables Luau's feature flags, which `scriptcheck` does not - that is how
 # the `declare class` deprecation was caught.
 #
 # **1.5 s over every example**, so it is in `just check` rather than beside it.
-# What is not free is the first run: `luau-lsp` compiles its own copy of Luau —
+# What is not free is the first run: `luau-lsp` compiles its own copy of Luau -
 # 11 minutes of CPU, 39 s wall on 24 cores, once. Afterwards the dependency is a
 # no-op.
 typecheck-editor: luau-lsp
     ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
-    @echo "typecheck-editor ok — every example agrees with the language server"
+    @echo "typecheck-editor ok - every example agrees with the language server"
 
 # The editor, with its control surface open for a Model Context Protocol client.
 #
@@ -311,7 +311,7 @@ typecheck-editor: luau-lsp
 #
 # Off unless asked for: the surface runs scripts, writes properties and saves
 # files for whatever connects, so opening it is a decision rather than a default.
-# `just mcp` opens 8738 — the port `.mcp.json` and RUNNING.md name for the
+# `just mcp` opens 8738 - the port `.mcp.json` and RUNNING.md name for the
 # editor, and they have to agree or a client connects to nothing; `just mcp 9001 --game My.agame` picks a port and passes
 # the rest through to the editor.
 #
@@ -327,8 +327,8 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 # The editor's language server, built from `mono.vendor/luau-lsp`.
 #
 # **The one vendor this build never compiles**, which is why it is a recipe of
-# its own rather than a target. `just setup` walks past the submodule —
-# `update = none` in `.gitmodules`, and the reason is written there — so this
+# its own rather than a target. `just setup` walks past the submodule -
+# `update = none` in `.gitmodules`, and the reason is written there - so this
 # clones it on first run. Nothing else in the repository needs it: `just
 # typecheck` gates on `mono.tools/scriptcheck`, which links our Luau.
 #
@@ -338,14 +338,14 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 #
 # **`-Wno-error=maybe-uninitialized`, and the narrowness is the point.** 1.9.2
 # hardcodes `-Wall -Werror` with no option to disable it, and GCC reports a
-# false positive inside nlohmann/json's `NLOHMANN_DEFINE_TYPE_*` macros — so the
+# false positive inside nlohmann/json's `NLOHMANN_DEFINE_TYPE_*` macros - so the
 # build fails on a warning about vendored code in a vendored tree.
 # `MonoVendor.cmake` turns Luau's own `LUAU_WERROR` off for exactly this reason.
 #
 # A blanket `-Wno-error` does not work here: `CMAKE_CXX_FLAGS` lands *before*
 # their `target_compile_options`, so the later `-Werror` wins. A specific
 # `-Wno-error=<warning>` takes precedence over the blanket form whatever the
-# order, which is why this names the warning rather than silencing all of them —
+# order, which is why this names the warning rather than silencing all of them -
 # every other warning upstream cares about still fails the build.
 #
 # **`-include cstdint` is the second one, and it is a dated bug rather than a
@@ -356,11 +356,11 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 # alternative is editing a file inside two vendored trees.
 #
 # **This is the version skew `.gitmodules` warns about, arriving early.** Our own
-# `mono.vendor/luau` is 0.731 and builds clean — the tree that does not is the
+# `mono.vendor/luau` is 0.731 and builds clean - the tree that does not is the
 # one luau-lsp brought with it.
 #
 # Flags rather than patches wherever a flag will do. Where one will not, the
-# patch is a file under `mono.vendor/patches/` applied here — the third shape
+# patch is a file under `mono.vendor/patches/` applied here - the third shape
 # `mono.vendor/AGENTS.md` argues for, taken over a fork so that nothing has to be
 # pushed to a remote we do not own.
 luau-lsp:
@@ -370,7 +370,7 @@ luau-lsp:
 
     # **The two Luaus must be one Luau.** The editor type-checks with the copy
     # luau-lsp brings and `just typecheck` with `mono.vendor/luau`; if they drift
-    # apart, an author gets diagnostics from a language the engine does not run —
+    # apart, an author gets diagnostics from a language the engine does not run -
     # which is worse than no editor support, because it looks authoritative.
     # Checked rather than written down, because rule 6 says a rule the build does
     # not check is documentation.
@@ -396,7 +396,7 @@ luau-lsp:
     shopt -s nullglob
     patches=(mono.vendor/patches/luau-lsp-*.patch)
     if [ ${#patches[@]} -eq 0 ]; then
-        echo "no patch found under mono.vendor/patches/ — one is checked in and this tree has none." >&2
+        echo "no patch found under mono.vendor/patches/ - one is checked in and this tree has none." >&2
         exit 1
     fi
 
@@ -410,7 +410,7 @@ luau-lsp:
             echo "$patch does not apply to mono.vendor/luau-lsp at $(git -C mono.vendor/luau-lsp rev-parse --short HEAD)." >&2
             echo "" >&2
             echo "Upstream moved the code it edits. Read the preamble at the top of the" >&2
-            echo "patch — it says what the hunk is for and where to re-point it — then" >&2
+            echo "patch - it says what the hunk is for and where to re-point it - then" >&2
             echo "regenerate it with 'git -C mono.vendor/luau-lsp diff'. Do not skip it:" >&2
             echo "without it the editor underlines every 'Enum.<Name>' annotation that" >&2
             echo "'just typecheck' accepts." >&2
@@ -425,12 +425,12 @@ luau-lsp:
     cmake --build .cache/build/luau-lsp --target luau-lsp
     echo ""
     echo "luau-lsp built: $(pwd)/.cache/build/luau-lsp/luau-lsp"
-    echo "Point your editor at it — see RUNNING.md, 'Autocomplete while you write one'."
+    echo "Point your editor at it - see RUNNING.md, 'Autocomplete while you write one'."
 
 # Every check there is, in the order to run them, against one preset.
 #
 # **The whole guarantee, and it is local.** No machine other than this one runs
-# any of it: there is no workflow on GitHub and there will not be one — the
+# any of it: there is no workflow on GitHub and there will not be one - the
 # repository's owner decided that, and `docs/retired/DEFERRED.md` D00005 carries
 # the decision and what it costs. So this recipe is not "what CI runs". It is
 # what a person runs before a push.
@@ -443,11 +443,11 @@ luau-lsp:
 # strictest configuration this repository has.
 #
 # **The one part of it that is not manual is the `ci` build**, which
-# `.githooks/pre-push` does for you — because that is the half that has gone
+# `.githooks/pre-push` does for you - because that is the half that has gone
 # uncompilable three times while being described as the standard, twice inside
 # v0.15 alone, and a check nobody runs stops being true.
 check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check typecheck typecheck-editor determinism replay-check
-    @echo "check ok — format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay"
+    @echo "check ok - format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay"
 
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")
@@ -461,7 +461,7 @@ demo: (build "client")
 #
 # The only program in the repository where `RunService:IsStudio()` is true, and
 # the one that writes a `.agame`. `just host --game X.agame` and
-# `just run --game X.agame` read the same file back — a dedicated server and a
+# `just run --game X.agame` read the same file back - a dedicated server and a
 # single-player client respectively, which is what makes the format a module
 # rather than something the editor owns.
 edit *args: (build "studio")
@@ -471,21 +471,21 @@ edit *args: (build "studio")
 #
 # **What makes the studio checkable by something that is not a person.** It
 # loads a game, starts it, renders the world into an offscreen target and writes
-# the result — no window, no compositor, no machine that has to be left alone.
+# the result - no window, no compositor, no machine that has to be left alone.
 # A scripted control or an agent reads the image instead of a screen.
 #
 # Not part of `just check`: it needs a GPU, and a build container that has none
 # would fail a check about the editor for a reason that is not about the editor.
 # **And a second shot, of the scene built to show content.** Every headless check
 # this editor could run was a count, and a count says the same thing whether the
-# models are right, squashed, inside-out, untextured or culled away — all five of
+# models are right, squashed, inside-out, untextured or culled away - all five of
 # which have happened. The mesh grid is the one scene whose whole job is to make
 # content visible, so photographing it turns "13 placed, 7 meshes, 16 textures"
 # into something somebody can actually disagree with.
 #
 # **Longer than twelve frames, because content arrives over several.** Naming a
 # mesh is what fetches it, the fetch spans frames, and the grid grows on
-# `Heartbeat` as bundles land — so a capture at frame ten is a picture of an empty
+# `Heartbeat` as bundles land - so a capture at frame ten is a picture of an empty
 # plate and says nothing.
 studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.bmp": (build "studio")
     @rm -f {{out}} {{meshes}}
@@ -493,12 +493,12 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
     @test -s {{out}} || (echo "FAIL: the headless editor wrote no capture" && exit 1)
     ./{{build}}/studio/studio --headless --frames 700 --run play         --capture-world Assets --capture {{meshes}} --width 1280 --height 900
     @test -s {{meshes}} || (echo "FAIL: the headless editor wrote no mesh capture" && exit 1)
-    @echo "studio ok — loaded, played and rendered with no display, into {{out}} and {{meshes}}"
+    @echo "studio ok - loaded, played and rendered with no display, into {{out}} and {{meshes}}"
 
 # Press a button in a shipped client, with no display, and read the answer back.
 #
 # **The check `docs/DEFERRED.md` D00125 asked for, and the bug it names is why.**
-# At v0.15 the shipped client did not route interface input at all — the router
+# At v0.15 the shipped client did not route interface input at all - the router
 # was constructed, read and never `Update`d, so a `TextButton` in a game never
 # lit and its `Activated` never fired, while the same tree worked in the editor
 # because the studio drives a router of its own. A button that does nothing in
@@ -508,7 +508,7 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
 # Closing it needed two things the client did not have: `--headless`, so the run
 # needs no display, and `--click NAME`, so something can press. The press is
 # synthesised into `input::Translator` as an ordinary SDL event and travels the
-# path a real click travels — same translator, same `scene::InputState`, same
+# path a real click travels - same translator, same `scene::InputState`, same
 # `gui::Router`, same `Runtime::DeliverGuiEvents`. A click that took a shortcut
 # past any of those would be a check of the shortcut.
 #
@@ -527,7 +527,7 @@ client-smoke: (build "client")
     trap 'rm -f "$log"' EXIT
     # **300 frames, and the margin is the point.** The press lands on frame 0 and
     # the release two frames later, but the script's handler does not run in the
-    # same breath — at 60 frames the run ended before it had, about one time in
+    # same breath - at 60 frames the run ended before it had, about one time in
     # four, which is a flake that would read as the click being broken. The run
     # costs about a third of a second either way.
     ./{{build}}/client/client --headless --frames 300 --width 960 --height 540 \
@@ -536,13 +536,13 @@ client-smoke: (build "client")
         || { echo "FAIL: the client never found or pressed the button"; tail -20 "$log"; exit 1; }
     grep -q "interface: swatch 3 activated" "$log" \
         || { echo "FAIL: the button was pressed and its Activated never reached the script"; tail -20 "$log"; exit 1; }
-    echo "client ok — pressed a button with no display and the script heard it"
+    echo "client ok - pressed a button with no display and the script heard it"
 
 # Drag the editor's window and check it is still alive afterwards.
 #
 # **The one bug class a headless run cannot reach.** The viewport shows last
 # frame's scene texture, so resizing the panel means the renderer frees a
-# texture the interface has already recorded a bind of — a use-after-free
+# texture the interface has already recorded a bind of - a use-after-free
 # inside SDL's Vulkan backend, with nothing of ours on the stack. It needs a
 # real window, a real swapchain and a window manager, which is exactly what
 # `--headless` does not have.
@@ -561,7 +561,7 @@ host *args: (build "server")
 # Two steps: the script writes source art into the store's `raw/`, and
 # `contentimport --publish` bakes `raw/` into `baked/` and publishes that. It
 # signs with `cdn::DevelopmentSigningKey` unless `--key` says otherwise, which is
-# why no key appears here — see `cdn/LocalStore.hpp` for what that identity is
+# why no key appears here - see `cdn/LocalStore.hpp` for what that identity is
 # and is not for.
 #
 # `just materials count=25` for a smaller pull. Re-running is cheap: the fetcher
@@ -590,7 +590,7 @@ unified *args: (build "unified_server_client")
 #
 # The determinism guarantee, checked rather than claimed. A recording is one
 # snapshot plus every envelope applied since, and both halves are written in a
-# stable order — so two runs of the same scene produce identical files, and any
+# stable order - so two runs of the same scene produce identical files, and any
 # difference is a wall clock, a pointer address, or an unordered container that
 # reached the simulation.
 #
@@ -601,14 +601,14 @@ determinism entities="512" ticks="200": (build "server")
     ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced         --record .cache/determinism-a.rec > /dev/null
     ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced         --record .cache/determinism-b.rec > /dev/null
     @cmp .cache/determinism-a.rec .cache/determinism-b.rec         || (echo "FAIL: two runs of the same scene diverged" && exit 1)
-    @echo "determinism ok — {{ticks}} ticks over {{entities}} entities, byte-identical"
+    @echo "determinism ok - {{ticks}} ticks over {{entities}} entities, byte-identical"
     @rm -f .cache/determinism-a.rec .cache/determinism-b.rec
 
 # A recorded run, replayed, and the replay recorded again.
 #
 # Stronger than the above: it proves the *replay* path reproduces the run rather
 # than merely that two live runs agree. A snapshot carries state and never code,
-# so the replaying process registers the same systems — which it does by being
+# so the replaying process registers the same systems - which it does by being
 # the same program.
 replay-check entities="256" ticks="120": (build "server")
     @rm -f .cache/replay-source.rec .cache/replay-again.rec
@@ -616,7 +616,7 @@ replay-check entities="256" ticks="120": (build "server")
     ./{{build}}/server/server --replay .cache/replay-source.rec         --record .cache/replay-again.rec > /dev/null
     @test -f .cache/replay-again.rec         || (echo "FAIL: replaying with --record wrote nothing" && exit 1)
     @cmp .cache/replay-source.rec .cache/replay-again.rec         || (echo "FAIL: the replay did not reproduce the run it replayed" && exit 1)
-    @echo "replay ok — {{ticks}} barriers reproduced, byte-identical"
+    @echo "replay ok - {{ticks}} barriers reproduced, byte-identical"
     @rm -f .cache/replay-source.rec .cache/replay-again.rec
 
 # Configure and build with no client at all, which is how the tier split is
@@ -635,7 +635,7 @@ check-server-is-headless:
 # no SDL and no shader compiler.
 #
 # MONO_VENDORED_GLSLC is left alone deliberately. The preset builds no client,
-# so the root CMakeLists never resolves a glslc at all — and if that stops being
+# so the root CMakeLists never resolves a glslc at all - and if that stops being
 # true, this recipe is where it shows up.
 check-cdn-is-bare:
     cmake --preset cdn > /dev/null
@@ -651,15 +651,15 @@ check-cdn-is-bare:
 # There is one node graph in this repository and it is `mono.vendor/nodegraph`.
 #
 # **The rule `D00113` spent two versions carrying.** That entry was open because
-# this design existed twice — the editor's `studio/NodeGraph.hpp` and the
-# template it came from — and the debt was never the second copy's quality. It
+# this design existed twice - the editor's `studio/NodeGraph.hpp` and the
+# template it came from - and the debt was never the second copy's quality. It
 # is that both accumulate callers and the neglected one is the one that goes
 # wrong, in the half nobody tests: the cycle guard, or the hash.
 #
 # A third would arrive as a file rather than as a decision. The render pipeline
 # editor and `Engine::bakegraph`'s pipeline documents are both still to be
 # written, and either could start its own registry and its own canvas without
-# anybody noticing until the first divergence — which is exactly what AGENTS.md
+# anybody noticing until the first divergence - which is exactly what AGENTS.md
 # rule 6 says to make the build check rather than leave in somebody's memory.
 #
 # Extend the library where it lives. `mono.vendor/nodegraph` is ours, it takes a
@@ -688,7 +688,7 @@ docs: (build "docgen")
     cmake --build --preset {{preset}} --target docs
 
 # The generated site, on a local port. Python is not a prerequisite of this
-# repository — it is only ever a convenience here, and the recipe says so rather
+# repository - it is only ever a convenience here, and the recipe says so rather
 # than failing with a traceback.
 docs-serve port="8000": docs
     #!/usr/bin/env bash
@@ -720,7 +720,7 @@ docs-check: (build "docgen") docs
     cmake --build --preset {{preset}} --target docs-check
 
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
-# `find .` so that mono.vendor/ is never touched — reformatting a submodule
+# `find .` so that mono.vendor/ is never touched - reformatting a submodule
 # turns every future update into a conflict.
 mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.network mono.tools mono.build"
 
@@ -728,7 +728,7 @@ mono_sources := "mono.engine mono.client mono.server mono.unified_server_client 
 #
 # `.clang-format` sets `BinPackParameters: OnePerLine`, which is an enum
 # introduced in clang-format 21. Every older version reads that key as a boolean
-# and stops with "invalid boolean" — a message that reads like the config is
+# and stops with "invalid boolean" - a message that reads like the config is
 # broken rather than the tool being too old, and which sent one person down the
 # wrong path already.
 #
@@ -740,8 +740,8 @@ mono_sources := "mono.engine mono.client mono.server mono.unified_server_client 
 # whatever answers to the bare name.
 #
 # **The major is pinned, and "21 or newer" was the bug.** Two majors do not agree
-# on the same file — include grouping and the wrapping of a long call are both
-# places they differ — so a rule that accepted a range made the formatting a
+# on the same file - include grouping and the wrapping of a long call are both
+# places they differ - so a rule that accepted a range made the formatting a
 # property of the machine. A box carrying an unversioned 21 *and* a versioned 23
 # formatted with 21 because the bare name was tried first; a box with only 23
 # formatted with 23; and the diff between them landed on files nobody had
@@ -799,8 +799,8 @@ format:
 # everyone downstream reads that green as "formatting is fine".
 #
 # **It names the tool it used, and the major is pinned so that name is the same
-# everywhere.** `.clang-format` carries no version field — the tool has none to
-# read — so `clang_format_major` above is where the number lives, and
+# everywhere.** `.clang-format` carries no version field - the tool has none to
+# read - so `clang_format_major` above is where the number lives, and
 # `find-clang-format` refuses anything else rather than taking whichever
 # candidate answered first. That is what turns "two machines reformat the same
 # file differently" from a thing to work around into a thing that cannot

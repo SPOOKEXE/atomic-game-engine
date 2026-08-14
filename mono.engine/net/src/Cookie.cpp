@@ -14,7 +14,7 @@ namespace engine::net {
 	namespace {
 		// The address, in a form that means one thing.
 		//
-		// Sixteen address bytes, the port big-endian, then the family — every
+		// Sixteen address bytes, the port big-endian, then the family - every
 		// byte of an `Endpoint` that distinguishes one peer from another, in a
 		// fixed order. A layout that skipped the family would let a v4 address
 		// and the v6 address whose first four bytes match it share a cookie.
@@ -177,7 +177,7 @@ namespace engine::net {
 		};
 
 		// Both are compared, and neither short-circuits. `VerifyBufsEqual` is
-		// constant time, and `|` rather than `||` keeps the pair that way too —
+		// constant time, and `|` rather than `||` keeps the pair that way too -
 		// an early exit on the first match would leak which secret answered,
 		// which is a bit of information about when the cookie was issued.
 		const unsigned matched =

@@ -3,7 +3,7 @@
 // A uniform hash grid over boxes, rebuilt from scratch every time.
 //
 // **The grid is rebuilt, never edited.** There is no `Insert`, no `Move` and no
-// `Remove`, and adding one would not be an extension — it would be a different
+// `Remove`, and adding one would not be an extension - it would be a different
 // data structure. This one is count-then-fill: one pass to measure, a prefix
 // sum, one pass to place every proxy into a single flat array, with no per-cell
 // vector and no allocation once the arrays have reached their size. An editable
@@ -40,8 +40,8 @@ namespace engine::spatial {
 	//
 	// The layers are **in the proxy** rather than looked up per candidate. A
 	// grid that held only `{id, box}` would have to resolve every candidate
-	// through whatever owns the layers to filter it — one random access per
-	// candidate, which is precisely the cost an index exists to remove — and it
+	// through whatever owns the layers to filter it - one random access per
+	// candidate, which is precisely the cost an index exists to remove - and it
 	// would make this module depend on the ECS to do it.
 	//
 	// @since v0.4
@@ -53,7 +53,7 @@ namespace engine::spatial {
 		// a caller wanting the exact shape tests the candidates itself.
 		core::AABB Bounds;
 
-		// Which layers it is on. Empty by default, matching nothing — see
+		// Which layers it is on. Empty by default, matching nothing - see
 		// `LayerMask`, which explains why that is the safer of the two
 		// wrong-by-default answers.
 		LayerMask Layers;
@@ -72,18 +72,18 @@ namespace engine::spatial {
 		// Cell edge length, in metres.
 		//
 		// **Measured, in the `bench` preset**, over 4000 colliders whose median
-		// is two metres across — `benchmarks/HashGrid.cpp`, which is also where
+		// is two metres across - `benchmarks/HashGrid.cpp`, which is also where
 		// to re-take it. Four metres is the minimum of both curves that
 		// matter, and they are not the same curve:
 		//
 		// | Cells | Rebuild, 4000 | OverlapBox | Raycast over 8m |
 		// |---|---|---|---|
-		// | 1 m | 893 us | 180 ns | — |
+		// | 1 m | 893 us | 180 ns | - |
 		// | 2 m | 224 us | 50 ns | 4.50 us |
 		// | **4 m** | **88 us** | **33 ns** | **3.35 us** |
 		// | 8 m | 61 us | 46 ns | 3.60 us |
 		// | 16 m | 53 us | 79 ns | 4.50 us |
-		// | 32 m | 51 us | 182 ns | — |
+		// | 32 m | 51 us | 182 ns | - |
 		//
 		// The rebuild alone would choose 32 metres. It does not get to: an
 		// overlap runs once per body per tick, so the thirteen nanoseconds
@@ -92,8 +92,8 @@ namespace engine::spatial {
 		// rebuild is 21 us at 1000 colliders and 33 us at 16000, the
 		// difference being cache rather than algorithm.
 		//
-		// This lands where the design note guessed — about twice the median
-		// collider extent — which is worth knowing for a scene whose colliders
+		// This lands where the design note guessed - about twice the median
+		// collider extent - which is worth knowing for a scene whose colliders
 		// are a different size. It is a default and not a law: construct with
 		// the size your own world measured, or call `SuggestCellSize` and let
 		// the world measure itself.
@@ -151,7 +151,7 @@ namespace engine::spatial {
 		//
 		// **Emptying is not a convenience, it is the only correct answer.**
 		// Every entry records the cell a proxy was binned into, and those
-		// coordinates are a function of the spacing — so a grid that kept its
+		// coordinates are a function of the spacing - so a grid that kept its
 		// entries across a size change would answer queries against cells that
 		// no longer exist. The caller rebuilds; that is what a rebuild-only
 		// index means.
@@ -189,8 +189,8 @@ namespace engine::spatial {
 		//
 		// The cell is stored rather than derived from the bucket, because a
 		// bucket holds every cell that hashed to it. Without the coordinate a
-		// query could not tell a genuine member from a collision, and — the
-		// part that actually bites — could not tell two cells of the *same*
+		// query could not tell a genuine member from a collision, and - the
+		// part that actually bites - could not tell two cells of the *same*
 		// proxy apart when both landed in one bucket, which would report that
 		// proxy twice.
 		struct Entry {
@@ -236,7 +236,7 @@ namespace engine::spatial {
 	// **The mean, not the median, and the difference is a sort.** A median needs
 	// the extents ordered, which is `O(n log n)` over every collider every time
 	// the set changes; the mean is one pass. What a median buys is resistance to
-	// outliers — and the quantisation below already flattens those, because an
+	// outliers - and the quantisation below already flattens those, because an
 	// outlier has to move the mean by a factor of two before it moves the
 	// answer at all.
 	//
@@ -244,7 +244,7 @@ namespace engine::spatial {
 	// exactly would differ every time a body was added, and each difference
 	// costs a full rebuild of the index; rounding to a power of two means the
 	// answer only changes when the scene's scale genuinely does. It is also
-	// where the cost curve is flat — the benchmark's 8 m and 16 m rows are
+	// where the cost curve is flat - the benchmark's 8 m and 16 m rows are
 	// within nine per cent of each other.
 	//
 	// **Deterministic, which it has to be.** One pass in the caller's order over

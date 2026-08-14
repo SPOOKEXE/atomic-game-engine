@@ -10,7 +10,7 @@
 //
 // The client side is the opposite and the boundary matters: a fetch issued from
 // a world *does* live inside a tick, and there rule 5 applies with no exception
-// — the completion is applied at the barrier. A chunk that becomes visible to a
+// - the completion is applied at the barrier. A chunk that becomes visible to a
 // system mid-tick is a desync. That half belongs to `Engine::assets` and the
 // world driver, not here.
 //
@@ -18,8 +18,8 @@
 // done: right for a tick, wrong for a service whose work is waiting on a
 // filesystem, because a construct that occupies a worker while it waits turns an
 // IO-bound origin into a thread-starved one. The one place a fan-out job *is*
-// right is preparing a group — hashing, chunking and compressing a known set is
-// CPU work with a known end — and that is where this uses one.
+// right is preparing a group - hashing, chunking and compressing a known set is
+// CPU work with a known end - and that is where this uses one.
 //
 // **A publication is immutable and publishing is an atomic swap.** A request
 // that started against one set of content keeps it, whatever is published
@@ -149,8 +149,8 @@ namespace cdn {
 	// Where a bundle's uncompressed bytes come from.
 	//
 	// **A seam, not a placeholder.** The on-disk chunk layout is a separate
-	// thing this module deliberately does not decide — CDN.md §7 lists it as not
-	// started — and wiring the pipeline directly to a filesystem would bake that
+	// thing this module deliberately does not decide - CDN.md §7 lists it as not
+	// started - and wiring the pipeline directly to a filesystem would bake that
 	// undecided layout into the request path. A source returns nothing when the
 	// bundle's bytes are unavailable, which the pipeline treats as a refusal
 	// rather than an empty group.
@@ -160,7 +160,7 @@ namespace cdn {
 	// One origin this one may forward a miss to.
 	//
 	// Named as well as addressed, because a name is what crosses into a
-	// configuration file, a log line and a dashboard — AGENTS.md rule 4 — and
+	// configuration file, a log line and a dashboard - AGENTS.md rule 4 - and
 	// "upstream 2 timed out" is not something anybody can act on.
 	struct UpstreamOrigin {
 		// What it is called.
@@ -172,7 +172,7 @@ namespace cdn {
 		std::string Endpoint;
 	};
 
-	// How this origin behaves — the whole of its setup.
+	// How this origin behaves - the whole of its setup.
 	//
 	// **Serving locally before asking anyone else is what makes this a cache
 	// server rather than a proxy**, and it is the default. A local hit costs a
@@ -184,14 +184,14 @@ namespace cdn {
 	//
 	// | Deployment | Settings |
 	// |---|---|
-	// | Local store — the server serving its own disk | `AllowUpstream` off |
-	// | Cache server — local first, upstream on a miss | `LocalFirst` on, `AllowUpstream` on |
-	// | Pure proxy — always ask upstream | `LocalFirst` off, `AllowUpstream` on |
+	// | Local store - the server serving its own disk | `AllowUpstream` off |
+	// | Cache server - local first, upstream on a miss | `LocalFirst` on, `AllowUpstream` on |
+	// | Pure proxy - always ask upstream | `LocalFirst` off, `AllowUpstream` on |
 	struct CDNSettings {
 		// Look in the local publication before asking any upstream.
 		//
 		// Off makes this a pure proxy that always forwards. That is a real
-		// deployment — an edge node holding no content of its own — but it is
+		// deployment - an edge node holding no content of its own - but it is
 		// not the common one, and it is not the default.
 		bool LocalFirst = true;
 
@@ -221,7 +221,7 @@ namespace cdn {
 		// Whether what an upstream returned must match the local manifest.
 		//
 		// **Leave this on.** A proxy that forwards bytes it cannot check is a
-		// proxy that launders a compromised upstream — and the local manifest is
+		// proxy that launders a compromised upstream - and the local manifest is
 		// signed, so the check costs nothing but a comparison. See
 		// `Origin::Pump` for exactly how much is checked today and what is still
 		// missing.
@@ -277,7 +277,7 @@ namespace cdn {
 		// Replaces the current publication, atomically.
 		//
 		// Requests already accepted keep the publication they were admitted
-		// against — that is the whole point of the swap. The prepared cache is
+		// against - that is the whole point of the swap. The prepared cache is
 		// cleared, because the previous publication's groups were compressed
 		// against content and a dictionary that are no longer current.
 		//
@@ -293,7 +293,7 @@ namespace cdn {
 
 		// Admits a request, or refuses it.
 		//
-		// The gate decides — the MAC, the expiry, then the scope — and this
+		// The gate decides - the MAC, the expiry, then the scope - and this
 		// learns nothing about who asked. A refused request still gets a handle
 		// so a caller can ask why once, rather than a bare failure that carries
 		// no state.
@@ -319,7 +319,7 @@ namespace cdn {
 		//
 		// **Cancellation is load-bearing, not a convenience.** The absence of it
 		// is what produces a game that hitches every time a player turns around
-		// — DATATYPES_LIBRARIES.md on the `assets` surface. A cancelled request
+		// - DATATYPES_LIBRARIES.md on the `assets` surface. A cancelled request
 		// is never prepared, and one cancelled mid-preparation has its result
 		// discarded rather than delivered to nobody.
 		//
@@ -334,7 +334,7 @@ namespace cdn {
 		//
 		// 1. **Cache lookup**, on one thread. A hit costs a lookup and no
 		//    compression at all.
-		// 2. **Resolve the payload** — local first, then upstream, per
+		// 2. **Resolve the payload** - local first, then upstream, per
 		//    `CDNSettings`. This is the IO, and it is deliberately *outside* the
 		//    fan-out below: a construct that occupies a worker while it waits on
 		//    a filesystem or a socket turns an IO-bound origin into a
@@ -348,7 +348,7 @@ namespace cdn {
 		// **What an upstream returns is checked against the local manifest**
 		// when `VerifyUpstream` is on: its length must match what the signed
 		// manifest records for that bundle. That is a real check against signed
-		// data and it is *not* the whole of one — chunk-level verification needs
+		// data and it is *not* the whole of one - chunk-level verification needs
 		// the chunk layout inside a group, which is not designed yet. A client
 		// verifies end to end regardless, so this is defence in depth rather than
 		// the trust boundary; the boundary is still the client's.
@@ -363,7 +363,7 @@ namespace cdn {
 		//
 		// The request is finished by this call, so a second Take answers
 		// nullptr. Holding the frame keeps its bytes alive even if the cache
-		// evicts it — which is what lets a slow client finish a transfer while
+		// evicts it - which is what lets a slow client finish a transfer while
 		// the origin serves everybody else.
 		//
 		// @param id The request.

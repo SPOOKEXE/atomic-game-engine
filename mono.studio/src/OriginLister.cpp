@@ -9,7 +9,7 @@
 // **It blocks, and the ceiling is the design.** `studio/AssetCatalogue.hpp`
 // carries the argument at `MakeOriginLister`: a listing is asked for when
 // somebody opens or refreshes the panel, so waiting for the answer with a bound
-// on the wait is cheaper — in code and in what can go wrong — than the per-tab
+// on the wait is cheaper - in code and in what can go wrong - than the per-tab
 // delivery client with its own lifetime and its own pump that D00111 rejected.
 
 #include <engine/assets/AssetKind.hpp>
@@ -115,7 +115,7 @@ namespace studio {
 
 				if (source.Kind != SourceKind::Http) {
 					// A directory is listed by reading its manifest and never
-					// by asking it anything — `DirectoryAssets`.
+					// by asking it anything - `DirectoryAssets`.
 					listing.Outcome = ListingOutcome::NotAsked;
 					return listing;
 				}
@@ -130,7 +130,7 @@ namespace studio {
 				const std::optional<Endpoint> address = Endpoint::Parse(source.Location);
 				if (!address) {
 					// `Endpoint::Parse` refuses a host name on purpose, which
-					// is the delivery client's limitation too — an address this
+					// is the delivery client's limitation too - an address this
 					// editor cannot reach is the same outcome as one nobody
 					// answers at.
 					listing.Outcome = ListingOutcome::Unreachable;
@@ -159,7 +159,7 @@ namespace studio {
 						return Only(ListingOutcome::Refused);
 					case http::Status::ServiceUnavailable:
 						// Up, and nothing published. A true empty listing
-						// rather than a failure — the empty case has its own
+						// rather than a failure - the empty case has its own
 						// sentence and it is the right one.
 						return Only(ListingOutcome::Listed);
 					default:
@@ -186,7 +186,7 @@ namespace studio {
 					for (const CatalogueEntry &entry : page->Entries) {
 						if (listing.Entries.size() >= Bounds.MaximumEntries) {
 							ENGINE_WARN(
-								"catalogue: {} listed more than {} assets — the rest is not shown",
+								"catalogue: {} listed more than {} assets - the rest is not shown",
 								source.Location,
 								Bounds.MaximumEntries
 							);

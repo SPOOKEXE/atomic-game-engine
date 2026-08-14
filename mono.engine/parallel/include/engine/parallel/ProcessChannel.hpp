@@ -5,8 +5,8 @@
 // `Channel.hpp` is the queue, and a caller holding one cannot tell what carries
 // the bytes. This is the other half of that promise: owning the operating
 // system endpoint, handing it to a child, and picking it up again on the far
-// side. Separate because it is a different job — a `Channel` is a queue, and an
-// endpoint is a resource with an owner and a lifetime — and because most of the
+// side. Separate because it is a different job - a `Channel` is a queue, and an
+// endpoint is a resource with an owner and a lifetime - and because most of the
 // engine wants the queue and none of the resource.
 //
 // **Nothing here names a platform either.** An endpoint is an `int64_t` whose
@@ -113,7 +113,7 @@ namespace engine::parallel {
 	// Creates a pair whose remote end survives being handed to a child process.
 	//
 	// Same interface, same framing, same refusal-instead-of-blocking as the
-	// local one — the caller cannot tell them apart, which is what makes
+	// local one - the caller cannot tell them apart, which is what makes
 	// thread-per-world and process-per-world one design rather than two.
 	//
 	// Costs more than `MakeLocalChannel` even when both ends stay here, because

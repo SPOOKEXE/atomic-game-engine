@@ -226,7 +226,7 @@ TEST_CASE("a frame fills the screen it was given", "[cdn][terminal]") {
 	const std::string frame = RenderFrame(board, view, ScreenSize{80, 24});
 
 	// Twenty-three document rows and a status bar, which is the whole of the
-	// screen and no more — a frame that overran would scroll the terminal and
+	// screen and no more - a frame that overran would scroll the terminal and
 	// leave the top row somewhere above it.
 	CHECK(CountLines(frame) == 23);
 	CHECK(frame.starts_with("\x1b[H"));
@@ -245,7 +245,7 @@ TEST_CASE("a frame draws where the view is scrolled to", "[cdn][terminal]") {
 	const std::string frame = RenderFrame(board, view, ScreenSize{80, 24});
 
 	// The listing is largest first, so the smallest asset is the document's
-	// last line — and the title, which is its first, is nowhere on the screen.
+	// last line - and the title, which is its first, is nowhere on the screen.
 	CHECK(frame.find("meshes/asset-0.mesh") != std::string::npos);
 	CHECK(frame.find("content origin") == std::string::npos);
 }
@@ -259,7 +259,7 @@ TEST_CASE("a narrow screen cuts the line rather than wrapping it", "[cdn][termin
 	const std::string frame = RenderFrame(board, view, ScreenSize{20, 6});
 
 	// A wrapped line takes two rows, and a screen of six rows would then hold
-	// four of them — so what is drawn no longer matches what was scrolled to.
+	// four of them - so what is drawn no longer matches what was scrolled to.
 	CHECK(CountLines(frame) == 5);
 	CHECK(frame.find("127.0.0.1:9080") == std::string::npos);
 }

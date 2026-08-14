@@ -5,8 +5,8 @@
 // **A delivery client answers in bursts, and the cost is on the taking end.**
 // `Pump` finishes whatever the sources managed this frame, and a scene that
 // named forty meshes at once gets forty answers in the frame the origin caught
-// up. Taking one is cheap; what follows it is not — an `.amesh` has to be
-// decoded and uploaded to the GPU before anything can draw it — so a loop that
+// up. Taking one is cheap; what follows it is not - an `.amesh` has to be
+// decoded and uploaded to the GPU before anything can draw it - so a loop that
 // drains every completed request the moment it notices them spends a third of a
 // second in one frame and the editor stops responding while somebody's model
 // set lands.
@@ -20,7 +20,7 @@
 // or uselessly large for the second.
 //
 // **What does not fit is deferred, not dropped.** An arrival a frame cannot
-// take is still an arrival — the caller puts it back in its pending list, which
+// take is still an arrival - the caller puts it back in its pending list, which
 // is exactly what it already does for a request that has not finished, so
 // nothing had to learn a new state to wait in.
 //
@@ -32,7 +32,7 @@
 // **Here rather than in the two loops that use it.** The studio and the client
 // each drain content in their frame loop and neither is reachable from a test,
 // so a rule written twice in two untestable places is a rule the build does not
-// check — see rule 6. The counters exist for the same reason: `Deferred` is how
+// check - see rule 6. The counters exist for the same reason: `Deferred` is how
 // a test, or somebody reading a profile, can tell "the budget did nothing" from
 // "the budget is doing its job" without instrumenting the loop.
 //

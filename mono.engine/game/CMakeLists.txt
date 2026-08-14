@@ -2,7 +2,7 @@
 #
 # **Shared rather than client**, which is the whole reason it is a module and
 # not part of `mono.studio`. The studio writes a game file, a dedicated server
-# reads one, and a client reads one to play single-player — three programs
+# reads one, and a client reads one to play single-player - three programs
 # across two tiers. A format owned by one of them is a format the other two
 # reimplement, and rule 6's version of that is two descriptions of one thing.
 #
@@ -15,7 +15,7 @@ mono_add_library(game
 		Engine::core
 
 		# L3. `ecs::Classes` is the reflection this whole format is written
-		# against — the properties a document holds are the ones a class
+		# against - the properties a document holds are the ones a class
 		# declares, so adding a property to a class adds it to the save file
 		# with nothing here changing. That is the reason a game file needs no
 		# schema of its own.
@@ -47,7 +47,7 @@ mono_add_library(game
 		# **`bakegraph` and never `bake`**, which is the entire reason that
 		# module exists. `bake` carries the PNG, JPEG, GIF, BMP, OBJ, glTF and
 		# PMX readers and its own build file says nothing a shipped game links
-		# may link it — so naming it here to parse a *text document* would put
+		# may link it - so naming it here to parse a *text document* would put
 		# every decoder into `server`, which links this and has no reason to
 		# decode a JPEG. `bakegraph` links `core` and nothing else; the day this
 		# edge wants widening to `bake`, the answer is no. `D00102`.
@@ -56,7 +56,7 @@ mono_add_library(game
 		# TODO(render-pipeline): kept for the save format's sake, and nothing in
 		# `game` names a `graph::` type today.
 		#
-		# A world carried its render pipelines the way it carries its scripts —
+		# A world carried its render pipelines the way it carries its scripts -
 		# authored content, and a world that exported its parts but forgot how it
 		# was drawn would lose an editor's work on exit. The set serialised to
 		# text, so the format embedded it rather than inventing a second one.

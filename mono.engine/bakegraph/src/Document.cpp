@@ -183,7 +183,7 @@ namespace engine::bake {
 
 		// **Written through `std::to_chars`, which round trips.** The shortest
 		// text that reads back as the same float, so a scale of a third saved
-		// and reloaded is bit-identical rather than nearly so — and a bake is
+		// and reloaded is bit-identical rather than nearly so - and a bake is
 		// supposed to be reproducible.
 		void AppendFloat(std::string &out, float value) {
 			std::array<char, 32> buffer{};
@@ -313,7 +313,7 @@ namespace engine::bake {
 		// **A node kind this build does not have lands here as `false`**, which
 		// is the whole of the unknown-kind story: `NodeFromText` knows a closed
 		// list, so `node bevel` from a newer editor is refused exactly as a
-		// misspelling is. The caller decides what a refusal costs — and for a
+		// misspelling is. The caller decides what a refusal costs - and for a
 		// world document that is the pipeline rather than the world.
 		//
 		// @return `false` when the line is not an operation.

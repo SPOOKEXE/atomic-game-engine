@@ -6,19 +6,19 @@
 // beam is a strip between two attachments with a Bezier curve through it; a trail
 // is a strip between two attachments *sampled over time*. Both come out as a
 // run of quads with a width, a colour and a texture coordinate along their
-// length, so there is one builder and two sources of points — rather than two
+// length, so there is one builder and two sources of points - rather than two
 // builders that agree until somebody fixes a winding bug in one of them.
 //
 // **Neither is a `scene::DrawInstance` and neither has a mesh.** A ribbon's
 // geometry is a function of where its endpoints are *this frame*, so a mesh would
-// be a mesh rebuilt every frame — which is a mesh table entry churning at frame
+// be a mesh rebuilt every frame - which is a mesh table entry churning at frame
 // rate for something that is four vertices per segment. The builder writes a
 // vertex stream the renderer uploads directly, the same way the particle stream
 // is uploaded.
 //
 // **A trail's history is on the trail's own row and is a fixed-capacity ring.**
 // A `std::vector` per trail is an allocation per trail and a pointer chase per
-// segment, and — the rule that actually forbids it — a component holding one
+// segment, and - the rule that actually forbids it - a component holding one
 // cannot survive being memcpy'd across a process boundary. Sixteen points is
 // enough for a sword swipe or a tyre mark at any frame rate worth drawing, and
 // `Trail::Lifetime` is what decides how far back in time those sixteen reach.
@@ -50,7 +50,7 @@ namespace engine::effects {
 	// How many points of history a trail keeps.
 	//
 	// Sixteen, for the reason the header gives. A power of two, so the ring's
-	// index is a mask rather than a modulo — this is walked per trail per frame.
+	// index is a mask rather than a modulo - this is walked per trail per frame.
 	inline constexpr uint32_t TRAIL_POINTS = 16;
 
 	// How many segments a beam is drawn with.
@@ -85,7 +85,7 @@ namespace engine::effects {
 		// Its colour and alpha, RGBA8.
 		//
 		// Per vertex rather than per ribbon, because a beam's colour is a
-		// `ColorSequence` along its length and a trail's fades towards its tail —
+		// `ColorSequence` along its length and a trail's fades towards its tail -
 		// which is the whole visual point of both.
 		uint32_t Colour = 0xFFFFFFFF;
 	};
@@ -94,7 +94,7 @@ namespace engine::effects {
 	//
 	// The property surface is Roblox's `Beam`, minus what is not implemented:
 	// `LightEmission` and `LightInfluence` are absent rather than declared and
-	// ignored, because the pass is unlit — `SurfaceAppearance`'s rule.
+	// ignored, because the pass is unlit - `SurfaceAppearance`'s rule.
 	//
 	// @since v0.10
 	struct Beam {
@@ -110,7 +110,7 @@ namespace engine::effects {
 		// Which attachment it leaves from.
 		//
 		// **An entity handle and not a name**, which is `PropertyType::Reference`
-		// and is meaningless outside this world — stated because it is the one
+		// and is meaningless outside this world - stated because it is the one
 		// field here that does not survive a wire on its own. `replication` turns
 		// a handle into its own identifier; a beam on a replica whose attachments
 		// have not arrived draws nothing, which is the honest state.
@@ -250,7 +250,7 @@ namespace engine::effects {
 		// Where this ribbon's vertices start.
 		uint32_t First = 0;
 
-		// How many there are. Always even — a strip is pairs.
+		// How many there are. Always even - a strip is pairs.
 		uint32_t Count = 0;
 
 		// Which texture, by name. Invalid draws a flat colour.
@@ -287,7 +287,7 @@ namespace engine::effects {
 	// and the difference is what a trail *is*: a record of where something has
 	// been. Sampling it at frame rate would make a trail's length depend on the
 	// machine drawing it, so two players swinging the same sword would leave
-	// different arcs — which is a desync arriving through a decoration.
+	// different arcs - which is a desync arriving through a decoration.
 	//
 	// @param store The world.
 	// @param delta How much time passed, in seconds.

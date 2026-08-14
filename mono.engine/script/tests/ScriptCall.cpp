@@ -2,7 +2,7 @@
 //
 // **This suite is the reason the neutral layer is worth having.** One method
 // table is only an improvement over two hand-written ones if something runs both
-// VMs and compares the answers — otherwise it is a third place the same fact is
+// VMs and compares the answers - otherwise it is a third place the same fact is
 // written. What went before was exactly that failure without the table: Luau's
 // instance methods numbered thirty and JavaScript's twenty-one, the pivot pair,
 // the three tag calls and the four attribute calls were reachable from one
@@ -18,7 +18,7 @@
 //
 // **The answer crosses as `workspace.Name`, because a property is already
 // neutral.** `Runtime::Run` reports whether a chunk ran and not what it
-// evaluated to, so a value has to be written somewhere C++ can read it — and the
+// evaluated to, so a value has to be written somewhere C++ can read it - and the
 // property surface is the one channel this suite is not testing, which is what
 // makes it usable as the wire.
 
@@ -64,7 +64,7 @@ namespace {
 		// **The whole class tree and not only the core of it**, which
 		// `EnsureClassTree` is: `ShaderScript` and the rest arrive through
 		// `RegisterSceneClasses`, and a case naming one of them without this gets
-		// "not a registered class" — a chunk that fails for a reason that has
+		// "not a registered class" - a chunk that fails for a reason that has
 		// nothing to do with what it was asserting. Registration is process-wide
 		// and idempotent, so the cost is a compare after the first call.
 		engine::scene::RegisterSceneClasses();
@@ -149,7 +149,7 @@ namespace {
 
 		// **Before the runtime, not after.** `MakeRuntime` installs the services
 		// against this store, and a resource a service reads at install time
-		// would otherwise arrive too late — `OpenWorkspace` is the one that
+		// would otherwise arrive too late - `OpenWorkspace` is the one that
 		// already depends on the order.
 		if (setup) {
 			setup(store);
@@ -160,7 +160,7 @@ namespace {
 
 		// **Held before the chunk runs, because the chunk renames it.**
 		// `scene::WorkspaceOf` resolves by *class* since v0.17, so a rename no
-		// longer strands it — but holding the handle is still what makes the
+		// longer strands it - but holding the handle is still what makes the
 		// answer readable without asking a renamed world for a name it no longer
 		// has. Until that fix this was load-bearing for a worse reason: the
 		// lookup was by name, so asking afterwards found nothing and
@@ -177,7 +177,7 @@ namespace {
 			// **The store's own boundary before the runtime's**, which is what
 			// `World::Tick` does around a real one. A *property* change reaches
 			// `ChangeQueue` through `Store::OnChangedComponent`, and that fires at
-			// `FlushSignals` — so without this a `GetPropertyChangedSignal` case
+			// `FlushSignals` - so without this a `GetPropertyChangedSignal` case
 			// beats with an empty queue and reads as a signal that never fires.
 			// An attribute needs none of it, which is why the cases here got by
 			// without it until a property one arrived.
@@ -195,7 +195,7 @@ namespace {
 	struct ParityCase {
 		const char *Name;
 
-		// Built per language, because a few of them genuinely differ — counting
+		// Built per language, because a few of them genuinely differ - counting
 		// a map's keys is a `for` loop in one and `Object.keys` in the other.
 		// What is asserted is the *answer*, never the spelling.
 		std::function<std::string(Language)> Body;
@@ -291,7 +291,7 @@ namespace {
 	}
 
 	// A window that has just regained focus, which is a `PreviousFocused` of
-	// false and a `Focused` of true — an edge and not a state.
+	// false and a `Focused` of true - an edge and not a state.
 	void FocusRegained(Store &store) {
 		engine::scene::InputState input;
 		input.Focused = true;
@@ -303,7 +303,7 @@ namespace {
 	//
 	// **The local is not decoration on the Luau side.** `luaL_sandbox` enables
 	// `safeenv`, so a bare `Global.Field` compiles to a `GETIMPORT` resolved once
-	// per closure and a live property would read as a frozen one —
+	// per closure and a live property would read as a frozen one -
 	// `DEFERRED.md` D00030. JavaScript has no such edge and gets the same
 	// spelling for free, which is what makes one string serve both.
 	//
@@ -318,7 +318,7 @@ namespace {
 	//
 	// **Each half is stringified rather than the whole**, and both reasons are
 	// Luau's: `..` refuses a boolean and a nil outright, and it binds tighter than
-	// `==` — so a bare `a .. '/' .. b == nil` is a concatenation error *and* the
+	// `==` - so a bare `a .. '/' .. b == nil` is a concatenation error *and* the
 	// wrong precedence. Wrapping each side settles both, and costs the JavaScript
 	// spelling nothing it was not already doing.
 	std::string Join(Language language, std::string_view left, std::string_view right) {
@@ -331,7 +331,7 @@ namespace {
 TEST_CASE("every neutral method is a member in both languages", "[scripting][scriptcall]") {
 	// **The structural half, and the one that would have caught the drift.** A
 	// method missing from a language is `undefined` in JavaScript and a missing
-	// member in Luau, and neither says anything until a script reaches it — which
+	// member in Luau, and neither says anything until a script reaches it - which
 	// is how nine methods stayed absent from one VM across two versions with the
 	// type declarations claiming all nine.
 	for (const Language language : LANGUAGES) {
@@ -341,7 +341,7 @@ TEST_CASE("every neutral method is a member in both languages", "[scripting][scr
 
 		for (const InstanceMethod &method : NeutralInstanceMethods()) {
 			// **No local, because every JavaScript chunk shares one global
-			// scope** — a second `let part` in the same VM is a `SyntaxError`
+			// scope** - a second `let part` in the same VM is a `SyntaxError`
 			// before a line of it runs, which would fail this case for a reason
 			// that has nothing to do with the method being asked about.
 			const std::string name(method.Name);
@@ -623,7 +623,7 @@ namespace {
 		);
 		store.SetParent(store.CreateInstance(plain, "Sword"), store.FindFirstRoot("StarterPack"));
 
-		// Local, so `Players.LocalPlayer` answers — the probe below is the other
+		// Local, so `Players.LocalPlayer` answers - the probe below is the other
 		// half of the one three cases up, which asserts it is nil where nobody
 		// is looking.
 		REQUIRE(engine::scene::AddPlayer(store, "Ada", true, 99) != engine::ecs::NULL_ENTITY);
@@ -633,7 +633,7 @@ namespace {
 TEST_CASE("the whole player surface answers the same in both languages", "[scripting][scriptcall]") {
 	// **Every member the join pipeline added, read through a real VM of each
 	// language.** A property is neutral by construction and a method is neutral
-	// because `ScriptMethods.cpp` is one table — but "by construction" is what
+	// because `ScriptMethods.cpp` is one table - but "by construction" is what
 	// the twenty-one hand-written JavaScript methods were also said to be, so
 	// this runs both and compares.
 	const auto players = [](Language language) {
@@ -775,7 +775,7 @@ TEST_CASE("the whole player surface answers the same in both languages", "[scrip
 TEST_CASE("two lives fire both character signals, in both languages", "[scripting][scriptcall]") {
 	// **Two spawns, and they have to be two *ticks*, which is what the parity
 	// harness cannot express.** A body that arrives and goes inside one barrier
-	// is one no handler could act on, so the arrival is dropped — the sequence
+	// is one no handler could act on, so the arrival is dropped - the sequence
 	// only reads as a life when there is a beat between the two.
 	//
 	// **And the two signals arrive by two different routes**, which is the thing
@@ -786,7 +786,7 @@ TEST_CASE("two lives fire both character signals, in both languages", "[scriptin
 	// a queue drained a tick later would hand a handler a model it cannot read a
 	// property off. A version that queued both fired `CharacterRemoving` with a
 	// dead handle and the Luau half raised "'Name' is not a valid member of this
-	// instance" — which is how the split was found.
+	// instance" - which is how the split was found.
 	//
 	// The log rides an **attribute** rather than a local, because each chunk runs
 	// on its own sandboxed thread and its globals are its own; the world is the
@@ -822,7 +822,7 @@ TEST_CASE("two lives fire both character signals, in both languages", "[scriptin
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 
 		// The second life. The removal fires inside this chunk, while the old
-		// body is still whole — which is exactly what the handler reads.
+		// body is still whole - which is exactly what the handler reads.
 		const std::string again = language == Language::Luau
 									  ? "game:GetService('Players').LocalPlayer:LoadCharacter()\n"
 									  : "game.GetService('Players').LocalPlayer.LoadCharacter()\n";
@@ -843,7 +843,7 @@ TEST_CASE("two lives fire both character signals, in both languages", "[scriptin
 TEST_CASE("who you are is not yours to assign, in both languages", "[scripting][scriptcall]") {
 	// **`UserId` is read-only and `LocalPlayer` is read-only, and the refusal is
 	// the point.** A script that could write either could claim to be somebody
-	// else — which is the one thing a shared world must not let a game script do
+	// else - which is the one thing a shared world must not let a game script do
 	// by accident. `PropertyDescriptor::Writable` is the whole enforcement, so a
 	// test that only read them would pass against a surface that let both be set.
 	for (const Language language : LANGUAGES) {
@@ -876,7 +876,7 @@ TEST_CASE("who you are is not yours to assign, in both languages", "[scripting][
 TEST_CASE("a wrong argument type is refused in both languages", "[scripting][scriptcall]") {
 	// **A reader raises rather than answering**, which is what lets a neutral
 	// method body read its arguments straight through. The two idioms are
-	// different — a Luau error and a thrown `TypeError` — and what has to match
+	// different - a Luau error and a thrown `TypeError` - and what has to match
 	// is that neither one quietly does the wrong thing.
 	//
 	// `AddTag` is here beside `PivotTo` for a reason: `JS_ToCString` will turn an
@@ -912,7 +912,7 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 	// **The five services that stopped being Luau's at v0.16**, each asked the
 	// same question in each VM. Before the neutral layer reached
 	// `ServiceSurface`, half of these scripts were a `TypeError` in JavaScript
-	// because the global did not exist at all — which is what makes this the
+	// because the global did not exist at all - which is what makes this the
 	// case that matters rather than a coverage exercise.
 	const std::vector<ParityCase> CASES = {
 		// --- ContentService ------------------------------------------------
@@ -929,7 +929,7 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 		 0,
 		 TwoMeshes},
 
-		// **Sorted, which is what makes a layout reproducible** — and the index
+		// **Sorted, which is what makes a layout reproducible** - and the index
 		// is the one place the two languages genuinely differ, because a Luau
 		// array is one-based and a JavaScript one is not.
 		{"and hands them back sorted",
@@ -1022,7 +1022,7 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 		// --- HttpService -----------------------------------------------------
 		//
 		// **The encoder's rules are the codec's, so one table must be one
-		// document in both VMs** — a map's keys sorted, an array one-based in
+		// document in both VMs** - a map's keys sorted, an array one-based in
 		// Luau and zero-based here, and the same text out of each.
 		{"JSONEncode writes one document from either language",
 		 [](Language language) {
@@ -1053,7 +1053,7 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 
 		// **A GUID is deterministic, which is what makes this a parity case at
 		// all.** `core::Random` over a draw index and a salt from the world's
-		// name gives the same sixteen bytes in both VMs — so the two answers are
+		// name gives the same sixteen bytes in both VMs - so the two answers are
 		// compared against each other *and* against a literal, and a binding that
 		// drew from a clock would fail both.
 		{"GenerateGUID draws the same sequence in both",
@@ -1066,7 +1066,7 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 		// choice rather than JSON's: Lua cannot tell an empty list from an empty
 		// map, so one of the two has to be picked and the bus's pick is the one a
 		// document has to agree with. JavaScript *can* tell them apart, so
-		// `JSONEncode([])` there answers `[]` — an asymmetry the languages
+		// `JSONEncode([])` there answers `[]` - an asymmetry the languages
 		// genuinely have and not one either binding invented.
 		{"an empty table is an object in both",
 		 [](Language language) { return Say(language, Call(language, "HttpService", "JSONEncode({})")); },
@@ -1082,7 +1082,7 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 		//
 		// **`OpenChannel` is the member this suite can reach, and `SendAsync` is
 		// not.** A send suspends on a reply the barrier decides, so against a bare
-		// store with no router around it there is nothing to resume — which is
+		// store with no router around it there is nothing to resume - which is
 		// what `engine.script.crossworldservice` exists for, over a real
 		// `Universe` with two worlds in it.
 		//
@@ -1104,7 +1104,7 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 		//
 		// **The pump is half the assertion.** A bound action that is never called
 		// is the failure this engine refuses twice over, and this language had no
-		// input pump at all until the service crossed — so the case holds a key
+		// input pump at all until the service crossed - so the case holds a key
 		// down, beats once, and asserts the handler ran *and* was handed Roblox's
 		// three arguments.
 		{"a bound action fires with a name, a state and an InputObject",
@@ -1175,13 +1175,13 @@ TEST_CASE("an optional flag reads each language's own truthiness", "[scripting][
 	// **The one place a ported method deliberately answers differently, pinned
 	// rather than left to be rediscovered.** `GenerateGUID(wrapInCurlyBraces)`
 	// is read with `ScriptCall::OptionalBoolean`, which is `lua_toboolean` on one
-	// side and `JS_ToBool` on the other — and only `nil` and `false` are falsy in
+	// side and `JS_ToBool` on the other - and only `nil` and `false` are falsy in
 	// Luau where `0`, `""` and `NaN` are falsy in JavaScript. So `GenerateGUID(0)`
 	// wraps in one and does not in the other.
 	//
 	// A strict reader that raised for a non-boolean would agree in both and would
 	// refuse the `if x then`-shaped code every Lua author writes. The engine takes
-	// the language, and this case is the record of that — with the *rest* of the
+	// the language, and this case is the record of that - with the *rest* of the
 	// answer identical, which is what says the divergence is the flag and nothing
 	// else.
 	const std::string luau = Answer(Language::Luau, Say(Language::Luau, "HttpService:GenerateGUID(0)"));
@@ -1196,7 +1196,7 @@ TEST_CASE("a wrong argument to a service method is refused in both", "[scripting
 	// **A service reader raises exactly as an instance one does**, which is the
 	// property that lets a neutral body read straight through. `AsNumber` is here
 	// because `JS_ToFloat64` would take `"5"` and `[]` quite happily where
-	// `luaL_checknumber` refuses a table — the same class of coercion `AddTag({})`
+	// `luaL_checknumber` refuses a table - the same class of coercion `AddTag({})`
 	// caught on the instance side.
 	const std::vector<std::pair<const char *, const char *>> PROBES = {
 		{"CollectionService", "AddTag('notaninstance', 'door')"},
@@ -1209,7 +1209,7 @@ TEST_CASE("a wrong argument to a service method is refused in both", "[scripting
 		// **A numeric string is a string in both, which it was not.**
 		// `luaL_checknumber` accepts `"5"` and `JS_IsNumber` does not, so this
 		// call bound at priority five in one language and threw in the other
-		// until `AsNumber` was made an exact type check — the same divergence
+		// until `AsNumber` was made an exact type check - the same divergence
 		// `ReadLuauAttribute` closed for `SetAttribute("n", "5")`.
 		{"ContextActionService", "BindActionAtPriority('open', function() end, false, '5')"},
 	};
@@ -1242,7 +1242,7 @@ TEST_CASE("a service property is live in both languages", "[scripting][scriptcal
 	// **The case the whole property mechanism exists to make true, and it is the
 	// one that has already failed once.** A Luau service is a *userdata* because
 	// `luaL_sandbox` enables `safeenv`, which compiles a field read off a
-	// constant global table into a `GETIMPORT` resolved once and cached — so the
+	// constant global table into a `GETIMPORT` resolved once and cached - so the
 	// first read of `MouseBehavior` won forever and a live value read as a frozen
 	// one. JavaScript has no such caching, but a property installed as a plain
 	// value rather than an accessor would reproduce the bug exactly.
@@ -1271,7 +1271,7 @@ TEST_CASE("a service property is live in both languages", "[scripting][scriptcal
 		// **An enum-valued property, which is the one that could genuinely have
 		// failed to cross.** `ScriptCall::ReturnEnum` is what lets it: the two
 		// VMs spell an `EnumItem` differently and each builds its own, where a
-		// `ScriptValue` — which crosses a world — has no tag for one and must not
+		// `ScriptValue` - which crosses a world - has no tag for one and must not
 		// gain one.
 		{"MouseBehavior round-trips as an EnumItem",
 		 [](Language language) {
@@ -1348,9 +1348,9 @@ TEST_CASE("a service property is live in both languages", "[scripting][scriptcal
 
 TEST_CASE("the two input surfaces answer the same in both languages", "[scripting][scriptcall]") {
 	// **The methods that came across with the properties.** Four of the six on
-	// `UserInputService` needed a return this interface did not have —
+	// `UserInputService` needed a return this interface did not have -
 	// `ReturnVector2` for the pointer pair, `ReturnEnums` for the key list and
-	// `ReturnInputObjects` for the button list — and each is here because its
+	// `ReturnInputObjects` for the button list - and each is here because its
 	// caller asked, which is the rule `ScriptCall.hpp` states.
 	const std::vector<ParityCase> CASES = {
 		{"IsKeyDown finds a held key",
@@ -1421,7 +1421,7 @@ TEST_CASE("the two input surfaces answer the same in both languages", "[scriptin
 		 OneOfEverything},
 
 		// **A list of `EnumItem`s and not of strings**, so what comes out is what
-		// `IsKeyDown` takes — the round trip a surface owes.
+		// `IsKeyDown` takes - the round trip a surface owes.
 		{"GetKeysPressed answers what IsKeyDown would take",
 		 [](Language language) {
 			 return AService(language, "UserInputService") +
@@ -1472,7 +1472,7 @@ TEST_CASE("the two input surfaces answer the same in both languages", "[scriptin
 TEST_CASE("the listener pair reads the same in both languages", "[scripting][scriptcall]") {
 	// **The one method on either surface that answers twice**, and therefore the
 	// one place a caller writes two different lines. Luau takes two values and
-	// JavaScript destructures the array `ScriptCall` packs them into — the same
+	// JavaScript destructures the array `ScriptCall` packs them into - the same
 	// class of difference as a Luau array being one-based, which is why the
 	// bodies below differ and the *answers* do not.
 	const std::vector<ParityCase> CASES = {
@@ -1499,7 +1499,7 @@ TEST_CASE("the listener pair reads the same in both languages", "[scripting][scr
 		 "ObjectPosition/Ear"},
 
 		// **Nil for an instance that has gone away**, rather than a handle to a
-		// dead row — `client::SoundStage` falls back to the camera for the same
+		// dead row - `client::SoundStage` falls back to the camera for the same
 		// case, so the two agree about what the setting now means.
 		{"a destroyed listener reads as nothing",
 		 [](Language language) {
@@ -1631,7 +1631,7 @@ TEST_CASE("a service property refuses the same writes in both languages", "[scri
 		// *image* and nothing in `render` produces one, so it must raise rather
 		// than being kept as a new property nobody reads. It replaced
 		// `MouseIconEnabled`, which sat here until that one became a real
-		// writable row — an absent member turning into a present one is exactly
+		// writable row - an absent member turning into a present one is exactly
 		// the change this case should notice.
 		{"UserInputService", "MouseIcon = 'cursor'"},
 
@@ -1754,7 +1754,7 @@ TEST_CASE("the migrated tree methods answer the same in both languages", "[scrip
 		 "Workspace.Door"},
 
 		// **`IsAncestorOf` is `IsDescendantOf` with the arguments swapped**, and
-		// Roblox has both — this engine had one until v0.18. Asserted as a pair so
+		// Roblox has both - this engine had one until v0.18. Asserted as a pair so
 		// a binding that answered the same thing to both fails.
 		{"the two containment questions are each other's inverse",
 		 [](Language language) {
@@ -1855,7 +1855,7 @@ TEST_CASE("the two refusals that used to differ now agree", "[scripting][scriptc
 	//
 	//   - `GetPropertyChangedSignal` compared `PropertyDescriptor::Name` in
 	//     JavaScript and ignored `Scriptable`, so a JavaScript script could watch
-	//     `ShaderScript.Source` — a property the read path refuses by answering
+	//     `ShaderScript.Source` - a property the read path refuses by answering
 	//     "no such member", precisely so an error message cannot tell a program
 	//     what is there to reach for. Luau refused it. One reader settles it.
 	//   - `SetNetworkOwner` read a null entity out of *anything* in JavaScript, so
@@ -1903,7 +1903,7 @@ TEST_CASE("the two refusals that used to differ now agree", "[scripting][scriptc
 TEST_CASE("the neutral table holds no duplicate names", "[scripting][scriptcall]") {
 	// **Two rows for one name is one row nothing installs.** Both would be
 	// walked, the second would overwrite the first, and the method a script
-	// reached would be whichever came last — while the table read as offering
+	// reached would be whichever came last - while the table read as offering
 	// both. Cheap to check and impossible to see by reading the list.
 	for (const InstanceMethod &left : NeutralInstanceMethods()) {
 		size_t seen = 0;

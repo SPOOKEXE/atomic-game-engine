@@ -7,7 +7,7 @@
 // deliberate: `mono.cdn` serves a manifest, the manifest is signed, a client
 // verifies that signature against a publisher key before a byte of content is
 // trusted, and `client/ContentDemand.hpp` decides what is asked for at all.
-// Arbitrary outbound HTTP from a game script is not a smaller version of that —
+// Arbitrary outbound HTTP from a game script is not a smaller version of that -
 // it is a different thing, and it is a *security* decision: what a game script
 // may talk to, whether a dedicated server will make requests on a player's
 // behalf, what a request discloses about the machine it left, and who is
@@ -15,7 +15,7 @@
 // the methods do not exist.
 //
 // **Not stubbed, and not present-but-erroring.** A method that exists and
-// refuses is a surface an author writes against and then finds does nothing —
+// refuses is a surface an author writes against and then finds does nothing -
 // and worse, it is a surface that *looks* decided, so the next reader assumes
 // somebody thought about it. An absent method fails the way every other
 // unprovided service member fails: "attempt to call a nil value", at the call
@@ -24,7 +24,7 @@
 // reason.
 //
 // If you are here to add one of the three, the thing to add first is the
-// decision — written down — about what a script may reach and who says so.
+// decision - written down - about what a script may reach and who says so.
 //
 // ## What the four that are here have in common
 //
@@ -37,8 +37,8 @@
 //
 // ## JSON is the codec's tree, spelled differently
 //
-// `Codec.hpp` already decides what a Lua table *is* — which tables are arrays,
-// which are maps, what a cycle is, what a key becomes — and a second traversal
+// `Codec.hpp` already decides what a Lua table *is* - which tables are arrays,
+// which are maps, what a cycle is, what a key becomes - and a second traversal
 // here answering any of those differently would mean one value crossing a bus
 // in one shape and landing in a JSON document in another. So `JSONEncode` reads
 // the script value with `ScriptCall::ReadValue`, the same walker
@@ -51,7 +51,7 @@
 // ## Neutral since v0.16
 //
 // Nothing in this file names a VM. It was four `lua_CFunction`s, which is why
-// JavaScript did not have `HttpService` at all — and the irony is that the whole
+// JavaScript did not have `HttpService` at all - and the irony is that the whole
 // file was already written against a shared tree, with only the four wrappers
 // around it per language. `GenerateGUID`'s draw counter was the one piece of
 // real state, and it crosses as `ScriptCall::NextGuid`.
@@ -117,7 +117,7 @@ namespace engine::script {
 		// Appends one string as a quoted JSON string.
 		//
 		// **Bytes through, above 0x7F.** A Lua string is bytes and nothing in
-		// this module decodes an encoding — `Codec.hpp` says so about the wire
+		// this module decodes an encoding - `Codec.hpp` says so about the wire
 		// format and it is equally true here. So a UTF-8 input produces UTF-8
 		// output and a string of arbitrary bytes comes back exactly as it went
 		// in; re-spelling the high bytes as `\u` escapes would mean guessing what
@@ -180,7 +180,7 @@ namespace engine::script {
 		//
 		// **Sorted by key bytes, exactly as `Encode` sorts.** A Lua table is a
 		// hash map, so writing entries in iteration order would make the *string*
-		// a script gets back depend on insertion history and allocator state —
+		// a script gets back depend on insertion history and allocator state -
 		// and that string may then be stored in a property, replicated, or
 		// written into a save. `Codec.hpp` §1 is the whole argument, and the only
 		// thing that changes here is that the output is text: the same table must
@@ -249,8 +249,8 @@ namespace engine::script {
 			// **The three value types are refused, and the refusal names one.**
 			// They cross a *bus* because both ends of a bus are this engine;
 			// JSON's readers are not, and there is no notation for a `CFrame`
-			// that any of them would understand. A shape invented here — say
-			// `{"x":..,"y":..}` — would decode back as a plain table rather than
+			// that any of them would understand. A shape invented here - say
+			// `{"x":..,"y":..}` - would decode back as a plain table rather than
 			// as the type it went in as, so the round trip this service's whole
 			// test rests on would quietly stop holding.
 			case ValueTag::Vector3:
@@ -290,7 +290,7 @@ namespace engine::script {
 		// applies here for a stronger reason: a payload reaching `Decode` was
 		// written by this engine, and a document reaching this may have been
 		// typed by hand. The invariant the refusals are chosen to keep is that
-		// **this reader never produces a value `JSONEncode` would refuse** — so
+		// **this reader never produces a value `JSONEncode` would refuse** - so
 		// anything it accepts can be written straight back out.
 		struct JsonReader {
 			std::string_view Text;
@@ -367,7 +367,7 @@ namespace engine::script {
 
 					// **A raw control byte inside a string is refused.** JSON
 					// requires it escaped, and accepting it would let a literal
-					// newline through — which `JSONEncode` then writes back as
+					// newline through - which `JSONEncode` then writes back as
 					// `\n`, so the document would not survive a round trip
 					// unchanged even though the value did.
 					if (byte < 0x20) {
@@ -425,7 +425,7 @@ namespace engine::script {
 
 					// **A surrogate pair is joined; a lone surrogate is
 					// refused.** A `\uD83D` on its own names half a character
-					// and has no UTF-8 encoding at all — the WTF-8 form exists
+					// and has no UTF-8 encoding at all - the WTF-8 form exists
 					// but nothing downstream reads it, so admitting one would
 					// put bytes in a Lua string that no consumer can decode and
 					// that `JSONEncode` would then hand back unchanged as
@@ -458,8 +458,8 @@ namespace engine::script {
 			//
 			// **The grammar is `std::from_chars`'s, applied to the maximal run of
 			// bytes a number can be made of.** Scanning the run first is what
-			// keeps `inf` and `nan` out — `from_chars` accepts both words and
-			// JSON has neither — and requiring the whole run to be consumed is
+			// keeps `inf` and `nan` out - `from_chars` accepts both words and
+			// JSON has neither - and requiring the whole run to be consumed is
 			// what makes `1..2` and `1e` errors rather than a `1` followed by
 			// rubbish nothing looked at.
 			bool ReadNumber(ScriptValue &out) {
@@ -517,7 +517,7 @@ namespace engine::script {
 				// **The same bound the encoder has, and that is why it is this
 				// number rather than a larger one that JSON alone would allow.**
 				// A document nested deeper than `CODEC_MAX_DEPTH` would decode
-				// into a table `JSONEncode` then refuses — and a recursive
+				// into a table `JSONEncode` then refuses - and a recursive
 				// descent with no bound at all is a C stack overflow from a
 				// string a script was handed.
 				if (depth > CODEC_MAX_DEPTH) {
@@ -546,8 +546,8 @@ namespace engine::script {
 				// **`null` decodes to `nil`, and Lua has no second answer.**
 				// Inside an object the key is simply absent; inside an array it
 				// is a hole, so `#` stops meaning what it did. That is the same
-				// thing Roblox does, and the alternative — a sentinel value
-				// standing for null — is a value every script that touches JSON
+				// thing Roblox does, and the alternative - a sentinel value
+				// standing for null - is a value every script that touches JSON
 				// would then have to know about.
 				case 'n':
 					return ReadWord("null", ValueTag::Nil, out);
@@ -716,7 +716,7 @@ namespace engine::script {
 		//
 		// **Arrays come back one-based.** `#`, `ipairs` and `table.remove` all
 		// mean one-based in Luau, so a zero-based table handed to a script is a
-		// list whose first element is invisible to every idiom an author has —
+		// list whose first element is invisible to every idiom an author has -
 		// and the bug that produces reads as "the server sent me nine of the ten
 		// rows". `ScriptCall::ReturnValue` is what makes it so, which is also
 		// what makes a decoded document and a delivered message the same shape.
@@ -745,7 +745,7 @@ namespace engine::script {
 		//
 		// FNV-1a, spelled out here rather than reached for from `core`, because
 		// what is wanted is a *specified* mixing of bytes that is the same on
-		// every platform — `std::hash` explicitly is not, and `AGENTS.md` rule 4
+		// every platform - `std::hash` explicitly is not, and `AGENTS.md` rule 4
 		// is the same concern one level up.
 		uint32_t SaltOf(std::string_view name) {
 			uint32_t hash = 2166136261u;
@@ -759,7 +759,7 @@ namespace engine::script {
 		// HttpService:GenerateGUID(wrapInCurlyBraces) -> string
 		//
 		// **It is deterministic, and that is a decision this engine forces.**
-		// `script/AGENTS.md` sets one test for anything added to this VM — what
+		// `script/AGENTS.md` sets one test for anything added to this VM - what
 		// can it observe that a recording cannot reproduce? A GUID drawn from the
 		// operating system's entropy or from a clock fails that test outright: a
 		// script that names a part after one, or stores one in a property,
@@ -770,7 +770,7 @@ namespace engine::script {
 		// **`just determinism` and `just replay-check` would not have caught
 		// it.** Both drive `mono.server` with `--entities` and `--ticks` and no
 		// `--game`, so neither run has a script runtime in it at all. The rule is
-		// the reason here, not the recipe — which is exactly the third category
+		// the reason here, not the recipe - which is exactly the third category
 		// `AGENTS.md` rule 6 warns about, so it is written down rather than left
 		// to be rediscovered.
 		//
@@ -885,7 +885,7 @@ namespace engine::script {
 		}
 
 		// **Four methods, and the three that are missing are missing on
-		// purpose.** Do not add `RequestAsync`, `GetAsync` or `PostAsync` here —
+		// purpose.** Do not add `RequestAsync`, `GetAsync` or `PostAsync` here -
 		// this file's header says what would have to be decided first.
 		constexpr std::array<ServiceMethod, 4> METHODS{{
 			{"JSONEncode", JsonEncode},

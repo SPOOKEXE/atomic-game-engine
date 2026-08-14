@@ -2,8 +2,8 @@
 //
 // **`engine::control` already answers the protocol and the worlds**, so what is
 // here is only what an editor has and a server does not: a selection, an output
-// panel, a notion of which scene is active, and Play. Everything else — the
-// handshake, `world_list`, `instance_set` — is the shared surface, registered
+// panel, a notion of which scene is active, and Play. Everything else - the
+// handshake, `world_list`, `instance_set` - is the shared surface, registered
 // first and then added to.
 //
 // **`engine_info` is replaced rather than extended.** The shared one knows about
@@ -30,7 +30,7 @@ namespace studio {
 	void Editor::StartControl() {
 		// **The port field is seeded whether or not the server starts**, because
 		// the panel's Start button has to offer something sensible in the case
-		// this function returns early — an editor launched without `--control`
+		// this function returns early - an editor launched without `--control`
 		// is exactly the one somebody turns the surface on from the panel.
 		if (Settings.ControlPort >= 0) {
 			ControlPortField = Settings.ControlPort;
@@ -40,7 +40,7 @@ namespace studio {
 			return;
 		}
 
-		// The shared tools first, then the editor's — so a replacement of one of
+		// The shared tools first, then the editor's - so a replacement of one of
 		// them is written after the thing it replaces.
 		//
 		// Guarded, because `ToggleControl` registers them too: the surface is
@@ -52,12 +52,12 @@ namespace studio {
 		}
 
 		if (!ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
-			Say("control: could not listen — is another program already on that port?",
+			Say("control: could not listen - is another program already on that port?",
 				engine::core::LogLevel::Error);
 			return;
 		}
 
-		Say("control: listening on 127.0.0.1:" + std::to_string(ControlServer.Port()) + " — " +
+		Say("control: listening on 127.0.0.1:" + std::to_string(ControlServer.Port()) + " - " +
 			std::to_string(ControlSurface.Count()) + " tools");
 	}
 
@@ -111,7 +111,7 @@ namespace studio {
 		ControlSurface.Add(Tool{
 			"world_run",
 			"Starts or stops one scene. `play` runs both halves in this process, `server` runs only "
-			"Script instances, and `edit` stops it and restores the snapshot taken when it started — "
+			"Script instances, and `edit` stops it and restores the snapshot taken when it started - "
 			"which is what makes running a scene non-destructive.",
 			[] {
 				return json{
@@ -236,7 +236,7 @@ namespace studio {
 		const std::string wanted = arguments["world"].get<std::string>();
 		const WorldId found = Universe->Find(engine::core::Name(wanted.c_str()));
 		if (!found.IsValid()) {
-			failure = "no world called '" + wanted + "' — call world_list";
+			failure = "no world called '" + wanted + "' - call world_list";
 		}
 		return found;
 	}
@@ -250,7 +250,7 @@ namespace studio {
 
 		// **The tools are registered once, not once per start.** `Surface::Add`
 		// replaces by name, so a second registration would be harmless and a
-		// second `AddUniverseTools` would still be work nobody asked for — and
+		// second `AddUniverseTools` would still be work nobody asked for - and
 		// the count in the log line would go on saying the same number while
 		// doing it twice.
 		if (ControlSurface.Count() == 0) {
@@ -260,7 +260,7 @@ namespace studio {
 
 		if (!ControlServer.Start(static_cast<uint16_t>(std::max(0, ControlPortField)))) {
 			Say("control: could not listen on port " + std::to_string(ControlPortField) +
-					" — is another program already there?",
+					" - is another program already there?",
 				engine::core::LogLevel::Error);
 			return;
 		}
@@ -268,7 +268,7 @@ namespace studio {
 		// Read back rather than echoed: a zero asks the operating system to
 		// pick, and the number somebody needs is the one it picked.
 		ControlPortField = ControlServer.Port();
-		Say("control: listening on 127.0.0.1:" + std::to_string(ControlServer.Port()) + " — " +
+		Say("control: listening on 127.0.0.1:" + std::to_string(ControlServer.Port()) + " - " +
 			std::to_string(ControlSurface.Count()) + " tools");
 	}
 
@@ -324,7 +324,7 @@ namespace studio {
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
 				"Zero asks the operating system to pick one.\n"
-				"Loopback only — nothing off this machine can reach it."
+				"Loopback only - nothing off this machine can reach it."
 			);
 		}
 
@@ -338,13 +338,13 @@ namespace studio {
 		// **The table this program actually declares, read from the registry.**
 		// A hand-kept list here would be the duplicate `control/Surface.hpp`
 		// exists to prevent, and a panel claiming a tool that is not registered
-		// is worse than no panel — it is the one place somebody would check
+		// is worse than no panel - it is the one place somebody would check
 		// before concluding their client was at fault.
 		ImGui::Text("Tools (%zu)", ControlSurface.Count());
 		ImGui::Separator();
 
 		if (ControlSurface.Count() == 0) {
-			ImGui::TextDisabled("nothing registered yet — start the server");
+			ImGui::TextDisabled("nothing registered yet - start the server");
 			ImGui::End();
 			return;
 		}

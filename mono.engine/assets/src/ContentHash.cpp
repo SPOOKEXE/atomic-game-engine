@@ -26,11 +26,11 @@ namespace engine::assets {
 
 	Hasher::Hasher() {
 		// The header sizes State without being able to name this type. Checked
-		// here rather than trusted — inside a member, because STATE_BYTES is
-		// private — so a BLAKE3 bump that grows the struct stops the build
+		// here rather than trusted - inside a member, because STATE_BYTES is
+		// private - so a BLAKE3 bump that grows the struct stops the build
 		// instead of writing past the buffer at run time.
 		static_assert(
-			sizeof(blake3_hasher) <= STATE_BYTES, "blake3_hasher outgrew Hasher::STATE_BYTES — raise it."
+			sizeof(blake3_hasher) <= STATE_BYTES, "blake3_hasher outgrew Hasher::STATE_BYTES - raise it."
 		);
 		static_assert(
 			alignof(blake3_hasher) <= STATE_ALIGNMENT,

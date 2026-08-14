@@ -21,7 +21,7 @@ namespace engine::ecs {
 		// orders share one plan.
 		//
 		// **Built on the caller's stack, not on the heap.** This runs once per
-		// query per system per tick — the hottest non-row path in the engine —
+		// query per system per tick - the hottest non-row path in the engine -
 		// and the previous shape allocated a vector *and* a string on every
 		// call, to look up a cache entry that was almost always already there.
 		// A stack buffer plus a transparent hash makes the hit path allocate
@@ -253,7 +253,7 @@ namespace engine::ecs {
 		// **Out of the tree before out of the directory.** See `DetachFromTree`:
 		// freeing a row leaves every link that points at it naming something
 		// that is gone, and the sibling walk stops at the first of those rather
-		// than stepping over it — so destroying the middle child of three used
+		// than stepping over it - so destroying the middle child of three used
 		// to truncate the list and lose the rest.
 		//
 		// Before rather than after, because there is no "after": once the row
@@ -295,8 +295,8 @@ namespace engine::ecs {
 		// components at all is in no table and is still an entity.
 		//
 		// Both regions, authoritative first. Walking to `Capacity()` alone would
-		// miss every predicted entity — silently, since a directory with none
-		// behaves identically — which is exactly the shape of bug a second
+		// miss every predicted entity - silently, since a directory with none
+		// behaves identically - which is exactly the shape of bug a second
 		// region introduces.
 		const size_t capacity = State->Directory.Capacity();
 		for (uint32_t index = 0; index < capacity; index++) {
@@ -347,8 +347,8 @@ namespace engine::ecs {
 	// --- components --------------------------------------------------------
 
 	// Qualified, every one of them. The public runtime-keyed methods below
-	// share these names deliberately — they are the same operation, one taking
-	// a state and one taking a `Store` — and unqualified lookup inside a member
+	// share these names deliberately - they are the same operation, one taking
+	// a state and one taking a `Store` - and unqualified lookup inside a member
 	// finds the member first and recurses.
 	void Store::SetRaw(Entity entity, ComponentId id, const void *value) {
 		engine::ecs::SetComponent(*State, entity, id, value);
@@ -429,7 +429,7 @@ namespace engine::ecs {
 
 		// Topped up rather than rebuilt. Tables are only ever added, so
 		// everything matched before still matches and only the new ones need
-		// testing — which is what makes calling this every tick cost nothing
+		// testing - which is what makes calling this every tick cost nothing
 		// after the first frame, and what closes `D00003`.
 		if (plan.SeenTables < State->Tables.size()) {
 			for (size_t index = plan.SeenTables; index < State->Tables.size(); index++) {
@@ -473,8 +473,8 @@ namespace engine::ecs {
 			}
 
 			// The chunk directory rather than a base address. One slice still
-			// covers the whole table — see `TableSlice` on why that is not a
-			// detail — and the visitors index it by `Column::ChunkOf(row)`.
+			// covers the whole table - see `TableSlice` on why that is not a
+			// detail - and the visitors index it by `Column::ChunkOf(row)`.
 			for (size_t term = 0; term < terms.size(); term++) {
 				columns[term] = table.ColumnAt(match.Positions[term]).ChunkData();
 			}
@@ -500,7 +500,7 @@ namespace engine::ecs {
 		// **Sorted and deduplicated so that two spellings of one query share a
 		// plan.** `VisitTables` keys its cache on the term bytes, so `{A, B}`
 		// and `{B, A}` would otherwise build and top up two plans that match
-		// exactly the same tables — and a script writing its query arguments in
+		// exactly the same tables - and a script writing its query arguments in
 		// a different order in two files would pay for it twice.
 		//
 		// A duplicate term is dropped rather than refused: naming a component
@@ -518,7 +518,7 @@ namespace engine::ecs {
 		RequireOwningThread("EachMatching");
 
 		// **An empty query matches nothing.** A query is defined by what it
-		// names, and `VisitTables` with no terms would match every table — which
+		// names, and `VisitTables` with no terms would match every table - which
 		// is a different question, and `EachEntity` is the one that answers it
 		// honestly by walking the directory rather than the tables.
 		if (components.empty()) {
@@ -533,7 +533,7 @@ namespace engine::ecs {
 
 		VisitTables(terms, [&body](const TableSlice &slice) {
 			// `Archetype::Ids` is one contiguous array whatever the columns do,
-			// so the entities need no chunk walk — see `ecs/AGENTS.md` on why
+			// so the entities need no chunk walk - see `ecs/AGENTS.md` on why
 			// the columns underneath do.
 			for (size_t row = 0; row < slice.Rows; row++) {
 				body(slice.Entities[row]);
@@ -557,7 +557,7 @@ namespace engine::ecs {
 
 		// The same check `Create` makes, because this mints from the same
 		// authoritative range. It was missing, and `scene::MakePart` grew a copy
-		// of it to work around the gap — one minting path honouring the rule and
+		// of it to work around the gap - one minting path honouring the rule and
 		// one walking past it is worse than neither, because the one that
 		// honours it makes the other look covered.
 		if (!MayMintAuthoritative("CreateInstance")) {
@@ -582,7 +582,7 @@ namespace engine::ecs {
 		//
 		// Linear over the merged list rather than a map. A class has a handful
 		// of properties, the list is contiguous, and a binding that cares about
-		// the cost resolves the descriptor once and keeps it — which is what
+		// the cost resolves the descriptor once and keeps it - which is what
 		// `PropertiesOf` is for.
 		const PropertyDescriptor *FindProperty(const Store &store, Entity instance, core::Name name) {
 			const ClassId id = store.ClassOf(instance);
@@ -645,7 +645,7 @@ namespace engine::ecs {
 		}
 
 		// A replica's rows belong to the authority. v0.3 made minting here
-		// impossible; a property write is the same hazard one step along — a
+		// impossible; a property write is the same hazard one step along - a
 		// client-side script setting a value the next delta overwrites, which
 		// presents as "my script works sometimes" rather than as an error.
 		//
@@ -767,7 +767,7 @@ namespace engine::ecs {
 	void Store::EachRoot(const std::function<void(Entity)> &body) const {
 		// Collected and sorted rather than visited in place. The walk is over
 		// archetypes, and a row's position in one moves whenever anything
-		// changes its component set — so visiting in place would report the
+		// changes its component set - so visiting in place would report the
 		// world's roots in an order that depends on what happened to the scene
 		// rather than on the scene. A recording made in one order and replayed
 		// in another diverges the first time a script reads `GetChildren()`.
@@ -990,7 +990,7 @@ namespace engine::ecs {
 		}
 
 		// An entity with no components is in no table, which is the ordinary
-		// state of one that has just been created — a row is what a component
+		// state of one that has just been created - a row is what a component
 		// buys.
 		const EntityLocation *location = State->Directory.Locate(key.Index);
 		if (location == nullptr || location->Archetype == EntityLocation::NO_ARCHETYPE) {
@@ -1029,13 +1029,13 @@ namespace engine::ecs {
 
 			// Runs of adjacent set bits. A system walks a table in order and
 			// writes as it goes, so the changed rows are usually one run or a
-			// few — which is what makes a delta a memcpy per run rather than a
+			// few - which is what makes a delta a memcpy per run rather than a
 			// copy per entity.
 			//
 			// **A run stops at a chunk boundary even when the bits do not.** The
 			// contract this hands the callback is that `data + row * size` is
 			// the value for `entities[row]` over the whole run, and past a
-			// boundary that address is in the previous chunk's tail — so a
+			// boundary that address is in the previous chunk's tail - so a
 			// delta would send entity A's id with entity B's bytes, which every
 			// test here would pass and a client would show as teleporting.
 			// `Archetype::Ids` stays one contiguous array, so only the value
@@ -1122,7 +1122,7 @@ namespace engine::ecs {
 
 		for (const ComponentId subject : subjects) {
 			// Collected before anything fires. A listener may add or remove a
-			// component, which moves rows between tables — and an iteration
+			// component, which moves rows between tables - and an iteration
 			// that was still walking one of them would be walking a table that
 			// no longer holds what it thought.
 			State->Firing.clear();
@@ -1185,7 +1185,7 @@ namespace engine::ecs {
 			}
 
 			// The bit index is the component's position in the table's sorted
-			// set, which is also where its column sits — the same resolution
+			// set, which is also where its column sits - the same resolution
 			// `MarkWritten` does per write, done once per table here.
 			const std::span<const ComponentId> ids = table.Set().Ids();
 			const auto at = std::lower_bound(ids.begin(), ids.end(), component);
@@ -1195,7 +1195,7 @@ namespace engine::ecs {
 
 			// Per chunk. A column is only contiguous inside one, so marking
 			// `table.Rows()` bits from chunk zero's base would write past its
-			// end — and it is a write, so it corrupts whatever the pool handed
+			// end - and it is a write, so it corrupts whatever the pool handed
 			// to somebody else rather than merely reading rubbish.
 			const auto position = static_cast<size_t>(at - ids.begin());
 			void *const *chunks = bits->ChunkData();
@@ -1280,7 +1280,7 @@ namespace engine::ecs {
 		}
 
 		// Taken by move before replaying, because applying a command may itself
-		// defer — a nested Each, or a Destroy that cascades. Replaying out of
+		// defer - a nested Each, or a Destroy that cascades. Replaying out of
 		// the live vector would walk a container being appended to.
 		std::vector<Command> commands;
 		commands.swap(State->Commands);

@@ -6,13 +6,13 @@
 // than a coloured label.** `docs/DEFERRED.md` D00119 refused `Player.Team`
 // while the only thing behind it would have been a string on a row: a side
 // nothing acts on is a field, and a field that looks like a feature is worse
-// than an absence. What acts on it is here — a `SpawnLocation` carries a
+// than an absence. What acts on it is here - a `SpawnLocation` carries a
 // `TeamColor` and `FindSpawn` filters on it, so joining a team changes where
 // you appear.
 //
 // **A `SpawnLocation` is a class now and was a *name* until v0.15.**
 // `scene::FindSpawn` looked for a part called `SpawnLocation`, which
-// `Characters.hpp` recorded as a deliberate stop — a class with teams and a
+// `Characters.hpp` recorded as a deliberate stop - a class with teams and a
 // forcefield on it would have been a class with a footnote while neither
 // existed. The name still works and is meant to: a plain `Part` still called
 // `SpawnLocation` is read as an enabled, neutral spawn, so every scene in
@@ -46,7 +46,7 @@ namespace engine::scene {
 	// Roblox's `Team` also carries `AutoAssignable` and a `PlayerAdded` signal;
 	// neither has a reader here, and a property nothing acts on is the thing
 	// D00119 refused this class for in the first place. Who is on a team is the
-	// `PlayerTeam` rows pointing at it rather than a list kept beside them —
+	// `PlayerTeam` rows pointing at it rather than a list kept beside them -
 	// rule 2, and the list would go stale the first time a player was
 	// destroyed.
 	//
@@ -74,8 +74,8 @@ namespace engine::scene {
 	struct PlayerTeam {
 		// The `Team` instance, or a null entity between teams.
 		//
-		// Spelled `Instance` rather than `Team` — `LocalPlayer::Instance`'s
-		// name — because a member called `Team` inside a namespace that also
+		// Spelled `Instance` rather than `Team` - `LocalPlayer::Instance`'s
+		// name - because a member called `Team` inside a namespace that also
 		// holds a *type* called `Team` is a shadow waiting for the first person
 		// who writes a method on this struct.
 		ecs::Entity Instance;
@@ -115,7 +115,7 @@ namespace engine::scene {
 	// **A tolerance rather than an equality, because a colour here is a value
 	// and not a palette index.** Roblox compares `BrickColor`s, which are
 	// enumerated, so equality is exact by construction; a `Color3` reaches this
-	// comparison through a property setter, a snapshot, and — in the studio —
+	// comparison through a property setter, a snapshot, and - in the studio -
 	// a JSON file that writes floats as text and reads them back. Exact
 	// equality survives the first two and not the third.
 	//
@@ -162,7 +162,7 @@ namespace engine::scene {
 	// Creates one `Team` under the world's `Teams` service.
 	//
 	// **`AddPlayer`'s shape, and deliberately not automatic.** Which sides a
-	// game has is the game's business, so furnishing a world invents none —
+	// game has is the game's business, so furnishing a world invents none -
 	// the same refusal `InstallServices` makes about occupants.
 	//
 	// @param store  The world.

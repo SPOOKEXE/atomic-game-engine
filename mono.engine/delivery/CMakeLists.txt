@@ -4,14 +4,14 @@
 # "remote fetch" under `assets` at L8, and that cannot be built: fetching needs
 # a transport, the transport is `net` at L11, and rule 1 says a layer may see
 # every layer below it and none above it. `assets/AGENTS.md` reaches the same
-# conclusion from the other side — *there is no network in this module and there
-# will not be* — so the fetch path has to sit above both. It does, here, and
+# conclusion from the other side - *there is no network in this module and there
+# will not be* - so the fetch path has to sit above both. It does, here, and
 # `assets` stays the format.
 #
 # **Why it is not part of `mono.cdn` either.** The origin is a product; this is
 # the half a game links. An engine module depending on a program's library is
 # the wrong direction, and duplicating the group format into both ends is how a
-# format acquires a dialect — which is the one thing CDN.md §6 refuses twice.
+# format acquires a dialect - which is the one thing CDN.md §6 refuses twice.
 #
 # So the split is: `assets` is what content *is*, this is what a group is *in
 # flight* and how one is fetched, and `mono.cdn` is the origin's policy, its

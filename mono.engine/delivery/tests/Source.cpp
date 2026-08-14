@@ -71,7 +71,7 @@ TEST_CASE("an http source needs host and port", "[delivery][source]") {
 
 TEST_CASE("order is priority and a disabled source is skipped but kept", "[delivery][source]") {
 	// Kept rather than removed, so the studio can turn an origin off without
-	// losing how it was configured — which is what somebody wants while they
+	// losing how it was configured - which is what somebody wants while they
 	// are working out which one is broken.
 	DeliverySettings settings;
 	settings.Publisher = SomeKey();

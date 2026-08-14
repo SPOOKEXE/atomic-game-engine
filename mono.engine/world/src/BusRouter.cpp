@@ -37,7 +37,7 @@ namespace engine::world {
 		//
 		// **`(From.Text(), Sequence)`, and the text half is rule 4 rather than a
 		// preference.** `Name::Id()` is handed out in interning order, so it
-		// depends on which world was named first *in this process* — a universe
+		// depends on which world was named first *in this process* - a universe
 		// restored from a snapshot interns in file order where the run that wrote
 		// it interned in creation order, and the same two envelopes then apply in
 		// the opposite order. That is a replay diverging from its recording
@@ -48,7 +48,7 @@ namespace engine::world {
 		// ids until v0.17.
 		//
 		// The comparison costs a string compare where it used to cost an integer
-		// one, over a range that is already nearly sorted — each world's outbox is
+		// one, over a range that is already nearly sorted - each world's outbox is
 		// ordered by construction, so this is a merge of sorted runs.
 		bool Earlier(const std::pair<World *, Envelope> &left, const std::pair<World *, Envelope> &right) {
 			if (left.second.From != right.second.From) {
@@ -260,7 +260,7 @@ namespace engine::world {
 			// **Opening a channel is `Subscribe` one bus along**, which is
 			// `BusOperation`'s argument: the act is the same one and the kind is
 			// what tells them apart. What differs from `Messaging` is who the
-			// list is for — a topic's subscribers are fanned out to, and a
+			// list is for - a topic's subscribers are fanned out to, and a
 			// channel's are *checked* before one addressed delivery is made.
 			if (envelope.Operation == BusOperation::Subscribe) {
 				// **The one refusal on this bus a world earns for itself, and it
@@ -299,7 +299,7 @@ namespace engine::world {
 
 			// **Four refusals, and each is a different thing to go and fix.**
 			// `Bus.hpp`'s table is the contract; this is where it is enforced,
-			// and the order matters — a closed channel on a world that is not
+			// and the order matters - a closed channel on a world that is not
 			// there should name the world, because that is the first thing wrong.
 			const WorldId destination = directory.Find(envelope.Target);
 			if (!destination.IsValid()) {
@@ -314,7 +314,7 @@ namespace engine::world {
 
 			if (directory.Reach(destination)->State() == WorldState::Faulted) {
 				// The supervisor is about to restore it from its snapshot, which
-				// takes its inbox with it — so this would be accepted and then
+				// takes its inbox with it - so this would be accepted and then
 				// thrown away. A **suspended** world is deliberately not refused:
 				// its inbox is what wakes it, which is
 				// `LifecycleInputs::InboxWaiting`.
@@ -366,7 +366,7 @@ namespace engine::world {
 	BarrierCounts BusRouter::Route(const WorldDirectory &directory, const UniverseSettings &settings) {
 		// Resized and cleared, never reassigned. `assign(N, {})` destroys every
 		// per-world vector and default-constructs a replacement, which throws
-		// away the capacity each world built up — once per world per tick,
+		// away the capacity each world built up - once per world per tick,
 		// forever. Clearing keeps the buffer, which is this version's standing
 		// discipline: preallocate and reuse by default.
 		Fanout.resize(directory.Registry.size());
@@ -380,13 +380,13 @@ namespace engine::world {
 		ChannelQueued.assign(directory.Registry.size(), 0);
 
 		// Every pending envelope from every world, stamped with its sender and
-		// sorted by `(From.Text(), Sequence)` — see `Earlier`.
+		// sorted by `(From.Text(), Sequence)` - see `Earlier`.
 		//
 		// The sort is what makes this deterministic: two worlds publishing in
 		// the same tick would otherwise be applied in whatever order the world
 		// list happened to be walked in, and a replay would diverge. Each
 		// world's outbox is already ordered by construction, so this is a merge
-		// of sorted runs rather than a general sort — and `std::stable_sort`
+		// of sorted runs rather than a general sort - and `std::stable_sort`
 		// over a nearly-sorted range is close to linear.
 		std::vector<std::pair<World *, Envelope>> traffic;
 
@@ -394,7 +394,7 @@ namespace engine::world {
 
 		if (Replaying) {
 			// A replayed world re-derives the same requests it made the first
-			// time, so its outbox is discarded rather than merged — applying
+			// time, so its outbox is discarded rather than merged - applying
 			// both copies would double every operation.
 			for (const auto &world : directory.Registry) {
 				if (world == nullptr) {
@@ -461,7 +461,7 @@ namespace engine::world {
 
 		if (settings.Federated) {
 			// The buses are somebody else's. Collected, stamped, ordered the
-			// same way — and then handed up the link instead of applied,
+			// same way - and then handed up the link instead of applied,
 			// because a host that answered its own DataStore read would be a
 			// second source of truth for the same key.
 			std::stable_sort(traffic.begin(), traffic.end(), Earlier);
@@ -478,7 +478,7 @@ namespace engine::world {
 
 		// What hosts handed over, merged in as though those worlds were local.
 		// Their `From` was checked against the host that sent it in `Ingest`, so
-		// by here a remote envelope is exactly as trusted as a local one — which
+		// by here a remote envelope is exactly as trusted as a local one - which
 		// is the point: one routing path, not two.
 		for (Envelope &envelope : Ingested) {
 			World *sender = directory.Reach(directory.Find(envelope.From));
@@ -519,7 +519,7 @@ namespace engine::world {
 			if (index < directory.Hosts.size() && directory.Hosts[index].IsValid()) {
 				// A world that lives elsewhere has no inbox here. What the
 				// barrier decided for it goes out to its host instead, and the
-				// count is the same count — a delivery is a delivery whichever
+				// count is the same count - a delivery is a delivery whichever
 				// process ends up holding it.
 				delivered += Fanout[index].size();
 				for (Delivery &delivery : Fanout[index]) {
@@ -540,7 +540,7 @@ namespace engine::world {
 
 			// Swapped, not assigned. `SetResource` copies, and a resource
 			// column holding a non-trivial type *destroys and re-copies* on
-			// assignment — so handing over an inbox this way used to free the
+			// assignment - so handing over an inbox this way used to free the
 			// world's delivery buffer and allocate a new one every barrier, per
 			// world, whether or not anything had arrived.
 			//
@@ -554,7 +554,7 @@ namespace engine::world {
 				// **An empty barrier leaves a full inbox alone.** A barrier runs
 				// once per host frame and a world's systems run at the world's
 				// own tick rate, so a host drawing faster than it ticks holds
-				// two or three barriers per tick — this editor measured 200
+				// two or three barriers per tick - this editor measured 200
 				// against 91. Replacing unconditionally therefore handed the
 				// world an empty buffer and took an unread delivery away with
 				// it, and a teleport could be sent, routed, delivered and lost.
@@ -563,7 +563,7 @@ namespace engine::world {
 				// carry mail is the case this file's opening line is about: a
 				// world that forgets to drain misses messages rather than
 				// accumulating a backlog. What clears a read inbox is the tick
-				// that read it — `world::World::Tick` — which is the only place
+				// that read it - `world::World::Tick` - which is the only place
 				// that knows a tick happened at all.
 				if (!Fanout[index].empty()) {
 					inbox->Arrived.swap(Fanout[index]);
@@ -571,9 +571,9 @@ namespace engine::world {
 				} else if (!inbox->Arrived.empty() && store.Time().Tick != DeliveredAt[index]) {
 					// The world's clock has moved since this arrived, so its
 					// systems have had their look. Dropped here rather than
-					// replaced, which is the same promise this file opens with —
+					// replaced, which is the same promise this file opens with -
 					// a system that forgets to drain misses messages rather than
-					// accumulating a backlog — now kept without also taking mail
+					// accumulating a backlog - now kept without also taking mail
 					// from a world that never got a tick to read it in.
 					inbox->Arrived.clear();
 				}
@@ -800,7 +800,7 @@ namespace engine::world {
 		// **An open channel is universe state, exactly as a topic subscription
 		// is.** A snapshot that dropped it would restore a universe where every
 		// addressed send answers `NoSuchChannel` until each world happened to open
-		// its channels again — which for a world whose open ran once at startup is
+		// its channels again - which for a world whose open ran once at startup is
 		// never.
 		WriteListeners(writer, Backends.Channels.Open, directory);
 	}
@@ -834,8 +834,8 @@ namespace engine::world {
 
 		ReadListeners(reader, Backends.Channels.Open, directory);
 
-		// The codec fills the table directly — the channels and the topics are one
-		// shape and one writer — so the per-world count is rebuilt from what
+		// The codec fills the table directly - the channels and the topics are one
+		// shape and one writer - so the per-world count is rebuilt from what
 		// landed. Without this a restored world could open the cap again on top of
 		// the channels it came back holding.
 		Backends.Channels.Recount();

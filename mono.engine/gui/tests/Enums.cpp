@@ -17,8 +17,8 @@ namespace {
 	// distinction worth holding on to. Every enum here is stored as its ordinal
 	// in a trivially-copied component, so a `TextXAlignment` of 2 has to mean
 	// `Right` in a game file this engine wrote and in one it did not. Reordering
-	// a set loads cleanly and lays everything out somewhere plausible — nothing
-	// at load time could catch it — so this list is the only thing that does.
+	// a set loads cleanly and lays everything out somewhere plausible - nothing
+	// at load time could catch it - so this list is the only thing that does.
 	//
 	// Renaming a member is a format change too, because the name is what a save
 	// file carries and what a script assigns.
@@ -61,8 +61,8 @@ TEST_CASE("the collector sets keep Roblox's order", "[gui][enums]") {
 	Expect<ZIndexBehavior, 2>({"Global", "Sibling"});
 	Expect<SurfaceSizingMode, 2>({"FixedSize", "PixelsPerStud"});
 
-	// **Starts at one.** `ScrollingDirection` is a bit pair in Roblox — X is 1,
-	// Y is 2 and XY is 3 — rather than a counter, and the ordinal is the format
+	// **Starts at one.** `ScrollingDirection` is a bit pair in Roblox - X is 1,
+	// Y is 2 and XY is 3 - rather than a counter, and the ordinal is the format
 	// so it is kept. `Classes.cpp`'s `EnumOrigin` applies the offset in both
 	// directions, and this is the assertion that says why it has to.
 	Expect<ScrollingDirection, 3>({"X", "Y", "XY"}, 1);
@@ -71,8 +71,8 @@ TEST_CASE("the collector sets keep Roblox's order", "[gui][enums]") {
 
 TEST_CASE("gui::Face agrees with scene::NormalId", "[gui][enums]") {
 	// **Two modules register `NormalId` and both must mean the same six
-	// numbers.** `gui` may not link `scene` — both are `shared`, so the tier
-	// check cannot catch the edge and `Enums.hpp` refuses it in prose — which
+	// numbers.** `gui` may not link `scene` - both are `shared`, so the tier
+	// check cannot catch the edge and `Enums.hpp` refuses it in prose - which
 	// means the agreement is held by a pair of tests rather than by a shared
 	// declaration.
 	//

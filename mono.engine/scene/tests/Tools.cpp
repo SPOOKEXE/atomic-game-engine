@@ -3,7 +3,7 @@
 // **The case that decides whether this was worth building is the second one.**
 // `docs/DEFERRED.md` D00120 refused a `Tool` class on the grounds that one with
 // no equip behaviour would appear in the insert palette, save into a game file
-// and then do nothing for ever — so what has to be proved is not that the class
+// and then do nothing for ever - so what has to be proved is not that the class
 // registers, but that putting a tool in a hand *moves the handle*, in the
 // formation the rig already keeps.
 //
@@ -99,7 +99,7 @@ namespace {
 	// A `Tool` with the one child that makes it holdable.
 	//
 	// Built through `Instance.new` and `MakePart` rather than by assembling
-	// components, because those are the only two constructors this module has —
+	// components, because those are the only two constructors this module has -
 	// `scene/AGENTS.md` refuses a second one, and a tool built by hand here
 	// would be a tool nothing else in the engine could produce.
 	Entity Gear(Store &store, std::string_view name) {
@@ -128,8 +128,8 @@ namespace {
 
 TEST_CASE("a stowed tool is its owner's and a held one is everybody's", "[scene][tools]") {
 	// **The wire rule, asserted where the rule lives.** `mono.server` installs
-	// `PlayerOwning` as its interest predicate — a row under a `Player` reaches
-	// that client and nobody else — and equipping moves the tool out from under
+	// `PlayerOwning` as its interest predicate - a row under a `Player` reaches
+	// that client and nobody else - and equipping moves the tool out from under
 	// the player and into a model in `Workspace`. So the privacy of a backpack
 	// and the publicity of a held tool are the same one statement, and this is
 	// it. `server.replication` asserts the other end over a real socket.
@@ -160,7 +160,7 @@ TEST_CASE("a stowed tool is its owner's and a held one is everybody's", "[scene]
 TEST_CASE("equipping hangs the handle off the hand and the pose places it", "[scene][tools]") {
 	// **The case D00120 was actually held open on.** The entry said a tool that
 	// follows a hand is the same missing piece as a rig that does not fall apart
-	// on a slope — so the assertion is not that a row appeared, it is that the
+	// on a slope - so the assertion is not that a row appeared, it is that the
 	// handle ends up where the arm is after the same pass that places the arm.
 	World world;
 	const Entity player = world.Join();
@@ -190,7 +190,7 @@ TEST_CASE("equipping hangs the handle off the hand and the pose places it", "[sc
 	CHECK(worn->Offset.Position.Y == Approx(arm->Offset.Position.Y - reach));
 
 	// **Carried rather than simulated**, which is what taking the `Motion` away
-	// says — the same archetype move `physics` makes for a sleeping body.
+	// says - the same archetype move `physics` makes for a sleeping body.
 	CHECK(world.Store_.Get<Motion>(handle) == nullptr);
 
 	// And the pass that places limbs places this one. Moving the root is what
@@ -270,7 +270,7 @@ TEST_CASE("an anchored handle is not unanchored by being carried", "[scene][tool
 	// **The half that would be silent.** Equipping takes a `Motion` away and
 	// unequipping hands one back, and a version that handed one back
 	// unconditionally would quietly unanchor every anchored handle in the world
-	// — `Anchored` *is* the absence of that pair.
+	// - `Anchored` *is* the absence of that pair.
 	World world;
 	const Entity player = world.Join();
 	const Entity character = CharacterOf(world.Store_, player);
@@ -313,8 +313,8 @@ TEST_CASE("one hand holds one tool", "[scene][tools]") {
 
 TEST_CASE("a script equips by assigning Parent and the pass picks it up", "[scene][tools]") {
 	// **The whole script surface, and it is deliberately not a method.** Class
-	// tables here carry properties and no methods — `Sound.Playing` is a
-	// property for exactly that reason — so `Humanoid:EquipTool` cannot exist
+	// tables here carry properties and no methods - `Sound.Playing` is a
+	// property for exactly that reason - so `Humanoid:EquipTool` cannot exist
 	// and does not need to: a Roblox script equips by writing `tool.Parent`,
 	// which is a declared property on `Instance`, and `UpdateToolGrips` is what
 	// makes the world agree with the tree afterwards.
@@ -344,13 +344,13 @@ TEST_CASE("a script equips by assigning Parent and the pass picks it up", "[scen
 
 TEST_CASE("a replica cannot move a tool between containers", "[scene][tools]") {
 	// **A client that can reparent its own tool can duplicate it**, because the
-	// write survives exactly until the next delta contradicts it — which
+	// write survives exactly until the next delta contradicts it - which
 	// presents as an inventory that works sometimes rather than as a refusal.
 	//
 	// Three doors and one rule: `ecs::Store::SetProperty` has refused every
 	// property write in a replica since v0.3, which is where this engine answers
 	// "who owns a row", and `EquipTool`/`UnequipTool` make the same refusal for
-	// the C++ side — `scene::TakeDamage`'s pair, one class along.
+	// the C++ side - `scene::TakeDamage`'s pair, one class along.
 	World world;
 	const Entity player = world.Join();
 	const Entity character = CharacterOf(world.Store_, player);
@@ -409,7 +409,7 @@ TEST_CASE("a held tool survives a save round trip still held", "[scene][tools]")
 	CHECK(restored.ParentOf(tool) == character);
 
 	// The derived half is derived again rather than trusted, and it lands on the
-	// same answer — which is what makes it safe for a replica to run.
+	// same answer - which is what makes it safe for a replica to run.
 	const Entity handle = restored.FindFirstChild(tool, engine::scene::TOOL_HANDLE_NAME);
 	const CharacterLimb *worn = restored.Get<CharacterLimb>(handle);
 	REQUIRE(worn != nullptr);
@@ -418,8 +418,8 @@ TEST_CASE("a held tool survives a save round trip still held", "[scene][tools]")
 
 TEST_CASE("dying keeps the tool and the respawn refills from StarterGear", "[scene][tools]") {
 	// **The lifetime question, answered by going through the machinery rather
-	// than beside it.** A corpse stays where it fell — `Humanoid.Health` at zero
-	// is what death is since v0.15 — so it keeps holding what it was holding,
+	// than beside it.** A corpse stays where it fell - `Humanoid.Health` at zero
+	// is what death is since v0.15 - so it keeps holding what it was holding,
 	// and `LoadCharacter` destroys that body and refills `Backpack` from
 	// `StarterGear` on the way to the next one. That is the two-container rule
 	// `Services.hpp` already states, unchanged: only `StarterGear` survives a
@@ -483,8 +483,8 @@ TEST_CASE("a player who leaves takes both their tools with them", "[scene][tools
 TEST_CASE("a tool an NPC is holding has nowhere to be put away", "[scene][tools]") {
 	// **Refused rather than dropped**, because `Character::Owner` is null for
 	// anything that is not a person at a keyboard and there is no backpack to
-	// use. Inventing one — parenting it into `Workspace` at the character's feet
-	// — would be this module deciding what dropping a tool looks like, which is a
+	// use. Inventing one - parenting it into `Workspace` at the character's feet
+	// - would be this module deciding what dropping a tool looks like, which is a
 	// game's rule.
 	World world;
 

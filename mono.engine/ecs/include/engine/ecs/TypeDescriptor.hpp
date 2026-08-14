@@ -36,7 +36,7 @@ namespace engine::ecs {
 	// A dense process-local handle for one registered component type.
 	//
 	// Assigned in registration order, so two runs of the same binary that
-	// register the same types in the same order agree — which is what lets an
+	// register the same types in the same order agree - which is what lets an
 	// archetype be identified by a sorted list of these rather than by names.
 	// Registration order is fixed by doing it at startup; see Components.
 	//
@@ -107,7 +107,7 @@ namespace engine::ecs {
 	// `replication` keeps by component name. The registration that installs it
 	// is the same one that names the type, so a server and a client cannot
 	// disagree about a component's wire form without disagreeing about the
-	// component — and a receiver decoding ten bytes as twenty-eight is not a
+	// component - and a receiver decoding ten bytes as twenty-eight is not a
 	// failure worth making a caller's discipline.
 	//
 	// @since v0.5
@@ -146,7 +146,7 @@ namespace engine::ecs {
 		// format carries; the id is not.
 		core::Name Name;
 
-		// sizeof(T). Zero for a tag — a type with no data, which costs a column
+		// sizeof(T). Zero for a tag - a type with no data, which costs a column
 		// of nothing and exists only to be matched by a query.
 		uint32_t Size = 0;
 
@@ -155,14 +155,14 @@ namespace engine::ecs {
 
 		// Whether this component holds bytes at all.
 		//
-		// Derived rather than declared — a type with no members is a tag — but
+		// Derived rather than declared - a type with no members is a tag - but
 		// named, so a caller asks what a component is instead of inferring it
 		// from a size of zero and getting the inference wrong somewhere.
 		ComponentKind Kind = ComponentKind::Data;
 
 		// Whether the bytes may be copied, moved and abandoned directly.
 		//
-		// True for almost every component — a transform, a velocity, an id.
+		// True for almost every component - a transform, a velocity, an id.
 		// When it is true the four lifetime hooks below still work but nothing
 		// has to call them, and the storage takes the memcpy path.
 		bool Trivial = false;
@@ -191,7 +191,7 @@ namespace engine::ecs {
 
 		// Reads `count` already-constructed values from `reader`. Null unless
 		// Serialisable. A short or corrupt buffer leaves the reader failed and
-		// the values unspecified but valid — never a partial object.
+		// the values unspecified but valid - never a partial object.
 		void (*Read)(core::ByteReader &reader, void *destination, size_t count) = nullptr;
 
 		// The compact form this type crosses a replication wire in, if it has
@@ -211,8 +211,8 @@ namespace engine::ecs {
 	//
 	// - It is **stable within one build** and may differ between compilers, so
 	//   it satisfies same-binary determinism and nothing wider.
-	// - Anything whose name has to survive a compiler change — a component in a
-	//   save file or on a wire — should be registered explicitly instead.
+	// - Anything whose name has to survive a compiler change - a component in a
+	//   save file or on a wire - should be registered explicitly instead.
 	//
 	// @return The spelled-out type name, without a trailing null.
 	template <class T> constexpr std::string_view TypeNameOf() {
@@ -236,8 +236,8 @@ namespace engine::ecs {
 
 		const size_t from = start + opening.size();
 
-		// GCC spells the whole substitution list — `[with T = X; std::string_view
-		// = ...]` — so the name ends at the first semicolon, not at the closing
+		// GCC spells the whole substitution list - `[with T = X; std::string_view
+		// = ...]` - so the name ends at the first semicolon, not at the closing
 		// bracket. Taking the bracket produced names like
 		// `Position; std::string_view = std::basic_string_view<char>`, which are
 		// still unique per type and so still *worked*, but are unreadable in a
@@ -261,14 +261,14 @@ namespace engine::ecs {
 	// copyable type.
 	//
 	// @warning A trivially copyable component containing a `core::Name` gets
-	//          raw serialisation that writes the name's **id** — a
-	//          process-local counter — which `Name.hpp` says never to
+	//          raw serialisation that writes the name's **id** - a
+	//          process-local counter - which `Name.hpp` says never to
 	//          serialize. Such a type must be registered with an explicit
 	//          writer and reader instead.
 	//
 	// @warning **A component that is snapshotted must have no padding.** Raw
 	//          serialisation writes the object representation, padding
-	//          included, and padding is never initialised — so two runs of one
+	//          included, and padding is never initialised - so two runs of one
 	//          scene produce different bytes and every comparison of two worlds
 	//          becomes unreliable. Order the members widest-first, or add an
 	//          explicit `Reserved` field, as `WorldTime` does. `just

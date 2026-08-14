@@ -16,7 +16,7 @@
 // answers that, one layer up and after a connection exists.
 //
 // **A tag is optional and its absence is not a failure.** A public session has
-// nothing to prove — its content is served to everyone who asks — so it
+// nothing to prove - its content is served to everyone who asks - so it
 // announces unsigned, and a signature on it would be a signature nobody could
 // check. A private session tags its advert under the `SessionKey`, and
 // `Decode` reports whether the tag verified against a key the caller holds
@@ -134,14 +134,14 @@ namespace network {
 		// LAN announcement: a host binds `0.0.0.0` and genuinely does not know
 		// which of its addresses a given client can route to. `Listing::Dial`
 		// is what resolves that, using the address the announcement arrived
-		// from — which is the one address that is known to work, because a
+		// from - which is the one address that is known to work, because a
 		// datagram came over it.
 		engine::net::Endpoint At;
 
 		// What to show a person. Capped at MAXIMUM_TEXT_BYTES.
 		std::string Name;
 
-		// What to show a person underneath the name — the place being played,
+		// What to show a person underneath the name - the place being played,
 		// the project being edited, the store being served. Capped the same.
 		std::string Detail;
 
@@ -179,9 +179,9 @@ namespace network {
 		//
 		// **False covers three different situations and deliberately does not
 		// distinguish them**: no tag, a tag under a key we do not hold, and a
-		// tag that failed. A caller's decision is the same in all three — a
+		// tag that failed. A caller's decision is the same in all three - a
 		// `Private` session that is not authenticated is one to show and refuse
-		// to dial — and a field that told a stranger which of the three it was
+		// to dial - and a field that told a stranger which of the three it was
 		// would answer "is this the right key" one guess at a time.
 		bool Authenticated = false;
 	};
@@ -205,7 +205,7 @@ namespace network {
 	// @param keys     Every key the caller holds. Tried in order; the first
 	//        that verifies wins, and none verifying is a decoded advert that is
 	//        not authenticated rather than a refusal.
-	// @return The advert, or nothing when the bytes are not one — a wrong
+	// @return The advert, or nothing when the bytes are not one - a wrong
 	//         magic, an unknown version, a length that contradicts the frame,
 	//         an enum outside its list, or text past the cap.
 	// @since v0.13

@@ -11,7 +11,7 @@
 // This is the JavaScript twin of `LuauBindings.hpp`'s `LuauContext`, and the
 // shared members are deliberately the same types. `SignalTable`, `ChangeQueue`
 // and `TaskQueue` decide **ordering**, and ordering is what a recording depends
-// on — so the two languages cannot disagree about it, because there is one
+// on - so the two languages cannot disagree about it, because there is one
 // implementation and each binding only supplies the callables.
 //
 // @tier L9 · shared
@@ -42,7 +42,7 @@ namespace engine::script {
 	//
 	// **The service's name rides beside the row because a refusal needs it.**
 	// `SoundService.AmbientReverb = 1` has to say which service is refusing, and
-	// a `ServiceProperty` carries only its own name — the same sentence the Luau
+	// a `ServiceProperty` carries only its own name - the same sentence the Luau
 	// half builds from `ServiceSurface::Name`.
 	//
 	// @since v0.16
@@ -52,7 +52,7 @@ namespace engine::script {
 	};
 
 	// Everything one JS runtime needs to reach the world, hung off the context
-	// rather than a static — two runtimes over two worlds must not be able to
+	// rather than a static - two runtimes over two worlds must not be able to
 	// reach each other's storage.
 	//
 	// @since v0.5
@@ -71,14 +71,14 @@ namespace engine::script {
 		//
 		// **Shared with the Luau side and for the three above's reason.** Which
 		// handler a press reaches is an ordering rule, and this language could
-		// not bind the service at all until the rule had one implementation —
+		// not bind the service at all until the rule had one implementation -
 		// see `Actions.hpp`.
 		ActionStack Actions;
 
 		// How many GUIDs `HttpService.GenerateGUID` has handed out.
 		//
 		// **A counter rather than a clock or an entropy source, which is what
-		// makes a GUID replayable** — `HttpService.cpp` carries the argument.
+		// makes a GUID replayable** - `HttpService.cpp` carries the argument.
 		// On the context rather than a file-static for this struct's own reason:
 		// two runtimes over two worlds must not share one stream.
 		uint64_t NextGuid = 0;
@@ -133,7 +133,7 @@ namespace engine::script {
 		JSClassID CFrameClass = 0;
 
 		// v0.6's datatype vocabulary. `Region3` is a `core::AABB` and `Ray` a
-		// `core::Ray`, exactly as on the Luau side — the engine had both, and a
+		// `core::Ray`, exactly as on the Luau side - the engine had both, and a
 		// second spelling of either would be a duplicate.
 		JSClassID Vector2Class = 0;
 		JSClassID UDimClass = 0;
@@ -207,7 +207,7 @@ namespace engine::script {
 		// Which promise resolver is waiting on which `ChildWaiters` entry.
 		//
 		// **The second resume source, and a second map rather than a widened
-		// first one** — the Luau twin carries the argument: a ticket and a waiter
+		// first one** - the Luau twin carries the argument: a ticket and a waiter
 		// id come from two counters that know nothing about each other, and what
 		// each resolves *with* is different.
 		std::unordered_map<uint64_t, CallbackRef> AwaitedChildren;

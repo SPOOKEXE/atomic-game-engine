@@ -7,8 +7,8 @@
 // up when it is not, so on a real internet path it is either wasting the link or
 // contributing to a collapse it cannot detect. This is the part that reacts.
 //
-// **The algorithm is Copa** — Arun and Balakrishnan, *Copa: Practical
-// Delay-Based Congestion Control for the Internet*, NSDI 2018 — and the reason
+// **The algorithm is Copa** - Arun and Balakrishnan, *Copa: Practical
+// Delay-Based Congestion Control for the Internet*, NSDI 2018 - and the reason
 // is that for a game the latency argument is the whole point rather than a side
 // note. Copa aims at a *standing queue of `1/delta` packets* at the bottleneck
 // and steers the rate toward `1/(delta * queueing delay)`, so the equilibrium is
@@ -19,7 +19,7 @@
 //
 // **What was rejected, and why, so it is not re-argued.** A loss-based AIMD
 // window in the NewReno lineage is simple, fair to TCP and thoroughly
-// understood, and it *finds the bottleneck by filling its buffer* — that is not
+// understood, and it *finds the bottleneck by filling its buffer* - that is not
 // an implementation detail, it is the mechanism. On a home router with a
 // hundred milliseconds of buffer that is a hundred milliseconds added to every
 // input the player sends, arriving exactly when the game is busiest. Vegas is
@@ -37,7 +37,7 @@
 // *competitive mode* and it is implemented here. The controller watches whether
 // the queue ever drains; if it has not drained for `CompetitionRoundTrips`, the
 // only explanation is a flow that keeps it full, and `TargetQueuePackets` then
-// moves AIMD-style — one packet added per round trip, halved on a loss — which
+// moves AIMD-style - one packet added per round trip, halved on a loss - which
 // is the same law the neighbour is playing and takes a comparable share. When
 // the neighbour leaves the queue drains again, the mode drops back, and the
 // latency comes back with it. **Latency is given up only for as long as
@@ -47,7 +47,7 @@
 // jitter, so there is no seeded source to justify. Time arrives as an argument
 // exactly as it does everywhere else in this module, which is what keeps the
 // controller's whole state a pure function of the sequence of calls it was
-// given — the same property the idle timeout has, and the reason a suite states
+// given - the same property the idle timeout has, and the reason a suite states
 // a congestion event rather than waiting for one.
 //
 // @tier L11 · shared
@@ -61,7 +61,7 @@ namespace engine::net {
 	// How hard the controller pushes, and how much queue it will tolerate.
 	//
 	// The defaults come from the Copa paper and from RFC 6928 rather than from a
-	// measurement taken here, and saying so is better than implying otherwise —
+	// measurement taken here, and saying so is better than implying otherwise -
 	// the same standing `LinkSettings` and `ReliabilitySettings` have.
 	//
 	// @since v0.15
@@ -70,7 +70,7 @@ namespace engine::net {
 		//
 		// **A cold start that blasts is a bad neighbour and one that crawls
 		// makes a joining player wait**, so this is RFC 6928's initial window
-		// exactly — ten full datagrams. A number with fifteen years of
+		// exactly - ten full datagrams. A number with fifteen years of
 		// deployment behind it rather than one chosen here, and small enough
 		// that it cannot hurt a path nothing has measured: at the assumed 100 ms
 		// it is under a megabit a second, and it is still enough that the first
@@ -94,7 +94,7 @@ namespace engine::net {
 		//
 		// **A controller that can reach zero and stay there is worse than no
 		// controller**, because the link then has no way to discover that the
-		// path recovered — it needs to send something to get an acknowledgement
+		// path recovered - it needs to send something to get an acknowledgement
 		// and it needs an acknowledgement to be allowed to send. Two datagrams
 		// is TCP's own floor and it is here for TCP's reason.
 		double MinimumWindowBytes = 2.0 * 1200.0;
@@ -130,7 +130,7 @@ namespace engine::net {
 		// cannot tell the two apart backs off for ever on a wireless link.
 		double VarianceFactor = 2.0;
 
-		// How far back the base round trip — the path with no queue on it — is
+		// How far back the base round trip - the path with no queue on it - is
 		// remembered.
 		//
 		// Long enough that a queue which stays full for several seconds does not
@@ -204,9 +204,9 @@ namespace engine::net {
 	// The send rate, steered by the round trip and by loss.
 	//
 	// One per `Link`, owned by it. It reads no clock and holds no transport: the
-	// link feeds it what it already knows — a round-trip estimate whenever one
+	// link feeds it what it already knows - a round-trip estimate whenever one
 	// lands, a count of sends the far side's acknowledgement showed missing, and
-	// one `Advance` per tick — and reads back a byte allowance.
+	// one `Advance` per tick - and reads back a byte allowance.
 	//
 	// **`Advance` is the only place the control law runs, and that is rule 5.**
 	// Observations may arrive several times in a tick because several packets
@@ -260,7 +260,7 @@ namespace engine::net {
 		//        must not buy the connection a second's worth of sending inside
 		//        one tick.
 		// @param ceilingBytes The most this tick may allow, whatever the path
-		//        would take — `LinkSettings::BytesPerTick`. The controller will
+		//        would take - `LinkSettings::BytesPerTick`. The controller will
 		//        not steer above it, and that is **anti-windup rather than
 		//        cosmetics**: a rate allowed to climb far past a cap it can never
 		//        spend would take seconds to come back down after real
@@ -269,8 +269,8 @@ namespace engine::net {
 		// @param answered Whether everything outstanding when the current
 		//        observation period opened has now been acknowledged.
 		//        **This is what clocks the controller, and the round trip is only
-		//        the fallback.** Every periodic decision here — the doubling, the
-		//        velocity, the mode switch — is waiting for the effect of the
+		//        the fallback.** Every periodic decision here - the doubling, the
+		//        velocity, the mode switch - is waiting for the effect of the
 		//        last one to come back, and an acknowledgement *is* that effect
 		//        arriving. A controller clocked by an assumed round trip instead
 		//        behaves the same on a loopback as on a satellite, which is
@@ -282,7 +282,7 @@ namespace engine::net {
 		//
 		// The window spread over the round trip and then over one tick. **The
 		// exception is the opening tick, which may spend the whole initial
-		// window** — that is what an initial window is for, and it is the one
+		// window** - that is what an initial window is for, and it is the one
 		// burst on a connection that has no feedback to pace against.
 		uint32_t AllowanceBytes() const {
 			return Allowance;
@@ -324,7 +324,7 @@ namespace engine::net {
 		//
 		// **A new connection has no idea what the path will carry and cannot
 		// find out by reasoning**, so it doubles its window every round trip from
-		// RFC 6928's initial window until something pushes back — a queue that
+		// RFC 6928's initial window until something pushes back - a queue that
 		// stops draining, a lost packet, or the cap. That is TCP's slow start
 		// and it is here for TCP's reason: the search has to be exponential or
 		// the first seconds of every connection are spent below the path.

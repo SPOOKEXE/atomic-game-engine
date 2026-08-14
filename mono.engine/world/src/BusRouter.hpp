@@ -4,7 +4,7 @@
 // out to the worlds it landed for.
 //
 // Private to this module. A bus is reached through `Postbox` from inside a
-// world, or not at all — and an envelope is applied by the driver at the
+// world, or not at all - and an envelope is applied by the driver at the
 // barrier, or not at all.
 //
 // **Everything happens on the driver thread, at the barrier.** That is what
@@ -41,7 +41,7 @@ namespace engine::world {
 	// A non-owning view, built where it is passed, so the router never holds a
 	// world past the barrier it was handed one for.
 	struct WorldDirectory {
-		// Every slot, holes included — a destroyed world leaves a null behind
+		// Every slot, holes included - a destroyed world leaves a null behind
 		// and the slots after it do not shift up.
 		std::span<const std::unique_ptr<World>> Registry;
 
@@ -158,8 +158,8 @@ namespace engine::world {
 
 		// Empties the backends and everything queued against them.
 		//
-		// The fanout is not queued state — it is scratch, resized and cleared at
-		// the top of every barrier — and neither is the replay flag, which says
+		// The fanout is not queued state - it is scratch, resized and cleared at
+		// the top of every barrier - and neither is the replay flag, which says
 		// where the next barrier's traffic comes from rather than holding any.
 		void Reset();
 
@@ -206,7 +206,7 @@ namespace engine::world {
 		// messages, by world index.
 		//
 		// Counted rather than derived, because deriving it means walking
-		// `Fanout[destination]` per send — quadratic in exactly the case the
+		// `Fanout[destination]` per send - quadratic in exactly the case the
 		// bound exists to survive. Reset with the fanout at the top of every
 		// barrier, so the limit is per barrier and says so.
 		std::vector<uint32_t> ChannelQueued;
@@ -215,7 +215,7 @@ namespace engine::world {
 		//
 		// **Because a barrier is not a tick, in either direction.** A barrier
 		// runs once per host frame and a world's systems run at the world's own
-		// rate — the studio measured 200 barriers against 91 ticks in one world,
+		// rate - the studio measured 200 barriers against 91 ticks in one world,
 		// and a world owing catch-up ticks is the same mismatch the other way.
 		// Replacing an inbox unconditionally therefore took mail away before any
 		// system had seen it; never replacing it hands the same mail over on
@@ -224,7 +224,7 @@ namespace engine::world {
 		// and kept until then.
 		//
 		// Here rather than on `Inbox` because it is the router's bookkeeping and
-		// not a fact about the world — a field on the resource would ride in
+		// not a fact about the world - a field on the resource would ride in
 		// every snapshot and on the wire.
 		std::vector<uint64_t> DeliveredAt;
 

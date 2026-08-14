@@ -19,7 +19,7 @@ namespace engine::core {
 	}
 
 	CFrame CFrame::Angles(float pitch, float yaw, float roll) {
-		// Y, then X, then Z, applied intrinsically — the order Roblox's
+		// Y, then X, then Z, applied intrinsically - the order Roblox's
 		// CFrame.Angles uses. Quaternion multiplication is not commutative, so
 		// this order is the definition rather than a detail.
 		const glm::quat aroundY = glm::angleAxis(yaw, glm::vec3{0.0f, 1.0f, 0.0f});
@@ -48,19 +48,19 @@ namespace engine::core {
 		//
 		// **Measured from the terms themselves rather than from `cos(pitch)`,
 		// and the threshold is about conditioning rather than about dividing by
-		// zero.** atan2 is defined at the origin, so the failure is not a NaN —
+		// zero.** atan2 is defined at the origin, so the failure is not a NaN -
 		// it is a confidently wrong angle. The first version of this tested
 		// `cos(pitch) < 1e-6` and was wrong for a reason worth keeping: at a
 		// true pole the quaternion round-trip leaves `sin(pitch)` at
-		// 0.99999994 rather than 1, so `cos(pitch)` reads 3.5e-4 — a thousand
-		// times the threshold — while the two elements below have already lost
+		// 0.99999994 rather than 1, so `cos(pitch)` reads 3.5e-4 - a thousand
+		// times the threshold - while the two elements below have already lost
 		// every significant bit. A test on the derived angle cannot see that;
 		// a test on the operands can.
 		//
 		// 1e-3 is where float noise in a normalised rotation stops being small
 		// against the values carrying the ratio. The nearest angle any caller
 		// is likely to sit at is one degree off the pole, where this reads
-		// 1.7e-2 — comfortably outside.
+		// 1.7e-2 - comfortably outside.
 		constexpr float NEAR_POLE = 1.0e-3f;
 		const float yawTermMagnitude = std::hypot(matrix[2][0], matrix[2][2]);
 
@@ -128,7 +128,7 @@ namespace engine::core {
 
 		// Shortest arc. A quaternion and its negation are the same orientation,
 		// so when the two point away from each other the straight line between
-		// them passes through the long way round — 359 degrees of rotation to
+		// them passes through the long way round - 359 degrees of rotation to
 		// express one degree of difference.
 		if (glm::dot(from, to) < 0.0f) {
 			to = -to;

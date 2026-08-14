@@ -3,7 +3,7 @@
 # A 16384 x 16384 noise-generated voxel world streamed around a camera.
 #
 # Chunks are generated on demand and evicted behind the camera, so the working
-# set is a ring rather than a map. The view channel grows itself to fit —
+# set is a ring rather than a map. The view channel grows itself to fit -
 # `--entities` seeds it and no longer caps it.
 #
 #   scripts/demos/run-terrain.sh                  # uncapped, held at 165 fps

@@ -99,7 +99,7 @@ namespace engine::net {
 					Socket.set_option(asio::socket_base::reuse_address(true), sharing);
 #if defined(SO_REUSEPORT)
 					// SO_REUSEADDR alone does not let two sockets hold one UDP
-					// port on Linux or macOS — it only shortens the wait after a
+					// port on Linux or macOS - it only shortens the wait after a
 					// close. SO_REUSEPORT is the one that shares, and it has no
 					// asio name, so it is spelled out. Windows has no such
 					// option and does not need one: SO_REUSEADDR already means
@@ -124,8 +124,8 @@ namespace engine::net {
 				}
 
 				// The setting means the same thing on both implementations: how
-				// much may wait before a send is refused. Advisory — a kernel
-				// may round it — which is why nothing reads it back.
+				// much may wait before a send is refused. Advisory - a kernel
+				// may round it - which is why nothing reads it back.
 				if (Limits.Broadcast) {
 					// Asked for rather than always on. A socket that could
 					// broadcast by default is one where a mistyped destination

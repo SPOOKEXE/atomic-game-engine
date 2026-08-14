@@ -10,7 +10,7 @@ namespace cdn {
 	namespace {
 		// Hex when it is exactly that, words otherwise. A person who was given
 		// words types words, and a launcher that generated a key passes the
-		// key — and the two are not ambiguous, because a 64-character
+		// key - and the two are not ambiguous, because a 64-character
 		// passphrase of nothing but hex digits is not a sentence anybody typed.
 		std::optional<network::SessionKey> ReadSecret(const std::string &secret) {
 			if (secret.empty()) {
@@ -73,8 +73,8 @@ namespace cdn {
 			// game server.** What a client needs from a content stream is a
 			// *TCP* address to fetch over; the punch that would matter is one
 			// through a UDP hole, and HTTP does not travel through it. So the
-			// rendezvous here is a directory — it tells a client where the
-			// origin is — and an origin behind a NAT still needs a forwarded
+			// rendezvous here is a directory - it tells a client where the
+			// origin is - and an origin behind a NAT still needs a forwarded
 			// port. Saying that plainly beats a punch that opens a mapping
 			// nothing uses.
 			stream->Finding = network::Presence::Open(presence, stream->Announcement, std::move(key));

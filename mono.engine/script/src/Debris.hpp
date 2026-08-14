@@ -4,7 +4,7 @@
 //
 // **The shared half of `Debris`, beside `TaskQueue` and for its reasons.** A
 // deadline names no VM, and what has to be one implementation is the order two
-// items due on the same tick are destroyed in — a script that spawns an effect
+// items due on the same tick are destroyed in - a script that spawns an effect
 // and its shell together should see them go in the order it added them, on
 // every run of the recording.
 //
@@ -18,7 +18,7 @@
 //
 // **A cap, and the failure it takes is deliberate.** `AddItem` is a *cleanup*
 // call, so the conservative failure when a script fills the queue from a loop is
-// to destroy the oldest item early — the thing was going to be destroyed anyway
+// to destroy the oldest item early - the thing was going to be destroyed anyway
 // and the only cost is that it went sooner. That is the opposite trade from
 // `TweenTable::MAXIMUM`, which refuses rather than evicting, and the difference
 // is the direction each is wrong in: a tween silently dropped is a scene that
@@ -27,7 +27,7 @@
 //
 // **No `MaxItems` property, unlike Roblox.** A cap a script can raise is not a
 // bound, and the property would make `Debris` the second service in this engine
-// that has to be a userdata rather than a table — see `ServiceSurface::Index`
+// that has to be a userdata rather than a table - see `ServiceSurface::Index`
 // for what that costs and why.
 //
 // @tier L9 · shared
@@ -57,7 +57,7 @@ namespace engine::script {
 		// does not queue a second entry. A script calling `AddItem` in a loop on
 		// something it is already counting down would otherwise fill the queue
 		// with one instance, and the second destruction of an entity is a no-op
-		// anyway — so the entry would only ever have been dead weight.
+		// anyway - so the entry would only ever have been dead weight.
 		//
 		// @param instance What to destroy.
 		// @param dueTick  The tick it becomes due on.
@@ -70,7 +70,7 @@ namespace engine::script {
 		// **Ties break on the order they were added**, which is what makes two
 		// items with one deadline go in the order the script asked. A heap
 		// ordered on the tick alone would leave that to whichever way the
-		// comparison happened to fall — the same rule and the same reason as
+		// comparison happened to fall - the same rule and the same reason as
 		// `TaskQueue::Advance`.
 		//
 		// @param tick    The tick the world has reached.
@@ -90,7 +90,7 @@ namespace engine::script {
 
 		// **There is no `Clear` either.** A world being torn down takes these
 		// with it, and a queue holding entity handles into a store that has gone
-		// is not something anything reads — the same reason `TaskQueue` is not
+		// is not something anything reads - the same reason `TaskQueue` is not
 		// emptied when a runtime closes.
 
 	  private:
@@ -119,7 +119,7 @@ namespace engine::script {
 	//
 	// **A store and a queue rather than a VM, so both runtimes call this one.**
 	// Draining debris destroys instances and fires nothing, so there is no
-	// callable for a language to know how to call — which is the whole of why
+	// callable for a language to know how to call - which is the whole of why
 	// `PumpTweens` is still two functions and this is one. It was two identical
 	// ten-line functions until v0.16.
 	//

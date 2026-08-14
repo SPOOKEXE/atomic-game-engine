@@ -3,7 +3,7 @@
 # Imported meshes, built-ins, textures, and a mirror.
 #
 # **Needs published content.** Without `--cdn` every mesh name resolves to the
-# built-in fallback and the scene draws cubes — which is not a failure, and is
+# built-in fallback and the scene draws cubes - which is not a failure, and is
 # not what it is for. `run-mesh-grid.sh` is the one that bakes and publishes;
 # point this at a store you already have:
 #

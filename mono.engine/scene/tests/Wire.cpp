@@ -2,7 +2,7 @@
 //
 // `Wire.hpp` states an error in metres and an error in radians. This is the
 // half that checks them, because a stated bound nobody measures is the same
-// thing as a hope with a constant beside it — and the two failure modes it
+// thing as a hope with a constant beside it - and the two failure modes it
 // guards against pull in opposite directions: a grid quietly widened past the
 // bound, and a bound quietly widened past the grid. Every case here therefore
 // asserts both that nothing exceeds the stated figure and that something comes
@@ -66,7 +66,7 @@ namespace scene_wire_test {
 	}
 
 	// The angle between two orientations, in radians. `q` and `-q` are the same
-	// rotation, so the dot product is taken absolutely — comparing components
+	// rotation, so the dot product is taken absolutely - comparing components
 	// would report a full turn for two identical orientations.
 	float AngleBetween(const CFrame &left, const CFrame &right) {
 		const float dot = left.QuaternionX * right.QuaternionX + left.QuaternionY * right.QuaternionY +
@@ -261,7 +261,7 @@ TEST_CASE("smallest-three reconstructs a unit quaternion", "[scene][wire]") {
 TEST_CASE("two nearly equal components pick a largest and stay inside the bound", "[scene][wire]") {
 	// **The case that picks the wrong largest.** When two components are within
 	// a rounding error of each other the encoder's choice can differ from what
-	// a reader would call largest — and it does not matter, because the decoder
+	// a reader would call largest - and it does not matter, because the decoder
 	// is told which one was dropped rather than working it out. What would
 	// matter is the accuracy, so that is what is asserted.
 	const float half = 0.5f;
@@ -315,7 +315,7 @@ TEST_CASE("the sign of the dropped component does not change the rotation", "[sc
 		opposite.Frame = negated;
 
 		// Both describe the same orientation, so both must decode to the same
-		// orientation — and to the same bytes, because a hash over replicated
+		// orientation - and to the same bytes, because a hash over replicated
 		// state cannot afford two encodings of one value.
 		const CFrame first = RoundTrip(positive).Frame;
 		const CFrame second = RoundTrip(opposite).Frame;
@@ -330,7 +330,7 @@ TEST_CASE("the sign of the dropped component does not change the rotation", "[sc
 
 TEST_CASE("any four bytes decode to a unit quaternion", "[scene][wire]") {
 	// Every field of an inbound message is hostile. A word no encoder would
-	// produce — three components that do not fit inside one rotation — still
+	// produce - three components that do not fit inside one rotation - still
 	// has to come out as something every consumer downstream may treat as a
 	// rotation, rather than as a quaternion of length 1.22 that quietly scales
 	// whatever it is applied to.
@@ -407,7 +407,7 @@ TEST_CASE("dead-reckoned error grows with time rather than with the grid", "[sce
 	//
 	// Both halves are asserted, in the shape the rest of this file uses.
 	// Nothing exceeds the stated growth, and the figure genuinely grows with the
-	// elapsed time rather than sitting at the grid's own error — or the horizon
+	// elapsed time rather than sitting at the grid's own error - or the horizon
 	// below would be describing something that does not happen.
 	const float positionReach = engine::scene::WIRE_POSITION_HALF_EXTENT_METRES;
 	const float linearReach = engine::scene::WIRE_LINEAR_HALF_EXTENT_METRES_PER_SECOND;
@@ -416,7 +416,7 @@ TEST_CASE("dead-reckoned error grows with time rather than with the grid", "[sce
 
 	// **Summed in double, so the figure is the quantisation error and nothing
 	// else.** The same sum in float at 64 m from the origin lands on the wrong
-	// side of a rounding step often enough to exceed the bound by an ulp —
+	// side of a rounding step often enough to exceed the bound by an ulp -
 	// 3.5 um measured, against a quantisation term four hundred times larger.
 	// That is a fact about float addition rather than about the grid, and
 	// mixing the two into one number would make neither of them checkable.
@@ -512,7 +512,7 @@ TEST_CASE("the grid is checked against the world rather than assumed", "[scene][
 TEST_CASE("a position code no encoder emits still decodes inside the world", "[scene][wire]") {
 	// **The one code a symmetric grid leaves unused**, arriving from a peer.
 	// A decoder that trusted its input would put an entity a step outside the
-	// extent this module states everything is inside — small, and exactly the
+	// extent this module states everything is inside - small, and exactly the
 	// sort of small that makes a containment test somewhere else disagree with
 	// a header.
 	const engine::ecs::WireFormat wire = engine::scene::TransformWire();

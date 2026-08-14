@@ -14,7 +14,7 @@ namespace engine::script {
 
 	ecs::Entity DebrisQueue::Add(ecs::Entity instance, uint64_t dueTick) {
 		// Already waiting: keep the earlier of the two deadlines and add
-		// nothing — see the header for why a second entry would be dead weight.
+		// nothing - see the header for why a second entry would be dead weight.
 		for (Item &item : Items) {
 			if (item.Instance != instance) {
 				continue;
@@ -30,7 +30,7 @@ namespace engine::script {
 		}
 
 		// At the cap, the oldest item goes now. The caller destroys it, which is
-		// what the return value means — and the header says why destroying early
+		// what the return value means - and the header says why destroying early
 		// is the right way for a cleanup call to fail.
 		ecs::Entity evicted = ecs::NULL_ENTITY;
 		if (Items.size() >= MAXIMUM) {
@@ -59,7 +59,7 @@ namespace engine::script {
 	}
 
 	void DebrisQueue::Advance(uint64_t tick, std::vector<ecs::Entity> &expired) {
-		// Everything at the front whose tick has arrived, in list order — which
+		// Everything at the front whose tick has arrived, in list order - which
 		// is deadline order, then insertion order.
 		size_t due = 0;
 		while (due < Items.size() && Items[due].DueTick <= tick) {

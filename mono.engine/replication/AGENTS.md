@@ -1,4 +1,4 @@
-# replication — module invariants
+# replication - module invariants
 
 L12, `shared` tier. What the server tells a client, and what the client does
 with it. `net` carries the bytes; this decides what they mean.
@@ -31,7 +31,7 @@ nor the new one, and nothing downstream could tell.
 
 A `ComponentId` is a dense counter assigned in registration order and means
 something different in the other process. Every component on the wire is named,
-and a message resolves names to ids once rather than per entity — the same rule
+and a message resolves names to ids once rather than per entity - the same rule
 `ecs`'s snapshot follows, for the same reason.
 
 An `ecs::Entity` **is** carried as its index and generation, and that is
@@ -51,7 +51,7 @@ Two rules for this module, and neither is checked by the build:
   a handle whose only possible reading is wrong. An input goes up; state comes
   back.
 - **`Store::Promote` is where a prediction becomes a server entity, and this
-  module owns *when*.** `ecs` deliberately built the operation and no policy —
+  module owns *when*.** `ecs` deliberately built the operation and no policy -
   see `ecs/AGENTS.md`. The decision needs a consumer that predicts a spawn, and
   there is none until there is a projectile, so nothing here should invent one
   in the meantime.
@@ -72,7 +72,7 @@ read off the function:
 2. A `Hello` is answered with a cookie `net::Cookie` derives. **Zero bytes**, and
    zero however many are outstanding.
 3. An `Answer` is checked against the cookie, then `MaximumClients`, then the
-   game's policy, then the X25519 agreement — and only then is a slot taken.
+   game's policy, then the X25519 agreement - and only then is a slot taken.
 
 Moving any of those later is the bug this ordering exists to prevent. In
 particular the agreement must stay behind the cookie: it is the only step that
@@ -85,7 +85,7 @@ handshake sits in front of, not defence it replaces.
 **An entity with no replicated component is not visible to anybody.** Interest
 filters entities and `Replicate` filters components, and the entity that passed
 the first and had nothing left after the second used to cross as a bare row in
-the join snapshot — no data, and a count of a world the client was told it may
+the join snapshot - no data, and a count of a world the client was told it may
 not see. `Authority::Survey` is where that is decided, once per `Publish`
 because the answer does not depend on the client.
 
@@ -105,7 +105,7 @@ The rules are `net/AGENTS.md`'s; what belongs here is what it costs this module.
 **The tag comes out of the payload, so every budget is sized against
 `net::Packet::MAXIMUM_MESSAGE_BYTES`.** `AuthoritySettings::ChunkBytes` is
 capped at construction, loudly, because a chunk that cannot fit is refused by
-`Link::Reserve` and a refusal is also what ordinary backpressure looks like —
+`Link::Reserve` and a refusal is also what ordinary backpressure looks like -
 which is the same shape as the v0.3 delta, the snapshot-chunk cursor and the
 oversized forget, three times over.
 
@@ -122,7 +122,7 @@ sequence rather than two that could overlap.
 ## A value crosses in its compact form, and the store never sees one
 
 `ecs::TypeDescriptor::Wire` is a second, lossy serialisation a component may
-carry — `scene::Transform` is twenty-eight bytes in a store and ten on a
+carry - `scene::Transform` is twenty-eight bytes in a store and ten on a
 datagram, `scene::Motion` twenty-four and twelve, which is a measured 25 entity
 values a datagram becoming 50. Three rules, and the build checks none of them.
 
@@ -139,7 +139,7 @@ those two recipes make.
 **The snapshot path and the delta path have to agree, and they are two places.**
 A delta is built from the dirty bits and a join snapshot is built from a scratch
 store, so `BeginSnapshot` puts every value with a wire form *through* it before
-copying — the snapshot then carries what the far side would have decoded. If one
+copying - the snapshot then carries what the far side would have decoded. If one
 path quantised and the other did not, a client's world would depend on when it
 joined, which never shows as a failure and always shows as drift between two
 clients. The scratch store is the only place that round trip is safe.
@@ -159,7 +159,7 @@ serialisations. A fourth is a place that can disagree with the other three.
 
 `ecs::ChangeChannel` already records what moved, for `.Changed` and for render
 invalidation; a delta is the third reader of the same bits. Do not add a second
-record of what changed, and do not diff two snapshots — a diff costs the size of
+record of what changed, and do not diff two snapshots - a diff costs the size of
 the world every tick whether or not anything happened.
 
 `EachChangedBatch` yields *runs* rather than rows precisely so that a delta is a
@@ -169,14 +169,14 @@ memcpy per run. A per-entity copy here would undo that.
 
 `Audit.hpp` hashes groups of replicated state, sends the digests, and takes back
 the groups a client says it disagrees with. It is **not a second way to send
-state** — it sends none. It is the only thing in this module that can notice a
+state** - it sends none. It is the only thing in this module that can notice a
 client quietly holding the wrong value, which is the class of bug v0.15 chased
 one cause at a time: the lost creation, the stranded value, the stale forget, the
 tick that never completed. `D00015(b)`.
 
 **It only ever catches *stale* divergence, and every other decision falls out of
 that.** Anything genuinely moving is already being corrected by ordinary deltas,
-so a mismatch is by definition not urgent — which is why the cadence is slow, the
+so a mismatch is by definition not urgent - which is why the cadence is slow, the
 slice is small, both messages are unreliable, and the audit is the last thing
 built in a tick so the byte budget turns it away before it turns away anything
 that matters.
@@ -192,7 +192,7 @@ for three different reasons and none of them is a hedge:
 - **Anything the client owns.** Under v0.13 ownership the client's copy is the
   newer one between submissions, so the server is the side that is behind.
 - **Anything carrying a `SuppressWhenTagged` tag.** The far side *derives* that
-  row — the two ends are meant to disagree — and a hash has no tolerance.
+  row - the two ends are meant to disagree - and a hash has no tolerance.
 
 **Membership is on the wire, and that is the decision the shape turns on.** The
 audit lists the entities it hashed rather than letting the receiver work them out
@@ -212,7 +212,7 @@ issued, the labels have to be groups this server hashed, they have to be strictl
 ascending so one cannot be named twice, and an audit may be answered once. The
 most an answer can therefore buy is the repair of exactly the slice the server
 had already chosen to look at, once every `AuditSettings::EveryTicks`. An audit
-the link refused is struck off by `Unsent` for the same reason — a question that
+the link refused is struck off by `Unsent` for the same reason - a question that
 was never asked may not be answered.
 
 **Both ends hash the value a replica holds, not the value each of them holds.**
@@ -228,7 +228,7 @@ drops a different one.
 entities back into `Unconfirmed`, which is the same seeding an entity coming into
 view already gets. A second path that resent values would be the second way to do
 one job. What that does not reach is a client holding an entity the server has no
-record of sending it — the server cannot name what it does not know about — and
+record of sending it - the server cannot name what it does not know about - and
 the honest bound on that case is the one this module already has:
 `ResnapshotAfterTicks`, reached because a delta naming a row the client does not
 hold never lets `Applied` move. `Statistics::Disputed` is the number that says
@@ -259,7 +259,7 @@ would need the two clocks to agree, and they do not.
 `D00015(c)` and was never about it.** What it was about is *agents*: predicting
 a second entity means predicting what another player will do, which is wrong
 more often than it is right and is visible as rubber-banding when it is wrong.
-That argument is untouched and so is the rule it produces — **no entity but the
+That argument is untouched and so is the rule it produces - **no entity but the
 one `SnapshotBuffer::Predict` names is ever run ahead of the authority on the
 strength of inputs, nothing replays an input for a row it does not own, and
 `Store::CreatePredicted`'s index range is still the only identity a replica may
@@ -267,7 +267,7 @@ mint.**
 
 What the rule did not distinguish is the other thing a client can do with a row
 somebody else owns. Predicting an input-driven agent is guessing at a human.
-**Dead-reckoning a body is evaluating a function the authority already sent** —
+**Dead-reckoning a body is evaluating a function the authority already sent** -
 `scene::Motion` *is* the derivative of the pose, so integrating it reads the
 message rather than inventing one. Three rules follow, and the build checks
 none of them:
@@ -281,7 +281,7 @@ none of them:
 - **Anything carrying a `scene::NetworkOwner` may not be.** Under v0.13
   ownership an owned body is simulated by its owner *authoritatively* and there
   is nothing arriving for a guess to be reconciled against, so dead reckoning it
-  as well simulates it twice with one of the two wrong — and the wrong one is
+  as well simulates it twice with one of the two wrong - and the wrong one is
   whichever the local machine happens not to own. **Extrapolate what nobody
   owns** is the whole of the test.
 - **The guess is bounded twice, and by two different things.** In *time* by
@@ -294,32 +294,32 @@ none of them:
 **This is not licence to simulate on a replica.** No broad phase, no narrow
 phase, no solver and no gravity: `mono.client/AGENTS.md`'s "nothing there
 advances the world" is intact, because nothing here advances one. The whole of
-what runs is `physics::Advanced` over one row — the same function the
+what runs is `physics::Advanced` over one row - the same function the
 authority's own `IntegrateMotion` is written out of, so a client cannot be
 integrating different arithmetic from the server.
 
 **Where `D00010` and this meet.** D00010 decided a dry buffer *stops* rather
 than extrapolating, on the grounds that guessing forward is "a freeze plus a
-lie" — the snap arrives when the next tick disagrees with the guess. **That
+lie" - the snap arrives when the next tick disagrees with the guess. **That
 decision is unchanged**, and `SnapshotBuffer` is where it still is: the render
 clock stops at the newest sample, `Sample` holds the last pose the authority
 described, and `Statistics::Stalls` counts it. What v0.15 adds sits outside the
-buffer and only on the entities carrying the thing D00010 did not have — a
+buffer and only on the entities carrying the thing D00010 did not have - a
 velocity the server sent, which is a right answer to extrapolate *toward*. A
 player has none, and neither has a body with no `scene::Motion`: there is no
 function to evaluate, so the freeze stands, unchanged and for D00010's reason.
 
 **And the lie is paid back rather than snapped away.** Whatever the guess added
 is `velocity * seconds`, so the correction is `seconds` easing to zero at
-`InterpolationSettings::UnwindFraction` — one number for the whole world instead
+`InterpolationSettings::UnwindFraction` - one number for the whole world instead
 of a per-entity blend, continuous by construction, and unwound slowly enough
 that a corrected body never appears to move backwards.
 
 ## The two halves pull opposite ways, and `SnapshotBuffer` is the other one
 
 Prediction runs the local player *ahead* so input feels immediate.
-`SnapshotBuffer` draws everything else *behind* — at a fixed delay from the
-newest received tick, interpolating between the two that bracket it — so that a
+`SnapshotBuffer` draws everything else *behind* - at a fixed delay from the
+newest received tick, interpolating between the two that bracket it - so that a
 world arriving at 30 Hz does not judder at 30 Hz on a screen running at 240.
 
 **They must never be applied to the same entity.** Delaying the predicted row by
@@ -327,7 +327,7 @@ the jitter budget puts back exactly the lag prediction exists to remove, and the
 player feels it as their own character lagging their own keys. The exclusion is
 structural rather than a caller's discipline: `SnapshotBuffer::Record` refuses
 the nominated entity *and* anything in `Store::CreatePredicted`'s index range,
-before it records anything at all — so a tick offered nothing but predicted rows
+before it records anything at all - so a tick offered nothing but predicted rows
 is a tick the buffer never saw.
 
 **The delay is the one number that matters**, it is `InterpolationSettings::DelayTicks`,
@@ -342,7 +342,7 @@ buffered tick and nothing else.
 **Nothing it produces may reach a component.** The interpolated pose is returned
 by value to whoever is filling a draw list. A render-rate quantity written back
 into the store would make a simulation depend on the frame rate of whoever
-happened to be watching it — the rule `world`'s `ViewChannel` already follows.
+happened to be watching it - the rule `world`'s `ViewChannel` already follows.
 
 **Reconciliation needs no cross-machine determinism.** The client drifting is
 expected; correcting the drift is the mechanism, not a fallback. Nothing here
@@ -357,7 +357,7 @@ ordinary backpressure and a message that can never fit looks exactly like one. A
 world of thirty-two entities already built one.
 
 `Authority::Pack` splits a tick's delta into however many messages it takes,
-each under `ChunkBytes` and **each independently applicable** — never a
+each under `ChunkBytes` and **each independently applicable** - never a
 reassembly, because this is the unreliable channel and holding a part back until
 its siblings arrive is a stall on a path whose premise is that the next tick is
 already on its way. Every part is applied the moment it lands. That is why
@@ -369,7 +369,7 @@ that distinction is the whole of D00013.** `Delta::Part` and `Delta::Final` say
 where a message sits in its tick and which one ended it; `Applied` may name a
 tick only once the client holds every part of it. Without that the client
 acknowledged on the strength of the parts that arrived and the server retired
-the values in the one that did not — self-healing for a tick that fits one
+the values in the one that did not - self-healing for a tick that fits one
 datagram and not for one that does not.
 
 Three things about the marker, and each of them is a way to get this wrong:
@@ -377,7 +377,7 @@ Three things about the marker, and each of them is a way to get this wrong:
 - **It is authored by the sender when the tick is packed, and it means "that is
   all of tick N".** Not "nothing else changed". The priority rotation
   deliberately holds values back under a budget, and what it held back was never
-  part of this tick — it keeps its unconfirmed entry and comes back on a later
+  part of this tick - it keeps its unconfirmed entry and comes back on a later
   one. A marker derived from what changed would leave every trimmed tick
   unacknowledged, on exactly the servers the cap exists for.
 - **A part number is a position, not an arrival order.** Parts arrive out of
@@ -389,19 +389,19 @@ Three things about the marker, and each of them is a way to get this wrong:
   re-offers everything the missing one carried and acknowledging *that* tick
   confirms it. One lost part costs one tick of acknowledgement. The bound on the
   case where no tick ever completes is `ResnapshotAfterTicks`, which is this
-  module's existing answer to a client that cannot be caught up by deltas — and
+  module's existing answer to a client that cannot be caught up by deltas - and
   `Replica::Statistics::Incomplete` is what says it is happening.
 
 **A part the transport refused is not a part that went out**, so `Unsent` rolls
 `Client::Streamed` back for a tick whose delta was cut short. The client cannot
 acknowledge a tick it holds only some of, so counting one against its silence
-measures it against something it was never given the chance to answer — and on a
+measures it against something it was never given the chance to answer - and on a
 link whose packet budget is below `MessagesPerTick` that is every tick, for ever.
 Same argument as the quiet world and the held-back budget, one layer down.
 
 **A `Structure` message is split too**, and the forget was the third path to be
 missed. A world leaving view all at once names every entity in one message, and
-three hundred handles is already past a datagram — which `Link::Reserve` refuses
+three hundred handles is already past a datagram - which `Link::Reserve` refuses
 outright rather than fragmenting, so the message saying "stop drawing these"
 would be the one that never arrives.
 
@@ -412,12 +412,12 @@ take, through `Authority::Unsent`.** This is the shape of bug the chunking fix
 did not cover, and it cost a suite that failed one run in three.
 
 A delta needs nothing undone: the unconfirmed set rebuilds it next tick. A
-snapshot chunk does, and this is the asymmetry — the cursor moves when the chunk
+snapshot chunk does, and this is the asymmetry - the cursor moves when the chunk
 is *built*, so a refused chunk is a gap in a stream the receiver waits on for
 ever. The observed failure was a client that applied 184 of 192 chunks, never
 reached the last byte, never joined, and then refused every delta that followed
 as stale: `applied=184 refused=17865`, which reads like a protocol error and was
-a cursor. A `Structure` message is the same shape — a creation, a destruction and
+a cursor. A `Structure` message is the same shape - a creation, a destruction and
 a forget are each said exactly once and each moved the known set when it was
 built.
 
@@ -442,11 +442,11 @@ archetypes. That is the whole of D00122.
 `ecs::ApplyMode::Overlay` and the world blob with `Authoritative`, and the world
 blob still carries the preface's entities. Swapping the modes is the failure this
 shape invites: a preface is a slice of a world, so applying it authoritatively
-sweeps everything it does not mention — nothing on a join, and the entire world a
+sweeps everything it does not mention - nothing on a join, and the entire world a
 client already holds on a *re-snapshot*, wiped a moment before being sent again.
 
 **A tick's chunks come from one blob.** Chunks go out in the order `Outgoing`
-was built, but a refusal is per message — so a preface chunk the link turned away
+was built, but a refusal is per message - so a preface chunk the link turned away
 beside a world chunk it took would be resent behind bytes it was supposed to
 precede. Two blobs never share an outgoing list, which makes the ordering a
 property of the code rather than of the packet budget. It costs one tick at the
@@ -464,14 +464,14 @@ this module always had.
 also runs `ReplicatedFirst`'s scripts before the rest of the tree arrives.
 `client::BuildReplicatedWorld` opens a `script::Runtime` and `replica-scripts`
 runs every client-side `LocalScript` as it lands, so a client does run scripts
-out of its replica — what nothing states is which of them may run before the
+out of its replica - what nothing states is which of them may run before the
 world's first chunk has. The preface is the half that exists; the guarantee that
 a named script goes ahead of it is the half that does not.
 
 ## Structure goes on the reliable channel, and values do not
 
 `Delta` carries what moved. `Structure` carries which entities the client holds
-— created, destroyed, forgotten — and `Session::ChannelFor` puts it on the
+- created, destroyed, forgotten - and `Session::ChannelFor` puts it on the
 reliable channel while the delta stays unreliable. That split is the whole of
 D00011's answer and it is not an exception to `net/AGENTS.md`'s "unreliable by
 default": a value is superseded by the next tick and a structural change never
@@ -480,7 +480,7 @@ is, so they are the two sides that rule already draws.
 **A tick acknowledgement cannot repair a lost structural change, and this is the
 reasoning worth keeping.** `Applied` names a tick, not a message. The server's
 known set moves when a creation is *said*, so a lost one leaves the server
-certain the client holds an entity it has never heard of — and the client goes
+certain the client holds an entity it has never heard of - and the client goes
 on acknowledging, is not behind, and is never re-snapshotted for it. Nothing
 that counts ticks can see that; the only thing in the tree that counts messages
 is `net::ReliableSender`, so that is what redelivers it. Adding a second
@@ -495,8 +495,8 @@ values, so treating it as a tick applied would confirm every value of that tick
 without one of them having arrived.
 
 **`Applied` means the last tick applied *in full*, and `Replica` enforces it in
-two ways.** A delta naming a row this client does not hold yet — which is
-exactly what a creation still in flight looks like — is applied as far as it can
+two ways.** A delta naming a row this client does not hold yet - which is
+exactly what a creation still in flight looks like - is applied as far as it can
 be and does not move `Applied`. Without that, a creation arrived reliably some
 ticks late and the entity held none of its components, because the tick its
 values were in had already been acknowledged. And a tick short of one of its
@@ -505,7 +505,7 @@ parts does not move it either; see the section above.
 ## An entity coming into view has not moved
 
 A delta is built from the dirty bits, and an entity entering a client's interest
-did not change — it was always there and that client could not see it. So the
+did not change - it was always there and that client could not see it. So the
 run walk finds nothing for it and it used to arrive as a bare row with none of
 its components, for as long as it stood still.
 
@@ -518,7 +518,7 @@ did the same job is the second one that would rot.
 
 `ResnapshotAfterTicks` is measured against the last tick a delta actually went
 out on, not against the tick number. A client acknowledges the last tick it
-*applied*, and a world where nothing moves sends nothing to apply — so a client
+*applied*, and a world where nothing moves sends nothing to apply - so a client
 in perfect agreement with a still world stopped acknowledging new ticks and was
 re-snapshotted for it, every hundred and twenty-one ticks, for as long as the
 world stayed quiet.
@@ -537,7 +537,7 @@ and can put nothing on the wire that interest excluded.
 
 **The cap is per client.** The budget is `net::Link`'s and there is one link per
 connection, so a per-server cap would have to be divided among clients before
-anything could enforce it — and that division is a per-client cap with an extra
+anything could enforce it - and that division is a per-client cap with an extra
 step. Interest is per client too, so a shared ordering would spend one client's
 bandwidth on another's entities. A machine's uplink is still a real limit; it is
 `MaximumClients` times the per-client budget, and that is a deployment decision.
@@ -546,7 +546,7 @@ bandwidth on another's entities. A machine's uplink is still a real limit; it is
 permanently high score hold a low one off the wire for the life of the
 connection. A value that has waited `StarvationTicks` jumps every score there
 is, so the longest anything waits is that deadline plus the ticks it takes to
-drain what was already waiting — a bound rather than a hope.
+drain what was already waiting - a bound rather than a hope.
 
 **Nothing is ranked on a tick that fits.** The delta is packed in the order the
 dirty bits handed it over, and only re-packed by score when that did not fit.
@@ -566,7 +566,7 @@ that says otherwise, and `Listener` warns at construction when
 
 **The link's allowance is the authority and `BytesPerTick` is a ceiling on what
 this module will *produce*.** `Authority::Pack` spends the lower of the two, and
-`Authority::SetAllowance` is how the number gets here — `Listener::Advance`
+`Authority::SetAllowance` is how the number gets here - `Listener::Advance`
 reads `ConnectionStats::SendAllowanceBytes` immediately after `ResetBudget`,
 which is where the link decides it.
 
@@ -584,8 +584,8 @@ host's. An `Authority` that reached for a `net::Link` would be an `Authority`
 that knows what a socket is.
 
 **Nothing in the ordering may read a clock, a pointer or an unordered
-container.** The comparator is a total order — score, then wait, then entity
-handle, then component — because `std::sort` is not stable and two runs of one
+container.** The comparator is a total order - score, then wait, then entity
+handle, then component - because `std::sort` is not stable and two runs of one
 server must produce the same bytes. The recovery walk sorts the unconfirmed
 entities for the same reason, and that one is not hypothetical: the map was
 walked in place, and the only way to see it is to build the same set of entries
@@ -595,8 +595,8 @@ through two different sequences of insertions.
 
 `ecs.Hierarchy`, `ecs.InstanceName` and `ecs.InstanceClass` are all replicated
 by default. Until v0.15 only the first was: the rule read "`scene.` or
-`ecs.Hierarchy`", so the other two crossed in a join snapshot — `Store::Save`
-carries every component — and never in a delta. An entity the world already held
+`ecs.Hierarchy`", so the other two crossed in a join snapshot - `Store::Save`
+carries every component - and never in a delta. An entity the world already held
 was named on a client and an entity created while that client was connected
 arrived with no name and no class, which `server.replication`'s
 private-containers case saw as four children of a `Player` called nothing.
@@ -613,7 +613,7 @@ Saying a name in the `Structure` message that creates the entity would be one
 reliable copy and nothing per tick after it, and it would be the v0.7 recolour
 bug again: `.Name` is a writable property a script sets whenever it likes, and a
 fact that crosses only at birth is wrong for ever afterwards. What guarantees
-arrival is the mechanism every other value already has — an entry in
+arrival is the mechanism every other value already has - an entry in
 `Unconfirmed`, re-offered every tick until the client acknowledges a tick it was
 in.
 
@@ -628,8 +628,8 @@ rather than a wire form here.** A `ClassId` is a registration index and rule 4
 forbids one on a wire: `Classes::Register` runs wherever the code needing a tree
 runs and `RegisterGuiClasses` is called lazily on first use, so two processes of
 one build can number a class differently depending on which of them opened an
-interface. Changing `Components::Register<InstanceClass>`'s serialiser — rather
-than fitting a `TypeDescriptor::Wire` over it — fixes the save file and the
+interface. Changing `Components::Register<InstanceClass>`'s serialiser - rather
+than fitting a `TypeDescriptor::Wire` over it - fixes the save file and the
 studio's edit stream in the same breath, and leaves one answer to "how is a class
 written down" instead of two.
 
@@ -649,8 +649,8 @@ bytes, which is true of a `Transform` and false of anything that writes a name:
 `scene.Visual` writes two and `ecs.InstanceName` writes one, and a name is as
 long as its text.
 
-It was reachable before instance names crossed — two parts whose meshes are spelt
-differently is enough — and invisible because a demo world's mesh names are
+It was reachable before instance names crossed - two parts whose meshes are spelt
+differently is enough - and invisible because a demo world's mesh names are
 almost all empty and therefore all four bytes long. The receiver was never the
 problem: `WriteComponents` reads the values sequentially and always could take
 any width. It was the sender slicing rows back out at `row * stride` after the
@@ -669,8 +669,8 @@ that fits. What a given row costs is only known once `offer` has written it.
   a network one.
 - **A line of sight in the priority score.** Supplied at v0.9 as
   `DistancePriority::Blocked`, on the same terms as the rest. Distance is
-  supplied too —
-  `replication::DistancePriority` — and the split it is built on is the thing to
+  supplied too -
+  `replication::DistancePriority` - and the split it is built on is the thing to
   preserve: **the arithmetic is here and the lookup is not.** A caller hands in
   two accessors, one for where a client is looking and one for where an entity
   is, and this module still names no component and links no simulation module.
@@ -683,10 +683,10 @@ that fits. What a given row costs is only known once `offer` has written it.
 
   **The cheap test gates the expensive one.** A raycast is orders of magnitude
   dearer than the subtraction beside it, so anything already scoring below
-  `OcclusionFloor` is never asked about — it cannot be moved far enough by
+  `OcclusionFloor` is never asked about - it cannot be moved far enough by
   occlusion to change its place in the order.
-- **Authenticating a *client*.** The server is authenticated at v0.9 — see
-  below — and the other direction is not: `SetAdmission` still decides who gets
+- **Authenticating a *client*.** The server is authenticated at v0.9 - see
+  below - and the other direction is not: `SetAdmission` still decides who gets
   in on whatever a game knows, and the default admits anybody who completes the
   handshake. A client identity would be a second key pair and a second pin, and
   it is a different problem from the relay one.
@@ -698,7 +698,7 @@ confirmation tag is computed on, and `ConnectorSettings::ServerIdentity` is the
 pin a client checks it against.
 
 **The tag and the signature are not the same check and neither replaces the
-other.** The tag proves the sender reached these keys — which a relay also does,
+other.** The tag proves the sender reached these keys - which a relay also does,
 because it reaches them by holding one exchange with each side and reading
 everything in between. The signature proves *which* server reached them, because
 a relay cannot make the server sign a transcript naming the relay's own
@@ -708,7 +708,7 @@ ephemeral key.
 case did not: it had the relay forward the server's welcome unchanged, which is
 refused at the *tag* and proves nothing about the signature. The case that
 matters runs two exchanges, so the tag passes and only the signature stands in
-the way — and there is a control beside it that removes the pin and watches the
+the way - and there is a control beside it that removes the pin and watches the
 same bytes get in.
 
 **Both ends default to the weaker mode and both say so.** A listener with no
@@ -732,8 +732,8 @@ version that reached for `scene::Transform` would be the coupling `SetInterest`
 and `SetPriority` were both shaped to avoid.
 
 **A fractional tick, because a client's view is fractional.** A renderer sits
-between two ticks and blends — `SnapshotBuffer::RenderTick` returns a `double`
-for exactly that reason — so sampling a whole tick answers with a pose the
+between two ticks and blends - `SnapshotBuffer::RenderTick` returns a `double`
+for exactly that reason - so sampling a whole tick answers with a pose the
 client never saw. The error is largest for the fastest things, which is where a
 hit test is already hardest.
 
@@ -746,7 +746,7 @@ number.
 **Refusals are refusals.** A tick older than the history, or an entity that was
 not recorded at the tick asked for, answers `false` rather than reaching for a
 neighbouring frame. Answering with a nearby placement would be inventing
-something the client never saw, and it would be invisible — the caller cannot
+something the client never saw, and it would be invisible - the caller cannot
 tell an interpolated answer from a fabricated one.
 
 **A repeated or out-of-order `Begin` is refused.** A frame is identified only by
@@ -767,7 +767,7 @@ earlier message it could sign. It is the first thing said on the encrypted
 stream instead, which costs no extra round trip.
 
 **Verification is not a policy question.** A claim that does not verify is
-dropped without consulting `SetClientPolicy` — a policy answering "is this key
+dropped without consulting `SetClientPolicy` - a policy answering "is this key
 allowed" is a game's business; one answering "is this key real" would be every
 game re-implementing a signature check, and one of them would get it wrong.
 
@@ -775,7 +775,7 @@ game re-implementing a signature check, and one of them would get it wrong.
 
 The switches are `-Wswitch`-checked and `ReadMessage`'s range comparison is not.
 It reads `kind > static_cast<uint8_t>(MessageKind::Disputed)`, and a kind
-appended after that one parses as out of range — so every message of it is
+appended after that one parses as out of range - so every message of it is
 dropped as malformed, on both ends, with the counter saying only "malformed".
 `Identify` did exactly that. Update the comparison in the same commit as the
 enum. There are **two** of them, in `ReadMessage` and in `PeekMessageKind`, and

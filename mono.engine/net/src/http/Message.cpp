@@ -13,7 +13,7 @@
 // and a chain of parsers that disagree about where a message ends is request
 // smuggling. So a bare LF is refused where CRLF is required, a folded header
 // line is refused, and two `Content-Length` fields are refused even when they
-// agree — because "even when they agree" is a check somebody eventually
+// agree - because "even when they agree" is a check somebody eventually
 // loosens.
 //
 // **Nothing is sized from a length field before that field is bounded.** The
@@ -59,7 +59,7 @@ namespace engine::net::http {
 		}
 
 		// A field name must be an RFC 9110 token. Refusing anything else is
-		// what stops a name carrying a colon, a space or a CR — each of which
+		// what stops a name carrying a colon, a space or a CR - each of which
 		// lets one field be read as two by a parser downstream.
 		bool IsToken(std::string_view value) {
 			if (value.empty()) {
@@ -379,7 +379,7 @@ namespace engine::net::http {
 		}
 		if (target.empty() || target.front() != '/') {
 			// Origin-form only. An absolute-form target is what a request to a
-			// forward proxy looks like, and this is not one — accepting it
+			// forward proxy looks like, and this is not one - accepting it
 			// would make the origin's target space depend on a host field.
 			return ParseResult::Malformed;
 		}
@@ -403,7 +403,7 @@ namespace engine::net::http {
 		parsed.Target = std::string(target);
 
 		// The block runs from just past the request line to just past the last
-		// header's CRLF — `headerEnd` indexes the first of the four bytes that
+		// header's CRLF - `headerEnd` indexes the first of the four bytes that
 		// end the block, so the last field's own terminator is included and
 		// every line the loop sees ends the same way. With no headers at all
 		// the two bounds meet and the block is empty.
@@ -423,7 +423,7 @@ namespace engine::net::http {
 		// **A body is `Put`'s and no other verb's.** A `GET` or a `HEAD` that
 		// declares a non-zero length is refused rather than skipped over,
 		// because skipping it means trusting a length to find the next message
-		// — and a body on a verb whose framing intermediaries disagree about is
+		// - and a body on a verb whose framing intermediaries disagree about is
 		// the request-smuggling primitive itself, not merely adjacent to it.
 		//
 		// `Unknown` is held to the same rule so that a well-formed
@@ -435,7 +435,7 @@ namespace engine::net::http {
 			}
 		} else if (!headers.HasLength) {
 			// **A `Put` states its length or it is not a `Put`.** The other
-			// framing — `transfer-encoding` — is refused outright above, so
+			// framing - `transfer-encoding` - is refused outright above, so
 			// without a length there is no way to know where this message ends
 			// and guessing "empty" would silently store nothing.
 			return ParseResult::Malformed;
@@ -644,7 +644,7 @@ namespace engine::net::http {
 		}
 
 		// **Written only for the verb that may carry one, and written from the
-		// body rather than from the header list** — `WriteResponse`'s rule,
+		// body rather than from the header list** - `WriteResponse`'s rule,
 		// and for its reason: two sources for one number is one number that
 		// will eventually be wrong, and the symptom is a connection that
 		// desynchronises a message later.

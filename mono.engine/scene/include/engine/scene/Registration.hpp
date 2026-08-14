@@ -7,7 +7,7 @@
 //
 // - **Registration order decides iteration order.** Component ids are a dense
 //   counter, an archetype is a sorted list of them, and archetypes are iterated
-//   in id order — so two runs that register in different orders visit rows in
+//   in id order - so two runs that register in different orders visit rows in
 //   different orders and a floating-point sum over those rows diverges.
 //   `ecs::Components::Seal` is what pins it, and everything has to be
 //   registered before it closes.
@@ -27,7 +27,7 @@ namespace engine::scene {
 	// Registers this module's components and resources under explicit names.
 	//
 	// Every type in `Components.hpp`, plus the `SurfaceTable` and
-	// `ActiveCamera` resources — a resource is keyed by a component id too, so
+	// `ActiveCamera` resources - a resource is keyed by a component id too, so
 	// `Store::SetResource` on an unregistered type would try to mint one, and
 	// after `Seal` that aborts.
 	//

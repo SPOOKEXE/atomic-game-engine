@@ -54,8 +54,8 @@ namespace engine::bake {
 
 			// An index of the width the header declared, sign-extended.
 			//
-			// **Negative means "none"** in PMX — a material with no texture
-			// carries -1 — so the sign has to survive the widening or every
+			// **Negative means "none"** in PMX - a material with no texture
+			// carries -1 - so the sign has to survive the widening or every
 			// untextured material picks up texture zero.
 			int32_t Index(uint8_t width) {
 				switch (width) {
@@ -107,7 +107,7 @@ namespace engine::bake {
 
 				// UTF-16LE to UTF-8. Written out because the alternative is
 				// `std::wstring_convert`, which is deprecated, and because the
-				// texture paths in a PMX are routinely Chinese or Japanese —
+				// texture paths in a PMX are routinely Chinese or Japanese -
 				// mangling them means every texture reference misses.
 				std::string result;
 				for (size_t index = 0; index + 1 < raw.size(); index += 2) {
@@ -204,7 +204,7 @@ namespace engine::bake {
 		}
 
 		// The four model names. Read and dropped: what a model calls itself is
-		// not what the engine calls it — the publisher's asset name is, and
+		// not what the engine calls it - the publisher's asset name is, and
 		// `AGENTS.md` rule 4 puts that decision in one place rather than in
 		// whatever a modeller typed.
 		for (int index = 0; index < 4; index++) {

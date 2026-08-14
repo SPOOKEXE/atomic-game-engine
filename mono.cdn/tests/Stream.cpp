@@ -67,7 +67,7 @@ TEST_CASE("a private stream announces under its key", "[cdn][stream]") {
 	CHECK(stream->Advertised().Admits == network::Access::Private);
 
 	// A machine with no route to the broadcast address opens no beacon, which
-	// is a fault rather than a refusal to serve — the origin is still serving
+	// is a fault rather than a refusal to serve - the origin is still serving
 	// content on its port.
 	if (stream->Announcing()) {
 		CHECK(stream->Advertised().Admits == network::Access::Private);
@@ -78,7 +78,7 @@ TEST_CASE("a secret that is neither hex nor words is refused with a reason", "[c
 	StreamSettings offering;
 	offering.Announce = true;
 	// Sixty-four characters, so it looks like a key, and one of them is not a
-	// hexadecimal digit — which is exactly the typo somebody makes copying one
+	// hexadecimal digit - which is exactly the typo somebody makes copying one
 	// off a screen. Refused rather than silently stretched as a passphrase,
 	// because the two derive different keys and the operator would be the only
 	// person on the wrong one.
@@ -86,7 +86,7 @@ TEST_CASE("a secret that is neither hex nor words is refused with a reason", "[c
 
 	std::string trouble;
 	const std::unique_ptr<Stream> stream = Stream::Open(offering, trouble);
-	// It is a passphrase, since it is not hex — which is the documented
+	// It is a passphrase, since it is not hex - which is the documented
 	// fallback and not a failure. What must not happen is a null with no
 	// reason.
 	if (stream == nullptr) {
@@ -164,7 +164,7 @@ TEST_CASE("a finder turns what it sees into sources, nearest first", "[cdn][stre
 	REQUIRE(sources.size() == 2);
 
 	// Nearest first, which is what "local first, then the origin next door,
-	// then the one across the internet" *is* to `delivery::AssetClient` — it
+	// then the one across the internet" *is* to `delivery::AssetClient` - it
 	// walks the list and stops at the first that answers.
 	CHECK(sources[0].Name == "next door");
 	CHECK(sources[1].Name == "across the internet");

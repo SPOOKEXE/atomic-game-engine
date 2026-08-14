@@ -2,7 +2,7 @@
 // is bad.
 //
 // **Every structure here is bounded to 32 by construction**, so nothing in this
-// file can go quadratic in any interesting way — and that is precisely why the
+// file can go quadratic in any interesting way - and that is precisely why the
 // numbers are worth having. The bound is what makes the design safe; these rows
 // are what say whether a linear scan over 32 entries per packet is *cheap*, or
 // whether 32 has quietly become the constant that dominates the per-packet
@@ -46,8 +46,8 @@ namespace reliability_bench {
 	// is a bit under two of those seconds, so the figure divides back cleanly.
 	constexpr size_t PACKETS = 10'000;
 
-	// A reliable payload is an event, not a snapshot — a door opening, a shot
-	// fired — so it is small. Sizing it at the MTU would measure a memcpy the
+	// A reliable payload is an event, not a snapshot - a door opening, a shot
+	// fired - so it is small. Sizing it at the MTU would measure a memcpy the
 	// real path does not do.
 	constexpr size_t PAYLOAD_BYTES = 128;
 
@@ -105,7 +105,7 @@ BENCH("sender · Due with nothing due, 10k calls", PACKETS) {
 	// **Called every tick whether or not anything is waiting**, which makes it
 	// the one function here whose empty case is the common case. It has to walk
 	// the held entries to find out that none of them have timed out, so this row
-	// is that walk — with the window full, because a walk over an empty window
+	// is that walk - with the window full, because a walk over an empty window
 	// measures nothing.
 	ReliableSender sender;
 	const std::vector<std::byte> &payload = Payload();
@@ -204,7 +204,7 @@ BENCH("receiver · 20% reordered, 10k packets", PACKETS) {
 	size_t delivered = 0;
 
 	for (size_t index = 0; index < PACKETS; index += 5) {
-		// Deliver 1..4 of this group, then 0 — so four payloads wait on the
+		// Deliver 1..4 of this group, then 0 - so four payloads wait on the
 		// fifth and all five come out together.
 		for (size_t offset = 1; offset < 5; offset++) {
 			Consume(receiver.Accept(static_cast<uint16_t>(index + offset), payload));
@@ -217,7 +217,7 @@ BENCH("receiver · 20% reordered, 10k packets", PACKETS) {
 }
 
 BENCH("receiver · 10k duplicates against a full window", PACKETS) {
-	// A resend that did not need to happen — the far side resends precisely
+	// A resend that did not need to happen - the far side resends precisely
 	// because it has not heard that the original arrived, so a lossy link
 	// produces these continuously. Rejecting one has to be cheap and, more to
 	// the point, must not hold anything: if this row's cost climbs across

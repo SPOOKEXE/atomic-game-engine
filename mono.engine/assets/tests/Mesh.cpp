@@ -4,7 +4,7 @@
 // byte reaching `Mesh::Read` came off a disk or a wire, so a count an attacker
 // chose must cost a comparison rather than an allocation. The two that are
 // specific to geometry are an index naming a vertex that is not there and a
-// submesh run reaching past the indices — both are reads past the end of a
+// submesh run reaching past the indices - both are reads past the end of a
 // buffer in whatever consumes the mesh, and neither is visible in the file.
 
 #include <engine/assets/Mesh.hpp>
@@ -107,7 +107,7 @@ TEST_CASE("an empty mesh gets a zero box rather than an inverted one", "[assets]
 	data.ComputeBounds();
 
 	// The fold starts from infinity, so the honest answer for no vertices is
-	// an inverted box — which propagates into a world AABB and makes every
+	// an inverted box - which propagates into a world AABB and makes every
 	// containment test answer nonsense rather than "empty".
 	CHECK(data.Minimum.X == 0.0f);
 	CHECK(data.Maximum.X == 0.0f);
@@ -153,7 +153,7 @@ TEST_CASE("a submesh reaching past the indices is refused", "[assets][mesh]") {
 
 	SECTION("wrapping to land back inside") {
 		// Both fields fit in 32 bits and their sum does not. Added in 32 the
-		// end lands at 2, which is inside the buffer and passes — which is why
+		// end lands at 2, which is inside the buffer and passes - which is why
 		// the check is done in 64.
 		data.Submeshes.push_back(Submesh{0xFFFFFFFEu, 4, "", ""});
 		CHECK_FALSE(data.IsValid());

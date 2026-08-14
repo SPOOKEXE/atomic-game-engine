@@ -40,7 +40,7 @@ namespace snapshot_test {
 		Entity Other;
 	};
 
-	// No serialisation — its bytes are a pointer into this process.
+	// No serialisation - its bytes are a pointer into this process.
 	struct Unwritable {
 		std::string Text;
 		Unwritable() = default;
@@ -143,7 +143,7 @@ TEST_CASE("generations survive, so a stale handle stays stale", "[ecs]") {
 TEST_CASE("both index regions round-trip, generations and all", "[ecs]") {
 	// The format's half of the split. The directory is written as one run per
 	// region, so a save that wrote only the authoritative run would lose every
-	// prediction — silently, because a world with none looks identical.
+	// prediction - silently, because a world with none looks identical.
 	Store source("source");
 
 	const Entity theirs = source.Create();
@@ -183,7 +183,7 @@ TEST_CASE("both index regions round-trip, generations and all", "[ecs]") {
 	REQUIRE(restored.Get<Spot>(restored.Get<Linked>(theirs)->Other)->X == 3.0f);
 
 	// And each region's free list came back its own, so the next mint on each
-	// side is the handle the source would have issued — index, generation and
+	// side is the handle the source would have issued - index, generation and
 	// region alike. A shared or dropped free list shows here and nowhere else.
 	REQUIRE(restored.Create() == source.Create());
 
@@ -394,8 +394,8 @@ TEST_CASE("a future version is refused rather than guessed at", "[ecs]") {
 TEST_CASE("a snapshot written at the previous version is refused", "[ecs]") {
 	// **Version 1 wrote the entity directory as one run and version 2 writes
 	// two**, one per index region. The two layouts are indistinguishable from
-	// the bytes — a version 1 stream's table count sits exactly where version
-	// 2's predicted-run length does — so a reader that tried to cope would
+	// the bytes - a version 1 stream's table count sits exactly where version
+	// 2's predicted-run length does - so a reader that tried to cope would
 	// restore a world nobody can reason about rather than refusing one.
 	Store source("source");
 	source.Set<Spot>(source.Create(), Spot{1.0f, 2.0f});
@@ -431,7 +431,7 @@ TEST_CASE("a snapshot claiming more entities than a region holds is refused", "[
 	std::vector<std::byte> tampered(writer.Bytes().begin(), writer.Bytes().end());
 
 	// The authoritative directory count is the field after the header, and the
-	// header is variable-length — the store's name and the component table are
+	// header is variable-length - the store's name and the component table are
 	// both in it. Walked with a reader rather than computed as an offset, so a
 	// field moving breaks this loudly instead of silently overwriting the wrong
 	// eight bytes and still passing.
@@ -458,7 +458,7 @@ TEST_CASE("a snapshot claiming more entities than a region holds is refused", "[
 	REQUIRE(restored.TableCount() == 0);
 
 	// **Refused at the count, not after eating the stream.** A reader without
-	// the check refuses too — it runs out of bytes and fails — so the outcome
+	// the check refuses too - it runs out of bytes and fails - so the outcome
 	// alone proves nothing. What the check buys is that the count is judged
 	// before a single directory entry is read against it, and the cursor is
 	// where that shows.
@@ -496,7 +496,7 @@ TEST_CASE("a truncated snapshot leaves the store empty", "[ecs]") {
 
 TEST_CASE("random bytes never restore anything", "[ecs]") {
 	// `core::Random` so a failure reproduces from the seed. Nothing here
-	// asserts a value — the assertion is that no arbitrary buffer produces a
+	// asserts a value - the assertion is that no arbitrary buffer produces a
 	// store claiming to hold entities.
 	constexpr uint32_t ITERATIONS = 500;
 	size_t restoredSomething = 0;
@@ -540,8 +540,8 @@ TEST_CASE("a snapshot with a valid header and rubbish body is refused", "[ecs]")
 		}
 	}
 
-	// Some of these may load — the format is not self-validating beyond its
-	// bounds — but none may crash, and that is what this case is really
+	// Some of these may load - the format is not self-validating beyond its
+	// bounds - but none may crash, and that is what this case is really
 	// asserting by completing at all.
 	REQUIRE(restoredWithState <= 200);
 }
@@ -560,7 +560,7 @@ TEST_CASE("loading over a populated world replaces it entirely", "[ecs]") {
 
 	REQUIRE(Transfer(source, target));
 
-	// Nothing of the old world survives — not its entities, not its tables.
+	// Nothing of the old world survives - not its entities, not its tables.
 	REQUIRE(target.CountMatching<Score>() == 0);
 	REQUIRE(target.CountMatching<Spot>() == 1);
 }

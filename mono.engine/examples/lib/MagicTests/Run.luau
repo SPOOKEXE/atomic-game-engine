@@ -27,7 +27,7 @@ local Run = {}
 --
 -- **A wait would also take the suite with it.** This chunk runs the 215 specs
 -- inline during one `LoadScene`; `WaitForChild` suspends until a *barrier*, and
--- there is no beat inside a scene load — so a single miss would suspend the
+-- there is no beat inside a scene load - so a single miss would suspend the
 -- chunk, `LoadScene` would report success, and nothing would ever have run.
 local function moduleChild(parent: Instance, name: string): ModuleScript
 	local child = parent:FindFirstChild(name)

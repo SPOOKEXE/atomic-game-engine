@@ -3,8 +3,8 @@
 // serving its own assets links this library in-process rather than starting a
 // second program. repo_layout.md §2, §11.
 //
-// **It serves, as of v0.9.** The warning this file carried since v0.2 — that
-// nothing was served because the manifest and the HTTP layer did not exist — is
+// **It serves, as of v0.9.** The warning this file carried since v0.2 - that
+// nothing was served because the manifest and the HTTP layer did not exist - is
 // gone with the thing it was warning about.
 //
 // Two modes, and they are deliberately one program:
@@ -14,7 +14,7 @@
 //
 // Publishing is separate from serving because the signing key is separate.
 // `assets/AGENTS.md` records the convention: a key belongs to whoever publishes
-// the game, and **the origin holds none** — that is what makes it safe to
+// the game, and **the origin holds none** - that is what makes it safe to
 // deploy on hardware nobody here owns. A single mode that published on start-up
 // would put a signing key on every serving box, permanently.
 //
@@ -53,7 +53,7 @@
 namespace {
 	// Wall time, read in exactly one place in this program.
 	//
-	// Everything below takes `nowSeconds` as an argument — `assets::Grant` so
+	// Everything below takes `nowSeconds` as an argument - `assets::Grant` so
 	// that neither end holds a clock of its own to drift, `net` so that a suite
 	// can state a timeout rather than sleep for one. A program eventually has
 	// to read a real clock, and this is the line that does.
@@ -80,7 +80,7 @@ namespace {
 	//
 	// Four a second: fast enough that a rate looks live, slow enough that the
 	// redraw is nothing next to the serving it is watching. Sampling happens
-	// every pump regardless — the history is built from differences, and
+	// every pump regardless - the history is built from differences, and
 	// sampling at the redraw rate would put traffic in the wrong minute at
 	// every bucket boundary.
 	constexpr uint64_t REDRAW_MILLISECONDS = 250;
@@ -133,16 +133,16 @@ namespace {
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("cdn");
 
-	// Declared before anything is parsed or read — see the client's `main`.
+	// Declared before anything is parsed or read - see the client's `main`.
 	engine::core::Config::DeclareEngineFlags();
 
 	// **Only the publish verb.** An origin moves bytes it does not interpret,
-	// so `content.*` — which is about decoding — would be a set of settings
+	// so `content.*` - which is about decoding - would be a set of settings
 	// with nothing here to read them.
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
 	cdn::DeclareFlags();
 
-	engine::core::Arguments arguments("cdn", "atomic — serves a game's content.");
+	engine::core::Arguments arguments("cdn", "atomic - serves a game's content.");
 	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("verbose", "Log at trace level");
@@ -150,9 +150,9 @@ int main(int argc, char **argv) {
 		"store", "DIR", "The content store to serve or publish into (default: beside the binary)"
 	);
 	arguments.Value("publish", "DIR", "Publish this directory of files into the store, then exit");
-	arguments.Value("signing-key", "HEX", "64 hex characters — the Ed25519 seed to sign a publish with");
+	arguments.Value("signing-key", "HEX", "64 hex characters - the Ed25519 seed to sign a publish with");
 	arguments.Value(
-		"grant-key", "HEX", "64 hex characters — the secret shared with the server that issues grants"
+		"grant-key", "HEX", "64 hex characters - the secret shared with the server that issues grants"
 	);
 	arguments.Value("port", "N", "Port to listen on (default: 9080; 0 binds an ephemeral one)");
 	arguments.Value(
@@ -164,7 +164,7 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("upstream", "NAME=HOST:PORT", "An origin to forward a miss to. Repeatable");
 	arguments.Flag("allow-upstream", "Forward a miss to an upstream. Off unless asked for");
-	arguments.Flag("no-local-first", "Always ask an upstream, even when the content is here — a pure proxy");
+	arguments.Flag("no-local-first", "Always ask an upstream, even when the content is here - a pure proxy");
 	arguments.Flag("no-cache-upstream", "Do not keep what an upstream returned");
 	arguments.Value("compression-level", "N", "Zstd level groups are prepared at (default: 9)");
 	arguments.Value("cache-bytes", "N", "What the prepared-group cache may hold");
@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
 	arguments.Value("rendezvous", "HOST:PORT", "Register this stream with a rendezvous point");
 	arguments.Value("rendezvous-listen", "PORT", "Run a rendezvous point here, so peers can find each other");
 	arguments.Value("frames", "N", "Serve this many pumps and exit. For a smoke test");
-	arguments.Flag("gui", "Watch it serve in the terminal — content, traffic and rates");
+	arguments.Flag("gui", "Watch it serve in the terminal - content, traffic and rates");
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -209,7 +209,7 @@ int main(int argc, char **argv) {
 	// runnable as it stands and the self-hosted case is a directory that ships
 	// with it. The working directory is whoever launched the process.
 	//
-	// The settings first, the command line over the top — see the client's
+	// The settings first, the command line over the top - see the client's
 	// `main` for the precedence this expresses.
 	std::filesystem::path storePath = engine::core::Paths::Assets();
 	if (const std::string_view fromSettings = engine::core::Flag("cdn.store").Text(); !fromSettings.empty()) {
@@ -225,7 +225,7 @@ int main(int argc, char **argv) {
 		const auto seed = arguments.Get("signing-key");
 		if (!seed) {
 			ENGINE_ERROR("cdn: --publish needs --signing-key, and it is not optional");
-			ENGINE_ERROR("cdn: a manifest nobody signed is a manifest no client can trust — CDN.md §2");
+			ENGINE_ERROR("cdn: a manifest nobody signed is a manifest no client can trust - CDN.md §2");
 			return 2;
 		}
 		const auto key = SigningKeyFromHex(*seed);
@@ -236,11 +236,11 @@ int main(int argc, char **argv) {
 
 		// **The publish policy is read here and reported**, because a publish
 		// that quietly left a form out is a client fetching a name that is not
-		// in the manifest — and the first anyone hears of that is a missing
+		// in the manifest - and the first anyone hears of that is a missing
 		// texture on somebody else's machine.
 		cdn::PublishSettings publishing;
 		if (const std::string refused = publishing.Content.RefusedText(); !refused.empty()) {
-			ENGINE_INFO("cdn: not publishing — {}", refused);
+			ENGINE_INFO("cdn: not publishing - {}", refused);
 		}
 
 		const auto report = cdn::Publish(std::filesystem::path(*content), storePath, *key, publishing);
@@ -249,7 +249,7 @@ int main(int argc, char **argv) {
 		}
 
 		ENGINE_INFO(
-			"cdn: published {} assets in {} bundles — {} bytes of content in {} bytes of chunks",
+			"cdn: published {} assets in {} bundles - {} bytes of content in {} bytes of chunks",
 			report->Assets,
 			report->Bundles,
 			report->ContentBytes,
@@ -258,7 +258,7 @@ int main(int argc, char **argv) {
 		ENGINE_INFO("cdn: manifest root {}", report->Root.ToHex());
 		ENGINE_INFO("cdn: publisher key {}", key->Public().ToHex());
 		if (!report->DictionaryTrained) {
-			ENGINE_INFO("cdn: no dictionary — groups will be compressed without one");
+			ENGINE_INFO("cdn: no dictionary - groups will be compressed without one");
 		}
 		if (report->Refused > 0) {
 			ENGINE_INFO("cdn: {} files were refused by the content settings", report->Refused);
@@ -279,7 +279,7 @@ int main(int argc, char **argv) {
 	if (!store) {
 		ENGINE_ERROR("cdn: no content store at {}", storePath.string());
 		ENGINE_ERROR(
-			"cdn: publish one first — cdn --publish DIR --store {} --signing-key HEX", storePath.string()
+			"cdn: publish one first - cdn --publish DIR --store {} --signing-key HEX", storePath.string()
 		);
 		return 1;
 	}
@@ -291,17 +291,17 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	// The setting, then the command line over the top — and the refusal below
+	// The setting, then the command line over the top - and the refusal below
 	// is unchanged, because a grant key is required either way.
 	std::string grantText(engine::core::Flag("cdn.grant-key").Text());
 	if (const auto typedKey = arguments.Get("grant-key"); typedKey.has_value()) {
 		grantText = std::string(*typedKey);
 	}
 	if (grantText.empty()) {
-		ENGINE_ERROR("cdn: --grant-key is required — it is the secret shared with the server");
+		ENGINE_ERROR("cdn: --grant-key is required - it is the secret shared with the server");
 		ENGINE_ERROR(
 			"cdn: an origin that admitted everyone would be deciding who may have what, "
-			"which is the server's job — CDN.md §4"
+			"which is the server's job - CDN.md §4"
 		);
 		return 2;
 	}
@@ -314,8 +314,8 @@ int main(int argc, char **argv) {
 	}
 
 	// The settings first, the command line over the top. The three below are
-	// bare flags whose *sense* is inverted — `--no-local-first` turns something
-	// off — so each is an override rather than an assignment: an absent
+	// bare flags whose *sense* is inverted - `--no-local-first` turns something
+	// off - so each is an override rather than an assignment: an absent
 	// `--no-local-first` is silence and must not overrule a config file.
 	cdn::CDNSettings settings = cdn::OriginFromFlags();
 	if (arguments.Has("no-local-first")) {
@@ -384,7 +384,7 @@ int main(int argc, char **argv) {
 	// costs disk rather than trust.
 	//
 	// Reachable from a flag as of v0.14. The origin has accepted uploads since
-	// v0.10 and no program could be told to — so the editor's Upload button had
+	// v0.10 and no program could be told to - so the editor's Upload button had
 	// a write source it could configure, a key it could send, and nothing
 	// anywhere that would take them.
 	if (auto key = arguments.Get("ingest-key"); key.has_value() && !key->empty()) {
@@ -392,7 +392,7 @@ int main(int argc, char **argv) {
 	}
 	if (!service.Ingest.Key.empty()) {
 		// **A store called `processed/` is a local store, and its inbox is the
-		// `raw/` beside it** — which is where `PublishLocal` reads from, so an
+		// `raw/` beside it** - which is where `PublishLocal` reads from, so an
 		// upload lands somewhere a publish will find it. Anywhere else the
 		// store is a bare directory of chunks with no such sibling, and putting
 		// an inbox *inside* it is at least a path somebody can predict.
@@ -401,8 +401,8 @@ int main(int argc, char **argv) {
 							   : storePath.filename() == "processed" ? storePath.parent_path() / "raw"
 																	 : storePath / "inbox";
 	} else if (arguments.Get("inbox").has_value()) {
-		// An inbox with no key refuses every upload — `IngestSettings::Key`
-		// says so — and an origin that looks configured for uploads and takes
+		// An inbox with no key refuses every upload - `IngestSettings::Key`
+		// says so - and an origin that looks configured for uploads and takes
 		// none is the failure worth naming here rather than at request time.
 		ENGINE_ERROR("cdn: --inbox needs --ingest-key, or nothing would be accepted");
 		return 2;
@@ -411,7 +411,7 @@ int main(int argc, char **argv) {
 	// **A flag rather than a default, and it is the one flag here whose default
 	// cannot be walked back.** Enumeration hands whoever asks the name of
 	// everything this origin holds, and a name that has been scraped stays
-	// scraped — so an operator says so out loud, and says it with the same
+	// scraped - so an operator says so out loud, and says it with the same
 	// secret that already admits an upload. `cdn::CatalogueSettings` carries the
 	// argument; the refusal for a flag with no key is here for `--inbox`'s
 	// reason.
@@ -504,7 +504,7 @@ int main(int argc, char **argv) {
 			// Not a terminal: a pipe, a log file, a service manager. Serving is
 			// the job and the dashboard is not, so this says so and carries on
 			// rather than refusing to start.
-			ENGINE_WARN("cdn: --gui needs a terminal on stdin and stdout — serving without it");
+			ENGINE_WARN("cdn: --gui needs a terminal on stdin and stdout - serving without it");
 		} else {
 			dashboard.emplace(*origin.Current(), footprint, serving->Local().Text());
 			// The log and the dashboard share one screen and the log would win,

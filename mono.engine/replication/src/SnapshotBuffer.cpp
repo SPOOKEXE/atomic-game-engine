@@ -87,7 +87,7 @@ namespace engine::replication {
 			// **The rate window closes on a tick boundary, and both halves of it
 			// move here.** Seconds accumulate every frame and ticks only arrive
 			// four times as rarely, so a ratio taken part way through a tick is
-			// systematically low — enough to read a steady 60 Hz stream as 56 and
+			// systematically low - enough to read a steady 60 Hz stream as 56 and
 			// draw the world in slow motion for it.
 			if (Newest_ != 0) {
 				// Counted as the ticks that passed rather than as arrivals: a
@@ -168,7 +168,7 @@ namespace engine::replication {
 		// it jumps by one the instant a tick lands and falls back by one over the
 		// period before the next. A correction that fired inside that swing would
 		// be chasing the staircase rather than the drift, and the world would
-		// speed up and slow down once per tick — which is the judder this class
+		// speed up and slow down once per tick - which is the judder this class
 		// exists to remove, rebuilt out of the cure.
 		double rate = 1.0;
 		if (behind > Settings_.DelayTicks + 1.0) {

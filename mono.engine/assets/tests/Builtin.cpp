@@ -3,7 +3,7 @@
 // **The winding check is the one that matters**, and it is here rather than
 // beside each generator because it is the same property for all six. A face
 // wound the wrong way is culled when you look at it and drawn when you cannot,
-// so a solid renders as an open shell showing its own interior — which reads as
+// so a solid renders as an open shell showing its own interior - which reads as
 // the renderer dropping triangles rather than as a winding bug. It shipped
 // exactly once, in the cube, and the check that caught it is the ancestor of
 // this file.
@@ -12,7 +12,7 @@
 // meaning every edge is shared by exactly two triangles and those two traverse
 // it in opposite directions. That single check subsumes "no hole", "no
 // duplicated face", "no face wound backwards relative to its neighbour" and
-// "no missing pole triangle" — all of which are ways a generated mesh goes
+// "no missing pole triangle" - all of which are ways a generated mesh goes
 // wrong that a picture of it would not show.
 
 #include <engine/assets/Builtin.hpp>
@@ -68,7 +68,7 @@ namespace {
 	// A position rounded onto a tenth-of-a-millimetre grid.
 	//
 	// **Positions and not indices are what identifies a corner here**, because
-	// every generator duplicates vertices on purpose — a cube corner is three
+	// every generator duplicates vertices on purpose - a cube corner is three
 	// vertices so its three faces stay flat, and a sphere's seam column is two
 	// so the texture does not wrap backwards. An edge test keyed on indices
 	// would report every one of those as a hole.
@@ -324,7 +324,7 @@ TEST_CASE("the built-in checker is a valid, tiling, two-colour sheet", "[assets]
 	REQUIRE(seen.size() == 2);
 
 	// Half each, which is what makes it read as a checkerboard rather than as
-	// a pattern with a bias — and what the cell size dividing the side buys.
+	// a pattern with a bias - and what the cell size dividing the side buys.
 	for (const auto &[colour, count] : seen) {
 		INFO(static_cast<int>(colour[0]));
 		REQUIRE(count == static_cast<size_t>(sheet.Width) * sheet.Height / 2);
@@ -335,7 +335,7 @@ TEST_CASE("the built-in checker is a valid, tiling, two-colour sheet", "[assets]
 	REQUIRE(at(0, 0)[3] == 0xFF);
 
 	// **The corners tile.** The sheet repeats across a surface, so the column
-	// past the right edge is column zero again — if the two edges held the same
+	// past the right edge is column zero again - if the two edges held the same
 	// colour the seam would show as a double-width check.
 	REQUIRE(at(0, 0) != at(sheet.Width - 1, 0));
 	REQUIRE(at(0, 0) != at(0, sheet.Height - 1));
@@ -345,7 +345,7 @@ TEST_CASE("the built-in checker arrives with its mip chain", "[assets][builtin]"
 	// **The sheet an author puts on a wall while deciding where the wall goes is
 	// also the sheet they see tiled across a floor from across the map**, so the
 	// one built-in texture in the engine was the one shimmering worst. It had no
-	// chain until v0.15 because the box filter lived a tier above this module —
+	// chain until v0.15 because the box filter lived a tier above this module -
 	// `assets/Resample.hpp` carries what moved and why.
 	using engine::assets::BuiltinTexture;
 	using engine::assets::MipLevelCount;

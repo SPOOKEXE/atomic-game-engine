@@ -24,7 +24,7 @@ namespace engine::bake {
 		Nodes.push_back(std::move(node));
 
 		// Ids are one-based so that a default-constructed `NodeId` names no
-		// node rather than the first one — the same reason `RequestId::NONE` is
+		// node rather than the first one - the same reason `RequestId::NONE` is
 		// zero.
 		return NodeId{static_cast<uint32_t>(Nodes.size())};
 	}
@@ -202,14 +202,14 @@ namespace engine::bake {
 
 			// **The name is asked for exactly one format, and only once the
 			// bytes have said nothing.** An SVG is XML and carries no signature,
-			// so nothing but its name can identify it — and a `<svg` or `<?xml`
+			// so nothing but its name can identify it - and a `<svg` or `<?xml`
 			// prefix sniff would be the same mistake the paragraph above
 			// describes, a claim over text that the next XML-shaped format would
 			// walk into. A signature still wins, so a `.svg` holding a PNG
 			// decoded as one above.
 			if (ImageFormatOfName(input.Source) == ImageFormat::Svg) {
 				failure = "graph: '" + input.Source +
-						  "' is an svg, which states a coordinate system and no pixels — import it with "
+						  "' is an svg, which states a coordinate system and no pixels - import it with "
 						  "a rasterize node, which carries the size";
 				return false;
 			}
@@ -237,7 +237,7 @@ namespace engine::bake {
 				return wrongKind("a mesh");
 			}
 			if (!FitMesh(result.Mesh, node.Size)) {
-				failure = "graph: '" + input.Source + "' cannot be fitted — it has no extent";
+				failure = "graph: '" + input.Source + "' cannot be fitted - it has no extent";
 				return false;
 			}
 			break;
@@ -280,7 +280,7 @@ namespace engine::bake {
 			const ImageFormat sniffed = ImageFormatOfBytes(input.Bytes);
 			if (sniffed != ImageFormat::Unknown) {
 				failure = "graph: '" + input.Source + "' is a " + std::string(Describe(sniffed)) +
-						  " and already has a size — import it, and resize it if it is the wrong one";
+						  " and already has a size - import it, and resize it if it is the wrong one";
 				return false;
 			}
 
@@ -322,7 +322,7 @@ namespace engine::bake {
 			// **Last of the texture nodes, and the graph does not enforce it.**
 			// A resize after this one drops the chain and an opaque pass after it
 			// would leave the levels' alpha as it was, so the order is the
-			// pipeline's to get right — `Bake.cpp` puts it immediately before the
+			// pipeline's to get right - `Bake.cpp` puts it immediately before the
 			// write for that reason.
 			if (!assets::BuildMipChain(result.Texture)) {
 				failure = "graph: '" + input.Source + "' cannot carry a mip chain";
@@ -335,8 +335,8 @@ namespace engine::bake {
 			}
 			// **Only a flipbook is retimed.** A frame rate on a still image is
 			// a number nothing would read, and stamping one would make
-			// `TextureData::IsFlipbook` — which asks about the grid, not the
-			// rate — the only thing keeping them apart.
+			// `TextureData::IsFlipbook` - which asks about the grid, not the
+			// rate - the only thing keeping them apart.
 			if (node.Size > 0.0f && result.Texture.IsFlipbook()) {
 				result.Texture.FlipbookFrameRate = node.Size;
 			}

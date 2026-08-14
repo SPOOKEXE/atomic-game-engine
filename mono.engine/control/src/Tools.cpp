@@ -2,14 +2,14 @@
 //
 // **The universe is the game and a world is a scene**, which is the mapping a
 // script already sees through `game` and `workspace`. Nothing here invents a
-// second vocabulary — `script/src/RunService.cpp` establishes it and the
+// second vocabulary - `script/src/RunService.cpp` establishes it and the
 // explorer draws the same objects.
 //
 // **Every one of these runs on the caller's thread, inside a frame or a tick.**
 // That is what makes them allowed to call `Universe::Enter` at all, and it is
 // also the constraint: a tool holds up the loop it runs in, so none of them walk
 // a world without a bound. The tree tools take a `depth` and a `limit` and
-// default both to something small — a world of fifty thousand parts serialised
+// default both to something small - a world of fifty thousand parts serialised
 // whole is a reply nothing can read and a frame nothing can draw.
 
 #include <engine/control/Surface.hpp>
@@ -56,7 +56,7 @@ namespace engine::control {
 			case world::WorldState::Remote:
 				// Held by a supervised host, not by this process. Distinct from
 				// "suspended", which is a world this process holds and has
-				// chosen not to tick — see `world/Enums.hpp`.
+				// chosen not to tick - see `world/Enums.hpp`.
 				return "remote";
 			}
 			return "unknown";
@@ -68,7 +68,7 @@ namespace engine::control {
 		// **Sized by the widest property type rather than by `CFrame`**, which is
 		// what it was until a sequence became one. A `core::ColorSequence` is
 		// twenty keypoints and does not fit in twenty-eight bytes, so the guard on
-		// `property.Size` refused it — correctly, and silently, which is what
+		// `property.Size` refused it - correctly, and silently, which is what
 		// would have made `emitter.Color` read back as `null` over the control
 		// surface with nothing in the log to say a property had been dropped.
 		//
@@ -111,7 +111,7 @@ namespace engine::control {
 			case PropertyType::Enum:
 				return std::string(reinterpret_cast<const core::Name *>(bytes)->Text());
 			case PropertyType::String:
-				// Never reached — served by the branch above the buffer.
+				// Never reached - served by the branch above the buffer.
 				return nullptr;
 			case PropertyType::Vector3: {
 				const auto &value = *reinterpret_cast<const core::Vector3 *>(bytes);
@@ -200,7 +200,7 @@ namespace engine::control {
 		// One property of one instance, read through its conversion.
 		json ReadProperty(Store &store, ecs::Entity instance, const PropertyDescriptor &property) {
 			// **Before the shared buffer**, because a `PropertyType::String`
-			// getter assigns into its destination rather than filling bytes —
+			// getter assigns into its destination rather than filling bytes -
 			// and assigning a `std::string` into uninitialised storage is
 			// undefined behaviour. Both script bindings take the same exception
 			// in the same shape.
@@ -287,11 +287,11 @@ namespace engine::control {
 		// other**, and a client that can only see the first cannot see anything
 		// a game declared for itself. v0.12 gave a script `World:DefineComponent`
 		// and a query over it; these are the same three questions asked over the
-		// wire — what components exist, who carries them, and what is in one.
+		// wire - what components exist, who carries them, and what is in one.
 		//
 		// **Only described components are readable**, exactly as they are from a
 		// script. A C++ component has no field list at run time, so there is
-		// nothing to build an object from — and it already has a property
+		// nothing to build an object from - and it already has a property
 		// surface, which `instance_get` answers.
 
 		// One described component's fields, as a name-to-type object.
@@ -308,7 +308,7 @@ namespace engine::control {
 		// The described component a `component` argument names.
 		const ecs::Schema *SchemaArgument(const json &arguments, ecs::ComponentId &id, std::string &failure) {
 			if (!arguments.contains("component") || !arguments["component"].is_string()) {
-				failure = "which component? — call component_list";
+				failure = "which component? - call component_list";
 				return nullptr;
 			}
 
@@ -316,7 +316,7 @@ namespace engine::control {
 			id = ecs::Components::Find(core::Name(wanted.c_str()));
 
 			if (!id.IsValid()) {
-				failure = "no component called '" + wanted + "' — call component_list";
+				failure = "no component called '" + wanted + "' - call component_list";
 				return nullptr;
 			}
 
@@ -326,7 +326,7 @@ namespace engine::control {
 				// component" sends a reader looking for a typo, where the real
 				// answer is often "that one is reached through its properties".
 				failure = "'" + wanted +
-						  "' is a component the engine declares, so it has no readable fields — use "
+						  "' is a component the engine declares, so it has no readable fields - use "
 						  "instance_get on the instance that carries it";
 			}
 			return schema;
@@ -337,7 +337,7 @@ namespace engine::control {
 		ComponentArgument(const json &arguments, std::vector<ecs::ComponentId> &out, std::string &failure) {
 			if (!arguments.contains("components") || !arguments["components"].is_array() ||
 				arguments["components"].empty()) {
-				failure = "name at least one component — call component_list";
+				failure = "name at least one component - call component_list";
 				return false;
 			}
 
@@ -379,7 +379,7 @@ namespace engine::control {
 			const std::string wanted = arguments["world"].get<std::string>();
 			const WorldId found = universe.Find(core::Name(wanted.c_str()));
 			if (!found.IsValid()) {
-				failure = "no world called '" + wanted + "' — call world_list";
+				failure = "no world called '" + wanted + "' - call world_list";
 			}
 			return found;
 		}
@@ -437,7 +437,7 @@ namespace engine::control {
 				break;
 			}
 			case PropertyType::String:
-				// Never reached — served by the branch above the buffer.
+				// Never reached - served by the branch above the buffer.
 				failure = "a string property is written through its own path";
 				return false;
 			case PropertyType::Vector3:
@@ -479,7 +479,7 @@ namespace engine::control {
 				// **Missing axes default to zero rather than to what is
 				// already there.** A caller sending only `{"X":...}` is
 				// setting a size, and a half-write that kept the old Y would
-				// be a value nobody authored — the read-modify-write belongs
+				// be a value nobody authored - the read-modify-write belongs
 				// in the caller, which can see both halves.
 				const json x = value.value("X", json::object());
 				const json y = value.value("Y", json::object());
@@ -582,7 +582,7 @@ namespace engine::control {
 			const json &value,
 			std::string &failure
 		) {
-			// The write half of the read path's exception — see `ReadProperty`.
+			// The write half of the read path's exception - see `ReadProperty`.
 			if (property.Type == PropertyType::String) {
 				if (!value.is_string()) {
 					failure = "that property takes a string";
@@ -591,7 +591,7 @@ namespace engine::control {
 
 				const std::string text = value.get<std::string>();
 				if (!store.SetProperty(instance, property, &text, sizeof(text))) {
-					failure = "the world refused the write — it may be running or a replica";
+					failure = "the world refused the write - it may be running or a replica";
 					return false;
 				}
 				return true;
@@ -612,7 +612,7 @@ namespace engine::control {
 			if (!store.SetProperty(instance, property, bytes, property.Size)) {
 				// The store refuses a write on an adopt-only world, which is what
 				// a replica is. Said plainly rather than as a bare false.
-				failure = "the world refused the write — it may be running or a replica";
+				failure = "the world refused the write - it may be running or a replica";
 				return false;
 			}
 			return true;
@@ -648,7 +648,7 @@ namespace engine::control {
 
 					// `CountMatching` rather than a walk: every instance carries
 					// `InstanceClass`, and counting a column is O(archetypes)
-					// where walking the tree is O(instances) — per world, per
+					// where walking the tree is O(instances) - per world, per
 					// call, inside a frame.
 					size_t instances = 0;
 					worlds->Enter(id, [&](Store &store) {
@@ -730,7 +730,7 @@ namespace engine::control {
 					return nullptr;
 				}
 				if (!arguments.contains("id")) {
-					failure = "instance_get needs an `id` — take one from world_tree";
+					failure = "instance_get needs an `id` - take one from world_tree";
 					return nullptr;
 				}
 
@@ -833,7 +833,7 @@ namespace engine::control {
 			"Every component a game declared for itself, with its fields and how many entities in a "
 			"scene carry it. A component is the storage under the class tree: an instance is an "
 			"entity and a class is a set of these. Components the engine declares are not listed "
-			"here — those are reached as properties, through instance_get.",
+			"here - those are reached as properties, through instance_get.",
 			[] { return WorldSchema(); },
 			[worlds](const json &arguments, std::string &failure) -> json {
 				const WorldId world = WorldArgument(*worlds, arguments, failure);
@@ -921,7 +921,7 @@ namespace engine::control {
 		Add(Tool{
 			"component_get",
 			"The values one entity holds for one component, field by field. Null when the entity "
-			"does not carry it — which is a different answer from carrying it with every field at "
+			"does not carry it - which is a different answer from carrying it with every field at "
 			"zero.",
 			[] {
 				json schema = WorldSchema();
@@ -936,7 +936,7 @@ namespace engine::control {
 					return nullptr;
 				}
 				if (!arguments.contains("id") || !arguments["id"].is_number()) {
-					failure = "which entity? — call entity_query or world_tree";
+					failure = "which entity? - call entity_query or world_tree";
 					return nullptr;
 				}
 
@@ -994,7 +994,7 @@ namespace engine::control {
 						return nullptr;
 					}
 					if (!arguments.contains("id") || !arguments["id"].is_number()) {
-						failure = "which entity? — call entity_query or world_tree";
+						failure = "which entity? - call entity_query or world_tree";
 						return nullptr;
 					}
 					if (!arguments.contains("fields") || !arguments["fields"].is_object()) {
@@ -1018,7 +1018,7 @@ namespace engine::control {
 						}
 
 						// The component's own lifetime hooks, because a schema
-						// holding a string field owns an allocation — the same
+						// holding a string field owns an allocation - the same
 						// holder both script bindings carry, for the same
 						// reason.
 						const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
@@ -1084,12 +1084,12 @@ namespace engine::control {
 				if (!Profiling || !core::FrameGraph::IsEnabled()) {
 					// Recorded as well as set, because a program that asserts
 					// the graph's state every frame would otherwise undo this
-					// before the next one — see `WantsProfiling`.
+					// before the next one - see `WantsProfiling`.
 					Profiling = true;
 					core::FrameGraph::SetEnabled(true);
 					return json{
 						{"spans", json::array()},
-						{"note", "profiling was off and is now on — call again for the next frame"},
+						{"note", "profiling was off and is now on - call again for the next frame"},
 					};
 				}
 

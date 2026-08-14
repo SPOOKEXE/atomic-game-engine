@@ -24,15 +24,15 @@ namespace engine::assets {
 
 		// **Carried across, because a resize does not change what the cells
 		// are.** A flipbook sheet shrunk to fit a texture budget is the same
-		// animation at a lower resolution — same grid, same frame count, same
-		// rate — and dropping the three fields here would turn every imported
+		// animation at a lower resolution - same grid, same frame count, same
+		// rate - and dropping the three fields here would turn every imported
 		// GIF larger than `--max-texture` back into an anonymous atlas. That is
 		// the whole failure this note exists to prevent: it would look like the
 		// decoder was broken, and the decoder would be fine.
 		//
 		// **A non-uniform resize is still legal and still carried.** The grid is
 		// a count, not a pixel size, so cells stay cells whatever the aspect
-		// becomes — anything sampling the sheet divides by `FlipbookSide` rather
+		// becomes - anything sampling the sheet divides by `FlipbookSide` rather
 		// than by a stored cell width.
 		resized.FlipbookSide = source.FlipbookSide;
 		resized.FlipbookFrames = source.FlipbookFrames;
@@ -43,7 +43,7 @@ namespace engine::assets {
 		for (uint32_t row = 0; row < height; row++) {
 			// The source rows this destination row averages over. Computed as a
 			// half-open range from the exact edges, so every source row belongs
-			// to exactly one destination row and none is counted twice — which
+			// to exactly one destination row and none is counted twice - which
 			// is what stops a downscale from brightening or darkening the image
 			// along one edge.
 			const uint32_t firstRow =
@@ -109,13 +109,13 @@ namespace engine::assets {
 
 		// A grid the sheet's dimensions do not divide evenly has no smaller sheet
 		// holding the same cells, so it gets no chain rather than an approximate
-		// one — `BuildMipChain` carries the argument.
+		// one - `BuildMipChain` carries the argument.
 		if (image.Width % side != 0 || image.Height % side != 0) {
 			return 1;
 		}
 
 		// **The last level whose cells are still an exact halving**, which is the
-		// largest power of two dividing both cell dimensions — and which lands
+		// largest power of two dividing both cell dimensions - and which lands
 		// exactly on the level where a frame is one pixel when the cells are
 		// themselves a power of two. One level further and a destination pixel
 		// spans two frames.

@@ -101,7 +101,7 @@ namespace unified {
 				// walk that *built* the list row for row. That one drops an
 				// invisible instance; this one counted it, so one hidden part
 				// anywhere ahead of the subject shifted every ordinal after it
-				// and this reported a different entity's position — as a plain
+				// and this reported a different entity's position - as a plain
 				// number, with nothing to say it was the wrong entity's.
 				if (!visual.Visible) {
 					return;

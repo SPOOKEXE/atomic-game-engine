@@ -4,16 +4,16 @@
 //
 // `Wav.hpp` said MP3 was "a vendored codec and a licence decision" and left the
 // gap honest rather than listing an extension it could not decode. The decision
-// went the other way at v0.9 because **minimp3 is CC0** — no attribution
-// obligation, no patent grant to read, nothing that follows a shipped game —
+// went the other way at v0.9 because **minimp3 is CC0** - no attribution
+// obligation, no patent grant to read, nothing that follows a shipped game -
 // and because the format a person actually has a music file in is this one.
 // Ogg and FLAC are still classified by the manifest and still not decoded here.
 //
 // **A compressed format can lie about how big it is, and that is the whole
 // difference from WAV.** A RIFF file's chunk lengths are bounded against the
 // bytes that arrived, so the worst a malformed one does is decode short. An
-// MP3 frame is about a hundred bytes and expands to 1152 frames of stereo —
-// nine kilobytes — so a small file can ask for gigabytes, and the input's
+// MP3 frame is about a hundred bytes and expands to 1152 frames of stereo -
+// nine kilobytes - so a small file can ask for gigabytes, and the input's
 // length bounds nothing. The output is therefore bounded directly, which is the
 // same rule `CDN.md` §5 already applies to a Zstd frame: **size the result from
 // something other than the attacker's number, and refuse rather than truncate.**
@@ -55,7 +55,7 @@ namespace engine::audio {
 	// visible rather than implicitly here.
 	//
 	// An ID3v2 tag at the front is skipped rather than scanned past. That is
-	// not tidiness — a tag carrying cover art is a JPEG, a JPEG is arbitrary
+	// not tidiness - a tag carrying cover art is a JPEG, a JPEG is arbitrary
 	// bytes, and arbitrary bytes contain frame syncs. A decoder that hunted for
 	// its first sync through an embedded image would occasionally start
 	// decoding one.
@@ -71,7 +71,7 @@ namespace engine::audio {
 
 	// The largest file this will look at.
 	//
-	// A backstop, and **not the check that matters** — see below. It catches a
+	// A backstop, and **not the check that matters** - see below. It catches a
 	// `.mp3` that is absurd before the decoder walks it.
 	constexpr size_t MAXIMUM_MP3_BYTES = 128u * 1024u * 1024u;
 
@@ -87,7 +87,7 @@ namespace engine::audio {
 	//
 	// 512 MB of float samples, which is the ceiling `MAXIMUM_WAV_BYTES` puts on
 	// a file, here on the result instead. About twenty-three minutes of 48 kHz
-	// stereo — longer than any music a level streams and far shorter than a
+	// stereo - longer than any music a level streams and far shorter than a
 	// machine's memory.
 	constexpr size_t MAXIMUM_MP3_SAMPLES = 128u * 1024u * 1024u;
 }

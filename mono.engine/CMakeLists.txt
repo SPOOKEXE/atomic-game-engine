@@ -5,7 +5,7 @@
 # which, and mono.tools/architecture/ checks the real graph against that table.
 #
 # Each module carries its own tests/ and its own AGENTS.md. The order below is
-# the layer order, for reading — CMake resolves the real graph from each
+# the layer order, for reading - CMake resolves the real graph from each
 # module's DEPS.
 
 add_subdirectory(core)      # L0 platform · L1 values      [shared]
@@ -45,7 +45,7 @@ if(MONO_BUILD_CLIENT)
 	add_subdirectory(ui)      # L12 the editor's toolkit     [client]
 endif()
 
-# TODO(D00017): the hosting half of L12 — orchestration — is a [server] module
+# TODO(D00017): the hosting half of L12 - orchestration - is a [server] module
 # and gets the mirror-image guard on MONO_BUILD_SERVER when it arrives. Filed
 # rather than versioned, because no version schedules it and `--worlds N` is a
 # harness rather than a caller.

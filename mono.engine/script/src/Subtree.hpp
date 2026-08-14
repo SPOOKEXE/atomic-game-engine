@@ -4,7 +4,7 @@
 //
 // **Both VMs destroy the same way, so they destroy through the same walk.**
 // `Store::DestroyInstance` takes the whole subtree, so everything the script
-// side remembers about that subtree has to be forgotten in step — and the two
+// side remembers about that subtree has to be forgotten in step - and the two
 // bindings each had their own copy of that walk, each of which stopped at the
 // direct children. A grandchild's connections outlived the row they watched.
 //
@@ -28,7 +28,7 @@ namespace engine::script {
 	// Visits everything under an instance, nearest first.
 	//
 	// **Depth first, in the order a recursive walk written by hand would
-	// produce** — a child, then everything under that child, then the next
+	// produce** - a child, then everything under that child, then the next
 	// child. That is Roblox's `GetDescendants` order, and scripts index into
 	// the result, so it is a contract rather than an implementation detail.
 	//
@@ -51,7 +51,7 @@ namespace engine::script {
 	// keeps a row nothing can reach in the signal table.
 	//
 	// Releasing the callable is the caller's, because only the VM that made one
-	// knows how — a registry ref on the Luau side, a `JSValue` on the other.
+	// knows how - a registry ref on the Luau side, a `JSValue` on the other.
 	//
 	// @param store    The world the subtree lives in.
 	// @param signals  The connection table to drop from.

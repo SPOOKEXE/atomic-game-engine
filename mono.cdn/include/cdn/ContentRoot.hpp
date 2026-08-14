@@ -3,7 +3,7 @@
 // The boundary between a content name and the filesystem.
 //
 // The origin serves bytes out of a directory, and every name it is asked for
-// arrives from outside this process — a manifest, a session descriptor, a
+// arrives from outside this process - a manifest, a session descriptor, a
 // request. repo_layout.md §11 treats the descriptor as untrusted content like
 // everything else, and the names inside it are untrusted for the same reason: a
 // resolver that hands back `../../etc/passwd` is a file-disclosure primitive
@@ -12,7 +12,7 @@
 // So resolution refuses by default and the check lives here, once, rather than
 // at the call sites. A call site added later is a call site that forgot.
 //
-// This is the local-filesystem half of §11's three sources — the one the server
+// This is the local-filesystem half of §11's three sources - the one the server
 // uses when it serves its own disk, and the one the origin uses when it is
 // deployed on its own. Server-proxied and direct delivery are the same store
 // reached over `net`, not a second implementation, and they arrive with
@@ -36,7 +36,7 @@ namespace cdn {
 	//
 	// Mount one at start-up and keep it. The directory is canonicalised on the
 	// way in, so every later comparison is against a path with no symlink, no
-	// `..` and no trailing separator still in it — which is what lets Resolve
+	// `..` and no trailing separator still in it - which is what lets Resolve
 	// decide containment by comparing two paths rather than by walking a tree.
 	class ContentRoot {
 	  public:
@@ -45,7 +45,7 @@ namespace cdn {
 		// Refuses a directory that is missing or is not a directory. Mounting one
 		// that is not there would turn a misconfigured deployment into a stream
 		// of individually plausible per-request failures, at request rate, with
-		// nothing anywhere saying the root was wrong — so it is refused once, at
+		// nothing anywhere saying the root was wrong - so it is refused once, at
 		// start-up, where a person is still watching.
 		//
 		// @param directory The directory to serve from. A relative path resolves
@@ -60,7 +60,7 @@ namespace cdn {
 
 		// Turns a content name into a path inside this root, or refuses it.
 		//
-		// A name is a relative, forward-slash path — `meshes/rock.mesh`. It is
+		// A name is a relative, forward-slash path - `meshes/rock.mesh`. It is
 		// refused when it is empty, absolute, or carries any `.` or `..`
 		// component, and the resolved path is then checked against the root as
 		// well.
@@ -68,7 +68,7 @@ namespace cdn {
 		// **Both halves are deliberate.** The component check alone cannot see a
 		// symlink inside the root that points out of it. The containment check
 		// alone accepts a name that only lands inside by accident, and accepts
-		// two spellings of one file — which defeats content addressing the day
+		// two spellings of one file - which defeats content addressing the day
 		// the manifest starts keying on the name.
 		//
 		// A refusal is not a missing file. It says the name may not be served at

@@ -7,8 +7,8 @@
 // tier up meant `assets` itself could not use it: `MakeBuiltin`'s checker,
 // `render::DefaultTexture` and `render::MissingTexture` are all pixels generated
 // below the importers, so all three uploaded at a single level and shimmered at
-// distance. Nothing here reads a foreign file or touches a vendor — it is a
-// weighted average over bytes this module already defines — so the tier it was
+// distance. Nothing here reads a foreign file or touches a vendor - it is a
+// weighted average over bytes this module already defines - so the tier it was
 // living at was an accident of where mip chains were first needed.
 //
 // `bake` still owns everything that turns *somebody else's* file into one of
@@ -40,7 +40,7 @@ namespace engine::assets {
 	// How many levels a chain over this image may honestly have.
 	//
 	// A still image gets the full `MipLevelCount`. **A flipbook sheet gets fewer,
-	// and that is the whole of the decision** — see `BuildMipChain`.
+	// and that is the whole of the decision** - see `BuildMipChain`.
 	//
 	// @param image The image, chain or no chain.
 	// @return The count, level zero included. Zero for an invalid image, and one
@@ -56,12 +56,12 @@ namespace engine::assets {
 	// **A flipbook sheet stops early rather than being padded or refused.**
 	// Halving a grid of frames is safe only while every destination pixel still
 	// falls inside one cell; one level past that, a pixel averages two frames and
-	// the sheet shows a ghost of the next frame at distance — which reads as the
+	// the sheet shows a ghost of the next frame at distance - which reads as the
 	// flipbook's cell arithmetic being wrong rather than as a chain one level too
 	// long. So the chain ends at the last level whose cells are still an exact
 	// halving, which is the level where each frame is one pixel. Padding the
-	// cells with gutters would change what a flipbook *is* — every consumer
-	// divides the sheet by `FlipbookSide` — and refusing the texture outright
+	// cells with gutters would change what a flipbook *is* - every consumer
+	// divides the sheet by `FlipbookSide` - and refusing the texture outright
 	// would throw away an image that was perfectly good without a chain.
 	//
 	// @param[in,out] image The image. Any existing chain is replaced, so running

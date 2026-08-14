@@ -75,7 +75,7 @@ TEST_CASE("the class filter is IsA, not an exact name", "[studio][find]") {
 	CHECK(Matches(fixture.World, part, exact));
 
 	// **The point of using the class tree rather than a string compare.** A
-	// `Part` is a `BasePart`, so searching for the base finds the leaf — which
+	// `Part` is a `BasePart`, so searching for the base finds the leaf - which
 	// is what somebody means by "every part" and what set inclusion already
 	// says.
 	FindQuery base;
@@ -143,7 +143,7 @@ TEST_CASE("a value is matched through its rendered text", "[studio][find]") {
 	const Entity part = fixture.Part("Block");
 
 	// Booleans, numbers and enums all go through `FormatValue`, so one
-	// predicate covers every type — and `Anchored` is a *structural* property
+	// predicate covers every type - and `Anchored` is a *structural* property
 	// on top of that, presence of a tag spelled as a bool, which the matcher
 	// also never learns.
 	const bool anchored = true;

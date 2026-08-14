@@ -18,7 +18,7 @@ namespace engine::scene {
 		// redraw, a false match shows a stale image, and only one of those is a
 		// bug somebody has to find.
 		//
-		// NaN falls the same way — two NaNs with different payloads hash apart —
+		// NaN falls the same way - two NaNs with different payloads hash apart -
 		// and for the same reason it does not matter.
 		uint32_t BitsOf(float value) {
 			uint32_t bits = 0;
@@ -29,7 +29,7 @@ namespace engine::scene {
 		// Two 32-bit fields as one 64-bit word.
 		//
 		// **`MixSignature` costs the same for one bit as for sixty-four**, so
-		// feeding it a 32-bit value wastes half of every mix — and every field
+		// feeding it a 32-bit value wastes half of every mix - and every field
 		// on a `DrawInstance` that a surface can see is 32 bits or fewer. Pairing
 		// them halves the number of mixes without folding in one bit less.
 		//
@@ -41,7 +41,7 @@ namespace engine::scene {
 		}
 
 		// The seed. FNV's 64-bit offset basis, used as a starting constant
-		// rather than as part of FNV — what follows is not FNV, and picking a
+		// rather than as part of FNV - what follows is not FNV, and picking a
 		// well-known non-zero start is only so an empty list does not hash to
 		// zero and collide with an uninitialised field.
 		constexpr uint64_t SIGNATURE_SEED = 0xCBF29CE484222325ull;
@@ -54,8 +54,8 @@ namespace engine::scene {
 	uint64_t MixSignature(uint64_t hash, uint64_t word) {
 		// Boost's `hash_combine` constant and shifts. Chosen because it is the
 		// one every reader has already seen: the avalanche matters far less here
-		// than for a hash table — a collision costs one skipped redraw of one
-		// surface, on one frame — and an unfamiliar mixer would invite somebody
+		// than for a hash table - a collision costs one skipped redraw of one
+		// surface, on one frame - and an unfamiliar mixer would invite somebody
 		// to improve it.
 		return hash ^ (word + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2));
 	}
@@ -63,7 +63,7 @@ namespace engine::scene {
 	uint64_t SignatureOf(std::span<const DrawInstance> instances) {
 		// **Four chains rather than one, because this is latency-bound and not
 		// throughput-bound.** `MixSignature` is a shift, a shift, an add and an
-		// xor, and every one of them needs the previous hash — so folding
+		// xor, and every one of them needs the previous hash - so folding
 		// eighteen fields into one accumulator is an eighteen-deep dependency
 		// chain per instance that a superscalar core can do nothing with. It
 		// measured at 13 ns an instance in `engine.scene.bench.ordering`, which
@@ -73,7 +73,7 @@ namespace engine::scene {
 		// deciding that nothing had changed.
 		//
 		// Independent lanes let four mixes be in flight at once, and pairing the
-		// 32-bit fields halves how many there are. Both are pure rearrangement —
+		// 32-bit fields halves how many there are. Both are pure rearrangement -
 		// every field still lands in the result, still by its bit pattern, and
 		// still field-wise rather than over the object representation, which is
 		// what `tests/DrawInstance.cpp` pins and what keeps `Reserved` out of it.
@@ -100,7 +100,7 @@ namespace engine::scene {
 			b = MixSignature(b, Pair(BitsOf(instance.Tint.R), BitsOf(instance.Tint.G)));
 			c = MixSignature(c, Pair(BitsOf(instance.Tint.B), BitsOf(instance.Transparency)));
 			// **The mesh alone, where it used to be the mesh and the material.**
-			// The material name is gone from a `DrawInstance` — a material is
+			// The material name is gone from a `DrawInstance` - a material is
 			// content now and what it resolves to is `Texture`, which is folded
 			// in below. Keeping both would have signed one fact twice.
 			d = MixSignature(d, Pair(instance.Mesh.Id(), 0u));
@@ -121,7 +121,7 @@ namespace engine::scene {
 			// looks like.** A seam plane that moved changes which half of the
 			// body is drawn, so a surface holding the old image is holding a body
 			// cut somewhere it no longer is. Four more mixes on two lanes, paid
-			// only because the plane is on every row — a scene with no portal in
+			// only because the plane is on every row - a scene with no portal in
 			// it folds in four zeroes and gets the same answer every frame, which
 			// is what the skip wants.
 			d = MixSignature(d, Pair(BitsOf(instance.SeamNormal.X), BitsOf(instance.SeamNormal.Y)));
@@ -142,7 +142,7 @@ namespace engine::scene {
 		// **Every instance, which is what this always meant.** The body moved to
 		// `OrderSubset` when the culling became graph nodes and a pass started
 		// being handed a list rather than the whole world; the sort itself is
-		// unchanged and is deliberately not written twice — see the comment on
+		// unchanged and is deliberately not written twice - see the comment on
 		// the reverse, which is there because a test caught it.
 		order.resize(instances.size());
 		for (size_t index = 0; index < instances.size(); index++) {
@@ -167,7 +167,7 @@ namespace engine::scene {
 		order.resize(from.size());
 
 		// The opaque head keeps the order the world produced it in, so an opaque
-		// scene comes out of this exactly as it went in — which is what makes a
+		// scene comes out of this exactly as it went in - which is what makes a
 		// recording of one replay, and what makes the cost on a scene with no
 		// transparency a single pass and no comparisons.
 		size_t opaque = 0;
@@ -176,7 +176,7 @@ namespace engine::scene {
 		for (const uint32_t index : from) {
 			// **A bad index is dropped rather than dereferenced.** A list is
 			// whatever a chain of filter nodes produced, and one of them naming
-			// an instance that no longer exists is a mis-wired pipeline — which
+			// an instance that no longer exists is a mis-wired pipeline - which
 			// should be a missing object, not a read off the end.
 			if (index >= instances.size()) {
 				order[--transparent] = index;
@@ -206,7 +206,7 @@ namespace engine::scene {
 		std::reverse(order.begin() + static_cast<ptrdiff_t>(opaque), order.end());
 
 		// Farthest first. Squared distance, because the square root is monotonic
-		// and cannot change an ordering — and this runs over every transparent
+		// and cannot change an ordering - and this runs over every transparent
 		// instance every frame per view.
 		std::stable_sort(
 			order.begin() + static_cast<ptrdiff_t>(opaque), order.end(), [&](uint32_t left, uint32_t right) {
@@ -241,7 +241,7 @@ namespace engine::scene {
 		// **The scan first, because the common scene has no mirror in it.**
 		// `stable_partition` allocates a temporary buffer whatever it finds, and
 		// with every `Surface` at its default of -1 the partition is a provable
-		// no-op — so a mirrorless frame was paying an allocation and two passes
+		// no-op - so a mirrorless frame was paying an allocation and two passes
 		// to reorder nothing.
 		if (std::none_of(order.begin(), order.end(), shows)) {
 			return 0;
@@ -270,7 +270,7 @@ namespace engine::scene {
 		// handful of panes and a comparison sort over it is cheaper to read than
 		// a loop of `stable_partition` calls each allocating its own buffer.
 		// Stable, so the order within one surface is whatever the caller
-		// established — world order in the opaque head, back-to-front in the
+		// established - world order in the opaque head, back-to-front in the
 		// blended tail.
 		//
 		// An index at or above `MAX_SURFACES` sorts to the end and is left out
@@ -290,7 +290,7 @@ namespace engine::scene {
 		//                  runs a pass submits are offsets into the buffer and
 		//                  not into this span.
 		// @param casters   Whether to partition each group by shadow casting and
-		//                  record how many cast. Only the opaque run wants it —
+		//                  record how many cast. Only the opaque run wants it -
 		//                  a blended fragment never reaches the shadow pass.
 		// @param out       The plan's per-surface runs, written for the indices
 		//                  that appear and left alone for the ones that do not.
@@ -309,8 +309,8 @@ namespace engine::scene {
 					end++;
 				}
 
-				// Negative cannot appear — the caller passes only the mirror run
-				// — but an index past the cap can, and it is dropped here rather
+				// Negative cannot appear - the caller passes only the mirror run
+				// - but an index past the cap can, and it is dropped here rather
 				// than written past the end of the array.
 				if (surface >= 0 && static_cast<uint8_t>(surface) < MAX_SURFACES) {
 					SurfaceRun &run = out[surface];
@@ -370,8 +370,8 @@ namespace engine::scene {
 			// depth order and is worth it.** Two mirrors at different depths are
 			// drawn in index order rather than far-to-near, so a nearer pane may
 			// be blended before a farther one. That was already true across the
-			// mirror/non-mirror boundary — `TransparentSurfaces` documents the
-			// trade — and this extends it between mirrors, because a texture
+			// mirror/non-mirror boundary - `TransparentSurfaces` documents the
+			// trade - and this extends it between mirrors, because a texture
 			// per surface means a sampler binding per surface and an order that
 			// interleaved them would need one draw call per pane.
 			//
@@ -398,7 +398,7 @@ namespace engine::scene {
 
 		// **Mirrors to the back of the opaque head, so the surface pass can
 		// skip them.** A mirror sits between its own reflection camera and the
-		// world — the camera is *behind* the plane looking through it — so
+		// world - the camera is *behind* the plane looking through it - so
 		// drawing the pane into its own reflection fills the texture with the
 		// pane, and the mirror then shows itself. That reads as a mirror which
 		// is not working at all rather than as an ordering mistake.

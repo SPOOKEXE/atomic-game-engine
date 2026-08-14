@@ -5,7 +5,7 @@
 // Gathered rather than scattered because most of them cross a module boundary:
 // a snapshot failure is reported to `world`, which reports it to a supervisor,
 // which logs it. A `bool` at each of those hops loses the reason, and an `int`
-// loses the type. Nothing here is an enum for the sake of having one — every
+// loses the type. Nothing here is an enum for the sake of having one - every
 // value below is returned or accepted by something.
 //
 // **These names are a format, not a convenience.** Anything serialised or
@@ -77,7 +77,7 @@ namespace engine::ecs {
 	enum class ApplyMode : uint8_t {
 		// Entities the snapshot does not mention are left alone.
 		//
-		// For a partial update — a delta, or the slice of a world one client
+		// For a partial update - a delta, or the slice of a world one client
 		// can perceive.
 		Overlay,
 

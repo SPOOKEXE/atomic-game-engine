@@ -2,7 +2,7 @@
 //
 // **The case that decides whether this was worth building is the third one.**
 // `docs/DEFERRED.md` D00119 refused `Player.Team` on the grounds that a team
-// whose only effect is a coloured name is a field rather than a feature — so
+// whose only effect is a coloured name is a field rather than a feature - so
 // what has to be proved is not that the property stores an entity, but that
 // joining a side changes where a body appears.
 //
@@ -76,7 +76,7 @@ namespace {
 	// A pad, built through the one constructor a part has.
 	//
 	// `PartDesc::Class` is what lets a `SpawnLocation` go through `MakePart`
-	// rather than being assembled by hand — the second definition
+	// rather than being assembled by hand - the second definition
 	// `scene/AGENTS.md` refuses.
 	Entity Pad(Store &store, const Vector3 &where, engine::ecs::ClassId klass, std::string_view name) {
 		PartDesc desc;
@@ -101,7 +101,7 @@ namespace {
 	}
 
 	// Where a player's body actually ended up, which is the only answer that
-	// matters — `FindSpawn` agreeing with itself proves nothing about the
+	// matters - `FindSpawn` agreeing with itself proves nothing about the
 	// pipeline that reads it.
 	Vector3 SpawnedAt(Store &store, Entity player) {
 		const Entity model = LoadCharacter(store, player);
@@ -133,7 +133,7 @@ TEST_CASE("a SpawnLocation class stands a character exactly where the named part
 		const Entity pad = Pad(world.Store_, Vector3{5.0f, 8.0f, 5.0f}, SpawnLocationClass(), "Red Base");
 
 		// The class carries the row and the name does not, which is the whole
-		// of the difference — and the class is still a part, so it is drawn and
+		// of the difference - and the class is still a part, so it is drawn and
 		// stood on like the block it replaces.
 		CHECK(world.Store_.Get<SpawnLocation>(pad) != nullptr);
 		CHECK(world.Store_.IsA(pad, engine::ecs::Classes::Find(Name("BasePart"))));
@@ -158,8 +158,8 @@ TEST_CASE("a player on no team still spawns", "[scene][teams]") {
 	REQUIRE(player != NULL_ENTITY);
 	REQUIRE(TeamOf(store, player) == NULL_ENTITY);
 
-	// A default `SpawnLocation` is neutral, so the ordinary world — one pad, no
-	// teams, nobody on a side — is unchanged by any of this.
+	// A default `SpawnLocation` is neutral, so the ordinary world - one pad, no
+	// teams, nobody on a side - is unchanged by any of this.
 	const Vector3 stood = SpawnedAt(store, player);
 	CHECK(stood.Y == Approx(9.0f + engine::scene::CHARACTER_HEIGHT * 0.5f));
 	CHECK(stood.X == Approx(5.0f));
@@ -175,7 +175,7 @@ TEST_CASE("a team spawns on its own colour and never on another's", "[scene][tea
 	REQUIRE(blue != NULL_ENTITY);
 
 	// **Blue's pad is first in tree order**, so a filter that ignored the
-	// colour would put everybody on it — which is exactly what the engine did
+	// colour would put everybody on it - which is exactly what the engine did
 	// before this existed.
 	Claim(store, Pad(store, Vector3{20.0f, 0.0f, 0.0f}, SpawnLocationClass(), "Blue Base"), BLUE, false);
 	Claim(store, Pad(store, Vector3{-20.0f, 0.0f, 0.0f}, SpawnLocationClass(), "Red Base"), RED, false);
@@ -291,7 +291,7 @@ TEST_CASE("a side and the pad that names it round-trip through a save", "[scene]
 	REQUIRE(restored.Load(reader));
 
 	// The service, the side, the membership and the pad's allegiance. A file
-	// that carried three of the four would load and be wrong — a player back on
+	// that carried three of the four would load and be wrong - a player back on
 	// no team spawns in the lobby, which reads as a game bug rather than a
 	// format one.
 	REQUIRE(TeamsOf(restored) != NULL_ENTITY);
@@ -314,7 +314,7 @@ TEST_CASE("a side and the pad that names it round-trip through a save", "[scene]
 
 TEST_CASE("two colours are one side within a tolerance and not beyond it", "[scene][teams]") {
 	// **A tolerance rather than an equality**, because a `Color3` reaches this
-	// comparison through a property setter, a snapshot and — in the studio — a
+	// comparison through a property setter, a snapshot and - in the studio - a
 	// JSON file that writes floats as text. Exact equality survives the first
 	// two and not the third.
 	CHECK(SameTeamColour(RED, RED));

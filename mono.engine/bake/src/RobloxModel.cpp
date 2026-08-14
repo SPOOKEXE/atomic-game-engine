@@ -115,8 +115,8 @@ namespace engine::bake {
 		// The most one chunk may inflate to.
 		//
 		// **The bound is on the number the file states, checked before the
-		// allocation it would cause.** Both compressors here expand — LZ4 by up
-		// to 255 times — so a chunk header is four bytes an attacker chooses and
+		// allocation it would cause.** Both compressors here expand - LZ4 by up
+		// to 255 times - so a chunk header is four bytes an attacker chooses and
 		// a gigabyte somebody else allocates. A real place exported whole has no
 		// chunk near this; a model file has nothing close.
 		constexpr uint64_t MAXIMUM_CHUNK_BYTES = 64ull * 1024ull * 1024ull;
@@ -208,7 +208,7 @@ namespace engine::bake {
 		// **Every length is checked against both ends before it is used.** A
 		// literal run must fit in what is left of the source, a match offset must
 		// name something already produced, and the total must land exactly on the
-		// declared size — `bake/AGENTS.md`'s PNG rule, that a stream producing
+		// declared size - `bake/AGENTS.md`'s PNG rule, that a stream producing
 		// more or less than its own header implies is malformed either way.
 		bool DecodeLz4(std::span<const std::byte> source, size_t expected, std::vector<std::byte> &out) {
 			out.clear();
@@ -267,7 +267,7 @@ namespace engine::bake {
 					return false;
 				}
 
-				// Byte at a time, because a match may overlap its own output —
+				// Byte at a time, because a match may overlap its own output -
 				// an offset of one is how the format spells a run of one byte,
 				// and a block copy would read what has not been written yet.
 				// Through a local, so the value is not a reference into the
@@ -299,7 +299,7 @@ namespace engine::bake {
 		// `count` values of `width` bytes, stored byte plane by byte plane.
 		//
 		// **The format stores the most significant byte of every value, then the
-		// next of every value, and so on** — which is what makes a column of
+		// next of every value, and so on** - which is what makes a column of
 		// similar numbers compress, and is why nothing in a property payload can
 		// be read with a `memcpy`. Reading it as a plain array gives numbers that
 		// are wrong rather than absent, which is the failure this comment exists
@@ -375,7 +375,7 @@ namespace engine::bake {
 		// The transposed, zigzagged, *cumulative* array a referent list is.
 		//
 		// **Cumulative is the part that is easy to miss**, and getting it wrong
-		// produces a file whose instances all resolve to referent zero — one
+		// produces a file whose instances all resolve to referent zero - one
 		// instance and everything else silently missing.
 		bool ReadReferents(Cursor &cursor, size_t count, std::vector<int32_t> &out) {
 			std::vector<uint32_t> words;
@@ -413,7 +413,7 @@ namespace engine::bake {
 		// thing and only one of them can be got wrong in a way review would not
 		// see. It was verified against a real place file: every rotation id
 		// occurring across a hundred and forty thousand instances resolves to a
-		// perpendicular pair, and identity — which is by far the most common —
+		// perpendicular pair, and identity - which is by far the most common -
 		// comes out at the 0x02 Studio writes for it.
 		//
 		// A pair that is not perpendicular is not one of the twenty-four, so the
@@ -663,7 +663,7 @@ namespace engine::bake {
 
 			case WireType::CFrame: {
 				// **The rotations come first, all of them, and the positions
-				// after** — one transposed `Vector3` array for the whole chunk.
+				// after** - one transposed `Vector3` array for the whole chunk.
 				// A reader that expected a position beside each rotation would
 				// still consume the right number of bytes and produce a whole
 				// model in the wrong places.
@@ -756,7 +756,7 @@ namespace engine::bake {
 
 			// A service instance carries a trailing flag each, saying whether it
 			// is the root one. Nothing here has services, so they are stepped
-			// over rather than read — but they are *stepped over*, because the
+			// over rather than read - but they are *stepped over*, because the
 			// chunk does not end where it would without them.
 			if (isService != 0 && !cursor.Skip(count)) {
 				failure = "rbxm: an INST chunk of services ends before its flags";
@@ -764,7 +764,7 @@ namespace engine::bake {
 			}
 
 			if (parse.ByClassIndex.count(classIndex) != 0) {
-				parse.Note(className + " is declared under a class index already used — skipped");
+				parse.Note(className + " is declared under a class index already used - skipped");
 				return true;
 			}
 
@@ -801,7 +801,7 @@ namespace engine::bake {
 
 			const auto klass = parse.ByClassIndex.find(classIndex);
 			if (klass == parse.ByClassIndex.end()) {
-				parse.Note(name + " belongs to a class this file never declared — skipped");
+				parse.Note(name + " belongs to a class this file never declared - skipped");
 				return true;
 			}
 
@@ -812,11 +812,11 @@ namespace engine::bake {
 			case PropertyResult::Unsupported: {
 				const char *refused = NameOfRefusedType(type);
 				if (refused != nullptr) {
-					parse.Note(klass->second.Name + "." + name + " is " + refused + " — skipped");
+					parse.Note(klass->second.Name + "." + name + " is " + refused + " - skipped");
 				} else {
 					parse.Note(
 						klass->second.Name + "." + name + " is a type this reader does not know (" +
-						std::to_string(static_cast<int>(type)) + ") — skipped"
+						std::to_string(static_cast<int>(type)) + ") - skipped"
 					);
 				}
 				return true;
@@ -860,7 +860,7 @@ namespace engine::bake {
 			}
 
 			if (version != 0) {
-				parse.Note("the parent table is a version this reader does not know — the tree is flat");
+				parse.Note("the parent table is a version this reader does not know - the tree is flat");
 				return true;
 			}
 			if (declared < 0 || static_cast<uint64_t>(declared) > parse.Instances.size()) {
@@ -879,7 +879,7 @@ namespace engine::bake {
 			for (size_t index = 0; index < count; index++) {
 				const auto child = parse.ByReferent.find(children[index]);
 				if (child == parse.ByReferent.end()) {
-					parse.Note("the parent table names an instance this file does not hold — skipped");
+					parse.Note("the parent table names an instance this file does not hold - skipped");
 					continue;
 				}
 
@@ -892,14 +892,14 @@ namespace engine::bake {
 				if (parent == parse.ByReferent.end()) {
 					parse.Note(
 						parse.Instances[child->second].Name +
-						" is inside an instance this file does not hold — left at the top"
+						" is inside an instance this file does not hold - left at the top"
 					);
 					continue;
 				}
 
 				if (parse.ParentOf[child->second] != Parse::NO_PARENT) {
 					parse.Note(
-						parse.Instances[child->second].Name + " is inside two instances — kept the first"
+						parse.Instances[child->second].Name + " is inside two instances - kept the first"
 					);
 					continue;
 				}
@@ -911,7 +911,7 @@ namespace engine::bake {
 		// Moves one instance and everything under it out of the flat list.
 		//
 		// Bounded by `MAXIMUM_ROBLOX_DEPTH`, which the caller has already proved
-		// every chain obeys — so this recursion cannot be driven off the stack by
+		// every chain obeys - so this recursion cannot be driven off the stack by
 		// a file claiming a million levels.
 		RobloxInstance
 		Detach(Parse &parse, const std::vector<std::vector<uint32_t>> &childrenOf, uint32_t at) {
@@ -926,7 +926,7 @@ namespace engine::bake {
 		//
 		// **The depth walk is the cycle check.** A chain that has not reached a
 		// root within `MAXIMUM_ROBLOX_DEPTH` steps is either deeper than this
-		// reads or a loop, and both are the same answer — the file is refused,
+		// reads or a loop, and both are the same answer - the file is refused,
 		// rather than a subtree being quietly dropped or the assembly recursing
 		// until the stack runs out.
 		bool Assemble(Parse &parse, RobloxModel &out, std::string &failure) {
@@ -968,7 +968,7 @@ namespace engine::bake {
 		static constexpr std::string_view MAGIC = "<roblox!\x89\xff\x0d\x0a\x1a\x0a";
 
 		if (bytes.size() < MAGIC.size() || std::memcmp(bytes.data(), MAGIC.data(), MAGIC.size()) != 0) {
-			failure = "rbxm: wrong signature — an XML .rbxmx or a mangled copy reads like this";
+			failure = "rbxm: wrong signature - an XML .rbxmx or a mangled copy reads like this";
 			return false;
 		}
 
@@ -1033,7 +1033,7 @@ namespace engine::bake {
 				// **Which compressor is a property of the bytes, not of a flag.**
 				// The chunk header says how long the payload is and nothing about
 				// what produced it, so Zstandard's frame magic is the only thing
-				// that separates the two — and a file written by an older Studio
+				// that separates the two - and a file written by an older Studio
 				// has no magic and is LZ4.
 				static constexpr std::byte ZSTD_MAGIC[4] = {
 					std::byte{0x28}, std::byte{0xB5}, std::byte{0x2F}, std::byte{0xFD}
@@ -1074,7 +1074,7 @@ namespace engine::bake {
 					return false;
 				}
 				for (int64_t index = 0; index < declared; index++) {
-					// Sixteen bytes of hash nothing here checks — it identifies
+					// Sixteen bytes of hash nothing here checks - it identifies
 					// the entry to a writer deduplicating, and a reader has the
 					// table in front of it.
 					inner.Skip(16);
@@ -1093,7 +1093,7 @@ namespace engine::bake {
 				// where reading past something is the right answer.
 				//
 				// `META` is excluded from the note rather than from the skip: it
-				// is document-level settings — whether Studio welds on move —
+				// is document-level settings - whether Studio welds on move -
 				// and holds no instance, so reporting it would be a line on every
 				// file Studio has ever written.
 				parse.Note("a " + std::string(tag) + " chunk is one this reader skips");

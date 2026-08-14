@@ -8,7 +8,7 @@
 //
 // `Instance.new("Part")` and `part.Size = v` are that model reached through a
 // *class*, and a class is something the engine registered. A game has data the
-// engine never heard of — a health, a cooldown, an inventory slot — and until
+// engine never heard of - a health, a cooldown, an inventory slot - and until
 // v0.12 the only places to put it were an attribute, which is one loose value
 // per instance with no query behind it, or a component in C++, which needs a
 // rebuild.
@@ -17,14 +17,14 @@
 // attach it to an entity, and ask the world who has one. **It adds no storage
 // and no concept.** `World:Query` is `Store::EachMatching`, `SetComponent` is
 // `Store::SetComponent`, and a component a script declared is iterated by a C++
-// system through `Each` with no idea a script named it — which is the property
+// system through `Each` with no idea a script named it - which is the property
 // that makes this worth having rather than a scripting-only side table.
 //
 // ## What a script may not reach, and why each refusal is the design
 //
 // - **A component the engine declared is not readable here.** `scene::Visual`
 //   is a C++ struct with no field list at run time, so there is nothing to
-//   marshal a table from — and it already has a property surface, which is the
+//   marshal a table from - and it already has a property surface, which is the
 //   supported way to touch it. Two ways to write one component is the debt the
 //   root `AGENTS.md` calls the most expensive kind.
 // - **Declaring a component is a registration, so it happens once.** Component
@@ -82,7 +82,7 @@ namespace engine::script {
 		// are written and destroyed afterwards. A `memset` and a `memcpy` would
 		// leak one allocation per write and free a garbage pointer on the next.
 		//
-		// Luau raises by throwing a C++ exception — `luaD_throw` — so a field
+		// Luau raises by throwing a C++ exception - `luaD_throw` - so a field
 		// conversion that rejects a script's value unwinds through this
 		// destructor rather than leaking past it.
 		class ComponentValue {
@@ -146,7 +146,7 @@ namespace engine::script {
 			const ComponentId id = Components::Find(Name(name));
 			if (!id.IsValid()) {
 				luaL_errorL(
-					state, "no component named '%s' — declare it with World:DefineComponent first", name
+					state, "no component named '%s' - declare it with World:DefineComponent first", name
 				);
 			}
 
@@ -235,7 +235,7 @@ namespace engine::script {
 			while (lua_next(state, 3) != 0) {
 				// **The key is copied before it is read as a string.** `lua_next`
 				// needs the key back on the stack unchanged for the next step,
-				// and `lua_tostring` on a number key rewrites it in place — which
+				// and `lua_tostring` on a number key rewrites it in place - which
 				// ends the traversal in the middle.
 				if (lua_type(state, -2) != LUA_TSTRING) {
 					luaL_errorL(state, "a component's fields are named, so every key must be a string");
@@ -309,7 +309,7 @@ namespace engine::script {
 		// `World:CreateEntity(name?)`
 		//
 		// **A bare entity: no class, no place in the tree, nothing drawn.** That
-		// is what makes it the ECS surface rather than a second `Instance.new` —
+		// is what makes it the ECS surface rather than a second `Instance.new` -
 		// an entity is a directory slot and a row is what a component buys, so
 		// one created here costs a handle until a script attaches something.
 		//
@@ -372,7 +372,7 @@ namespace engine::script {
 		// **An array, not an iterator.** A coroutine-shaped iterator would hold
 		// the storage open across a yield, and `Store::EachMatching` defers
 		// structural changes for the length of the call precisely so a body may
-		// create and destroy — a suspended iterator would have that scope open
+		// create and destroy - a suspended iterator would have that scope open
 		// for as long as the script felt like. The array is also what lets a
 		// script destroy every match without walking a collection it is editing.
 		int WorldQuery(lua_State *state) {
@@ -405,7 +405,7 @@ namespace engine::script {
 		// had.** `SetComponent("Health", { Current = 50 })` on an entity that
 		// already has one is a write to `Current` alone, because that is what
 		// anybody writing that line means. On an entity that does not, the
-		// missing fields take the type's zero — which is what a fresh component
+		// missing fields take the type's zero - which is what a fresh component
 		// is, and is why the value is default-constructed before the table is
 		// applied rather than after.
 		int InstanceSetComponent(lua_State *state) {
@@ -416,7 +416,7 @@ namespace engine::script {
 			ComponentId id;
 			const Schema &schema = CheckSchema(state, name, id);
 
-			// A tag — a component with no fields — takes no value at all, and
+			// A tag - a component with no fields - takes no value at all, and
 			// the table is optional for one.
 			const bool tag = schema.Fields().empty();
 			if (!tag) {
@@ -530,7 +530,7 @@ namespace engine::script {
 		// **Every component, including the ones the engine declared.** A `Part`
 		// answers with `scene.Visual` and the rest, which is the honest view of
 		// what an instance is and is exactly what a debug panel needs. Sorted by
-		// name so two runs agree — the storage's own order is by registration id,
+		// name so two runs agree - the storage's own order is by registration id,
 		// which is stable within a build and says nothing to a reader.
 		int InstanceGetComponents(lua_State *state) {
 			Store &store = StoreOf(state);
@@ -580,7 +580,7 @@ namespace engine::script {
 		// already is one. A separate `Entity` type would have been a second
 		// handle onto the same sixty-four bits.
 		//
-		// `OpenInstances` builds that table, so this runs after it —
+		// `OpenInstances` builds that table, so this runs after it -
 		// `LuauRuntime` orders the two.
 		static const struct {
 			const char *Name;

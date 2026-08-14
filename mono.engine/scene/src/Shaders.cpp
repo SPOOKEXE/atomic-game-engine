@@ -19,7 +19,7 @@ namespace engine::scene {
 		// **`Computed` rather than `Property<&ShaderSource::Code>`, and the
 		// difference is the counter.** A generated field setter writes the
 		// string and nothing else, which would leave `Revision` saying the
-		// shader had not changed — so a library holding the last revision it
+		// shader had not changed - so a library holding the last revision it
 		// compiled would go on drawing the previous one, for ever, and the
 		// symptom is an edit that does nothing.
 		ecs::PropertyDescriptor SourceProperty() {
@@ -82,11 +82,11 @@ namespace engine::scene {
 		// The class, built once for the process.
 		//
 		// A function-local static in `ShaderScriptClass`, so the class exists
-		// before the first caller reads an id from it — `RegisterScriptClasses`
+		// before the first caller reads an id from it - `RegisterScriptClasses`
 		// is the pattern and carries the reason.
 		ecs::ClassId RegisterShaderScriptClass() {
 			// Through `EnsureClassTree` rather than registering `Instance`
-			// again, and it registers this module's components on the way — a
+			// again, and it registers this module's components on the way - a
 			// class is a set of component ids and cannot be declared before
 			// they exist.
 			EnsureClassTree();
@@ -155,7 +155,7 @@ namespace engine::scene {
 		// deliberate: comparing first would make the revision mean "the source
 		// differs from last time", which is a second answer to a question the
 		// library already asks by holding the revision it compiled. One writer,
-		// one meaning — this counts writes.
+		// one meaning - this counts writes.
 		held->Code.assign(code);
 		held->Revision++;
 		return true;
@@ -165,7 +165,7 @@ namespace engine::scene {
 		out.clear();
 
 		// **Walked over the materials**, which is what a world asks for rather
-		// than what it holds — the header carries the argument. A `const` walk,
+		// than what it holds - the header carries the argument. A `const` walk,
 		// so this may be called from a read-only consumer without acquiring
 		// anything.
 		store.Each<const MaterialRef>([&out](ecs::Entity, const MaterialRef &material) {

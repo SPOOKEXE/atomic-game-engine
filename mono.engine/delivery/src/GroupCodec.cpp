@@ -64,7 +64,7 @@ namespace engine::delivery {
 			// **Zstd leaves it off by default**, and with it off a frame with a
 			// flipped byte decompresses cleanly to the right length and the
 			// wrong content. The chunk hashes would still catch that downstream
-			// — a client verifies everything against the signed manifest root —
+			// - a client verifies everything against the signed manifest root -
 			// but only after a whole group has been transferred and expanded,
 			// and with nothing saying the transport was at fault rather than the
 			// origin. Four bytes per frame buys the error where it happened.
@@ -169,7 +169,7 @@ namespace engine::delivery {
 
 		// ZDICT wants the samples end to end in one buffer plus their lengths,
 		// so they are flattened here rather than the caller being asked to
-		// present them that way — a caller holding a vector of files should not
+		// present them that way - a caller holding a vector of files should not
 		// have to know the trainer's calling convention.
 		std::vector<std::byte> flattened;
 		std::vector<size_t> sizes;
@@ -214,8 +214,8 @@ namespace engine::delivery {
 
 		// Zstd will happily use arbitrary bytes as a "raw content" dictionary,
 		// which is legal and useless. Refusing anything without the trained
-		// dictionary's magic keeps a misconfiguration — a manifest shipped where
-		// a dictionary was expected — from silently costing ratio on every group
+		// dictionary's magic keeps a misconfiguration - a manifest shipped where
+		// a dictionary was expected - from silently costing ratio on every group
 		// for the life of a deployment.
 		if (ZDICT_getDictID(bytes.data(), bytes.size()) == 0) {
 			return std::nullopt;

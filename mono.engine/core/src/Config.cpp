@@ -211,8 +211,8 @@ namespace engine::core {
 		ConfigReport report;
 
 		// **The declared table is walked rather than the environment**, because
-		// there is no portable way to enumerate the environment and — more to
-		// the point — an unknown `ATOMIC_` variable is not this engine's to
+		// there is no portable way to enumerate the environment and - more to
+		// the point - an unknown `ATOMIC_` variable is not this engine's to
 		// complain about. See the header.
 		for (const FlagDescription &description : Flags::Declared()) {
 			const std::string variable = VariableNameOf(prefix, description.Name);
@@ -305,7 +305,7 @@ namespace engine::core {
 		}
 
 		// **Applied before the freeze rather than after it**, so a bad spelling
-		// is a fault this report carries alongside every other one — and so the
+		// is a fault this report carries alongside every other one - and so the
 		// rest of startup logs at the level the deployment asked for rather than
 		// at the default it was about to leave behind.
 		if (Flags::Has(LOG_LEVEL_FLAG)) {

@@ -221,7 +221,7 @@ namespace engine::audio {
 		}
 
 		// Kahn's algorithm over in-degree. Deterministic because the ready set
-		// is walked in node order rather than popped from a stack — two runs of
+		// is walked in node order rather than popped from a stack - two runs of
 		// one graph produce one order, which is what makes a mix reproducible.
 		std::vector<size_t> remaining(Ids.size(), 0);
 		for (const Wire &wire : Wires) {
@@ -255,7 +255,7 @@ namespace engine::audio {
 			}
 		}
 
-		// Anything left is in a cycle, which `Connect` refuses — so this cannot
+		// Anything left is in a cycle, which `Connect` refuses - so this cannot
 		// happen. Appending rather than dropping is the safe answer if it ever
 		// does: a node missing from the order silently stops advancing, which
 		// is far harder to find than one mixed in the wrong order.

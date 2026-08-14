@@ -4,7 +4,7 @@
 // Publishing a build hashes and chunks every asset in it; a client verifying a
 // download hashes every chunk it received. Those are gigabyte-scale operations
 // where nothing else in this engine is, so the useful figure is a rate and the
-// useful comparison is against a disk — a pipeline that hashes at 300 MB/s on a
+// useful comparison is against a disk - a pipeline that hashes at 300 MB/s on a
 // drive that reads at 3 GB/s has turned an I/O-bound job into a CPU-bound one.
 //
 // The buffer sizes bracket that. 64 KiB is one chunk, which is what a client
@@ -57,7 +57,7 @@ namespace content_bench {
 	// -size chunks and take the cheap path every time; and a cryptographic hash
 	// over zeroes is the same speed but the result tells you nothing about
 	// whether the buffer was ever really read. This is a cheap
-	// non-cryptographic scramble — it only has to look like data to a mask test.
+	// non-cryptographic scramble - it only has to look like data to a mask test.
 	const std::vector<std::byte> &Bytes(size_t count) {
 		static std::vector<std::pair<size_t, std::vector<std::byte>>> built;
 		for (const auto &[size, data] : built) {
@@ -119,7 +119,7 @@ BENCH("Hasher::Of · 64 KiB", CHUNK_BYTES / 1024) {
 
 BENCH("Hasher::Of · 16 MiB", ASSET_BYTES / 1024) {
 	// A whole asset in one call. Against the 64 KiB row, the difference is the
-	// per-call setup amortised over 256 times the data — so if this row is much
+	// per-call setup amortised over 256 times the data - so if this row is much
 	// cheaper per kibibyte, a caller hashing chunk by chunk is paying that setup
 	// once per chunk and should be using the streaming form instead.
 	const std::vector<std::byte> &data = Bytes(ASSET_BYTES);
@@ -127,8 +127,8 @@ BENCH("Hasher::Of · 16 MiB", ASSET_BYTES / 1024) {
 }
 
 BENCH("Hasher::Of · 256 tiny buffers", 256) {
-	// The per-call floor. A manifest hashes many short things — names, entries,
-	// roots — and at that size the setup is the entire cost. This row is what a
+	// The per-call floor. A manifest hashes many short things - names, entries,
+	// roots - and at that size the setup is the entire cost. This row is what a
 	// pipeline pays for granularity.
 	static const std::vector<std::byte> tiny(64);
 	for (size_t index = 0; index < 256; index++) {
@@ -170,13 +170,13 @@ BENCH("Chunker::NextBoundary · 16 MiB one chunk at a time", ASSET_BYTES / 1024)
 }
 
 BENCH("Chunker::Split · 16 MiB of zeroes", ASSET_BYTES / 1024) {
-	// **The degenerate stream, and it is not a contrived one** — a sparse file,
+	// **The degenerate stream, and it is not a contrived one** - a sparse file,
 	// a zero-filled texture mip, a padded archive. The rolling hash never finds
 	// a boundary, so every chunk is forced at `MaximumBytes`.
 	//
 	// **This row is dearer than the real-data one, and that is the correct
 	// result rather than a regression.** A content-defined chunker has to hash
-	// every byte — you cannot know a boundary is absent without looking — so
+	// every byte - you cannot know a boundary is absent without looking - so
 	// there is no early-out to be had here and the two rows once reported the
 	// same figure. What separates them now is the warm-up window: `NextBoundary`
 	// only feeds its hash for the 64 bytes before `MinimumBytes` rather than
@@ -241,7 +241,7 @@ BENCH("HashTree::Build · 256 leaves", 256) {
 
 BENCH("HashTree::Build · 65k leaves", 65'536) {
 	// A whole game's worth. **A flat per-leaf figure against the 256-leaf row is
-	// the result to want** — a tree is linear in its leaves and logarithmic in
+	// the result to want** - a tree is linear in its leaves and logarithmic in
 	// its depth, so per-leaf cost should not move. A climbing one means
 	// something is being copied per level rather than combined.
 	const std::vector<ContentHash> &leaves = Leaves(65'536);
@@ -258,7 +258,7 @@ BENCH("HashTree::RootOf · 65k leaves", 65'536) {
 
 BENCH("HashTree::CombineNodes · 100k", 100'000) {
 	// The primitive every level is made of. A tree over N leaves does N-1 of
-	// these, so this row times the leaf count is the whole tree's cost — and if
+	// these, so this row times the leaf count is the whole tree's cost - and if
 	// it is not, `Build` is doing something besides combining.
 	const std::vector<ContentHash> &leaves = Leaves(256);
 	uint8_t mixed = 0;

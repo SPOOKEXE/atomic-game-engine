@@ -1,7 +1,7 @@
 // The client half of a Play run, which is the one part of it a test can reach.
 //
 // **`PlayLink` was built precisely so this file could exist.** Everything else
-// about Play needs a window, a device and an imgui frame — `Widgets.cpp` says so
+// about Play needs a window, a device and an imgui frame - `Widgets.cpp` says so
 // at the top and `mono.studio/AGENTS.md` carries the invariants a test cannot.
 // What a viewport shows is not testable here; whether there is anything correct
 // *to* show is, and that is the half that can be silently wrong.
@@ -69,7 +69,7 @@ namespace {
 	// `D00015` (a) puts position on a fixed-point grid of +-64 m in 32767 steps
 	// each way, which is 0.977 mm per axis anywhere in the world. Asserting
 	// equality here was the first thing this file got wrong, and it failed with
-	// 1.000030518 against 1.0 — which is the wire working exactly as specified.
+	// 1.000030518 against 1.0 - which is the wire working exactly as specified.
 	//
 	// Stated as the engine's own bound rather than as whatever the run happened
 	// to produce: a tolerance fitted to an observed error stops being a check
@@ -91,7 +91,7 @@ namespace {
 			Authority = Worlds.Create(settings);
 
 			// The dirty bits a delta is built from. Without these the
-			// `Observed` half of the replication table finds nothing — silently
+			// `Observed` half of the replication table finds nothing - silently
 			// and for ever, which is exactly the failure `ChangeDetection`
 			// documents.
 			//
@@ -99,7 +99,7 @@ namespace {
 			// world it is physics that states it**: `physics::PreparePhysicsWorld`
 			// observes `scene::Transform`, and `Editor::BuildWorld` calls it for
 			// every world. So this is the fixture standing in for the pipeline it
-			// does not install, rather than a switch production forgot —
+			// does not install, rather than a switch production forgot -
 			// `scene::Motion` is the one that genuinely has no observer outside
 			// `mono.server`, and the walking case below is what would notice.
 			Worlds.Enter(Authority, [](Store &store) {
@@ -128,7 +128,7 @@ namespace {
 		}
 
 		// A step of the link followed by a tick of the universe, which is the
-		// order `Editor::Simulate` uses — and the order is the whole of why the
+		// order `Editor::Simulate` uses - and the order is the whole of why the
 		// "written after the join" case below exists.
 		//
 		// A world clears its change bits at the *start* of a tick. Publishing
@@ -213,7 +213,7 @@ TEST_CASE("what the server holds arrives on the client", "[studio][playlink]") {
 	fixture.Step(link, 32);
 
 	// **The assertion the whole feature is for.** Not "a world exists" and not
-	// "a message was produced" — the rows the authority holds are on the other
+	// "a message was produced" - the rows the authority holds are on the other
 	// side, at the values it holds them at.
 	const std::optional<float> nearX = fixture.ReplicaX(link, near);
 	const std::optional<float> farX = fixture.ReplicaX(link, far);
@@ -229,13 +229,13 @@ TEST_CASE("what the server holds arrives on the client", "[studio][playlink]") {
 
 	// **One message, and that is the assertion rather than a disappointment.**
 	// This world has no systems in it, so once the join has landed nothing
-	// changes and there is nothing to send — a link that went on producing
+	// changes and there is nothing to send - a link that went on producing
 	// deltas for a world at rest would be spending a client's bandwidth to tell
 	// it what it already knows. `TotalMessages` is what says so.
 	//
 	// Deliberately *not* `Applied > 0`. This world was published before it had
 	// ever ticked, so its snapshot is stamped tick 0 and a correct join leaves
-	// `Applied` at zero — the assertion was written before that was understood
+	// `Applied` at zero - the assertion was written before that was understood
 	// and it failed for a world that had replicated perfectly. See
 	// `LinkReport::Applied`, which used to make the same claim.
 	CHECK(report.TotalMessages == 1);
@@ -256,8 +256,8 @@ TEST_CASE("a value written after the join crosses too", "[studio][playlink]") {
 	CHECK_THAT(*joined, Catch::Matchers::WithinAbs(0.0f, WIRE_MILLIMETRES));
 
 	// **Through `Set`, because that is what marks it.** A system writing through
-	// `Each`'s mutable reference marks nothing dirty — v0.3 wrote that up as one
-	// of the four bugs a passing in-process suite could not see — so a test that
+	// `Each`'s mutable reference marks nothing dirty - v0.3 wrote that up as one
+	// of the four bugs a passing in-process suite could not see - so a test that
 	// wrote the fast way would be asserting the delta path against a write the
 	// delta path cannot see.
 	fixture.Worlds.Enter(fixture.Authority, [entity](Store &store) {
@@ -273,7 +273,7 @@ TEST_CASE("a value written after the join crosses too", "[studio][playlink]") {
 	REQUIRE(moved.has_value());
 	CHECK_THAT(*moved, Catch::Matchers::WithinAbs(42.0f, WIRE_MILLIMETRES));
 
-	// A delta was built, sent and applied in full — which is what moves
+	// A delta was built, sent and applied in full - which is what moves
 	// `Applied` off the snapshot's tick, and the only unambiguous evidence that
 	// this arrived as a change rather than in a fresh snapshot.
 	CHECK(link.Report().Applied > 0);
@@ -295,8 +295,8 @@ TEST_CASE("stopping takes the client view away with it", "[studio][playlink]") {
 	link.Stop(fixture.Worlds);
 
 	// **The world goes, and the handle stops naming it.** Everything that asks
-	// `Editor::IsReplicaWorld` — the worlds panel, the lifecycle, the save path
-	// — would otherwise be answering about a hole.
+	// `Editor::IsReplicaWorld` - the worlds panel, the lifecycle, the save path
+	// - would otherwise be answering about a hole.
 	CHECK_FALSE(link.IsRunning());
 	CHECK_FALSE(link.ReplicaWorld().IsValid());
 	CHECK(fixture.Worlds.Count() == before - 1);
@@ -335,7 +335,7 @@ TEST_CASE("a link refuses to start twice and refuses a world that is not there",
 // world was a plain white part, and it looked like the renderer.
 //
 // The three components below are what closed it. The *aim* is deliberately not
-// among them — see `client::AimReplicaViewer` — because a reflection is of the
+// among them - see `client::AimReplicaViewer` - because a reflection is of the
 // viewer and every client has its own.
 TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 	Fixture fixture;
@@ -354,7 +354,7 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 
 		// **No slot set here, because nothing authors one.** A pane is a mirror
 		// because a `SurfaceCamera` is parented to it, and
-		// `scene::AimSurfaceCameras` hands the slots out — so what this fixture
+		// `scene::AimSurfaceCameras` hands the slots out - so what this fixture
 		// has to get right is the face and the parent link, which are the two
 		// things the wire has to carry.
 		engine::scene::SurfaceCamera target;
@@ -389,7 +389,7 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 	});
 
 	// **Aimed from a camera the client made for itself.** A replica may not mint
-	// an authoritative entity, so this comes out of the predicted range — and it
+	// an authoritative entity, so this comes out of the predicted range - and it
 	// has to exist before `AimSurfaceCameras` will do anything, because a mirror
 	// with no viewer has no reflection to compute rather than a default one.
 	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
@@ -403,11 +403,11 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 	});
 
 	// The pane is told what it shows, on the client, by the client. The face is
-	// at z = -0.2 and the eye at z = 20, so the reflection lands at z = -20.4 —
+	// at z = -0.2 and the eye at z = 20, so the reflection lands at z = -20.4 -
 	// the same arithmetic `scene/tests/SurfaceCameras.cpp` pins, reached here
 	// through the wire rather than through a parent set in this process.
 	// **Slot 0, and derived rather than received.** The number is not on the
-	// wire at all now — each end hands out slots in entity order, and a replica
+	// wire at all now - each end hands out slots in entity order, and a replica
 	// matches entities by index and generation, so both arrive at the same
 	// answer without sending it. One camera therefore means slot 0 on both
 	// sides, and the two ends of the pairing are written from one variable.
@@ -431,7 +431,7 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 TEST_CASE("two clients get two worlds with two names", "[studio][playlink]") {
 	// **What multi-client Play is made of.** Each client is an independent
 	// link with its own replica world, because the bug a second client exists
-	// to catch is the two of them disagreeing — and two views of one store
+	// to catch is the two of them disagreeing - and two views of one store
 	// cannot disagree.
 	//
 	// The names have to differ for rule 4's reason: a world's name is its
@@ -491,7 +491,7 @@ TEST_CASE("what the server holds arrives on every client", "[studio][playlink]")
 TEST_CASE("a play link admits a player and gives it a body", "[studio][playlink]") {
 	// **What made Play "both halves" rather than one half wearing both hats.**
 	// A link has held an authority and a replica since v0.7 and nobody was in
-	// the replica — it received state and had no player, no character and no way
+	// the replica - it received state and had no player, no character and no way
 	// to move one. These are the three facts that changed, and each of them is
 	// silently wrong in a different way if it is missing:
 	//
@@ -501,7 +501,7 @@ TEST_CASE("a play link admits a player and gives it a body", "[studio][playlink]
 	//   * no route for its intent, and the keyboard reaches nothing.
 	Fixture fixture;
 
-	// A furnished world, because a player is a child of the `Players` service —
+	// A furnished world, because a player is a child of the `Players` service -
 	// a scene nobody furnished gets no player, quietly, which is the placeholder
 	// case `mono.server` names too.
 	fixture.Worlds.Enter(fixture.Authority, [](Store &store) {
@@ -532,8 +532,8 @@ TEST_CASE("a play link admits a player and gives it a body", "[studio][playlink]
 		CHECK(engine::scene::NetworkOwnerOf(store, root) == player);
 	});
 
-	// The replica is told which player is its own. It cannot be replicated — a
-	// resource is one row and the answer differs per client — so this is the
+	// The replica is told which player is its own. It cannot be replicated - a
+	// resource is one row and the answer differs per client - so this is the
 	// studio's version of `game::JoinNotice`.
 	fixture.Worlds.Enter(link.ReplicaWorld(), [player](Store &store) {
 		const auto *local = store.Resource<engine::scene::LocalPlayer>();
@@ -556,7 +556,7 @@ TEST_CASE("a play link admits a player and gives it a body", "[studio][playlink]
 	//
 	// `Editor::DrivePlayer` writes the replica's `InputState` and needs a
 	// window; what it writes is an ordinary resource, so a test writes the same
-	// thing and the rest of the path is the real one — `ReadMoveIntent` in the
+	// thing and the rest of the path is the real one - `ReadMoveIntent` in the
 	// replica, the codec, `ApplyMoveInput` on the authority.
 	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
 		auto *input = store.ResourceMutable<engine::scene::InputState>();
@@ -578,7 +578,7 @@ TEST_CASE("a play link admits a player and gives it a body", "[studio][playlink]
 	});
 
 	// Stopping takes the player with it, or a body is owned for ever by
-	// somebody who has gone — which is the case `scene.ownership`'s reclaim
+	// somebody who has gone - which is the case `scene.ownership`'s reclaim
 	// exists for and the one this must not create.
 	link.Stop(fixture.Worlds);
 	fixture.Worlds.Enter(fixture.Authority, [player, root](Store &store) {
@@ -597,7 +597,7 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 	// the whole of what "press W and it walks" means.
 	//
 	// **The world is furnished the way `Editor::BuildWorld` furnishes one**, and
-	// naming the same calls in the same order is the point — a studio that stops
+	// naming the same calls in the same order is the point - a studio that stops
 	// installing one of them is a studio where Play looks exactly like this test
 	// failing.
 	Fixture fixture;
@@ -608,7 +608,7 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 		// **`InstallPresentation` first, exactly as `Editor::BuildWorld` calls
 		// it, and leaving it out is what made this case pass through the bug it
 		// was written to catch.** It brings `client::InstallControls` with it,
-		// and that installs `character-control` — `scene::UpdateCharacterControl`
+		// and that installs `character-control` - `scene::UpdateCharacterControl`
 		// running on the *authority*, against a keyboard the authority does not
 		// have.
 		//
@@ -674,7 +674,7 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 
 		// **Standing on the floor, and this is not a formality.** `Grounded` is
 		// the whole of what gates a jump, and `physics::GroundCharacters` gets it
-		// from a ray that starts inside the character's own collider — so a
+		// from a ray that starts inside the character's own collider - so a
 		// version of that function which rejects the caster by comparing the
 		// result rather than by excluding it from the query answers "falling"
 		// while the character rests perfectly still on a plate.
@@ -707,8 +707,8 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 	// The authority moving its own row proves the simulation; a person pressing
 	// W is watching a *replica*, and the two are only the same picture if the
 	// new pose is sent. It is not sent unless the authority is observing
-	// `scene::Transform` — the delta for an `Observed` component is built from
-	// the dirty bits and from nothing else — so a world nobody declared that on
+	// `scene::Transform` - the delta for an `Observed` component is built from
+	// the dirty bits and from nothing else - so a world nobody declared that on
 	// replicates its join snapshot and then never moves again. Which is a
 	// character that walks everywhere except on the screen.
 	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
@@ -757,7 +757,7 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 
 		// **An edge, so the previous frame has to not hold it.**
 		// `scene::ReadMoveIntent` asks for the space bar's *tap*, and a tap is
-		// an edge the writer recorded — a key held since the last frame is not
+		// an edge the writer recorded - a key held since the last frame is not
 		// a jump, and a bit set in `Down` that no `LatchPresses` ever saw is not
 		// a press at all. `Editor::DrivePlayer` ends its frame with that call,
 		// so the harness does too.
@@ -774,7 +774,7 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 	// Two seconds is the budget, and it is a statement about the numbers rather
 	// than a guess. `JumpSpeed` is chosen against `CHARACTER_HEIGHT` and
 	// `scene::Gravity` so that the whole arc takes well under a second and a
-	// half — a jump that has not landed by now is one whose speed and gravity
+	// half - a jump that has not landed by now is one whose speed and gravity
 	// disagree about what units they are in, which is exactly the state that
 	// reads as a character frozen in the air.
 	// **Released after one frame, and forgetting to was worth catching.** The
@@ -814,7 +814,7 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 	// **The client watched the whole arc, and this is the case somebody
 	// actually reported.** A jumping character touches nothing, and
 	// `physics::Publish` used to mark `scene::Transform` changed only for the
-	// bodies the solver had a manifold for — so the moment it left the ground it
+	// bodies the solver had a manifold for - so the moment it left the ground it
 	// stopped replicating. The client saw it rise for the two or three ticks the
 	// floor contact survived take-off, and then hang at that height until it
 	// landed and a contact put it back on the wire. Which reads exactly as "it
@@ -834,8 +834,8 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 // half true.** What a viewport *draws* does. What it does with the keyboard does
 // not: `Editor::DrivePlayer` is imgui state and store writes, and imgui runs
 // perfectly well with a context, a font atlas and no backend at all. So the one
-// step of "press W and the character walks" that had no test — the editor
-// deciding that this panel's keyboard belongs to that client — is testable, and
+// step of "press W and the character walks" that had no test - the editor
+// deciding that this panel's keyboard belongs to that client - is testable, and
 // the gap is why "I click the client viewport and nothing happens" could not be
 // reproduced anywhere but by hand.
 
@@ -843,7 +843,7 @@ namespace {
 	// An imgui context with no backend, and a frame open on it.
 	//
 	// The font atlas is built explicitly because `NewFrame` asserts on one that
-	// is not — a backend would have done it while uploading the texture, and
+	// is not - a backend would have done it while uploading the texture, and
 	// there is no backend here.
 	struct Frame {
 		ImGuiContext *Context = nullptr;
@@ -877,7 +877,7 @@ namespace {
 			ImGui::EndFrame();
 
 			// A second frame, so the event queued above is in `KeysData` while
-			// the frame is open — which is the state `DrivePlayer` reads.
+			// the frame is open - which is the state `DrivePlayer` reads.
 			ImGui::NewFrame();
 		}
 	};
@@ -928,7 +928,7 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 	// **Recorded as a run, because that is how the editor knows a world is a
 	// client's.** `Editor::IsReplicaWorld` walks `Runs` and nothing else, so a
 	// link the editor is not holding is a panel `DrivePlayer` refuses on its
-	// first line — which is indistinguishable, from the outside, from a
+	// first line - which is indistinguishable, from the outside, from a
 	// keyboard that is simply ignored.
 	studio::Editor::WorldRun run;
 	run.World = authority;
@@ -975,7 +975,7 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 	});
 
 	// **And the panel that is not being pointed at drives nobody.** Two client
-	// views in one editor must not both walk on one keyboard — the second would
+	// views in one editor must not both walk on one keyboard - the second would
 	// be a character somebody is not looking at, moving on a key meant for the
 	// first.
 	CHECK_FALSE(editor.DrivePlayer(replica, false, false, false));
@@ -993,13 +993,13 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 }
 
 TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]") {
-	// **The bug this exists for did not stop the keyboard reaching the client —
+	// **The bug this exists for did not stop the keyboard reaching the client -
 	// it stopped it staying there.** `Editor::DriveCamera` picks the panel a
 	// gesture means from `Hovered || Active || Panning` and used to hand only
 	// the first two on, so a panel chosen *because* it was panning arrived at
 	// `DrivePlayer` looking untouched: it took the frame, decided it was not
 	// being driven, and wiped the keys. `Panning` survives a middle-drag
-	// released off the picture, so the state is sticky — the character got a
+	// released off the picture, so the state is sticky - the character got a
 	// move direction on a fraction of the ticks and, because
 	// `scene::StepCharacters` replaces horizontal velocity rather than adding
 	// to it, went nowhere at all.
@@ -1127,7 +1127,7 @@ TEST_CASE("a teleport wakes the world it arrives in, even outside the run", "[st
 	// three facts that make it happen are all ordinary on their own.
 	//
 	// `TeleportService:Teleport` destroys the player in the world they left
-	// before the destination has admitted them — it has to, because only the
+	// before the destination has admitted them - it has to, because only the
 	// source world can, and a player left behind would be in two places at
 	// once. The arrival is a payload sitting in the destination's inbox. And a
 	// world that is not part of the run is suspended, so it never ticks, so it
@@ -1135,7 +1135,7 @@ TEST_CASE("a teleport wakes the world it arrives in, even outside the run", "[st
 	//
 	// The player therefore exists nowhere: destroyed in the source, unbuilt in
 	// the destination. `Editor::FollowTeleports` searches every world for
-	// `LOST_FRAMES`, finds nobody, and reports the client gone — which is what
+	// `LOST_FRAMES`, finds nobody, and reports the client gone - which is what
 	// the studio's own Playground does, because its pad names Arena and Arena
 	// is not the scene being played.
 	//
@@ -1185,7 +1185,7 @@ TEST_CASE("a teleport wakes the world it arrives in, even outside the run", "[st
 		arrival.From = Name("Scene");
 
 		// The resource itself is the driver's to create, and a world that has
-		// never been delivered anything has none — so the arrival brings it,
+		// never been delivered anything has none - so the arrival brings it,
 		// exactly as the first delivery would.
 		engine::world::Inbox inbox;
 		inbox.Arrived.push_back(std::move(arrival));
@@ -1205,7 +1205,7 @@ TEST_CASE("a teleport wakes the world it arrives in, even outside the run", "[st
 TEST_CASE("a client that leaves takes its character with it", "[studio][playlink]") {
 	// **A body outstays its owner and nothing ever collects it.** The character
 	// is a `Model` under Workspace, so it is not reachable from the `Player`
-	// once that instance is gone — `RemoveCharacter` is the only thing that
+	// once that instance is gone - `RemoveCharacter` is the only thing that
 	// knows the two are connected, and it has to run *before* the player is
 	// destroyed or the link between them is already cut.
 	//
@@ -1262,7 +1262,7 @@ TEST_CASE("a client that leaves takes its character with it", "[studio][playlink
 	link.Stop(fixture.Worlds);
 
 	// A tick after, because a rig torn down by a destroy has to survive the
-	// systems that walk it — `PoseCharacters` follows a root it may no longer
+	// systems that walk it - `PoseCharacters` follows a root it may no longer
 	// have, and a limb outliving its model is exactly what this is looking for.
 	fixture.Worlds.Tick(FRAME_SECONDS);
 
@@ -1286,7 +1286,7 @@ TEST_CASE("a client that leaves takes its character with it", "[studio][playlink
 TEST_CASE("a player destroyed by anything else loses its character too", "[studio][playlink]") {
 	// **The registration, not the function.** `scene::ReclaimOrphanedCharacters`
 	// has its own cases in `mono.engine/scene/tests/Characters.cpp`; what this
-	// one asks is whether anything ever calls it — which is the failure mode
+	// one asks is whether anything ever calls it - which is the failure mode
 	// that produced it, since the rule existed twice as a line two callers had
 	// to remember and nowhere as a rule.
 	//
@@ -1303,7 +1303,7 @@ TEST_CASE("a player destroyed by anything else loses its character too", "[studi
 		// **Prepared even though this case never simulates anything**, and
 		// leaving it out is a fault that lands in a different test. Installing
 		// the character systems installs the ground query, which reaches for
-		// `physics::PhysicsWorld` — and reaching for a component *names* it, so
+		// `physics::PhysicsWorld` - and reaching for a component *names* it, so
 		// a world that never prepared one registers the name implicitly. The
 		// next suite to call `PreparePhysicsWorld` then registers it explicitly,
 		// which is an abort: "a type has one name". Catch2 shuffles, so it
@@ -1344,7 +1344,7 @@ TEST_CASE("a client that crossed once can be found in the world it came from", "
 	// client gone, and the character it left behind stood there with nobody in
 	// it.
 	//
-	// `Editor::Claimed` is what separates an arrival from a namesake — every run
+	// `Editor::Claimed` is what separates an arrival from a namesake - every run
 	// names its clients the same way, so a universe with a client in seven
 	// worlds holds seven players called "client 1". It filtered by the *run's*
 	// world, and a run keeps the scene an author pressed Play on for its whole
@@ -1353,7 +1353,7 @@ TEST_CASE("a client that crossed once can be found in the world it came from", "
 	//
 	// Which turned it into a comparison of `ecs::Entity` handles across a world
 	// boundary. An entity is an index and a generation *within one store*, so
-	// two worlds allocate the same numbers — and two worlds built by the same
+	// two worlds allocate the same numbers - and two worlds built by the same
 	// script in the same order allocate them in the same order. The arriving
 	// player matched the far world's player by number and read as already
 	// claimed.
@@ -1419,7 +1419,7 @@ TEST_CASE("a client that crossed once can be found in the world it came from", "
 	CHECK(editor.Claimed(there, theirs));
 
 	// **The return leg.** A player arriving back in `here` is not this link's,
-	// wherever its number lands — and `theirs` is passed deliberately, because a
+	// wherever its number lands - and `theirs` is passed deliberately, because a
 	// handle minted in `there` is exactly what used to match here by accident.
 	INFO("the arrival read as already claimed, so no destination was found");
 	CHECK_FALSE(editor.Claimed(here, theirs));
@@ -1433,11 +1433,11 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 	// **The bug this closes is invisible to every other test in the engine,
 	// because it only exists once there are two worlds.** `CrossPortals` maps a
 	// crossing body and its velocity on the host that simulates it, and a
-	// player's view direction is not in either — it is `CameraController::
+	// player's view direction is not in either - it is `CameraController::
 	// Angles`, a resource on the host that is *looking*. In a Play run those are
 	// two different worlds: the authority walks the character, the replica draws
 	// for the player. So a pair of panes that turns a corner used to leave the
-	// eye pointing the way it came in — the character apparently spinning ninety
+	// eye pointing the way it came in - the character apparently spinning ninety
 	// degrees on the spot, and W walking sideways from then on, because
 	// `ReadMoveIntent` steers by that same yaw.
 	//
@@ -1473,7 +1473,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		store.SetParent(ground, workspace);
 
 		// **The pane the walk meets.** A yaw of zero looks along -Z and W walks
-		// away from the camera, so the character sets off northward — and this
+		// away from the camera, so the character sets off northward - and this
 		// stands in the way of it with its `Back` face, which is +Z, pointing
 		// back at where it started.
 		engine::scene::PartDesc near_;
@@ -1487,7 +1487,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 
 		// **And the far one, turned a quarter, which is what makes this a corner
 		// rather than a corridor.** Its own `Back` is +Z in its own frame, and
-		// the quarter turn puts that at +X in the world — so a body that walks
+		// the quarter turn puts that at +X in the world - so a body that walks
 		// north into the near pane comes out of this one walking east, ninety
 		// degrees from where it went in.
 		engine::scene::PartDesc far_;
@@ -1529,7 +1529,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 	// the drop.
 	fixture.Step(link, 30);
 
-	// The client's own camera, following its own character — which is what
+	// The client's own camera, following its own character - which is what
 	// `scene::FollowOwnCharacter` does on a real client and what makes the yaw
 	// below somebody's view rather than a spare number.
 	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
@@ -1546,7 +1546,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 
 	// **Ticked and presented, because the camera pass is a `PreRender` one.**
 	// `Universe::Tick` runs the simulation phases and `Universe::Present` runs
-	// `PreRender` alone — a replica's `replica-camera` lives in the second,
+	// `PreRender` alone - a replica's `replica-camera` lives in the second,
 	// which is the editor's every-frame path and is what a test that only ticks
 	// never reaches.
 	for (int frame = 0; frame < 60; frame++) {
@@ -1558,7 +1558,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		const auto *placement = store.Get<Transform>(root);
 		REQUIRE(placement != nullptr);
 
-		// Out of the far pane, a hundred metres from where it set off — which no
+		// Out of the far pane, a hundred metres from where it set off - which no
 		// amount of walking north could have done.
 		INFO("landed at " << placement->Frame.Position.X << ", " << placement->Frame.Position.Z);
 		CHECK(placement->Frame.Position.X > 90.0f);
@@ -1584,7 +1584,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		// the yaw below because the two failures look identical from the outside
 		// and have nothing in common: a component that did not cross is a
 		// replication question, and a yaw that did not move under a component
-		// that did is `FollowPortalTransit` never running — which is what a
+		// that did is `FollowPortalTransit` never running - which is what a
 		// camera pass in `PreRender` does when nobody presents.
 		const auto *arrived = store.Get<engine::scene::PortalTransit>(root);
 		REQUIRE(arrived != nullptr);
@@ -1606,7 +1606,7 @@ TEST_CASE("stopping a world takes the clients that walked into it too", "[studio
 	// makes those two different worlds.** `FollowTeleports` re-homes a
 	// `PlayLink` onto the scene its character walked into and leaves it in the
 	// run an author pressed Play on, so after one crossing the run names one
-	// world and the link plays another — which `Editor::Claimed` already had to
+	// world and the link plays another - which `Editor::Claimed` already had to
 	// be taught.
 	//
 	// `EndRun` read the run's list, so it stopped the clients that left this
@@ -1654,7 +1654,7 @@ TEST_CASE("stopping a world takes the clients that walked into it too", "[studio
 	editor.Runs.push_back(std::move(home));
 
 	// And the run for the world about to be stopped, which owns no client of
-	// its own — the only one in the universe is somebody else's.
+	// its own - the only one in the universe is somebody else's.
 	studio::Editor::WorldRun destination;
 	destination.World = there;
 	destination.Mode = studio::RunMode::Play;
@@ -1670,7 +1670,7 @@ TEST_CASE("stopping a world takes the clients that walked into it too", "[studio
 	editor.EndRun(there);
 
 	// **The client is gone, and its world with it.** Not "eventually", and not
-	// "when its own run stops" — the authority it was watching is being taken
+	// "when its own run stops" - the authority it was watching is being taken
 	// apart in this call.
 	CHECK_FALSE(worldIsAlive(replica));
 

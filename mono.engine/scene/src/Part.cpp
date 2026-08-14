@@ -33,7 +33,7 @@ namespace engine::scene {
 		// What a script sees, projected onto what the components hold. Roblox's
 		// names, because v0.6 binds `Instance.new` to this table and a surface
 		// that differs from the one scripts expect is a migration nobody asked
-		// for — the argument `RegisterTree` already makes for the class tree.
+		// for - the argument `RegisterTree` already makes for the class tree.
 		//
 		// **Four of these are plain fields and the rest are conversions**, which
 		// is why `PropertyDescriptor` stopped being a component and an offset at
@@ -52,14 +52,14 @@ namespace engine::scene {
 		//
 		// The read-modify-write is the entire point. An offset-shaped setter
 		// would write twelve bytes over the front of a `CFrame` and leave a
-		// quaternion that no longer matches — which is exactly what a member
+		// quaternion that no longer matches - which is exactly what a member
 		// pointer cannot express and why this is a conversion.
 		// Writes a placement.
 		//
 		// **`PreviousTransform` is deliberately *not* written here, and that is
 		// a decision this function exists to record.** The obvious reading is
 		// that an authored write is a teleport and should move the frame it is
-		// interpolated from — and it was written that way first. It is wrong:
+		// interpolated from - and it was written that way first. It is wrong:
 		// `examples/Rings.luau` and every scripted animation in this engine set
 		// `CFrame` once per tick and rely on the draw list interpolating between
 		// ticks, which is what buys smooth motion at 300 frames a second over a
@@ -70,9 +70,9 @@ namespace engine::scene {
 		// ticks" is the case that caught it, and it is the case that matters.
 		//
 		// **The editor's problem was a different one and is fixed where it
-		// belongs.** A world nothing ticks never runs `capture-previous` —
+		// belongs.** A world nothing ticks never runs `capture-previous` -
 		// that is a `PreSimulation` system and `World::Present` runs
-		// `PreRender` alone — so its `PreviousTransform` is wherever each part
+		// `PreRender` alone - so its `PreviousTransform` is wherever each part
 		// was created. The fix is to present such a world at alpha *one*,
 		// because there is no next tick to draw towards.
 		//
@@ -94,7 +94,7 @@ namespace engine::scene {
 		// CFrame: the placement itself.
 		//
 		// A `Computed` over a field a member pointer could reach, which is the
-		// one case in this file where that is not a smell — see `PlaceInstance`.
+		// one case in this file where that is not a smell - see `PlaceInstance`.
 		PropertyDescriptor CFrameProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("CFrame");
@@ -159,7 +159,7 @@ namespace engine::scene {
 		// Orientation: the rotation of `Transform`, as intrinsic Y-X-Z turns.
 		//
 		// **Degrees, because Roblox's `.Orientation` is degrees** and this is
-		// Roblox's surface — a script that works there should read the same
+		// Roblox's surface - a script that works there should read the same
 		// number here. `CFrame::Angles` keeps radians because that is the
 		// engine's API in the engine's unit, so the factor lives here, in one
 		// place, in both directions. A getter in degrees against a setter in
@@ -244,7 +244,7 @@ namespace engine::scene {
 				bounds->HalfExtent = half;
 
 				// Absent on something that is drawn and not collided, which is
-				// legal — so this is not a failure.
+				// legal - so this is not a failure.
 				if (Collider *collider = store.GetMutable<Collider>(instance)) {
 					collider->Extent = half;
 				}
@@ -261,7 +261,7 @@ namespace engine::scene {
 		// destroys whatever the game had configured, so `part.CanCollide =
 		// false` followed by `true` silently widens what it hits. `Trigger`
 		// means "report the contact and apply no impulse", which is what
-		// Roblox's `CanCollide = false` does — a part still fires `Touched`.
+		// Roblox's `CanCollide = false` does - a part still fires `Touched`.
 		PropertyDescriptor CanCollideProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("CanCollide");
@@ -297,7 +297,7 @@ namespace engine::scene {
 		//
 		// **Derived, so there is nothing to write it to.** A part with
 		// `CustomPhysicalProperties` weighs its density times its volume, and a
-		// part without one weighs whatever `RigidBody::Mass` says — `MassOf` is
+		// part without one weighs whatever `RigidBody::Mass` says - `MassOf` is
 		// the rule and the solver asks the same function. Offering a setter
 		// would mean deciding which of the two inputs an assignment moves, and
 		// both answers are wrong: writing density makes a resize change what was
@@ -305,7 +305,7 @@ namespace engine::scene {
 		// with the density beside it.
 		//
 		// An anchored part has no `RigidBody` and answers zero, which is what
-		// the solver reads as immovable — the honest number for a thing the
+		// the solver reads as immovable - the honest number for a thing the
 		// world may not move.
 		PropertyDescriptor MassProperty() {
 			PropertyDescriptor property;
@@ -340,14 +340,14 @@ namespace engine::scene {
 			return property;
 		}
 
-		// Anchored: whether the world may move it — and the one property that
+		// Anchored: whether the world may move it - and the one property that
 		// is not stored anywhere.
 		//
 		// `MakePart` says it in as many words: **anchored decides presence, not
 		// a flag.** An anchored part carries neither `RigidBody` nor `Motion`,
 		// so it sits in a different archetype and the dynamic queries never
 		// visit it. Reading it is therefore a component test and writing it is
-		// an archetype move — which is what `PropertyKind::Structural` exists to
+		// an archetype move - which is what `PropertyKind::Structural` exists to
 		// announce, so a caller knows this one defers where the others do not.
 		PropertyDescriptor AnchoredProperty() {
 			PropertyDescriptor property;
@@ -387,7 +387,7 @@ namespace engine::scene {
 		// **The bits stay anonymous in `scene` and the naming lives in
 		// `spatial`**, which is where `LayerMask` is. This module holding the
 		// table would be a component module deciding a physics policy for every
-		// game that uses it — the reason this property was named as a gap at
+		// game that uses it - the reason this property was named as a gap at
 		// v0.5 rather than guessed at.
 		//
 		// A **name** crosses, never the index. Rule 4: which bit a group holds
@@ -410,8 +410,8 @@ namespace engine::scene {
 				}
 
 				// The lowest set bit. A collider belongs to exactly one group
-				// even though `Layer` could hold several — `MakePart` sets
-				// `Only(0)` — so this reports the group it was put in rather
+				// even though `Layer` could hold several - `MakePart` sets
+				// `Only(0)` - so this reports the group it was put in rather
 				// than inventing an answer for a mask nothing here produces.
 				uint32_t index = 0;
 				for (; index < spatial::LayerMask::LAYER_COUNT; index++) {
@@ -452,7 +452,7 @@ namespace engine::scene {
 
 		// FieldOfView: the camera's vertical angle, in degrees.
 		//
-		// Degrees out, radians stored — Roblox's `Camera.FieldOfView` is
+		// Degrees out, radians stored - Roblox's `Camera.FieldOfView` is
 		// degrees and every trigonometric consumer wants radians, so the
 		// conversion is exactly what a computed property is for. `Orientation`
 		// makes the same trade one file up.
@@ -499,11 +499,11 @@ namespace engine::scene {
 		// An enum rather than a number, so `camera.Face = "Frnot"` is refused
 		// where it was written instead of landing in the component as a face
 		// nobody chose. Membership is `EnumTable`'s, and the storage is the
-		// ordinal — Roblox's ordinal, so a game file carrying a number means the
+		// ordinal - Roblox's ordinal, so a game file carrying a number means the
 		// same thing in both engines.
 		// Interned once. `Name.hpp` states the rule this was breaking in as many
-		// words — "not free, so do it once and keep the result rather than
-		// constructing from a literal inside a loop" — and a property getter read
+		// words - "not free, so do it once and keep the result rather than
+		// constructing from a literal inside a loop" - and a property getter read
 		// every frame by an immediate-mode properties panel is that loop. Each
 		// construction took the global name-registry mutex and hashed a string,
 		// on top of the `EnumTable` mutex the lookup already takes.
@@ -568,7 +568,7 @@ namespace engine::scene {
 		// Destination: the part on the far side of a portal.
 		//
 		// **A reference, because both ends are in one world.** Rule 3 forbids a
-		// handle that crosses a world boundary and this never does — a portal
+		// handle that crosses a world boundary and this never does - a portal
 		// pairs two parts of one store, which is the case `PropertyType::Reference`
 		// exists for. `CurrentCameraProperty` in `Services.cpp` is the same shape.
 		//
@@ -579,7 +579,7 @@ namespace engine::scene {
 		// mistake refused where it was made beats one discovered by looking at
 		// the wall.
 		//
-		// **Clearing is allowed** — `portal.Destination = nil` turns it back
+		// **Clearing is allowed** - `portal.Destination = nil` turns it back
 		// into a mirror, which is also what a deleted destination does.
 		PropertyDescriptor DestinationProperty() {
 			PropertyDescriptor property;
@@ -627,7 +627,7 @@ namespace engine::scene {
 		//
 		// Unvalidated on purpose, unlike `Destination` above. A world is looked
 		// up by name at draw time by whoever is drawing, and the destination
-		// world may legitimately not exist yet — a script naming one that a
+		// world may legitimately not exist yet - a script naming one that a
 		// later `AddWorld` creates is ordinary, and refusing the assignment here
 		// would make authoring order significant for no gain. A name matching
 		// nothing shows this world, which is visible.
@@ -759,7 +759,7 @@ namespace engine::scene {
 		// whole of `AGENTS.md` rule 4 applied to a filter: a script says
 		// `camera.TagFilter = "Reflective"` and the component holds a mask that
 		// a draw loop can `and` against. The registration happens here, once,
-		// where the name is written — so the hot path never sees a string.
+		// where the name is written - so the hot path never sees a string.
 		//
 		// **Several tags, comma-separated**, because a mask holds thirty-two and
 		// a property holds one value. `"Imported, Reflective"` is the whole
@@ -772,7 +772,7 @@ namespace engine::scene {
 		// registering a blank tag.
 		//
 		// Reading it back gives every name in the mask, in bit order, joined the
-		// same way — so a filter written from a script round-trips exactly and
+		// same way - so a filter written from a script round-trips exactly and
 		// one assembled another way reads as the tags it includes rather than as
 		// a number.
 		PropertyDescriptor TagFilterProperty() {
@@ -785,7 +785,7 @@ namespace engine::scene {
 			// setter move a `core::Name`, which is what `PropertyType::Name`
 			// means. Declaring the wrong one type-checks, passes a test that
 			// writes raw bytes, and fails at the first script that assigns to
-			// it — which is exactly how it was found.
+			// it - which is exactly how it was found.
 			property.Type = PropertyType::Name;
 			property.Size = sizeof(core::Name);
 			property.Kind = PropertyKind::Field;
@@ -834,7 +834,7 @@ namespace engine::scene {
 
 				// **Assembled into a local and assigned once.** A loop writing
 				// straight into the component would leave a half-built filter
-				// behind when the table filled part way through — a redirected
+				// behind when the table filled part way through - a redirected
 				// pass drawing some of its group, which is harder to notice than
 				// one drawing none of it.
 				uint32_t mask = 0;
@@ -878,13 +878,13 @@ namespace engine::scene {
 		// `CFrame` and `Position` are the local offset an author writes;
 		// `WorldCFrame` and `WorldPosition` are what `ResolveAttachments`
 		// computed from it. A writable world frame would be a second way to place
-		// an attachment, and the two would disagree the moment the parent moved —
+		// an attachment, and the two would disagree the moment the parent moved -
 		// which is exactly the state `GuiObject`'s absolutes are read-only to
 		// prevent.
 		//
 		// **A getter that walked to the parent was tried and is what the derived
 		// field replaced.** It is one `CFrame` product per read, and a beam reads
-		// four of them per frame — but the cost is not the argument. The argument
+		// four of them per frame - but the cost is not the argument. The argument
 		// is that a read on the frame an attachment is created, before the pass
 		// has run, would answer a stale identity through the field and the right
 		// value through the walk, and a property that answers differently
@@ -1060,7 +1060,7 @@ namespace engine::scene {
 		//
 		// **Written rather than a `ClampedProperty`, because the ceiling is
 		// another field.** `ClampedProperty` bakes its bounds in as template
-		// arguments — that is what keeps its setter captureless — and the bound
+		// arguments - that is what keeps its setter captureless - and the bound
 		// here is `MaxHealth`, which a game sets. So the conversion is written,
 		// which is what `PropertyKind::Computed` is for.
 		//
@@ -1108,7 +1108,7 @@ namespace engine::scene {
 		//
 		// **The engine's own reader for `MaxHealth`, and the reason it is not a
 		// plain clamped field.** A property nothing in the engine consults is the
-		// objection `docs/DEFERRED.md` D00119 held a whole class back for — so the
+		// objection `docs/DEFERRED.md` D00119 held a whole class back for - so the
 		// ceiling means something here rather than only in whatever bar a game
 		// draws: `Health` clamps against it, and lowering it below the current
 		// health pulls that down too. Roblox does the same, and the alternative
@@ -1196,7 +1196,7 @@ namespace engine::scene {
 			// **A `Vector3` carrying two numbers**, because `PropertyType` has
 			// no `Vector2` case and adding one is a decision about what userland
 			// can hold rather than a detail this property gets to take. Z is
-			// unused and reads back as zero, which is the honest shape — a
+			// unused and reads back as zero, which is the honest shape - a
 			// script that set it would find it ignored rather than silently
 			// meaning something.
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
@@ -1241,11 +1241,11 @@ namespace engine::scene {
 			RegisterSceneComponents();
 
 			// **`Material` is not registered as an enum, and its absence is the
-			// point.** It held seventeen names — `Plastic`, `Wood`, `Metal` —
+			// point.** It held seventeen names - `Plastic`, `Wood`, `Metal` -
 			// and the membership check was the only thing it did: no renderer
 			// sampled anything different because a part said `Wood`. A material
 			// is content now, named by a `Material` instance and resolved
-			// against what a publisher published — `scene/Materials.hpp`. A game
+			// against what a publisher published - `scene/Materials.hpp`. A game
 			// that wants its own named set still registers one with
 			// `ecs::EnumTable::Register`; the engine no longer ships one that
 			// promises something it cannot draw.
@@ -1254,8 +1254,8 @@ namespace engine::scene {
 			//
 			// **Generated from the enum rather than typed out beside it**, which
 			// is the difference between one declaration and two that agree until
-			// they do not. `NormalId`'s ordinals are the storage — a `Face` of 1
-			// is `Top` in a game file — so a literal list here would be a second
+			// they do not. `NormalId`'s ordinals are the storage - a `Face` of 1
+			// is `Top` in a game file - so a literal list here would be a second
 			// place the order lives, and getting it wrong would load every saved
 			// mirror pointing at the wrong side of its pane. Silently: nothing
 			// about a face is checkable at load time.
@@ -1293,8 +1293,8 @@ namespace engine::scene {
 			// **`ecs`'s, not this module's.** `Instance`, `Name` and `Parent`
 			// all project components `ecs` owns, and they were declared here
 			// only because `scene` happened to be the first module with a class
-			// tree. v0.8 added a second — `gui`, which is `shared` and may not
-			// link this one — so the root moved down to where its components
+			// tree. v0.8 added a second - `gui`, which is `shared` and may not
+			// link this one - so the root moved down to where its components
 			// already live. Same correction `ecs.Hierarchy`'s registration went
 			// through, and the `ParentProperty` this file used to hold is gone with it.
 			const ecs::ClassId instance = ecs::Classes::RegisterInstanceRoot();
@@ -1315,7 +1315,7 @@ namespace engine::scene {
 				// **What is drawn is interpolated, so what is drawn carries the
 				// component interpolation needs.** This used to be added by
 				// whichever scene wanted it, which meant a part created from a
-				// script — `Instance.new("Part")` and nothing else — was a
+				// script - `Instance.new("Part")` and nothing else - was a
 				// complete, correct part that the renderer silently skipped,
 				// because `CollectInstances` matches on
 				// `<Transform, PreviousTransform, Bounds, Visual>`.
@@ -1328,7 +1328,7 @@ namespace engine::scene {
 				// **What a surface is made of, and what groups it belongs to.**
 				// Both are on `BasePart` rather than on `MeshPart`, which costs
 				// sixteen bytes on every part in the world and buys a draw-list
-				// pass with no optional join — `SurfaceAppearance`'s own header
+				// pass with no optional join - `SurfaceAppearance`'s own header
 				// carries the whole argument.
 				ecs::Components::Of<SurfaceAppearance>(),
 				ecs::Components::Of<Tags>(),
@@ -1338,7 +1338,7 @@ namespace engine::scene {
 				// only show density and friction on the parts somebody had
 				// already customised would be a panel with a hole in it, and an
 				// optional component is a join per row for four floats. The
-				// flag inside says whether any of it is used —
+				// flag inside says whether any of it is used -
 				// `PhysicsProperties::Custom`.
 				ecs::Components::Of<PhysicsProperties>(),
 			};
@@ -1347,7 +1347,7 @@ namespace engine::scene {
 			// Part adds nothing of its own: BasePart already holds the set
 			// `v02v03v04.md` §3.3 names, and Part is the concrete leaf a script
 			// asks for by name. `RigidBody` and `Motion` are deliberately
-			// absent from every class here — whether a part has them is
+			// absent from every class here - whether a part has them is
 			// `PartDesc::Anchored`'s decision, and putting them in the class
 			// set would land static geometry in the dynamic archetype.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});
@@ -1356,7 +1356,7 @@ namespace engine::scene {
 			// it**, and it is a class at v0.15 because until then it was a
 			// *name*: `scene::FindSpawn` looked for a child called
 			// `SpawnLocation` and `Characters.hpp` recorded that as a deliberate
-			// stop — a class with teams on it would have been a class with a
+			// stop - a class with teams on it would have been a class with a
 			// footnote while teams did not exist. They do now, so the footnote
 			// is paid off and `docs/DEFERRED.md` D00119 closes with it.
 			//
@@ -1374,21 +1374,21 @@ namespace engine::scene {
 
 			// **A `Model` is a `PVInstance` and adds nothing.** It is a
 			// container with a place in the world, which is exactly what
-			// `PVInstance` already is — so what the class buys is the
+			// `PVInstance` already is - so what the class buys is the
 			// vocabulary: `Instance.new("Model")` resolves, `:IsA("Model")`
 			// answers, and a character is a thing rather than six loose parts
 			// under Workspace. `scene::MakeCharacter` is its first caller.
 			const ecs::ClassId modelClass = ecs::Classes::Register("Model", pvInstance, {});
 
 			// **A `Tool` is a `Model` a character can be holding**, and holding
-			// it is a reparent rather than a flag — `scene/Tools.hpp` carries the
+			// it is a reparent rather than a flag - `scene/Tools.hpp` carries the
 			// whole decision, including why the handle is a `CharacterLimb` and
 			// not an `Attachment`.
 			//
 			// **Roblox's abstract `BackpackItem` is deliberately not between the
 			// two.** It carries members this engine has nothing behind, and
 			// registering it would put an instantiable class that does nothing
-			// into the insert palette — which is the exact objection
+			// into the insert palette - which is the exact objection
 			// `docs/DEFERRED.md` D00120 held this class back for.
 			//
 			// The component is in the class set, which is `SurfaceCamera`'s
@@ -1408,15 +1408,15 @@ namespace engine::scene {
 			// So what the class is *for* is the vocabulary. A script written
 			// against Roblox says `Instance.new("MeshPart")` and reads
 			// `.MeshId` and `.TextureID`, and a class tree that made it say
-			// `Part` and `.Mesh` would be a migration nobody asked for —
+			// `Part` and `.Mesh` would be a migration nobody asked for -
 			// `scene/AGENTS.md`'s argument for keeping the tree Roblox's,
 			// applied to the class v0.9 exists to add.
 			const ecs::ClassId meshPart = ecs::Classes::Register("MeshPart", basePart, {});
 
 			// **A camera is an instance, because a camera is a row.**
 			// `scene::Camera` has been a component since v0.4 precisely so a
-			// world can hold several — a spectator, a cutscene, a security
-			// monitor — and `ActiveCamera` names the live one. What was missing
+			// world can hold several - a spectator, a cutscene, a security
+			// monitor - and `ActiveCamera` names the live one. What was missing
 			// was a class, so `Instance.new("Camera")` had nothing to resolve to
 			// and a script could not make one, aim one, or ask which was live.
 			//
@@ -1429,14 +1429,14 @@ namespace engine::scene {
 			// the whole of the class.
 			//
 			// It derives from `Camera` rather than standing beside it, because
-			// it *is* one — it has a field of view, clip planes and a place in
+			// it *is* one - it has a field of view, clip planes and a place in
 			// the world, and `workspace.CurrentCamera` is a question anybody may
 			// ask of it. What it adds is a texture to render into and a face to
 			// project off.
 			//
 			// **The component is in the class set, so `Instance.new` makes a
-			// working one.** On `Camera` the surface component is structural —
-			// `SurfaceSize` adds and removes it — which is right there, because
+			// working one.** On `Camera` the surface component is structural -
+			// `SurfaceSize` adds and removes it - which is right there, because
 			// an ordinary camera that acquired a render target by being asked
 			// its size would be a surprise. Here it is what the class is for, so
 			// a `SurfaceCamera` that had to be given a size before it became one
@@ -1448,8 +1448,8 @@ namespace engine::scene {
 
 			// **A `Portal` is a `SurfaceCamera` that has been told where the
 			// other end is, and deriving says exactly that.** Everything a
-			// mirror has it keeps — the face, the surface size, the image
-			// transparency, the effect, the tag filter — because a portal
+			// mirror has it keeps - the face, the surface size, the image
+			// transparency, the effect, the tag filter - because a portal
 			// renders through the same pass, projects onto its pane the same
 			// way, and differs only in where its camera stands.
 			//
@@ -1465,8 +1465,8 @@ namespace engine::scene {
 			// is the design.** It has no place of its own: under `Workspace` it
 			// is heard everywhere at one level, and inside a part it is heard
 			// from that part and falls off with distance. Giving it a
-			// `Transform` would be a second opinion about where a thing is —
-			// rule 2 with a speaker attached — and would make "attach a sound
+			// `Transform` would be a second opinion about where a thing is -
+			// rule 2 with a speaker attached - and would make "attach a sound
 			// to a thing" a field to keep in step with a parent that already
 			// says it.
 			//
@@ -1479,7 +1479,7 @@ namespace engine::scene {
 
 			// **An `Attachment` is an `Instance` and not a `PVInstance`**, which
 			// is `Sound`'s omission for a related reason. A `PVInstance` carries a
-			// `Transform` — a world-space placement — and an attachment already
+			// `Transform` - a world-space placement - and an attachment already
 			// holds a `CFrame` relative to its parent. Two of those on one row is
 			// two opinions about where a point is, and `SetParent` would silently
 			// decide which one won.
@@ -1512,7 +1512,7 @@ namespace engine::scene {
 			//
 			// Each class sets its own `Kind` as a *prototype default*, so
 			// `Instance.new("SpotLight")` is a spot light without a script saying
-			// so — which is the whole point of the prototype row. A `Kind`
+			// so - which is the whole point of the prototype row. A `Kind`
 			// property is deliberately not declared: the class is the answer, and
 			// a second way to say it is the duplicate `AGENTS.md` warns about.
 			// **A `Humanoid` is an `Instance` under a character model**, which is
@@ -1527,7 +1527,7 @@ namespace engine::scene {
 			// The key names, so a script can say `Enum.KeyCode.Space` and be told
 			// when it is wrong. **Generated from `Describe` rather than typed out
 			// beside the enum**, which is the rule `NormalId` already follows here
-			// — one declaration, and adding a key means adding it in one place.
+			// - one declaration, and adding a key means adding it in one place.
 			std::array<std::string_view, static_cast<size_t>(KeyCode::Count)> keys{};
 			for (size_t index = 0; index < keys.size(); index++) {
 				keys[index] = Describe(static_cast<KeyCode>(index));
@@ -1537,7 +1537,7 @@ namespace engine::scene {
 			// **Every input source and not only the three buttons**, because an
 			// `InputObject` reports where an event came from and `MouseButton1..3`
 			// can only describe a click. Generated from `Describe` for `KeyCode`'s
-			// reason — one declaration, and adding a source means adding it in one
+			// reason - one declaration, and adding a source means adding it in one
 			// place. The buttons keep ordinals 0 to 2, which
 			// `UserInputService:IsMouseButtonPressed` relies on and `Input.cpp`
 			// holds with a `static_assert`.
@@ -1550,7 +1550,7 @@ namespace engine::scene {
 			// **The states a bound action's handler is told about.** Registered
 			// here beside the other input enums rather than in
 			// `script::OpenInputServices`, because the bindings generator does not
-			// open a VM — an enum registered at VM-open time is one the manifest
+			// open a VM - an enum registered at VM-open time is one the manifest
 			// never sees, and `Enum_UserInputState` came out of the declaration
 			// file as an unknown type.
 			ecs::EnumTable::Register(
@@ -1572,7 +1572,7 @@ namespace engine::scene {
 			// **Where the ear is, and only the two modes the mixer can honour.**
 			// Roblox's `Enum.ListenerType` has four; `CFrame` and `ObjectCFrame`
 			// place the ear *and turn it*, and `client::SoundStage` posts a
-			// position with no facing — so registering either would offer an
+			// position with no facing - so registering either would offer an
 			// author a member that changes nothing. `scene/Audio.hpp` carries the
 			// argument, and this is generated from its `Describe` for the reason
 			// the keys above are.
@@ -1608,7 +1608,7 @@ namespace engine::scene {
 			// only members of Roblox's `ValueBase` family this engine has. Rojo
 			// maps `*.txt` onto the first and `*.csv` onto the second, and a
 			// folder sync that could not build either would silently drop files
-			// — see `scene::TextContent` for why the rest of the family is
+			// - see `scene::TextContent` for why the rest of the family is
 			// deliberately absent.
 			//
 			// `ValueBase` is registered as the base so `:IsA("ValueBase")`
@@ -1627,7 +1627,7 @@ namespace engine::scene {
 			// second `BasePart` subclass exists.
 
 			// Everything with a place in the world has these three, and all
-			// three project one `Transform` — which is exactly the fan-out
+			// three project one `Transform` - which is exactly the fan-out
 			// v0.6's per-instance `.Changed` has to handle: one component write,
 			// three property names observing it.
 			// On `Instance`, because everything has a name and a place in the
@@ -1647,7 +1647,7 @@ namespace engine::scene {
 			//
 			// The reason this comment used to give was that an authored
 			// placement has to move `PreviousTransform` with it, and that reason
-			// was wrong — it breaks every scripted animation in the engine.
+			// was wrong - it breaks every scripted animation in the engine.
 			// `PlaceInstance` carries the refutation and the fix.
 			ecs::Classes::Computed(pvInstance, CFrameProperty());
 			ecs::Classes::Computed(pvInstance, PositionProperty());
@@ -1655,7 +1655,7 @@ namespace engine::scene {
 
 			// **Roblox's `PivotOffset`, on `PVInstance` rather than on
 			// `BasePart`.** Roblox declares it on the latter; here the component
-			// is on the former, and a `Model` — when there is one — wants the
+			// is on the former, and a `Model` - when there is one - wants the
 			// same field for the same reason. Declaring it where the storage is
 			// keeps one answer to "what has a pivot".
 			ecs::Classes::Property<&Pivot::Offset>(pvInstance, "PivotOffset");
@@ -1664,7 +1664,7 @@ namespace engine::scene {
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 
-			// The plain fields. `Color` is a rename rather than a conversion —
+			// The plain fields. `Color` is a rename rather than a conversion -
 			// `Visual::Tint` is what a script calls `Color`. `Surface::Material`,
 			// which is what a part *feels* like, is deliberately not bound: it is
 			// a separate fact that happens to share a word with the `Material`
@@ -1678,7 +1678,7 @@ namespace engine::scene {
 			// **Roblox spells this as one `PhysicalProperties` value and this
 			// spells it as four fields.** The value type would need a
 			// `PropertyType` of its own, a Luau userdata, a wire form and a
-			// panel row that edits four numbers inside one cell — for a thing
+			// panel row that edits four numbers inside one cell - for a thing
 			// every caller immediately takes apart again. Four properties are
 			// four rows a panel already knows how to draw and four names a
 			// script already knows how to set.
@@ -1694,7 +1694,7 @@ namespace engine::scene {
 			// **Drag, under the names the integrator already reads.** A second
 			// pair on `PhysicsProperties` would be two places to write one
 			// number; these are `RigidBody`'s own fields, so a part that is
-			// anchored has neither — which is honest, because an anchored part
+			// anchored has neither - which is honest, because an anchored part
 			// has no motion to damp and Roblox's `Anchored` part ignores drag
 			// in the same way.
 			ecs::Classes::Property<&RigidBody::LinearDamping>(basePart, "LinearDamping");
@@ -1707,7 +1707,7 @@ namespace engine::scene {
 			// `UnionOperation` *share*, and geometry loaded from a file is not
 			// shared by any of them: a `Part` is one of six built-in shapes and
 			// naming a mesh on it is a property that does nothing. Offering it
-			// is worse than not having it — an author sets it, the part does not
+			// is worse than not having it - an author sets it, the part does not
 			// change, and nothing says the class was the wrong one. Both are
 			// declared on `MeshPart` below, under the names that class actually
 			// shows.
@@ -1717,7 +1717,7 @@ namespace engine::scene {
 			// CollectInstances` is a batched parallel walk over a fixed
 			// signature, and an optional column is precisely what that shape
 			// cannot express. A dense column of mostly-invalid names is sixteen
-			// bytes an entity and no branches — where a per-class component
+			// bytes an entity and no branches - where a per-class component
 			// would be a join per row per frame. What moved is the *vocabulary*,
 			// which is what a properties panel and a script see.
 			//
@@ -1727,7 +1727,7 @@ namespace engine::scene {
 			// **The alpha pair stays on `BasePart`, and the asymmetry is
 			// deliberate.** These say how the alpha of whatever is being sampled
 			// is treated, and a plain `Part` samples something the moment it has
-			// a `Material` child — a cut-out material on a `Part` needs `Clip`
+			// a `Material` child - a cut-out material on a `Part` needs `Clip`
 			// exactly as one on a `MeshPart` does. They are not *content*, which
 			// is the line the two above fall on the far side of.
 			ecs::Classes::ClampedProperty<&SurfaceAppearance::AlphaCutoff, 0.0f, 1.0f>(
@@ -1741,7 +1741,7 @@ namespace engine::scene {
 			// would have sat in a snapshot and a delta being read by nobody.
 			//
 			// **Not clamped, deliberately.** It was, briefly. Roblox does not
-			// clamp this either — `part.Transparency = 2` reads back as 2 — and
+			// clamp this either - `part.Transparency = 2` reads back as 2 - and
 			// the reason to match is not fidelity for its own sake: a script that
 			// drives a fade by arithmetic and reads the value back expects what
 			// it wrote, and a property that silently rewrites its input is one an
@@ -1762,14 +1762,14 @@ namespace engine::scene {
 
 			// **The one property on a part that only an editor reads.** A
 			// locked part still draws, still collides and is still reachable
-			// from a script — what it refuses is a pointer pick, which is
+			// from a script - what it refuses is a pointer pick, which is
 			// `Visual::Locked`'s whole surface. Declared here rather than kept
 			// in the editor because it is authoring data that has to survive a
 			// save, which an editor-side set could not.
 			ecs::Classes::Property<&Visual::Locked>(basePart, "Locked");
 
 			// **`Value` on the base, so both classes have it once.** A
-			// `LocalizationTable` holds its CSV here and resolves nothing —
+			// `LocalizationTable` holds its CSV here and resolves nothing -
 			// translation lookup is a service with a locale and a fallback
 			// chain, and none of that is a file mapping.
 			ecs::Classes::Property<&TextContent::Value>(valueBase, "Value");
@@ -1781,16 +1781,16 @@ namespace engine::scene {
 
 			// The last of the two that were named as gaps at v0.5. `Material` was
 			// the other and is no longer a property of a part at all: it is an
-			// instance under one — see the `Material` class below.
+			// instance under one - see the `Material` class below.
 			ecs::Classes::Computed(basePart, CollisionGroupProperty());
 
 			// The camera's own three. `FieldOfView` is **degrees**, because
 			// Roblox's is and because `Orientation` already reproduces that same
-			// split — the component stores radians and the conversion is where
+			// split - the component stores radians and the conversion is where
 			// the unit changes, which is the whole shape of a property here.
 			// **Roblox's names, and since v0.10 the only names.** These were
 			// aliases of `BasePart.Mesh` and `BasePart.ColorMap`; those are gone
-			// — see the note where they used to be declared — so a mesh
+			// - see the note where they used to be declared - so a mesh
 			// reference and its sheet are named on the one class that has
 			// either. One spelling rather than two also ends the trap
 			// `studio/Assets.hpp` warned about, where an alias missing from the
@@ -1811,7 +1811,7 @@ namespace engine::scene {
 			// eight versions.
 			//
 			// **`TeamColor` is Roblox's spelling and the storage is British**,
-			// which is `Visual::Tint` reaching a script as `Color` — the
+			// which is `Visual::Tint` reaching a script as `Color` - the
 			// vocabulary crosses and the field name does not.
 			ecs::Classes::Property<&SpawnLocation::TeamColour>(spawnLocation, "TeamColor");
 			ecs::Classes::Property<&SpawnLocation::Neutral>(spawnLocation, "Neutral");
@@ -1831,7 +1831,7 @@ namespace engine::scene {
 			// **How often the surface may redraw, and zero is uncapped.** A
 			// plain property rather than a clamped one: a ceiling here would be
 			// a second opinion about what a display can do, and the floor is
-			// already meaningful — see `SurfaceCamera::FPS`. A negative value
+			// already meaningful - see `SurfaceCamera::FPS`. A negative value
 			// is refused where it is read rather than where it is written, so
 			// a script that computes one gets the uncapped behaviour instead of
 			// a surface that never draws again.
@@ -1849,7 +1849,7 @@ namespace engine::scene {
 			// half-extent or a quaternion in degrees, so there is no conversion
 			// to write and no place for one to be wrong in one direction.
 			//
-			// `SoundId` names a published asset the way `MeshId` does —
+			// `SoundId` names a published asset the way `MeshId` does -
 			// extension included, exactly as the manifest carries it, because
 			// the lookup is a string compare and the one place the two could
 			// diverge is a spelling.
@@ -1867,7 +1867,7 @@ namespace engine::scene {
 			ecs::Classes::Property<&Sound::RollOffMaxDistance>(soundClass, "RollOffMaxDistance");
 
 			// The attachment's four. `CFrame` is the authored local offset and
-			// carries the same name a `PVInstance`'s does — which is correct
+			// carries the same name a `PVInstance`'s does - which is correct
 			// rather than a collision: on both classes it means "where this thing
 			// is, in the terms that thing is placed in", and an attachment is
 			// placed relative to its parent.
@@ -1877,8 +1877,8 @@ namespace engine::scene {
 			ecs::Classes::Computed(attachmentClass, WorldPositionProperty());
 
 			// The material's one. **`MaterialId` rather than `Material`**, which
-			// is this tree's spelling for "a name that is an asset" — `MeshId`,
-			// `SoundId`, `TextureID` — and is what puts the studio's content
+			// is this tree's spelling for "a name that is an asset" - `MeshId`,
+			// `SoundId`, `TextureID` - and is what puts the studio's content
 			// picker on it rather than a bare text field, through
 			// `studio::ContentKindOfProperty`. Calling it `Material` on a class
 			// called `Material` would also read as a self-reference at every call
@@ -1887,7 +1887,7 @@ namespace engine::scene {
 
 			// **Which shader draws it, and `Shader` rather than `ShaderId`.**
 			// The `...Id` spelling above marks a name a *publisher* owns, which
-			// is what puts the content picker on it — and this name is not one:
+			// is what puts the content picker on it - and this name is not one:
 			// it may be a `ShaderScript` sitting in the same world, or a shader
 			// the engine ships and no manifest lists. `scene/Shaders.hpp` is the
 			// resolution order and why it is that way round.
@@ -1899,7 +1899,7 @@ namespace engine::scene {
 			// that read them**, which is the shape the single component forces and
 			// is honest about it: a `PointLight` has an `Angle` property that does
 			// nothing. The alternative is declaring the same two descriptors on
-			// two classes, which is two declarations of one projection — and the
+			// two classes, which is two declarations of one projection - and the
 			// component is shared either way, so the storage does not change. A
 			// point light's angle reads back what it was set to and is ignored,
 			// which is the same contract `SurfaceCamera::Face` has on a camera
@@ -1909,7 +1909,7 @@ namespace engine::scene {
 			ecs::Classes::Property<&Light::Shadows>(lightClass, "Shadows");
 
 			// Clamped, because all three are quantities with an obvious nearest
-			// meaning outside their range — `ClampedProperty`'s own argument. The
+			// meaning outside their range - `ClampedProperty`'s own argument. The
 			// brightness ceiling is Roblox's; the range ceiling is the one past
 			// which a forward renderer's light culling stops rejecting anything.
 			ecs::Classes::ClampedProperty<&Light::Brightness, 0.0f, 10000.0f>(lightClass, "Brightness");
@@ -1917,7 +1917,7 @@ namespace engine::scene {
 			ecs::Classes::ClampedProperty<&Light::Angle, 0.0f, 180.0f>(lightClass, "Angle");
 			ecs::Classes::Computed(lightClass, LightFaceProperty());
 
-			// The humanoid's. All plain fields — nothing here is a doubled
+			// The humanoid's. All plain fields - nothing here is a doubled
 			// half-extent or an angle in the wrong unit, so there is no conversion
 			// to write and no place for one to be wrong in one direction.
 			//
@@ -1925,7 +1925,7 @@ namespace engine::scene {
 			// character possible.** A game driving an NPC writes it directly and
 			// never installs `UpdateCharacterControl`; a player's character has
 			// that system writing it every frame instead. One field, two writers,
-			// and only one of them installed per character — which is the same
+			// and only one of them installed per character - which is the same
 			// shape `MoveCamera` and a scripted camera already have.
 			ecs::Classes::Property<&Humanoid::MoveDirection>(humanoidClass, "MoveDirection");
 			ecs::Classes::ClampedProperty<&Humanoid::WalkSpeed, 0.0f, 1000.0f>(humanoidClass, "WalkSpeed");
@@ -1935,7 +1935,7 @@ namespace engine::scene {
 
 			// **The two that decide whether a character is alive**, and both are
 			// written conversions because each is clamped against the other. See
-			// `HealthProperty` for why they are writable at all — the replica
+			// `HealthProperty` for why they are writable at all - the replica
 			// refusal that answers "may a client set its own health" lives in
 			// `Store::SetProperty` and covers every property here, so a second
 			// answer declared on this one would be the copy that drifts.
@@ -1944,13 +1944,13 @@ namespace engine::scene {
 
 			// **Read-only, because it is what the world found rather than what an
 			// author wants.** A script setting `Grounded` would be telling the
-			// controller a lie it acts on immediately — the jump would fire in
+			// controller a lie it acts on immediately - the jump would fire in
 			// mid-air, which is the exploit this flag exists to gate.
 			ecs::Classes::Computed(humanoidClass, GroundedProperty());
 
 			// The tool's one. **`Grip` and not `GripPos`/`GripForward`/the rest
 			// of Roblox's six**, because those are the same `CFrame` taken apart
-			// into a position and three basis vectors — six properties writing
+			// into a position and three basis vectors - six properties writing
 			// one field, five of which are a rotation somebody has to keep
 			// orthogonal by hand. A `CFrame` is a declared property type here and
 			// `Attachment.CFrame` already crosses as one.
@@ -1959,7 +1959,7 @@ namespace engine::scene {
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like. The
 			// `Material` class above is what it looks like, and the two are
-			// separate facts that share a word — a mirror-finish floor and a
+			// separate facts that share a word - a mirror-finish floor and a
 			// rubber floor may share a surface and never a material. Binding both
 			// under one script name would make one of them unreachable and the
 			// other ambiguous.
@@ -1975,7 +1975,7 @@ namespace engine::scene {
 
 		// **A missing `Pivot` is the identity rather than a refusal.** Every
 		// `PVInstance` has the column, but a replica's row grows from a wire
-		// delta and a headless world may hold an instance built by hand — and
+		// delta and a headless world may hold an instance built by hand - and
 		// "no offset" is a complete answer, not an error.
 		const Pivot *pivot = store.Get<Pivot>(instance);
 		return pivot == nullptr ? transform->Frame : transform->Frame * pivot->Offset;
@@ -2002,12 +2002,12 @@ namespace engine::scene {
 
 	// **One registration, and the static that holds it lives here.** Two
 	// function-local statics each calling `RegisterTree` would have raced to
-	// register the same names, which `Classes::Register` tolerates — and then
+	// register the same names, which `Classes::Register` tolerates - and then
 	// the *order* of the two would decide which id each class got, which is
 	// rule 4's hazard arriving inside one process. So there is one static, and
 	// every accessor goes through it.
 	float VolumeOf(const Collider &collider) {
-		// Half-extents, as everywhere else in this module — `InverseInertiaOf`
+		// Half-extents, as everywhere else in this module - `InverseInertiaOf`
 		// reads the same field the same way.
 		const float x = std::max(collider.Extent.X, 0.0f);
 		const float y = std::max(collider.Extent.Y, 0.0f);
@@ -2019,7 +2019,7 @@ namespace engine::scene {
 		case ShapeKind::Sphere:
 			return (4.0f / 3.0f) * std::numbers::pi_v<float> * x * x * x;
 		case ShapeKind::Cylinder:
-			// Radius from X, half-height from Y — the axes `InverseInertiaOf`
+			// Radius from X, half-height from Y - the axes `InverseInertiaOf`
 			// puts the barrel along.
 			return std::numbers::pi_v<float> * x * x * (2.0f * y);
 		}
@@ -2034,7 +2034,7 @@ namespace engine::scene {
 		// **A zero-volume shape keeps the authored mass rather than becoming
 		// weightless.** A part with no extent is a scene being built rather than
 		// a thing with no substance, and a mass of zero is what the solver reads
-		// as immovable — the opposite of what a density of nearly nothing means.
+		// as immovable - the opposite of what a density of nearly nothing means.
 		const float volume = VolumeOf(collider);
 		if (!(volume > 0.0f) || !(properties->Density > 0.0f)) {
 			return std::max(body.Mass, 0.0f);
@@ -2051,7 +2051,7 @@ namespace engine::scene {
 	//
 	// **The id is cached, and that is safe because of the above.** Only
 	// `EnsureClassTree` calls `RegisterTree`, so a static here calls a static
-	// there rather than racing beside it — and a class id is fixed for the life
+	// there rather than racing beside it - and a class id is fixed for the life
 	// of the process once registered. Without this each call was a `core::Name`
 	// intern plus a lookup, paid every time somebody asked.
 	ecs::ClassId SoundClass() {
@@ -2073,7 +2073,7 @@ namespace engine::scene {
 		// **The class is a parameter now, and `MakePart` is still the only
 		// constructor.** A `SpawnLocation` is a `Part` plus one component, so
 		// the alternative was a second builder that assembled the five
-		// components itself — the duplicate `scene/AGENTS.md` refuses, and the
+		// components itself - the duplicate `scene/AGENTS.md` refuses, and the
 		// one that disagrees the first time `BasePart` gains a member.
 		//
 		// Anything that is not a `BasePart` is refused rather than half-built:
@@ -2126,7 +2126,7 @@ namespace engine::scene {
 
 		// **Anchored decides presence, not a flag.** An anchored part carries
 		// neither of these, so it sits in a different archetype and the dynamic
-		// queries never visit it — which beats testing a boolean per row per
+		// queries never visit it - which beats testing a boolean per row per
 		// tick and is the form the ECS is built for.
 		if (!desc.Anchored) {
 			store.Set(part, RigidBody{});

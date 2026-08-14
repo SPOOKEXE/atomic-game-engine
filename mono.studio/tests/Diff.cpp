@@ -5,8 +5,8 @@
 // panel can draw a convincing "no changes" over a diff that never found any,
 // and nothing about the picture would say which it was.
 //
-// The cases are text in, text out. What the panel does with the result — the
-// colours, the counts, the refresh button — needs a window and is covered by
+// The cases are text in, text out. What the panel does with the result - the
+// colours, the counts, the refresh button - needs a window and is covered by
 // running the editor.
 
 #include <engine/testing/Suite.hpp>
@@ -99,7 +99,7 @@ TEST_CASE("a trailing newline does not invent a line", "[studio][diff]") {
 TEST_CASE("two separate changes are reported separately", "[studio][diff]") {
 	// **What the alignment buys.** A prefix/suffix trim alone would collapse
 	// these into one hunk spanning the untouched middle, which is the coarse
-	// answer the size cap falls back to — correct, and much less useful.
+	// answer the size cap falls back to - correct, and much less useful.
 	const std::vector<DiffLine> lines =
 		DiffText("a\nb\nc\nd\ne\n", "a\nB\nc\nd\nE\n");
 

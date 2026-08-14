@@ -20,7 +20,7 @@ namespace engine::physics {
 		// pane, which in a room is a floor, a wall or two and whatever is on
 		// them. A doorway that overflows this is a doorway with a crowd of
 		// scenery in it, and the overflow is reported rather than silently
-		// dropped — a body held up by *some* of a floor is worse than one held up
+		// dropped - a body held up by *some* of a floor is worse than one held up
 		// by none, because it looks like physics rather than like a missing
 		// feature.
 		constexpr size_t MAX_PROXIES_PER_BODY = 32;
@@ -29,7 +29,7 @@ namespace engine::physics {
 		//
 		// **The far pane's own seam, which is this one's exact inverse.**
 		// `scene::SeamMapping` states one map per pane, and a pair's two maps
-		// compose to the identity — so there is no inverse to derive and no
+		// compose to the identity - so there is no inverse to derive and no
 		// second arithmetic to get wrong. A pane whose partner is missing from
 		// the gathered set has no inverse and no far room to reach into, which is
 		// the cross-world case and one this pass has nothing to say about.
@@ -49,8 +49,8 @@ namespace engine::physics {
 
 		// **A world with no physics in it is not a world with a bug in it.** The
 		// character systems are installed by hosts that never call
-		// `PreparePhysicsWorld` — a scene of anchored parts and a camera needs no
-		// solver — and the overlap below reports a missing world as an error
+		// `PreparePhysicsWorld` - a scene of anchored parts and a camera needs no
+		// solver - and the overlap below reports a missing world as an error
 		// once per body per tick, which is a log nobody can read past.
 		if (!store.HasResource<PhysicsWorld>()) {
 			return 0;
@@ -62,7 +62,7 @@ namespace engine::physics {
 		}
 
 		// **Gathered before anything is created**, because creating an entity
-		// moves rows and a walk that saw its own output would proxy the proxies —
+		// moves rows and a walk that saw its own output would proxy the proxies -
 		// a proxy straddles the pane it was mapped through by construction.
 		struct Straddler {
 			ecs::Entity Body;

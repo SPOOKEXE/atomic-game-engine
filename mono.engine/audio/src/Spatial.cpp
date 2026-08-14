@@ -13,7 +13,7 @@ namespace engine::audio {
 
 		// Map -1..+1 onto 0..90 degrees, then take cosine and sine. At the
 		// centre both are 1/root(2), so the summed power is the same as at
-		// either extreme — which is what stops a swept sound sagging as it
+		// either extreme - which is what stops a swept sound sagging as it
 		// passes in front.
 		const float angle = (clamped + 1.0f) * 0.5f * QUARTER_TURN;
 		return StereoGain{.Left = std::cos(angle), .Right = std::sin(angle)};
@@ -73,7 +73,7 @@ namespace engine::audio {
 		float pan = 0.0f;
 		if (distance > 0.0001f) {
 			// The component of the direction along the listener's right vector.
-			// Already in -1..1 for unit vectors, so no further normalising —
+			// Already in -1..1 for unit vectors, so no further normalising -
 			// and clamped anyway, because a caller's "unit" vector is only as
 			// unit as whatever produced it.
 			pan = std::clamp(

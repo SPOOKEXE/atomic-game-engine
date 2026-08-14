@@ -16,7 +16,7 @@
 // The pipeline end to end, with no sound card.
 //
 // **This is what the null device is for.** Every stage above the hardware is
-// data — bytes in, samples out — so the only part that genuinely needs a device
+// data - bytes in, samples out - so the only part that genuinely needs a device
 // is the handover, and that part is small. A suite that needed real audio would
 // run nowhere: CI has no sound card and a developer's is in use.
 
@@ -69,7 +69,7 @@ namespace {
 		return command;
 	}
 
-	// A real `.wav` file, built in memory — the same bytes a delivery client
+	// A real `.wav` file, built in memory - the same bytes a delivery client
 	// would hand over after fetching one.
 	std::vector<std::byte> WavFile(const std::vector<int16_t> &samples, uint16_t channels = 2) {
 		std::vector<std::byte> file;
@@ -277,7 +277,7 @@ TEST_CASE("ids are unique across allocations", "[audio][device]") {
 
 TEST_CASE("a command posted from another thread arrives intact", "[audio][device]") {
 	// **The arrangement the whole module is shaped around**: one producer, one
-	// consumer, no lock. This is the case that would catch a torn command — a
+	// consumer, no lock. This is the case that would catch a torn command - a
 	// slot published before it was filled.
 	std::unique_ptr<NullDevice> device = OpenNullDevice(Settings());
 	auto &mixer = device->Mixer();
@@ -339,7 +339,7 @@ TEST_CASE("the queue does not keep sounds alive after handing them over", "[audi
 
 TEST_CASE("a real device is optional and its absence is not an error", "[audio][device]") {
 	// A CI container has no sound server. A game that refused to start because
-	// it could not make a noise would be worse than one that is quiet — so
+	// it could not make a noise would be worse than one that is quiet - so
 	// this asserts the contract rather than that a device exists.
 	const std::unique_ptr<engine::audio::Device> device = engine::audio::OpenDevice(Settings());
 	if (device == nullptr) {

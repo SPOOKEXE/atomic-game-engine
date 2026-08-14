@@ -27,7 +27,7 @@ TEST_CASE("this test binary can list its own suites", "[process]") {
 	const auto self = Run({"/proc/self/exe", "--mono-suites"});
 
 	if (!self.Started) {
-		// No /proc — a BSD or a container without it. The rest of the suite
+		// No /proc - a BSD or a container without it. The rest of the suite
 		// still covers the parsing.
 		SUCCEED("no /proc/self/exe on this platform");
 		return;
@@ -48,7 +48,7 @@ TEST_CASE("a non-zero exit is reported without losing the output", "[process]") 
 
 	REQUIRE(result.ExitCode != 0);
 	// Output has to survive a failure, or a failing suite reports nothing
-	// useful — which is precisely when the output is wanted.
+	// useful - which is precisely when the output is wanted.
 	REQUIRE_FALSE(result.Output.empty());
 }
 

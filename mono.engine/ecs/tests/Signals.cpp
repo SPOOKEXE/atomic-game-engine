@@ -93,7 +93,7 @@ TEST_CASE("a flush with nothing changed fires nothing", "[ecs]") {
 	store.Set<Health>(entity, Health{1});
 	REQUIRE(store.FlushSignals() == 1);
 
-	// Bits are not cleared by firing — a replication delta and a render
+	// Bits are not cleared by firing - a replication delta and a render
 	// invalidation read the same bits, and one consumer clearing them out from
 	// under another is the bug that shape avoids. So this fires again until
 	// something clears.
@@ -281,7 +281,7 @@ TEST_CASE("a store with no listeners costs a flush nothing", "[ecs]") {
 
 TEST_CASE("signals do not survive a snapshot, and say so by being absent", "[ecs]") {
 	// A snapshot carries state, never code. A restored world has storage and no
-	// behaviour until somebody registers it again — the same rule a replayed
+	// behaviour until somebody registers it again - the same rule a replayed
 	// universe follows, and the reason `Replayer::Restore` demands a configure
 	// callback.
 	Store store("signals");

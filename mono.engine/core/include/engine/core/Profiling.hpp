@@ -2,7 +2,7 @@
 
 // The engine profiler. One macro feeds both consumers:
 //
-//   - Tracy, for the real thing — a second process, every thread, full history.
+//   - Tracy, for the real thing - a second process, every thread, full history.
 //   - FrameGraph, for the in-game F5 overlay, which has to work with nothing
 //     attached and on a machine that is not the developer's.
 //
@@ -38,7 +38,7 @@
 //
 // **`ZoneNamedN` rather than `ZoneScopedN`, so two of these may share a C++
 // scope.** `ZoneScopedN` declares a variable called `___tracy_scoped_zone`,
-// which is one fixed name — so a second macro beside the first was a
+// which is one fixed name - so a second macro beside the first was a
 // redeclaration error naming a Tracy internal, from a header the caller never
 // wrote, and only in builds with `ENGINE_TRACY` on. The FrameGraph half was
 // already unique per line; this makes the Tracy half agree. Two on the *same*
@@ -55,7 +55,7 @@
 
 // Opens a dynamically named Tracy zone and copied-name FrameGraph scope.
 //
-// Use for a span whose name is not known at compile time — a script chunk, a
+// Use for a span whose name is not known at compile time - a script chunk, a
 // graph node kind. The `fallback` literal is what Tracy groups the zone
 // under, and what the overlay falls back to when the caller had nothing to
 // say.
@@ -86,8 +86,8 @@
 // the published spans after the frame that produced them has ended, so a
 // name built into a local would dangle by the time it is drawn.
 //
-// This is for a caller that owns the string for the life of the run — the
-// scheduler, which owns its system names — and it is the only reason the
+// This is for a caller that owns the string for the life of the run - the
+// scheduler, which owns its system names - and it is the only reason the
 // copying form is not the only form. `fallback` labels the Tracy zone;
 // FrameGraph records `view` as given, including an empty view.
 //
@@ -166,5 +166,5 @@
 // @param name Stable name used by the active profiling consumers.
 #define ENGINE_PROFILE(name) ENGINE_PROFILE_CAT(name, ::engine::core::ProfileCategory::Engine)
 
-// Reports whether anything is collecting — Tracy attached or FrameGraph enabled.
+// Reports whether anything is collecting - Tracy attached or FrameGraph enabled.
 #define ENGINE_PROFILE_COLLECTING() (ENGINE_PROFILE_ATTACHED() || ::engine::core::FrameGraph::IsEnabled())

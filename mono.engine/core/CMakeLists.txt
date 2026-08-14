@@ -6,8 +6,8 @@
 mono_add_library(core
 	TIER shared
 
-	# All three appear in core's public headers — spdlog in Log.hpp, glm in
-	# CFrame.hpp, Tracy in Profiling.hpp — so they have to propagate. Nothing
+	# All three appear in core's public headers - spdlog in Log.hpp, glm in
+	# CFrame.hpp, Tracy in Profiling.hpp - so they have to propagate. Nothing
 	# else about a vendor leaves this module.
 	VENDOR_PUBLIC
 		spdlog::spdlog
@@ -17,7 +17,7 @@ mono_add_library(core
 	# **core links no vendor but those three, and Crypto++ was the fourth until
 	# v0.15.** It was here for `Random`'s SHA-256 and `SecureWipe`'s zeroing
 	# loop, both of which are now specified algorithms written out in this
-	# module — SplitMix64's finaliser and a volatile store.
+	# module - SplitMix64's finaliser and a volatile store.
 	#
 	# Not removed to make anything smaller. `net` and `assets` link Crypto++
 	# themselves and are what put it in the client, the server and the origin,

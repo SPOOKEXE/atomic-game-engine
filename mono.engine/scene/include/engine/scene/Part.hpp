@@ -1,6 +1,6 @@
 #pragma once
 
-// `Part` — a class, not a component.
+// `Part` - a class, not a component.
 //
 // A class in the `ecs::Classes` sense: a name, a parent, and the component set
 // its instances land in. `Instance.new("Part")` from script in v0.6 and
@@ -8,11 +8,11 @@
 // there is exactly one answer to "what is a part made of" and the editor, the
 // loader, the bindings and the tests cannot disagree about it.
 //
-// The tree is Roblox's, and shallow on purpose — `ecs/Classes.hpp` names these
+// The tree is Roblox's, and shallow on purpose - `ecs/Classes.hpp` names these
 // four as the shape it stores ancestry for:
 //
 //     Instance                 nothing; the root everything derives from
-//     └─ PVInstance            Transform — anything with a place in the world
+//     └─ PVInstance            Transform - anything with a place in the world
 //        └─ BasePart           Bounds, Visual, Collider, Surface
 //           └─ Part            the concrete box
 //
@@ -62,7 +62,7 @@ namespace engine::scene {
 		// **Here so that `MakePart` stays the only constructor.** A
 		// `SpawnLocation` is a `Part` with one component more, and a caller that
 		// assembled it by hand would be the second definition
-		// `scene/AGENTS.md` refuses — the two disagree the first time
+		// `scene/AGENTS.md` refuses - the two disagree the first time
 		// `BasePart` gains a component. Anything that does not derive from
 		// `BasePart` is refused rather than half-built.
 		//
@@ -77,7 +77,7 @@ namespace engine::scene {
 		// **This decides whether `RigidBody` and `Motion` exist on the entity
 		// at all**, rather than setting a flag the physics step reads. An
 		// anchored part therefore lands in a different archetype, and the
-		// dynamic queries never visit it — which is the ECS-native form of the
+		// dynamic queries never visit it - which is the ECS-native form of the
 		// optimisation and strictly better than a branch per row per tick.
 		bool Anchored = false;
 	};
@@ -92,7 +92,7 @@ namespace engine::scene {
 	//
 	// **Roblox's `PVInstance:GetPivot()`.** A `Transform` says where the centre
 	// of something is; a pivot says where it is *held*, which is what an author
-	// places against — a door by its hinge, a lid by its rim. `Pivot::Offset`
+	// places against - a door by its hinge, a lid by its rim. `Pivot::Offset`
 	// carries why that needs storage rather than being derivable.
 	//
 	// @param store    The world.
@@ -105,7 +105,7 @@ namespace engine::scene {
 	//
 	// **The inverse of `PivotOf`, and that is the whole of it**: the placement
 	// that puts the pivot at the target is `target * Offset⁻¹`. Doing it the
-	// other way round — setting the transform to the target and hoping — is what
+	// other way round - setting the transform to the target and hoping - is what
 	// "PivotTo does not respect the offset" bugs are.
 	//
 	// @param store    The world.
@@ -118,13 +118,13 @@ namespace engine::scene {
 	// Registers the whole scene class tree, once per process.
 	//
 	// **Every class accessor here calls this first**, so a caller asking for
-	// `Humanoid` or `Attachment` still gets a fully registered tree — one
+	// `Humanoid` or `Attachment` still gets a fully registered tree - one
 	// registration whichever door it is entered by.
 	//
 	// **Named rather than spelled `PartClass()`, which is what it used to be.**
 	// The call is made for its side effect and not for the id it returns, and
 	// asking for the *Part* class in order to look up a *Humanoid* reads as a
-	// claim about the hierarchy — which it is not. A humanoid derives from the
+	// claim about the hierarchy - which it is not. A humanoid derives from the
 	// instance root, not from a part. What every accessor shares is the
 	// registration, so that is what this is called.
 	//
@@ -146,8 +146,8 @@ namespace engine::scene {
 	//
 	// **Density wins where it is set, and `RigidBody::Mass` is what is written
 	// down otherwise.** A part with `PhysicsProperties::Custom` weighs its
-	// density times its volume — so resizing it changes what it weighs, which is
-	// what density means — and a part without one weighs whatever was authored.
+	// density times its volume - so resizing it changes what it weighs, which is
+	// what density means - and a part without one weighs whatever was authored.
 	//
 	// **Derived at the point of use rather than written back.** A system that
 	// wrote `Mass` every tick would be a second copy of a fact, dirtying a
@@ -169,7 +169,7 @@ namespace engine::scene {
 	// exists.
 	//
 	// Idempotent, and cheap after the first call. Anything that names a class
-	// before a store has been furnished — a loader, a test — calls this first.
+	// before a store has been furnished - a loader, a test - calls this first.
 	void EnsureClassTree();
 
 	// The `Part` class id, registering the whole tree on first call.
@@ -191,7 +191,7 @@ namespace engine::scene {
 	// The `Sound` class id, registering the tree on first call.
 	//
 	// **Derives from `Instance` and not from `PVInstance`**, because a sound
-	// has no place of its own — where it is heard from is its parent's. Under
+	// has no place of its own - where it is heard from is its parent's. Under
 	// `Workspace` it is heard everywhere at one level; inside a part it is
 	// heard from that part and falls off with distance. That is Roblox's rule
 	// and it is also the one that keeps "attach a sound to a thing" as
@@ -204,7 +204,7 @@ namespace engine::scene {
 	// Creates one part in a world.
 	//
 	// The single place that decides what a part is made of. Anything building
-	// parts another way — a loader, a test, a demo — is a second definition,
+	// parts another way - a loader, a test, a demo - is a second definition,
 	// and the two disagree the first time one of them gains a component.
 	//
 	// The instance starts from the class prototype and is then written from
@@ -212,13 +212,13 @@ namespace engine::scene {
 	// keeps its declared default instead of being silently zeroed.
 	//
 	// `PartDesc::Class` is what keeps that true for the classes that are a part
-	// plus something — `SpawnLocation` is the first — rather than growing a
+	// plus something - `SpawnLocation` is the first - rather than growing a
 	// second builder beside this one.
 	//
 	// @param store The world to create in.
 	// @param desc  What the part is.
 	// @return The new entity, or `ecs::NULL_ENTITY` when the store refused to
-	//         create one — an adopt-only replica does — or when
+	//         create one - an adopt-only replica does - or when
 	//         `PartDesc::Class` does not derive from `BasePart`.
 	ecs::Entity MakePart(ecs::Store &store, const PartDesc &desc);
 }

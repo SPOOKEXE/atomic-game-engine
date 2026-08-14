@@ -1,15 +1,15 @@
 // Who simulates a body, and the one case that has a correct answer today.
 //
 // **Nothing reads ownership yet, so most of what could be asserted here would
-// be asserting a plan.** What is real is the shape — absent means the server, a
-// null hands it back, a non-`Player` is refused — and the reclaim, which is the
+// be asserting a plan.** What is real is the shape - absent means the server, a
+// null hands it back, a non-`Player` is refused - and the reclaim, which is the
 // half that would be a bug rather than a gap the day the rest lands: a body
 // owned by a player who left is owned by a dead entity, and an owner nothing can
 // resolve is a body nothing will ever simulate.
 //
 // The reclaim is therefore tested against a *destroyed* player rather than a
-// stale handle. Those are different failures — `Entity` carries a generation, so
-// a stale handle is already safe — and it is the first one that happens when
+// stale handle. Those are different failures - `Entity` carries a generation, so
+// a stale handle is already safe - and it is the first one that happens when
 // somebody disconnects.
 
 #include <engine/ecs/Classes.hpp>
@@ -55,8 +55,8 @@ TEST_CASE("an unassigned body is the server's", "[scene][ownership]") {
 
 	const Entity part = MakePart(store, PartDesc{});
 
-	// **Both halves, because they are two claims.** The component is absent —
-	// which is what keeps ownership free for a game that never uses it — and
+	// **Both halves, because they are two claims.** The component is absent -
+	// which is what keeps ownership free for a game that never uses it - and
 	// the accessor reads that absence as the server rather than as an error.
 	CHECK_FALSE(store.Has<NetworkOwner>(part));
 	CHECK(NetworkOwnerOf(store, part) == NULL_ENTITY);
@@ -96,8 +96,8 @@ TEST_CASE("a null owner gives the body back rather than storing a hole", "[scene
 
 TEST_CASE("an anchored part is the server's and cannot be handed over", "[scene][ownership]") {
 	// **Ownership is about physics, so a part with no physics has nothing to
-	// hand over.** Anchoring removes the `RigidBody` — anchored decides
-	// presence rather than setting a flag — and an owner of a body that does
+	// hand over.** Anchoring removes the `RigidBody` - anchored decides
+	// presence rather than setting a flag - and an owner of a body that does
 	// not exist is a field that reads as live and moves nothing.
 	ownership_test::Ready();
 
@@ -115,14 +115,14 @@ TEST_CASE("an anchored part is the server's and cannot be handed over", "[scene]
 	CHECK(NetworkOwnerOf(store, fixed) == NULL_ENTITY);
 
 	// Giving it back is still legal, because that is always a legal thing to
-	// ask for — a script that anchored a part and then tidied up should not be
+	// ask for - a script that anchored a part and then tidied up should not be
 	// told off for the order it did them in.
 	CHECK(SetNetworkOwner(store, fixed, NULL_ENTITY));
 }
 
 TEST_CASE("anchoring an owned body returns it to the server", "[scene][ownership]") {
 	// The other end of the same sentence. A script that anchors a part it
-	// handed out does not have to remember to take it back — and leaving the
+	// handed out does not have to remember to take it back - and leaving the
 	// row on would keep a client authorised to write the transform of something
 	// the world has just declared immovable.
 	ownership_test::Ready();
@@ -169,7 +169,7 @@ TEST_CASE("a body comes back to the server when its owner leaves", "[scene][owne
 	const Entity player = AddPlayer(store, "Ada");
 	REQUIRE(SetNetworkOwner(store, part, player));
 
-	// Nothing to reclaim while the player is here — which is the half that
+	// Nothing to reclaim while the player is here - which is the half that
 	// says the walk is looking at liveness rather than at anything else.
 	ReclaimAbandonedOwnership(store);
 	CHECK(NetworkOwnerOf(store, part) == player);

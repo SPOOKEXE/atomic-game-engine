@@ -62,13 +62,13 @@ namespace client {
 
 		// The deterministic sequence used to be an integer mixer written out
 		// here, and the same one again in mono.server/src/Simulation.cpp. It is
-		// engine::core::Random now — same reason, one copy, and a specified
+		// engine::core::Random now - same reason, one copy, and a specified
 		// algorithm rather than three constants nobody can check.
 
 		// --- systems -------------------------------------------------------
 		//
 		// Every one of these is a plain function. None captures anything,
-		// because there is nothing outside the world for it to capture — which
+		// because there is nothing outside the world for it to capture - which
 		// is what makes them registerable from bindings, replayable from a
 		// recording, and reusable by a second world.
 
@@ -79,7 +79,7 @@ namespace client {
 		// It is a row like anything else with a place in the world: a
 		// `scene::Camera` and a `scene::Transform` on an entity, with the
 		// `ActiveCamera` resource naming which of a world's cameras is live.
-		// That is what makes a second one — a spectator, a mirror — a create
+		// That is what makes a second one - a spectator, a mirror - a create
 		// rather than a rewrite of this function.
 		void MoveCamera(Store &store) {
 			const ActiveCamera *active = store.Resource<ActiveCamera>();
@@ -121,7 +121,7 @@ namespace client {
 		// **`PreRender`, and registered before `collect-instances` in the same
 		// phase**, because what it produces is presentation state and this is
 		// the phase that derives presentation state. Registration order carries
-		// no ordering contract — `Scheduler` says so — but these two are
+		// no ordering contract - `Scheduler` says so - but these two are
 		// independent in the only way that matters: a gate one frame stale
 		// would be a part that appears a frame after it was parented, and the
 		// phase runs them in the order they were added.
@@ -129,8 +129,8 @@ namespace client {
 		// **It is the one thing here that is structural**, which is worth
 		// naming rather than hiding: adding or removing `Rendered` moves a row
 		// to another archetype. That is acceptable because nothing in the
-		// simulation reads `Rendered` — it exists to be a query term for the
-		// draw list and for nothing else — and because every host derives it
+		// simulation reads `Rendered` - it exists to be a query term for the
+		// draw list and for nothing else - and because every host derives it
 		// the same way, so two runs of one scene still agree. The alternative
 		// was `PostSimulation`, and it fails a world that presents without
 		// ticking: the studio edits a suspended world, and it would have shown
@@ -146,7 +146,7 @@ namespace client {
 		// **Before the draw list is collected, and that ordering matters here.**
 		// Aiming a camera also writes its part's `Visual::Surface`, so a pass
 		// that ran afterwards would publish a draw list built from last frame's
-		// answer — a mirror would be one frame late to start showing anything,
+		// answer - a mirror would be one frame late to start showing anything,
 		// which is invisible in a still scene and a flicker in a moving one.
 		void AimSurfaces(Store &store) {
 			(void)engine::scene::AimSurfaceCameras(store);
@@ -159,7 +159,7 @@ namespace client {
 		// `physics::INTEGRATE_GRAIN`, and the analogy is close enough to be worth
 		// making: that body carries a whole `core::CFrame` per row through a
 		// quaternion product and a normalise, and this one carries two through an
-		// `NLerp` — the same shape of arithmetic, the same reciprocal square
+		// `NLerp` - the same shape of arithmetic, the same reciprocal square
 		// root, over roughly three times the bytes. `Integrate.hpp` measures its
 		// crossover at 8,000 rows, and 1024 puts this loop's floor at the same
 		// 8192.
@@ -167,7 +167,7 @@ namespace client {
 		// **What it replaces is the default, and the default was certainly
 		// wrong.** `Jobs::DEFAULT_GRAIN` is calibrated for three float adds per
 		// row; taking it put this loop's floor at 32,768 instances, so a scene of
-		// twenty thousand parts ran the whole draw list on one thread — the exact
+		// twenty thousand parts ran the whole draw list on one thread - the exact
 		// failure `Integrate.hpp` records for the same reason, where the default
 		// cost 73.5 us against 27.3 us for a dispatch it declined to make. Being
 		// approximately right beats being precisely calibrated for somebody
@@ -197,13 +197,13 @@ namespace client {
 			// Split into spans that cost nothing to separate.
 			//
 			// The counting, the sizing and the arithmetic are three different
-			// answers to "why is this system slow" — a cached query that is not
+			// answers to "why is this system slow" - a cached query that is not
 			// as cached as it looks, a vector reallocating every frame, or the
 			// interpolation itself. One number covering all three cannot tell
 			// them apart.
 			//
 			// It stops here. Going finer means a scope *inside* the row loop,
-			// and a scope costs a clock read and a push — several times what a
+			// and a scope costs a clock read and a push - several times what a
 			// quaternion multiply costs. That measurement would be mostly of
 			// itself.
 			size_t matching = 0;
@@ -226,7 +226,7 @@ namespace client {
 				// to be overwritten a moment later. A reading above zero here
 				// means the scene changed size or the capacity is being lost.
 				//
-				// The count is a floor rather than a contract — it comes from a
+				// The count is a floor rather than a contract - it comes from a
 				// different query than the one EachBatch walks, and this system
 				// does not get to assume the two agree. The batches decide the
 				// real size, and the shrink below settles it.
@@ -254,8 +254,8 @@ namespace client {
 				// frame-to-frame reshuffling of the draw list.
 				ENGINE_PROFILE_CAT("interpolate", engine::core::ProfileCategory::Simulation);
 
-				// Taken once, outside. A worker cannot grow the vector — that is
-				// a reallocation under every other worker's feet — so the buffer
+				// Taken once, outside. A worker cannot grow the vector - that is
+				// a reallocation under every other worker's feet - so the buffer
 				// is sized before the loop starts and the body writes into it.
 				DrawInstance *const out = drawList->Instances.data();
 				const size_t capacity = drawList->Instances.size();
@@ -264,7 +264,7 @@ namespace client {
 				// is the point of a tag: it is a term in the query, so the
 				// archetype walk never reaches a row that has not been marked as
 				// a visible descendant of `Workspace`. A branch here could not
-				// have done the same job — this loop writes `out[first + row]`
+				// have done the same job - this loop writes `out[first + row]`
 				// so that no two workers touch the same bytes, and skipping a
 				// row would leave a hole in the draw list and make `written` a
 				// lie. `scene/Visibility.hpp` has the whole argument.
@@ -306,11 +306,11 @@ namespace client {
 						for (size_t row = 0; row < rows; row++) {
 							// Interpolated, not the tick position. At 300 fps
 							// against a 60 Hz tick, drawing tick positions shows
-							// each one five times and then jumps — which reads as
+							// each one five times and then jumps - which reads as
 							// a frame-rate problem rather than as a tick-rate one.
 							//
 							// NLerp, not Lerp. The endpoints are one simulation
-							// tick apart — a few degrees at most — and over an arc
+							// tick apart - a few degrees at most - and over an arc
 							// that short the two agree to well inside a pixel.
 							// Lerp's constant angular speed costs an acos and
 							// three sin calls per entity, which on this loop was
@@ -321,7 +321,7 @@ namespace client {
 							// into something a GPU binds.
 							//
 							// The fields come from `scene::MakeDrawInstance`, which
-							// is the only place that list is written — the
+							// is the only place that list is written - the
 							// replicated collector fills the same row from a
 							// snapshot. Both components are required columns of
 							// *this* query, so the addresses are always good.
@@ -360,15 +360,15 @@ namespace client {
 			// because they are not entities: nothing in the world matches the
 			// query, so there is no row to size the list against. `push_back`
 			// past the shrink costs one reallocation on the frame a mirror is
-			// created and nothing after it — the capacity stays.
+			// created and nothing after it - the capacity stays.
 			// **Before the markers, so a marker is never cloned.** A face bar is
 			// a debugging aid lying on a pane, which means it straddles that
-			// pane by construction — and a bar cloned onto the far side would
+			// pane by construction - and a bar cloned onto the far side would
 			// mark a face nothing projects off.
 			//
 			// **One far-side copy and not two, which is what this used to
-			// draw.** There were two passes producing it — one walked the world
-			// for things that can move, the other walked the draw list — and
+			// draw.** There were two passes producing it - one walked the world
+			// for things that can move, the other walked the draw list - and
 			// calling both put two copies of every straddling body on the far
 			// side, z-fighting each other. Worse, the list pass reads the list
 			// it appends to, so it also copied the entity pass's output: a copy
@@ -377,7 +377,7 @@ namespace client {
 			// like is a spare character standing near the hole.
 			//
 			// **`CutAndCloneSeams` is the one pass now**, and it is the list one
-			// because only a list walk holds the row the original is in — which
+			// because only a list walk holds the row the original is in - which
 			// is what lets it *cut* the body at the plane rather than leave two
 			// whole copies straddling two panes. The same call serves a replica,
 			// which has a draw list and no simulation behind it.
@@ -394,7 +394,7 @@ namespace client {
 	// builds the world and a client installs the two systems it owns. Keeping
 	// the C++ scene beside the Luau one would have been two ways to do one job,
 	// which is the most expensive kind of debt in a monorepo because both
-	// accumulate callers — and the scripted path is the one that proves the
+	// accumulate callers - and the scripted path is the one that proves the
 	// bindings work.
 
 	namespace {
@@ -482,7 +482,7 @@ namespace client {
 		// **This world's own rows, counted before anything is appended to
 		// them.** The far world's straddlers land in `drawn` further down, and
 		// handing those back to `AppendPortalClones` as a source would clone a
-		// clone — a body that walked in from the far room would be copied
+		// clone - a body that walked in from the far room would be copied
 		// straight back into it. What crosses is what this world drew.
 		const auto ownRows = drawn.size();
 
@@ -492,7 +492,7 @@ namespace client {
 		const engine::core::Name here = universe.NameOf(world);
 
 		// Which surface index wants which world, gathered while inside the
-		// source store and used entirely outside it — `Universe::Enter` is not
+		// source store and used entirely outside it - `Universe::Enter` is not
 		// re-entrant, and the far world has to be entered to be read.
 		struct Wanted {
 			int8_t Surface = 0;
@@ -523,8 +523,8 @@ namespace client {
 		size_t attached = 0;
 
 		// Which far worlds have already had their own straddlers brought back
-		// here. Two panes onto one world is an ordinary arrangement — a room
-		// with a window at each end — and the far world's bodies belong in this
+		// here. Two panes onto one world is an ordinary arrangement - a room
+		// with a window at each end - and the far world's bodies belong in this
 		// world's list once, not once per pane.
 		std::vector<engine::world::WorldId> paired;
 
@@ -547,7 +547,7 @@ namespace client {
 			}
 
 			// A name matching nothing, or naming the world we are already in,
-			// leaves the surface exactly as `CollectSurfaceViews` left it — this
+			// leaves the surface exactly as `CollectSurfaceViews` left it - this
 			// world's own image, which is a mirror and is visible as one.
 			if (!found.IsValid() || found == world) {
 				continue;
@@ -555,7 +555,7 @@ namespace client {
 
 			// **Whether the far end still owes this one its own straddlers.** A
 			// hole has two mouths and a body may be standing in either, so the
-			// visit below does both halves of one pair in one entry — see the
+			// visit below does both halves of one pair in one entry - see the
 			// `paired` note under it.
 			const bool returns =
 				here.IsValid() && std::find(paired.begin(), paired.end(), found) == paired.end();
@@ -590,9 +590,9 @@ namespace client {
 				// itself and which a cross-world pair had nowhere to state.
 				//
 				// **It blanked the feature outright, and looked like the pass
-				// failing.** A pair is laid out the same way at both ends — that
+				// failing.** A pair is laid out the same way at both ends - that
 				// is what makes a hole read as an opening rather than as a
-				// painting — so the far world's own slab stands exactly where
+				// painting - so the far world's own slab stands exactly where
 				// this pane's camera is aimed, at about the distance the frustum
 				// is fitted to, and it is the same rectangle that frustum covers.
 				// It therefore fills the image edge to edge, in one flat colour,
@@ -602,12 +602,12 @@ namespace client {
 				// does.
 				//
 				// Selected by **slot** rather than by entity, because a draw
-				// instance carries a surface index and no identity — and the
+				// instance carries a surface index and no identity - and the
 				// slots wanted are exactly the ones gathered above.
 				//
 				// **An invisible row is left behind too, and this range is the
 				// only draw path that has to say so.** Everywhere else a fully
-				// transparent part *is* drawn — into the blended run, where an
+				// transparent part *is* drawn - into the blended run, where an
 				// alpha of nothing contributes nothing. The foreign range has no
 				// runs: `SurfaceView` names one span and the surface pass submits
 				// it as a single plain draw, bypassing the plan that would have
@@ -615,8 +615,8 @@ namespace client {
 				// **opaque** pipeline and draws solid.
 				//
 				// **And every cross-world portal has exactly such a part in the
-				// worst possible place.** `Portal::Destination` is a stand-in — a
-				// transform and a size saying where the hole leads — authored
+				// worst possible place.** `Portal::Destination` is a stand-in - a
+				// transform and a size saying where the hole leads - authored
 				// invisible and set at the pane, which is where this camera is
 				// aimed and the size the frustum is fitted to. It filled most of
 				// the picture with one flat colour, and how much depended on
@@ -626,7 +626,7 @@ namespace client {
 				// Dropped here rather than teaching the range about blending,
 				// which is the 80/20: nothing is lost, because there was no
 				// picture in it. **A *partly* transparent part in the far world
-				// is still drawn opaque** — that limit is stated in
+				// is still drawn opaque** - that limit is stated in
 				// `NON-EUCLIDEAN.md` rather than hidden here.
 				if (const auto *list = store.Resource<DrawList>()) {
 					for (const DrawInstance &instance : list->Instances) {
@@ -643,7 +643,7 @@ namespace client {
 				}
 
 				// **And whoever is standing in the far world's own pane, on
-				// this side of it — which is the half that was missing and is
+				// this side of it - which is the half that was missing and is
 				// why a cross-world hole only worked one way round.** The two
 				// mouths of a pair are not one job done twice: the clone below
 				// this block carries *our* bodies into the picture the pane
@@ -657,12 +657,12 @@ namespace client {
 				// stands in this room, in front of this world's pane, and is
 				// culled, sorted and lit with everything else here. `foreign` is
 				// the picture *inside* the glass, and the far body is already in
-				// it — the far world drew itself.
+				// it - the far world drew itself.
 				//
 				// **Selected by name and never by `entry.Surface`.** A surface
 				// slot numbers a camera within one store, so the near pane's
 				// index says nothing about which of the far world's cameras
-				// leads back — pointing it at that index picks whichever of the
+				// leads back - pointing it at that index picks whichever of the
 				// far world's panes happens to share the number, which is any of
 				// them or none.
 				if (!returns) {
@@ -670,7 +670,7 @@ namespace client {
 				}
 
 				// The same slots the copy above filtered by, gathered once, and
-				// the same rows the copy above read — so what arrives in this
+				// the same rows the copy above read - so what arrives in this
 				// room is the far half of exactly what the far world drew.
 				if (const auto *list = store.Resource<DrawList>()) {
 					for (const int8_t slot : returning) {
@@ -683,7 +683,7 @@ namespace client {
 			// The far world holds no copy of a body that is still in this one, so
 			// without this a character halfway through a cross-world portal is
 			// whole in the room it is leaving and absent from the picture of the
-			// room it is entering — which is the artefact `AppendPortalClones`
+			// room it is entering - which is the artefact `AppendPortalClones`
 			// removes for a same-world pane, seen through the one boundary that
 			// pass cannot answer for itself.
 			//
@@ -734,7 +734,7 @@ namespace client {
 		for (const engine::scene::PortalSeam &seam : seams) {
 			// **A cross-world pane stays on the surface path**, because a warp
 			// into another world's coordinate space is a stated frame rather than
-			// a derived one — `Portal::DestinationWorld` and
+			// a derived one - `Portal::DestinationWorld` and
 			// `AttachForeignSurfaces` are the whole of that arrangement, and it
 			// does not recurse.
 			if (seam.Crosses || seam.Surface < 0) {
@@ -781,7 +781,7 @@ namespace client {
 		// **The panes, measured once for the whole walk.** A mirror's camera is a
 		// function of its pane and whoever is looking at it, so the renderer needs
 		// the rectangle in order to place that camera for a viewer deeper than the
-		// eye — see `render::SurfaceView::PaneNormal`. Measuring a face is
+		// eye - see `render::SurfaceView::PaneNormal`. Measuring a face is
 		// `GatherSurfacePanes`' business and not this file's: `ReachOf` and the
 		// face's two axes were re-derived in three places once, and a marker drawn
 		// on a face the camera was not projecting off is a debugging aid that lies.
@@ -794,7 +794,7 @@ namespace client {
 
 		store.Each<const engine::scene::SurfaceCamera, const engine::scene::Camera, const Transform>(
 			// `panes` needs no capture: it has static storage duration, for the
-			// reason every other scratch buffer in this file does — a per-frame
+			// reason every other scratch buffer in this file does - a per-frame
 			// allocation in a walk that runs once per world per frame.
 			[&views, &store, portals](
 				Entity entity,
@@ -803,8 +803,8 @@ namespace client {
 				const Transform &placement
 			) {
 				// **A slot the recursive pass owns gets no surface camera.** Both
-				// would draw the same pane — one from a camera derived from this
-				// level and one from a camera placed off the eye — and the second
+				// would draw the same pane - one from a camera derived from this
+				// level and one from a camera placed off the eye - and the second
 				// is the viewpoint error the pass exists to remove. Skipped here
 				// rather than refused in the renderer so the cost of aiming it is
 				// the only thing wasted.
@@ -837,7 +837,7 @@ namespace client {
 				// **Matched by entity and not by slot.** Two cameras naming one
 				// index is a scene mistake the renderer resolves by keeping the
 				// first, and matching on the number here would hand the survivor
-				// the loser's rectangle — a camera reflecting through a pane it is
+				// the loser's rectangle - a camera reflecting through a pane it is
 				// not on, which reads as a mirror showing the wrong room.
 				for (const engine::scene::SurfacePane &pane : panes) {
 					if (pane.Camera != entity) {
@@ -855,8 +855,8 @@ namespace client {
 
 				// **The fitted frustum when there is one, and the plain camera
 				// when there is not.** `AimSurfaceCameras` writes a
-				// `SurfaceLens` for every camera it places — which is every one
-				// parented to a part — and that lens is off-axis and possibly
+				// `SurfaceLens` for every camera it places - which is every one
+				// parented to a part - and that lens is off-axis and possibly
 				// obliquely clipped, neither of which a field of view can say.
 				//
 				// A surface camera parented to the *world* is placed by whoever
@@ -873,7 +873,7 @@ namespace client {
 					// fitted**, which for a portal is not nothing. The image is
 					// read back by projecting the pane's own world position, so
 					// a camera fitted three hundred units away needs the pane
-					// carried there too — see `scene::SurfaceLens::Mapping`. A
+					// carried there too - see `scene::SurfaceLens::Mapping`. A
 					// mirror's is the identity and this line is free.
 					//
 					// **Composed by `SurfaceMapping` rather than here**, because
@@ -889,13 +889,13 @@ namespace client {
 
 				// **Opacity here, transparency in the component**, and the flip
 				// happens once. `scene::SurfaceCamera::ImageTransparency` is
-				// authored the way a script thinks — 0 is solid, like every
-				// other transparency in this engine — and the shader multiplies
+				// authored the way a script thinks - 0 is solid, like every
+				// other transparency in this engine - and the shader multiplies
 				// by the opposite, so converting at the boundary beats one
 				// subtraction in a shader nobody can put a breakpoint in.
 				// **Not clamped here.** The property setter is the authored gate
 				// and `Renderer` clamps again at its own boundary because
-				// `SurfaceView` is a public struct any host fills — a third copy
+				// `SurfaceView` is a public struct any host fills - a third copy
 				// in between makes none of the three read as the authority, and
 				// a future widening of the range has to find all of them.
 				view.ImageOpacity = 1.0f - target.ImageTransparency;
@@ -906,7 +906,7 @@ namespace client {
 
 				// **And how often it may redraw**, which is the same kind of
 				// pass-through. A surface is a whole scene render and there is
-				// no reason it should keep the screen's rate — see
+				// no reason it should keep the screen's rate - see
 				// `scene::SurfaceCamera::FPS` for why the default is a rate
 				// rather than "every frame".
 				view.FPS = target.FPS;
@@ -948,7 +948,7 @@ namespace client {
 		//
 		// **One buffer for every batch, and each batch takes a range of it.** The
 		// spans handed to the renderer have to survive until it has drawn them, so
-		// they cannot point at anything a loop iteration owns — and they cannot be
+		// they cannot point at anything a loop iteration owns - and they cannot be
 		// appended to while an earlier span is outstanding unless the buffer is
 		// reserved. It is cleared once a frame and reserved to the pool's own size
 		// the first time anything crosses, so no batch's span is ever invalidated
@@ -1058,13 +1058,13 @@ namespace client {
 
 		// **Walked from the emitter column rather than from the block list**, and
 		// the direction matters: a block knows how many particles it has and
-		// nothing about what they look like, and the shared half — texture, blend
-		// mode, flipbook — is on the emitter. Walking blocks would mean a lookup
+		// nothing about what they look like, and the shared half - texture, blend
+		// mode, flipbook - is on the emitter. Walking blocks would mean a lookup
 		// from `EmitterBlock::Owner` back to a row per block, which is a random
 		// access per emitter to avoid a sequential one.
 		//
 		// The order is therefore the emitter column's, which is stable within a
-		// tick — so the batch list is the same every frame and the draw order does
+		// tick - so the batch list is the same every frame and the draw order does
 		// not shuffle.
 		store.Each<const engine::effects::ParticleEmitter, const engine::effects::EmitterSlot>(
 			[&](engine::ecs::Entity,
@@ -1108,7 +1108,7 @@ namespace client {
 
 		// Gathered whole, then ordered, then cut. **Not cut during the walk**,
 		// because "the sixteen nearest" cannot be decided until the far ones have
-		// been seen — a partial sort over the whole set is the only form that is
+		// been seen - a partial sort over the whole set is the only form that is
 		// correct, and a scene has tens of lights rather than thousands.
 		store.Each<const engine::scene::Light>([&](engine::ecs::Entity entity,
 												   const engine::scene::Light &bulb) {
@@ -1128,7 +1128,7 @@ namespace client {
 				frame = placement->Frame;
 			} else {
 				// No place to shine from. Skipped rather than placed at the
-				// origin — see the header.
+				// origin - see the header.
 				return;
 			}
 
@@ -1158,7 +1158,7 @@ namespace client {
 
 				// Half the authored angle, as a cosine. Roblox's `Angle` is
 				// the full cone width, and the dot product test is against the
-				// half — halving in the shader would be doing it per fragment.
+				// half - halving in the shader would be doing it per fragment.
 				light.ConeCosine = std::cos(
 					std::clamp(bulb.Angle, 0.0f, 180.0f) * 0.5f * std::numbers::pi_v<float> / 180.0f
 				);
@@ -1171,7 +1171,7 @@ namespace client {
 		// A torch carried up to a portal lights the room beyond it, which is what
 		// "light works through a portal" means to somebody looking at one. The
 		// copy is the lamp mapped by the seam: `Point` for where it is, `Length`
-		// for how far it reaches, `Rotate` for which way a spot points — the same
+		// for how far it reaches, `Rotate` for which way a spot points - the same
 		// four applications a body, a camera and a ray go through, and mixing two
 		// of them up is a light that leads somewhere slightly wrong.
 		//
@@ -1183,7 +1183,7 @@ namespace client {
 		//
 		// **It ignores the aperture, and is no less correct than the lamp it
 		// copies.** A transported light spills into the whole far room rather
-		// than the hole's beam — and a local light in this pipeline is unshadowed
+		// than the hole's beam - and a local light in this pipeline is unshadowed
 		// and already spills through every wall in the world. When local shadows
 		// arrive the copy inherits them for free, because it is an ordinary entry
 		// in the same buffer. `NON-EUCLIDEAN.md` Part V.3.
@@ -1206,7 +1206,7 @@ namespace client {
 						}
 
 						// Out of reach of the hole itself, so nothing of it gets
-						// through — measured against the rectangle rather than
+						// through - measured against the rectangle rather than
 						// its plane, or every lamp in a building would transport
 						// through every pane in it.
 						if (engine::scene::SeamDistance(seam, lights[index].Position) >=
@@ -1233,7 +1233,7 @@ namespace client {
 				lights.end(),
 				[&eye](const engine::render::SceneLight &left, const engine::render::SceneLight &right) {
 					// Squared, because the square root is monotonic and cannot
-					// change an ordering — `scene::OrderForDrawing`'s reason.
+					// change an ordering - `scene::OrderForDrawing`'s reason.
 					const Vector3 a = left.Position - eye;
 					const Vector3 b = right.Position - eye;
 					return a.Dot(a) < b.Dot(b);
@@ -1252,7 +1252,7 @@ namespace client {
 		//
 		// **`ResolveAttachments` first and in `PreSimulation`**, because an
 		// emitter parented to an attachment reads that attachment's world frame
-		// when it spawns — and spawning happens in the same phase. Resolving after
+		// when it spawns - and spawning happens in the same phase. Resolving after
 		// would emit from where the attachment was last frame, which on a fast
 		// projectile is a visible lag between the rocket and its exhaust.
 		//
@@ -1271,8 +1271,8 @@ namespace client {
 			}
 
 			// **Registered in both phases, and that is not a duplicate system.**
-			// `ResolveAttachments` is a pure recompute of a cache — one multiply
-			// per attachment, from state it does not own — so running it twice
+			// `ResolveAttachments` is a pure recompute of a cache - one multiply
+			// per attachment, from state it does not own - so running it twice
 			// gives the same answer twice, which is what makes this safe where
 			// two *different* systems writing one field would not be.
 			//
@@ -1284,7 +1284,7 @@ namespace client {
 			//     rocket's exhaust would trail its nozzle by a tick.
 			//   - `client::CollectLights` reads it to place a lamp, and it runs
 			//     at present time. A world that is being *authored* never ticks
-			//     at all — `World::Present` runs `PreRender` alone — so
+			//     at all - `World::Present` runs `PreRender` alone - so
 			//     resolving only at `PreSimulation` left every attachment at the
 			//     identity and every lamp in the studio lighting the origin.
 			//
@@ -1305,8 +1305,8 @@ namespace client {
 				(void)engine::effects::RecordTrails(world, static_cast<float>(world.Time().Delta));
 			});
 			// The `PreRender` half of the pair above. First in this phase, so
-			// `build-ribbons` and everything the host reads after `Present` —
-			// `client::CollectLights`, `CollectParticleBatches` — see a frame
+			// `build-ribbons` and everything the host reads after `Present` -
+			// `client::CollectLights`, `CollectParticleBatches` - see a frame
 			// resolved against the transforms this frame is being drawn with.
 			scheduler.Add("resolve-attachments", Phase::PreRender, [](Store &world) {
 				(void)engine::scene::ResolveAttachments(world);
@@ -1327,14 +1327,14 @@ namespace client {
 		//
 		// **`InputState` is created here and never by a script**, because a world
 		// with no resource is one where every input query answers "nothing
-		// pressed" — which is exactly right for a server and exactly wrong for a
+		// pressed" - which is exactly right for a server and exactly wrong for a
 		// client that forgot to install it. Creating it at install time makes the
 		// presence of the resource mean "somebody is looking at this world".
 		//
 		// **The ground check is the client's rather than `scene`'s**, and that is
 		// the tier doing its job: `scene` may not link `physics`, so
 		// `StepCharacters` reads `Humanoid::Grounded` and this is what writes it.
-		// The same split `replication::DistancePriority::Blocked` already has —
+		// The same split `replication::DistancePriority::Blocked` already has -
 		// the arithmetic there, the query here.
 		void InstallControls(Store &store, Scheduler &scheduler) {
 			if (!store.HasResource<engine::scene::InputState>()) {
@@ -1346,7 +1346,7 @@ namespace client {
 
 			// **Camera control in `PreRender` and character control in
 			// `Simulation`**, which is not an inconsistency. A camera is
-			// presentation — it should turn at frame rate, because a mouse moves
+			// presentation - it should turn at frame rate, because a mouse moves
 			// at frame rate and a camera locked to the tick judders. A character
 			// moves a body the physics step integrates, so it has to be on the
 			// tick or two players at different frame rates would move at different
@@ -1372,7 +1372,7 @@ namespace client {
 		// How many particles a world's pool holds when nobody has said.
 		//
 		// **Half a million, because that is the number `ROADMAP.md` v0.10 asks
-		// for by name** — a hundred thousand emitters at five particles each — and
+		// for by name** - a hundred thousand emitters at five particles each - and
 		// a default below it makes the engine's stated target something every
 		// scene has to opt into.
 		//
@@ -1380,17 +1380,17 @@ namespace client {
 		// is what makes this a real decision rather than a generous one: the pool
 		// is allocated up front and never grows (`ParticleSystem::Capacity` gives
 		// the reason), so this is 524,288 slots times 68 bytes across the instance
-		// and state arrays — **about 36 MB a world**, resident from the moment
+		// and state arrays - **about 36 MB a world**, resident from the moment
 		// presentation is installed.
 		//
 		// That is affordable for one world and is not for twenty. A host that
-		// opens several at once — the studio with more than one place loaded —
+		// opens several at once - the studio with more than one place loaded -
 		// should pass its own figure rather than take this one, and
 		// `InstallParticles` takes the capacity for exactly that reason.
 		//
 		// **Measured before it was raised**: at 250,000 the stress scene's grid
 		// starved after about 41,000 of its 102,400 emitters, and the symptom was
-		// an effect that simply was not there rather than an error —
+		// an effect that simply was not there rather than an error -
 		// `ParticleStatistics::EmittersRefused` is the number that says so.
 		constexpr uint32_t DEFAULT_PARTICLE_POOL = 524288;
 	}
@@ -1428,8 +1428,8 @@ namespace client {
 		const float extent = store.Resource<WorldBounds>()->HalfExtent;
 
 		// **A scene that placed its own camera keeps it.** `MoveCamera` is this
-		// client's placeholder — it orbits whatever `ActiveCamera` names so that
-		// a scene with no camera of its own is still looked at from somewhere —
+		// client's placeholder - it orbits whatever `ActiveCamera` names so that
+		// a scene with no camera of its own is still looked at from somewhere -
 		// and running it beside a script that aimed one is two things writing
 		// one `Transform`, the second winning silently every tick.
 		//
@@ -1448,7 +1448,7 @@ namespace client {
 			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		}
 
-		// `PreRender`, ahead of the pass that reads it — `InstallPresentation`
+		// `PreRender`, ahead of the pass that reads it - `InstallPresentation`
 		// carries the argument, and this is the same three lines.
 		scheduler.Add("resolve-materials", Phase::PreRender, [](Store &world) {
 			(void)engine::scene::ResolveMaterials(world);
@@ -1479,7 +1479,7 @@ namespace client {
 	// TODO(render-pipeline): `InstallWorldPipelines` lived here.
 	//
 	// It was the join between a world and the renderer, and **it was the last
-	// link to be built** — the catalogue, the document, the editor panel, the
+	// link to be built** - the catalogue, the document, the editor panel, the
 	// `PipelineSet` on the world and `Renderer::SetPipeline` all existed while
 	// nothing connected the last two, so "Save to world" wrote a document that
 	// round-tripped perfectly and never drew a pixel. Whatever replaces it, this
@@ -1494,7 +1494,7 @@ namespace client {
 	// - **The installed key was qualified by world id**, because pipelines are
 	//   global to the renderer by name while a world's names are its own. Two
 	//   worlds each calling theirs `main` is ordinary, and with a second viewport
-	//   open both draw in one frame — an unqualified key meant whichever world
+	//   open both draw in one frame - an unqualified key meant whichever world
 	//   installed last drew both.
 	// - **Installed on a world change, not per frame.** Installing compiles the
 	//   graph and reports what is wrong with it, so per frame that is a compile
@@ -1508,7 +1508,7 @@ namespace client {
 		//
 		// It had no registration at all before v0.7, which meant
 		// `Store::SetResource` minted one under the compiler's spelling of the
-		// type — rule 4's exact failure, sitting unnoticed because nothing had
+		// type - rule 4's exact failure, sitting unnoticed because nothing had
 		// ever tried to snapshot a world that had one. The studio's Stop does:
 		// it saves the universe when Play is pressed and restores it when Stop
 		// is, and `Store::Save` refuses a resource with no serialisation rather
@@ -1546,7 +1546,7 @@ namespace client {
 		if (!store.HasResource<WorldBounds>()) {
 			// A default rather than nothing. `WorldBounds` is what the
 			// replication wire quantises against and what a camera would frame,
-			// and a world opened in an editor has authored no such number — so
+			// and a world opened in an editor has authored no such number - so
 			// it gets the type's own default instead of a missing resource
 			// somebody later reads through a null pointer.
 			store.SetResource(WorldBounds{});
@@ -1560,7 +1560,7 @@ namespace client {
 
 		// **Who a teleport brings in, and it must not depend on scripts.** A
 		// destination is chosen by a script in *another* world, so a world can be
-		// somebody's destination without containing a line of code — and
+		// somebody's destination without containing a line of code - and
 		// admitting used to happen inside the Luau runtime's own delivery pump.
 		// A world with no runtime took the payload into its inbox and left it
 		// there: destroyed in the world you left, never built in the world you
@@ -1575,7 +1575,7 @@ namespace client {
 		// **It was `PreSimulation`, and that made it do nothing at all in an
 		// edited world.** `World::Present` runs `PreRender` alone and the studio
 		// never ticks while somebody is authoring, so a `Material` dropped onto
-		// a part changed the part's appearance only after Play was pressed —
+		// a part changed the part's appearance only after Play was pressed -
 		// which reads as the material not being loaded rather than as a pass
 		// that did not run. The same mistake put every part at the origin
 		// through `PreviousTransform`; `studio::PresentationAlpha` is that one.
@@ -1583,7 +1583,7 @@ namespace client {
 		// Nothing in the tick reads a `SurfaceAppearance`, so the phase this
 		// belongs in is the one its only consumer runs in. It now costs once per
 		// *frame* rather than once per tick, which is a walk of the material
-		// instances — a handful in a scene, against a draw list of thousands.
+		// instances - a handful in a scene, against a draw list of thousands.
 		scheduler.Add("resolve-materials", Phase::PreRender, [](Store &world) {
 			(void)engine::scene::ResolveMaterials(world);
 		});
@@ -1595,13 +1595,13 @@ namespace client {
 		// rectangle everywhere else: the studio, `--game` and an imported world
 		// all come through here, and none of them was aiming anything.
 		//
-		// The visible half of that failure is not the camera at all — it is
+		// The visible half of that failure is not the camera at all - it is
 		// step 4 of `scene/SurfaceCameras.hpp`. Aiming a camera is also what
 		// writes `Visual::Surface` on the pane it is parented to, so without
 		// this system the pane keeps the component's default of -1, samples no
 		// texture, and draws as its own flat `Tint`. `Mirrors-1-world.luau`
 		// tints its pane white, so the symptom was a white part beside a frame
-		// that was rendering perfectly — which reads as a broken surface pass
+		// that was rendering perfectly - which reads as a broken surface pass
 		// rather than as a missing system.
 		//
 		// **Between the two, not beside them.** `sync-rendered` decides what is

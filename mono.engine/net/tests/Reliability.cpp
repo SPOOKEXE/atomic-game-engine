@@ -119,7 +119,7 @@ TEST_CASE("an acknowledgement retires nothing it does not name", "[net][reliabil
 	// Older than anything sent, and with an empty window.
 	CHECK(sender.OnAcknowledge(Ack(4), 0.0) == 0);
 
-	// Newer, but the bit for 5 is not set — 5 is what was lost.
+	// Newer, but the bit for 5 is not set - 5 is what was lost.
 	CHECK(sender.OnAcknowledge(Ack(9, BitFor(9, 8)), 0.0) == 0);
 	CHECK(sender.Waiting() == 1);
 }
@@ -129,8 +129,8 @@ TEST_CASE("a receiver that has heard nothing acknowledges nothing", "[net][relia
 	ReliableSender sender(Quick());
 	REQUIRE(sender.Track(0, Body(1), 0.0));
 
-	// The trap: a window starting at zero acknowledges sequence zero — the
-	// first reliable payload a Link ever sends — before it has arrived, and
+	// The trap: a window starting at zero acknowledges sequence zero - the
+	// first reliable payload a Link ever sends - before it has arrived, and
 	// that payload is then never resent. It starts one behind instead.
 	const PacketHeader header = receiver.Acknowledging(PacketHeader{});
 	CHECK(header.Acknowledge == 0xFFFF);
@@ -193,7 +193,7 @@ TEST_CASE("a resend the budget refuses is held and offered again", "[net][reliab
 	CHECK(sent == 1);
 	CHECK(link.Stats().SendsOverBudget == 1);
 
-	// Its clock never restarted, so it is still due — and still held.
+	// Its clock never restarted, so it is still due - and still held.
 	const auto again = sender.Due(0.1);
 	REQUIRE(again.size() == 1);
 	CHECK(again[0].Sequence == 1);
@@ -676,7 +676,7 @@ TEST_CASE("many independent streams all arrive intact", "[net][reliability][fuzz
 // **This is what `ConnectionStats::RoundTripMilliseconds` was declared for and
 // never filled in.** The field sat at zero from v0.3 to v0.9 while
 // `replication::Rewind::TickSeenBy` read it, so lag compensation corrected for
-// the interpolation delay and not for travel — a conservative rewind, and one
+// the interpolation delay and not for travel - a conservative rewind, and one
 // nothing said was conservative.
 
 TEST_CASE("an acknowledgement measures the round trip", "[net][reliability]") {
@@ -724,7 +724,7 @@ TEST_CASE("a resent payload is never measured, which is Karn's rule", "[net][rel
 	// **The detail that decides whether this is right or merely present.** An
 	// acknowledgement of a resent packet does not say *which* transmission it
 	// answers, so a sample from one is either the true trip or the trip plus a
-	// retransmit timeout — and there is no way to tell. Measuring them makes
+	// retransmit timeout - and there is no way to tell. Measuring them makes
 	// the estimate worst on exactly the links that need it most.
 	ReliableSender sender(Quick());
 
@@ -746,8 +746,8 @@ TEST_CASE("a resent payload is never measured, which is Karn's rule", "[net][rel
 }
 
 TEST_CASE("a window acknowledgement measures too", "[net][reliability]") {
-	// Retiring through the bitfield is the common case on a busy link — one
-	// packet retires up to thirty-three — so measuring only the direct
+	// Retiring through the bitfield is the common case on a busy link - one
+	// packet retires up to thirty-three - so measuring only the direct
 	// acknowledgement would sample a small and unrepresentative slice.
 	ReliableSender sender(Quick());
 
@@ -835,7 +835,7 @@ TEST_CASE("a link that swings between two delays reports the swing", "[net][reli
 	CHECK(sender.SmoothedRoundTripSeconds() < 0.08);
 
 	// The variance is what says the next sample could be twenty milliseconds
-	// from the estimate — and `CongestionSettings::VarianceFactor` is what
+	// from the estimate - and `CongestionSettings::VarianceFactor` is what
 	// consumes it, so that this path is not read as one with a queue on it.
 	CHECK(sender.RoundTripVarianceSeconds() > 0.01);
 }

@@ -18,14 +18,14 @@ namespace engine::assets {
 	// What subsystem an asset belongs to.
 	enum class AssetKind : uint8_t {
 		// No claim. What an unrecognised extension produces, and what an old
-		// manifest's assets read as. Deliverable like anything else — an origin
-		// moves bytes it does not interpret — and simply not routable by kind.
+		// manifest's assets read as. Deliverable like anything else - an origin
+		// moves bytes it does not interpret - and simply not routable by kind.
 		Unknown = 0,
 
 		// Geometry. `ROADMAP.md` v0.9's mesh importing and baking pipeline.
 		Mesh = 1,
 
-		// An image, whatever it is eventually sampled as — albedo, normal,
+		// An image, whatever it is eventually sampled as - albedo, normal,
 		// lightmap. **Not split by role here**, because role is a property of
 		// the material that references it rather than of the bytes, and a
 		// manifest that guessed would be wrong for every texture used twice.
@@ -35,7 +35,7 @@ namespace engine::assets {
 		// and in-game".
 		Audio = 3,
 
-		// A material or surface description — what binds textures to a mesh.
+		// A material or surface description - what binds textures to a mesh.
 		Material = 4,
 
 		// A typeface.
@@ -48,7 +48,7 @@ namespace engine::assets {
 		// Moving pictures, for `VideoFrame`.
 		Video = 7,
 
-		// Structured data with no subsystem of its own — a level description, a
+		// Structured data with no subsystem of its own - a level description, a
 		// table, a game file. The honest bucket rather than a dumping ground:
 		// anything here is delivered and handed over whole.
 		Data = 8,
@@ -57,13 +57,13 @@ namespace engine::assets {
 		//
 		// **Its own kind rather than `Script` or `Data`.** `Script` is source a
 		// VM may run in a sandbox and `Data` is bytes handed over whole; a
-		// shader is neither — it is compiled ahead of time, it is handed to a
+		// shader is neither - it is compiled ahead of time, it is handed to a
 		// GPU rather than to an interpreter, and whether it is *safe* is a
 		// question about a driver rather than about a sandbox. Routing it as
 		// either would put it through the wrong subsystem's door.
 		//
 		// **What arrives is SPIR-V.** Source extensions route here too, because
-		// what somebody publishes is what they wrote — `bake` is what turns one
+		// what somebody publishes is what they wrote - `bake` is what turns one
 		// into the other, exactly as it does for a mesh.
 		//
 		// @since v0.11
@@ -73,7 +73,7 @@ namespace engine::assets {
 	// Returns a stable, human-readable name for a kind.
 	//
 	// Lowercase and stable, because it reaches a log line, a studio panel and a
-	// command line — all three of which are places `AGENTS.md` rule 4 says a
+	// command line - all three of which are places `AGENTS.md` rule 4 says a
 	// name goes rather than a number.
 	//
 	// @param kind The kind to name.
@@ -90,7 +90,7 @@ namespace engine::assets {
 	//
 	// **The extension table holds both sides of every format and this is the
 	// question it cannot answer.** `.pmx` and `.amesh` are both `Mesh`; `.png`
-	// and `.atex` are both `Texture` — which is right for *routing*, because a
+	// and `.atex` are both `Texture` - which is right for *routing*, because a
 	// publisher pointed at a source tree and one pointed at a baked tree must
 	// classify the same way. It is wrong for anything asking "will this load",
 	// and until v0.10 nothing asked: the local store published `raw/` directly,
@@ -101,7 +101,7 @@ namespace engine::assets {
 	// **A source is not "unreadable", it is unbaked**, and the two look the same
 	// from here. What this answers is whether `assetc` has already been over it.
 	//
-	// Formats with no baked form of their own — audio, scripts, fonts, data —
+	// Formats with no baked form of their own - audio, scripts, fonts, data -
 	// are readable as they are, which is why this is not simply a list of three
 	// extensions.
 	//

@@ -3,9 +3,9 @@
 // A run of fixed-size chunks holding component values whose type is known only
 // at runtime.
 //
-// This is where a property physically lives. An archetype is a set of these —
+// This is where a property physically lives. An archetype is a set of these -
 // one per component in its set, all the same length and chunked on the same row
-// boundaries — so a system iterating `<Transform, Motion>` walks two packed
+// boundaries - so a system iterating `<Transform, Motion>` walks two packed
 // arrays a chunk at a time rather than chasing an object graph, and Luau writing
 // `part.Size` resolves a name to a column and an offset.
 //
@@ -13,7 +13,7 @@
 //
 // - **Lifetime goes through the descriptor.** Constructing, destroying, copying
 //   and moving are function pointers, because there is no `T` here to call.
-//   For a trivially copyable component — nearly all of them — the column takes
+//   For a trivially copyable component - nearly all of them - the column takes
 //   a memcpy path and never calls one.
 // - **Removal is swap-with-last.** Deleting a row touches two rows instead of
 //   shifting a tail, which is what keeps destroying an entity O(1). Row order
@@ -29,9 +29,9 @@
 //   that peaked at ten thousand entities and settled at a hundred used to hold
 //   the peak forever, and a thousand such worlds in one host measured **703 MB
 //   against 2.7 MB of live rows**. The pool is what makes giving it back
-//   affordable — see `src/ChunkPool.hpp`, which carries that reasoning.
+//   affordable - see `src/ChunkPool.hpp`, which carries that reasoning.
 //
-// A tag — a component with no data — is a column of zero-byte rows. It counts
+// A tag - a component with no data - is a column of zero-byte rows. It counts
 // its rows and allocates nothing, because the presence of the component is the
 // entire value.
 //
@@ -63,7 +63,7 @@ namespace engine::ecs {
 		// and the case that would have is the small one. A resource is a column of
 		// a single row and some of them are hundreds of bytes wide, so a fixed
 		// chunk of a thousand rows would have charged a world more than a megabyte
-		// to hold one — worse than the leak this item exists to close, and worse
+		// to hold one - worse than the leak this item exists to close, and worse
 		// for every world rather than only the ones that shrank.
 		static constexpr size_t FIRST_CHUNK_SHIFT = 3;
 
@@ -76,7 +76,7 @@ namespace engine::ecs {
 		// fixed chunk size has to choose: small enough that a settled world gives
 		// its peak back, or large enough that a big world's rows are not scattered
 		// across hundreds of allocations. Measured, a fixed thousand rows cost
-		// **8% on `Each` over 100k entities** — the same shape as the eight times
+		// **8% on `Each` over 100k entities** - the same shape as the eight times
 		// as many allocations that got a smaller `SparseSet` page rejected at
 		// 8-21%.
 		//
@@ -88,7 +88,7 @@ namespace engine::ecs {
 		// the copy taken out and the release put in.
 		//
 		// The boundaries are a function of the row index alone, so **every column
-		// in an archetype divides identically** whatever its stride — which is what
+		// in an archetype divides identically** whatever its stride - which is what
 		// `EachBatch<Transform, Motion>` needs to hand out two pointers over the
 		// same rows.
 		//
@@ -207,7 +207,7 @@ namespace engine::ecs {
 		// The chunk directory: one base address per chunk, in row order.
 		//
 		// What the iteration paths resolve once per table and then index by
-		// `row >> CHUNK_SHIFT`. Empty — and therefore `nullptr` — for a tag
+		// `row >> CHUNK_SHIFT`. Empty - and therefore `nullptr` - for a tag
 		// column, for a typeless one, and for a data column holding no rows,
 		// which is why every caller checks the row count first rather than the
 		// pointer.
@@ -291,7 +291,7 @@ namespace engine::ecs {
 		// Appends one row moved out of another column of the same type.
 		//
 		// The source row is left constructed and destructible; the caller
-		// removes it. This is the archetype-move path — an entity gaining a
+		// removes it. This is the archetype-move path - an entity gaining a
 		// component moves each of its existing values to the new archetype's
 		// columns rather than copying them.
 		//
@@ -349,7 +349,7 @@ namespace engine::ecs {
 		size_t Alignment = 1;
 		bool Trivial = false;
 
-		// One base address per chunk. Never reallocated in place — a chunk keeps
+		// One base address per chunk. Never reallocated in place - a chunk keeps
 		// its address for its whole time in this column, so only the directory
 		// moves when the count changes.
 		std::vector<void *> Chunks;

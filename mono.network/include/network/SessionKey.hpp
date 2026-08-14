@@ -16,14 +16,14 @@
 //
 // **It is not a transport key and there is nothing here that encrypts.**
 // `engine::net::Handshake` already derives per-session ciphers from an
-// ephemeral exchange, and forward secrecy is the whole reason it is ephemeral —
+// ephemeral exchange, and forward secrecy is the whole reason it is ephemeral -
 // a configured key that also encrypted traffic would make every past session
 // readable from one file on one machine. So this authenticates and stops.
 //
 // **A MAC rather than a signature**, for `assets::Grant`'s reason: both ends of
 // a private session are one trust domain, HMAC-SHA256 verification is cheap,
 // and an asymmetric operation per announcement would buy nothing. The
-// asymmetric key is where the trust boundary actually is — `assets::Signature`
+// asymmetric key is where the trust boundary actually is - `assets::Signature`
 // over a manifest, `replication::ConnectorSettings::ServerIdentity` over a
 // server.
 //
@@ -51,7 +51,7 @@ namespace network {
 		// Key length. 32 bytes, matching HMAC-SHA256's block-derived strength.
 		static constexpr size_t BYTES = 32;
 
-		// Tag length. The full HMAC-SHA256 output, untruncated — the thing
+		// Tag length. The full HMAC-SHA256 output, untruncated - the thing
 		// being tagged is a whole announcement, and 16 saved bytes off a
 		// datagram that already carries two strings is not worth the argument
 		// about how much strength truncation costs.
@@ -65,7 +65,7 @@ namespace network {
 		// each guess against a stolen announcement into a fifth of a second
 		// too, which is the only number that matters. It is written down here
 		// because changing it changes every key ever derived from a
-		// passphrase — see FromPassphrase.
+		// passphrase - see FromPassphrase.
 		static constexpr uint32_t PASSPHRASE_ROUNDS = 200000;
 
 		// Builds a key from shared secret material.
@@ -89,8 +89,8 @@ namespace network {
 		// choice for a password database and the right one here: both ends have
 		// to derive the *same* key from the same words with nothing else
 		// exchanged, so there is nowhere for a per-key salt to come from. What
-		// that costs is precomputation — a table of common passphrases works
-		// against every session ever — and what it buys is a session two people
+		// that costs is precomputation - a table of common passphrases works
+		// against every session ever - and what it buys is a session two people
 		// can join by agreeing on a sentence. Pick a sentence.
 		//
 		// **The salt and the round count are part of the key.** Changing either
@@ -115,7 +115,7 @@ namespace network {
 
 		// Draws a fresh key from the operating system's entropy.
 		//
-		// @return The key, or nothing if the operating system refused — which
+		// @return The key, or nothing if the operating system refused - which
 		//         is a refusal to host a private session, never a fallback to a
 		//         weaker source.
 		static std::optional<SessionKey> Draw();
@@ -158,7 +158,7 @@ namespace network {
 		// the refusals, which is a forgery with more steps.
 		//
 		// @param over The bytes the tag should commit to.
-		// @param tag  The tag presented, of any length — a wrong length is a
+		// @param tag  The tag presented, of any length - a wrong length is a
 		//        refusal rather than a read past the end.
 		// @return Whether the tag verifies.
 		bool Admits(std::span<const std::byte> over, std::span<const std::byte> tag) const;

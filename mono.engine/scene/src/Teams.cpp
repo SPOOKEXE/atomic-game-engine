@@ -19,7 +19,7 @@ namespace engine::scene {
 	ecs::ClassId TeamClass() {
 		// **Through `ServiceClass`, because `Teams` is where a `Team` lives.**
 		// The whole service tree is one registration and this is one of its
-		// doors — the shape `PlayerClass` already has beside it.
+		// doors - the shape `PlayerClass` already has beside it.
 		static const ecs::ClassId team = (ServiceClass(), ecs::Classes::Find(core::Name("Team")));
 		return team;
 	}

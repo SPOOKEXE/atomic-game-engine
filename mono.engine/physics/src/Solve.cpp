@@ -36,7 +36,7 @@ namespace engine::physics {
 		// Every shape here is symmetric about its own axes, so the local tensor
 		// is diagonal and these three numbers are the whole of it. The formulae
 		// are the standard solid ones, written against **half**-extents because
-		// that is what `Collider::Extent` is — reading them as full extents
+		// that is what `Collider::Extent` is - reading them as full extents
 		// makes every body four times harder to turn, which reads as a
 		// suspiciously heavy world rather than as a units mistake.
 		core::Vector3 InverseInertiaOf(const scene::Collider &collider, float mass) {
@@ -92,7 +92,7 @@ namespace engine::physics {
 		//
 		// Positive means moving apart. The angular halves read the precomputed
 		// torques rather than building the point velocities, which is the same
-		// scalar triple product written the cheap way round — see
+		// scalar triple product written the cheap way round - see
 		// `ContactAxis::FirstTorque`.
 		float ClosingSpeed(const SolverBody &first, const SolverBody &second, const ContactAxis &axis) {
 			return (second.LinearVelocity - first.LinearVelocity).Dot(axis.Direction) +
@@ -104,8 +104,8 @@ namespace engine::physics {
 		//
 		// Built from whichever world axis the normal is least aligned with, so
 		// the cross product is never near-degenerate. The choice is a function
-		// of the normal alone, which is what keeps the friction basis — and
-		// therefore the warm start that reuses its impulses — the same from one
+		// of the normal alone, which is what keeps the friction basis - and
+		// therefore the warm start that reuses its impulses - the same from one
 		// tick to the next.
 		void TangentsFor(const core::Vector3 &normal, core::Vector3 &first, core::Vector3 &second) {
 			const core::Vector3 seed = std::abs(normal.X) < 0.57735f   ? core::Vector3::XAxis
@@ -199,7 +199,7 @@ namespace engine::physics {
 			const scene::PhysicsProperties *physical
 		) {
 			if (body == nullptr || collider == nullptr) {
-				// No `RigidBody` is not a static body — `scene::Enums` is
+				// No `RigidBody` is not a static body - `scene::Enums` is
 				// explicit that it is not a body at all. It still stops things,
 				// which is exactly what an infinite mass does.
 				return BodyFacts{};
@@ -208,7 +208,7 @@ namespace engine::physics {
 			// **`scene::MassOf` and not `body->Mass`, because density is a mass
 			// too.** A part with `CustomPhysicalProperties` weighs its density
 			// times its volume, and the properties panel shows the same number
-			// through the same function — a solver with its own arithmetic here
+			// through the same function - a solver with its own arithmetic here
 			// would be a part that weighs one thing and reads as another.
 			const float mass = scene::MassOf(*collider, *body, physical);
 			if (body->Kind != scene::BodyKind::Dynamic || !(mass > 0.0f)) {
@@ -238,7 +238,7 @@ namespace engine::physics {
 		// Only the bodies a manifold names. A body nothing touches has no
 		// constraint to solve and no velocity for `Publish` to write back, so
 		// gathering every dynamic row would be a pass over the world to find
-		// the few that are in contact — the shape `CODE_QUALITY.md` names.
+		// the few that are in contact - the shape `CODE_QUALITY.md` names.
 		//
 		// **The sort is over entity ids, not over bodies.** Two entries per
 		// manifold go in and only `Owner` is meaningful at this point, so
@@ -283,7 +283,7 @@ namespace engine::physics {
 		// Safe to reach typed, and only because of the guard at the top of this
 		// function. `RegisterPhysicsComponents` registers the `scene` types
 		// before its own, so a store that got past `PreparedWorldMutable` has
-		// `scene.SurfaceTable` registered under its explicit name — and a store
+		// `scene.SurfaceTable` registered under its explicit name - and a store
 		// that did not never reaches this line. That is the ordering the guard
 		// buys, and moving this above it would reintroduce the hazard
 		// `WorldResource.hpp` describes with a different type.
@@ -307,7 +307,7 @@ namespace engine::physics {
 			}
 
 			// **The one `Surface` read.** One row per body per tick, resolved
-			// before a single impulse is computed — `v02v03v04.md` §3.2 asks
+			// before a single impulse is computed - `v02v03v04.md` §3.2 asks
 			// for exactly this and the cost it is avoiding is a name lookup per
 			// contact per iteration. An unregistered material takes the
 			// defaults rather than logging: `SurfaceTable` refuses a
@@ -327,7 +327,7 @@ namespace engine::physics {
 
 			// **The part's own numbers win over its material's.** `Surface`
 			// names what a thing is made of and this is the crate that is
-			// deliberately slippery — `scene::PhysicsProperties` carries the
+			// deliberately slippery - `scene::PhysicsProperties` carries the
 			// argument for it being an override rather than a replacement, and
 			// `Custom` is what says whether there is one at all.
 			//
@@ -352,7 +352,7 @@ namespace engine::physics {
 		// A sleeping body has no `scene::Motion`, so the broad phase has it in
 		// the static index and only an *awake* neighbour can produce a pair
 		// with it. One pass in pair order, so a stack wakes one layer per tick
-		// — bounded, deterministic, and visibly a settling stack rather than a
+		// - bounded, deterministic, and visibly a settling stack rather than a
 		// whole scene jumping at once.
 		for (size_t at = 0; at < manifolds.size(); at++) {
 			SolverBody &first = bodies[located[at].first];
@@ -443,7 +443,7 @@ namespace engine::physics {
 
 				// Restitution is a function of how fast they were closing
 				// *before* anything was applied, so it is captured here and not
-				// recomputed per iteration — an iteration that recomputed it
+				// recomputed per iteration - an iteration that recomputed it
 				// would keep finding a smaller closing speed and add energy
 				// chasing it.
 				const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
@@ -493,7 +493,7 @@ namespace engine::physics {
 				// stops fitting in cache somewhere around a few thousand
 				// contacts, and the row's arithmetic cannot start until they
 				// arrive. Asking for them one row ahead is what turns that wait
-				// into work already done. A hint only — it changes no result,
+				// into work already done. A hint only - it changes no result,
 				// and the bounds test costs one predictable branch per row.
 				if (at + 1 < rows.size()) {
 					__builtin_prefetch(&bodies[rows[at + 1].First]);
@@ -525,7 +525,7 @@ namespace engine::physics {
 
 				// **No penetration term here.** The overlap is unwound by the
 				// correction sweep below, against velocities that never reach a
-				// `scene::Motion` — so a body at rest ends the tick at rest
+				// `scene::Motion` - so a body at rest ends the tick at rest
 				// rather than carrying one tick of gravity upward forever.
 				const float wanted = normal.Impulse + (row.Bounce - separating) * normal.Mass;
 
@@ -569,8 +569,8 @@ namespace engine::physics {
 
 		// Sorted, because next tick's warm start binary-searches this. The rows
 		// arrive in pair order already, but a manifold's own points do not
-		// arrive in feature order — reduction keeps the four that hold the face
-		// widest, not the first four — so the last part of the key is the part
+		// arrive in feature order - reduction keeps the four that hold the face
+		// widest, not the first four - so the last part of the key is the part
 		// that needs the sort.
 		std::sort(next.begin(), next.end());
 		std::swap(PipelineInternals::ImpulseCache(*world), next);

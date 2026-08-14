@@ -2,7 +2,7 @@
 //
 // **This panel exists because of rule 3, not in spite of it.** "Nothing crossing
 // a world boundary is a pointer" means every crossing is already a copy with a
-// bus, a key, a sender and a payload — sitting in two ordinary resources on the
+// bus, a key, a sender and a payload - sitting in two ordinary resources on the
 // world's own store. So this reads what is there. There is no instrumentation
 // here, no second recording path, and nothing that would have to be switched on.
 //
@@ -12,7 +12,7 @@
 // count and nothing about the traffic between them.
 //
 // **Read every frame, cached nowhere.** `Inbox` is replaced wholesale each
-// barrier — `Postbox.hpp` says so — so a cached copy would be showing a barrier
+// barrier - `Postbox.hpp` says so - so a cached copy would be showing a barrier
 // that has already been and gone. That is `AGENTS.md`'s rule for every panel
 // here and it bites harder than usual on this one.
 
@@ -116,7 +116,7 @@ namespace studio {
 
 			// Snapshotted inside `Enter` and drawn outside it. Drawing from
 			// within would hold a scoped store reference across imgui calls that
-			// can open a popup and run other code — and `Enter` aborts on
+			// can open a popup and run other code - and `Enter` aborts on
 			// re-entry rather than allowing it.
 			std::vector<Envelope> pending;
 			std::vector<Delivery> arrived;
@@ -146,7 +146,7 @@ namespace studio {
 			std::snprintf(
 				header,
 				sizeof(header),
-				"%s — %zu queued, %zu arrived###world",
+				"%s - %zu queued, %zu arrived###world",
 				name.c_str(),
 				pending.size(),
 				arrived.size()
@@ -157,7 +157,7 @@ namespace studio {
 					// Worth saying out loud: a replica may not write to a bus at
 					// all, so an outbox with anything in it here is a bug rather
 					// than traffic.
-					ImGui::TextDisabled("replica — DataStore, MemoryStore and Teleport are refused here");
+					ImGui::TextDisabled("replica - DataStore, MemoryStore and Teleport are refused here");
 				}
 
 				if (haveBudget) {

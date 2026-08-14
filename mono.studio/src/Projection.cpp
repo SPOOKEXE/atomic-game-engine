@@ -18,7 +18,7 @@ namespace studio {
 		//
 		// **Not zero.** The perspective divide by a `w` approaching zero sends a
 		// point to infinity, and a line clipped at exactly the eye plane still
-		// produces coordinates in the millions — which imgui then rasterises as
+		// produces coordinates in the millions - which imgui then rasterises as
 		// a stripe across the whole panel. A small positive epsilon is the
 		// difference between "clipped" and "clipped, and the last segment ate
 		// the screen".
@@ -53,7 +53,7 @@ namespace studio {
 		// one and the determinant reduces to `1 - cos^2` between them.
 		// **From the axis to the ray, not the other way round.** The solve
 		// measures `along` outwards from `origin`, so reversing this reverses
-		// every drag — the handle follows the cursor in a mirror, which reads as
+		// every drag - the handle follows the cursor in a mirror, which reads as
 		// the gizmo being attached to the wrong axis rather than as a sign.
 		const Vector3 between = ray.Origin - origin;
 
@@ -61,7 +61,7 @@ namespace studio {
 		const float determinant = 1.0f - axisDotRay * axisDotRay;
 
 		// Near parallel: the two lines never meaningfully approach, and the
-		// solve below divides by almost nothing. See the declaration — this is
+		// solve below divides by almost nothing. See the declaration - this is
 		// the axis-pointing-at-you case, and it has to refuse rather than
 		// produce a number.
 		constexpr float PARALLEL = 1e-4f;
@@ -87,7 +87,7 @@ namespace studio {
 		}
 
 		// Clip to normalised device coordinates, then NDC to the image rect.
-		// **The rect, not the panel** — see the header.
+		// **The rect, not the panel** - see the header.
 		const glm::vec2 ndc(clip.x / clip.w, clip.y / clip.w);
 
 		// Y is flipped because NDC counts upwards from the centre and a panel
@@ -119,7 +119,7 @@ namespace studio {
 
 		// One endpoint crosses. `w` is linear in world position, so the
 		// parameter at which it reaches the plane is exact rather than
-		// approached — and the interpolated clip-space point is the same one
+		// approached - and the interpolated clip-space point is the same one
 		// that clipping in world space and re-projecting would give.
 		if (aBehind != bBehind) {
 			const float t = (plane - a.w) / (b.w - a.w);
@@ -160,7 +160,7 @@ namespace studio {
 		// Two points down the same pixel, un-projected and subtracted. Taking a
 		// single near-plane point and treating it as a direction would be wrong
 		// by the eye offset, which is invisible at the centre of the panel and
-		// grows towards the corners — the same shape of bug as the image-rect
+		// grows towards the corners - the same shape of bug as the image-rect
 		// trap, and just as easy to miss.
 		const glm::vec4 nearPoint = inverse * glm::vec4(ndc.x, ndc.y, 0.0f, 1.0f);
 		const glm::vec4 farPoint = inverse * glm::vec4(ndc.x, ndc.y, 1.0f, 1.0f);
@@ -188,7 +188,7 @@ namespace studio {
 	// **The support function, which is what "resting on it" needs.** A box
 	// laid on a slope touches the slope at one corner, and the distance
 	// from the centre to that corner along the surface normal is exactly
-	// this sum — using half the height instead would sink a tilted part
+	// this sum - using half the height instead would sink a tilted part
 	// into the ground by however much it is tilted.
 	float SupportAlong(const CFrame &frame, const Vector3 &half, const Vector3 &direction) {
 		const Vector3 right = frame.RightVector();
@@ -223,7 +223,7 @@ namespace studio {
 		}
 		forward = forward.Unit();
 
-		// Right-handed, and `LookVector` is `-Z` — so the basis's third
+		// Right-handed, and `LookVector` is `-Z` - so the basis's third
 		// column is the *back*. Getting this the other way round mirrors
 		// every part that is dropped, which reads as the model being wrong
 		// rather than the maths.

@@ -4,15 +4,15 @@
 //
 // **Not `<engine/world/Bus.hpp>`, which is one layer down and is the bus.** That
 // header says what a topic, a ticket and a status *are*; this one holds the two
-// things a *script binding* over them needs and neither language decides — who
+// things a *script binding* over them needs and neither language decides - who
 // is listening to a topic, and the word a script sees for a refusal.
 //
 // ## The subscription table
 //
 // **Shared machinery beside `SignalTable` and `DebrisQueue`, and for their
 // reason.** A topic is a string and a listener is a callable neither language
-// may interpret, so what is left — which callables a topic has and the order a
-// delivery reaches them in — names no VM and must not be two implementations. It
+// may interpret, so what is left - which callables a topic has and the order a
+// delivery reaches them in - names no VM and must not be two implementations. It
 // was two: Luau kept a table per topic in the registry under
 // `engine.messaging.subscriptions` and JavaScript kept a `std::unordered_map` on
 // its context, so `MessagingService` could not be described once even though
@@ -20,7 +20,7 @@
 //
 // **Order within a topic is insertion order, and that is the whole contract.**
 // Two scripts subscribing to one topic are delivered to in the order they
-// subscribed, on every run of the recording — which is `SignalTable`'s rule and
+// subscribed, on every run of the recording - which is `SignalTable`'s rule and
 // `DebrisQueue`'s, said for a third list.
 //
 // **No unsubscribe, because the bus has none.** `Postbox::Subscribe` registers a
@@ -72,8 +72,8 @@ namespace engine::script {
 		}
 
 		// **There is no `Clear` and no release walk**, unlike `SignalTable` and
-		// `TaskQueue`. A subscription lasts as long as the VM does — there is no
-		// unsubscribe for the same reason — so the only moment every reference
+		// `TaskQueue`. A subscription lasts as long as the VM does - there is no
+		// unsubscribe for the same reason - so the only moment every reference
 		// would be handed back is the one where the whole VM is being freed and
 		// the registry goes with it.
 
@@ -86,7 +86,7 @@ namespace engine::script {
 	// A stable, machine-readable name for a bus refusal.
 	//
 	// **Not `world::Describe(BusStatus)`, and the difference is who reads it.**
-	// That one is prose for a log — "version conflict" — and this is a value a
+	// That one is prose for a log - "version conflict" - and this is a value a
 	// script *compares against*, so it is the member's own spelling and changing
 	// one would break a game rather than a sentence. Both languages hand the same
 	// word back beside a reply, which is why it is here rather than once per pump:

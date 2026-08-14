@@ -56,7 +56,7 @@ namespace engine::net::http {
 		// Connections closed for malformed or unsupported requests.
 		size_t Rejected = 0;
 
-		// Connections that ended normally — the peer went away, or the idle
+		// Connections that ended normally - the peer went away, or the idle
 		// timeout took one.
 		//
 		// **Apart from `Rejected`, because the two mean opposite things about
@@ -105,7 +105,7 @@ namespace engine::net::http {
 
 		// Stops listening and drops every open connection.
 		//
-		// **Idempotent, because the destructor calls it too** — an origin shut
+		// **Idempotent, because the destructor calls it too** - an origin shut
 		// down explicitly and then destroyed is the ordinary path, not a
 		// mistake.
 		virtual void Close() = 0;

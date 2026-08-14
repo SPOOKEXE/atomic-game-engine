@@ -5,7 +5,7 @@
 // on; `GetValue` and `Create` are `ScriptMethod`s, so both VMs install the same
 // two rows; and the `Tween` object those rows hand back is a tagged userdata in
 // `LuauTween.cpp` and a registered class in `JsTween.cpp`. That last split is
-// deliberate rather than unfinished — `Tweens.hpp` and `ScriptCall::ReturnTween`
+// deliberate rather than unfinished - `Tweens.hpp` and `ScriptCall::ReturnTween`
 // carry the argument, and the short version is that `Play` is a name the neutral
 // instance table would take from every part in the world.
 //
@@ -16,9 +16,9 @@
 //
 // **The goal map is what needed a record reader.** A goal's value is a `UDim2`,
 // a `Rect` or a `ColorSequence`, and `ScriptValue` has no tag for any of them
-// and must not gain one — so `ScriptCall::ReadFieldNames` and
+// and must not gain one - so `ScriptCall::ReadFieldNames` and
 // `ReadFieldProperty` read the record by *name and declared type* instead, and
-// the policy below — what may be tweened and what the refusal says — is written
+// the policy below - what may be tweened and what the refusal says - is written
 // once for both languages rather than twice with two spellings.
 //
 // @tier L9 · shared
@@ -44,8 +44,8 @@ namespace engine::script {
 
 		// Where the goal record sits in `Create`'s argument list.
 		//
-		// Named because `ReadGoals` reads the same argument twice — once for the
-		// names and once per value — and two literal `2`s three lines apart is
+		// Named because `ReadGoals` reads the same argument twice - once for the
+		// names and once per value - and two literal `2`s three lines apart is
 		// exactly the pair that gets edited singly.
 		constexpr size_t GOALS = 2;
 
@@ -69,7 +69,7 @@ namespace engine::script {
 		// name**.
 		//
 		// **Every refusal names the property**, because the alternative is a
-		// tween that runs for its whole duration and moves nothing — which reads
+		// tween that runs for its whole duration and moves nothing - which reads
 		// as a broken engine rather than as a scene asking for something that
 		// does not mean anything. A `Bool` has no midpoint, `Anchored` is a
 		// `Bool`, and saying so is the difference between a minute and an
@@ -117,8 +117,8 @@ namespace engine::script {
 			// **Sorted by spelling, which is what makes two goals a stated
 			// order.** A Luau table is walked in hash order and a JavaScript
 			// object in insertion order, and two properties of one instance may
-			// project onto one component — `Position` and `CFrame` both write
-			// `Transform` — so which of them lands last is observable and must
+			// project onto one component - `Position` and `CFrame` both write
+			// `Transform` - so which of them lands last is observable and must
 			// not depend on which language asked.
 			std::sort(goals.begin(), goals.end(), [](const TweenGoal &left, const TweenGoal &right) {
 				return left.Property.Text() < right.Property.Text();
@@ -129,9 +129,9 @@ namespace engine::script {
 		// `TweenService:GetValue(alpha, easingStyle, easingDirection)`
 		//
 		// **Pure, and the only part of this service a scene can use without
-		// building anything.** A layout that wants a curve without a target — an
+		// building anything.** A layout that wants a curve without a target - an
 		// emitter's rate, a camera's own easing, a value written into an
-		// attribute — reaches for this rather than making a tween to read.
+		// attribute - reaches for this rather than making a tween to read.
 		void GetValue(ScriptCall &call) {
 			const double alpha = call.AsNumber(0);
 
@@ -145,7 +145,7 @@ namespace engine::script {
 				call.Raise("TweenService:GetValue: expected an Enum.EasingDirection");
 			}
 
-			// Clamped by `Ease` itself rather than here — past the end a tween is
+			// Clamped by `Ease` itself rather than here - past the end a tween is
 			// finished, and an elastic curve extrapolated past one grows without
 			// bound.
 			call.ReturnNumber(
@@ -168,7 +168,7 @@ namespace engine::script {
 
 			// **The connections go before the row does.** Only a VM knows what a
 			// `CallbackRef` means, which is why the release is a request on the
-			// interface — see `ScriptCall::ForgetSubject`.
+			// interface - see `ScriptCall::ForgetSubject`.
 			for (const Entity stale : dropped) {
 				call.ForgetSubject(stale);
 				store.Destroy(stale);

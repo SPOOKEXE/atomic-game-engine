@@ -10,7 +10,7 @@ namespace engine::core {
 		//
 		// This was `CryptoPP::SecureWipeBuffer`, which is the same loop. It is
 		// written out here because `Engine::core` stopped linking Crypto++ when
-		// `Random` did — one primitive of four lines is not a reason for the
+		// `Random` did - one primitive of four lines is not a reason for the
 		// bottom layer of the engine to depend on a cryptography library, and
 		// keeping the dependency for it would have been the whole cost of the
 		// change with none of the point.

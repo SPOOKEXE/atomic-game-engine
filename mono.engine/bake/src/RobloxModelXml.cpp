@@ -17,7 +17,7 @@
 // and goes through the same mapping.** `RobloxModel.cpp` reads the binary
 // container; this reads the XML one; `studio::RojoSync` cannot tell which it was
 // given. A second model type would be the copy that drifts, and
-// `tests/RobloxModel.cpp` holds the case that keeps the two honest — one model
+// `tests/RobloxModel.cpp` holds the case that keeps the two honest - one model
 // written both ways, asserted to come back identical.
 //
 // **A referent is even less than it is in the binary container.** There the
@@ -31,18 +31,18 @@
 // is why.** A `PROP` chunk's bytes are positional, so a value the binary reader
 // cannot decode ends that file; an XML element carries its own end tag, so a
 // value this cannot decode is skipped and the document carries on. Both are the
-// same rule read against the format in front of them — never guess, and never
+// same rule read against the format in front of them - never guess, and never
 // lose more than the thing that was not understood.
 
 namespace engine::bake {
 
-	// The scanner is `core`'s since v0.15 — `D00128`, and `core/Xml.hpp` carries
+	// The scanner is `core`'s since v0.15 - `D00128`, and `core/Xml.hpp` carries
 	// why it is at the bottom rather than beside a format that reads markup.
 	namespace xml = core::xml;
 
 	namespace {
 		// What a failure here is called, what one element may carry, and that a
-		// prefix means nothing to a model — Studio writes `xmime` on the root and
+		// prefix means nothing to a model - Studio writes `xmime` on the root and
 		// nothing below it. Studio writes three attributes at most on anything
 		// below `<roblox>`; the root itself carries the schema namespaces.
 		constexpr xml::Options XML{"rbxmx", 16, true};
@@ -94,7 +94,7 @@ namespace engine::bake {
 		// How deep the *elements* may nest.
 		//
 		// **The model's depth bound applied to the markup**, which bounds it a
-		// little tighter than the binary reader does — an `Item` sixty levels down
+		// little tighter than the binary reader does - an `Item` sixty levels down
 		// is sixty-two elements down, because `<roblox>` and `<Properties>` are
 		// levels too. The difference is between two depths nothing real reaches,
 		// and one number for both readers is worth more than the last two levels.
@@ -102,7 +102,7 @@ namespace engine::bake {
 
 		// How deep one property value may nest, and how many parts it may have.
 		//
-		// `Rect2D` is the deepest at two — `min` then `X` — and
+		// `Rect2D` is the deepest at two - `min` then `X` - and
 		// `CoordinateFrame` is the widest at twelve. Anything past these is not a
 		// value this format has.
 		//@{
@@ -225,7 +225,7 @@ namespace engine::bake {
 			}
 
 			// The leftover bits of a group must be zero, and there is never a
-			// whole byte of them — a group of one base64 digit encodes nothing.
+			// whole byte of them - a group of one base64 digit encodes nothing.
 			return padding <= 2 && (accumulated & ((1u << bits) - 1u)) == 0;
 		}
 
@@ -296,7 +296,7 @@ namespace engine::bake {
 		// The names differ from the binary container's numbers in three places
 		// worth knowing: a `CFrame` is a `CoordinateFrame`, a `Rect` is a
 		// `Rect2D`, and `Content` and `BinaryString` are separate elements here
-		// for what the binary container stores as one `String` — which is why
+		// for what the binary container stores as one `String` - which is why
 		// they are read rather than refused, since refusing them would make a
 		// `Decal` imported from XML lose the texture the same model keeps when it
 		// is imported from `.rbxm`.
@@ -333,7 +333,7 @@ namespace engine::bake {
 
 			if (element == "SharedString") {
 				// The table's key, resolved here so that nothing outside this
-				// parse ever sees it — the same rule the binary reader's `SSTR`
+				// parse ever sees it - the same rule the binary reader's `SSTR`
 				// index follows.
 				const auto found = shared.find(std::string(Trimmed(text)));
 				out.Kind = RobloxValueKind::Text;
@@ -618,15 +618,15 @@ namespace engine::bake {
 		// that refers to it.
 		//
 		// **So it is read in a pass of its own**, which is the whole reason there
-		// are two: a value cannot be resolved as it is met, and the alternative —
-		// leaving keys in the tree and walking it again afterwards — would let a
+		// are two: a value cannot be resolved as it is met, and the alternative -
+		// leaving keys in the tree and walking it again afterwards - would let a
 		// key escape the reader if anything ever returned early.
 		bool ReadSharedStrings(
 			std::string_view whole, std::unordered_map<std::string, std::string> &out, std::string &failure
 		) {
 			// **A substring test before a scan**, because most files carry no
 			// table at all and would otherwise pay a whole extra pass to find
-			// that out. A false positive costs the scan and nothing else — the
+			// that out. A false positive costs the scan and nothing else - the
 			// text can only be inside a CDATA section, which the scanner steps
 			// over.
 			if (whole.find("<SharedStrings") == std::string_view::npos) {
@@ -794,7 +794,7 @@ namespace engine::bake {
 
 				if (item) {
 					// **Moved into whatever is still open**, which is what makes
-					// the nesting of the markup the shape of the tree — the one
+					// the nesting of the markup the shape of the tree - the one
 					// thing a referent is allowed to become, and here it is not
 					// even that.
 					RobloxInstance node = std::move(items.back());
@@ -831,7 +831,7 @@ namespace engine::bake {
 					return false;
 				}
 				if (name.empty()) {
-					model.Notes.push_back("a <" + std::string(element) + "> carries no name — skipped");
+					model.Notes.push_back("a <" + std::string(element) + "> carries no name - skipped");
 					continue;
 				}
 
@@ -844,14 +844,14 @@ namespace engine::bake {
 						(refused != nullptr
 							 ? std::string(refused)
 							 : "a type this reader does not know (" + std::string(element) + ")") +
-						" — skipped"
+						" - skipped"
 					);
 					continue;
 				}
 				if (result == ValueResult::Malformed) {
 					model.Notes.push_back(
 						items.back().ClassName + "." + name + " does not hold a " + std::string(element) +
-						" — skipped"
+						" - skipped"
 					);
 					continue;
 				}

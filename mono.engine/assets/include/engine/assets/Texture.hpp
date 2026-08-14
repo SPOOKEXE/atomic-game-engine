@@ -4,14 +4,14 @@
 //
 // **The gap was never a missing decoder.** `ImageLabel` drew the missing-texture
 // marker because `AssetKind::Texture` named a kind and nothing said what a
-// texture *is* — so there was nothing for a backend to sample even once the
+// texture *is* - so there was nothing for a backend to sample even once the
 // bytes had arrived. Vendoring a PNG decoder would have answered a different
 // question: how to read somebody else's format, when what was needed was to
 // have one.
 //
 // So this is the format, and it is deliberately the dullest possible: a header
 // and the pixels a GPU wants, in the order it wants them. **A runtime does not
-// decode.** Turning a PNG into this is a publishing step — the same division
+// decode.** Turning a PNG into this is a publishing step - the same division
 // `Chunker` and `Manifest` already draw, where the origin does the work once
 // and every client does none.
 //
@@ -22,7 +22,7 @@
 //
 // **Uncompressed here, compressed in transit.** `delivery::GroupCodec` runs
 // zstd over whatever a group holds, so a raw sheet costs its real size on disk
-// and its compressed size on the wire — and the client's decompression is the
+// and its compressed size on the wire - and the client's decompression is the
 // one it was already doing for every other asset rather than a second one for
 // this kind alone.
 //
@@ -40,7 +40,7 @@ namespace engine::assets {
 	// How the pixels are laid out.
 	//
 	// **A closed list that grows, and the ordinal is on the wire**, so an entry
-	// may be added at the end and never reordered — `ecs::PropertyType`'s rule
+	// may be added at the end and never reordered - `ecs::PropertyType`'s rule
 	// and for the same reason.
 	//
 	// @since v0.8
@@ -127,7 +127,7 @@ namespace engine::assets {
 		// **A vector of levels rather than one buffer holding the whole chain**,
 		// and the reason is what `Pixels` already means. A dozen call sites read
 		// `Pixels` as *the image* and check it against `Width * Height *
-		// BytesPerPixel` — `IsValid`, the GPU upload, `ResizeImage`, the opaque
+		// BytesPerPixel` - `IsValid`, the GPU upload, `ResizeImage`, the opaque
 		// pass, the thumbnailer. Concatenating would make every one of them read
 		// a buffer a third too long while still compiling, and `IsValid` would
 		// have to stop meaning what it means. Levels beside the base cost a
@@ -145,8 +145,8 @@ namespace engine::assets {
 		//
 		// **A sheet of animation frames is still one texture, and that is the
 		// whole reason this is three fields rather than a new asset kind.** A
-		// GIF decodes to a square power-of-two grid of cells — `bake/Gif.cpp`
-		// carries that argument — so what a sampler needs is unchanged and what
+		// GIF decodes to a square power-of-two grid of cells - `bake/Gif.cpp`
+		// carries that argument - so what a sampler needs is unchanged and what
 		// is *lost* without these three is how to play it: a 4x4 sheet and a
 		// 4x4 tile atlas are the same pixels.
 		//
@@ -169,7 +169,7 @@ namespace engine::assets {
 		// **Read from the source rather than assumed.** A GIF states a delay
 		// per frame and this is what those delays average to; a sheet drawn by
 		// hand states nothing, which is what zero means. A consumer that gets
-		// zero picks its own rate — for a particle that is "one loop over the
+		// zero picks its own rate - for a particle that is "one loop over the
 		// lifetime", which is what the engine did before there was anything to
 		// ask.
 		//
@@ -206,7 +206,7 @@ namespace engine::assets {
 
 	// Reading and writing the texture format.
 	//
-	// Static, because a texture has no state — the same shape `Packet` has for
+	// Static, because a texture has no state - the same shape `Packet` has for
 	// the same reason.
 	//
 	// @since v0.8
@@ -220,8 +220,8 @@ namespace engine::assets {
 		// The version. Bumped when the layout changes, never reused.
 		//
 		// **3 adds the mip chain, 2 added the three flipbook fields, and 1 is
-		// still read.** Not compatibility for its own sake — this is pre-release
-		// and the standing rule is that a format break is acceptable — but
+		// still read.** Not compatibility for its own sake - this is pre-release
+		// and the standing rule is that a format break is acceptable - but
 		// because every absent case has an obviously right answer: a v1 file is a
 		// still image and a v2 file is a texture with one level, which is what
 		// zero and one already mean. Refusing them would make every baked texture
@@ -262,7 +262,7 @@ namespace engine::assets {
 		// which is the difference between a refusal and a decompression bomb.
 		//
 		// @param reader The bytes to parse.
-		// @param out    Filled in on success, left alone otherwise — so a caller
+		// @param out    Filled in on success, left alone otherwise - so a caller
 		//               reusing one cannot act on a mixture of the last good
 		//               image and a bad one.
 		// @return `false` on anything malformed. Drop it and count it.

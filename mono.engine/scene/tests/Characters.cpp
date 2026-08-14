@@ -167,7 +167,7 @@ TEST_CASE("limbs follow the root and nothing else does", "[scene][characters]") 
 	// Move the body, as the solver would.
 	store.Set(character->Root, Transform{CFrame(Vector3{100.0f, 20.0f, -3.0f})});
 
-	// Six limbs and the model itself — the model carries a limb row with an
+	// Six limbs and the model itself - the model carries a limb row with an
 	// identity offset so that its own placement does not stay behind.
 	CHECK(PoseCharacters(store) == 7);
 
@@ -177,7 +177,7 @@ TEST_CASE("limbs follow the root and nothing else does", "[scene][characters]") 
 	CHECK(store.Get<Transform>(model)->Frame.Position.Y == Approx(20.0f));
 
 	// A root that has gone leaves its limbs where they fell rather than
-	// collapsing them onto the origin — a pile where it died beats a pile at
+	// collapsing them onto the origin - a pile where it died beats a pile at
 	// the world centre.
 	store.DestroyInstance(character->Root);
 	CHECK(PoseCharacters(store) == 0);
@@ -364,7 +364,7 @@ TEST_CASE("a replicated assignment builds the same rig", "[scene][characters]") 
 
 	// **What a client receives: the `PlayerCharacter` row and nothing else
 	// resolved.** `Character` crosses the wire too, but the two arrive as
-	// separate component streams and the frame between them is real — and a
+	// separate component streams and the frame between them is real - and a
 	// client whose `SubmitMove` refuses on that frame sends no keys at all.
 	store.Remove<Character>(model);
 	CHECK(UpdateCharacterControl(store) == 0);
@@ -426,7 +426,7 @@ TEST_CASE("a character does not outlive the player it belongs to", "[scene][char
 	// **The direction `LinkPlayerCharacters` does not cover.** That function
 	// releases a player whose model was destroyed; this is a player destroyed
 	// under a model, and a character is a `Model` under Workspace rather than a
-	// child of the `Player` — so nothing takes it along.
+	// child of the `Player` - so nothing takes it along.
 	//
 	// Only two places ever handled it, and both by hand:
 	// `studio::PlayLink::Stop` and `TeleportService:Teleport` call
@@ -523,7 +523,7 @@ TEST_CASE("every spawn re-copies the character scripts and refills the backpack"
 	CHECK(store.FindFirstChild(backpack, "Sword") != NULL_ENTITY);
 
 	// **Gear a game grants at run time goes in `StarterGear`**, which is the
-	// container that survives — and something dropped straight into `Backpack`
+	// container that survives - and something dropped straight into `Backpack`
 	// is the one that does not. Both are set up here and checked after the
 	// second spawn.
 	store.SetParent(store.CreateInstance(plain, "Torch"), gear);
@@ -535,7 +535,7 @@ TEST_CASE("every spawn re-copies the character scripts and refills the backpack"
 	REQUIRE(secondBody != NULL_ENTITY);
 	CHECK(secondBody != firstBody);
 
-	// The new body has its own copy of the character script — not the old
+	// The new body has its own copy of the character script - not the old
 	// body's, which went with it.
 	const Entity animate = store.FindFirstChild(secondBody, "Animate");
 	REQUIRE(animate != NULL_ENTITY);
@@ -574,7 +574,7 @@ TEST_CASE("a respawn waits exactly RespawnTime and then repeats", "[scene][chara
 	std::vector<Entity> spawned;
 
 	// **The first pass is the initial spawn**, because a player with no
-	// character and auto-loading on is a player waiting for one — which is the
+	// character and auto-loading on is a player waiting for one - which is the
 	// same rule a death goes through rather than a second one beside it.
 	const auto advance = [&](size_t ticks) {
 		size_t made = 0;
@@ -629,7 +629,7 @@ TEST_CASE("a respawn waits exactly RespawnTime and then repeats", "[scene][chara
 TEST_CASE("a character dies at zero, waits where it fell, and is replaced", "[scene][characters]") {
 	// **`docs/retired/DEFERRED.md` D00121's whole subject.** Until v0.15 a character
 	// died by being *destroyed* and the respawn clock started from the tick a
-	// player was first seen with no model — Roblox's delay with Roblox's trigger
+	// player was first seen with no model - Roblox's delay with Roblox's trigger
 	// missing. This is the trigger: health reaches zero, the body stays where it
 	// fell for `Player.RespawnTime`, and only then is it removed and replaced.
 	World world;
@@ -699,7 +699,7 @@ TEST_CASE("a character dies at zero, waits where it fell, and is replaced", "[sc
 	// **And a living player is still never waiting.** The branch that decides
 	// this now asks whether the body has health rather than whether it exists,
 	// so a version that got the polarity wrong would respawn everybody for ever
-	// — and this is what would catch it.
+	// - and this is what would catch it.
 	CHECK(advance(120) == 0);
 	CHECK(CharacterOf(store, player) == replacement);
 }
@@ -707,7 +707,7 @@ TEST_CASE("a character dies at zero, waits where it fell, and is replaced", "[sc
 TEST_CASE("a replica may not take health off anybody", "[scene][characters]") {
 	// **The authority decision, and it is one rule with two doors.**
 	// `ecs::Store::SetProperty` already refuses every property write in a
-	// replica — that is where this engine answers "who owns a row" — and
+	// replica - that is where this engine answers "who owns a row" - and
 	// `TakeDamage` makes the same refusal for the C++ door. A client holds a
 	// copy of every `scene.Humanoid` in the world, so a client allowed to
 	// subtract from one is a client deciding who died.
@@ -728,7 +728,7 @@ TEST_CASE("a replica may not take health off anybody", "[scene][characters]") {
 
 	// **Writable, deliberately.** Declaring it read-only would have stopped the
 	// *server* script that wants to kill somebody, which is the ordinary way a
-	// game does it — the question is who is asking, not whether the value has a
+	// game does it - the question is who is asking, not whether the value has a
 	// meaningful assignment.
 	REQUIRE(health != nullptr);
 	REQUIRE(health->Writable);
@@ -820,7 +820,7 @@ TEST_CASE("health and its ceiling are clamped against each other", "[scene][char
 
 TEST_CASE("a wounded character comes back wounded from a file", "[scene][characters]") {
 	// **Health is on `scene.Humanoid`, which is registered with the generated
-	// serialiser** — so this is not a check that somebody wrote a field into a
+	// serialiser** - so this is not a check that somebody wrote a field into a
 	// hand-written pair. It is a check that the two floats went into the object
 	// representation rather than off the end of it: a world saved mid-fight and
 	// reopened at full health would be a save format that quietly discards the
@@ -854,12 +854,12 @@ TEST_CASE("a character arriving and leaving is recorded once, in order", "[scene
 	// **What `Player.CharacterAdded` and `CharacterRemoving` are built on, and
 	// the queue deliberately does not carry all of it.** `scene` is L7 and a
 	// signal is L9, so the transitions are written down here and whoever owns a
-	// scripting layer drains them — the same split `ecs::Store::TakeTreeChanges`
+	// scripting layer drains them - the same split `ecs::Store::TakeTreeChanges`
 	// is on.
 	//
 	// **A body that is *destroyed* is not this queue's to report.** Dying in this
 	// engine is being destroyed, so a queue drained a tick later would hand a
-	// handler a model it cannot read a property off — `script` fires
+	// handler a model it cannot read a property off - `script` fires
 	// `CharacterRemoving` from `Store::OnDescendantRemoving` instead, while the
 	// model is still whole. What is left here is the release that did not
 	// destroy, which is `player.Character = nil`.
@@ -888,7 +888,7 @@ TEST_CASE("a character arriving and leaving is recorded once, in order", "[scene
 	CHECK(changes.empty());
 
 	// **A release that keeps the body is the one departure this queue carries**,
-	// and the model is deliberately still alive afterwards — Roblox's
+	// and the model is deliberately still alive afterwards - Roblox's
 	// `player.Character = nil` does not destroy anything either.
 	REQUIRE(SetPlayerCharacter(store, player, NULL_ENTITY));
 	CHECK(store.Alive(firstBody));
@@ -915,7 +915,7 @@ TEST_CASE("a character arriving and leaving is recorded once, in order", "[scene
 	CHECK(changes[1].Character == thirdBody);
 
 	// **Re-linking the body a player already holds records nothing**, which is
-	// what makes `LinkPlayerCharacters` cheap to run every tick — a version that
+	// what makes `LinkPlayerCharacters` cheap to run every tick - a version that
 	// recorded would fire `CharacterAdded` once per tick for ever.
 	CHECK(SetPlayerCharacter(store, player, thirdBody));
 	(void)LinkPlayerCharacters(store);

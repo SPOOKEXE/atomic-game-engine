@@ -1,8 +1,8 @@
 // The v0.6 script surface, exercised through the VM rather than through the
 // pieces underneath it.
 //
-// `Signals.cpp` and `Codec.cpp` cover the shared machinery — ordering, the wire
-// format — because those are pure C++ and testable without a VM. This file
+// `Signals.cpp` and `Codec.cpp` cover the shared machinery - ordering, the wire
+// format - because those are pure C++ and testable without a VM. This file
 // covers what a script can actually reach, which is the part a binding can get
 // wrong while every piece under it is correct.
 
@@ -66,7 +66,7 @@ namespace {
 	// now decides.
 	//
 	// Falls back to a root, because some of these scripts deliberately leave an
-	// instance unparented — an orphan is still reachable from C++ through
+	// instance unparented - an orphan is still reachable from C++ through
 	// `EachRoot`, and only a *script* is unable to list one. A test about
 	// signals or tasks should not have to care which of the two its fixture is.
 	Entity InScene(Store &store, std::string_view name) {
@@ -96,7 +96,7 @@ namespace {
 	//
 	// **The order is the reason these tests exist.** Changes are cleared at the
 	// *start* of a tick, the script runs in the middle, and the barrier fires at
-	// the end — so a write made before a beat is wiped by that beat's
+	// the end - so a write made before a beat is wiped by that beat's
 	// `ClearChanges` and never reaches a `.Changed` handler. That is correct
 	// behaviour and not a gap: a write outside a tick belongs to no tick.
 	void Beat(Store &store, Runtime &runtime) {
@@ -143,7 +143,7 @@ TEST_CASE("a disconnected handler stops being called", "[scripting]") {
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	// Counted in the world rather than in a script global, because each chunk
-	// gets its own sandboxed globals — so a second chunk could not read the
+	// gets its own sandboxed globals - so a second chunk could not read the
 	// first one's counter even if it wanted to.
 	MustRun(*runtime, R"(
 		local part = Instance.new('Part')
@@ -542,7 +542,7 @@ TEST_CASE("a top-level script may yield, and the load still succeeds", "[scripti
 }
 
 TEST_CASE("task.wait counts in ticks, rounding up", "[scripting]") {
-	// Seconds in, ticks underneath — §2. Rounding up means a wait is never
+	// Seconds in, ticks underneath - §2. Rounding up means a wait is never
 	// *shorter* than asked, which is the direction an author can reason about.
 	RegisterClasses();
 	Store store("script_test");
@@ -781,7 +781,7 @@ TEST_CASE("an enum property takes a member and refuses a stranger", "[scripting]
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	// **`AlphaMode`, where this was `Material` until v0.10.** The enum is gone
-	// with the seventeen names nothing sampled — `scene/Materials.hpp` — and what
+	// with the seventeen names nothing sampled - `scene/Materials.hpp` - and what
 	// is under test here was never the material: it is that a
 	// `PropertyType::Enum` property takes a member, takes the bare string a
 	// migrating script contains, and refuses everything else.
@@ -809,7 +809,7 @@ TEST_CASE("an enum property takes a member and refuses a stranger", "[scripting]
 
 TEST_CASE("javascript reaches the same enum through its own spelling", "[scripting][js]") {
 	// **The second consumer, which is the point of having two VMs.** One
-	// property declaration, one registry, two languages — and the differences
+	// property declaration, one registry, two languages - and the differences
 	// are the languages': `Equals` rather than `==`, because JavaScript compares
 	// object identity and cannot overload it.
 	RegisterClasses();
@@ -963,7 +963,7 @@ TEST_CASE("attributes are dropped with the instance that held them", "[scripting
 
 	// **Entity ids are reused, which is the whole reason this test exists.** A
 	// table keyed by id with an entry left behind surfaces as somebody else's
-	// attribute on a freshly created part — at a distance of however many
+	// attribute on a freshly created part - at a distance of however many
 	// entities were made in between, which is the worst kind of bug to find.
 	MustRun(*runtime, R"(
 		local first = Instance.new("Part")
@@ -1009,12 +1009,12 @@ TEST_CASE("an attribute change reaches a listener", "[scripting]") {
 // **Above both sections rather than beside the gui one, because
 // `gameProcessedEvent` joined them.** A pointer press the 2D tree consumed
 // arrives at `UserInputService.InputBegan` marked, so a case about the input
-// pump has to be able to make a button and hand the router's event over — and
+// pump has to be able to make a button and hand the router's event over - and
 // two copies of `MakeLog` is the duplicate the root `AGENTS.md` calls the
 // expensive kind.
 //
 // **Handlers record into the world rather than into a global**, because both
-// VMs freeze their globals — `script/AGENTS.md` calls that the design rather
+// VMs freeze their globals - `script/AGENTS.md` calls that the design rather
 // than a hardening pass. A part's `Name` is appended to, which records order as
 // well as count in one readable value.
 namespace {
@@ -1044,7 +1044,7 @@ namespace {
 	// thing that cannot work: `LuauInstances.cpp` refuses `FindFirstChild(x, "")`
 	// because `core::Name("")` is the invalid name and would match anything
 	// unnamed. A handler looking the log up would get `nil`, fail at beat time
-	// rather than at `Run` time, and record nothing — which reads exactly like
+	// rather than at `Run` time, and record nothing - which reads exactly like
 	// the signal never firing.
 	constexpr const char *LOG_NAME = "Log";
 
@@ -1070,7 +1070,7 @@ TEST_CASE("UserInputService answers from the world's input state", "[scripting]"
 	Store store("script_test");
 
 	// **The resource is what makes input exist.** A world without one is a
-	// server, and every query answers "nothing pressed" rather than raising —
+	// server, and every query answers "nothing pressed" rather than raising -
 	// which is what lets one script poll input on both halves of a game.
 	engine::scene::InputState state;
 	state.Down.Set(engine::scene::KeyCode::W, true);
@@ -1092,7 +1092,7 @@ TEST_CASE("UserInputService answers from the world's input state", "[scripting]"
 
 		-- **The one field that travels towards the client.** A script sets it and
 		-- the client applies it to the window on the next frame.
-		-- **Through a local, which is how a Roblox script is written anyway** —
+		-- **Through a local, which is how a Roblox script is written anyway** -
 		-- `local UIS = game:GetService("UserInputService")`. It is also the only
 		-- form that works: `luaL_sandbox` enables Luau's `safeenv`, so a bare
 		-- `Global.Field` compiles to a `GETIMPORT` that resolves once and caches
@@ -1158,7 +1158,7 @@ TEST_CASE("a bound action fires on the edge and the priority decides", "[scripti
 	)");
 
 	// Press E. **The edge is the difference between the two bitsets**, which is
-	// what a client's translator produces every frame — so a test drives it the
+	// what a client's translator produces every frame - so a test drives it the
 	// same way rather than through a second path.
 	auto *input = store.ResourceMutable<engine::scene::InputState>();
 	input->Previous = input->Down;
@@ -1207,7 +1207,7 @@ TEST_CASE("a bound action fires on the edge and the priority decides", "[scripti
 //
 // **The gap this closes was three answers to one question.** `InputBegan` fired
 // with a bare `Enum.KeyCode`, a bound action's handler took one as its third
-// argument, and the generated declarations said both passed *nothing* — so a
+// argument, and the generated declarations said both passed *nothing* - so a
 // script copied from a Roblox place read `input.KeyCode` and got nil, and the
 // typechecker agreed with neither the code nor itself. `InputObject` is what all
 // three now agree on.
@@ -1236,7 +1236,7 @@ TEST_CASE("an input signal hands over an InputObject", "[scripting]") {
 	)");
 
 	// The edge is the difference between the two bitsets, which is what a
-	// client's translator produces every frame — so a test drives it the same
+	// client's translator produces every frame - so a test drives it the same
 	// way rather than through a second path.
 	auto *input = store.ResourceMutable<engine::scene::InputState>();
 	input->Previous = input->Down;
@@ -1265,7 +1265,7 @@ TEST_CASE("an input signal hands over an InputObject", "[scripting]") {
 TEST_CASE("a mouse button is an input, which it never was before", "[scripting]") {
 	// `InputState` has carried `WasButtonPressed` since v0.10 and nothing in the
 	// script layer ever asked it, so a click was invisible to a script that was
-	// not polling — the one input this engine had that a Roblox place could not
+	// not polling - the one input this engine had that a Roblox place could not
 	// hear.
 	RegisterClasses();
 	Store store("script_test");
@@ -1350,7 +1350,7 @@ TEST_CASE("InputChanged fires, which it had never done", "[scripting]") {
 
 	REQUIRE(runtime->Heartbeat(0.016f));
 
-	// The wheel's notches land in `Z`, which is Roblox's placement exactly — a
+	// The wheel's notches land in `Z`, which is Roblox's placement exactly - a
 	// script migrated from a Roblox place reads `input.Position.Z` for them.
 	MustRun(*runtime, R"(
 		local board = workspace:FindFirstChild('Board')
@@ -1377,7 +1377,7 @@ TEST_CASE("InputChanged fires, which it had never done", "[scripting]") {
 TEST_CASE("a :Once input handler retires after one edge, in both languages", "[scripting]") {
 	// **`SignalTable::Fire` retires nothing itself, and every direct caller owes
 	// it.** Only the VM knows how to release a callable, and a disconnect can
-	// arrive from inside a fire about a value still on the stack — so the table
+	// arrive from inside a fire about a value still on the stack - so the table
 	// hands back what a `Once` connection spent and the caller disconnects it.
 	// `FireSignal` and `FireJsSignal` have always done that; both input pumps
 	// were written later and neither did, so `:Once` on a `UserInputService`
@@ -1385,7 +1385,7 @@ TEST_CASE("a :Once input handler retires after one edge, in both languages", "[s
 	// of and did not ask to keep.
 	//
 	// **Two edges and a count, not one edge and a flag.** A test that fired once
-	// and checked the handler ran would have passed against the broken code —
+	// and checked the handler ran would have passed against the broken code -
 	// what is wrong is only visible on the *second* edge.
 	//
 	// Both languages, because the fault was in both pumps and a fix to one is how
@@ -1433,7 +1433,7 @@ TEST_CASE("a :Once input handler retires after one edge, in both languages", "[s
 		// **"1", from two edges.** "2" is the defect: the connection was never
 		// retired, so it kept answering long after it had spent itself.
 		//
-		// Held before the chunk runs, because the chunk renames it —
+		// Held before the chunk runs, because the chunk renames it -
 		// `scene::WorkspaceOf` is a lookup by name over the roots.
 		CHECK(std::string(store.InstanceNameOf(workspace).Text()) == "1");
 	}
@@ -1522,7 +1522,7 @@ TEST_CASE("a bound action can say what it claimed, in both languages", "[scripti
 	// **Luau's alone until v0.16, and the gap was invisible from here.** The
 	// two reporting methods answer a record holding `Enum.KeyCode` members and
 	// `ScriptValue` has no tag for an `EnumItem`, so they stayed in
-	// `ServiceSurface::LuauMethods` while the other four crossed —
+	// `ServiceSurface::LuauMethods` while the other four crossed -
 	// `ScriptCall::ReturnBoundAction` is what closed it, by making the *fact* a
 	// `BoundActionReport` and leaving each VM to build its own record.
 	//
@@ -1598,7 +1598,7 @@ TEST_CASE("a bound action can say what it claimed, in both languages", "[scripti
 			}
 
 			// `null` rather than an empty object, which is what `if (info)`
-			// reads — the same rule the Luau half states for a truthy table.
+			// reads - the same rule the Luau half states for a truthy table.
 			if (CAS.GetBoundActionInfo('nothing at all') !== null) {
 				throw new Error('an unbound name reported a record');
 			}
@@ -1619,8 +1619,8 @@ TEST_CASE("a bound action can say what it claimed, in both languages", "[scripti
 
 TEST_CASE("a bound action's handler is given an InputObject", "[scripting]") {
 	// **Roblox's third argument has always been an `InputObject`** and this
-	// passed an `Enum.KeyCode`, so a handler reading `input.KeyCode` — the form
-	// every Roblox place is written in — got nil.
+	// passed an `Enum.KeyCode`, so a handler reading `input.KeyCode` - the form
+	// every Roblox place is written in - got nil.
 	RegisterClasses();
 	Store store("script_test");
 	store.SetResource(engine::scene::InputState{});
@@ -1659,7 +1659,7 @@ TEST_CASE("a bound action decides who else hears the key, in both languages", "[
 	// **`Enum.ContextActionResult` existed in Roblox and nowhere here.** The pump
 	// called the highest claim with `lua_pcall(..., 0, 0)` and `JS_Call` whose
 	// result it freed unread, so `Pass` was unspellable and a handler's return
-	// value was dead — which made the one case `ContextActionService` is *for*
+	// value was dead - which made the one case `ContextActionService` is *for*
 	// unsolvable in the interesting direction. A vehicle nobody is driving wants
 	// to let E through to the door it is parked beside.
 	//
@@ -1730,13 +1730,13 @@ TEST_CASE("a bound action decides who else hears the key, in both languages", "[
 			REQUIRE(runtime->Heartbeat(0.016f));
 		}
 
-		// **`floor` never runs**, which is the half `Sink` is for — and `door`
+		// **`floor` never runs**, which is the half `Sink` is for - and `door`
 		// running at all is the half `Pass` is for. The old pump produced
 		// `vehicle;vehicle;`.
 		CHECK(Trace(store, log) == "vehicle;door;vehicle;door;");
 
 		// **Reset from C++, because the trace *is* the name.** A second chunk
-		// cannot look the part up again — `FindFirstChild('Log')` is a lookup by
+		// cannot look the part up again - `FindFirstChild('Log')` is a lookup by
 		// the name the first chunk has been appending to.
 		REQUIRE(store.SetInstanceName(log, LOG_NAME));
 
@@ -1773,14 +1773,14 @@ TEST_CASE("a bound action decides who else hears the key, in both languages", "[
 
 TEST_CASE("a click the interface took is game-processed and a key is not", "[scripting][gui]") {
 	// **Roblox's second argument, which this passed nothing at all for.** A
-	// handler written `function(input, gameProcessed)` — the form every Roblox
-	// place is written in — read nil for the second argument on every edge, so a
+	// handler written `function(input, gameProcessed)` - the form every Roblox
+	// place is written in - read nil for the second argument on every edge, so a
 	// place that guarded on it treated a click on its own menu as a click on the
 	// world. Swallowing the click instead would have been the other wrong answer;
 	// Roblox's is to deliver it *marked*.
 	//
 	// **What backs it is the router's own events**, because they are the only
-	// record of a press having been taken — `InterfaceHasPointer` carries the
+	// record of a press having been taken - `InterfaceHasPointer` carries the
 	// argument, including why a key is honestly never processed.
 	//
 	// **Four observations over two beats, and the mouse differs between them.** A
@@ -2068,8 +2068,8 @@ TEST_CASE("the device the player switched to reaches a script, in both languages
 			assert(not UIS.MouseIconEnabled, 'MouseIconEnabled did not round-trip')
 		)"
 				 : R"(
-			// Braced, because JavaScript chunks share one global object — see
-			// `JavaScriptRuntime` — so a second top-level `const UIS` is a
+			// Braced, because JavaScript chunks share one global object - see
+			// `JavaScriptRuntime` - so a second top-level `const UIS` is a
 			// redeclaration rather than a fresh binding.
 			{
 				const service = game.GetService('UserInputService');
@@ -2277,7 +2277,7 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 		assert(workspace.CurrentCamera == nil, 'detaching did not take')
 	)");
 
-	// Degrees out, radians stored — the same split `Orientation` makes.
+	// Degrees out, radians stored - the same split `Orientation` makes.
 	const Entity camera = InScene(store, "Main");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Approx(1.5707963f).margin(1e-4));
@@ -2285,7 +2285,7 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 
 TEST_CASE("javascript aims the same camera through the same resource", "[scripting][js]") {
 	// **The second consumer, and until now there was not one.** `CurrentCamera`
-	// projects onto no component — it is `scene::ActiveCamera`, a resource — so
+	// projects onto no component - it is `scene::ActiveCamera`, a resource - so
 	// each VM has to special-case it, and only the Luau side did. The JavaScript
 	// world object is sealed with `JS_PreventExtensions` before a script sees
 	// it, so `workspace.CurrentCamera = view` added no property, threw nothing
@@ -2391,7 +2391,7 @@ TEST_CASE("CollisionGroup is a name over the layer bits", "[scripting]") {
 //
 // **The roadmap's own gate: each item lands in Luau *and* JavaScript, or it is
 // not done.** These are the same behaviours the cases above assert in Luau,
-// written the way the language spells them — `a.mul(b)` rather than `a * b`,
+// written the way the language spells them - `a.mul(b)` rather than `a * b`,
 // `game.GetService` rather than `game:GetService`, `typeOf(v)` rather than
 // `typeof v`, and a promise rather than a coroutine.
 //
@@ -2541,7 +2541,7 @@ TEST_CASE("javascript task.wait resumes at a tick boundary", "[scripting][js]") 
 	// **A promise rather than a coroutine**, which is JavaScript's own
 	// suspension primitive. The host drives the microtask queue through
 	// `JS_ExecutePendingJob`, so the continuation runs at a point the engine
-	// picked — which is what makes it legal under §1 at all.
+	// picked - which is what makes it legal under §1 at all.
 	RegisterClasses();
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
@@ -2708,7 +2708,7 @@ TEST_CASE("javascript has the datatype vocabulary", "[scripting][js]") {
 
 TEST_CASE("javascript Random matches Luau for one seed", "[scripting][js]") {
 	// **One generator, two bindings.** `core::Random` is indexed rather than
-	// streamed, so the seed is the salt and the draw number is the index —
+	// streamed, so the seed is the salt and the draw number is the index -
 	// which means the two languages produce the *same* sequence, and this is
 	// what asserts it rather than each side agreeing only with itself.
 	RegisterClasses();
@@ -2767,7 +2767,7 @@ TEST_CASE("javascript can ask where it is standing", "[scripting][js]") {
 
 TEST_CASE("a table published from Luau arrives as an object in JavaScript", "[scripting][js]") {
 	// **The codec's second requirement, asserted across the pair.** One format,
-	// one encoder, two bindings — so the bytes one VM writes are the bytes the
+	// one encoder, two bindings - so the bytes one VM writes are the bytes the
 	// other reads, and neither can be internally consistent while disagreeing
 	// with the wire.
 	RegisterClasses();
@@ -2776,7 +2776,7 @@ TEST_CASE("a table published from Luau arrives as an object in JavaScript", "[sc
 	const auto luau = MakeRuntime(store, Language::Luau);
 	const auto javascript = MakeRuntime(store, Language::JavaScript);
 
-	// Encoded by Luau's walker, decoded by JavaScript's — through the same
+	// Encoded by Luau's walker, decoded by JavaScript's - through the same
 	// `ScriptValue` tree and the same sorted-key format.
 	MustRun(*luau, R"(
 		local part = Instance.new('Part')
@@ -2820,7 +2820,7 @@ TEST_CASE("javascript refuses to send what cannot cross a world boundary", "[scr
 //
 // **What makes "scripts live under a world" structural rather than a fact about
 // the command line.** A game has many scripts, each parented somewhere, each
-// knowing which one it is — and a world that owns its scripts is a world that
+// knowing which one it is - and a world that owns its scripts is a world that
 // can be written out whole, which is why this is the save-file prerequisite
 // rather than a convenience.
 
@@ -2863,7 +2863,7 @@ TEST_CASE("a script is an instance with a class and a source", "[scripting][inst
 // the host role all assume the program is the one an author wrote, and a script
 // that could rewrite another one makes all three decorative.
 //
-// The author's path is unaffected — the properties panel, a game file and the
+// The author's path is unaffected - the properties panel, a game file and the
 // Rojo sync write through `Store::SetProperty`, which is what the C++ below
 // stands for.
 TEST_CASE("a script cannot reach another script's source", "[scripting][instances]") {
@@ -2975,7 +2975,7 @@ TEST_CASE("a disabled script is not selected", "[scripting][instances]") {
 
 TEST_CASE("scripts are selected in creation order", "[scripting][instances]") {
 	// One script may build what another expects to find, so the order has to be
-	// the world's rather than the archetype's — which would reorder itself the
+	// the world's rather than the archetype's - which would reorder itself the
 	// first time an unrelated component was added to one of them.
 	RegisterClasses();
 	Store store("script_test");
@@ -3021,7 +3021,7 @@ TEST_CASE("a running script knows which instance it is", "[scripting][instances]
 
 	// The override rather than a scope guard, restored below. `Paths` has no
 	// RAII form, and adding one for a test would be widening a public header to
-	// make a test easier — which the root `AGENTS.md` names outright.
+	// make a test easier - which the root `AGENTS.md` names outright.
 	const std::filesystem::path previous = engine::core::Paths::Assets();
 	engine::core::Paths::SetAssetsOverride(directory);
 
@@ -3045,7 +3045,7 @@ TEST_CASE("a running script knows which instance it is", "[scripting][instances]
 
 TEST_CASE("two scripts each see themselves and not each other", "[scripting][instances]") {
 	// `luaL_sandboxthread` gives each chunk its own global table, so `script`
-	// is per chunk rather than per VM — which is exactly the scoping an author
+	// is per chunk rather than per VM - which is exactly the scoping an author
 	// expects and the reason it is set on the thread rather than on the state.
 	RegisterClasses();
 	Store store("script_test");
@@ -3088,7 +3088,7 @@ TEST_CASE("two scripts each see themselves and not each other", "[scripting][ins
 //
 // **The calls a script genuinely suspends on**, and the reason `task` had to
 // come first. A `Get` returns a `Ticket`; the reply lands in the inbox at a
-// later tick, applied sorted at the barrier — which is
+// later tick, applied sorted at the barrier - which is
 // `docs/retired/SCRIPT_CONCURRENCY.md` §1's *first* legal resume source, and the only
 // one that needs a bus behind it rather than a bare `Store`.
 //
@@ -3150,7 +3150,7 @@ TEST_CASE("a MemoryStore write and read round-trips through the barrier", "[scri
 	// Nothing yet: the reply lands at a later barrier by design.
 	universe.Enter(world, [&](Store &store) { CHECK(InScene(store, "Set:Ok") == engine::ecs::NULL_ENTITY); });
 
-	// Each barrier carries one reply, and each resume issues the next call — so
+	// Each barrier carries one reply, and each resume issues the next call - so
 	// the round trip takes as many ticks as it takes calls.
 	for (int beat = 0; beat < 6; beat++) {
 		universe.Tick(1.0f / 60.0f);
@@ -3294,7 +3294,7 @@ TEST_CASE("a script casts a ray and reads what it hit", "[scripting][raycast]") 
 	)");
 
 	// The broad-phase index is rebuilt by a system, and this test runs no
-	// scheduler — so it is synced directly. A query against a stale index finds
+	// scheduler - so it is synced directly. A query against a stale index finds
 	// nothing, which would look like the binding failing rather than the index
 	// being empty.
 	engine::physics::SyncBroadphase(store);
@@ -3341,7 +3341,7 @@ TEST_CASE("RaycastParams filters by collision group", "[scripting][raycast]") {
 	)");
 
 	// The broad-phase index is rebuilt by a system, and this test runs no
-	// scheduler — so it is synced directly. A query against a stale index finds
+	// scheduler - so it is synced directly. A query against a stale index finds
 	// nothing, which would look like the binding failing rather than the index
 	// being empty.
 	engine::physics::SyncBroadphase(store);
@@ -3445,7 +3445,7 @@ TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scr
 TEST_CASE("a part is a mirror because a surface camera is parented to it", "[scripting][surface]") {
 	// **There is no `Surface` property to set, and that is the point.** It was
 	// Roblox's name for something else entirely, and what it actually held was a
-	// render-target index the author had to keep unique by hand — two cameras
+	// render-target index the author had to keep unique by hand - two cameras
 	// silently sharing a texture being the failure. A pane is a mirror because a
 	// `SurfaceCamera` is parented to it; a plain `Camera` projects nothing.
 	RegisterClasses();
@@ -3474,7 +3474,7 @@ TEST_CASE("a part is a mirror because a surface camera is parented to it", "[scr
 	const Entity pane = InScene(store, "Pane");
 
 	// Nothing has aimed anything yet, so the pane is an ordinary part. The slot
-	// arrives from `AimSurfaceCameras`, which needs a viewer — see
+	// arrives from `AimSurfaceCameras`, which needs a viewer - see
 	// `scene/tests/SurfaceCameras.cpp` for the pass itself.
 	CHECK(store.Get<Visual>(pane)->Surface == -1);
 	CHECK(store.FindFirstChild(pane, "Reflection") != engine::ecs::NULL_ENTITY);
@@ -3578,7 +3578,7 @@ namespace {
 	// than a path.
 	Entity StageModule(Store &store, const char *path, const char *name, const char *program) {
 		// **Services first, because `WorkspaceOf` is a lookup and not a create.**
-		// The runtime installs them when it opens, which is after this — so
+		// The runtime installs them when it opens, which is after this - so
 		// staging a module before one existed would parent it to nothing and
 		// leave it a root beside the Workspace rather than inside it.
 		engine::scene::InstallServices(store);
@@ -3598,7 +3598,7 @@ namespace {
 TEST_CASE("a ModuleScript is not run by the world", "[scripting]") {
 	// **The whole reason `ModuleScript` is a sibling of `Script` rather than a
 	// kind of one.** A world that ran every module at start would give a library
-	// a side effect nobody asked for — and a synced Rojo project would execute a
+	// a side effect nobody asked for - and a synced Rojo project would execute a
 	// thousand files written to be required.
 	RegisterClasses();
 	Store store("script_test");
@@ -3694,7 +3694,7 @@ TEST_CASE("a require cycle is named rather than crashing", "[scripting]") {
 }
 
 TEST_CASE("a module gets script pointing at itself", "[scripting]") {
-	// The same global a `Script` gets, so a module can find its own siblings —
+	// The same global a `Script` gets, so a module can find its own siblings -
 	// which is how a folder of modules refers to its neighbours without knowing
 	// where the folder sits.
 	RegisterClasses();
@@ -3711,7 +3711,7 @@ TEST_CASE("a module gets script pointing at itself", "[scripting]") {
 
 TEST_CASE("two module instances naming one file are two modules", "[scripting]") {
 	// **Keyed by instance, not by path.** That is what makes a module a thing in
-	// the tree rather than a thing on disk — two copies in two places are two
+	// the tree rather than a thing on disk - two copies in two places are two
 	// modules with two states, exactly as two copies of a Script are two scripts.
 	RegisterClasses();
 	Store store("script_test");
@@ -3729,7 +3729,7 @@ TEST_CASE("two module instances naming one file are two modules", "[scripting]")
 
 TEST_CASE("Players.LocalPlayer is nil until a host says who it is", "[scripting]") {
 	// **The default is nobody**, because who is in a game is the host's business
-	// — a dedicated server admits players as they connect and the studio admits
+	// - a dedicated server admits players as they connect and the studio admits
 	// one per client view. Furnishing a world does not invent an occupant.
 	RegisterClasses();
 	Store store("script_test");
@@ -3805,7 +3805,7 @@ TEST_CASE("LocalPlayer cannot be assigned from a script", "[scripting]") {
 
 TEST_CASE("a LocalScript runs on a client and a Script does not", "[scripting]") {
 	// **Roblox's rule, and the contexts it decides.** The same world, two hosts,
-	// two different sets of scripts — which is what makes one codebase able to
+	// two different sets of scripts - which is what makes one codebase able to
 	// hold both halves of a game.
 	RegisterClasses();
 	Store store("script_test");
@@ -3832,7 +3832,7 @@ TEST_CASE("a LocalScript runs on a client and a Script does not", "[scripting]")
 }
 
 TEST_CASE("the tree lookups reach past the direct children", "[scripting]") {
-	// The half of Roblox's `Instance` surface that answers "where is this" —
+	// The half of Roblox's `Instance` surface that answers "where is this" -
 	// and the half a script reaches for the moment a scene stops being flat.
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
@@ -4107,7 +4107,7 @@ TEST_CASE("DescendantRemoving fires while the thing is still there", "[scripting
 	// **The contract, and the only assertion that matters.** Every other tree
 	// signal is delivered from a queue at the next barrier; this one has to be
 	// called *before* the removal, or a handler cannot do the one thing it
-	// exists for — read the subtree it is about to lose.
+	// exists for - read the subtree it is about to lose.
 	//
 	// So the handler asks, at call time, whether the leaving instance is still
 	// a descendant of the ancestor being notified. Answering "no" would mean
@@ -4153,7 +4153,7 @@ TEST_CASE("DescendantRemoving fires while the thing is still there", "[scripting
 	)");
 
 	// The model and the part inside it both stopped being descendants of the
-	// workspace, so both were announced — and both were still there when they
+	// workspace, so both were announced - and both were still there when they
 	// were.
 	CHECK(store.FindFirstChild(log, "intact-Model") != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(log, "intact-Part") != engine::ecs::NULL_ENTITY);
@@ -4280,7 +4280,7 @@ TEST_CASE("javascript reaches the same tree signals", "[scripting][js]") {
 	const Entity log = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log");
 	REQUIRE(log != engine::ecs::NULL_ENTITY);
 
-	// Queued, not immediate — the same one-tick contract the Luau side has.
+	// Queued, not immediate - the same one-tick contract the Luau side has.
 	CHECK(store.FindFirstChild(log, "added-Mover") == engine::ecs::NULL_ENTITY);
 
 	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
@@ -4291,7 +4291,7 @@ TEST_CASE("javascript reaches the same tree signals", "[scripting][js]") {
 	CHECK(store.FindFirstChild(log, "removed-Mover") == engine::ecs::NULL_ENTITY);
 
 	// **No `const` here.** Unlike Luau, whose chunks each get their own
-	// sandboxed globals, these two share one scope — so re-declaring a name the
+	// sandboxed globals, these two share one scope - so re-declaring a name the
 	// first chunk bound is a `SyntaxError` rather than a shadow.
 	MustRun(*runtime, R"(
 		workspace.FindFirstChild('Home').FindFirstChild('Mover').Parent = workspace;
@@ -4305,7 +4305,7 @@ TEST_CASE("javascript reaches the same tree signals", "[scripting][js]") {
 TEST_CASE("javascript DescendantRemoving fires while the thing is still there", "[scripting][js]") {
 	// The contract, from the other language. Dispatched from inside the store
 	// before the removal, so no heartbeat runs between the write and the
-	// assertions below — if it needed one they would fail.
+	// assertions below - if it needed one they would fail.
 	RegisterClasses();
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
@@ -4408,13 +4408,13 @@ TEST_CASE("javascript announces a destroyed subtree once", "[scripting][js]") {
 // own ordering rules survive the crossing unchanged.
 //
 // A `gui::Router` is deliberately **not** used to produce the events. Its rules
-// — which element an `InputEnded` goes to, that `MouseLeave` precedes
-// `MouseEnter` — are `gui`'s and are tested there. Feeding hand-built events in
+// - which element an `InputEnded` goes to, that `MouseLeave` precedes
+// `MouseEnter` - are `gui`'s and are tested there. Feeding hand-built events in
 // is what makes these cases about delivery: a test that drove a real pointer
 // would fail for either module's reasons and name neither.
 //
 // `Happened`, `MakeButton`, `MakeLog` and `Trace` are above the input section,
-// which is the other half that needs them — see the comment there.
+// which is the other half that needs them - see the comment there.
 
 TEST_CASE("a gui event reaches a script's Activated", "[scripting][gui]") {
 	RegisterClasses();
@@ -4447,15 +4447,15 @@ TEST_CASE("a gui event reaches a script's Activated", "[scripting][gui]") {
 	CHECK(Trace(store, log) == "c");
 	CHECK(runtime->PendingGuiEventCount() == 0);
 
-	// And it fires once rather than every beat — the queue is drained, not read.
+	// And it fires once rather than every beat - the queue is drained, not read.
 	Beat(store, *runtime);
 	CHECK(Trace(store, log) == "c");
 }
 
 TEST_CASE("gui events keep the router's order across the queue", "[scripting][gui]") {
-	// **`MouseLeave` before `MouseEnter` is `gui::Router`'s rule** — a handler
+	// **`MouseLeave` before `MouseEnter` is `gui::Router`'s rule** - a handler
 	// that puts something back on leave runs before the one reacting to the
-	// arrival — and a queue that sorted, bucketed by element or delivered by
+	// arrival - and a queue that sorted, bucketed by element or delivered by
 	// kind would quietly reverse it. Two elements, one move between them.
 	RegisterClasses();
 	Store store("script_test");
@@ -4512,7 +4512,7 @@ TEST_CASE("a pointer signal is called with the canvas position", "[scripting][gu
 TEST_CASE("an event for a destroyed element is dropped rather than dispatched", "[scripting][gui]") {
 	// **The ordinary case, not an edge one.** A close button destroys the panel
 	// it sits in, and the same delivery may carry a later event about something
-	// that went with it — the router named both from a list compiled before
+	// that went with it - the router named both from a list compiled before
 	// either handler ran. Firing at a dead entity would hand a script a userdata
 	// for a row that is gone.
 	RegisterClasses();
@@ -4549,8 +4549,8 @@ TEST_CASE("an event for a destroyed element is dropped rather than dispatched", 
 
 TEST_CASE("two deliveries before one beat both arrive", "[scripting][gui]") {
 	// **Two panels routing into one runtime is the studio's ordinary
-	// arrangement** — one `gui::Router` per viewport panel, per
-	// `ROADMAP.md`'s v0.8 entry — so a second delivery before the beat has to
+	// arrangement** - one `gui::Router` per viewport panel, per
+	// `ROADMAP.md`'s v0.8 entry - so a second delivery before the beat has to
 	// queue behind the first rather than replace it.
 	RegisterClasses();
 	Store store("script_test");
@@ -4578,8 +4578,8 @@ TEST_CASE("two deliveries before one beat both arrive", "[scripting][gui]") {
 
 TEST_CASE("javascript reaches the same gui signals", "[scripting][js][gui]") {
 	// The roadmap's gate: each item lands in Luau *and* JavaScript, or it is not
-	// done. The ordering is shared by construction — one `SignalTable`, one
-	// queue on `Runtime` — so what this checks is that the binding exists and
+	// done. The ordering is shared by construction - one `SignalTable`, one
+	// queue on `Runtime` - so what this checks is that the binding exists and
 	// that the arguments arrive.
 	RegisterClasses();
 	Store store("script_test");
@@ -4590,7 +4590,7 @@ TEST_CASE("javascript reaches the same gui signals", "[scripting][js][gui]") {
 
 	MustRun(*runtime, R"(
 		// The `workspace` global rather than `game.GetService('Workspace')`,
-		// which the JavaScript surface does not answer — the existing parity
+		// which the JavaScript surface does not answer - the existing parity
 		// cases above reach it the same way.
 		const button = workspace.FindFirstChild('JsGo');
 		if (!button) throw new Error('the button should be findable');
@@ -4615,7 +4615,7 @@ TEST_CASE("javascript reaches the same gui signals", "[scripting][js][gui]") {
 TEST_CASE("game.JobId names the world the script is standing on", "[scripting]") {
 	// **What lets one file build four different worlds.** `--worlds N` runs the
 	// same script in every world it creates, so without an identity every view
-	// is identical — and a compositor that placed them in the wrong order would
+	// is identical - and a compositor that placed them in the wrong order would
 	// look exactly like one that did not. `Mirrors-4-worlds.luau` is the caller.
 	//
 	// The world's *name* rather than a fresh identifier, because a name is what
@@ -4661,7 +4661,7 @@ namespace {
 			// The point of the suffix is that two runs of this suite at once do
 			// not share a directory. A process id would say that too, but
 			// `getpid` is POSIX and Windows spells it `_getpid` behind
-			// <process.h> — a portable unique name is cheaper than a platform
+			// <process.h> - a portable unique name is cheaper than a platform
 			// split inside a test fixture.
 			Root = std::filesystem::temp_directory_path() /
 				   ("mono_mount_" + std::string(name) + "_" + std::to_string(std::random_device{}()));
@@ -4856,7 +4856,7 @@ TEST_CASE("Vector3 has the Magnitude and Unit the declarations promise", "[scrip
 
 TEST_CASE("a script pivots a part by its handle", "[scripting]") {
 	// **The pair is the point.** A `Transform` says where a part's centre is,
-	// and almost nothing is placed by its centre — `PivotOffset` is where the
+	// and almost nothing is placed by its centre - `PivotOffset` is where the
 	// handle is, `GetPivot` reads it in world space and `PivotTo` puts it
 	// somewhere. Setting `CFrame` to the target instead is the bug this exists
 	// to make unnecessary.
@@ -4902,8 +4902,8 @@ TEST_CASE("an instance with no placement answers a pivot anyway", "[scripting]")
 
 // --- network ownership ------------------------------------------------------
 //
-// **The surface, not the effect.** Nothing in the engine reads ownership yet —
-// physics integrates every body on whichever machine runs it — so what these
+// **The surface, not the effect.** Nothing in the engine reads ownership yet -
+// physics integrates every body on whichever machine runs it - so what these
 // pin is that a script can say who owns a body, read it back, and be stopped
 // from saying something that cannot be true. `engine.scene.ownership` owns the
 // reclaim.
@@ -4922,8 +4922,8 @@ TEST_CASE("a script hands a body to a player and back to the server", "[scriptin
 
 		-- **Unanchored first, and this engine's default is not Roblox's.**
 		-- `Instance.new('Part')` here carries neither `RigidBody` nor `Motion`
-		-- — the class sets deliberately leave them out, so whether a part is a
-		-- body is a decision rather than a flag — and ownership is about who
+		-- - the class sets deliberately leave them out, so whether a part is a
+		-- body is a decision rather than a flag - and ownership is about who
 		-- runs the physics, so an anchored part is refused.
 		part.Anchored = false
 
@@ -4946,7 +4946,7 @@ TEST_CASE("a script hands a body to a player and back to the server", "[scriptin
 
 TEST_CASE("a script cannot hand over an anchored part", "[scripting]") {
 	// **The case a game will actually hit.** Ownership decides who runs the
-	// physics, and an anchored part has none to run — so this is a script
+	// physics, and an anchored part has none to run - so this is a script
 	// mistake with a visible symptom rather than a silent no-op, and the
 	// message names the anchoring because that is the likelier of the two
 	// things to have gone wrong.
@@ -4968,7 +4968,7 @@ TEST_CASE("a script cannot hand over an anchored part", "[scripting]") {
 TEST_CASE("a script cannot hand a body to something that is not a player", "[scripting]") {
 	// **Raises rather than answering false**, which is the departure from
 	// `AddTag` the binding documents: a full tag table is a scene running out
-	// of room, where this is a script naming the wrong variable — and a silent
+	// of room, where this is a script naming the wrong variable - and a silent
 	// refusal is a body nothing simulates and no line of output.
 	RegisterClasses();
 	Store store("script_test");
@@ -5032,7 +5032,7 @@ TEST_CASE("PlayerAdded fires for a player and not for anything else", "[scriptin
 
 	// **Recorded onto an instance rather than into a global.** Each `Run` is
 	// its own chunk, so a global one chunk sets is not a global the next one
-	// reads — which is what every other signal case here works around the same
+	// reads - which is what every other signal case here works around the same
 	// way.
 	MustRun(*runtime, R"(
 		local log = workspace:FindFirstChild('Log')
@@ -5091,8 +5091,8 @@ TEST_CASE("PlayerRemoving fires while the player is still there", "[scripting]")
 	// **The reason it is not a queued signal.** A game saving somebody's
 	// progress on the way out reads the player in the handler; a signal
 	// delivered at the next barrier would hand it an instance that has gone.
-	// So the handler reads `.Name` — which is only answerable while the row is
-	// alive — rather than merely counting the call.
+	// So the handler reads `.Name` - which is only answerable while the row is
+	// alive - rather than merely counting the call.
 	RegisterClasses();
 	Store store("script_test");
 	engine::scene::InstallServices(store);
@@ -5151,7 +5151,7 @@ TEST_CASE("javascript hears players join and leave", "[scripting][js]") {
 
 TEST_CASE("a script keeps its world awake and lets it sleep again", "[scripting]") {
 	// **The surface a game reaches for when its world is empty and busy.** An
-	// NPC on a route, a shop restocking, a round counting down — a host can see
+	// NPC on a route, a shop restocking, a round counting down - a host can see
 	// players and nothing else, so this is how a game says the world still has
 	// work in it. `scene/Awake.hpp` carries the argument; this is the spelling.
 	RegisterClasses();

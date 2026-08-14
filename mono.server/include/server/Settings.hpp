@@ -18,8 +18,8 @@
 // every host on a machine the same set.
 //
 // **`--listen` is here and it is the one that needed thought.** The port and
-// "whether to listen at all" are two settings on purpose — `Options::Listening`
-// says why zero is a real port rather than a way of saying no — so they are two
+// "whether to listen at all" are two settings on purpose - `Options::Listening`
+// says why zero is a real port rather than a way of saying no - so they are two
 // flags, and `--listen PORT` sets both.
 //
 // @since v0.15

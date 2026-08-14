@@ -1,4 +1,4 @@
-# mono.engine/resources — module invariants
+# mono.engine/resources - module invariants
 
 L11 · `client`. The engine's built-in GLSL, and the one name that says where the
 build stages it.
@@ -12,7 +12,7 @@ consumer already owns better.
 
 What that buys is a rule the build enforces rather than a convention. A program
 stages the shaders of every module it links, so `<program>/shaders/resources/`
-is present exactly when something linked `Engine::resources` — and a second
+is present exactly when something linked `Engine::resources` - and a second
 module wanting `opaque.frag` links it too instead of reaching sideways into
 another module's source directory.
 
@@ -22,7 +22,7 @@ another module's source directory.
 `glslc` was resolved, and `glslc` is only resolved when `MONO_BUILD_CLIENT` is
 on. A `shared` module owning the same files would break the `server` preset on a
 machine with no shader compiler, and would stage a `shaders/` directory into
-`server/` — which `mono.server/AGENTS.md` names as the visible symptom of a
+`server/` - which `mono.server/AGENTS.md` names as the visible symptom of a
 link-line mistake, and the Justfile checks for.
 
 ## The light cap is read from `render`, at configure time
@@ -35,7 +35,7 @@ drift.
 That reach is upward and stays a **file read**, never a link edge: the value
 belongs beside the struct it sizes, and moving the declaration down here would
 put it away from the code that has to agree with it. If that declaration moves
-or changes shape, the regex in `CMakeLists.txt` moves in the same commit — it is
+or changes shape, the regex in `CMakeLists.txt` moves in the same commit - it is
 a `FATAL_ERROR`, so the build says so.
 
 ## Every shader is staged twice, and the caller says which it wants
@@ -43,7 +43,7 @@ a `FATAL_ERROR`, so the build says so.
 `glslc` writes `opaque.frag.spv` and `mono.tools/shadercross` writes
 `opaque.frag.msl` beside it, from the same build. SDL's Vulkan backend takes one
 and its Metal backend takes the other, and which one a client opens is a
-property of the *device* rather than of the platform or of the build —
+property of the *device* rather than of the platform or of the build -
 `SDL_GetGPUShaderFormats` is what answers it, and `render/src/ShaderBinary.hpp`
 is where it is asked.
 
@@ -60,7 +60,7 @@ runs; `docs/DEFERRED.md` D00001 is where the rest of that sentence lives.
 ## A shader a game author writes is a different thing
 
 None of those are in this repository. `render::ShaderCompiler` compiles them at
-runtime and a failure there is a diagnostic string, not a build failure —
+runtime and a failure there is a diagnostic string, not a build failure -
 `mono.engine/render/AGENTS.md` carries the split. Nothing authored outside the
 engine belongs in this directory.
 
@@ -70,7 +70,7 @@ engine belongs in this directory.
   names. `render` decides what a shader is bound to, and a consumer that wanted
   this module to load one for it would be asking for a renderer.
 - **No baked meshes or textures.** The engine's default shapes and its missing
-  texture are *generated* — `assets::MakeBuiltin` and `render::MissingTexture` —
+  texture are *generated* - `assets::MakeBuiltin` and `render::MissingTexture` -
   and a checked-in file of the same geometry would be a second copy of a fact
   the code already owns, free to drift from it. A default that has to be a file
   because nothing can generate it may live here; one that can be generated

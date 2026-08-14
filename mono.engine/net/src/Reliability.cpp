@@ -54,13 +54,13 @@ namespace engine::net {
 		// **Karn's rule, and it is the whole reason `Attempts` is consulted
 		// here.** An acknowledgement of a resent packet does not say which
 		// transmission it answers, so a sample from one is either the true trip
-		// or the trip plus a retransmit timeout — and there is no way to tell.
+		// or the trip plus a retransmit timeout - and there is no way to tell.
 		// Measuring them makes the estimate worst on exactly the links that
 		// need it most.
 		const auto sample = [this, nowSeconds](const Held &entry) {
 			// **Zero, because `Attempts` counts *re*sends and not sends.**
 			// `Track` starts it at zero and `OnResent` increments it, so a
-			// packet that went out once and was never repeated has zero — and a
+			// packet that went out once and was never repeated has zero - and a
 			// check for one measures precisely the packets Karn's rule exists
 			// to exclude, which is the inversion this first shipped as.
 			if (entry.Attempts != 0) {

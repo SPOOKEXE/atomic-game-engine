@@ -16,9 +16,9 @@ namespace engine::core {
 			//
 			// `Text()` is called on every property comparison, every log line,
 			// every panel row and every save-file field. The registry it reads
-			// is append-only — the deque never moves what it holds and nothing
+			// is append-only - the deque never moves what it holds and nothing
 			// is ever removed, which `Text()`'s own return comment already
-			// relies on — so concurrent readers do not interfere with each
+			// relies on - so concurrent readers do not interfere with each
 			// other at all. With a plain mutex they serialised anyway, and with
 			// `ExecutionMode::WorldParallel` two worlds ticking on two workers
 			// contended on this one lock for every name either of them touched.
@@ -62,7 +62,7 @@ namespace engine::core {
 		//
 		// Deliberately does *not* jump past a high pin. Reserving 500'000 and
 		// then setting the counter to 500'001 would make every later name take
-		// a huge id — the ids stop being dense, which was the reason for having
+		// a huge id - the ids stop being dense, which was the reason for having
 		// a counter at all, and any further pin below the new high-water mark
 		// gets consumed by ordinary interning. Skipping instead keeps both
 		// properties, at the cost of a walk that only ever advances.
@@ -84,7 +84,7 @@ namespace engine::core {
 
 		// **The hit is a read, and it is almost every call.** A process interns
 		// each distinct name once and then constructs from that text for the
-		// life of the run — a component name, a property name, a service name —
+		// life of the run - a component name, a property name, a service name -
 		// so the miss below happens a few thousand times at load and the lookup
 		// here happens continuously.
 		//
@@ -105,10 +105,10 @@ namespace engine::core {
 		}
 
 		// A miss. `shared_mutex` cannot upgrade, so the shared lock is dropped
-		// and an exclusive one taken — which means another thread may have
+		// and an exclusive one taken - which means another thread may have
 		// interned this very text in between, and the lookup has to happen
 		// again. **Without the re-check two threads that both missed would both
-		// insert, and one text would have two ids** — which is precisely the
+		// insert, and one text would have two ids** - which is precisely the
 		// thing `Name` exists to make impossible.
 		std::lock_guard lock(registry.Guard);
 

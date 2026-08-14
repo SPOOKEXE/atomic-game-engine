@@ -19,7 +19,7 @@ namespace {
 	server::Server *Running = nullptr;
 
 	// Ctrl-C has to reach the tick loop rather than killing the process where
-	// it stands. Only Stop is called from here — it is one atomic store, which
+	// it stands. Only Stop is called from here - it is one atomic store, which
 	// is about the limit of what is safe in a signal handler.
 	extern "C" void OnInterrupt(int) {
 		if (Running) {
@@ -31,7 +31,7 @@ namespace {
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("server");
 
-	// Declared before anything is parsed or read — see the client's `main` for
+	// Declared before anything is parsed or read - see the client's `main` for
 	// why the order matters.
 	engine::core::Config::DeclareEngineFlags();
 	engine::parallel::DeclareFlags();
@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
 	server::DeclareFlags();
 
-	engine::core::Arguments arguments("server", "atomic — hosts a game.");
+	engine::core::Arguments arguments("server", "atomic - hosts a game.");
 	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("unpaced", "Tick back to back instead of pacing to the tick rate");
@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
 		"Run every parallel dispatch on one thread, so the frame graph keeps every span"
 	);
 
-	// The control surface. Off unless asked for — see `Options::ControlPort`.
+	// The control surface. Off unless asked for - see `Options::ControlPort`.
 	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8734)");
 	arguments.Flag("chatter", "Make every world publish on a shared topic (no game file yet)");
 
@@ -88,15 +88,15 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"rendezvous", "HOST:PORT", "Register with a rendezvous point, so clients off this subnet can reach it"
 	);
-	arguments.Value("content-store", "DIR", "Serve this content store to clients — CDN.md §6's local store");
+	arguments.Value("content-store", "DIR", "Serve this content store to clients - CDN.md §6's local store");
 	arguments.Value("content-port", "PORT", "Port the attached origin listens on (0 for ephemeral)");
 	arguments.Value(
-		"content-grant-key", "HEX", "64 hex characters — the secret grants are issued and checked with"
+		"content-grant-key", "HEX", "64 hex characters - the secret grants are issued and checked with"
 	);
 	arguments.Value(
 		"identity-key",
 		"HEX",
-		"64 hex characters — the Ed25519 seed this server proves its identity with. Without it a "
+		"64 hex characters - the Ed25519 seed this server proves its identity with. Without it a "
 		"relay in the path can read everything"
 	);
 
@@ -133,7 +133,7 @@ int main(int argc, char **argv) {
 	// Set before startup so every dispatch uses the measured serial path.
 	engine::parallel::ApplyFlags();
 
-	// The settings first, the command line over the top — see the client's
+	// The settings first, the command line over the top - see the client's
 	// `main` for the precedence this expresses.
 	server::Options options = server::OptionsFromFlags();
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
 			options.IdleCloseSeconds = arguments.GetNumber("idle-close", options.IdleCloseSeconds);
 
 			// Said out loud rather than clamped in silence. The decision clamps
-			// anyway — see `world::MAXIMUM_IDLE_LIMIT_SECONDS` — and a number
+			// anyway - see `world::MAXIMUM_IDLE_LIMIT_SECONDS` - and a number
 			// quietly ignored reads as the flag not working.
 			if (options.IdleCloseSeconds > engine::world::MAXIMUM_IDLE_LIMIT_SECONDS) {
 				ENGINE_WARN(
@@ -177,7 +177,7 @@ int main(int argc, char **argv) {
 	// `GetInteger` with a fallback would open the port on every run, because a
 	// fallback is returned when the flag is absent. This way `--mcp-port` alone
 	// takes this program's number, and no flag at all leaves whatever
-	// `server.control-port` said — which is minus one unless a deployment
+	// `server.control-port` said - which is minus one unless a deployment
 	// deliberately opened it.
 	if (arguments.Has("mcp-port")) {
 		options.ControlPort = static_cast<int>(arguments.GetInteger("mcp-port", 8734));
@@ -234,7 +234,7 @@ int main(int argc, char **argv) {
 			return 2;
 		}
 
-		// Zero is a real answer here — bind an ephemeral port — so "was it
+		// Zero is a real answer here - bind an ephemeral port - so "was it
 		// given" and "what was it set to" are different questions and the flag
 		// being present is what turns listening on.
 		options.ListenPort = static_cast<uint16_t>(port);

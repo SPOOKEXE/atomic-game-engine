@@ -1,6 +1,6 @@
 // The pre-shared key: where one comes from, what it tags, and what it refuses.
 //
-// The passphrase path is the one with a standing obligation attached — the salt
+// The passphrase path is the one with a standing obligation attached - the salt
 // and the round count are part of the key, so a change to either silently
 // invalidates every key anybody derived from words. The vector below is what
 // makes that a failing test rather than a session nobody can join.
@@ -69,7 +69,7 @@ TEST_CASE("hostile text is refused rather than half-read", "[network][sessionkey
 	CHECK_FALSE(SessionKey::FromText(std::string(63, 'a')).has_value());
 	CHECK_FALSE(SessionKey::FromText(std::string(65, 'a')).has_value());
 
-	// Right length, wrong alphabet — and the wrong character is at the end, so
+	// Right length, wrong alphabet - and the wrong character is at the end, so
 	// a reader that filled the key as it went has already written 31 bytes by
 	// the time it finds out.
 	std::string nearly(63, 'a');
@@ -111,7 +111,7 @@ TEST_CASE(
 	// are part of the key: changing either changes every key ever derived from
 	// a passphrase, and the symptom is a private session nobody can join with
 	// the words that worked yesterday. If this fails, the question is not "what
-	// is the new expected value" — it is whether the change was meant, and
+	// is the new expected value" - it is whether the change was meant, and
 	// whether the advert version moved with it.
 	CHECK(FromWords("atomic").Text() == "b78d1fb97427b4c754db1988a231734a4fa4982ef157c970da451482f60fac9a");
 	CHECK(SessionKey::PASSPHRASE_ROUNDS == 200000);
@@ -138,7 +138,7 @@ TEST_CASE("a tag commits to the bytes it was made over", "[network][sessionkey]"
 	CHECK_FALSE(FromWords("another secret").Admits(message, tag));
 
 	// A truncated tag is a refusal rather than a comparison over whichever
-	// bytes happened to be there — which is the shape of a forgery that
+	// bytes happened to be there - which is the shape of a forgery that
 	// succeeds by presenting nothing.
 	CHECK_FALSE(key.Admits(message, std::span(tag).first(16)));
 	CHECK_FALSE(key.Admits(message, {}));

@@ -252,7 +252,7 @@ TEST_CASE("an invalid name round-trips as invalid", "[bytes]") {
 }
 
 TEST_CASE("a name interns on read when the process has not seen it", "[bytes]") {
-	// The reading process is a different one in every case that matters — a
+	// The reading process is a different one in every case that matters - a
 	// restored snapshot, a packet from a server. Nothing may assume the text
 	// was already interned.
 	ByteWriter writer;
@@ -384,7 +384,7 @@ TEST_CASE("failure is sticky", "[bytes]") {
 	writer.WriteUInt32(7);
 	writer.WriteUInt32(9);
 
-	// Eight bytes wanted and eight present, so this succeeds — and reads the
+	// Eight bytes wanted and eight present, so this succeeds - and reads the
 	// two 32-bit fields as one 64-bit value, which is what a format mismatch
 	// looks like when nothing bounds-checks it into being obvious.
 	ByteReader reader = ReaderOver(writer);
@@ -485,7 +485,7 @@ TEST_CASE("a reserved writer does not reallocate under its reservation", "[bytes
 TEST_CASE("random buffers never read out of bounds", "[bytes]") {
 	// The reader's contract is that no input can make it misbehave, so hand it
 	// arbitrary bytes and an arbitrary sequence of reads. Nothing here asserts
-	// a value — the assertion is that the process survives and the failure flag
+	// a value - the assertion is that the process survives and the failure flag
 	// is consistent with how much was consumed.
 	constexpr uint32_t ITERATIONS = 2'000;
 

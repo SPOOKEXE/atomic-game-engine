@@ -2,7 +2,7 @@
 
 // How much of a C++ source file is code, and how much is everything else.
 //
-// Three numbers per file — empty lines, comment lines, code lines — over a
+// Three numbers per file - empty lines, comment lines, code lines - over a
 // classification that is a scan of the whole file rather than a test applied to
 // each line on its own. Two of the states a line can be in outlive the line: a
 // `/* */` that opened earlier, and a raw string literal that has not closed. A
@@ -27,7 +27,7 @@ namespace linecount {
 	//
 	// The rules, in the order they are applied:
 	//
-	// - A line holding nothing but whitespace is `Empty` — including one inside
+	// - A line holding nothing but whitespace is `Empty` - including one inside
 	//   a block comment or a raw string. A blank line is a blank line wherever
 	//   it appears, and counting the ones inside comment blocks as comments
 	//   inflates the comment share by the paragraph breaks in it.
@@ -72,7 +72,7 @@ namespace linecount {
 	// The totals for one translation unit.
 	//
 	// A file is as many lines as it has newlines, plus one when it does not end
-	// on a newline. An empty file is zero lines rather than one — a file with
+	// on a newline. An empty file is zero lines rather than one - a file with
 	// nothing in it has no blank line in it either.
 	//
 	// @param source The whole file, exactly as it is on disk.

@@ -77,7 +77,7 @@ namespace engine::replication {
 
 		// **The stage is part of the buffer's identity, beside the tick.** A join
 		// is two blobs taken at one tick, so two of the same length would
-		// otherwise be assembled into one another — half a preface spliced under
+		// otherwise be assembled into one another - half a preface spliced under
 		// half a world, restored without a complaint from anything.
 		if (!Assembling || chunk.Tick != SnapshotTick || chunk.Stage != Stage ||
 			Snapshot.size() != chunk.TotalBytes) {
@@ -113,7 +113,7 @@ namespace engine::replication {
 
 		// **The preface merges and the world sweeps, and swapping them is the
 		// bug.** A preface is a slice of a world, so applying it authoritatively
-		// would destroy everything it does not mention — which on a re-snapshot
+		// would destroy everything it does not mention - which on a re-snapshot
 		// is the entire world the client already holds, wiped a moment before
 		// being sent it again.
 		const bool preface = Stage == SnapshotStage::Preface;
@@ -148,7 +148,7 @@ namespace engine::replication {
 		// **A snapshot is the whole world, so nothing in it is half-built.**
 		// Anything that was being held is either in these bytes with its parent
 		// or is not in them at all, and either way the hold has nothing left to
-		// say — keeping it would re-parent an entity the snapshot may have put
+		// say - keeping it would re-parent an entity the snapshot may have put
 		// somewhere else.
 		Arriving_.clear();
 
@@ -174,7 +174,7 @@ namespace engine::replication {
 		// **The write itself is shared with the inbound direction**, which is
 		// what `Submission.hpp` is for: a delta going up the wire is the same
 		// bytes as one coming down, and the only difference is whether the
-		// sender was allowed to say it. No filter here — the sender is the
+		// sender was allowed to say it. No filter here - the sender is the
 		// authority.
 		const WriteOutcome outcome = WriteComponents(store, delta);
 		if (outcome.Status != ApplyStatus::Ok) {
@@ -194,7 +194,7 @@ namespace engine::replication {
 
 			// The bound. An entity held past `HOLD_DELTAS` is shown wherever it
 			// has got to, because content that is simply missing is worse than
-			// content that arrived in two steps — `HOLD_DELTAS` carries why.
+			// content that arrived in two steps - `HOLD_DELTAS` carries why.
 			const uint64_t seen = Stats_.Deltas;
 			std::vector<Arrival> overdue;
 			std::erase_if(Arriving_, [&](const Arrival &arriving) {
@@ -250,8 +250,8 @@ namespace engine::replication {
 	void Replica::ReleaseArrivals(ecs::Store &store) {
 		for (const Arrival &arriving : Arriving_) {
 			if (arriving.Parent == ecs::NULL_ENTITY) {
-				// It never had one. A replicated root is an ordinary thing —
-				// `Instance.new` with no parent is exactly this — and putting it
+				// It never had one. A replicated root is an ordinary thing -
+				// `Instance.new` with no parent is exactly this - and putting it
 				// somewhere would be inventing a tree the server did not send.
 				continue;
 			}
@@ -277,8 +277,8 @@ namespace engine::replication {
 			store.CreateAt(entity);
 
 			// **Recorded before a single component of it has arrived.** The
-			// hold is what stops a half-built entity being drawn — see
-			// `HoldArrivals` — and the moment to start holding is the moment the
+			// hold is what stops a half-built entity being drawn - see
+			// `HoldArrivals` - and the moment to start holding is the moment the
 			// entity exists, because the delta that parents it may be the very
 			// next message.
 			Arriving_.push_back(Arrival{entity, ecs::NULL_ENTITY, Stats_.Deltas});
@@ -367,7 +367,7 @@ namespace engine::replication {
 		case MessageKind::Identify:
 		case MessageKind::Disputed:
 		// **`User` is refused here rather than ignored.** Its payload is opaque
-		// to this module by design — see `MessageKind::User` — so whoever owns
+		// to this module by design - see `MessageKind::User` - so whoever owns
 		// the link peels one off before this point. One arriving here means the
 		// caller did not, which is a routing mistake worth counting rather than
 		// a message to drop quietly.

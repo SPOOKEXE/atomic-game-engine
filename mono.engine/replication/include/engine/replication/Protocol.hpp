@@ -37,8 +37,8 @@ namespace engine::replication {
 		// **The seam that stops the next feature becoming a fourth session
 		// type.** A connected, admitted, encrypted, reliable link between two
 		// processes is expensive to build and this module already has one; a
-		// caller that needs to carry something else between the same two ends —
-		// a game's remote call, the studio's edit stream — should not have to
+		// caller that needs to carry something else between the same two ends -
+		// a game's remote call, the studio's edit stream - should not have to
 		// build a second one beside it.
 		//
 		// The payload is opaque here and must stay opaque. A `replication` that
@@ -85,7 +85,7 @@ namespace engine::replication {
 	//
 	// Unknown versions are refused; wire changes require a version bump.
 	//
-	// **8 — no message changed shape, and it still had to move.** A peer of
+	// **8 - no message changed shape, and it still had to move.** A peer of
 	// version 7 registers `ecs.InstanceClass` and would resolve the name in a
 	// delta perfectly well, then read a length-prefixed class name as a raw
 	// four-byte `ClassId` and lose the cursor for every value behind it. A
@@ -99,7 +99,7 @@ namespace engine::replication {
 	//
 	// **A join is two blobs because it is two cursors.** A snapshot is one
 	// `ecs::Store::Save` chunked across ticks in whatever order the store wrote
-	// its archetypes, and no ordering hook reaches inside a byte cursor — so
+	// its archetypes, and no ordering hook reaches inside a byte cursor - so
 	// "these entities first" is a second snapshot finished before the first byte
 	// of the world's goes out, and this is the field that says which one a chunk
 	// is part of. See `Authority::SetPreface`.
@@ -126,7 +126,7 @@ namespace engine::replication {
 		//
 		// **Part of the buffer's identity at the far side, not a label.** Both
 		// blobs are stamped with the tick they were taken at, so two of the same
-		// length would otherwise assemble into one another — the same failure
+		// length would otherwise assemble into one another - the same failure
 		// `Offset` exists to prevent, one level up.
 		//
 		// @since v0.15
@@ -145,7 +145,7 @@ namespace engine::replication {
 		// Where this chunk starts within that total.
 		//
 		// **Explicit rather than implied by arrival order**, because chunks
-		// travel on a channel that may reorder them — an appending receiver
+		// travel on a channel that may reorder them - an appending receiver
 		// would assemble a snapshot out of order and never know.
 		uint32_t Offset = 0;
 
@@ -170,7 +170,7 @@ namespace engine::replication {
 		// Those rows' values, back to back at the component's wire stride.
 		//
 		// **Parallel to `Entities` rather than interleaved with it**, so the
-		// values are one memcpy per run of adjacent rows — which is what
+		// values are one memcpy per run of adjacent rows - which is what
 		// `EachChangedBatch` yields and the reason it yields runs at all.
 		std::vector<std::byte> Values;
 	};
@@ -237,7 +237,7 @@ namespace engine::replication {
 		// The input itself, opaque here.
 		//
 		// **This module does not know what a game's input is**, and reading it
-		// would be `replication` knowing what a component means — the same line
+		// would be `replication` knowing what a component means - the same line
 		// `ComponentDelta::Values` is on.
 		std::vector<std::byte> Bytes;
 	};
@@ -272,7 +272,7 @@ namespace engine::replication {
 		// makes the comparison exact.** The sender audits only the rows this
 		// client has already acknowledged, and a receiver working the
 		// membership out for itself would include a row that is merely in
-		// flight — reporting a disagreement about a value that is on its way.
+		// flight - reporting a disagreement about a value that is on its way.
 		std::vector<ecs::Entity> Entities;
 
 		// The digest of those entities' replicated values.
@@ -402,7 +402,7 @@ namespace engine::replication {
 		//
 		// **Every field rather than a union, and it costs what it costs.** A
 		// message is parsed once per datagram and then acted on, so the saving a
-		// union would buy is a few hundred bytes on one stack frame — against a
+		// union would buy is a few hundred bytes on one stack frame - against a
 		// visitor at every site that handles a message, in a module where every
 		// inbound field is hostile and the parsing is the part that has to stay
 		// readable.

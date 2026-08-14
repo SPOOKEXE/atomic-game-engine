@@ -3,7 +3,7 @@
 // `Name` is the bottom of the engine's identity story: a component name, a
 // property name, a service name and a save-file field are all `Name`, so the
 // registry is touched by every layer above L0 and a regression here is a
-// regression everywhere. There is nowhere else these numbers can come from —
+// regression everywhere. There is nowhere else these numbers can come from -
 // running the client shows the total and never the share.
 //
 // **Three different costs live here and they are not comparable to each
@@ -42,7 +42,7 @@ namespace names_bench {
 	//
 	// Large enough that the registry's hash map is a real lookup rather than one
 	// bucket the predictor has memorised, and small enough that the whole
-	// working set stays in L2 — which is where a real engine's name traffic
+	// working set stays in L2 - which is where a real engine's name traffic
 	// lives, because the set of component and property names is fixed at load
 	// and small.
 	constexpr size_t POOL = 4096;
@@ -163,7 +163,7 @@ BENCH("Exists · already interned", 10'000) {
 BENCH("Exists · never interned", 10'000) {
 	// The miss path, which is the one a hostile or merely wrong input takes and
 	// the one that walks a bucket to its end before giving up. It must not
-	// intern anything — if this row's cost climbs across samples, `Exists` has
+	// intern anything - if this row's cost climbs across samples, `Exists` has
 	// started inserting and the whole registry has a leak.
 	uint32_t found = 0;
 	for (size_t index = 0; index < 10'000; index++) {
@@ -237,7 +237,7 @@ BENCH("control · unordered_map<string, int> · lookup", 10'000) {
 // --- the contended path -------------------------------------------------------
 //
 // **Read this ladder as ratios, never as absolutes.** Each row does the same
-// total work — `THREADED_LOOKUPS` lookups — split across more threads, so a
+// total work - `THREADED_LOOKUPS` lookups - split across more threads, so a
 // registry that scaled perfectly would report a falling number and one that
 // serialised would report a flat or rising one. The thread spawn is inside the
 // measurement and does not divide, so the ideal is never actually reached; what
@@ -292,7 +292,7 @@ BENCH("Name(text) contended · 8 threads", THREADED_LOOKUPS) {
 BENCH("Text contended · 8 threads", THREADED_LOOKUPS) {
 	// The same ladder's top rung for the read that `WorldParallel` actually
 	// makes most often. Separate from the constructor because `Text` does not
-	// hash anything — if the constructor rows scale and this one does not, the
+	// hash anything - if the constructor rows scale and this one does not, the
 	// hash is what is serialising and not the lock.
 	const std::vector<Name> &names = Interned();
 	OnThreads(8, [&names](size_t worker) {
@@ -309,7 +309,7 @@ BENCH("Text contended · 8 threads", THREADED_LOOKUPS) {
 BENCH("Name(text) · first seen", 2048) {
 	// **This row measures a registry that is bigger every sample, and that is
 	// deliberate.** Interning something new is an insert, and an insert can only
-	// happen once per string — so a steady-state version of this benchmark does
+	// happen once per string - so a steady-state version of this benchmark does
 	// not exist. What is comparable is the row against itself over time: the
 	// registry is append-only and never shrinks, so if the cost of a first
 	// sighting starts climbing with the table's size, the map has stopped
@@ -317,7 +317,7 @@ BENCH("Name(text) · first seen", 2048) {
 	//
 	// The harness takes the minimum of seven samples after two warm-ups, so the
 	// figure reported is from an early sample and the later ones only widen the
-	// spread. A spread far larger than the minimum on this row *is* the signal —
+	// spread. A spread far larger than the minimum on this row *is* the signal -
 	// it means the ninth pass through cost visibly more than the first.
 	//
 	// 2048 per sample, nine samples, so this file adds at most ~18k permanent

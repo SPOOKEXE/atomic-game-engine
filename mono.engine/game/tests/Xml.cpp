@@ -51,7 +51,7 @@ TEST_CASE("a document parses into elements, attributes and text", "[game][xml]")
 TEST_CASE("a doctype is refused rather than parsed", "[game][xml]") {
 	// **Billion laughs, and every variant of it.** The attack is an entity
 	// declared in terms of itself ten times over, so a two-kilobyte document
-	// expands to gigabytes — and there is no version of "expand entities
+	// expands to gigabytes - and there is no version of "expand entities
 	// safely" simpler than not having entities. Refusing the DOCTYPE removes
 	// the whole family in one line.
 	XmlDocument document;
@@ -72,7 +72,7 @@ TEST_CASE("an undeclared entity is refused, not ignored", "[game][xml]") {
 	// the point of use.
 	//
 	// **Counted as `Refused` and not `Malformed`**, because a document that
-	// names an entity is a document that expected a declaration — somebody
+	// names an entity is a document that expected a declaration - somebody
 	// tried something, rather than something being wrong.
 	XmlDocument document;
 	CHECK(ParseXml(R"(<Game format="1">&xxe;</Game>)", document) == XmlStatus::Refused);
@@ -92,7 +92,7 @@ TEST_CASE("the five predefined entities and numeric references are read", "[game
 
 TEST_CASE("nesting past the limit is its own refusal", "[game][xml]") {
 	// A stack-exhaustion attack is a *well-formed* document, which is why this
-	// is `TooDeep` and not `Malformed` — a refusal that said "malformed" would
+	// is `TooDeep` and not `Malformed` - a refusal that said "malformed" would
 	// send whoever read the log looking for a typo.
 	std::string text = "<a>";
 	for (int depth = 0; depth < 64; depth++) {
@@ -135,7 +135,7 @@ TEST_CASE("a mismatched or truncated document is refused", "[game][xml]") {
 
 TEST_CASE("CDATA survives a closing sequence inside it", "[game][xml]") {
 	// **The one that corrupts a file silently if it is wrong.** A program
-	// containing `]]>` is ordinary code — two array closes and a comparison —
+	// containing `]]>` is ordinary code - two array closes and a comparison -
 	// and a writer that emitted it raw would end the section early and drop the
 	// rest of the script into the document as markup.
 	const std::string program = "local x = a[b[c]]> 3";
@@ -154,7 +154,7 @@ TEST_CASE("a script's ampersand is source and not a reference", "[game][xml]") {
 	// **A save file's scripts are CDATA and CDATA is text**, so the refusal of
 	// an undeclared entity sits at each point a reference is actually read
 	// rather than in a sweep over the document. A sweep would refuse this file
-	// while naming an entity nobody wrote — which is the bug a real `.rbxmx` in
+	// while naming an entity nobody wrote - which is the bug a real `.rbxmx` in
 	// this repository's corpus found, one format along, and the reason
 	// `core/Xml.hpp` keeps the two policies apart.
 	const std::string program = "local mask = \"[&;]\"\nif a and b then end";
@@ -175,7 +175,7 @@ TEST_CASE("a script's ampersand is source and not a reference", "[game][xml]") {
 
 TEST_CASE("character data before the root is refused", "[game][xml]") {
 	// A document that begins with text is not one this format wrote, and a CDATA
-	// section is character data however much of markup's punctuation it borrows —
+	// section is character data however much of markup's punctuation it borrows -
 	// the scanner steps over one as text, so the refusal is the loader's to make.
 	XmlDocument document;
 	CHECK(ParseXml("junk<Game format=\"1\" />", document) == XmlStatus::Malformed);

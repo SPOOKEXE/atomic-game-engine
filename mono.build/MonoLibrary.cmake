@@ -1,4 +1,4 @@
-# MonoLibrary.cmake — module and program declarations, and the tier check.
+# MonoLibrary.cmake - module and program declarations, and the tier check.
 #
 # Every engine library is declared with mono_add_library and carries exactly one
 # tier. Every program is declared with mono_add_program and stages into its own
@@ -26,7 +26,7 @@ set_property(GLOBAL PROPERTY MONO_ALL_PROGRAMS "")
 # Tier checking
 # ---------------------------------------------------------------------------
 
-# Vendor targets carry no tier. Absence means "not ours", not "shared" — a
+# Vendor targets carry no tier. Absence means "not ours", not "shared" - a
 # missing tier on a first-party target is caught by mono_add_library instead.
 function(_mono_tier_of target out)
 	set(tier "")
@@ -79,7 +79,7 @@ endfunction()
 # `defines` is a list of `NAME=VALUE`, each becoming a `-D` on the glslc command
 # line. It exists because a number spelled in a header *and* in GLSL is a
 # constraint the build does not check, which AGENTS.md rule 6 calls
-# documentation — and the failure it hides is quiet in both directions: a shader
+# documentation - and the failure it hides is quiet in both directions: a shader
 # capped lower silently ignores the tail of a uniform array, and one capped
 # higher reads past the buffer. Both look like "that light does not work".
 #
@@ -134,7 +134,7 @@ function(_mono_add_shaders name target defines)
 		# it, so translating only where the result is loaded would mean the one
 		# platform that cannot run `just check` is the only one that ever
 		# produces the file. Emitting it everywhere is what lets a Linux build
-		# fail on a shader Metal could not express — which is the half of
+		# fail on a shader Metal could not express - which is the half of
 		# `docs/DEFERRED.md` D00001 that does not need a Mac.
 		#
 		# The cost is one small process per shader; `just shader-check` reads
@@ -156,7 +156,7 @@ function(_mono_add_shaders name target defines)
 
 	# **A module's staging directory is reconciled here, not merely written
 	# to.** A `.spv` is an `add_custom_command` output and CMake deletes an
-	# output only when the command that made it is re-run — so a shader that is
+	# output only when the command that made it is re-run - so a shader that is
 	# renamed, deleted, or moved to another module leaves its compiled form on
 	# disk forever. `just shader-check` then reports on files whose source no
 	# longer exists, which it did: 35 orphans from a v0.15 move sat beside 14
@@ -197,7 +197,7 @@ endfunction()
 # **The other half of the reconciliation, and it is the half `_mono_add_shaders`
 # structurally cannot do.** That function returns early for a module with no
 # `shaders/` directory, so a module that *stops* owning shaders is a module
-# nothing looks at again — which is exactly what happened when the built-in GLSL
+# nothing looks at again - which is exactly what happened when the built-in GLSL
 # moved from `render` to `resources` and `shaderstage/render/` was left behind
 # whole. Call this after every module has been declared.
 function(mono_prune_shader_stage)
@@ -213,7 +213,7 @@ endfunction()
 # ---------------------------------------------------------------------------
 
 # Anything under src/platform/<os>/ compiles only on that <os>. The alternative
-# — one file per platform, each wrapped in an #if that empties it elsewhere —
+# - one file per platform, each wrapped in an #if that empties it elsewhere -
 # puts the same rule in every file and lets one of them forget.
 #
 # No public header names an operating system. This is the only place in the
@@ -236,7 +236,7 @@ set(MONO_ALL_PLATFORMS windows linux macos android ios posix)
 
 # `posix` is a family rather than a platform: everything except Windows. It
 # exists so that an implementation genuinely shared by Linux, macOS, Android and
-# iOS — process spawning, for one — is one file rather than four identical ones
+# iOS - process spawning, for one - is one file rather than four identical ones
 # or one file wrapped in an #if that empties it four times.
 #
 # A specific platform directory still wins where the shared one is wrong; both
@@ -294,8 +294,8 @@ function(mono_add_library name)
 		message(FATAL_ERROR "mono_add_library(${name}): unknown TIER '${ARG_TIER}'.")
 	endif()
 
-	# Engine:: for mono.engine modules. A program's own library — mono.client,
-	# mono.server — passes NAMESPACE Mono, because it is a product's library
+	# Engine:: for mono.engine modules. A program's own library - mono.client,
+	# mono.server - passes NAMESPACE Mono, because it is a product's library
 	# rather than a layer of the engine, and the alias should say so.
 	if(NOT ARG_NAMESPACE)
 		set(ARG_NAMESPACE Engine)
@@ -330,7 +330,7 @@ function(mono_add_library name)
 	set_property(GLOBAL APPEND PROPERTY MONO_TIERED_TARGETS ${target})
 
 	# Checked here for the immediate feedback, and again at the end of the
-	# configure by mono_check_all_tiers — see the comment on that function.
+	# configure by mono_check_all_tiers - see the comment on that function.
 	_mono_check_tiers(${target} "${ARG_TIER}" "${ARG_DEPS}" "${ARG_ALLOW_TIER_ESCAPE}")
 
 	if(sources)
@@ -377,7 +377,7 @@ endfunction()
 #
 # One Catch2 binary per module, over every .cpp in that module's tests/. The
 # binary links mono_test_main, which handles --mono-suites before handing the
-# command line to Catch2 — that listing is what mono.tools/testrunner reads.
+# command line to Catch2 - that listing is what mono.tools/testrunner reads.
 function(mono_add_tests name)
 	cmake_parse_arguments(ARG "" "" "DEPS" ${ARGN})
 
@@ -393,7 +393,7 @@ function(mono_add_tests name)
 
 	# A module's own tests may reach its src/ directory, and only its own tests
 	# may. AGENTS.md states the rule this implements: do not widen a public
-	# header to make a test easier — link the private one instead. Without this
+	# header to make a test easier - link the private one instead. Without this
 	# line the only way to test a private type is to publish it, which is the
 	# outcome the rule exists to prevent.
 	if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -445,7 +445,7 @@ endfunction()
 # silently stopped re-running.
 #
 # Staged into bench/ rather than tests/, so `just test` never runs a benchmark
-# and `just bench` never runs a test — the two answer different questions and a
+# and `just bench` never runs a test - the two answer different questions and a
 # suite that did both would be slow at one and imprecise at the other.
 function(mono_add_benchmarks name)
 	cmake_parse_arguments(ARG "" "" "DEPS" ${ARGN})
@@ -462,12 +462,12 @@ function(mono_add_benchmarks name)
 	# Optimised whatever the preset says, because a debug build measures the
 	# debug build. A benchmark run against unoptimised code reports a number
 	# that has no relationship to the one anybody ships, and the danger is not
-	# that it is slower — it is that the *ratios* between two implementations
+	# that it is slower - it is that the *ratios* between two implementations
 	# invert.
 	#
 	# **-O3, matching `release`, and the two must not drift.** This line said
 	# -O2 while `release` inherited -O2 from RelWithDebInfo, so they agreed by
-	# coincidence rather than by construction — and when `release` moved to -O3
+	# coincidence rather than by construction - and when `release` moved to -O3
 	# this became the one place that would have gone on reporting the old
 	# number. A benchmark compiled differently from the thing it is a benchmark
 	# of measures a binary nobody ships, which is the same failure as measuring
@@ -494,7 +494,7 @@ endfunction()
 # mono_add_program
 # ---------------------------------------------------------------------------
 #
-# A program is a thin main over libraries. It stages into its own directory —
+# A program is a thin main over libraries. It stages into its own directory -
 # binary, shared libraries and the shaders of every module it links, and nothing
 # else. A server/ directory that has grown a shaders/ folder is a link-line
 # mistake anyone can see. repo_layout.md §15.
@@ -566,7 +566,7 @@ function(mono_add_program name)
 		# `rm -rf` before the copy, so the staged directory is the module's
 		# directory rather than the union of every one it has ever been. A copy
 		# alone leaves a renamed shader staged beside its replacement, and the
-		# renderer opens files by name — so the stale one loads and nothing says
+		# renderer opens files by name - so the stale one loads and nothing says
 		# which of the two it got. The whole directory is a handful of kilobytes
 		# and this target already runs every build, so it costs nothing to be
 		# exact.
@@ -576,7 +576,7 @@ function(mono_add_program name)
 	endforeach()
 
 	# A module this program no longer links leaves a whole directory behind, and
-	# the per-module sweep above cannot see it — there is no command for a module
+	# the per-module sweep above cannot see it - there is no command for a module
 	# that is not on the link line. Configure time, for `_mono_add_shaders`'
 	# reason: the link row is known here and changes to it re-run the configure.
 	_mono_prune_directory("${stage}/shaders" "${shader_modules}")
@@ -591,7 +591,7 @@ function(mono_add_program name)
 
 		# The program depends on the staging, not the other way round.
 		#
-		# Reversed, `ALL` still stages it on a full build — and `cmake --build
+		# Reversed, `ALL` still stages it on a full build - and `cmake --build
 		# --target client` does not, because nothing it was asked for depends on
 		# it. That is exactly what `just run` asks for, so a fresh preset built
 		# the client, skipped its shaders, and failed at startup with four
@@ -612,7 +612,7 @@ function(mono_add_program name)
 	# `render::GlyphAtlas` opens the same four directly, so that a shipped
 	# client can draw a `ScreenGui` without linking the editor's toolkit. A gate
 	# that still named only `ui` staged nothing for a program that draws text
-	# through the other one — and the symptom is a client whose interface has no
+	# through the other one - and the symptom is a client whose interface has no
 	# glyphs in it.
 	list(FIND all_deps engine_ui links_ui)
 	list(FIND all_deps engine_render links_render)
@@ -622,7 +622,7 @@ function(mono_add_program name)
 		# The directory first. `copy_if_different` given a destination that does
 		# not exist writes a *file* under that name, so without this the staged
 		# tree grows a file called `fonts` holding one typeface and the next copy
-		# overwrites it — which fails as "not a directory" a long way from here.
+		# overwrites it - which fails as "not a directory" a long way from here.
 		add_custom_command(TARGET ${target} POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E make_directory "${stage}/fonts"
 			VERBATIM)
@@ -643,7 +643,7 @@ function(mono_add_program name)
 					"$<TARGET_FILE:SDL3-shared>" "${stage}"
 				VERBATIM)
 
-			# The binary asks the loader for the soname — libSDL3.so.0 — and
+			# The binary asks the loader for the soname - libSDL3.so.0 - and
 			# not for the versioned file. Copying only the latter produces a
 			# staged tree that is missing the name it actually looks up.
 			if(UNIX AND NOT APPLE)
@@ -657,7 +657,7 @@ function(mono_add_program name)
 endfunction()
 
 # Walks MONO_DEPS breadth-first. Vendor targets have no such property, so the
-# walk stops at them, which is what we want — we only care about our own graph
+# walk stops at them, which is what we want - we only care about our own graph
 # plus the vendor leaves it reaches.
 function(_mono_transitive_deps roots out)
 	set(seen "")
@@ -692,8 +692,8 @@ endfunction()
 
 # The check inside mono_add_library runs while the directory is being
 # processed, so it can only see targets declared before it. CMake resolves link
-# dependencies lazily, which means a forward reference — `ecs` listing
-# `Mono::server`, declared two add_subdirectory calls later — passes it in
+# dependencies lazily, which means a forward reference - `ecs` listing
+# `Mono::server`, declared two add_subdirectory calls later - passes it in
 # silence. That is precisely the violation worth catching, so the whole set is
 # re-checked here once every target exists.
 #
@@ -717,8 +717,8 @@ function(mono_check_all_tiers)
 			if(NOT TARGET ${dep})
 				message(FATAL_ERROR
 					"${target} lists '${dep}' in DEPS, and no such target exists.\n"
-					"  A misspelled dependency links fine — CMake would resolve it as a "
-					"bare library name at link time — so it is refused here instead."
+					"  A misspelled dependency links fine - CMake would resolve it as a "
+					"bare library name at link time - so it is refused here instead."
 				)
 			endif()
 		endforeach()

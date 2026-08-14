@@ -13,7 +13,7 @@
 //
 // Both flags are Windows 10 1511 and later. An older console fails the mode
 // change and this refuses to open, which the caller reports and carries on
-// without — the same outcome as a redirected stdout.
+// without - the same outcome as a redirected stdout.
 
 namespace cdn {
 	namespace {

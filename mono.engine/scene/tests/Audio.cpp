@@ -4,7 +4,7 @@
 // the two facts that are stated in two places and would agree until somebody
 // edited one: the padding a snapshot writes, and the member names
 // `ecs::EnumTable` registers against `Describe`. Both have a precedent in this
-// module for going wrong silently — `scene/tests/Input.cpp` carries the six bytes
+// module for going wrong silently - `scene/tests/Input.cpp` carries the six bytes
 // that reached a save file uninitialised.
 
 #include <engine/ecs/EnumTable.hpp>
@@ -43,7 +43,7 @@ static_assert(
 
 TEST_CASE("a world nobody has configured is as authored", "[scene][audio]") {
 	// **The defaults are the contract**, because `SoundService`'s getters answer
-	// from a default-constructed one for a world with no resource — a headless
+	// from a default-constructed one for a world with no resource - a headless
 	// server, and every world before a script says anything. A master volume of
 	// anything but 1 here would quietly rescale every scene in the engine.
 	const AudioState fresh;
@@ -83,8 +83,8 @@ TEST_CASE("Enum.ListenerType holds exactly what the engine can honour", "[scene]
 	}
 
 	// **The two Roblox has and this does not**, asserted absent rather than
-	// merely not listed. `scene/Audio.hpp` gives the reason — both place the ear
-	// *and turn it*, and the mixer is posted a position with no facing — and a
+	// merely not listed. `scene/Audio.hpp` gives the reason - both place the ear
+	// *and turn it*, and the mixer is posted a position with no facing - and a
 	// member that resolved would be a setting a script could write and nothing
 	// would honour.
 	size_t ignored = 0;
@@ -93,7 +93,7 @@ TEST_CASE("Enum.ListenerType holds exactly what the engine can honour", "[scene]
 }
 
 TEST_CASE("the settings round-trip as a world resource", "[scene][audio]") {
-	// **Registered, because a resource is keyed by a component id too** — one
+	// **Registered, because a resource is keyed by a component id too** - one
 	// that is never registered is minted by the first `SetResource` under the
 	// compiler's spelling of the type, and aborts outright once the table is
 	// sealed. That is the failure this case would catch.

@@ -33,7 +33,7 @@ namespace engine::replication {
 		//
 		// **The half that makes a stale handle safe.** Slots are reused the
 		// moment a client leaves, so an index alone would let a message meant
-		// for somebody who disconnected be delivered to whoever arrived next —
+		// for somebody who disconnected be delivered to whoever arrived next -
 		// `ecs::Entity` carries a generation for the same reason.
 		uint32_t Generation = 0;
 
@@ -68,7 +68,7 @@ namespace engine::replication {
 		// of repaired.
 		//
 		// **Measured against how far behind the client is, not against the tick
-		// number** — the version that compared tick numbers re-snapshotted a
+		// number** - the version that compared tick numbers re-snapshotted a
 		// client in perfect agreement with a quiet world every 120 ticks for
 		// ever.
 		uint64_t ResnapshotAfterTicks = 120;
@@ -81,7 +81,7 @@ namespace engine::replication {
 		// **Per client rather than per server, and the difference is not
 		// pedantry**: the budget belongs to a link and there is one link per
 		// connection, so a server-wide cap would have to be divided before it
-		// could be enforced — and that division *is* a per-client cap.
+		// could be enforced - and that division *is* a per-client cap.
 		size_t BytesPerTick = 32 * 1024;
 
 		// How long a value may wait before it outranks every score.
@@ -119,8 +119,8 @@ namespace engine::replication {
 		// Declares a component as replicated, by name.
 		//
 		// **Opt in, not opt out.** A world holds components no client has any
-		// business receiving — a server-side AI's scratch state, a pending bus
-		// request — and a default of "everything" makes leaking one the
+		// business receiving - a server-side AI's scratch state, a pending bus
+		// request - and a default of "everything" makes leaking one the
 		// consequence of forgetting rather than of deciding.
 		//
 		// @param component The component's registered name.
@@ -146,14 +146,14 @@ namespace engine::replication {
 		// is six parts and one of them moves: `scene::PoseCharacters` derives the
 		// other five from the root, on whichever machine draws, precisely so they
 		// cannot come apart at speed. Those five transforms crossed every tick
-		// anyway and were overwritten the moment they landed — five ten-byte
+		// anyway and were overwritten the moment they landed - five ten-byte
 		// quantised `CFrame`s per character per tick, against roughly ten bytes
 		// for the root alone.
 		//
 		// **Named rather than typed, because the tag belongs to a module this one
 		// must not see.** `scene` is L7 and this is L12, so the component that
 		// marks a derived row is declared where the thing producing it lives and
-		// reaches here as a string — which is rule 4, and the same way
+		// reaches here as a string - which is rule 4, and the same way
 		// `Replicate` already names what it sends.
 		//
 		// **Deltas only, and the baseline still carries one copy.** That is a
@@ -164,12 +164,12 @@ namespace engine::replication {
 		//
 		// Not a wire-format change. A delta already carries only the rows that
 		// changed, so a receiver cannot tell an omitted row from an unchanged
-		// one — which is why this could be decided without a second consumer to
+		// one - which is why this could be decided without a second consumer to
 		// check it against, as `D00115` expected to need.
 		//
 		// **A tagged entity is also out of the audit entirely.** The two ends
 		// are meant to disagree about a derived row, and a hash has no
-		// tolerance — see `Audit.hpp`. What that costs is that a character root
+		// tolerance - see `Audit.hpp`. What that costs is that a character root
 		// is never audited, and it moves every tick, so the audit would have
 		// passed over it anyway.
 		//
@@ -193,7 +193,7 @@ namespace engine::replication {
 		// `SetOwnership`'s default and is right for the opposite reason: that one
 		// gates writes, where forgetting must fail closed, and this one gates
 		// reads of a world a host chose to stream at all. A server that means to
-		// hide its `ServerStorage` says so — see `scene::VisibleToClients`.
+		// hide its `ServerStorage` says so - see `scene::VisibleToClients`.
 		//
 		// @param predicate Called as `predicate(ClientId, ecs::Entity, const
 		//                  ecs::Store &)`.
@@ -212,22 +212,22 @@ namespace engine::replication {
 		// **`SetPriority` orders a stream and this orders a join, and neither
 		// can do the other's job.** A join is one `ecs::Store::Save` chunked
 		// across ticks in the order the store wrote its archetypes, and a score
-		// does not reach inside a byte cursor — so a client's very first view of
+		// does not reach inside a byte cursor - so a client's very first view of
 		// a world was whatever the storage happened to lay down first, whatever
 		// the priority hook said. What this predicate picks out is captured and
 		// finished as its own blob before the world's first chunk is built.
 		//
 		// **Applied as an overlay on the far side, and sent twice.** The blob is
 		// a slice of a world rather than the whole of one, so a receiver may not
-		// sweep what it fails to mention — and the world blob that follows still
+		// sweep what it fails to mention - and the world blob that follows still
 		// carries these entities, because *that* one is the complete picture and
 		// the sweep behind it is what retires a client's stale rows. The
 		// duplication is the price, and it is the size of what a host puts in
 		// front rather than the size of the world.
 		//
 		// **No `ClientId`, unlike every other hook here.** What goes first is a
-		// property of the content — Roblox's `ReplicatedFirst` is a container,
-		// not a per-player decision — and interest has already narrowed the set
+		// property of the content - Roblox's `ReplicatedFirst` is a container,
+		// not a per-player decision - and interest has already narrowed the set
 		// this is asked about to what that client may see.
 		//
 		// @param predicate Called as `predicate(ecs::Entity, const ecs::Store
@@ -256,7 +256,7 @@ namespace engine::replication {
 		//
 		// **Plausibility is deliberately not checked here, and that is the
 		// decision.** This module could compare a submitted position against
-		// the last one and refuse a jump — and it would be wrong to, because it
+		// the last one and refuse a jump - and it would be wrong to, because it
 		// does not know whether this game has teleports, launch pads, vehicles
 		// or a grappling hook. A speed limit invented at this layer is a limit
 		// every game has to work around and none can tune. So the engine
@@ -266,8 +266,8 @@ namespace engine::replication {
 		//
 		// **No predicate means nothing may be written.** An authority that has
 		// not been told who owns what refuses every inbound delta, because the
-		// alternative — accepting them until somebody remembers to restrict it
-		// — makes the insecure state the one you get by forgetting.
+		// alternative - accepting them until somebody remembers to restrict it
+		// - makes the insecure state the one you get by forgetting.
 		//
 		// **It is handed the world rather than reaching for one**, unlike
 		// `SetInterest`, and the difference is not stylistic: this runs inside
@@ -299,7 +299,7 @@ namespace engine::replication {
 		// **This is where the policy is enforced**, and it is here rather than
 		// in `Receive` for a mechanical reason worth knowing: a component's
 		// values are one packed stream in entity order, so refusing an entity
-		// means reading its value off the stream and discarding it — and only
+		// means reading its value off the stream and discarding it - and only
 		// the type's descriptor knows how long that value is. `Submission.hpp`
 		// carries the whole of that.
 		//
@@ -349,8 +349,8 @@ namespace engine::replication {
 		// **The link's allowance is the authority and `BytesPerTick` is a
 		// ceiling on what this module is willing to *produce*.** Congestion
 		// control measures the path; `BytesPerTick` is a number somebody typed.
-		// Packing rows past the allowance does not send more — `Link::Reserve`
-		// refuses them — it spends the encode and then hands the refusal to
+		// Packing rows past the allowance does not send more - `Link::Reserve`
+		// refuses them - it spends the encode and then hands the refusal to
 		// `Unsent`, which rebuilds the same rows next tick. Under the allowance
 		// the same shortfall reaches the *priority scheduler* instead, which is
 		// the thing that exists to decide what a client sees when not all of it
@@ -429,7 +429,7 @@ namespace engine::replication {
 			// How many entities this client is believed to hold.
 			//
 			// The set every `Created`, `Destroyed` and `Forgotten` is a
-			// difference against — which is why losing sight of an entity is a
+			// difference against - which is why losing sight of an entity is a
 			// forget rather than a destroy.
 			size_t Known = 0;
 		};
@@ -472,7 +472,7 @@ namespace engine::replication {
 			//
 			// **The anti-cheat signal, and the only one this module offers.**
 			// A steady zero is a game where nobody is trying; anything else is
-			// a client submitting state for something it was not handed —
+			// a client submitting state for something it was not handed -
 			// which is either a bug in that client or a person editing one.
 			// See `SetOwnership` for why the plausibility half deliberately
 			// lives in the host instead.
@@ -504,7 +504,7 @@ namespace engine::replication {
 			// figure that climbs and then stops is divergence found and
 			// repaired, and one that climbs for ever on a quiet link is a
 			// client holding something the server has no record of sending it
-			// — which the repair below cannot reach, and which nothing else
+			// - which the repair below cannot reach, and which nothing else
 			// would have reported at all.
 			//
 			// Cumulative rather than per-`Publish`, like `Unowned`.
@@ -573,7 +573,7 @@ namespace engine::replication {
 
 			// Whether this message was the tick's audit. A refused one leaves
 			// the client with nothing to answer, so the record of what it owes
-			// an answer for has to go with it — otherwise a later `Disputed`
+			// an answer for has to go with it - otherwise a later `Disputed`
 			// naming that tick would be accepted for an audit that never went.
 			bool Audit = false;
 		};
@@ -593,8 +593,8 @@ namespace engine::replication {
 		// asked of the client.** A client claiming everything mismatches is
 		// asking the server to resend the world, so the only thing an answer
 		// can do is name groups out of a slice the server chose, once, for a
-		// tick the server issued. Everything a peer could inflate — how often,
-		// how many, and which — is a number on this side of the wire.
+		// tick the server issued. Everything a peer could inflate - how often,
+		// how many, and which - is a number on this side of the wire.
 		struct AuditRecord {
 			// The tick of the audit awaiting an answer, or zero for none.
 			uint64_t Tick = 0;
@@ -616,7 +616,7 @@ namespace engine::replication {
 
 			// Indexed by `SnapshotStage`, and streamed in that order. Two
 			// cursors rather than one because a snapshot's chunking has no other
-			// place ordering could live — see `SetPreface`.
+			// place ordering could live - see `SetPreface`.
 			std::array<Staged, STAGES> Snapshots;
 
 			std::unordered_set<uint64_t> Known;
@@ -658,13 +658,13 @@ namespace engine::replication {
 			// **A handle, because the set it walks is not a list.** Entities
 			// come and go between audits, so a position would skip whatever
 			// happened to be inserted in front of it and re-audit whatever was
-			// removed behind it — the same reason `Delta::Part` is a position
+			// removed behind it - the same reason `Delta::Part` is a position
 			// and not an arrival order, one layer up.
 			uint64_t AuditCursor = 0;
 
 			// Entities an accepted answer asked to have re-offered, consumed by
 			// the next `BuildComponents`. The repair is the recovery walk that
-			// already exists — a second path that resent a value would be the
+			// already exists - a second path that resent a value would be the
 			// second way to do one job.
 			std::vector<uint64_t> Repairing;
 
@@ -684,7 +684,7 @@ namespace engine::replication {
 			//
 			// **A span rather than a row number times a stride, because a row is
 			// not a fixed width.** A component may serialise to a different
-			// number of bytes per entity — `scene.Visual` writes two names and
+			// number of bytes per entity - `scene.Visual` writes two names and
 			// `ecs.InstanceName` writes one, so two parts whose meshes have
 			// differently-spelt names are two different lengths in the same
 			// entry. `Pack` reorders rows by priority and slices them out again,

@@ -18,7 +18,7 @@ namespace engine::script {
 		// **A layer mask, not a list of instances**, and that is the shape the
 		// engine already has: `physics::Raycast` filters on
 		// `spatial::LayerMask`, which is what a collision group resolves to. A
-		// `FilterDescendantsInstances` list — Roblox's — would be a per-ray
+		// `FilterDescendantsInstances` list - Roblox's - would be a per-ray
 		// walk of a subtree, and the engine has a bit test that answers the same
 		// question in one instruction.
 		//
@@ -93,7 +93,7 @@ namespace engine::script {
 		//
 		// **Roblox's signature, including that the direction carries the
 		// distance.** `Raycast(origin, direction * 500)` is what an author
-		// writes, so the length of the second argument is how far to look — and
+		// writes, so the length of the second argument is how far to look - and
 		// `core::Ray` requires a *unit* direction, so the split happens here
 		// rather than being lost.
 		int WorkspaceRaycast(lua_State *state) {
@@ -148,7 +148,7 @@ namespace engine::script {
 			// enum member.** Roblox's `RaycastResult.Material` is the *visual*
 			// material, and that is no longer a field on a part: v0.10 replaced
 			// the seventeen-name enum with a `Material` instance naming a
-			// published asset — `scene/Materials.hpp` — and resolving one from
+			// published asset - `scene/Materials.hpp` - and resolving one from
 			// here would mean a child walk inside a query result.
 			//
 			// `Surface::Material` is the better answer for this caller anyway. A
@@ -161,7 +161,7 @@ namespace engine::script {
 				// **The empty view's pointer is null, and Luau asserts on one.**
 				// An invalid `core::Name` reads back a default `string_view`, so
 				// pushing `.data()` unchecked traps inside the VM rather than
-				// pushing an empty string — a part with no surface is the common
+				// pushing an empty string - a part with no surface is the common
 				// case, not the edge one.
 				const std::string_view material = surface->Material.Text();
 				lua_pushlstring(state, material.empty() ? "" : material.data(), material.size());
@@ -192,7 +192,7 @@ namespace engine::script {
 		lua_setglobal(state, "RaycastParams");
 
 		// On the Workspace's own method table, because `workspace:Raycast` is
-		// where Roblox puts it — a query is against a scene and not against a
+		// where Roblox puts it - a query is against a scene and not against a
 		// part, so it must not appear on every instance. `OpenWorkspace`
 		// creates that table and `LuauBindings.hpp` states that this runs after it.
 		lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");

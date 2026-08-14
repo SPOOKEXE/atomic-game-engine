@@ -94,7 +94,7 @@ TEST_CASE("the stage is honoured, not ignored", "[shaderc]") {
 	//
 	// These two are genuinely stage-specific. If the stage were being dropped
 	// on the way through, both would compile and the mismatch would surface
-	// later as a pipeline that will not create — much further from the cause.
+	// later as a pipeline that will not create - much further from the cause.
 	REQUIRE(compiler.Compile(VALID_VERTEX, ShaderStage::Fragment, "no-gl-position").Failed);
 	REQUIRE(
 		compiler.Compile("#version 450\nvoid main() { discard; }\n", ShaderStage::Vertex, "no-discard").Failed

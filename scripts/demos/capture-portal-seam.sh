@@ -20,7 +20,7 @@
 # be the same on frame one.
 #
 # The client is killed rather than waited for: there is a shutdown race in the
-# GPU teardown that predates the portal pass — `NON-EUCLIDEAN.md` Appendix A —
+# GPU teardown that predates the portal pass - `NON-EUCLIDEAN.md` Appendix A -
 # and the capture is written well before the exit that hangs.
 
 set -euo pipefail
@@ -51,7 +51,7 @@ fi
 for view in "${views[@]}"; do
 	# **The line is rewritten rather than a global set.** `_G` is readonly in
 	# the script sandbox, so a scene cannot be told anything from outside except
-	# by editing it — see the note beside `VIEW` in `PortalSeam.luau`.
+	# by editing it - see the note beside `VIEW` in `PortalSeam.luau`.
 	staged="$out/PortalSeam-$view.luau"
 	sed "s/^local VIEW = \"\"$/local VIEW = \"$view\"/" "$scene" > "$staged"
 
@@ -68,7 +68,7 @@ for view in "${views[@]}"; do
 		--script "$staged" --frames 90 --capture "$shot" > /dev/null 2>&1 || true
 
 	if [ ! -f "$shot" ]; then
-		echo "  no capture written — run the client by hand to see why" >&2
+		echo "  no capture written - run the client by hand to see why" >&2
 		exit 1
 	fi
 

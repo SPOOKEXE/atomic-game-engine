@@ -49,7 +49,7 @@ namespace {
 
 TEST_CASE("extent is a half-extent in the shape's own definition", "[physics][shapes]") {
 	// The single most likely silent factor of two in the module. A box a metre
-	// across has an extent of 0.5 on that axis — the same number
+	// across has an extent of 0.5 on that axis - the same number
 	// `scene::Bounds::HalfExtent` stores and the number `MakePart` halves
 	// `PartDesc::Size` into.
 	CHECK(ShapeHalfExtent(ShapeKind::Box, Vector3{0.5f, 1.0f, 2.0f}) == Vector3{0.5f, 1.0f, 2.0f});
@@ -67,7 +67,7 @@ TEST_CASE("extent is a half-extent in the shape's own definition", "[physics][sh
 TEST_CASE("the aabb derivation reads extent the same way the shape does", "[physics][shapes]") {
 	// The test that fails if one of the two ever starts treating `Extent` as a
 	// full extent. Unrotated, the world bound of a shape must be exactly the
-	// shape's own half-extent about its position — so the two readings of
+	// shape's own half-extent about its position - so the two readings of
 	// `Extent` are compared against each other rather than against a literal
 	// that would have to be updated alongside whichever one changed.
 	const Vector3 position{3.0f, -2.0f, 11.0f};
@@ -98,7 +98,7 @@ TEST_CASE("a rotated box bounds larger than an unrotated one", "[physics][shapes
 	// The rotate-the-centre-only bug. Turning a unit cube 45 degrees about Y
 	// makes it root two wide on X and Z; a derivation that rotated the position
 	// and kept the extent would return the same box it started with, which is
-	// *smaller* than the shape — and a broad phase whose bound is too small
+	// *smaller* than the shape - and a broad phase whose bound is too small
 	// drops contacts and reports nothing at all.
 	const Collider box = Of(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f});
 
@@ -151,7 +151,7 @@ TEST_CASE("a tilted cylinder bounds larger than an upright one", "[physics][shap
 
 	// At 45 degrees the exact bound is halfHeight * |a.e| + radius *
 	// sqrt(1 - (a.e)^2) per axis, which is strictly tighter than the box around
-	// the cylinder — the box bound would give 5 on X and Y where the true reach
+	// the cylinder - the box bound would give 5 on X and Y where the true reach
 	// is a little over 3.5. Being tighter is the whole reason this case is not
 	// routed through FromOrientedBox.
 	const Vector3 tilted = ReachOf(ShapeWorldBounds(cylinder, CFrame::Angles(0.0f, 0.0f, QUARTER_TURN)));
@@ -166,7 +166,7 @@ TEST_CASE("an upright cylinder bounds to its own radius, not its diagonal", "[ph
 	// The sqrt term is what makes a cylinder standing on its end bound to
 	// exactly its radius across. A cheaper derivation that used the barrel's
 	// bounding box would agree here only by accident of axis alignment, so this
-	// is the case that separates the two once the frame is turned about Y —
+	// is the case that separates the two once the frame is turned about Y -
 	// spinning a cylinder about its own axis must change nothing.
 	const Collider cylinder = Of(ShapeKind::Cylinder, Vector3{1.0f, 4.0f, 0.0f});
 
@@ -189,7 +189,7 @@ TEST_CASE("a negative extent is left alone rather than clamped", "[physics][shap
 	CHECK(bound.Minimum.X > bound.Maximum.X);
 
 	// It does not even contain the point it is centred on, and it misses every
-	// box near it — which is what makes the mistake show up on the first test
+	// box near it - which is what makes the mistake show up on the first test
 	// somebody writes rather than as a collider that is quietly the wrong size.
 	CHECK_FALSE(bound.Contains(Vector3::Zero));
 	CHECK_FALSE(bound.Overlaps(AABB{Vector3{2.0f, 2.0f, 2.0f}, Vector3{3.0f, 3.0f, 3.0f}}));

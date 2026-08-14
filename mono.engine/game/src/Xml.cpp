@@ -63,7 +63,7 @@ namespace engine::game {
 		case XmlStatus::TooManyAttributes:
 			return "an element carries more attributes than the limit allows";
 		case XmlStatus::Refused:
-			return "the document uses a feature this reader refuses — a doctype, "
+			return "the document uses a feature this reader refuses - a doctype, "
 				   "an entity declaration, or an undeclared entity reference";
 		}
 		return "unknown";
@@ -98,7 +98,7 @@ namespace engine::game {
 		// The elements still open, innermost last, as indices into
 		// `out.Elements`. **The stack is a vector and not the C stack**, which is
 		// what makes a document nested a million deep a `TooDeep` instead of a
-		// crash with no file named — and is why `MaximumDepth` is a number a
+		// crash with no file named - and is why `MaximumDepth` is a number a
 		// caller may raise.
 		std::vector<uint32_t> open;
 
@@ -110,7 +110,7 @@ namespace engine::game {
 		for (;;) {
 			if (open.empty()) {
 				// **Nothing but whitespace may precede the root**, comments and
-				// the declaration aside — the scanner steps over those. A
+				// the declaration aside - the scanner steps over those. A
 				// document that begins with character data is not one this format
 				// wrote, and a CDATA section is character data however much of
 				// the punctuation it borrows.
@@ -297,7 +297,7 @@ namespace engine::game {
 	void XmlWriter::Attribute(std::string_view name, std::string_view value) {
 		if (!Pending) {
 			// Dropped rather than written, because an attribute after a child
-			// produces a document that will not re-parse — and a save file that
+			// produces a document that will not re-parse - and a save file that
 			// cannot be loaded is worse than one that is missing a field.
 			Broken = true;
 			return;
@@ -331,8 +331,8 @@ namespace engine::game {
 		EndOpenTag();
 		Out += "<![CDATA[";
 
-		// **The `]]>` split.** A program containing that sequence — two array
-		// closes and a comparison, which is ordinary code — would otherwise end
+		// **The `]]>` split.** A program containing that sequence - two array
+		// closes and a comparison, which is ordinary code - would otherwise end
 		// the section early and put the rest of the file into the document as
 		// markup. Ending and reopening mid-sequence is the standard answer, and
 		// a reader that concatenates its text runs cannot tell it happened.
@@ -364,8 +364,8 @@ namespace engine::game {
 		Stack.pop_back();
 
 		if (Pending && !HasContent) {
-			// Collapsed. A game file is mostly empty elements — a part with
-			// default properties, a folder with no children — and `<Part />` is
+			// Collapsed. A game file is mostly empty elements - a part with
+			// default properties, a folder with no children - and `<Part />` is
 			// half the bytes of the pair.
 			Out += " />\n";
 			Pending = false;

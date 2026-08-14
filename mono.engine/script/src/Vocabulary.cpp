@@ -13,7 +13,7 @@ namespace engine::script {
 		// Luau's reserved words, from the lexer rather than from memory.
 		//
 		// Sorted, because the completion list is ranked by match quality and
-		// ties break by name — an unsorted source would put two runs in a
+		// ties break by name - an unsorted source would put two runs in a
 		// different order for no reason anybody could see.
 		constexpr std::string_view LUAU_KEYWORDS[] = {
 			"and",	 "break",  "continue", "do",   "else", "elseif", "end",	  "export",
@@ -55,7 +55,7 @@ namespace engine::script {
 		};
 
 		// `__instanceMethods` is a global only because that is where the shared
-		// method object had to live for `PrototypeFor` to reach it — see
+		// method object had to live for `PrototypeFor` to reach it - see
 		// `JsSurface.cpp`. It is not part of the surface anybody writes against.
 		//
 		// `globalThis`, `undefined` and `nil` are real and reachable; the first

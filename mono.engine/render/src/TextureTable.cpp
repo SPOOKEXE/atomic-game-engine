@@ -37,7 +37,7 @@ namespace engine::render {
 		// uploaded and never sampled: `mipmap_mode` has said LINEAR since v0.8,
 		// and a clamp of zero pins every fetch to level zero regardless. The
 		// bound is past `assets::MipLevelCount`'s largest answer, which is what
-		// "as many levels as the texture has" is spelled as here — SDL takes a
+		// "as many levels as the texture has" is spelled as here - SDL takes a
 		// LOD clamp rather than a level count, so a per-texture number would have
 		// to be a per-texture sampler.
 		sampler.min_lod = 0.0f;
@@ -50,7 +50,7 @@ namespace engine::render {
 		}
 
 		// **Uploaded here rather than lazily**, so the first frame that draws an
-		// untextured part costs a lookup and not a create-and-copy — and so a
+		// untextured part costs a lookup and not a create-and-copy - and so a
 		// device that cannot make a 64-pixel texture fails at start-up rather
 		// than at the moment somebody selects a part.
 		size_t defaultBytes = 0;
@@ -74,7 +74,7 @@ namespace engine::render {
 		// resolves without a store, a publish or a fetch is the only thing an
 		// editor can offer on a machine that has none of the three.
 		//
-		// Registered as ordinary entries rather than as another special handle —
+		// Registered as ordinary entries rather than as another special handle -
 		// `engine.Checker` is content that happens to be generated, and a part
 		// naming it takes the path every other texture takes.
 		for (uint8_t index = 0; index < assets::BUILTIN_TEXTURE_COUNT; index++) {
@@ -216,7 +216,7 @@ namespace engine::render {
 	TextureTable::Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image) {
 		// **One description, because there are two call sites.** `Add` replaces
 		// an entry or inserts one, and two aggregate initialisers is two places
-		// to forget a field — which is exactly how the sheet layout would go
+		// to forget a field - which is exactly how the sheet layout would go
 		// missing on a *replaced* texture only, so an animation would play until
 		// a publisher re-published it and then stop.
 		return Entry{
@@ -248,7 +248,7 @@ namespace engine::render {
 			return false;
 		}
 
-		// The chain counts against the ceiling too — it is a third of a texture's
+		// The chain counts against the ceiling too - it is a third of a texture's
 		// device memory, and a pre-check that ignored it would let a full table
 		// take an upload it then could not afford.
 		size_t bytes = image.Pixels.size();
@@ -320,8 +320,8 @@ namespace engine::render {
 		}
 
 		// **Refused before the swap, so a full table leaves the caller its
-		// texture.** The alternative — release the old entry and then discover
-		// there is no room — would drop a working picture to make space for one
+		// texture.** The alternative - release the old entry and then discover
+		// there is no room - would drop a working picture to make space for one
 		// that is not going in.
 		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
 			ENGINE_WARN("texture table: full, refusing {}", name.Text());
@@ -364,7 +364,7 @@ namespace engine::render {
 
 		// **Not conditioned on the table already holding it.** Content is
 		// republished, and a name asked for again while the old texture is
-		// still registered is still in flight — refusing the mark here would
+		// still registered is still in flight - refusing the mark here would
 		// make the second fetch invisible for no gain.
 		Awaiting.insert(name.Id());
 	}

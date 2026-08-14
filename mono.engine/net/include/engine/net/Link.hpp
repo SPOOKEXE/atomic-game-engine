@@ -2,7 +2,7 @@
 
 // One connection's life, with no socket anywhere in it.
 //
-// Join, leave, timeout and reconnect — v0.3's first roadmap item — expressed as
+// Join, leave, timeout and reconnect - v0.3's first roadmap item - expressed as
 // a state machine over *events*, not over a transport. A datagram socket, a
 // loopback and a test all drive the same object, which is what makes
 // `repo_layout.md` §16.6 honest: single-player uses a loopback with real
@@ -24,7 +24,7 @@
 // **There are two limits on a send and they answer different questions.**
 // `BytesPerTick` is a cap a game states and it never moves; `CongestionControl`
 // is what the path looks able to take and it moves every tick. A send has to
-// pass both, and a refusal says which — `ConnectionStats::SendsOverBudget`
+// pass both, and a refusal says which - `ConnectionStats::SendsOverBudget`
 // against the configuration, `SendsOverAllowance` against the path. Collapsing
 // them would make "raise the cap" look like a fix for congestion.
 //
@@ -44,7 +44,7 @@ namespace engine::net {
 	// How a connection is paced and when it is given up on.
 	//
 	// The defaults are conventional rather than measured, and saying so is
-	// better than implying otherwise — the same standing that `ChunkLimits` has.
+	// better than implying otherwise - the same standing that `ChunkLimits` has.
 	struct LinkSettings {
 		// How long a handshake may take before the attempt is abandoned.
 		double HandshakeTimeoutSeconds = 5.0;
@@ -68,7 +68,7 @@ namespace engine::net {
 		// limit.** It was kept rather than removed when congestion control
 		// landed, because the two are answers to different questions: a game may
 		// legitimately refuse to spend more than N on one player even on a path
-		// that would carry ten times that — a hundred players on one host is a
+		// that would carry ten times that - a hundred players on one host is a
 		// hundred of these, and the operator's bill is not a function of what
 		// the path can take. What it stopped being is a *rate*: it does not open
 		// up on a fat path and it never did back off on a congested one, and
@@ -100,8 +100,8 @@ namespace engine::net {
 
 	// The lifecycle of one connection.
 	//
-	// Owned by whatever holds the transport. It never sends anything itself — it
-	// says what *should* be sent and records what was — because a state machine
+	// Owned by whatever holds the transport. It never sends anything itself - it
+	// says what *should* be sent and records what was - because a state machine
 	// that can also do I/O is one that cannot be tested without doing I/O.
 	//
 	// @since v0.3
@@ -134,7 +134,7 @@ namespace engine::net {
 		// **A `Link` cannot measure this itself**, and that is why it is set
 		// rather than computed: the acknowledgement that closes a round trip is
 		// matched against a packet a `ReliableSender` is holding, and a link
-		// holds none — it stamps sequences and counts what arrives. Whoever owns
+		// holds none - it stamps sequences and counts what arrives. Whoever owns
 		// both halves tells it.
 		//
 		// **This is also the congestion controller's delay signal**, which is
@@ -150,7 +150,7 @@ namespace engine::net {
 		// with the last time this link was told, which is that one.
 		//
 		// @param seconds The smoothed estimate. Ignored when negative.
-		// @param varianceSeconds The estimate's variance —
+		// @param varianceSeconds The estimate's variance -
 		//        `ReliableSender::RoundTripVarianceSeconds`. Negative is read as
 		//        unknown, and the controller's noise threshold then falls back
 		//        to `CongestionSettings::MinimumQueueSeconds` alone.
@@ -184,7 +184,7 @@ namespace engine::net {
 		// Moves a `Connecting` link to `Connected`.
 		//
 		// @param nowSeconds The current time.
-		// @return False when the link was not `Connecting` — a handshake that
+		// @return False when the link was not `Connecting` - a handshake that
 		//         completes twice is a protocol error, not an idempotent call.
 		bool CompleteHandshake(double nowSeconds);
 
@@ -195,7 +195,7 @@ namespace engine::net {
 		// politely is indistinguishable from one that crashed, and every clean
 		// exit costs the other end a full idle timeout.
 		//
-		// @param reason Why. `None` is refused — an ending always has one.
+		// @param reason Why. `None` is refused - an ending always has one.
 		// @return False when already ending or ended.
 		bool Disconnect(DisconnectReason reason);
 
@@ -240,8 +240,8 @@ namespace engine::net {
 		//
 		// @param payloadBytes The payload about to be sent, before it is sealed.
 		// @return False when the link is not `Connected`, the payload is over
-		//         `Packet::MAXIMUM_MESSAGE_BYTES` — the limit less the tag it
-		//         will grow by — or a budget is spent, whether the configured
+		//         `Packet::MAXIMUM_MESSAGE_BYTES` - the limit less the tag it
+		//         will grow by - or a budget is spent, whether the configured
 		//         one or the one the congestion controller allows.
 		//         `ConnectionStats::SendsOverBudget` counts the first and
 		//         `SendsOverAllowance` the second. **A caller that must not lose
@@ -257,8 +257,8 @@ namespace engine::net {
 		// **The acknowledgement is of the same channel this packet goes on**,
 		// because there is one sequence space per channel and one field to say
 		// which sequence arrived. A caller that needs the reliable stream
-		// acknowledged by every packet whatever its channel — which is what
-		// retires a reliable payload on a mostly one-way conversation —
+		// acknowledged by every packet whatever its channel - which is what
+		// retires a reliable payload on a mostly one-way conversation -
 		// overwrites these two fields with `ReliableReceiver::Acknowledging`.
 		//
 		// @param channel Which channel the packet belongs to.
@@ -291,7 +291,7 @@ namespace engine::net {
 		// One of these per channel because the sequences are per channel. A
 		// single mark for the whole link is judged with `Packet::IsNewer`
 		// against whichever channel most recently moved it, and the reliable
-		// channel moves it a long way at a join — so the first unreliable
+		// channel moves it a long way at a join - so the first unreliable
 		// packets after one were refused as stale, which is exactly the failure
 		// the per-channel counters exist to prevent.
 		struct ChannelWindow {
@@ -308,8 +308,8 @@ namespace engine::net {
 			// Whether anything has arrived on this channel at all.
 			//
 			// **A flag rather than a sentinel value, and that is the off-by-one
-			// this avoids.** All 65536 sequences are legitimate — zero most of
-			// all, since it is the first one `NextHeader` stamps — so there is
+			// this avoids.** All 65536 sequences are legitimate - zero most of
+			// all, since it is the first one `NextHeader` stamps - so there is
 			// no number that can mean "nothing yet". Starting `Highest` at zero
 			// and trusting it would read a channel's first packet as a repeat
 			// of one that never existed, and would count `Sequence` packets
@@ -348,7 +348,7 @@ namespace engine::net {
 		double LastAdvanceAt = 0.0;
 		bool Ticked = false;
 
-		// One counter per channel, because they are ordered independently — a
+		// One counter per channel, because they are ordered independently - a
 		// reliable resend must not make an unreliable packet look stale.
 		//
 		// Sized from the enum rather than from a literal. The handshake slot is
@@ -357,7 +357,7 @@ namespace engine::net {
 		// off the end the day another one is added.
 		uint16_t OutgoingSequence[static_cast<size_t>(ChannelKind::Handshake) + 1]{};
 
-		// What has arrived, one window per channel — the receiving mirror of
+		// What has arrived, one window per channel - the receiving mirror of
 		// the counters above, and sized from the enum for the same reason.
 		//
 		// The handshake slot is never touched, because a handshake datagram
@@ -383,7 +383,7 @@ namespace engine::net {
 		//
 		// Re-armed to whatever is being sent now each time the frontier reaches
 		// it, so "the period is over" means "everything outstanding when it
-		// opened has been answered" — which is one round trip, measured rather
+		// opened has been answered" - which is one round trip, measured rather
 		// than assumed, on a loopback and on a satellite alike.
 		uint16_t PeriodSequence = 0;
 

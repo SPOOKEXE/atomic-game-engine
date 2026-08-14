@@ -13,14 +13,14 @@ TEST_SUITE_ID("engine.core.random")
 using engine::core::Random;
 
 // The property the whole thing exists for. A generator that drifts between runs
-// or between machines does not fail loudly — a replay just diverges, and a
+// or between machines does not fail loudly - a replay just diverges, and a
 // server and client disagree about where something is. Pinning the actual
 // numbers is the only check that catches it, and `just determinism` and
 // `just replay-check` cannot: both compare one run against another, so both
 // stay green on a generator that changed and agrees with itself.
 //
 // **The first pin is a published constant, not a number read out of this file.**
-// SplitMix64 seeded with zero emits 0xE220A8397B1DCDAF first — the value every
+// SplitMix64 seeded with zero emits 0xE220A8397B1DCDAF first - the value every
 // reference implementation of it prints, and the one to check this against if
 // the constants below are ever edited. `Bits(0, 0)` is its top half.
 //
@@ -107,7 +107,7 @@ TEST_CASE("consecutive indices do not repeat", "[random]") {
 	// The failure a counter-based mixer has that a hash does not: a weak
 	// finaliser leaves neighbouring inputs correlated, and a stream drawn by an
 	// incrementing counter is nothing but neighbouring inputs. Four thousand in a
-	// row, all distinct — at this count even a fair 32-bit generator is expected
+	// row, all distinct - at this count even a fair 32-bit generator is expected
 	// to collide about once in five hundred runs, so a repeat here is structure
 	// rather than luck.
 	std::set<uint32_t> seen;
@@ -149,7 +149,7 @@ TEST_CASE("the distribution is roughly flat", "[random]") {
 TEST_CASE("every bit is balanced", "[random]") {
 	// The bucket case above only ever looks at the top eight bits, because that
 	// is all `Float` keeps. This looks at all thirty-two, which is what `Bits`
-	// hands out — a stuck or duplicated bit low down would be invisible to every
+	// hands out - a stuck or duplicated bit low down would be invisible to every
 	// other case here and would show up in a caller as a `% 3` that never
 	// returns two.
 	int setCount[32] = {};

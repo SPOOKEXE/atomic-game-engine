@@ -1,13 +1,13 @@
 // `ContextActionService`'s surface, in neither language.
 //
 // **Split out of `InputServices.cpp` at v0.18** alongside `UserInputService.cpp`
-// and `LuauInput.cpp` — one file held both services and the Luau pump that
+// and `LuauInput.cpp` - one file held both services and the Luau pump that
 // drives them, so a description with no VM in it was compiled against `<lua.h>`
 // and neither service could be found by its own name.
 //
 // **What this adds over `UserInputService` is a priority stack**, and that is
-// the whole of it. Polling `IsKeyDown` is fine until two systems want E — a door
-// and a vehicle — and then the question is which one gets it. A bound action is
+// the whole of it. Polling `IsKeyDown` is fine until two systems want E - a door
+// and a vehicle - and then the question is which one gets it. A bound action is
 // a claim on a key with a number attached, and the highest claim wins.
 //
 // **The stack is shared and the callables are not.** What a claim *is* and which
@@ -78,8 +78,8 @@ namespace engine::script {
 			}
 
 			// **The replaced handler is released and not leaked.** Rebinding a
-			// name replaces it rather than stacking a second — Roblox's
-			// behaviour, and the one that makes a script safe to run twice — so
+			// name replaces it rather than stacking a second - Roblox's
+			// behaviour, and the one that makes a script safe to run twice - so
 			// the callable the old row held has to go back to the VM that minted
 			// it.
 			CallbackRef replaced = 0;
@@ -89,7 +89,7 @@ namespace engine::script {
 		}
 
 		void BindAction(ScriptCall &call) {
-			// `(name, handler, createTouchButton, ...keys)` — the touch button is
+			// `(name, handler, createTouchButton, ...keys)` - the touch button is
 			// accepted and ignored, because there is no touch surface. Accepted
 			// rather than refused so a Roblox script runs unchanged.
 			BindAtPriority(call, 0, 3);
@@ -120,7 +120,7 @@ namespace engine::script {
 		// **Luau's alone until v0.16, and what closed them was a report rather
 		// than a rewrite.** Each answers a record holding a list of
 		// `Enum.KeyCode` members, and `ScriptCall` can return a `ScriptValue`,
-		// which has no tag for an `EnumItem` — and must not gain one, because a
+		// which has no tag for an `EnumItem` - and must not gain one, because a
 		// `ScriptValue` crosses a world and `Codec.hpp` is a wire format. The
 		// answer is the one `UserInputService`'s `InputObject` already proved:
 		// `BoundActionReport` is the fact, each adapter builds its own record and
@@ -158,14 +158,14 @@ namespace engine::script {
 			const BoundAction *found = stack.Find(name);
 			if (found == nullptr) {
 				// **Nil for an unbound name, not an empty record.** Roblox's
-				// answer, and the one `if info then` reads correctly — an empty
+				// answer, and the one `if info then` reads correctly - an empty
 				// table is truthy and would report every name as bound.
 				call.ReturnNil();
 				return;
 			}
 
 			// **`stackOrder` needs the position and `Find` answers the row**, so
-			// the span is what turns one into the other — a pointer into the
+			// the span is what turns one into the other - a pointer into the
 			// stack's own vector, subtracted from its start.
 			std::vector<core::Name> keys;
 			call.ReturnBoundAction(ReportOf(actions, static_cast<size_t>(found - actions.data()), keys));
@@ -193,7 +193,7 @@ namespace engine::script {
 	}
 
 	const ServiceSurface &ContextActionServiceSurface() {
-		// A plain table, because this one is **methods only** — and a method is
+		// A plain table, because this one is **methods only** - and a method is
 		// exactly the case `GETIMPORT` is correct for: the closure never
 		// changes, so caching it is what the optimisation is for. Only a mutable
 		// *property* is broken by it. That is also why this one could cross to

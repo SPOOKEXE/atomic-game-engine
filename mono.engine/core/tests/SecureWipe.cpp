@@ -2,7 +2,7 @@
 //
 // **What cannot be tested here is the thing that matters.** Whether the
 // optimiser removed the write is a property of the generated code, not of the
-// program's behaviour — a test that observes the buffer afterwards keeps the
+// program's behaviour - a test that observes the buffer afterwards keeps the
 // write alive by observing it, which is exactly the condition under which
 // `memset` would also have survived. So these check the contract that *can* be
 // checked, and the guarantee itself rests on the implementation going through a

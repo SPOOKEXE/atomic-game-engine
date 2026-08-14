@@ -180,7 +180,7 @@ TEST_CASE("the surface table crosses a snapshot in order", "[scene][registration
 }
 
 TEST_CASE("the active camera resource survives a snapshot", "[scene][registration]") {
-	// Registered because a resource is keyed by a component id too — one that
+	// Registered because a resource is keyed by a component id too - one that
 	// is never named here would be minted by the first `SetResource` under the
 	// compiler's spelling, and would abort once the table is sealed.
 	RegisterSceneComponents();
@@ -208,7 +208,7 @@ TEST_CASE("the active camera resource survives a snapshot", "[scene][registratio
 // `Visual` is registered with a hand-written writer and reader, because it
 // holds `core::Name`s that have to cross as text. The cost of that pair is that
 // a field added to the struct crosses only if a person remembers to add two
-// lines, and nothing in the build checks — so the field silently resets to its
+// lines, and nothing in the build checks - so the field silently resets to its
 // default on every load, which looks like a bug in whatever reads it.
 //
 // This has happened three times. `Transparency` and `Surface` were both added
@@ -221,7 +221,7 @@ TEST_CASE("the active camera resource survives a snapshot", "[scene][registratio
 // round-trip test passes for a field the writer skips whenever the reader
 // leaves the default in place, which is exactly the case that goes wrong.
 //
-// Adding a field to `Visual` and not adding a case here leaves it untested —
+// Adding a field to `Visual` and not adding a case here leaves it untested -
 // which is why `engine.scene.components` pins `sizeof(Visual)`. That assertion
 // fails first, and it fails in a file whose comment points back at this one.
 TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {

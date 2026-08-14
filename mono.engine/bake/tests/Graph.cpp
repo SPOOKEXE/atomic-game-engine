@@ -1,7 +1,7 @@
 // The bake pipeline: input nodes, processing nodes, export nodes.
 //
 // Every case here runs without opening a file, which is the property the graph
-// is shaped around — `audio::NullDevice` is the same idea for the mixer. The
+// is shaped around - `audio::NullDevice` is the same idea for the mixer. The
 // bytes a source node holds are a built-in mesh serialised in the test itself,
 // so the suite exercises the real import path over a real file format with no
 // fixture on disk to go stale.
@@ -128,7 +128,7 @@ TEST_CASE("a mesh round-trips through import and export", "[bake][graph]") {
 	const NodeId source = graph.AddSource("props/ramp.amesh", bytes);
 	const NodeId write = graph.AddWrite("props/ramp");
 
-	// A source node's bytes are already an asset, so no import is needed —
+	// A source node's bytes are already an asset, so no import is needed -
 	// except that the payload is `Bytes` and `Write` wants a mesh, which is the
 	// mismatch this checks.
 	REQUIRE(graph.Connect(source, write));
@@ -157,7 +157,7 @@ TEST_CASE("a scale node rebuilds normals only when it has to", "[bake][graph]") 
 		REQUIRE(Ran(graph).empty());
 
 		// A cube's faces are flat, and rebuilding normals over a cube whose
-		// vertices are shared per face changes nothing — but rebuilding them
+		// vertices are shared per face changes nothing - but rebuilding them
 		// after a *uniform* scale would be work with no reason, and the visible
 		// consequence on a model with split normals is that it turns smooth.
 		const MeshData &mesh = graph.Output(scale).Mesh;
@@ -176,7 +176,7 @@ TEST_CASE("a scale node rebuilds normals only when it has to", "[bake][graph]") 
 		CHECK(mesh.Maximum.Y == Approx(2.0f));
 
 		// Every normal still unit length, which a stretched-but-unrebuilt
-		// sphere's would also be — what changes is where they point, and the
+		// sphere's would also be - what changes is where they point, and the
 		// cheap standing check is that nothing became degenerate.
 		for (const engine::assets::MeshVertex &vertex : mesh.Vertices) {
 			const float length = std::sqrt(

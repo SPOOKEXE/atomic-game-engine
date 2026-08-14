@@ -36,14 +36,14 @@ namespace engine::scene {
 		// Whether a handle already carries exactly the row it should.
 		//
 		// **A byte comparison, and it is exact only because `CharacterLimb` has
-		// no holes.** Its members are ordered widest-first for that reason —
+		// no holes.** Its members are ordered widest-first for that reason -
 		// see the struct, where the eight bytes this comparison found are
 		// written up. A field-by-field comparison would be the weaker test
 		// anyway: it silently stops covering the next member somebody adds,
 		// which is `WriteVisuals`' documented failure mode one file over.
 		//
 		// Compared at all rather than written unconditionally, because a `Set`
-		// marks the row changed — and an equipped tool would then put a
+		// marks the row changed - and an equipped tool would then put a
 		// `scene.CharacterLimb` delta on the wire every tick, for ever.
 		bool SameLimb(const CharacterLimb &left, const CharacterLimb &right) {
 			return std::memcmp(&left, &right, sizeof(CharacterLimb)) == 0;
@@ -66,7 +66,7 @@ namespace engine::scene {
 				store.Remove<CharacterLimb>(handle);
 
 				// **Only where there is a body to move.** An anchored handle has
-				// no `RigidBody` and must not gain a `Motion` — that pair is what
+				// no `RigidBody` and must not gain a `Motion` - that pair is what
 				// `Anchored` means, and handing one back would silently unanchor
 				// a part the author anchored.
 				if (store.Has<RigidBody>(handle)) {
@@ -128,7 +128,7 @@ namespace engine::scene {
 		}
 
 		// The bottom face of the arm, which is the hand. A limb with no `Bounds`
-		// is a bare point and is taken as it is — the same reading `FindSpawn`
+		// is a bare point and is taken as it is - the same reading `FindSpawn`
 		// gives a spawn pad with no bounds.
 		const Bounds *bounds = store.Get<Bounds>(arm);
 		const float drop = bounds == nullptr ? 0.0f : bounds->HalfExtent.Y;
@@ -162,7 +162,7 @@ namespace engine::scene {
 
 		// **A hand that cannot be emptied refuses the swap**, rather than ending
 		// up with two tools in it. That happens for a character with no owner to
-		// have a `Backpack` — see `UnequipTool` — and refusing it here is the
+		// have a `Backpack` - see `UnequipTool` - and refusing it here is the
 		// mistake caught where it was made, which is `SetPlayerCharacter`'s rule
 		// about a model with no humanoid.
 		if (already != ecs::NULL_ENTITY && !UnequipTool(store, already)) {
@@ -198,7 +198,7 @@ namespace engine::scene {
 		if (backpack == ecs::NULL_ENTITY) {
 			// An NPC's tool, or a player built without going through
 			// `AddPlayer`. Left in the hand rather than put somewhere this
-			// module invented — see the declaration.
+			// module invented - see the declaration.
 			return false;
 		}
 

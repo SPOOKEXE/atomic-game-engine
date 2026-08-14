@@ -38,8 +38,8 @@ namespace studio {
 		// class names inside every quoted literal would make the popup useless
 		// exactly where somebody is typing prose.
 		bool WantsClassName(std::string_view call) {
-			// The receiver does not matter — `part:IsA` and `thing:IsA` are the
-			// same question — so only the last segment is compared.
+			// The receiver does not matter - `part:IsA` and `thing:IsA` are the
+			// same question - so only the last segment is compared.
 			if (const size_t separator = call.find_last_of(".:"); separator != std::string_view::npos) {
 				call.remove_prefix(separator + 1);
 			}
@@ -151,7 +151,7 @@ namespace studio {
 			return std::all_of(value.begin(), value.end(), IsWordCharacter);
 		}
 
-		// A dotted chain and nothing else — `part`, `game:GetService`,
+		// A dotted chain and nothing else - `part`, `game:GetService`,
 		// `Instance.new`. A callee that is anything more than this is one this
 		// file cannot read, which is the answer rather than a problem.
 		bool IsChain(const std::string_view value) {
@@ -167,7 +167,7 @@ namespace studio {
 		// table really has.
 		//
 		// **`Name::Exists` before `Name`**, because constructing one interns it
-		// — and this runs against whatever is inside the quotes on every
+		// - and this runs against whatever is inside the quotes on every
 		// keystroke, most of which is prose.
 		Name ClassNamed(const std::string_view literal) {
 			if (literal.empty() || !Name::Exists(literal)) {
@@ -191,7 +191,7 @@ namespace studio {
 		}
 
 		// An expression with any trailing line comment cut off. `--` is Luau's
-		// and `//` is JavaScript's, and neither counts inside a string — an
+		// and `//` is JavaScript's, and neither counts inside a string - an
 		// asset id in a literal would otherwise truncate the line it is on.
 		std::string_view WithoutComment(const std::string_view value) {
 			char quote = '\0';
@@ -226,8 +226,8 @@ namespace studio {
 		// The class an expression evaluates to, when the text says so outright.
 		//
 		// **Three shapes, and the boundary between them is the whole point.** A
-		// class written as a literal — `Instance.new("Part")`,
-		// `game:GetService("Lighting")`, `FindFirstChildOfClass("Part")` — is
+		// class written as a literal - `Instance.new("Part")`,
+		// `game:GetService("Lighting")`, `FindFirstChildOfClass("Part")` - is
 		// read. A `:Clone()` carries its receiver's class, because a clone of a
 		// `Part` is a `Part` whatever else the file does. A name standing in for
 		// another name is followed. **Everything else answers nothing**, which
@@ -335,7 +335,7 @@ namespace studio {
 				}
 				at = hit + local.size();
 
-				// A whole word, so `part` does not match inside `parts` — and
+				// A whole word, so `part` does not match inside `parts` - and
 				// not a member, so `model.part = x` is not an assignment to a
 				// local called `part`.
 				const bool wordStart = hit == 0 || (!IsWordCharacter(text[hit - 1]) && text[hit - 1] != '.' &&
@@ -399,12 +399,12 @@ namespace studio {
 		//
 		// **Each row names whose property it is, and that is load-bearing.** A
 		// narrowed row reads `bool on Part` and a union row reads
-		// `bool on some class` — the difference between "this class has this"
+		// `bool on some class` - the difference between "this class has this"
 		// and "one of these classes has this". `Complete.hpp` carries the
 		// argument for why the marker exists at all.
 		//
 		// **`ClassInfo::Properties` is already the inherited span**, so a class
-		// that is known needs no ancestry walk — which is the one place this
+		// that is known needs no ancestry walk - which is the one place this
 		// file does less work than `mono.tools/bindings`, whose declaration
 		// files have to strip inheritance back out to write `extends`.
 		void OfferProperties(std::vector<Completion> &into, const std::string_view prefix, const Name klass) {
@@ -538,8 +538,8 @@ namespace studio {
 		const size_t subjectStart = ChainStart(text, wordStart - 1);
 		query.Subject = text.substr(subjectStart, wordStart - 1 - subjectStart);
 
-		// A chain that ends in a separator has no subject worth resolving —
-		// `a..b` and `.foo` both land here — and answering an empty one lets
+		// A chain that ends in a separator has no subject worth resolving -
+		// `a..b` and `.foo` both land here - and answering an empty one lets
 		// the caller fall back to the union rather than look up "".
 		if (!query.Subject.empty() && (query.Subject.back() == '.' || query.Subject.back() == ':')) {
 			query.Subject = {};
@@ -571,15 +571,15 @@ namespace studio {
 
 			// **A category, not nine names.** A world has exactly one of each
 			// service and `scene::InstallServices` is what puts it there, so
-			// offering one is offering a second that nothing resolves — and
+			// offering one is offering a second that nothing resolves - and
 			// asking `IsA` is what keeps a tenth service out of this function.
 			if (serviceClass.IsValid() && Classes::IsA(id, serviceClass)) {
 				continue;
 			}
 
 			// The abstract bases. Roblox does not let you insert an `Instance`
-			// or a `BasePart` either, and the run time *would* mint one —
-			// `LuauInstances.cpp` looks the name up and takes whatever it finds — so
+			// or a `BasePart` either, and the run time *would* mint one -
+			// `LuauInstances.cpp` looks the name up and takes whatever it finds - so
 			// this is the only place that refuses.
 			const std::string_view name = info.Name.Text();
 			if (name == "Instance" || name == "PVInstance" || name == "BasePart" ||
@@ -609,7 +609,7 @@ namespace studio {
 			}
 
 			// `IsA` and the `WhichIsA` pair take a base, so the abstract ones
-			// are exactly what they are for — `part:IsA("BasePart")` is the
+			// are exactly what they are for - `part:IsA("BasePart")` is the
 			// question the class tree exists to answer.
 			const bool bases = query.Call.ends_with("IsA");
 
@@ -711,7 +711,7 @@ namespace studio {
 		}
 
 		// Best first, and ties broken by name rather than by the order the
-		// tables happened to be walked in — so two runs of the same editor
+		// tables happened to be walked in - so two runs of the same editor
 		// against the same file offer the same list.
 		std::sort(offered.begin(), offered.end(), [](const Completion &left, const Completion &right) {
 			if (left.Score != right.Score) {

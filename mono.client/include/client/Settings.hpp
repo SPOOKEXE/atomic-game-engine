@@ -4,8 +4,8 @@
 //
 // **A flag is the *default* for the matching command-line option, not a second
 // copy of it.** `main` fills an `Options` from here and then lets `--width` and
-// friends override what it found, so the precedence a person expects —
-// built-in, then config file, then environment, then what they typed — falls
+// friends override what it found, so the precedence a person expects -
+// built-in, then config file, then environment, then what they typed - falls
 // out of `core::Flags` rather than being re-derived per option.
 //
 // **The built-in defaults are read off a default-constructed `Options`**, so
@@ -26,8 +26,8 @@
 //
 // `client.content-sources` is a list: the key repeats and the order is the
 // priority order, because the first origin that answers wins. Nothing is split
-// on a separator — a source is `host:port` or `dir:PATH` and a path may contain
-// anything somebody chose — so the repeat is what expresses the sequence.
+// on a separator - a source is `host:port` or `dir:PATH` and a path may contain
+// anything somebody chose - so the repeat is what expresses the sequence.
 // `core::Flags`' `List` kind carries the append-and-replace rule.
 //
 // @since v0.15

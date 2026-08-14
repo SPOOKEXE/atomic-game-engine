@@ -3,8 +3,8 @@
 // One method, written once, called from either language.
 //
 // **A property was already neutral and a method was not.**
-// `ecs::PropertyDescriptor` is data — a `PropertyType`, a size, a getter, a
-// setter — so a property declared in `scene` is readable from Luau, from
+// `ecs::PropertyDescriptor` is data - a `PropertyType`, a size, a getter, a
+// setter - so a property declared in `scene` is readable from Luau, from
 // JavaScript and in the properties panel with none of the three changing,
 // because every binding switches on the type and never on the name.
 //
@@ -13,12 +13,12 @@
 // two lists do: Luau's instance method table held thirty entries and
 // JavaScript's held twenty-one, and nothing in the build named the nine that
 // were missing. `JsSurface.cpp` already carried a scar from the same class of
-// bug — a hard-coded count of `10` on a list of sixteen, so six methods
+// bug - a hard-coded count of `10` on a list of sixteen, so six methods
 // including `IsDescendantOf` and `Changed` were simply never installed, and a
 // method that is not there is `undefined` until something calls it.
 //
 // So a method becomes data too: a name and a function taking a `ScriptCall`.
-// The VM-shaped half — reading an argument, pushing a result, raising an error —
+// The VM-shaped half - reading an argument, pushing a result, raising an error -
 // is an adapter implemented once per language, and `LuauCall.cpp` and
 // `JsCall.cpp` are the only files that have met a VM.
 //
@@ -28,32 +28,32 @@
 // already convert to and from it, so it looks like the answer. It is not, and
 // the reason is a rule rather than an omission: `ValueTag` has no instance, and
 // `CodecStatus::Unsupported` is what a script gets for offering one. A
-// `ScriptValue` crosses a **world** — a bus envelope, a data store, a save file —
+// `ScriptValue` crosses a **world** - a bus envelope, a data store, a save file -
 // and rule 3 says nothing crossing a world boundary is a pointer, so a handle
 // naming a row in one store must not arrive in another.
 //
 // A method call crosses nothing. It happens inside one process, against one
-// store, and returns before the tick moves — which is why `ecs::Entity` is
+// store, and returns before the tick moves - which is why `ecs::Entity` is
 // exactly the right currency here and exactly the wrong one there. Two
 // interfaces, because they answer two questions.
 //
 // ## A service method is the same thing with no subject
 //
 // `ServiceSurface` described a service in `lua_CFunction`s, so it could only
-// build a Luau one and every JavaScript service was hand-written — which is how
+// build a Luau one and every JavaScript service was hand-written - which is how
 // `ContentService`, `CollectionService`, `HttpService`, `CrossWorldService` and
 // `ContextActionService` came to be reachable from one language and not the
 // other, with the catalogue naming the gap and nothing closing it. A service
 // method takes the service table as its receiver and does nothing with it, so it
-// is an instance method whose `Subject()` is `NULL_ENTITY` — one adapter per
+// is an instance method whose `Subject()` is `NULL_ENTITY` - one adapter per
 // language, a second trampoline on each, and no third interface. See
 // `ServiceMethod` at the foot of this file and `ServiceSurface.hpp` for what a
 // service became.
 //
 // **A service *property* is the same thing again, and it needed one more row
 // type rather than one more interface.** `ServiceProperty` is a name and two
-// `ScriptMethod`s — a getter that answers and a setter that reads argument zero
-// — so the property surface of `UserInputService` and `SoundService` is written
+// `ScriptMethod`s - a getter that answers and a setter that reads argument zero
+// - so the property surface of `UserInputService` and `SoundService` is written
 // against this same interface and installed by the same two adapters. What
 // differs is only how each VM hangs an accessor off an object, which is the
 // business of `InstallService` and `InstallJsServiceProperties`.
@@ -63,7 +63,7 @@
 // There is no `AsBoolean`, no `OptionalNumber` and no `ReturnColor3`, because
 // nothing written against this takes or returns one. A pure virtual with no
 // caller is a line every adapter has to implement to satisfy the compiler and
-// nobody has to get right, which is the shape a mistake hides in — and adding
+// nobody has to get right, which is the shape a mistake hides in - and adding
 // one when the first method needs it is a three-line change the build refuses
 // to let anybody forget.
 //
@@ -73,7 +73,7 @@
 // `AsTweenInfo`, the two record readers, `ReturnTween`, `ForgetSubject` and
 // `Await` arrived with the seven services that stopped being written twice at
 // v0.16. `Forget`, `ReadProperty` and `ConnectOnce` arrived at v0.18 with the
-// last twenty instance methods and the interface a UI author reaches for —
+// last twenty instance methods and the interface a UI author reaches for -
 // `Forget` is what made `Destroy` and `ClearAllChildren` neutral, and the other
 // two are `GuiObject`'s three tween methods. `Waiters` and `AwaitChild` arrived
 // with `WaitForChild`, which is the first method here that resumes on something
@@ -86,8 +86,8 @@
 // `ReadValue`/`ReturnValue` are on it anyway. Both are true, and the difference
 // is what the value *is*. An argument that names a thing in this world is an
 // `ecs::Entity`, because a handle is meaningful inside one process. An argument
-// that is an arbitrary tree a script built — the message `CrossWorldService`
-// puts on a bus, the document `HttpService` writes as JSON — is a `ScriptValue`,
+// that is an arbitrary tree a script built - the message `CrossWorldService`
+// puts on a bus, the document `HttpService` writes as JSON - is a `ScriptValue`,
 // because those are exactly the values that leave the world and rule 3 already
 // decided their shape. `ValueTag` still has no instance, so the two doors stay
 // separate: no method may take a tree where it means a handle.
@@ -131,8 +131,8 @@ namespace engine::script {
 	// author actually wrote.
 	//
 	// **Every reader raises rather than returning a failure.** A wrong argument
-	// type is a script bug and each language already has a way to say so — a Luau
-	// error and a thrown `TypeError` — so a method body reads its arguments
+	// type is a script bug and each language already has a way to say so - a Luau
+	// error and a thrown `TypeError` - so a method body reads its arguments
 	// straight through and never checks. See `Raise`.
 	class ScriptCall {
 	  public:
@@ -150,7 +150,7 @@ namespace engine::script {
 		// Where a change is written down for the next barrier to deliver.
 		//
 		// **An attribute has no component behind it**, so nothing fans out to a
-		// property name on its behalf and the writer says what changed itself —
+		// property name on its behalf and the writer says what changed itself -
 		// see `ChangeQueue::Record`. Both contexts hold one of these and neither
 		// one is a VM type.
 		virtual ChangeQueue &Changes() = 0;
@@ -165,7 +165,7 @@ namespace engine::script {
 		// The next draw number for `HttpService:GenerateGUID`.
 		//
 		// **A counter and never a clock or an entropy source, which is what
-		// makes a GUID replayable** — `HttpService.cpp` carries the whole
+		// makes a GUID replayable** - `HttpService.cpp` carries the whole
 		// argument. It is on the *context* rather than a file-static for this
 		// module's own reason: two runtimes over two worlds must not share one
 		// stream. Advances by one per call.
@@ -177,7 +177,7 @@ namespace engine::script {
 		// **A copy of the role and never a `Runtime`**, because the question a
 		// script asks is about the *process* and the answer was fixed when the
 		// runtime was built. Handing the runtime over would put every other thing
-		// on it — `Run`, `Debug`, the limits — one dot away from a service method.
+		// on it - `Run`, `Debug`, the limits - one dot away from a service method.
 		virtual const HostRole &Role() const = 0;
 
 		// Every tween this VM has made.
@@ -205,8 +205,8 @@ namespace engine::script {
 		//
 		// **A `CallbackRef` list and nothing else**, which is what lets
 		// `MessagingService:SubscribeAsync` be one method: the callable stays
-		// opaque and the pump — which is per language, because calling a callable
-		// is — walks the same list in both. See `Bus.hpp`.
+		// opaque and the pump - which is per language, because calling a callable
+		// is - walks the same list in both. See `Bus.hpp`.
 		virtual TopicSubscriptions &Subscriptions() = 0;
 
 		// The instance the method was called on.
@@ -230,7 +230,7 @@ namespace engine::script {
 		// How many arguments the author actually wrote.
 		//
 		// **For a variadic tail and nothing else**, which is
-		// `ContextActionService:BindAction(name, handler, touch, ...keys)` — the
+		// `ContextActionService:BindAction(name, handler, touch, ...keys)` - the
 		// one method on either surface whose argument list has no end. Every
 		// other reader takes a fixed index, and `IsNil` is what an *optional*
 		// argument asks: a loop that stopped at the first nil would truncate a
@@ -252,7 +252,7 @@ namespace engine::script {
 		//
 		// **Each language's own truthiness, which is a divergence worth stating
 		// rather than papering over.** Only `nil` and `false` are falsy in Luau,
-		// where `0`, `""` and `NaN` are falsy in JavaScript — so
+		// where `0`, `""` and `NaN` are falsy in JavaScript - so
 		// `GenerateGUID(0)` wraps in one language and does not in the other. A
 		// strict reader that raised for a non-boolean would agree in both and
 		// would refuse `if x then`-shaped code every Lua author writes; the
@@ -287,7 +287,7 @@ namespace engine::script {
 		// **Answers rather than raising**, unlike every other reader here, and
 		// the exception is what the caller is doing: a variadic key list walks
 		// past whatever it cannot read, because `BindAction`'s tail is the one
-		// place a script may legitimately pass something that is not a key —
+		// place a script may legitimately pass something that is not a key -
 		// Roblox's takes `Enum.UserInputType` members there too and this engine
 		// binds keys only.
 		//
@@ -308,7 +308,7 @@ namespace engine::script {
 		// one way an attribute differs from a property: nothing declared it, so
 		// what a script passed is what decides. `out.Type` is left `Opaque` for a
 		// value with no attribute form, and the caller turns that into a refusal
-		// naming the attribute — this does not raise, because `Opaque` is also
+		// naming the attribute - this does not raise, because `Opaque` is also
 		// what an omitted value means and the two are told apart by `IsNil`.
 		//
 		// @param index Zero-based.
@@ -319,7 +319,7 @@ namespace engine::script {
 		//
 		// **The one reader that answers a failure rather than raising**, and the
 		// exception is the message: a table holding a function or an instance is
-		// something a caller has to *name* — "the value holds something with no
+		// something a caller has to *name* - "the value holds something with no
 		// JSON form" and "the data cannot cross a world boundary" are two
 		// different sentences about one refusal, and only the method knows which
 		// one it is saying. See `Describe` and `HttpService.cpp`'s
@@ -336,7 +336,7 @@ namespace engine::script {
 		// **The pair below is what `ScriptValue` cannot do**, and
 		// `TweenService:Create`'s goal map is the caller that asked: a goal's
 		// value is a `UDim2`, a `Rect` or a `ColorSequence`, and `ValueTag` has
-		// no tag for any of them and must not gain one — it is what crosses a
+		// no tag for any of them and must not gain one - it is what crosses a
 		// world. So the record is read by *name and declared type* instead: the
 		// names come out first, and each value is then read as the property it
 		// is named after.
@@ -376,7 +376,7 @@ namespace engine::script {
 		// reason that one does**: a `UDim2` is not a `ScriptValue` and must not
 		// become one, so a method taking a datatype argument reads it as the
 		// property it is about to write. `GuiObject:TweenPosition` is the caller
-		// — it takes a `UDim2` and a `TweenSize` a `UDim2` of a different
+		// - it takes a `UDim2` and a `TweenSize` a `UDim2` of a different
 		// meaning, and reading each *as the target's own `Position`* is what
 		// keeps the three tween methods from naming a datatype at all.
 		//
@@ -397,7 +397,7 @@ namespace engine::script {
 		// callable is a registry ref and a JavaScript one an index into
 		// `JsContext::Callables`; nothing shared may interpret either, so a
 		// `ContextActionService` handler crosses as the same `CallbackRef` a
-		// connection does — which is what lets `ActionStack` hold the rules and
+		// connection does - which is what lets `ActionStack` hold the rules and
 		// neither VM hold a second copy of them.
 		//
 		// The caller owns what comes back and must hand it to `ReleaseCallback`
@@ -417,14 +417,14 @@ namespace engine::script {
 		// **`RetainCallback`'s other half, and the three tween methods are what
 		// asked.** `GuiObject:TweenPosition(..., callback)` is Roblox's shape for
 		// "tell me when this arrives", which here is exactly a `:Once` on the
-		// tween's `Completed` — so rather than a second delivery path, the method
+		// tween's `Completed` - so rather than a second delivery path, the method
 		// hands the callable to the table both pumps already walk. `SignalTable`
 		// is shared machinery and only the `CallbackRef` is a VM's, which is why
 		// this is a request rather than an accessor handing the table over.
 		//
 		// **Once and never a plain connect**, because that is the whole of what
 		// the caller means and because the retirement is what releases the
-		// callable — a connection that fired forever would hold a closure for the
+		// callable - a connection that fired forever would hold a closure for the
 		// life of the world.
 		//
 		// @param kind     Which signal.
@@ -438,7 +438,7 @@ namespace engine::script {
 		//
 		// **More than one answer is a Luau shape and JavaScript packs it into an
 		// array**, which is the one place this interface lets the two spellings
-		// differ — `SoundService:GetListener()` is `(Enum.ListenerType,
+		// differ - `SoundService:GetListener()` is `(Enum.ListenerType,
 		// Instance?)` in Roblox's own documentation, and the alternatives were to
 		// invent a record type for one service's shape or to leave the method
 		// Luau's alone. It is the same class of difference as a Luau array being
@@ -462,7 +462,7 @@ namespace engine::script {
 		// One member of one enum, as an `EnumItem`.
 		//
 		// **The counterpart of `ReadEnum`, and a surface whose getter and setter
-		// disagree about a type is a round trip that does not close** —
+		// disagree about a type is a round trip that does not close** -
 		// `UserInputService.MouseBehavior` is written with an `Enum.MouseBehavior`
 		// and has to read back as one.
 		//
@@ -481,9 +481,9 @@ namespace engine::script {
 
 		// A list of input reports, as the language's own `InputObject`s.
 		//
-		// **The wrapper is per language and the report is not** — a tagged
+		// **The wrapper is per language and the report is not** - a tagged
 		// userdata on one side and an object of a registered class on the other,
-		// over one `InputReport` — which is the split `ReturnSignal` is on.
+		// over one `InputReport` - which is the split `ReturnSignal` is on.
 		// `UserInputService:GetMouseButtonsPressed` answers with these rather than
 		// with `EnumItem`s, which is Roblox's shape: the object carries where the
 		// pointer was as well as which button it is.
@@ -493,14 +493,14 @@ namespace engine::script {
 		//
 		// **`ReturnInputObjects`' split exactly, and it is what closed the last
 		// per-method gap in a service both languages bind.** The record holds
-		// `Enum.KeyCode` members, so it cannot be a `ScriptValue` — that tree
+		// `Enum.KeyCode` members, so it cannot be a `ScriptValue` - that tree
 		// crosses a world and has no tag for an `EnumItem`. What it can be is a
 		// `BoundActionReport` per language: the fact is one struct and each
 		// adapter builds the table or object, exactly as each builds its own
 		// `InputObject` over one `InputReport`.
 		//
 		// `ContextActionService:GetBoundActionInfo` and `GetAllBoundActionInfo`
-		// are the two callers, and they are the whole reason this is a pair —
+		// are the two callers, and they are the whole reason this is a pair -
 		// keying a map by name is a language's own business.
 		//@{
 		virtual void ReturnBoundAction(const BoundActionReport &report) = 0;
@@ -511,7 +511,7 @@ namespace engine::script {
 		//
 		// **A `string_view` and not a `const char *`**, because a JSON document
 		// and a URL escape are both built with embedded zeroes possible in them
-		// — a Luau string is bytes and nothing in this module decodes an
+		// - a Luau string is bytes and nothing in this module decodes an
 		// encoding, so a length-carrying view is the only form that does not
 		// truncate at the first one.
 		virtual void ReturnString(std::string_view value) = 0;
@@ -545,15 +545,15 @@ namespace engine::script {
 
 		// A map from name to value, which is what `GetAttributes` answers.
 		//
-		// **A map and not a list**, because that is what a caller iterates —
+		// **A map and not a list**, because that is what a caller iterates -
 		// `pairs` in one language and `Object.keys` in the other.
 		virtual void ReturnAttributes(std::span<const std::pair<core::Name, ecs::AttributeValue>> values) = 0;
 
 		// A handle onto one of `Subject()`'s signals.
 		//
-		// **The one return whose object is built differently in the two VMs** —
+		// **The one return whose object is built differently in the two VMs** -
 		// `PushSignal` mints a tagged userdata and `MakeJsSignal` an object of a
-		// registered class — and it is here rather than left double-bound because
+		// registered class - and it is here rather than left double-bound because
 		// that difference is the whole of what an adapter is for. What the two
 		// hand back is the same `SignalTable` entry either way, so the *signal* is
 		// one thing and only its wrapper is two.
@@ -564,8 +564,8 @@ namespace engine::script {
 
 		// One tween, as the handle each language wraps an entity in.
 		//
-		// **`ReturnSignal`'s split exactly** — a tagged userdata on one side and
-		// an object of a registered class on the other, over one `ecs::Entity` —
+		// **`ReturnSignal`'s split exactly** - a tagged userdata on one side and
+		// an object of a registered class on the other, over one `ecs::Entity` -
 		// and it is here for that return's reason: the difference between the two
 		// wrappers is the whole of what an adapter is for.
 		//
@@ -583,7 +583,7 @@ namespace engine::script {
 		// already push one, and a `ReturnRecord` invented for it would be a
 		// return type per service shape on an interface that is supposed to
 		// carry what its callers ask for. A record that needed an `EnumItem` or
-		// an `Instance` in it could not use this — see `ScriptValue` — and that
+		// an `Instance` in it could not use this - see `ScriptValue` - and that
 		// refusal is the useful half: it is why `GetBoundActionInfo` is still
 		// written twice.
 		//
@@ -598,7 +598,7 @@ namespace engine::script {
 		//
 		// **The `Forget` shape `script/AGENTS.md` predicted, arriving with the
 		// caller that needed it.** `SignalTable::DropSubject` hands back a list of
-		// `CallbackRef`, and only a VM knows what one means — so the shared half
+		// `CallbackRef`, and only a VM knows what one means - so the shared half
 		// is a request and the per-language half is `lua_unref` against an index
 		// into `JsContext::Callables`. `TweenService:Create` is the caller: a
 		// tween reclaimed to make room takes its `Completed` listeners with it,
@@ -617,7 +617,7 @@ namespace engine::script {
 		// per-language by construction: `ForgetSubtree` takes a callback that is
 		// `lua_unref` on one side and an index into `JsContext::Callables` on the
 		// other. What actually crosses is an entity and a request to forget it,
-		// which is this — so the *walk*, which has to reach every descendant or a
+		// which is this - so the *walk*, which has to reach every descendant or a
 		// grandchild's connections outlive the row they watched, is written once.
 		//
 		// **Called before `Store::DestroyInstance` and never after.** The walk
@@ -635,7 +635,7 @@ namespace engine::script {
 		// the running thread and the barrier resumes it with `(value, status,
 		// version)`; JavaScript answers a `Promise` the barrier resolves with the
 		// same three. Both are `docs/retired/SCRIPT_CONCURRENCY.md` §1's first
-		// legal resume source — a `Ticket` reply the barrier applied — and neither
+		// legal resume source - a `Ticket` reply the barrier applied - and neither
 		// is expressible in the other's idiom, so what is shared is *which ticket*
 		// and nothing else.
 		//
@@ -655,7 +655,7 @@ namespace engine::script {
 		// whole reason it is a second member.** That one is keyed on a
 		// `world::Ticket` because a bus reply is what the barrier had ever
 		// resumed a script with; this is keyed on a `ChildWaiters` id, because
-		// what resumes the caller is the tree — and the value it resumes *with*
+		// what resumes the caller is the tree - and the value it resumes *with*
 		// is an instance, which is exactly the value a bus reply may never carry
 		// (see `ScriptValue` above). One member could not have carried both
 		// without the resume path having to ask which kind it was holding.
@@ -664,7 +664,7 @@ namespace engine::script {
 		// nothing may be pushed after it, because on the Luau side the stack top
 		// is where the yield takes its results from.
 		//
-		// @param waiter What `ChildWaiters::Add` handed back. Never zero — a
+		// @param waiter What `ChildWaiters::Add` handed back. Never zero - a
 		//               full queue is refused where it is asked for, because the
 		//               message names the method.
 		virtual void AwaitChild(uint64_t waiter) = 0;
@@ -695,7 +695,7 @@ namespace engine::script {
 	//
 	// **The same row as `InstanceMethod` and deliberately a different type.**
 	// They are installed by different loops onto different objects and the two
-	// tables must not be interchangeable — a service method reads `Subject()`
+	// tables must not be interchangeable - a service method reads `Subject()`
 	// and finds nothing, and an instance method installed on a service table
 	// would be reachable on a service and on nothing else. One name apiece is
 	// what makes a wrong list a compile error.
@@ -712,7 +712,7 @@ namespace engine::script {
 	// **A property is not a method, and the two mechanisms stay apart because
 	// the VMs disagree about which is hard.** A `ScriptMethod` is a call; a
 	// property is an accessor, and a language reaches an accessor by a route of
-	// its own — Luau through a userdata's `__index`, because `luaL_sandbox`
+	// its own - Luau through a userdata's `__index`, because `luaL_sandbox`
 	// enables `safeenv` and a field read off a constant global *table* compiles
 	// to a `GETIMPORT` resolved once, so a live value reads as a frozen one;
 	// JavaScript through `JS_DefinePropertyGetSet`, which runs on every read and
@@ -734,7 +734,7 @@ namespace engine::script {
 		ScriptMethod Get;
 
 		// Takes the new value as argument **zero**. Null for a read-only
-		// property, which is most of them — and a write to one is refused by
+		// property, which is most of them - and a write to one is refused by
 		// name in both languages rather than being dropped.
 		ScriptMethod Set;
 	};
@@ -745,7 +745,7 @@ namespace engine::script {
 	// which is `LuauInstances.cpp`'s rule and the reason this is one function rather
 	// than a predicate beside a lookup. `PropertyDescriptor::Scriptable` is about
 	// who is asking, and the honest answer to a script asking for a script's
-	// `Source` is the one it gets for a member that does not exist — otherwise the
+	// `Source` is the one it gets for a member that does not exist - otherwise the
 	// error message itself tells a program what is there to reach for.
 	//
 	// **One reader, because there were three.** The property surface, the tween
@@ -781,7 +781,7 @@ namespace engine::script {
 	// **Declared rather than folded into one array**, because the split is by
 	// what a method reaches: these four name `engine::gui` or drive a
 	// `TweenTable`, and the rest name only the class tree and the store. There is
-	// still one table — `NeutralInstanceMethods` concatenates — so nothing
+	// still one table - `NeutralInstanceMethods` concatenates - so nothing
 	// installs a partial surface.
 	//
 	// @return The gui-facing rows.

@@ -95,7 +95,7 @@ namespace engine::audio {
 		}
 
 		// Rounded rather than truncated, so a rate ratio that lands just under
-		// a whole frame does not drop the last one — which on a short sound is
+		// a whole frame does not drop the last one - which on a short sound is
 		// an audible click at the end of every playback.
 		const double ratio = static_cast<double>(target.SampleRate) / static_cast<double>(Shape.SampleRate);
 		const auto targetFrames =

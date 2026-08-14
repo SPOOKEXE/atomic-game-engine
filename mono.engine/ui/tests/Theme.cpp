@@ -3,7 +3,7 @@
 // **An imgui context is not a device.** `ImGui::CreateContext` allocates a
 // style table and a font atlas description and touches no driver, so the two
 // claims in `Theme.cpp` that would otherwise be assertions in a comment are
-// checkable here — and they are the two that break the editor visibly rather
+// checkable here - and they are the two that break the editor visibly rather
 // than subtly.
 
 #include <engine/testing/Suite.hpp>
@@ -42,7 +42,7 @@ TEST_CASE("the dockspace's empty background is opaque", "[ui][theme]") {
 	// hole in the dockspace, `DockingEmptyBg` had to be transparent or it
 	// painted over the frame. That arrangement is gone: `imgui.cpp` only punches
 	// the hole while the central node is *empty*, so docking the viewport into
-	// it — the only way anybody uses it — filled the whole dockspace with
+	// it - the only way anybody uses it - filled the whole dockspace with
 	// `WindowBg` and the world vanished.
 	//
 	// The world is a texture in a panel now, so an empty dock area is an
@@ -82,7 +82,7 @@ TEST_CASE("one scale knob moves every metric", "[ui][theme]") {
 
 	// Borders are the deliberate exception and are named so that a reader does
 	// not read their absence above as an oversight. A one-pixel border is one
-	// pixel at every scale — doubling it draws a frame around every widget
+	// pixel at every scale - doubling it draws a frame around every widget
 	// heavy enough to read as a selection.
 	CHECK(doubled.WindowBorderSize == single.WindowBorderSize);
 }
@@ -113,7 +113,7 @@ TEST_CASE("every palette is legible and distinct", "[ui][theme]") {
 		const float text = luminance(style.Colors[ImGuiCol_Text]);
 
 		// Text has to be well clear of the panel it is on. Every palette here
-		// is dark, so "clear" means brighter — a light theme would need this
+		// is dark, so "clear" means brighter - a light theme would need this
 		// stated as a distance rather than as a direction.
 		CHECK(text - surface > 0.35f);
 
@@ -136,7 +136,7 @@ TEST_CASE("every palette is legible and distinct", "[ui][theme]") {
 		CHECK(muted < text);
 		CHECK(muted > surface);
 
-		// And the dockspace stays opaque whatever the palette — see the case
+		// And the dockspace stays opaque whatever the palette - see the case
 		// above for what a transparent one shows.
 		CHECK(style.Colors[ImGuiCol_DockingEmptyBg].w == 1.0f);
 	}
@@ -147,7 +147,7 @@ TEST_CASE("every palette is legible and distinct", "[ui][theme]") {
 
 TEST_CASE("a palette chosen before a context survives to it", "[ui][theme]") {
 	// `SetPalette` restyles immediately when there is something to restyle, and
-	// remembers when there is not — which is what lets a setting read out of a
+	// remembers when there is not - which is what lets a setting read out of a
 	// file be applied before the interface has been created.
 	engine::ui::SetPalette(engine::ui::Palette::Terminal);
 	CHECK(engine::ui::CurrentPalette() == engine::ui::Palette::Terminal);
@@ -164,7 +164,7 @@ TEST_CASE("a palette chosen before a context survives to it", "[ui][theme]") {
 
 TEST_CASE("a colour survives a round trip through text", "[ui][theme]") {
 	// The text form is the only place the byte order differs from `IM_COL32`,
-	// and it is a boundary two files write and two read — the layout ini and
+	// and it is a boundary two files write and two read - the layout ini and
 	// `preferences.json`. A swap that is wrong in one direction only would show
 	// up as colours that drift a little further from what somebody chose every
 	// time the editor is restarted, which is the worst kind of bug to find.
@@ -202,7 +202,7 @@ TEST_CASE("every colour has a name that parses back", "[ui][theme]") {
 TEST_CASE("an override rides over the palette rather than replacing it", "[ui][theme]") {
 	// **The claim the whole design rests on.** An override that was a full copy
 	// of a palette would pin all seven colours the moment anybody touched one,
-	// and choosing a theme afterwards would appear to do nothing — which is
+	// and choosing a theme afterwards would appear to do nothing - which is
 	// exactly the complaint a customisable theme usually earns.
 	const Context context;
 
@@ -243,7 +243,7 @@ TEST_CASE("an override rides over the palette rather than replacing it", "[ui][t
 TEST_CASE("a panel's colours are pushed and popped", "[ui][theme]") {
 	// `ScopedColours` is the per-widget half, and the two things that can go
 	// wrong with it are both silent: pushing nothing when something was asked
-	// for, and leaving the stack unbalanced — which imgui reports a frame later
+	// for, and leaving the stack unbalanced - which imgui reports a frame later
 	// as an assertion in an unrelated window.
 	const Context context;
 	engine::ui::SetPalette(engine::ui::Palette::Dark);
@@ -279,7 +279,7 @@ TEST_CASE("a panel's colours are pushed and popped", "[ui][theme]") {
 
 TEST_CASE("the drawn colours are the styled ones", "[ui][theme]") {
 	// The accent is both a style entry and a packed constant, because a few
-	// things are drawn rather than styled — the explorer's selection band, the
+	// things are drawn rather than styled - the explorer's selection band, the
 	// toolbar's run-state pill. Two spellings of one colour is the drift
 	// `Theme.cpp` exists to prevent, so this checks they still agree.
 	const Context context;

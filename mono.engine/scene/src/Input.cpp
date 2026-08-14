@@ -15,7 +15,7 @@ namespace engine::scene {
 		// `NormalId` member list from `Describe` rather than typing it out.
 		//
 		// The order **is** the enum's, and a `static_assert` below is what makes
-		// that a checked claim rather than a hopeful one — inserting a key in the
+		// that a checked claim rather than a hopeful one - inserting a key in the
 		// middle of `KeyCode` without inserting a name here would silently shift
 		// every name after it by one, so `Enum.KeyCode.W` would resolve to V.
 		constexpr std::array<std::string_view, static_cast<size_t>(KeyCode::Count)> KEY_NAMES{{
@@ -101,7 +101,7 @@ namespace engine::scene {
 		// format, and does it silently.
 		//
 		// The number is what the members happen to add up to rather than a target
-		// — the point is that changing it is a decision somebody has to make here.
+		// - the point is that changing it is a decision somebody has to make here.
 		constexpr size_t SIZE_IS_PINNED = 56;
 		static_assert(
 			sizeof(InputState) == SIZE_IS_PINNED,
@@ -116,8 +116,8 @@ namespace engine::scene {
 
 	KeyCode KeyFromName(std::string_view name) {
 		// **A linear scan and not a map.** Ninety-odd string compares sounds like
-		// a lot and is not: this is called when a script *names* a key — binding
-		// an action, testing one by name — which is an authoring-time frequency,
+		// a lot and is not: this is called when a script *names* a key - binding
+		// an action, testing one by name - which is an authoring-time frequency,
 		// and the hot path is `IsKeyDown(KeyCode)` which takes the enum and never
 		// comes here. A static map would be an allocation and a hash to save a
 		// scan nothing runs in a loop.

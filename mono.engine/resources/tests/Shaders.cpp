@@ -17,7 +17,7 @@ namespace {
 	constexpr const char *STAGED = "shaders/resources";
 
 	// The override is process-wide state; a case that leaves it set breaks
-	// every later one — `engine.core.paths` carries the same guard.
+	// every later one - `engine.core.paths` carries the same guard.
 	struct Override {
 		explicit Override(const fs::path &path) {
 			Paths::SetAssetsOverride(path);

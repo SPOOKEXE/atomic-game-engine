@@ -51,14 +51,14 @@ namespace engine::ui {
 			return true;
 		}
 
-		// A window decides whether anything is *drawn*. Everything else — the
-		// context, the fonts, the theme, every panel's code — happens either way.
+		// A window decides whether anything is *drawn*. Everything else - the
+		// context, the fonts, the theme, every panel's code - happens either way.
 		const bool drawable = window != nullptr;
 
 		const render::BackendHandles backend = renderer.Backend();
 		if (backend.Device == nullptr) {
 			// Not an assertion. A headless run legitimately has no device, and
-			// the caller decides whether that is fatal — same contract as
+			// the caller decides whether that is fatal - same contract as
 			// `Renderer::Initialise`.
 			ENGINE_ERROR("ui::Interface needs an initialised renderer");
 			return false;
@@ -74,7 +74,7 @@ namespace engine::ui {
 
 		// **Keyboard navigation on, gamepad navigation off.** An editor is
 		// driven by a keyboard and a mouse, and the gamepad mapping steals the
-		// arrow keys from a text field the moment a controller is plugged in —
+		// arrow keys from a text field the moment a controller is plugged in -
 		// which reads as the script editor being broken by unrelated hardware.
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
@@ -95,13 +95,13 @@ namespace engine::ui {
 		// **Before the first frame, which is the whole requirement.** imgui
 		// loads the ini lazily on the first `NewFrame`, so a settings handler
 		// registered any later has already had its lines skipped as belonging
-		// to nobody — and the chosen palette would then silently reset on
+		// to nobody - and the chosen palette would then silently reset on
 		// every start.
 		InstallThemeSettings();
 
 		// **Real faces, rasterised at the scale rather than stretched.** imgui's
 		// built-in font is a 13px bitmap: proportional, unhinted, and with no
-		// monospace companion — fine for a debug overlay and wrong for something
+		// monospace companion - fine for a debug overlay and wrong for something
 		// somebody reads all day. `ui::LoadFonts` is the table of what is
 		// vendored; a missing file leaves the built-in in place and says so
 		// once, because an editor that refused to open over a font would be
@@ -126,7 +126,7 @@ namespace engine::ui {
 			// The context is live and nothing will draw it. The display size the
 			// platform backend would have reported is supplied here and in
 			// `Begin`, because a zero-sized display clips every panel to nothing
-			// — which looks exactly like the panels not running.
+			// - which looks exactly like the panels not running.
 			io.DisplaySize = State->Display;
 			io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
 
@@ -232,7 +232,7 @@ namespace engine::ui {
 		// SDL3 backend reads a wall clock and assigns `io.DeltaTime` itself, so
 		// setting it first is a value that is thrown away. Passing it in is
 		// what makes a fixed-step or headless driver produce the same frames
-		// every run — the same rule `world::Driver` and `net` already hold.
+		// every run - the same rule `world::Driver` and `net` already hold.
 		ImGui::NewFrame();
 		ImGui::GetIO().DeltaTime = frameSeconds > 0.0f ? frameSeconds : 1.0f / 60.0f;
 	}

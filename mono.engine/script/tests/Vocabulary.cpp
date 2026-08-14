@@ -4,13 +4,13 @@
 // **The failure this exists to catch has happened twice in this module and both
 // times it was silent.** `LuauValues.cpp` records `Magnitude` and `Unit`, promised
 // by `engine.d.luau` for two versions while the run time answered "Vector3 has
-// no member 'Unit'" — a script that typechecked clean and failed anyway.
+// no member 'Unit'" - a script that typechecked clean and failed anyway.
 // `JsSurface.cpp` records a hand-written `10` on a list of sixteen methods,
 // which left the last six uninstalled with nothing warning. Both are the same
 // shape: a description of the surface kept somewhere other than the surface.
 //
 // So the assertions here run *against a live VM*. Offering a name that does not
-// resolve is worse than offering nothing — an author picks it out of a list,
+// resolve is worse than offering nothing - an author picks it out of a list,
 // writes it, and finds out at run time in whatever scene reaches that line
 // first, which is exactly the experience `Vocabulary.hpp` was written to end.
 
@@ -22,7 +22,7 @@
 #include <engine/world/Bus.hpp>
 
 // The status words are `script::DescribeStatus`'s, which is private to the
-// module — the test links `src/` for exactly this.
+// module - the test links `src/` for exactly this.
 #include "Bus.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -82,8 +82,8 @@ namespace {
 }
 
 TEST_CASE("a runtime describes the surface it installed", "[script][vocabulary]") {
-	// The names an author reaches for first. Not an exhaustive list — the point
-	// of walking the VM is that nothing here has to be — but enough that a walk
+	// The names an author reaches for first. Not an exhaustive list - the point
+	// of walking the VM is that nothing here has to be - but enough that a walk
 	// which quietly returned nothing is a failure rather than a pass.
 	//
 	// **Both VMs, and only what both have.** The two genuinely differ, and
@@ -134,7 +134,7 @@ TEST_CASE("every offered instance member resolves on a real instance", "[script]
 	// of them are a chain of string comparisons in `InstanceIndex`
 	// with a list kept next to them, and a list beside a branch is exactly the
 	// arrangement that goes stale. Nothing can enumerate a branch, so nothing
-	// can check the other direction — a signal added to the chain and not to
+	// can check the other direction - a signal added to the chain and not to
 	// the list is invisible here, and that is stated rather than papered over.
 	for (const Language language : {Language::Luau, Language::JavaScript}) {
 		Vm vm(language);
@@ -148,7 +148,7 @@ TEST_CASE("every offered instance member resolves on a real instance", "[script]
 		const bool luau = language == Language::Luau;
 
 		// `Instance.new` in both, and JavaScript's is a property rather than a
-		// construct signature — `new Instance("Part")` is the shape the
+		// construct signature - `new Instance("Part")` is the shape the
 		// bindings deliberately did not take, so that one spelling works in
 		// both languages.
 		std::string source =
@@ -191,7 +191,7 @@ TEST_CASE("a withheld name is one the VM actually installs", "[script][vocabular
 TEST_CASE("the two languages are described apart", "[script][vocabulary]") {
 	// **Not a tidiness check.** `engine.d.ts` once declared `UserInputService`
 	// and `ContextActionService` for JavaScript because its prelude was written
-	// by mirroring Luau's, and neither global existed in that VM — a TypeScript
+	// by mirroring Luau's, and neither global existed in that VM - a TypeScript
 	// file naming one typechecks and then fails. The walk cannot make that
 	// mistake, and this pins the property so that a future convenience does not
 	// reintroduce it.
@@ -200,13 +200,13 @@ TEST_CASE("the two languages are described apart", "[script][vocabulary]") {
 	// `SoundService` followed it**, which is the honest half of the same check:
 	// each is described once now and both VMs install it, so asserting an absence
 	// here would be asserting a gap that has been closed. The last two went when
-	// `ServiceProperty` gave a live property a neutral shape — a userdata's
+	// `ServiceProperty` gave a live property a neutral shape - a userdata's
 	// `__index` on one side and `JS_DefinePropertyGetSet` on the other, from one
 	// list of names.
 	//
 	// **`require` is what is left, and it is not a service.** Modules are
 	// Luau-only because `OpenRequire` compiles a chunk, and a JavaScript one
-	// would be a second loader rather than a second binding — which is the same
+	// would be a second loader rather than a second binding - which is the same
 	// shape as `BreakpointService`, absent here only because a plain runtime
 	// installs no studio service in either VM.
 	Vm luau(Language::Luau);
@@ -281,7 +281,7 @@ TEST_CASE("the bus status words are the switch, not a copy of it", "[script][voc
 
 	// **`Unknown` is last and is a member.** It is what `DescribeStatus`
 	// answers for a value it does not recognise, which a script can be handed
-	// after a version skew between two processes — so a union without it makes
+	// after a version skew between two processes - so a union without it makes
 	// correct handling code a typecheck failure, and one with it anywhere but
 	// the end means the walk read past the enum.
 	CHECK(words.back() == "Unknown");

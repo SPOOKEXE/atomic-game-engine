@@ -2,14 +2,14 @@
 //
 // **The other half of `just bindings-check`.** That one asks whether the
 // declaration files still match the class table. This asks whether the scripts
-// people actually write still match the declaration files — and the two
+// people actually write still match the declaration files - and the two
 // questions are different: a property can be removed from the class table,
 // regenerate cleanly, and leave every script that named it broken with nothing
 // reporting it until the scene fails to build.
 //
 // **Upstream's `luau-analyze` cannot do this**, which is why there is a tool
 // here rather than a line in the Justfile. It has no flag for loading a
-// definition file, so it checks against the built-in globals alone — and every
+// definition file, so it checks against the built-in globals alone - and every
 // `Instance`, `Vector3` and `workspace` in this engine would come back as an
 // unknown global. What a language server does instead is `loadDefinitionFile`
 // into the global scope before checking, which is what this does, so the answer
@@ -63,7 +63,7 @@ namespace {
 	// **Strict for every file, and it ignores `.luaurc`.** The checked-in
 	// `.luaurc` already says strict, but a config resolver that read it would
 	// make this check answer differently depending on which directory a script
-	// was moved to — and a per-directory answer is not what a repository-wide
+	// was moved to - and a per-directory answer is not what a repository-wide
 	// gate should be.
 	struct Configs : Luau::ConfigResolver {
 		Luau::Config Strict;
@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
 	engine::core::Log::Initialise("scriptcheck");
 
 	engine::core::Arguments arguments(
-		"scriptcheck", "atomic — type-checks Luau scripts against the generated declarations."
+		"scriptcheck", "atomic - type-checks Luau scripts against the generated declarations."
 	);
 	arguments.Value("definitions", "PATH", "The declaration file to check against");
 
@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
 
 	const std::optional<std::string> source = Read(definitions);
 	if (!source) {
-		ENGINE_ERROR("could not read {} — run `just bindings`", definitions);
+		ENGINE_ERROR("could not read {} - run `just bindings`", definitions);
 		return 2;
 	}
 
@@ -138,7 +138,7 @@ int main(int argc, char **argv) {
 
 	if (!loaded.success) {
 		// The declaration file itself is wrong, which is a generator bug rather
-		// than a script one — so it is named as such and nothing else is
+		// than a script one - so it is named as such and nothing else is
 		// checked. Every script would fail against a vocabulary that did not
 		// load, and a thousand consequential errors bury the one cause.
 		for (const Luau::ParseError &error : loaded.parseResult.errors) {
@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
 		}
 
 		ENGINE_ERROR(
-			"{} did not load. It is generated — the fault is in mono.tools/bindings rather than in "
+			"{} did not load. It is generated - the fault is in mono.tools/bindings rather than in "
 			"the file.",
 			definitions
 		);
@@ -168,13 +168,13 @@ int main(int argc, char **argv) {
 	//
 	// Luau parses `Enum.NormalId` in a type position as a reference with a
 	// *prefix*, and resolves it through `Scope::lookupImportedType("Enum",
-	// "NormalId")` — that is, `importedTypeBindings["Enum"]["NormalId"]`. That map
+	// "NormalId")` - that is, `importedTypeBindings["Enum"]["NormalId"]`. That map
 	// is populated by `require` (`ConstraintGenerator.cpp:1512` assigns a required
 	// module's exported bindings into it) and by nothing a `declare` statement can
 	// say. `loadDefinitionFile` only ever writes `exportedTypeBindings[name]`, a
 	// flat name.
 	//
-	// **So Roblox is not doing anything a definitions file can do — it is doing
+	// **So Roblox is not doing anything a definitions file can do - it is doing
 	// this.** luau-lsp's Roblox platform registers the same map from an API dump.
 	// The generator emits `Enum_NormalId` as a flat extern type, and this aliases
 	// every one of them under the `Enum` prefix, so a script may write either.
@@ -238,13 +238,13 @@ int main(int argc, char **argv) {
 
 	if (failures > 0) {
 		ENGINE_ERROR(
-			"{} error(s). A script and the bindings disagree — either the script names something "
+			"{} error(s). A script and the bindings disagree - either the script names something "
 			"the engine no longer has, or the class table changed and `just bindings` has not run.",
 			failures
 		);
 		return 1;
 	}
 
-	ENGINE_INFO("scriptcheck ok — {} script(s) agree with {}", scripts.size(), definitions);
+	ENGINE_INFO("scriptcheck ok - {} script(s) agree with {}", scripts.size(), definitions);
 	return 0;
 }

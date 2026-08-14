@@ -43,7 +43,7 @@ namespace engine::assets {
 	//
 	// Stateless with respect to the data: the same bytes and the same limits
 	// give the same boundaries on any machine, in any build, forever. That is a
-	// requirement rather than a nicety — two peers that chunk differently share
+	// requirement rather than a nicety - two peers that chunk differently share
 	// nothing, and the dedup this exists for silently stops working.
 	class Chunker {
 	  public:
@@ -62,7 +62,7 @@ namespace engine::assets {
 		//
 		// The spans tile the input exactly: they are contiguous, in order, and
 		// their lengths sum to `data.size()`. An empty input gives no spans
-		// rather than one empty span — a zero-length chunk has a hash and no
+		// rather than one empty span - a zero-length chunk has a hash and no
 		// content, which is a row in every manifest that references it and a
 		// fetch that transfers nothing.
 		//
@@ -86,7 +86,7 @@ namespace engine::assets {
 		ChunkLimits Envelope;
 
 		// Masks derived from the limits at construction. Strict applies before
-		// the target and loose after it — see the source for why one mask alone
+		// the target and loose after it - see the source for why one mask alone
 		// gives a much wider size spread than its average suggests.
 		uint64_t StrictMask = 0;
 		uint64_t LooseMask = 0;

@@ -7,20 +7,20 @@
 // reader in this module turns somebody else's file into an `assets::MeshData` or
 // an `assets::TextureData`; an `.rbxm` is an *instance tree*, so what comes back
 // is a tree of what the file called each thing and what it said about it. Who
-// turns that into rows in a store is the caller's business — `bake` is L9 and
+// turns that into rows in a store is the caller's business - `bake` is L9 and
 // knows nothing about `ecs`.
 //
 // **Two containers, one tree, and that is the point.** `ReadRobloxModel` reads
 // the binary `.rbxm` and `ReadRobloxModelXml` reads the XML `.rbxmx`; both hand
 // back a `RobloxModel` and a caller cannot tell which it was given. The same
 // model exported both ways comes back the same, which
-// `bake/tests/RobloxModel.cpp` asserts outright — a second model type for the
+// `bake/tests/RobloxModel.cpp` asserts outright - a second model type for the
 // second container would have been the copy that drifts.
 //
 // **A referent is a within-file encoding and never leaves as identity.** The
 // binary format numbers its instances so that its `PRNT` chunk can say which is
 // inside which, and those numbers are chosen by whatever wrote the file. So a
-// referent becomes exactly one thing here — **the shape of the tree** — and is
+// referent becomes exactly one thing here - **the shape of the tree** - and is
 // discarded with the parse. Nothing in what comes back is numbered, and a
 // `Ref`-typed property is refused rather than turned into an index, because a
 // number that named a row of one file is not a name anything outside it can
@@ -46,7 +46,7 @@
 //   `Float64`;
 // - `UDim`, `UDim2`, `Vector2`, `Vector3`, `Color3`, `Color3uint8`, `Rect` and
 //   `NumberRange`;
-// - `CFrame`, whole — position *and* rotation;
+// - `CFrame`, whole - position *and* rotation;
 // - `SharedString`, resolved out of the file's own table.
 //
 // **Refused by name:** `Enum` and `Ref`, which are numbers naming somebody
@@ -56,7 +56,7 @@
 // The XML container spells the same subset differently and reads exactly it:
 // `CoordinateFrame` is the `CFrame`, `Rect2D` is the `Rect`, `token` is the
 // `Enum` and is refused, and `Content` and `BinaryString` are separate elements
-// for what the binary container stores as one `String` — so both are read, since
+// for what the binary container stores as one `String` - so both are read, since
 // refusing them would make a `Decal` imported from XML lose a texture the same
 // model keeps when it is imported from `.rbxm`. A script's source is a
 // `ProtectedString` in both, written there as a type number and here inside a
@@ -67,14 +67,14 @@
 // a type this does not decode is a chunk skipped whole. That is the structural
 // fact that makes a partial reader of this format safe rather than lucky, and it
 // is why the list above can grow one row at a time. An XML element carries its
-// own end tag, which gives the same property for a different reason — and gives
+// own end tag, which gives the same property for a different reason - and gives
 // it one step further, since a value that is malformed rather than merely
 // unknown costs its property there too, where in the binary container it ends
 // the file.
 //
 // **An `Enum` is refused rather than guessed** and it is the row most likely to
 // be argued with. The file stores an enum as a number, and that number indexes
-// Roblox's table — `Material` 256 is `Plastic` because Roblox says so. This
+// Roblox's table - `Material` 256 is `Plastic` because Roblox says so. This
 // engine names enum members through `ecs::EnumTable` and has no such table, so
 // the only ways to honour one are to ship Roblox's numbering or to use this
 // engine's declaration order. The second is precisely the id-derived-from-order
@@ -105,13 +105,13 @@ namespace engine::bake {
 		// `Bool`.
 		Bool,
 
-		// `Integer` — the format's `Int32` and `Int64` both arrive here.
+		// `Integer` - the format's `Int32` and `Int64` both arrive here.
 		Integer,
 
-		// `Number` — the format's `Float32` and `Float64` both arrive here.
+		// `Number` - the format's `Float32` and `Float64` both arrive here.
 		Number,
 
-		// `Text` — the format's `String`, `ProtectedString` and `SharedString`
+		// `Text` - the format's `String`, `ProtectedString` and `SharedString`
 		// all arrive here, the last already resolved out of the file's table.
 		//
 		// `ProtectedString` is how a script's source is written and is a
@@ -125,7 +125,7 @@ namespace engine::bake {
 		// `Vector2`.
 		Vector2,
 
-		// `Color3` — the format's `Color3` and `Color3uint8` both arrive here.
+		// `Color3` - the format's `Color3` and `Color3uint8` both arrive here.
 		Color3,
 
 		// `CFrame`.
@@ -153,8 +153,8 @@ namespace engine::bake {
 	// **It is not `game::PropertyValue` and cannot be.** That type lives in
 	// `game`, which is above this module and links `ecs`, `scene` and `world`; an
 	// importer that named it would put half the engine underneath a foreign-format
-	// parser. So this carries the kinds a `.rbxm` can actually produce — the left
-	// column of the table in this file's header, and nothing else — and the
+	// parser. So this carries the kinds a `.rbxm` can actually produce - the left
+	// column of the table in this file's header, and nothing else - and the
 	// caller converts, keyed on the type its own class table declares rather than
 	// on what the file happened to store.
 	//
@@ -206,7 +206,7 @@ namespace engine::bake {
 	//
 	// @since v0.15
 	struct RobloxProperty {
-		// What the file called it — `Anchored`, `Size`. Matched against the
+		// What the file called it - `Anchored`, `Size`. Matched against the
 		// caller's own property list by spelling, because a name is the only
 		// thing about a property that crosses a file.
 		std::string Name;
@@ -223,7 +223,7 @@ namespace engine::bake {
 		// table. Not checked here: `bake` has no idea what classes exist.
 		std::string ClassName;
 
-		// Its `Name` property, or the class name when it carried none — which is
+		// Its `Name` property, or the class name when it carried none - which is
 		// Roblox's own default for an instance nobody renamed.
 		//
 		// **Lifted out of `Properties` rather than left in it**, so that there is
@@ -249,7 +249,7 @@ namespace engine::bake {
 		// The instances with nothing above them, in file order.
 		//
 		// **A list rather than one**, because the format allows any number and
-		// Rojo's file table allows one — so which count is acceptable is a
+		// Rojo's file table allows one - so which count is acceptable is a
 		// question for whoever asked, not for the reader.
 		std::vector<RobloxInstance> Roots;
 
@@ -276,7 +276,7 @@ namespace engine::bake {
 	//
 	// The bound `studio::RojoSync` puts on a JSON document, for the same reason:
 	// the tree is walked recursively and a file is free to claim a million levels.
-	// It doubles as the cycle check — a parent chain longer than this is either
+	// It doubles as the cycle check - a parent chain longer than this is either
 	// too deep or a loop, and both answers are the same one.
 	constexpr uint32_t MAXIMUM_ROBLOX_DEPTH = 64;
 
@@ -303,7 +303,7 @@ namespace engine::bake {
 	// has already answered. Each refuses the other by name, so an author who
 	// renamed a file is told which one they have.
 	//
-	// The XML this reads is markup and not a document — no document type
+	// The XML this reads is markup and not a document - no document type
 	// declaration, no entities beyond the five XML predefines and numeric
 	// character references, no external anything. A `<!DOCTYPE` or `<!ENTITY` is
 	// refused outright rather than bounded, which is the same answer `ReadSvg`

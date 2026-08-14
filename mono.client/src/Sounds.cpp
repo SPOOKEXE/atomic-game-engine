@@ -12,8 +12,8 @@
 // The seam between a world's `Sound` rows and the mixer's graph.
 //
 // One rule shapes the whole file: **post only what changed.** The command queue
-// is bounded and a full one drops rather than blocks — right, because the
-// consumer has a deadline — so a pass that reposted its whole state every frame
+// is bounded and a full one drops rather than blocks - right, because the
+// consumer has a deadline - so a pass that reposted its whole state every frame
 // would fill it with no-ops and start dropping the commands that were real.
 
 namespace client {
@@ -141,7 +141,7 @@ namespace client {
 		auto &queue = mixer.Commands();
 
 		// Stopped before it is removed. `RemoveNode` takes its wires with it,
-		// so the order is not load-bearing for correctness — but a player that
+		// so the order is not load-bearing for correctness - but a player that
 		// is removed mid-block while still marked playing is a state the graph
 		// briefly holds and nothing needs it to.
 		Command command;
@@ -188,7 +188,7 @@ namespace client {
 		// Negative gain is a phase inversion rather than a quieter sound, and a
 		// script that wrote one meant silence. Clamped here rather than in the
 		// property setter so the resource keeps what was written and only what is
-		// *posted* is bounded — the same split `Sound::Volume` is on, where above
+		// *posted* is bounded - the same split `Sound::Volume` is on, where above
 		// 1 is legal and the output stage clips it once.
 		const float master = audio == nullptr ? 1.0f : std::max(audio->MasterVolume, 0.0f);
 
@@ -201,7 +201,7 @@ namespace client {
 
 			// A sound that should not be sounding, or one whose asset has
 			// not arrived yet. The second is the ordinary state while
-			// content streams, not an error — and it is why a script may
+			// content streams, not an error - and it is why a script may
 			// set `Playing` before anything has been delivered and still
 			// have it start when it does.
 			if (!sound.Playing || samples == nullptr) {
@@ -215,7 +215,7 @@ namespace client {
 			// **Where it is heard from is its parent's**, which is the whole
 			// of the positional rule and is read here rather than stored.
 			// A parent with a place in the world makes this an emitter; a
-			// parent that is a service — or none at all — makes it heard
+			// parent that is a service - or none at all - makes it heard
 			// everywhere at one level.
 			const engine::ecs::Entity parent = store.ParentOf(instance);
 			const engine::scene::Transform *placement =
@@ -313,7 +313,7 @@ namespace client {
 
 		// The ear. Position only: a listener's facing would need the camera's
 		// rotation, and every sound this engine places today is either
-		// omnidirectional or attenuated by distance alone — panning against a
+		// omnidirectional or attenuated by distance alone - panning against a
 		// right vector nobody set would put a sound in the wrong ear rather
 		// than in the middle. That is also why `scene::ListenerMode` has two
 		// members where Roblox's `Enum.ListenerType` has four.
@@ -322,7 +322,7 @@ namespace client {
 		// back rather than to the origin.** `SoundService:SetListener` names an
 		// instance, the instance may be destroyed while the setting stands, and
 		// an ear silently teleported to (0, 0, 0) is a scene that goes quiet for
-		// no stated reason — where falling back to the camera is what the world
+		// no stated reason - where falling back to the camera is what the world
 		// meant before it was told otherwise.
 		engine::core::Vector3 ear = listener;
 		if (audio != nullptr && audio->Mode == engine::scene::ListenerMode::ObjectPosition) {

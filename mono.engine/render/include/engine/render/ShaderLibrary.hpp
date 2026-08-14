@@ -4,14 +4,14 @@
 //
 // **This is the consumer `ShaderCompiler` was written for.** That header exists
 // because a `ShaderScript`'s revision can change while the engine runs, and
-// until this file nothing in the engine ever asked it to compile anything —
+// until this file nothing in the engine ever asked it to compile anything -
 // `docs/retired/DEFERRED.md` D00110 is the entry that records the gap, and the order it
 // insists on: the thing that names a shader has to exist before the shaders do,
 // or a library of defaults is a directory nothing loads.
 //
 // ## The resolution order, which is the whole design
 //
-// A `Material` names a shader — `scene::MaterialRef::Shader` — and that one
+// A `Material` names a shader - `scene::MaterialRef::Shader` - and that one
 // name resolves three ways:
 //
 // | what the world holds | what the library gets |
@@ -33,7 +33,7 @@
 // ## What this does not do
 //
 // **It never touches a device.** It holds words, and turning words into an
-// `SDL_GPUShader` and a pipeline is `Renderer::AddShader`'s job — which is what
+// `SDL_GPUShader` and a pipeline is `Renderer::AddShader`'s job - which is what
 // lets the whole route above be tested without a GPU, as `render/AGENTS.md`
 // requires of anything that can be.
 //
@@ -74,7 +74,7 @@ namespace engine::render {
 		// The compiler's diagnostic, or empty on success.
 		//
 		// Non-empty for a shader that failed to compile *and* for a name
-		// nothing in the world or the engine holds — both are things an author
+		// nothing in the world or the engine holds - both are things an author
 		// wants to read, and both leave `SpirV` empty.
 		std::string Error;
 
@@ -93,7 +93,7 @@ namespace engine::render {
 	//
 	// **The list is what makes those files reachable.** `resources/AGENTS.md`
 	// refuses a default nothing consumes, and a `.frag` staged into
-	// `shaders/resources/` that no name resolves to is exactly that — so a
+	// `shaders/resources/` that no name resolves to is exactly that - so a
 	// shader added to that directory is added here in the same change or it is
 	// not added at all.
 	//
@@ -141,7 +141,7 @@ namespace engine::render {
 		// of what the world wants rather than of everything it ever wanted.
 		//
 		// @param store The world.
-		// @return How many modules changed — compiled, loaded, or dropped.
+		// @return How many modules changed - compiled, loaded, or dropped.
 		//         Zero is the steady state, and is what a caller checks before
 		//         handing anything to a device.
 		size_t Refresh(ecs::Store &store);
@@ -149,7 +149,7 @@ namespace engine::render {
 		// The module a name resolved to, or null.
 		//
 		// **Null means "nothing has asked for it"**, which is not the same as a
-		// module carrying an `Error` — that one was asked for and could not be
+		// module carrying an `Error` - that one was asked for and could not be
 		// produced.
 		//
 		// @param name The shader's name.
@@ -162,7 +162,7 @@ namespace engine::render {
 		// for these and leaves the rest alone; walking every module every frame
 		// would rebuild every pipeline every frame.
 		//
-		// A dropped name appears here too, and `Find` answers null for it —
+		// A dropped name appears here too, and `Find` answers null for it -
 		// which is how a caller knows to release whatever it built.
 		//
 		// @return The names, valid until the next `Refresh`.

@@ -178,13 +178,13 @@ namespace engine::audio {
 			// A container with no sound server, a machine with audio disabled.
 			// Ordinary, and not an error: a game that refused to start because
 			// it could not make a noise would be worse than one that is quiet.
-			ENGINE_INFO("audio: no output available ({}) — running silently", SDL_GetError());
+			ENGINE_INFO("audio: no output available ({}) - running silently", SDL_GetError());
 			return nullptr;
 		}
 
 		auto device = std::make_unique<SdlDevice>(shape, block);
 		if (!device->Open(settings)) {
-			ENGINE_INFO("audio: could not open an output ({}) — running silently", SDL_GetError());
+			ENGINE_INFO("audio: could not open an output ({}) - running silently", SDL_GetError());
 			return nullptr;
 		}
 

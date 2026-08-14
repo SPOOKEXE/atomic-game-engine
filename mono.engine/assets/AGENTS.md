@@ -1,4 +1,4 @@
-# assets — module invariants
+# assets - module invariants
 
 L8 `content`, `shared` tier. Content addressing, chunking, the hash tree, the
 manifest and the one signature over it. `CDN.md` is the design; this file is
@@ -11,8 +11,8 @@ that in one sentence: *`assets` does not depend on `scene`, which is why the
 delivery service can link it alone.*
 
 That is the entire reason `mono.cdn` can be a program with no simulation in it.
-An edge from here to a simulation type would not fail the tier check — both are
-`shared` — so this one is a convention the build cannot catch, which by rule 6
+An edge from here to a simulation type would not fail the tier check - both are
+`shared` - so this one is a convention the build cannot catch, which by rule 6
 means it has to be written down. It is written down here.
 
 ## The format is frozen, and three things in particular
@@ -24,7 +24,7 @@ everywhere. None of them is a tuning knob.
   two ways to address content is the one place a second mechanism must not be
   allowed to accumulate callers.
 - **The gear table and its seed.** `Chunker.cpp` generates 256 constants from
-  `GEAR_SEED`. Change either and every chunk boundary in the world moves — every
+  `GEAR_SEED`. Change either and every chunk boundary in the world moves - every
   stored chunk, every manifest, every client cache, at once.
 - **The tag bytes.** `0x01` interior, `0x02` root, `0x03` signing, `0x04`
   descriptor. They are domain separation, not decoration; see below.
@@ -67,7 +67,7 @@ says which it was.
 
 `DATATYPES_LIBRARIES.md` puts Ed25519 verification at `shared` and signing at
 `server` and CLI. Both halves are in this one `shared` library, so **the build
-cannot enforce that split** — rule 6 again.
+cannot enforce that split** - rule 6 again.
 
 The convention: `SigningKey` is called by studio and the CLI. A client, a server
 tick or `mono.cdn` calling it is a review failure. The origin holds no signing
@@ -76,7 +76,7 @@ key, and that is what makes it safe to deploy on hardware nobody here owns.
 ## A grant is checked in one order, and the MAC is first
 
 `Grant::Open` verifies the MAC, *then* the expiry, *then* the scope. Nothing
-above the MAC check is acted on — the fields are read into a local and no
+above the MAC check is acted on - the fields are read into a local and no
 decision is taken from them.
 
 Reordering this is the mistake worth refusing. Rejecting on an unverified expiry
@@ -103,14 +103,14 @@ notion of "now" to drift out of step with the server's, and expiry stays
 testable.
 
 Forged, expired and out-of-scope are counted apart. An expired grant is an
-ordinary event — a session that ran long — and a forged one is an alarm. One
+ordinary event - a session that ran long - and a forged one is an alarm. One
 counter for both buries the alarm in the noise.
 
 ## Every field of a parsed manifest is hostile
 
 A manifest arrives from an origin, and `repo_layout.md` §1 says anyone can run
-one. `Manifest::Read` refuses — returning nothing and marking the reader failed
-— on a wrong magic, an unknown version, an out-of-range count, a name that is
+one. `Manifest::Read` refuses - returning nothing and marking the reader failed
+- on a wrong magic, an unknown version, an out-of-range count, a name that is
 empty or over-long, a byte total that disagrees with its chunks, a root that
 does not match what it claims to cover, a list out of canonical order, or a
 bundle naming an asset the manifest does not describe.
@@ -142,14 +142,14 @@ serialiser would not produce.
 `VENDOR_PUBLIC`. `Hasher` sizes its own inline storage and asserts against the
 real struct in the source, which is why `blake3.h` reaches nothing.
 
-The alternative — a `unique_ptr` pimpl — would put an allocation on the path that
+The alternative - a `unique_ptr` pimpl - would put an allocation on the path that
 hashes every chunk of every asset. Do not "simplify" it back.
 
 ## What is policy and lives elsewhere
 
 **Which assets go in which bundle** is delivery policy, not format. A group has
 to be independently useful, which is a statement about the game rather than about
-bytes — `CDN.md` §5, and it belongs with the origin.
+bytes - `CDN.md` §5, and it belongs with the origin.
 
 **Where a seed comes from.** `SigningKey::FromSeed` takes 32 bytes and asks no
 questions. `core::Random` is not a cryptographic generator and must never be used
@@ -176,7 +176,7 @@ it an *address*: folding a name into it would give two identical files under two
 names two different roots and lose dedup across them.
 
 A descriptor is length-prefixed and tagged `0x04`. Both for the reasons
-`HashTree`'s own tags exist — without the length, `ab` + `c` and `a` + `bc` are
+`HashTree`'s own tags exist - without the length, `ab` + `c` and `a` + `bc` are
 one hash and the binding does not hold.
 
 ## `AssetKind` is decided once, by the publisher
@@ -190,7 +190,7 @@ is, which disagree the day one reader learns an extension the other has not.
 
 **The list is closed and its numbers are part of the format.** Appending is safe;
 renumbering is not. An unknown kind is read as `Unknown` rather than refused,
-because a manifest from a later build is a legitimate document — refusing would
+because a manifest from a later build is a legitimate document - refusing would
 make every kind added later a hard break for every client already deployed.
 
 ## Verification is `VerifyAsset` and nothing else
@@ -199,15 +199,15 @@ An asset root is a **tree over chunk hashes**, not the digest of its content, so
 `Hasher::Of(bytes) == asset.Root` is wrong for every asset cut into more than one
 chunk and right by coincidence for some that were not.
 
-That is the worst shape a check can have — it passes in the small case somebody
-tests with — and it was written once, in the delivery cache, where it silently
+That is the worst shape a check can have - it passes in the small case somebody
+tests with - and it was written once, in the delivery cache, where it silently
 refused every real asset as a cache miss. One implementation now, with three
 callers: the chunk store reassembling, the delivery client checking what arrived
 from an origin, and the same client checking what came out of its own cache.
 
 ## The chunk store is the format's, not the origin's
 
-`ChunkStore` decides how chunks are laid out on a disk — the thing `CDN.md` §7
+`ChunkStore` decides how chunks are laid out on a disk - the thing `CDN.md` §7
 listed as undecided. It is here rather than in `mono.cdn` for the reason the
 manifest is: **a publisher writes that tree and a client reads it**, so one
 implementation or the two acquire a dialect.
@@ -220,15 +220,15 @@ levels, two jobs.
 costs one pass and catches a corrupt disk, a partial write and a tampered store
 with the same check.
 
-`ReadBundle` is the one producer of a group's payload — members concatenated in
-`BundleEntry::Assets` order — and `SliceOf` is the one consumer's definition of
+`ReadBundle` is the one producer of a group's payload - members concatenated in
+`BundleEntry::Assets` order - and `SliceOf` is the one consumer's definition of
 where each asset sits. The origin compresses what one produces and the client
 splits what the other describes, so the two ends cannot disagree about where an
 asset starts.
 
 ## Not here yet
 
-- Fetching. There is no network in this module and there will not be — transport
+- Fetching. There is no network in this module and there will not be - transport
   is `Engine::net` at L11 and the fetch path is `Engine::delivery` above it.
 - Containers and cooked-asset layout: what is *inside* an asset, as opposed to
   how it is named and delivered.
@@ -253,7 +253,7 @@ buying a pass the reader is already making.
 
 `TextureData::Mips` holds the levels' bytes and nothing else. Each level's width
 and height come from `MipExtent`, and `IsValid` refuses a level that is not
-exactly that size — which is the mesh bounding box's argument one format over: a
+exactly that size - which is the mesh bounding box's argument one format over: a
 stored per-level width is a second copy of a fact the base dimensions already
 carry, and it is the copy an attacker gets to choose. A level claiming to be
 larger than it is is a GPU upload reading past the end of a buffer.
@@ -264,20 +264,20 @@ constant of its own. That bound is tighter and it stays true if
 
 **The levels are beside the base, not concatenated with it.** `Pixels` means *the
 image* to a dozen call sites that check it against `Width * Height *
-BytesPerPixel` — `IsValid`, `render::TextureTable::Upload`, `ResizeImage`, the
+BytesPerPixel` - `IsValid`, `render::TextureTable::Upload`, `ResizeImage`, the
 opaque pass, the studio thumbnailer. One buffer holding the chain would make
 every one of them read a third too much while still compiling. Do not "flatten"
 it.
 
 ## The box filter lives here, and the tier it lives at was the whole bug
 
-`Resample.hpp` — `ResizeImage`, `MipChainLevels`, `BuildMipChain`. It was
+`Resample.hpp` - `ResizeImage`, `MipChainLevels`, `BuildMipChain`. It was
 `bake::ResizeImage` at L9 until v0.15, and being one tier up meant this module
 could not use its own filter: `MakeBuiltin`'s checker, `render::DefaultTexture`
 and `render::MissingTexture` are all pixels generated below the importers, so all
 three uploaded at one level and shimmered at distance with three modules looking
 correct. Moving it down fixed all three at once, and it moved rather than being
-copied — a second box filter is how two textures start disagreeing about what a
+copied - a second box filter is how two textures start disagreeing about what a
 half-size copy of themselves is.
 
 **It belongs here on its own merits, not only because this needed it.** Every
@@ -303,12 +303,12 @@ or whose dimensions its grid does not divide, gets **no chain at all** rather
 than an approximate one.
 
 The one exception is a 1x1 grid, which gets the full chain: there is no interior
-boundary to bleed across. That case is not a curiosity — `bake/Gif.cpp` gives
+boundary to bleed across. That case is not a curiosity - `bake/Gif.cpp` gives
 every single-frame GIF a 1x1 grid, so without it every imported still would lose
 its levels to a neighbour that does not exist.
 
 The two alternatives were weighed and both are worse. Padding the cells with
-gutters changes what a flipbook *is* — every consumer divides the sheet by
+gutters changes what a flipbook *is* - every consumer divides the sheet by
 `FlipbookSide`, so a gutter is a change to `TextureData`, to
 `render::FlipbookCellAt` and to every UV that samples one. Refusing the texture
 outright throws away an image that was perfectly good without a chain.
@@ -318,7 +318,7 @@ outright throws away an image that was perfectly good without a chain.
 `MakeBuiltin(BuiltinTexture)` calls `BuildMipChain` before returning, and so do
 `render::DefaultTexture` and `render::MissingTexture`. These are the only
 textures in the engine that reach a sampler without passing through a bake
-graph, so there is no pipeline stage to put a `Mipmap` node in — the generator is
+graph, so there is no pipeline stage to put a `Mipmap` node in - the generator is
 the last place that knows the image is finished. A built-in that returned without
 a chain would be the one texture in the engine that still aliased, and the
 checker is exactly the sheet an author tiles across a floor and then looks at
@@ -329,7 +329,7 @@ from across the map.
 `Material` and `Texture` are `std::string` and this is the one place the format
 departs from rule 4's usual answer. Interning takes a process-wide mutex and
 grows a registry nothing empties, and every byte here arrives from an origin
-anybody may run — so a mesh naming ten thousand distinct materials would be an
+anybody may run - so a mesh naming ten thousand distinct materials would be an
 unbounded allocation in a shared table, reachable from content.
 `delivery::Asset::Name` is a `std::string` for the same reason.
 
@@ -340,7 +340,7 @@ the name has already been accepted. `render::MeshTable::Add` is that point.
 
 `MakeBuiltin` produces geometry rather than reading a table, and the reason is
 what the suite can then check: every triangle of every built-in points outwards,
-and every closed one is a manifold — each edge shared by exactly two triangles
+and every closed one is a manifold - each edge shared by exactly two triangles
 that traverse it in opposite directions. That single property subsumes "no
 hole", "no duplicated face", "no face wound backwards relative to its neighbour"
 and "no missing pole triangle", none of which a picture would show.
@@ -352,17 +352,17 @@ the ancestor of `tests/Builtin.cpp`.
 **Everything is a unit shape about its own origin**, spanning -0.5 to +0.5.
 `render::Renderer` folds `DrawInstance::HalfExtent` into the model matrix, so a
 generator returning a radius-one sphere would make every part twice the size it
-says it is — and the mistake would read as a physics bug, because the collider
+says it is - and the mistake would read as a physics bug, because the collider
 would still be right.
 
 ## There is one extension table, and it answers three questions
 
 `ContentForm.cpp` holds it. A name's extension decides the **form** (the format
-— `Png`, `Gif`, `Svg`, `Mp4`), the **kind** (`AssetKind`, the routing label
+- `Png`, `Gif`, `Svg`, `Mp4`), the **kind** (`AssetKind`, the routing label
 several forms share) and whether it is a **source** a baker still has to
 convert.
 
-Those were two lists until v0.15 — an `EXTENSIONS` table for routing and a
+Those were two lists until v0.15 - an `EXTENSIONS` table for routing and a
 separate `SOURCES` list beside it, with a comment on the second saying it was
 the one that must not go stale. Adding a format meant editing both and nothing
 noticed when somebody edited one. It is three columns now, `KindOfName` is
@@ -370,8 +370,8 @@ noticed when somebody edited one. It is three columns now, `KindOfName` is
 a row is the whole edit.
 
 **Do not add a second table.** Anything that wants to know what an extension
-means asks here, and anything derived from the set of forms — the content flags
-are — is generated from `AllForms` rather than listed again.
+means asks here, and anything derived from the set of forms - the content flags
+are - is generated from `AllForms` rather than listed again.
 
 ## A content policy is consulted at the door, before anything decodes
 
@@ -384,7 +384,7 @@ studio's picker.
 Consulting it *late* passes every obvious test and fails the point of it. The
 `cdn` suite asserts the chunk store is **smaller** after a refused publish
 rather than only that the manifest is shorter, because a gate applied after the
-chunker would satisfy the second and not the first — and the whole reason to
+chunker would satisfy the second and not the first - and the whole reason to
 refuse an SVG is that the rasteriser is never reached.
 
 **A refusal is named, counted and never silent.** `PublishReport::Refused` and
@@ -396,6 +396,6 @@ not be broken by a deployment deciding it does not want GIFs.
 bytes it does not interpret, so a policy that refused what it cannot name would
 refuse the next format before it was added; `content.unknown` is the one flag
 that closes the list. A program that never declared the flags gets everything,
-which is what this engine did before they existed — a dead flag handle reads
+which is what this engine did before they existed - a dead flag handle reads
 `false`, and defaulting to refusal there would make a tool that forgot to
 register a table produce an empty bake with no explanation.

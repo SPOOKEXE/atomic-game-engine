@@ -65,7 +65,7 @@ namespace client {
 				built.Text(
 					"client.session-id",
 					defaults.SessionIdText,
-					"Join the session with this id — 32 hex characters"
+					"Join the session with this id - 32 hex characters"
 				);
 				built.Text(
 					"client.session-key",
@@ -80,7 +80,7 @@ namespace client {
 				built.Text(
 					"client.server-key",
 					defaults.ServerKey,
-					"64 hex characters — the server identity to pin. Without it a relay in the path can read "
+					"64 hex characters - the server identity to pin. Without it a relay in the path can read "
 					"everything"
 				);
 
@@ -97,7 +97,7 @@ namespace client {
 				built.Text(
 					"client.publisher-key",
 					defaults.ContentPublisherKey,
-					"64 hex characters — the key whose manifests this client trusts"
+					"64 hex characters - the key whose manifests this client trusts"
 				);
 				built.Text(
 					"client.assets-directory",
@@ -120,7 +120,7 @@ namespace client {
 		Options options;
 		if (!engine::core::Flags::Has("client.width")) {
 			// Nothing declared them, so this is whatever `Options` says on its
-			// own — the same direction `assets::ContentPolicy::FromFlags` takes
+			// own - the same direction `assets::ContentPolicy::FromFlags` takes
 			// for a program that never registered a table.
 			return options;
 		}

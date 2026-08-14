@@ -3,8 +3,8 @@
 // What crosses a world boundary, and the only shape it may take.
 //
 // **A world may name another world and may not reach into one.** Everything that
-// crosses goes through a bus, and four of the five are the Roblox ones —
-// MessagingService, MemoryStore, DataStore, Teleport — because those are the
+// crosses goes through a bus, and four of the five are the Roblox ones -
+// MessagingService, MemoryStore, DataStore, Teleport - because those are the
 // shapes a game actually needs and because a Luau author already knows their
 // semantics. `Channel` is the fifth and is this engine's own.
 //
@@ -12,24 +12,24 @@
 // in another world.** A destination is a `core::Name` and a payload is bytes, so
 // the type that would have broken "nothing crossing a world boundary is a
 // pointer" does not exist and cannot be built out of what is here. Naming a world
-// that has been destroyed is answered — `NoSuchWorld` — rather than being a
+// that has been destroyed is answered - `NoSuchWorld` - rather than being a
 // dangling anything.
 //
 // **Everything is asynchronous**, because a world tick occupies a job worker
 // and blocking one stalls every other world in the host. A call returns a
-// `Ticket` and the reply lands in the world's inbox at a later tick — which is
+// `Ticket` and the reply lands in the world's inbox at a later tick - which is
 // the same contract `:GetAsync()` already teaches, so the engine's requirement
 // and the script author's expectation are the same thing.
 //
 // **Ordering is decided in one place.** Traffic is applied at the driver's
 // barrier, on one thread, in `(From.Text(), Sequence)` order. Each world's
 // outbox is already ordered by construction, so delivery is a k-way merge
-// rather than a sort — and two runs of the same universe apply the same
+// rather than a sort - and two runs of the same universe apply the same
 // operations in the same order, which is what a replay needs.
 //
 // **The sort key is the sender's name *text*, not its `Name::Id()`**, and that
 // is rule 4 rather than a preference. An id is handed out in interning order, so
-// it depends on which world happened to be named first in this process — a
+// it depends on which world happened to be named first in this process - a
 // universe restored from a snapshot interns in file order where the run that
 // wrote it interned in creation order, and the same two envelopes then apply in
 // the opposite order. `BusRouter::SortedKeys` already argues exactly this for the
@@ -53,7 +53,7 @@ namespace engine::world {
 		// with no subscribers is not an error, it is a quiet afternoon.
 		Messaging,
 
-		// Ephemeral shared state — a matchmaking queue, a leaderboard, a
+		// Ephemeral shared state - a matchmaking queue, a leaderboard, a
 		// cross-world counter. Fast, and gone when the run ends.
 		MemoryStore,
 
@@ -69,8 +69,8 @@ namespace engine::world {
 		// attached.
 		//
 		// **A channel is `(destination world, channel name)` and both halves are
-		// required.** The receiving world *opens* a channel — `Subscribe` with
-		// the channel in `Key` — and a sender addresses it with `Send`, `Key`
+		// required.** The receiving world *opens* a channel - `Subscribe` with
+		// the channel in `Key` - and a sender addresses it with `Send`, `Key`
 		// holding the channel and `Target` the destination world. A send naming a
 		// channel the destination has not opened is `NoSuchChannel` rather than a
 		// delivery, which is what keeps two subsystems talking between the same
@@ -79,8 +79,8 @@ namespace engine::world {
 		// message the pair exchanged and had to filter by inspecting the payload.
 		//
 		// **`Teleport` without the player, and it is a fifth kind rather than a
-		// flag on the fourth.** The two look alike on the wire — both name a
-		// destination and carry bytes — and they mean entirely different things
+		// flag on the fourth.** The two look alike on the wire - both name a
+		// destination and carry bytes - and they mean entirely different things
 		// to whoever receives them: a teleport is a person arriving, and the
 		// receiving world builds a `Player` and a character out of it. A channel
 		// message is a message. Overloading `Teleport` would have meant every
@@ -94,7 +94,7 @@ namespace engine::world {
 		// and wrong for "world B, here is the score you asked me for". This
 		// addresses one world by name and delivers to it alone.
 		//
-		// **Appended, because these are wire ordinals** — rule 4. A kind
+		// **Appended, because these are wire ordinals** - rule 4. A kind
 		// inserted above this line renumbers `Teleport` for every process that
 		// has not been rebuilt, and a teleport would arrive as something else.
 		//
@@ -116,7 +116,7 @@ namespace engine::world {
 		// its own**, because it is the same act one bus along: a world declaring
 		// which named things it wants delivered. Two more ordinals would have
 		// meant two more rows in every switch to say what `Subscribe` already
-		// says, and the reader tells them apart by `BusKind` — which it has to
+		// says, and the reader tells them apart by `BusKind` - which it has to
 		// read anyway.
 		Publish,
 		Subscribe,
@@ -143,7 +143,7 @@ namespace engine::world {
 	//
 	// **Every way a cross-world send can fail is one of these, and none of them
 	// is a silent drop.** `Postbox::SendTo` always asks for a reply, so a status
-	// always has a carrier back to the sender — which is what makes the semantics
+	// always has a carrier back to the sender - which is what makes the semantics
 	// below something a script can branch on rather than something it has to
 	// infer from a message that never arrived:
 	//
@@ -164,7 +164,7 @@ namespace engine::world {
 	// **Delivery is at-most-once and the engine never retries.** A refusal is
 	// reported once and the payload is dropped; a sender that wants the message
 	// to land sends it again, because only the sender knows whether re-sending is
-	// correct — a retry inside the bus would duplicate an operation whose second
+	// correct - a retry inside the bus would duplicate an operation whose second
 	// application is not free.
 	//
 	// @since v0.2
@@ -176,7 +176,7 @@ namespace engine::world {
 		NotFound,
 
 		// An Update whose version had moved on. The caller re-reads and retries
-		// — which is the whole reason a version is carried.
+		// - which is the whole reason a version is carried.
 		Conflict,
 
 		// The world has spent its allowance for this bus this tick. Roblox has
@@ -198,7 +198,7 @@ namespace engine::world {
 		// sender retrying on the next tick is right in the second case and wrong
 		// in the first.
 		//
-		// **Appended — these are wire ordinals**, rule 4. A status inserted above
+		// **Appended - these are wire ordinals**, rule 4. A status inserted above
 		// this line renumbers `Unsupported` for every process that has not been
 		// rebuilt.
 		//
@@ -220,7 +220,7 @@ namespace engine::world {
 		//
 		// `Faulted` today: the supervisor is restoring that world from its
 		// snapshot, so anything queued for it now is about to be thrown away with
-		// the rest of its inbox. A **suspended** world is deliberately not this —
+		// the rest of its inbox. A **suspended** world is deliberately not this -
 		// its inbox is what wakes it, which is `LifecycleInputs::InboxWaiting`.
 		//
 		// @since v0.17
@@ -230,12 +230,12 @@ namespace engine::world {
 		// `UniverseSettings::ChannelsPerWorld` channels.
 		//
 		// **Not `OverBudget`, which is the nearest and means something else.**
-		// A budget is a *rate* — spent this tick, back next tick — so a world
+		// A budget is a *rate* - spent this tick, back next tick - so a world
 		// told it is over budget waits a tick and tries again, and a world that
 		// did that with this refusal would loop for ever. This is a total, and
 		// the only thing that clears it is the world closing a channel it holds.
 		//
-		// **Appended — these are wire ordinals**, rule 4.
+		// **Appended - these are wire ordinals**, rule 4.
 		//
 		// @since v0.17
 		TooManyChannels,
@@ -332,7 +332,7 @@ namespace engine::world {
 
 		// The topic, key, or channel.
 		//
-		// **For a channel arrival this is the channel, not the sender** — which
+		// **For a channel arrival this is the channel, not the sender** - which
 		// is `Messaging`'s shape and was not v0.15's: the first cut had no channel
 		// to name, so it put the sender here and the receiver read it twice.
 		// `From` is who sent it, on every bus that has a sender.
@@ -357,8 +357,8 @@ namespace engine::world {
 
 	// Writes an envelope.
 	//
-	// One encoder, because there are three readers of it — a recording, a
-	// snapshot of pending traffic, and the link to a supervised host — and
+	// One encoder, because there are three readers of it - a recording, a
+	// snapshot of pending traffic, and the link to a supervised host - and
 	// three encoders would agree until the day one of them did not. Names are
 	// written as text, so a frame crosses a process boundary where the
 	// interned ids mean nothing.

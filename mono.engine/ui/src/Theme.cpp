@@ -13,7 +13,7 @@ namespace engine::ui {
 		// **Five colours, and the other ten are shades of the first.** A theme
 		// that spelled out its button face, its hovered button face, its input
 		// well and its border is a theme with four more chances to put a
-		// control at the wrong distance from the panel behind it — and with
+		// control at the wrong distance from the panel behind it - and with
 		// seven of them, that is twenty-eight. The shade factors below are the
 		// design; a palette only chooses where on the scale it sits and what
 		// colour the highlights are.
@@ -63,7 +63,7 @@ namespace engine::ui {
 			 NEUTRAL_TEXT,
 			 NEUTRAL_MUTED},
 
-			// Shadow — near black, and the accent is a grey rather than a hue.
+			// Shadow - near black, and the accent is a grey rather than a hue.
 			{"Shadow",
 			 {0.071f, 0.071f, 0.078f, 1.00f},
 			 {0.427f, 0.435f, 0.463f, 1.00f},
@@ -71,7 +71,7 @@ namespace engine::ui {
 			 {0.800f, 0.800f, 0.816f, 1.00f},
 			 {0.443f, 0.443f, 0.459f, 1.00f}},
 
-			// Blue — the same structure, further into the hue than `Dark`.
+			// Blue - the same structure, further into the hue than `Dark`.
 			{"Blue",
 			 {0.075f, 0.122f, 0.196f, 1.00f},
 			 {0.129f, 0.502f, 0.949f, 1.00f},
@@ -103,7 +103,7 @@ namespace engine::ui {
 			 NEUTRAL_TEXT,
 			 NEUTRAL_MUTED},
 
-			// Terminal — black and phosphor, text included. The one palette
+			// Terminal - black and phosphor, text included. The one palette
 			// whose text is not neutral, and the header says why.
 			{"Terminal",
 			 {0.027f, 0.043f, 0.031f, 1.00f},
@@ -144,7 +144,7 @@ namespace engine::ui {
 		// a palette *declares* and this is what is actually being drawn: the
 		// declaration, plus whatever the editor and the panel chose over it.
 		// Keeping them separate is what lets an override survive a change of
-		// palette — see `ThemeColours`.
+		// palette - see `ThemeColours`.
 		struct Skin {
 			ImVec4 Values[THEME_COLOUR_COUNT];
 
@@ -239,13 +239,13 @@ namespace engine::ui {
 		//
 		// **Written into an array rather than into the style**, because a panel
 		// with its own colours needs the same ladder pushed rather than
-		// installed — and a second copy of it is the drift the whole file exists
+		// installed - and a second copy of it is the drift the whole file exists
 		// to prevent. `ApplyEditorTheme` passes `style.Colors`; `ScopedColours`
 		// passes a local and pushes what differs.
 		//
 		// **Derived rather than stored.** Fifteen constants per palette times
 		// seven palettes is a hundred and five numbers, of which seventy would be
-		// the same ladder written out again — and the first one to be mistyped
+		// the same ladder written out again - and the first one to be mistyped
 		// would be a button half a shade off in one theme, which is the kind of
 		// thing that gets noticed a year later.
 		void Derive(const Skin &skin, ImVec4 *colours) {
@@ -267,7 +267,7 @@ namespace engine::ui {
 			// **No `LINK` here**, and its absence is not an oversight: a matched
 			// run in a filtered list is *drawn* rather than styled, so imgui's
 			// table has no slot for it. `LinkColour` derives it from the same
-			// accent — the accent lifted toward white, so it reads as "the
+			// accent - the accent lifted toward white, so it reads as "the
 			// accent, brighter" rather than as a sixth colour nobody chose. The
 			// warning and the error are drawn for the same reason.
 
@@ -337,7 +337,7 @@ namespace engine::ui {
 
 			// **`DockingEmptyBg` is opaque now, and that is the v0.7 change.** It
 			// was transparent while the world was drawn through a hole in the
-			// dockspace — and that arrangement is gone, because `imgui.cpp` only
+			// dockspace - and that arrangement is gone, because `imgui.cpp` only
 			// punches the hole while the central node is *empty*, so docking the
 			// viewport into it painted over the frame. The world is a texture in
 			// a panel now, so an empty dock area is a surface like any other and
@@ -363,7 +363,7 @@ namespace engine::ui {
 	void InstallThemeSettings() {
 		// **The palette rides in the layout ini rather than in a file of its
 		// own.** It is the same kind of fact as where somebody dragged a panel
-		// — a per-machine preference nobody would check into a repository —
+		// - a per-machine preference nobody would check into a repository -
 		// and a second config file is a second thing to find, parse, version
 		// and fail to write.
 		//
@@ -407,7 +407,7 @@ namespace engine::ui {
 			// palette above: an index would make reordering `ThemeColour` a
 			// silent recolour of everybody's editor, and a name that no longer
 			// exists is skipped instead. The same names a plugin passes and a
-			// settings panel prints — see `COLOUR_NAMES`.
+			// settings panel prints - see `COLOUR_NAMES`.
 			char name[32] = {};
 			char text[16] = {};
 			if (std::sscanf(line, "%31[^=]=%15s", name, text) != 2) {
@@ -420,7 +420,7 @@ namespace engine::ui {
 				GlobalOverride[*colour] = *packed;
 
 				// Restyled per line, like `SetPalette` above. Seven restyles at
-				// most, once, on the frame the ini loads — and the alternative
+				// most, once, on the frame the ini loads - and the alternative
 				// is a rule about who restyles after a load that somebody has to
 				// remember.
 				if (ImGui::GetCurrentContext() != nullptr) {
@@ -583,7 +583,7 @@ namespace engine::ui {
 	void SetGlobalColours(const ThemeColours &colours) {
 		GlobalOverride = colours;
 
-		// Restyles and persists, for the reasons `SetPalette` does both — and
+		// Restyles and persists, for the reasons `SetPalette` does both - and
 		// through the same two calls, so that a caller changing a colour and a
 		// caller changing a theme have nothing different to remember.
 		if (ImGui::GetCurrentContext() == nullptr) {
@@ -639,7 +639,7 @@ namespace engine::ui {
 		ApplyEditorTheme(CurrentScale);
 
 		// **Marked dirty here rather than by the caller**, so that persisting
-		// the choice is not something each call site has to remember — and so
+		// the choice is not something each call site has to remember - and so
 		// that no panel needs `imgui_internal.h` to change a colour. imgui
 		// saves on a timer and on shutdown, so an editor that was killed rather
 		// than closed keeps the choice it would otherwise appear not to have
@@ -704,14 +704,14 @@ namespace engine::ui {
 
 		// **Antialiased fills off for rectangles is deliberately not set.** The
 		// panels are rectangles at integer positions, so the antialiasing costs
-		// nothing on them — and the rounded corners the scale asks for are the
+		// nothing on them - and the rounded corners the scale asks for are the
 		// one thing that would look wrong without it.
 		style.WindowMinSize = ImVec2(Scaled(Size::PanelMinimum), Scaled(Size::Bar * 2.0f));
 	}
 
 	// **These five read the resolved skin, not the palette.** They are what the
-	// things that are *drawn* rather than styled ask for — a selection band, an
-	// error line, a matched run in a filter — so a colour overridden for the
+	// things that are *drawn* rather than styled ask for - a selection band, an
+	// error line, a matched run in a filter - so a colour overridden for the
 	// editor has to reach them too, or half the interface would take a new
 	// accent and the other half would keep the old one.
 

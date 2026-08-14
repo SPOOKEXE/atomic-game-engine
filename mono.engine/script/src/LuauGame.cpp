@@ -7,7 +7,7 @@
 // compiled against `<lua.h>` for no reason of its own.
 //
 // **They remain one subject and the seam is `GetService`.** A service installs
-// as a *global* of its own name, and this is the function that looks one up —
+// as a *global* of its own name, and this is the function that looks one up -
 // so the refusal at the bottom is where `ServiceCatalogue`'s language mask
 // becomes something an author can read. `RunService.cpp` is the description;
 // this is the apparatus, and the JavaScript half of the same apparatus is
@@ -32,7 +32,7 @@ namespace engine::script {
 		//
 		// The service locator every Roblox script opens with. Looked up as a
 		// global rather than from a table of its own, so
-		// `game:GetService("RunService")` and `RunService` are one object — two
+		// `game:GetService("RunService")` and `RunService` are one object - two
 		// objects for one service is two things to keep in step, and a script
 		// comparing them would find them different.
 		int GetService(lua_State *state) {
@@ -40,7 +40,7 @@ namespace engine::script {
 
 			// **`Workspace` before the globals, because its global is spelled
 			// differently.** Roblox's is `workspace`, lowercase, and a script
-			// asking for it by its class name is asking for the same object —
+			// asking for it by its class name is asking for the same object -
 			// which it did not get, because `lua_getglobal("Workspace")` finds
 			// nothing and this refused a service the engine plainly provides.
 			//
@@ -59,7 +59,7 @@ namespace engine::script {
 
 			// **Then the tree, because that is where a scene service lives.**
 			// `Players`, `ReplicatedStorage` and the rest are ordinary instances
-			// `InstallServices` puts at the root — so looking them up by name is
+			// `InstallServices` puts at the root - so looking them up by name is
 			// looking them up the way everything else in the world is looked up.
 			//
 			// A global would have been a second handle onto one instance, and a
@@ -74,7 +74,7 @@ namespace engine::script {
 			// **Which refusal, from the catalogue.** A name that is *here* but
 			// bound by the other language is a different failure from a name the
 			// engine has never heard of, and saying the same sentence for both
-			// sends an author looking in the wrong place — they check their
+			// sends an author looking in the wrong place - they check their
 			// spelling when the answer is that the service exists and this VM
 			// does not have it. `ServiceCatalogue.hpp` carries the argument.
 			if (const ServiceDefinition *known = FindService(name);
@@ -101,7 +101,7 @@ namespace engine::script {
 				// **The context is forwarded, not re-derived.** `GetService`
 				// reaches the world to resolve a service instance from the
 				// tree, and a plain `lua_pushcfunction` would give it no
-				// upvalue to read one from — which is a garbage pointer rather
+				// upvalue to read one from - which is a garbage pointer rather
 				// than a compile error.
 				lua_pushvalue(state, lua_upvalueindex(1));
 				lua_pushcclosure(state, GetService, "GetService", 1);
@@ -111,7 +111,7 @@ namespace engine::script {
 			// **Which world this script is running on, by name.**
 			//
 			// Roblox's `JobId` identifies the server instance a script is
-			// standing on, and a world here *is* that instance — one clock, one
+			// standing on, and a world here *is* that instance - one clock, one
 			// store, one set of scripts. So the mapping is the same one `game`
 			// and `workspace` already use rather than a new idea:
 			//
@@ -124,7 +124,7 @@ namespace engine::script {
 			// would look correct.
 			//
 			// A name rather than Roblox's GUID, because a name is what a bus
-			// envelope, a snapshot and a view header already carry — a second
+			// envelope, a snapshot and a view header already carry - a second
 			// identifier for one world would be the two-sources-of-truth
 			// problem, and this one is already the key everything else uses.
 			if (field == "JobId") {
@@ -144,7 +144,7 @@ namespace engine::script {
 		//
 		// Roblox's `game` is a `DataModel`: the root holding every service and,
 		// through `Workspace`, everything with a position. This engine already
-		// has that thing and calls it `world::Universe` — one process, many
+		// has that thing and calls it `world::Universe` - one process, many
 		// worlds, buses between them. The mapping is direct rather than
 		// approximate:
 		//

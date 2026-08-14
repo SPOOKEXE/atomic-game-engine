@@ -29,7 +29,7 @@ namespace engine::script {
 		// One userdata of a plain value type.
 		//
 		// Every datatype below is trivially copyable and needs the same three
-		// operations — push, check, and a metatable — so they are written once
+		// operations - push, check, and a metatable - so they are written once
 		// here rather than eleven times. Luau's tag is what makes the check
 		// safe: `Vector2` and `UDim` are both two floats, so a check on shape
 		// would pass for either.
@@ -159,7 +159,7 @@ namespace engine::script {
 		}
 
 		// `UDim2.fromScale(x, y)` and `UDim2.fromOffset(x, y)`, which is how
-		// most real layout code is written — four numbers where two are zero is
+		// most real layout code is written - four numbers where two are zero is
 		// noise an author stops reading.
 		int UDim2FromScale(lua_State *state) {
 			*Push<UDim2, TAG_UDIM2>(state, "UDim2") = UDim2{Number(state, 1), 0.0f, Number(state, 2), 0.0f};
@@ -325,14 +325,14 @@ namespace engine::script {
 		//
 		// **Both forms, and the table one is not deprecated.** Roblox has
 		// `NumberSequenceKeypoint`, and until v0.10 this engine deliberately did
-		// not — the note here said two more userdata types for a value an author
+		// not - the note here said two more userdata types for a value an author
 		// writes inline once is surface nobody asked for, and while a sequence was
 		// only ever built from a literal that was true.
 		//
 		// What made it false is that a sequence became a *property*. An emitter's
 		// `Transparency` is read back, and a getter handing out
 		// `{time, value, envelope}` gives three anonymous numbers with no
-		// `typeof` — so `emitter.Transparency.Keypoints[1].Value` did not work and
+		// `typeof` - so `emitter.Transparency.Keypoints[1].Value` did not work and
 		// nothing said why. `TAG_NUMBER_KEYPOINT` carries the rest of the
 		// reasoning.
 		//
@@ -352,7 +352,7 @@ namespace engine::script {
 			// rather than a tidy-up.** A negative index is relative to the top *at
 			// the moment of the call*, so after the first `lua_rawgeti` grows the
 			// stack, `index` of -1 names the value that was just pushed instead of
-			// the table it came from — and the second read then indexes a number.
+			// the table it came from - and the second read then indexes a number.
 			//
 			// It survived because nothing exercised it: every sequence in the
 			// suite was built from the two-argument form, and the table form is
@@ -391,7 +391,7 @@ namespace engine::script {
 			lua_rawgeti(state, table, 1);
 			lua_rawgeti(state, table, 2);
 
-			// Read before the pop, and `CheckColor3` may longjmp out of here —
+			// Read before the pop, and `CheckColor3` may longjmp out of here -
 			// which is fine and is why nothing between these two lines allocates.
 			out.Time = static_cast<float>(lua_tonumber(state, -2));
 			out.Value = CheckColor3(state, -1);
@@ -403,7 +403,7 @@ namespace engine::script {
 		// `NumberSequenceKeypoint.new(time, value, envelope)`.
 		//
 		// The envelope defaults to zero, which is Roblox's default and is also the
-		// only value that means "no band" — `Sequence.hpp` declines to sample the
+		// only value that means "no band" - `Sequence.hpp` declines to sample the
 		// band itself because picking a number inside it needs a generator, and
 		// `effects::ParticleSystem` is the caller that has one.
 		int NumberKeypointNew(lua_State *state) {
@@ -537,8 +537,8 @@ namespace engine::script {
 			luaL_errorL(state, "NumberSequence has no member '%s'", std::string(field).c_str());
 		}
 
-		// `sequence:Evaluate(t)`. Roblox has no such method — an author writes
-		// the interpolation by hand every time — and the engine already has the
+		// `sequence:Evaluate(t)`. Roblox has no such method - an author writes
+		// the interpolation by hand every time - and the engine already has the
 		// exact function, so not exposing it would be hiding the useful half.
 		int NumberSequenceEvaluate(lua_State *state) {
 			const NumberSequence &value =
@@ -625,7 +625,7 @@ namespace engine::script {
 		int TweenInfoNew(lua_State *state) {
 			// **Every argument read before the result is pushed.** Pushing first
 			// puts the new userdata on top of the stack, so it becomes argument
-			// N+1 — and `TweenInfo.new(2, style, direction)` then failed with
+			// N+1 - and `TweenInfo.new(2, style, direction)` then failed with
 			// "invalid argument #4 (number expected, got TweenInfo)", naming the
 			// value it had just created. Every constructor below reads first for
 			// the same reason.
@@ -700,7 +700,7 @@ namespace engine::script {
 		// `core::Ray`, which the engine already had. The one difference worth
 		// naming: `core::Ray::Direction` **must be unit length** and Roblox's
 		// need not be, so the constructor normalises and the length is not
-		// silently lost — `Ray.Unit` hands back the same thing.
+		// silently lost - `Ray.Unit` hands back the same thing.
 
 		int RayNew(lua_State *state) {
 			const Ray built{CheckVector3(state, 1), CheckVector3(state, 2).Unit()};
@@ -741,8 +741,8 @@ namespace engine::script {
 		// --- Random ----------------------------------------------------------
 		//
 		// **The consumer `D00004` has been waiting for.** `core::Random` is
-		// indexed rather than streamed — `Float(index, salt)` depends on nothing
-		// but its arguments — and Roblox's `Random` is a stream. The shim is the
+		// indexed rather than streamed - `Float(index, salt)` depends on nothing
+		// but its arguments - and Roblox's `Random` is a stream. The shim is the
 		// counter: the seed is the salt and the draw number is the index, so a
 		// script's sequence is a pure function of its seed and how many values
 		// it has taken. Two runs agree, and a recording replays.
@@ -834,7 +834,7 @@ namespace engine::script {
 			lua_pushcfunction(state, type.Index, "__index");
 			lua_setfield(state, -2, "__index");
 
-			// What `typeof` reads — see `LuauValues.cpp`'s `Install`.
+			// What `typeof` reads - see `LuauValues.cpp`'s `Install`.
 			lua_pushstring(state, type.Name);
 			lua_setfield(state, -2, "__type");
 
@@ -873,7 +873,7 @@ namespace engine::script {
 	//
 	// **Here rather than in each VM's open, because there are three callers.**
 	// Both surfaces consume them through `TweenInfo`, and `mono.tools/bindings`
-	// needs them without opening a VM at all — see `script/Datatypes.hpp` for
+	// needs them without opening a VM at all - see `script/Datatypes.hpp` for
 	// what having written the list twice actually cost.
 	void RegisterDatatypeEnums() {
 		static const std::string_view EASING_STYLES[] = {
@@ -948,7 +948,7 @@ namespace engine::script {
 			 nullptr,
 			 colorSequence},
 			// **Registered after the sequences they belong to, which is only
-			// legibility — `Install` is order-independent.** Equality is bound on
+			// legibility - `Install` is order-independent.** Equality is bound on
 			// both because comparing two stops is what a test of a gradient does,
 			// and without it `==` compares userdata addresses and is false for two
 			// keypoints holding identical numbers.

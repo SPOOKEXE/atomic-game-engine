@@ -1,6 +1,6 @@
 #pragma once
 
-// What a 2D thing in a game *is* — the component set both halves share.
+// What a 2D thing in a game *is* - the component set both halves share.
 //
 // `scene` answers the same question for a part and this is that file's argument
 // applied one dimension down. A server authors a `ScreenGui` and replicates it,
@@ -25,7 +25,7 @@
 // ## Text is owned; an image name is interned
 //
 // **The split is what a value *is*, not what it is made of.** `Picture::Image`
-// is an asset id — one of the bounded set of things a game shipped — so it is a
+// is an asset id - one of the bounded set of things a game shipped - so it is a
 // `core::Name`, interned once and compared as an integer, exactly as
 // `Material` and a class name are.
 //
@@ -37,7 +37,7 @@
 // loop to do it. A score counter is the first thing anybody writes.
 //
 // What it costs instead: `Label` and `Entry` are no longer trivially copyable,
-// so both carry a written serialiser — which both already did, because a
+// so both carry a written serialiser - which both already did, because a
 // `core::Name`'s id is process-local and could never have been memcpy'd to a
 // file either. The storage change is therefore paid entirely in `ecs::Column`'s
 // non-trivial path, which has existed since v0.2 and had no user until now.
@@ -152,7 +152,7 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Label {
-		// The string. Owned rather than interned — see the note at the top of
+		// The string. Owned rather than interned - see the note at the top of
 		// this file, and `ecs::PropertyType::String`.
 		std::string Text;
 
@@ -202,7 +202,7 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Picture {
-		// The content name. Interned — see the note at the top of this file.
+		// The content name. Interned - see the note at the top of this file.
 		core::Name Image;
 
 		// Multiplied into the sampled colour. White leaves it alone.
@@ -288,7 +288,7 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Entry {
-		// Shown when the text is empty. Owned, like `Label::Text` — a
+		// Shown when the text is empty. Owned, like `Label::Text` - a
 		// placeholder is authored rather than chosen from a set, and having
 		// the two strings a text box holds be two different types would be a
 		// distinction with nothing behind it.
@@ -311,7 +311,7 @@ namespace engine::gui {
 		// **Roblox's number: one-based, and counted in characters rather than
 		// in bytes.** `1` is before the first character and `n + 1` is after the
 		// last, so an empty box that has just taken focus reads `1`. The
-		// distinction is not academic — `Label::Text` is UTF-8, and a caret set
+		// distinction is not academic - `Label::Text` is UTF-8, and a caret set
 		// from `Text.size()` sits past the end of anything typed in a language
 		// with accents in it. `gui::Focus` counts the characters.
 		int32_t CursorPosition = -1;
@@ -324,7 +324,7 @@ namespace engine::gui {
 	//
 	// On every `LayerCollector`. What differs between a `ScreenGui`, a
 	// `SurfaceGui` and a `BillboardGui` is *where* the canvas is, which is what
-	// `Canvas`, `Surface` and `Billboard` add — the fields here are the ones all
+	// `Canvas`, `Surface` and `Billboard` add - the fields here are the ones all
 	// three share.
 	//
 	// @since v0.8
@@ -348,7 +348,7 @@ namespace engine::gui {
 	// The screen-sized canvas a `ScreenGui` collects onto.
 	//
 	// Holds the resolved rectangle rather than any authored field, because a
-	// screen gui has none — its canvas is the viewport. It exists so the draw
+	// screen gui has none - its canvas is the viewport. It exists so the draw
 	// pass and the hit test can read the canvas a node belongs to without
 	// learning which of the three kinds of collector it was.
 	//
@@ -365,7 +365,7 @@ namespace engine::gui {
 	// is on, which is `scene::Bounds`; a `BillboardGui`'s scale is against the
 	// screen it is projected onto, which is a fact about a camera and a
 	// viewport. This module is L7 `shared` and links neither, so it declares
-	// where the answer goes and whoever holds both operands writes it —
+	// where the answer goes and whoever holds both operands writes it -
 	// `render::ResolveSpatialCanvases` is that writer today.
 	//
 	// **Derived, like `Canvas` and `Resolved`.** Nothing authors it, nothing
@@ -374,7 +374,7 @@ namespace engine::gui {
 	// hosts with different viewports are *supposed* to disagree.
 	//
 	// Absent means "nobody resolved one", and `CanvasFor` then falls back to the
-	// authored pixel size — which is the right answer for a headless world, a
+	// authored pixel size - which is the right answer for a headless world, a
 	// test, and a `SurfaceGui` whose sizing mode is `FixedSize` anyway.
 	//
 	// @since v0.8
@@ -491,7 +491,7 @@ namespace engine::gui {
 		// One edge each, resolved against the parent's own size.
 		//
 		// **A `UDim` rather than a number**, so padding can be a fraction of the
-		// parent — which is what lets one element look right at two sizes
+		// parent - which is what lets one element look right at two sizes
 		// without a script recomputing it.
 		//@{
 		core::UDim Top;
@@ -610,7 +610,7 @@ namespace engine::gui {
 		// What the outline looks like.
 		//
 		// **Its own transparency rather than the parent's**, so an outline can
-		// stay solid on a fading element — which is what a focus ring wants and
+		// stay solid on a fading element - which is what a focus ring wants and
 		// what inheriting would make impossible.
 		//@{
 		core::Color3 Color{0.0f, 0.0f, 0.0f};
@@ -636,7 +636,7 @@ namespace engine::gui {
 	//
 	// **Derived, and the only component here that is.** One pass writes it,
 	// parent before child; the draw pass and the hit test read it with a query.
-	// Nothing else in the engine may keep a second copy — `scene::Bounds` gives
+	// Nothing else in the engine may keep a second copy - `scene::Bounds` gives
 	// the argument, and it is the same argument.
 	//
 	// A node that is not reached by the pass keeps whatever it last held and is
@@ -693,14 +693,14 @@ namespace engine::gui {
 	// What every 3D adornment carries.
 	//
 	// **An adornment is a `GuiBase3d`, which is a description and not a
-	// drawing.** It says what to outline, in what colour, and how solid — and
+	// drawing.** It says what to outline, in what colour, and how solid - and
 	// nothing here resolves that into geometry, because resolving it needs the
 	// adornee's `CFrame` and stud extent and those are `scene::Transform` and
 	// `scene::Bounds`. `gui` links neither and `gui/AGENTS.md` refuses the edge.
 	//
 	// That split is `D00022`'s, arrived at for a `SurfaceGui`'s canvas and the
 	// same one word for word here: **whoever draws an adornment has both
-	// operands, and this module has one.** What `gui` owns is the tree half —
+	// operands, and this module has one.** What `gui` owns is the tree half -
 	// which instance an adornment is about, and whether it is anywhere it may
 	// be drawn from at all.
 	//
@@ -752,7 +752,7 @@ namespace engine::gui {
 		// The fill drawn over the adornee's faces.
 		core::Color3 SurfaceColor{0.0f, 0.65f, 1.0f};
 
-		// 1 by default, which means no fill — an outline alone. A filled
+		// 1 by default, which means no fill - an outline alone. A filled
 		// selection hides what it selected, and an author who wants one asks.
 		float SurfaceTransparency = 1.0f;
 	};
@@ -773,7 +773,7 @@ namespace engine::gui {
 	//
 	// **A component on the service instance rather than a resource**, which is
 	// the opposite of what `ecs/AGENTS.md`'s one-of-a-kind rule usually asks
-	// for — and the reason is that a service *is* an instance here. `scene`'s
+	// for - and the reason is that a service *is* an instance here. `scene`'s
 	// services are rows in the tree that `GetService` finds by name, so their
 	// state has to be reachable the same way a `Part`'s is: through a property
 	// on the thing a script is holding. A resource would make
@@ -785,7 +785,7 @@ namespace engine::gui {
 		//
 		// **This is what makes `GuiObject::Selectable` mean something.** The
 		// property has existed since the tree was registered and nothing read
-		// it, which is the state the roadmap refuses to leave a property in —
+		// it, which is the state the roadmap refuses to leave a property in -
 		// `Select` and `SelectNext` are the readers.
 		ecs::Entity SelectedObject;
 
@@ -806,8 +806,8 @@ namespace engine::gui {
 		// The `TextBox` the keyboard is going to, or null.
 		//
 		// **The focus lives here rather than on `gui::Router`, because two
-		// modules read it and only one decides it.** The router decides — a
-		// press lands on a text box or somewhere else — and
+		// modules read it and only one decides it.** The router decides - a
+		// press lands on a text box or somewhere else - and
 		// `UserInputService:GetFocusedTextBox` at L9 reads, with no route to a
 		// router at all. A copy held beside the decision would be rule 2's
 		// second statement of one fact, and the two would part company the first

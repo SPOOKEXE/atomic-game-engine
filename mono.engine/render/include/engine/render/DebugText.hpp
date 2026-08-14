@@ -5,7 +5,7 @@
 // **Separate from `OverlayImage` because the dependency runs one way.** The
 // image is a dirty-rect RGBA surface that knows nothing about glyphs; the font
 // knows how to lay bytes into one. Nothing in `Overlay.cpp` calls this, and
-// everything that calls this is somewhere else — which is the shape that says
+// everything that calls this is somewhere else - which is the shape that says
 // two concepts were sharing a file.
 //
 // Uppercase, digits and the punctuation the panels actually use; anything else
@@ -55,7 +55,7 @@ namespace engine::render {
 		// @client
 		int LineHeight(int scale);
 
-		// Lowercase is drawn as uppercase — the font has one case, and
+		// Lowercase is drawn as uppercase - the font has one case, and
 		// silently dropping letters would be worse than shouting.
 		//
 		// The origin is the glyph's top-left pixel. Unsupported characters are

@@ -1,7 +1,7 @@
 // The interface a UI author reaches for, driven end to end in both languages.
 //
 // **A gui signal that exists and never fires is the failure this module names
-// twice**, and until v0.18 the shipped client never routed gui input at all — the
+// twice**, and until v0.18 the shipped client never routed gui input at all - the
 // router was constructed, read for its hover and never `Update`d. So this suite
 // does not assert that a connection can be made: it stands a real world up, lays
 // it out, compiles the draw list, drives `gui::Router` with a pointer, hands what
@@ -62,8 +62,8 @@ namespace {
 	// **Through `scene::AddPlayer` rather than a hand-parented container**, for
 	// the reason `ScriptCall.cpp`'s `OneOccupant` gives: the four containers are
 	// what that function *is*, and a `PlayerGui` made by hand is a row the join
-	// pipeline never produced. It is also how a script reaches one —
-	// `Players.LocalPlayer.PlayerGui` — where a root instance has no route at
+	// pipeline never produced. It is also how a script reaches one -
+	// `Players.LocalPlayer.PlayerGui` - where a root instance has no route at
 	// all.
 	//
 	// **A player's own copy rather than the `StarterGui` template**, because that
@@ -86,8 +86,8 @@ namespace {
 			REQUIRE(engine::scene::InstallServices(Data) != NULL_ENTITY);
 
 			// **Both installers, which is what a host does.** `gui`'s services
-			// cannot come from `scene`'s — the two modules may not link each
-			// other — so `GuiService` is absent from a world that called only one
+			// cannot come from `scene`'s - the two modules may not link each
+			// other - so `GuiService` is absent from a world that called only one
 			// of them, and `game:GetService('GuiService')` then refuses.
 			REQUIRE(engine::gui::InstallGuiServices(Data) != NULL_ENTITY);
 
@@ -136,7 +136,7 @@ namespace {
 		//
 		// **The whole chain and not a hand-built `GuiEvent`.** A test that
 		// synthesised events would pass against a router nothing calls, which is
-		// exactly the bug that shipped — so the pointer goes in and a signal
+		// exactly the bug that shipped - so the pointer goes in and a signal
 		// comes out.
 		void Frame(Runtime &runtime, float x, float y, bool down) {
 			Compile();
@@ -156,8 +156,8 @@ namespace {
 		// released.
 		//
 		// **The composition `Client::Draw` makes, spelled out here for the reason
-		// `Frame` spells out the pointer's.** `gui::Type` produces no event —
-		// `Router::Update` is where events come from and no press happened — so
+		// `Frame` spells out the pointer's.** `gui::Type` produces no event -
+		// `Router::Update` is where events come from and no press happened - so
 		// the caller owes the `FocusReleased` that a script's `FocusLost` is
 		// listening for, with `Entered` set. A fixture that fired the signal
 		// directly would pass against a runtime that ignored the flag.
@@ -213,7 +213,7 @@ namespace {
 
 TEST_CASE("every gui signal a button has actually fires, in both languages", "[scripting][guisurface]") {
 	// **The audit, made a check.** Six signals are offered on every instance and
-	// one of them — `MouseButton1Click` — is new; what this asserts is that each
+	// one of them - `MouseButton1Click` - is new; what this asserts is that each
 	// of them reaches a handler when a pointer does the thing it is named for,
 	// rather than that it can be connected to.
 	//
@@ -266,14 +266,14 @@ TEST_CASE("every gui signal a button has actually fires, in both languages", "[s
 
 		// **`activated` and `clicked` both**, which is what makes
 		// `MouseButton1Click` a second name for one event rather than a member
-		// that exists and never fires — the failure this suite is named after.
+		// that exists and never fires - the failure this suite is named after.
 		CHECK(world.Log() == "enter moved began ended activated clicked leave ");
 	}
 }
 
 TEST_CASE("a script reads what is under a point, front to back", "[scripting][guisurface]") {
 	// **Two overlapping objects, so the order is asserted and not merely the
-	// count.** The `ZIndex` decides, and the second half of each case moves it —
+	// count.** The `ZIndex` decides, and the second half of each case moves it -
 	// a binding that answered tree order would pass the first and fail the
 	// second.
 	for (const Language language : LANGUAGES) {
@@ -348,7 +348,7 @@ TEST_CASE("a tween on a GuiObject moves it and reports back", "[scripting][guisu
 	// **Through `TweenService`'s table and never beside it**, which is what the
 	// last assertion of each language pins: the motion happens at the head of the
 	// barrier, on the fixed tick delta, so the property is part way at one beat
-	// and arrived at the end — a method that assigned the goal outright would
+	// and arrived at the end - a method that assigned the goal outright would
 	// read as arrived on the first.
 	for (const Language language : LANGUAGES) {
 		INFO((language == Language::Luau ? "luau" : "javascript"));
@@ -412,7 +412,7 @@ TEST_CASE("a tween on a GuiObject moves it and reports back", "[scripting][guisu
 TEST_CASE("override decides whether a second tween takes the object", "[scripting][guisurface]") {
 	// **Roblox's flag, and the answer is what a caller reads.** A second
 	// `TweenPosition` while the first is running is refused with `false` unless
-	// the call says to take over — and a refusal must leave nothing behind, or
+	// the call says to take over - and a refusal must leave nothing behind, or
 	// the cap reclaims records for calls that never ran.
 	for (const Language language : LANGUAGES) {
 		INFO((language == Language::Luau ? "luau" : "javascript"));
@@ -463,7 +463,7 @@ TEST_CASE("override decides whether a second tween takes the object", "[scriptin
 		}
 
 		// **The third goal and not the first**, which is what says the override
-		// cancelled rather than ran beside it — two live tweens on one property
+		// cancelled rather than ran beside it - two live tweens on one property
 		// would leave whichever wrote last, and the refused one's 900 must appear
 		// nowhere.
 		CHECK(world.PositionOf(panel).X.Offset == 300.0f);
@@ -473,8 +473,8 @@ TEST_CASE("override decides whether a second tween takes the object", "[scriptin
 TEST_CASE("a tween refuses a property with no midpoint, in both languages", "[scripting][guisurface]") {
 	// **The refusal names the property**, for `TweenService:Create`'s reason: a
 	// tween that runs for its whole duration and moves nothing reads as a broken
-	// engine. `ScreenGui` has no `Position` at all — a `LayerCollector` is not a
-	// `GuiObject` — which is the case a flat instance method table has to answer
+	// engine. `ScreenGui` has no `Position` at all - a `LayerCollector` is not a
+	// `GuiObject` - which is the case a flat instance method table has to answer
 	// honestly rather than silently.
 	for (const Language language : LANGUAGES) {
 		Interface world("guisurface.refusal");
@@ -500,7 +500,7 @@ TEST_CASE("the collector and the service carry what an author sets", "[scripting
 	// `ScreenGui` was said to have `ResetOnSpawn`, `DisplayOrder`, `Enabled` and
 	// `IgnoreGuiInset` and `GuiService` to have three settings; all seven are
 	// declared properties, so what is worth asserting is not that they store a
-	// value but that something *reads* one — a property nothing consults is the
+	// value but that something *reads* one - a property nothing consults is the
 	// hollow member every refusal in this module is about.
 	//
 	// `Enabled` is the one with teeth: switching it off has to empty the hit
@@ -553,7 +553,7 @@ TEST_CASE("the collector and the service carry what an author sets", "[scripting
 
 		// **A fresh chunk rather than a second statement in the first**, because
 		// each chunk runs on its own sandboxed thread in Luau and shares one
-		// global scope in JavaScript — a second `let screen` is a `SyntaxError`
+		// global scope in JavaScript - a second `let screen` is a `SyntaxError`
 		// before a line of it runs.
 		const std::string off =
 			language == Language::Luau
@@ -575,7 +575,7 @@ TEST_CASE(
 ) {
 	// **The keyboard half of D00117, driven the way the pointer half is.** The
 	// pointer goes in, `gui::Router` decides that a press landed on a `TextBox`,
-	// and what comes out is `textBox.Focused` in a script — no hand-built event,
+	// and what comes out is `textBox.Focused` in a script - no hand-built event,
 	// because a suite that synthesised one would pass against a router that never
 	// took focus, which is exactly the bug the pointer half already shipped once.
 	//
@@ -629,7 +629,7 @@ TEST_CASE(
 		CHECK(engine::gui::FocusedTextBox(world.Data) == NULL_ENTITY);
 
 		// **`enterPressed` is false because a press took the keyboard away**,
-		// which is the answer that makes the argument worth passing — the case
+		// which is the answer that makes the argument worth passing - the case
 		// below is the other one.
 		CHECK(world.Log() == "focused=Entry lost=false,nil ");
 	}
@@ -638,7 +638,7 @@ TEST_CASE(
 TEST_CASE("typing reaches the box and Return says so, in both languages", "[scripting][guisurface]") {
 	// **The rest of D00117, from the script's side.** A press takes the
 	// keyboard, characters land in `Label::Text`, and Return releases the box
-	// with Roblox's `enterPressed` finally answering something — which is what
+	// with Roblox's `enterPressed` finally answering something - which is what
 	// tells a search field it was submitted rather than abandoned.
 	//
 	// **The text is read back through the property**, not off the component, so
@@ -651,7 +651,7 @@ TEST_CASE("typing reaches the box and Return says so, in both languages", "[scri
 		const Entity box = world.Box("TextBox", "Entry", 0.0f, 0.0f, 100.0f, 100.0f);
 		REQUIRE(box != NULL_ENTITY);
 
-		// Off, so the press does not empty the box before anything is typed —
+		// Off, so the press does not empty the box before anything is typed -
 		// the default is on, which is what a search field wants.
 		engine::gui::Entry entry;
 		entry.ClearTextOnFocus = false;

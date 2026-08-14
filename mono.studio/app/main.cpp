@@ -23,8 +23,8 @@ int main(int argc, char **argv) {
 	engine::core::Log::Initialise("studio");
 
 	// **The engine's settings and the content policy, and no `studio.*` table.**
-	// An editor already persists its own preferences in a document it owns —
-	// `studio/Config.hpp` — and a second place to say the same things is the
+	// An editor already persists its own preferences in a document it owns -
+	// `studio/Config.hpp` - and a second place to say the same things is the
 	// drift rule 2 is about. What a config file adds here is the settings that
 	// are *not* the editor's: the log level, the job pool, and which content
 	// forms this machine will decode, all three of which a studio shares with
@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
 	engine::parallel::DeclareFlags();
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
 
-	engine::core::Arguments arguments("studio", "atomic studio — builds a game.");
+	engine::core::Arguments arguments("studio", "atomic studio - builds a game.");
 	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("verbose", "Log at trace level");
@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
 		"Levels of mirror-in-mirror per frame, overriding the world (default: measured)"
 	);
 
-	// The control surface. Off unless asked for — see `Options::ControlPort`.
+	// The control surface. Off unless asked for - see `Options::ControlPort`.
 	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8738)");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 
@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
 
 	// **Before anything starts a world or a job.** The flag is read on every
 	// dispatch, so setting it late would leave the frames before it with the
-	// shape it exists to remove — and those are the frames somebody was
+	// shape it exists to remove - and those are the frames somebody was
 	// watching while the program came up.
 	//
 	// It makes the program slower on purpose. See `parallel::SetForceSerialCompute`:
@@ -115,8 +115,8 @@ int main(int argc, char **argv) {
 
 	// **The configured values first, then the flags over the top.** Only this
 	// function can tell a flag that was given from one that was left at its
-	// default — `Arguments::GetNumber(name, fallback)` answers the fallback for
-	// an absent flag — so the reconciliation belongs here and nowhere else.
+	// default - `Arguments::GetNumber(name, fallback)` answers the fallback for
+	// an absent flag - so the reconciliation belongs here and nowhere else.
 	// `studio/Config.hpp` states the rule: a flag is for one run and a
 	// preference is a thing somebody set and expects to find again.
 	studio::Preferences preferences;
@@ -205,7 +205,7 @@ int main(int argc, char **argv) {
 		// **A headless capture pins the animation clock, and it is not a flag.**
 		// The only reason to take one is to compare it with another, and a clock
 		// accumulated from the measured frame delta lands frame N on a different
-		// phase every run — two captures of one unchanged world differ by about
+		// phase every run - two captures of one unchanged world differ by about
 		// an eighth of their bytes, which swamps most changes worth checking.
 		//
 		// Headless only, because a capture taken while somebody is watching is a
