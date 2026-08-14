@@ -108,6 +108,8 @@ namespace {
 			return "computed";
 		case PropertyKind::Structural:
 			return "structural";
+		case PropertyKind::Resource:
+			return "resource";
 		}
 		return "field";
 	}

@@ -2,6 +2,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Invariants.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/gui/Components.hpp>
@@ -15,6 +16,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.gui.registration")
+TEST_DEPENDS("engine.ecs.invariants")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
@@ -267,4 +269,17 @@ TEST_CASE("an image name still interns, and should", "[gui][registration]") {
 	REQUIRE(store.SetProperty(picture, Name("Image"), &fresh, sizeof(fresh)));
 
 	CHECK(Name::Count() > before);
+}
+
+TEST_CASE("every interface component obeys the serialisation rules", "[gui][registration]") {
+	// **Thirteen of these were wrong at once**, which is what makes the sweep
+	// worth having over a list: every one had padding under a raw writer, and
+	// four of them were demonstrably putting bytes nobody wrote into a save.
+	// None of it was visible from any single component's own test.
+	//
+	// `engine.ecs.invariants` is where the rules live and where each is proved
+	// to fire. This asks them about this module.
+	RegisterGuiComponents();
+
+	CHECK(engine::ecs::Describe(engine::ecs::AuditComponents("gui.")) == "");
 }

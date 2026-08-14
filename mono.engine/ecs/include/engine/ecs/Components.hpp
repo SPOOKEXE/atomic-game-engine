@@ -74,6 +74,12 @@ namespace engine::ecs {
 			descriptor.Write = write;
 			descriptor.Read = read;
 			descriptor.Serialisable = write != nullptr && read != nullptr;
+
+			// The caller's writer replaces the object representation, so
+			// neither padding nor a process-local id inside `T` can reach a
+			// file through it. That is the whole reason this overload exists,
+			// and `AuditComponents` reads this flag to know not to complain.
+			descriptor.RawSerialisation = false;
 			return Adopt(key, descriptor, Slot<T>(), false);
 		}
 

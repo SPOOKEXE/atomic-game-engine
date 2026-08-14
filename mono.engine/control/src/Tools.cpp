@@ -122,10 +122,28 @@ namespace engine::control {
 				return json{{"R", value.R}, {"G", value.G}, {"B", value.B}};
 			}
 			case PropertyType::CFrame: {
+				// **The rotation as well as the position.** Both halves were
+				// missing here and in `ValueFromJson`, so reading a rotated
+				// part's `CFrame` reported it upright and writing that value
+				// back stood it up - which is what an editor does every time it
+				// nudges a selection. `engine.control.marshalling` is what says
+				// so now.
+				//
+				// The quaternion by its four components rather than as Euler
+				// angles, for `CFrame.hpp`'s reason: reading angles back out of
+				// a quaternion is ambiguous at the poles, so a round trip
+				// through them is not one.
 				const auto &value = *reinterpret_cast<const core::CFrame *>(bytes);
 				return json{
 					{"Position",
 					 json{{"X", value.Position.X}, {"Y", value.Position.Y}, {"Z", value.Position.Z}}},
+					{"Rotation",
+					 json{
+						 {"X", value.QuaternionX},
+						 {"Y", value.QuaternionY},
+						 {"Z", value.QuaternionZ},
+						 {"W", value.QuaternionW},
+					 }},
 				};
 			}
 			// Named numbers, same rule as `Vector3` above: the reply is for
@@ -456,11 +474,26 @@ namespace engine::control {
 				break;
 			case PropertyType::CFrame: {
 				const json position = value.value("Position", value);
-				*reinterpret_cast<core::CFrame *>(bytes) = core::CFrame{core::Vector3{
+
+				// **An absent `Rotation` is the identity, not what was there.**
+				// Every other case in this switch defaults a missing field to
+				// zero rather than reading the old value, and the argument is
+				// the one `UDim2` states below: the read-modify-write belongs in
+				// the caller, which can see both halves. `{"W": 1}` rather than
+				// all zeroes because a quaternion of four zeroes is not a
+				// rotation at all.
+				const json rotation = value.value("Rotation", json::object());
+				core::CFrame frame{core::Vector3{
 					number(position.value("X", json(0.0)), 0.0f),
 					number(position.value("Y", json(0.0)), 0.0f),
 					number(position.value("Z", json(0.0)), 0.0f),
 				}};
+				frame.QuaternionX = number(rotation.value("X", json(0.0)), 0.0f);
+				frame.QuaternionY = number(rotation.value("Y", json(0.0)), 0.0f);
+				frame.QuaternionZ = number(rotation.value("Z", json(0.0)), 0.0f);
+				frame.QuaternionW = number(rotation.value("W", json(1.0)), 1.0f);
+
+				*reinterpret_cast<core::CFrame *>(bytes) = frame;
 				break;
 			}
 			case PropertyType::Vector2:

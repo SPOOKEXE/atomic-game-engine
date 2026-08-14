@@ -283,6 +283,33 @@ TEST_CASE("raw blocks copy and borrow the same bytes", "[bytes]") {
 	REQUIRE(std::memcmp(view.data(), source, sizeof(source)) == 0);
 }
 
+TEST_CASE("a refused raw read leaves the destination alone", "[bytes]") {
+	// **The contract `ReadRaw` states and the one a caller relies on without
+	// noticing.** A component is decoded straight into its own storage, so a
+	// read that copied what it had and *then* discovered it was short would
+	// leave half a value there and report failure - and a caller checking
+	// `Failed()` once at the end, which is the usage this class is shaped for,
+	// would already have a half-written object.
+	ByteWriter writer;
+	writer.WriteUInt32(0xAABB'CCDDu);
+
+	ByteReader reader(writer.Bytes());
+
+	unsigned char destination[8];
+	std::memset(destination, 0x5A, sizeof(destination));
+
+	REQUIRE_FALSE(reader.ReadRaw(destination, sizeof(destination)));
+	REQUIRE(reader.Failed());
+
+	for (const unsigned char byte : destination) {
+		CHECK(byte == 0x5A);
+	}
+
+	// And nothing was consumed either, so the four bytes that *are* there are
+	// still where a caller recovering from the refusal would look for them.
+	CHECK(reader.Position() == 0);
+}
+
 TEST_CASE("a zero-length write and read are both no-ops", "[bytes]") {
 	ByteWriter writer;
 	writer.WriteRaw(nullptr, 0);

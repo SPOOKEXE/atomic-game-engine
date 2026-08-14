@@ -121,6 +121,9 @@ namespace engine::gui {
 
 		// Which axes grow to fit the content.
 		AutomaticSize Automatic = AutomaticSize::None;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[2] = {};
 	};
 
 	// The box an element draws for itself.
@@ -146,6 +149,9 @@ namespace engine::gui {
 
 		// Whether the outline grows outwards, inwards, or straddles the edge.
 		BorderMode Border = BorderMode::Outline;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// The text an element shows.
@@ -282,6 +288,9 @@ namespace engine::gui {
 
 		// Which axes grow the canvas to fit the content.
 		AutomaticSize AutomaticCanvas = AutomaticSize::None;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[1] = {};
 	};
 
 	// What makes a text box editable.
@@ -328,12 +337,16 @@ namespace engine::gui {
 	// three share.
 	//
 	// @since v0.8
+	// Widest first, which is the ordering `TypeDescriptor`'s warning asks for
+	// rather than the reading order the fields were written in. A `bool` ahead
+	// of the `int32_t` cost three bytes nothing wrote, and they went into every
+	// save.
 	struct Layer {
-		// Whether this collector and its subtree are drawn at all.
-		bool Enabled = true;
-
 		// Which collector draws on top. Higher draws later.
 		int32_t DisplayOrder = 0;
+
+		// Whether this collector and its subtree are drawn at all.
+		bool Enabled = true;
 
 		// Whether `ZIndex` is compared across the collector or among siblings.
 		ZIndexBehavior Behavior = ZIndexBehavior::Sibling;
@@ -386,9 +399,22 @@ namespace engine::gui {
 	// A collector projected onto a face of a part.
 	//
 	// @since v0.8
+	// Widest first, for `Layer`'s reason.
 	struct Surface {
 		// The part this is drawn on, or the parent when unset.
 		ecs::Entity Adornee;
+
+		// The canvas size in pixels, when `Sizing` says `FixedSize`.
+		core::Vector2 CanvasSize{800.0f, 600.0f};
+
+		// Pixels per stud, when `Sizing` says so.
+		float PixelsPerStud = 50.0f;
+
+		// How much scene lighting tints it. 0 is fullbright.
+		float LightInfluence = 0.0f;
+
+		// A multiplier on the fullbright part of the result.
+		float Brightness = 1.0f;
 
 		// Which face of that part.
 		Face On = Face::Front;
@@ -396,20 +422,11 @@ namespace engine::gui {
 		// How the canvas's pixel size is decided.
 		SurfaceSizingMode Sizing = SurfaceSizingMode::FixedSize;
 
-		// Pixels per stud, when `Sizing` says so.
-		float PixelsPerStud = 50.0f;
-
-		// The canvas size in pixels, when `Sizing` says `FixedSize`.
-		core::Vector2 CanvasSize{800.0f, 600.0f};
-
 		// Whether it draws over geometry in front of it.
 		bool AlwaysOnTop = false;
 
-		// How much scene lighting tints it. 0 is fullbright.
-		float LightInfluence = 0.0f;
-
-		// A multiplier on the fullbright part of the result.
-		float Brightness = 1.0f;
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[1] = {};
 	};
 
 	// A collector that faces the camera at a point in the world.
@@ -431,14 +448,17 @@ namespace engine::gui {
 		// An offset in multiples of the adornee's size.
 		core::Vector3 ExtentsOffset;
 
-		// Whether it draws over geometry in front of it.
-		bool AlwaysOnTop = false;
-
 		// How much scene lighting tints it. 0 is fullbright.
 		float LightInfluence = 0.0f;
 
 		// Beyond this many studs it is not drawn. Zero means no limit.
 		float MaxDistance = 0.0f;
+
+		// Whether it draws over geometry in front of it.
+		bool AlwaysOnTop = false;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// What a `CanvasGroup` composites its subtree with.
@@ -475,6 +495,10 @@ namespace engine::gui {
 
 		// 0 is opaque and 1 is invisible.
 		float Transparency = 0.0f;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		// `CurrentCamera` aligns the whole component to eight.
+		uint8_t Reserved[4] = {};
 	};
 
 	// --- the modifiers ------------------------------------------------------
@@ -504,12 +528,13 @@ namespace engine::gui {
 	// Stacks the parent's children along one axis.
 	//
 	// @since v0.8
+	// Widest first, for `Layer`'s reason.
 	struct ListLayout {
-		// Which way the children stack.
-		FillDirection Direction = FillDirection::Vertical;
-
 		// Space between one child and the next.
 		core::UDim Padding;
+
+		// Which way the children stack.
+		FillDirection Direction = FillDirection::Vertical;
 
 		// Where the stack sits along the horizontal axis.
 		HorizontalAlignment Horizontal = HorizontalAlignment::Left;
@@ -531,12 +556,12 @@ namespace engine::gui {
 		// Space between cells, on both axes.
 		core::UDim2 CellPadding{0.0f, 5.0f, 0.0f, 5.0f};
 
-		// Which way a row or column is filled.
-		FillDirection Direction = FillDirection::Horizontal;
-
 		// How many cells before wrapping. Zero fits as many as the parent
 		// holds, which is Roblox's meaning of its own default.
 		int32_t MaxCells = 0;
+
+		// Which way a row or column is filled.
+		FillDirection Direction = FillDirection::Horizontal;
 
 		// Which corner the fill starts from.
 		StartCorner Corner = StartCorner::TopLeft;
@@ -549,6 +574,9 @@ namespace engine::gui {
 
 		// What order the children are visited in.
 		SortOrder Order = SortOrder::LayoutOrder;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// Forces the parent's resolved size to a ratio.
@@ -564,6 +592,9 @@ namespace engine::gui {
 
 		// Which axis the other is derived from.
 		DominantAxis Dominant = DominantAxis::Width;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[2] = {};
 	};
 
 	// Clamps the parent's resolved size, in pixels.
@@ -688,6 +719,9 @@ namespace engine::gui {
 		// every parenting path is where one gets missed and an element draws
 		// after being detached.
 		bool Rendered = false;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// What every 3D adornment carries.
@@ -723,6 +757,9 @@ namespace engine::gui {
 		// every other transparency here keeps it.
 		float Transparency = 0.0f;
 
+		// Draw order among adornments. Higher draws later, so on top.
+		int32_t ZIndex = 0;
+
 		// Whether it is drawn at all.
 		bool Visible = true;
 
@@ -734,8 +771,9 @@ namespace engine::gui {
 		// selected, which is the one thing it is for.
 		bool AlwaysOnTop = true;
 
-		// Draw order among adornments. Higher draws later, so on top.
-		int32_t ZIndex = 0;
+		// Explicit padding, for the reason every other `Reserved` gives.
+		// `Adornee` aligns the whole component to eight.
+		uint8_t Reserved[2] = {};
 	};
 
 	// The box a `SelectionBox` draws.
@@ -789,20 +827,6 @@ namespace engine::gui {
 		// `Select` and `SelectNext` are the readers.
 		ecs::Entity SelectedObject;
 
-		// Whether a platform menu is covering the game.
-		//
-		// Set by a host, read by a script that wants to pause. Nothing in this
-		// engine opens one yet; it is here because a script asking "is the menu
-		// up" during a pause handler is the ordinary use and answering `false`
-		// truthfully is better than not answering.
-		bool MenuIsOpen = false;
-
-		// Whether moving the selection is allowed to pick something on its own.
-		//
-		// Roblox's `AutoSelectGuiEnabled`. False means a game drives selection
-		// itself and `SelectNext` refuses to seed one from nothing.
-		bool AutoSelectGuiEnabled = true;
-
 		// The `TextBox` the keyboard is going to, or null.
 		//
 		// **The focus lives here rather than on `gui::Router`, because two
@@ -819,5 +843,23 @@ namespace engine::gui {
 		//
 		// @since v0.15
 		ecs::Entity FocusedTextBox;
+
+		// Whether a platform menu is covering the game.
+		//
+		// Set by a host, read by a script that wants to pause. Nothing in this
+		// engine opens one yet; it is here because a script asking "is the menu
+		// up" during a pause handler is the ordinary use and answering `false`
+		// truthfully is better than not answering.
+		bool MenuIsOpen = false;
+
+		// Whether moving the selection is allowed to pick something on its own.
+		//
+		// Roblox's `AutoSelectGuiEnabled`. False means a game drives selection
+		// itself and `SelectNext` refuses to seed one from nothing.
+		bool AutoSelectGuiEnabled = true;
+
+		// Explicit padding, for the reason every other `Reserved` gives. Both
+		// handles align the whole component to eight.
+		uint8_t Reserved[6] = {};
 	};
 }

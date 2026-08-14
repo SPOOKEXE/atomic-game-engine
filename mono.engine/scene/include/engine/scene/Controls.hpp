@@ -138,7 +138,13 @@ namespace engine::scene {
 		bool Enabled = true;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[2] = {};
+		//
+		// **Six rather than two**, because `Subject` is eight-byte aligned and
+		// so the whole struct is: two left four bytes the compiler filled and
+		// nobody initialised, and those four went into every save and every
+		// delta. `engine.ecs.invariants` is what says so now, and
+		// `engine.scene.registration` is what asks it about this module.
+		uint8_t Reserved[6] = {};
 	};
 
 	// What makes a part a character somebody drives.

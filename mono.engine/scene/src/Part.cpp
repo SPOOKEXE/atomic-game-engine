@@ -318,6 +318,13 @@ namespace engine::scene {
 				ecs::Components::Of<PhysicsProperties>(),
 			});
 
+			// **The empty set rather than nothing at all.** A read-only
+			// property writes no component, and saying so with an interned
+			// empty set is what lets a caller walk `Writes` without first
+			// asking whether it is there - which is what per-instance
+			// `.Changed` does for every property at once.
+			property.Writes = &ecs::ComponentSet::Intern({});
+
 			// **Declared rather than implied by the missing setter.** A panel
 			// greys a row on this flag and a script's assignment is refused by
 			// it; leaving it true with no `Set` would be a property that reads
@@ -337,6 +344,52 @@ namespace engine::scene {
 
 			// No `Set`. A descriptor with none is read-only, which is what a
 			// panel greys out and what a script's assignment is refused by.
+			return property;
+		}
+
+		// LinearDamping and AngularDamping: drag, which only a body has.
+		//
+		// **Computed rather than the generated field pair, so that reading one
+		// off an anchored part answers rather than fails.** An anchored part
+		// carries no `RigidBody` - that is what anchored *means* here - and
+		// `Classes::Property<&RigidBody::LinearDamping>` produced a getter that
+		// returned false for it. `Store::GetProperty` returning false becomes
+		// `could not read 'LinearDamping'` in Luau, so `print(part.LinearDamping)`
+		// on an ordinary anchored part raised an error on a field access that
+		// looks like every other one. `ecs::AuditProperties` is what found it.
+		//
+		// The answer for a part with no body is the default a body would have
+		// had, which is `Mass`'s convention one function up and stated there:
+		// the honest number for a thing the world may not move.
+		//
+		// **A write still needs a body.** There is nowhere to keep drag for a
+		// part that has none, and inventing a `RigidBody` to hold it would
+		// unanchor the part as a side effect of setting its drag.
+		template <auto Member> PropertyDescriptor DampingProperty(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<RigidBody>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const RigidBody *body = store.Get<RigidBody>(instance);
+				const RigidBody fallback;
+				*static_cast<float *>(out) = (body == nullptr ? fallback : *body).*Member;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				RigidBody *body = store.GetMutable<RigidBody>(instance);
+				if (body == nullptr) {
+					return false;
+				}
+				body->*Member = *static_cast<const float *>(value);
+				return true;
+			};
+
 			return property;
 		}
 
@@ -1697,8 +1750,8 @@ namespace engine::scene {
 			// anchored has neither - which is honest, because an anchored part
 			// has no motion to damp and Roblox's `Anchored` part ignores drag
 			// in the same way.
-			ecs::Classes::Property<&RigidBody::LinearDamping>(basePart, "LinearDamping");
-			ecs::Classes::Property<&RigidBody::AngularDamping>(basePart, "AngularDamping");
+			ecs::Classes::Computed(basePart, DampingProperty<&RigidBody::LinearDamping>("LinearDamping"));
+			ecs::Classes::Computed(basePart, DampingProperty<&RigidBody::AngularDamping>("AngularDamping"));
 
 			ecs::Classes::Computed(basePart, MassProperty());
 

@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,13 @@ namespace snapshot_test {
 	// exactly for: a parent, a target, an owner.
 	struct Linked {
 		Entity Other;
+	};
+
+	// Registered under a name of its own so that a case below can rewrite that
+	// name in a saved stream and hand the result back as a snapshot from a
+	// build this one does not share a component set with.
+	struct Vanishing {
+		uint32_t Value = 0;
 	};
 
 	// No serialisation - its bytes are a pointer into this process.
@@ -357,6 +365,57 @@ TEST_CASE("a component with no serialisation refuses the snapshot", "[ecs]") {
 
 	ByteWriter writer;
 	REQUIRE_FALSE(store.Save(writer));
+}
+
+TEST_CASE("a snapshot naming a component this build does not have is refused", "[ecs]") {
+	// **The cross-build case, and the one that cannot be produced by corrupting
+	// bytes at random.** A save file from a build that had a component this one
+	// does not is a well-formed snapshot in every other respect: the header is
+	// right, the version is right, every length agrees. Only the name in the
+	// component table is unknown, and the choice at that point is to refuse or
+	// to restore a world with a column missing.
+	//
+	// Refusing is the same call `Unwritable` above gets and for the same
+	// reason. A world that silently lost a column looks right and is not.
+	//
+	// Built by patching a real snapshot rather than by hand, so it stays a
+	// snapshot when the format changes. The replacement is the same length as
+	// the original, which leaves every offset after it valid - the point is to
+	// exercise the unknown-name path and not the truncation path beside it.
+	Components::Register<Vanishing>("test.Vanishing");
+
+	Store source("source");
+	source.Set<Vanishing>(source.Create(), Vanishing{7});
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	const std::span<const std::byte> saved = writer.Bytes();
+	std::vector<std::byte> bytes(saved.begin(), saved.end());
+
+	const std::string_view present = "test.Vanishing";
+	const std::string_view absent = "test.Vanished!";
+	REQUIRE(present.size() == absent.size());
+
+	const auto at = std::search(
+		bytes.begin(), bytes.end(), present.begin(), present.end(), [](std::byte left, char right) {
+			return left == static_cast<std::byte>(right);
+		}
+	);
+	REQUIRE(at != bytes.end());
+	std::transform(absent.begin(), absent.end(), at, [](char character) {
+		return static_cast<std::byte>(character);
+	});
+
+	Store target("target");
+	target.Create();
+
+	ByteReader reader(bytes);
+	REQUIRE_FALSE(target.Load(reader));
+
+	// Empty rather than partly the old world and partly the new one.
+	REQUIRE(target.TableCount() == 0);
+	REQUIRE(target.CountMatching<Vanishing>() == 0);
 }
 
 TEST_CASE("a stream that is not a snapshot is refused", "[ecs]") {

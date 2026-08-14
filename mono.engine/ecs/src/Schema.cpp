@@ -627,6 +627,14 @@ namespace engine::ecs {
 			return {{}, Status::Exhausted, false};
 		}
 
+		// **Read before the move below empties `layout`.** The descriptor's
+		// `Kind` was being decided from `layout.empty()` afterwards, which is
+		// always true once the vector has been moved from - so every component
+		// a script declared was registered as a tag while holding bytes.
+		// Nothing read `Kind` yet, which is the only reason it never showed;
+		// `engine.ecs.invariants` is what says so now.
+		const bool fieldless = layout.empty();
+
 		const size_t index = registry.Entries.size();
 		Schema &schema = registry.Entries.emplace_back();
 		schema.TypeName = key;
@@ -645,7 +653,7 @@ namespace engine::ecs {
 		descriptor.Name = key;
 		descriptor.Size = width;
 		descriptor.Alignment = alignment;
-		descriptor.Kind = layout.empty() ? ComponentKind::Tag : ComponentKind::Data;
+		descriptor.Kind = fieldless ? ComponentKind::Tag : ComponentKind::Data;
 
 		// **Trivial says the caller *may* skip the hooks, not that they do not
 		// exist.** A blob of value types is a memcpy for the storage, which is

@@ -21,6 +21,7 @@ using engine::ecs::PropertyType;
 using engine::ecs::Schema;
 using engine::ecs::Schemas;
 using engine::ecs::Store;
+using engine::ecs::TypeDescriptor;
 
 namespace {
 	// The component table is process-wide and nothing unregisters, so every
@@ -387,4 +388,32 @@ TEST_CASE("a slot past the last one is refused rather than overrunning", "[schem
 	// And the process has room left, which is the property the cap exists to
 	// have: a game describing tens of components is nowhere near it.
 	CHECK(Schemas::All().size() < 2048);
+}
+
+TEST_CASE("a described component with fields is data and a fieldless one is a tag", "[schema]") {
+	// **The regression for a use-after-move.** `Kind` was decided from
+	// `layout.empty()` *after* `layout` had been moved into the schema, so the
+	// answer was always "empty" and every component a script declared was
+	// registered as a tag while holding bytes. Nothing read `Kind` at the time,
+	// which is why it survived: a field with no consumer is a field with no
+	// test, until the first consumer trusts it and is wrong about every
+	// script-declared component at once.
+	const std::string named = Unique("kind.data");
+	const FieldSpec fields[] = {{"Value", PropertyType::Double}};
+
+	const Schemas::Result data = Schemas::Register(named, fields);
+	REQUIRE(data.Why == Schemas::Status::Ok);
+
+	const TypeDescriptor &described = Components::Describe(data.Id);
+	CHECK(described.Kind == engine::ecs::ComponentKind::Data);
+	CHECK(described.Size > 0);
+
+	// And the other way, which is the branch that was accidentally always
+	// taken and so was never really exercised either.
+	const Schemas::Result tag = Schemas::Register(Unique("kind.tag"), {});
+	REQUIRE(tag.Why == Schemas::Status::Ok);
+
+	const TypeDescriptor &empty = Components::Describe(tag.Id);
+	CHECK(empty.Kind == engine::ecs::ComponentKind::Tag);
+	CHECK(empty.Size == 0);
 }

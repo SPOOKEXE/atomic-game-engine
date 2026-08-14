@@ -420,18 +420,19 @@ namespace engine::scene {
 		// recorded, and the two would disagree the first time anything set the
 		// resource directly - which `client::InstallDefaultCamera` does.
 		//
-		// **`PropertyKind::Computed` and not `Structural`**, even though it writes
-		// a resource rather than a component: structural means the write moves the
-		// row to another archetype, and this moves nothing. What it does touch is
-		// outside the entity entirely, which is a case `PropertyKind` has no
-		// member for - recorded here rather than by inventing one for a single
-		// property.
+		// **`PropertyKind::Resource` and not `Structural`**: structural means the
+		// write moves the row to another archetype, and this moves nothing. What
+		// it touches is outside the entity entirely. That was recorded here in
+		// prose while there was one such property; there are two now, and
+		// `ecs::AuditProperties` cannot tell a setter that writes a resource from
+		// a setter that forgot to mark a component without being told which this
+		// is.
 		PropertyDescriptor CurrentCameraProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("CurrentCamera");
 			property.Type = PropertyType::Reference;
 			property.Size = sizeof(ecs::Entity);
-			property.Kind = PropertyKind::Computed;
+			property.Kind = PropertyKind::Resource;
 
 			// **Names the `Camera` component rather than nothing**, which is the
 			// nearest honest answer: what this projects is a resource, and
@@ -513,7 +514,7 @@ namespace engine::scene {
 			property.Name = core::Name("SurfaceBounces");
 			property.Type = PropertyType::Int32;
 			property.Size = sizeof(int32_t);
-			property.Kind = PropertyKind::Computed;
+			property.Kind = PropertyKind::Resource;
 
 			// **The resource's own component id, which `CurrentCamera` could
 			// not name.** A resource is keyed by a component id like anything

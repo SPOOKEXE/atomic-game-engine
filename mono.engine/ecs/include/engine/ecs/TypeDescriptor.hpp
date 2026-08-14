@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <type_traits>
 
@@ -173,6 +174,27 @@ namespace engine::ecs {
 		// it will refuse rather than write bytes that cannot be read back.
 		bool Serialisable = false;
 
+		// Whether Write is the object representation rather than a caller's.
+		//
+		// The distinction the two warnings on `DescribeType` are about: a raw
+		// writer copies whatever bytes the type occupies, so its padding and
+		// any process-local id inside it reach the file. A caller's writer goes
+		// field by field and neither can. `Padded` below is only a defect for a
+		// type where this is true, which is why both are recorded rather than
+		// just the second.
+		//
+		// @since v0.15
+		bool RawSerialisation = false;
+
+		// Whether the type has bytes no member occupies.
+		//
+		// Derived at registration by `HasPadding`, so it costs one probe per
+		// type per process and nothing afterwards. Meaningless for a type that
+		// is not trivially copyable, which is left `false`.
+		//
+		// @since v0.15
+		bool Padded = false;
+
 		// Default-constructs `count` values at `destination`.
 		void (*DefaultConstruct)(void *destination, size_t count) = nullptr;
 
@@ -254,6 +276,72 @@ namespace engine::ecs {
 		return signature.substr(from, to - from);
 	}
 
+	// Whether `T` occupies bytes none of its members do.
+	//
+	// **The check that turns `DescribeType`'s second warning into something the
+	// build enforces**, and it exists because padding is invisible to every
+	// other tool the storage has. `sizeof(T)` does not say where the members
+	// are, and a value's bytes do not either: value-initialisation zeroes
+	// padding, so two default-constructed values agree whether or not there is
+	// any. Only the compiler knows the layout.
+	//
+	// So the compiler is asked directly. `__builtin_clear_padding` is the hook
+	// C++20 added for `bit_cast` and atomics: it zeroes a value's padding and
+	// leaves every member alone. Filling the object representation with a probe
+	// byte first and clearing afterwards makes the padding the only thing that
+	// changed, so a byte that is no longer the probe is a byte no member owns.
+	//
+	// Writing arbitrary bytes over a live value is what makes this defined
+	// rather than a reinterpreted buffer: `T` is trivially copyable here, so its
+	// object representation is a caller's to write, and its destructor is
+	// trivial.
+	//
+	// Reports `false` on a toolchain without the builtin. That is the honest
+	// answer for a compiler that cannot be asked, and `AuditComponents` says so
+	// out loud rather than reporting a clean sweep it did not perform.
+	//
+	// @return `true` when at least one byte of `T` belongs to no member.
+	// @since v0.15
+	template <class T> bool HasPadding() {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_clear_padding)
+		if constexpr (std::is_trivially_copyable_v<T> && !std::is_empty_v<T> &&
+					  std::is_default_constructible_v<T>) {
+			// Any value works. 0xA5 rather than 0xFF or 0x00 so that a member
+			// the clear happens to leave at its own limit is not mistaken for
+			// one the clear touched.
+			constexpr unsigned char PROBE = 0xA5;
+
+			T value{};
+			std::memset(static_cast<void *>(&value), PROBE, sizeof(T));
+			__builtin_clear_padding(&value);
+
+			unsigned char bytes[sizeof(T)];
+			std::memcpy(bytes, static_cast<const void *>(&value), sizeof(T));
+			for (size_t index = 0; index < sizeof(T); index++) {
+				if (bytes[index] != PROBE) {
+					return true;
+				}
+			}
+		}
+#endif
+#endif
+		return false;
+	}
+
+	// Whether this build can answer `HasPadding` at all.
+	//
+	// @return `true` when the toolchain has `__builtin_clear_padding`.
+	// @since v0.15
+	constexpr bool PaddingIsDetectable() {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_clear_padding)
+		return true;
+#endif
+#endif
+		return false;
+	}
+
 	// Builds the descriptor for a concrete type.
 	//
 	// Every hook is generated here, where `T` is still known. Serialisation is
@@ -283,6 +371,8 @@ namespace engine::ecs {
 		descriptor.Alignment = static_cast<uint32_t>(alignof(T));
 		descriptor.Trivial = std::is_trivially_copyable_v<T> && std::is_trivially_destructible_v<T>;
 		descriptor.Serialisable = std::is_trivially_copyable_v<T> && !std::is_empty_v<T>;
+		descriptor.RawSerialisation = descriptor.Serialisable;
+		descriptor.Padded = HasPadding<T>();
 
 		descriptor.DefaultConstruct = [](void *destination, size_t count) {
 			auto *values = static_cast<T *>(destination);

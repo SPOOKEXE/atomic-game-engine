@@ -193,6 +193,24 @@ namespace engine::ecs {
 		// to another archetype. `Anchored` is the only one today. Cannot happen
 		// inline during iteration and goes through the deferral queue.
 		Structural,
+
+		// The write lands on a world resource rather than on the instance.
+		//
+		// `Workspace.CurrentCamera` and `Workspace.SurfaceBounces` are the two:
+		// both are read and written through an instance and neither touches a
+		// row. `Reads` and `Writes` can only name components, so they name the
+		// nearest one and a `.Changed` listener over-reports - which is the
+		// direction `ecs::ChangeChannel` says to err in.
+		//
+		// **Declared rather than left implicit**, which is a correction to what
+		// `Services.cpp` decided when there was one of these: a setter that
+		// marks no component looks exactly like a setter that forgot to, and
+		// `AuditProperties` cannot tell the two apart without being told. The
+		// argument against inventing a member for a single property does not
+		// survive a second property and a check that needs the distinction.
+		//
+		// @since v0.15
+		Resource,
 	};
 
 	class Store;
