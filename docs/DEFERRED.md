@@ -145,15 +145,24 @@ ask. The two things to build are `Server::ApplyInputs` learning a third message
 and a policy seam beside `SetAdmission` that answers whether this player may go
 there.
 
-**A separate gap this half uncovered, and it is not this entry's.** No `script.`
-or `gui.` component is replicated - `replication/Defaults.cpp` takes `scene.` and
-the three `ecs.` instance components and nothing else - so a script instance
-crosses as a name and a class with no source path on it, and a `ScreenGui`
-crosses with no `gui.Element`. A client therefore runs the scripts its own host
-put in the replica rather than ones the authority authored. Closing that is a
-`replication` decision about `gui.Label` and `gui.Entry`, which are not trivially
-copyable and would need `Observed` change detection; it belongs in an entry of
-its own rather than under a teleport.
+**The separate gap this half uncovered is closed, and it never was a
+teleport's.** No `script.` or `gui.` component crossed, so a script instance
+arrived as a name and a class with no program on it and a `ScreenGui` arrived
+with no `gui.Element` - a client ran the scripts its own host had put in the
+replica rather than the ones the authority authored.
+`replication::DefaultReplicatedComponents` now takes the whole `gui.` prefix less
+`gui.Resolved`, `gui.SpatialCanvas` and `gui.GuiServiceState`, and names five
+`script.` rows - a path per language, the selector, `script.Disabled` and
+`script.Program`, which is the text itself, mirrored onto the instance from the
+world's `SourceCache` because a resource cannot be filtered by interest and would
+have put `ServerScriptService`'s programs on every client. `gui.Label`,
+`gui.Entry` and `script.Program` are `Observed` because a signature hashes an
+object representation and all three hold a `std::string`, and `Authority::Survey`
+is what turns the observation on - so a host cannot declare the detector and
+forget the store. `client.replica.arrival` drives the whole of it over a real
+`Listener` and `Connector`: a `LocalScript` whose text exists only in the
+authority's `SourceCache` runs on the client, and a `ScreenGui` authored there
+compiles to a draw command here.
 
 ### [_] D00109
 

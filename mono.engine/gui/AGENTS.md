@@ -309,6 +309,52 @@ re-cloned every *other* time passes a two-spawn check - and the second player in
 `engine.gui.services` is what catches a reset reaching the template rather than
 the copy.
 
+## An interface replicates, and three components deliberately do not
+
+A server authors a `ScreenGui` and a client is shown it: that is what `shared`
+was for, and from v0.15 it is what actually happens.
+`replication::DefaultReplicatedComponents` takes the whole `gui.` prefix less
+three names, and the three are the module's own answer to what a *viewer*
+decides rather than what an author does.
+
+- **`Resolved`** is where the layout put a rectangle on *this* display. Every
+  client recomputes it from the tree it was sent, so the authority's answer is
+  right for the authority's window and wrong for everybody else's. It is
+  `scene::Rendered`'s exclusion, one dimension down.
+- **`SpatialCanvas`** is the same fact fitted to a surface by whoever holds a
+  camera.
+- **`GuiServiceState`** holds `FocusedTextBox`, and there is one row of it per
+  world. Two people typing into two boxes would be two clients writing one row -
+  so this is the one that would be *wrong* rather than merely wasteful, and it is
+  why `client::BuildReplicatedWorld` still calls `InstallGuiServices` every tick
+  to complete a service that arrives with no state on it.
+
+The hover and the press need no entry: `Router` holds them privately and they
+are not components, which is the same fact this file states one section up from
+the other side.
+
+**`Label` and `Entry` are observed rather than signed, and that is forced.** A
+signature hashes the object representation and both hold a `std::string`, whose
+object representation is a pointer - so two boxes with the same words hash
+differently and text edited inside its own capacity hashes the same.
+`replication::Authority::Resign` declines a non-trivial component outright and
+says to observe it instead.
+
+**A `TextBox`'s text is suppressed on the wire, and that is a decision about a
+person rather than about bandwidth.** `Type` writes `Label::Text` in the replica
+as somebody types, so the two ends are meant to disagree - and both the delta
+path and the anti-entropy audit would otherwise put the authority's copy back
+over a half-typed word. `Entry` is the tag that says so, because a `TextBox` is
+the only class carrying one. What it costs is that a script writing
+`TextBox.Text` after a client has joined does not reach that client;
+`replication/AGENTS.md` carries the whole argument.
+
+**The caret never crossed and that is `WriteEntries`' doing.** It writes
+`CursorPosition` and `SelectionStart` as `-1` rather than as themselves, so a
+save file cannot restore somebody mid-edit and a delta cannot move a local
+caret. Keep it that way: it is also what lets both ends of an audit hash one
+value for a box only one of them is typing into.
+
 ## Text and image names intern, and that has a stated cost
 
 `Label::Text`, `Picture::Image` and `Entry::PlaceholderText` are `core::Name`,

@@ -708,6 +708,54 @@ way for one to be wrong. A handle is not a lifetime - nothing here can tell an
 unplayed tween somebody still holds from one nobody does - which is why there is
 a count at all.
 
+## A program is stored once and mirrored onto the instance for the wire
+
+`SourceCache` is a world resource keyed by path - one table, many instances, and
+`ReadSource` consults it before the filesystem. That is right for *storage* and
+impossible for the *wire*: `replication::Authority::SetInterest` filters
+entities, so a resource can only cross whole, and whole means every client
+holding `ServerScriptService`'s programs. `scene::VisibleToClients` exists
+because that leak was closed for the instances themselves at v0.15; sending the
+table would have re-opened it for their contents.
+
+So `script::Program` is a row on the instance - the path it was read for and the
+text - and `MirrorSourcePrograms` fills it from the cache at the head of both
+runtimes' beats. Five rules a reviewer should hold to:
+
+- **One writer, and it is derived.** The cache is the record; the row is a
+  mirror, exactly as `scene::PreviousTransform` and `gui::Resolved` are mirrors
+  of state that lives elsewhere. A second writer would be the two copies rule 2
+  forbids.
+- **`ReadProgram` reads the cache, then the row, then the disk, and the order is
+  the load-bearing part.** The cache wins wherever it has an answer, so an
+  editor's unsaved edit still runs; the row is what a replica has *instead* of a
+  cache; the filesystem is last, so a client cannot quietly run a file of its own
+  in place of the program it was sent.
+- **Only what a client could run is mirrored.** A `LocalScript` and a
+  `ModuleScript`, never a `Script` - so a server's program is not a component at
+  all, and no interest predicate has to be right for it to stay on the server.
+- **It does nothing in a replica.** `Store::AdoptOnly` is the test, as it is for
+  `OpenWorkspace`: the rows arrived from the authority, and refilling them from
+  whatever this machine has on disk is how a client runs a program the server
+  never sent. The window is real - a container can land a tick before the program
+  beside it.
+- **The cost of a tick that edited nothing is a `SourceCache::Generation`
+  compare and a name compare per script.** The counter is bumped by `Set` and
+  `Erase` and is deliberately not serialised. Nothing reads a program's bytes
+  unless the generation moved, and a rebuild still compares before writing, so
+  one file saved in an editor does not put every program in the world back on the
+  wire. Measured at 29 µs a tick over fifty scripts of a kilobyte at `-O0`,
+  against 200 µs for a hash of the same programs - which is what a
+  `ChangeDetection::Signature` over them would have cost every tick to learn that
+  nobody had typed anything.
+
+**`LuaSourceContainer` and its JavaScript twin write their path as text**, which
+they did not until v0.15. A `core::Name` is a process-local counter, so the
+object representation put an interning index into a save file and would have put
+one on a wire - `ecs::DescribeType`'s warning names exactly this hazard.
+`ecs::Store::SNAPSHOT_VERSION` 4 and `replication::PROTOCOL_VERSION` 9 refuse the
+old encoding rather than misreading it.
+
 ## One runtime, one world
 
 The `Store` is an upvalue on every bound function rather than a global, so two

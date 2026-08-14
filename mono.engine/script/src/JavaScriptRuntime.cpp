@@ -276,16 +276,17 @@ namespace engine::script {
 		// **The active container, not a component of its own.** An instance
 		// may hold a program per language and `ActiveSourceOf` is the one place
 		// that says which one runs - see `script::CodeSourceContainerSelector`.
-		const core::Name path = ActiveSourceOf(Store, instance);
-		if (!path.IsValid()) {
+		if (!ActiveSourceOf(Store, instance).IsValid()) {
 			return true;
 		}
 
-		// The world's `SourceCache` before the filesystem, through the same one
-		// function the Luau side uses. Two resolvers is two places to forget
-		// the cache, and both VMs load the same game file.
+		// The world's `SourceCache`, then the replicated row, then the
+		// filesystem, through the same one function the Luau side uses. Two
+		// resolvers is two places to forget one of the three, and both VMs load
+		// the same game file and run in the same replica.
+		core::Name path;
 		std::string program;
-		if (!ReadSource(Store, path, program, Error)) {
+		if (!ReadProgram(Store, instance, path, program, Error)) {
 			return false;
 		}
 
@@ -319,6 +320,14 @@ namespace engine::script {
 		// barrier's deliveries, then what changed, then the resumes due, then
 		// the beat. Each of the first three is one of
 		// `docs/retired/SCRIPT_CONCURRENCY.md` §1's legal resume sources.
+		//
+		// **The source mirror comes before all four, exactly where the Luau side
+		// puts it** - `LuauRuntime::Heartbeat` carries the argument: the rows it
+		// writes are read by `replication::Authority::Publish` after the tick is
+		// over, so mirroring at the end would put every client a tick behind
+		// every save.
+		MirrorSourcePrograms(Store, Mirrored);
+
 		Error = PumpJsDeliveries(Context, Store);
 
 		const auto note = [&](std::string message) {

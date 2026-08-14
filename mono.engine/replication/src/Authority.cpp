@@ -211,10 +211,33 @@ namespace engine::replication {
 		// to. See `Audit.hpp`.
 		Resolved.clear();
 		ResolvedNames.clear();
-		for (const core::Name name : Components) {
-			if (const ecs::ComponentId id = ecs::Components::Find(name); id.IsValid()) {
-				Resolved.push_back(id);
-				ResolvedNames.push_back(name);
+		for (size_t slot = 0; slot < Components.size(); slot++) {
+			const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
+			if (!id.IsValid()) {
+				continue;
+			}
+
+			Resolved.push_back(id);
+			ResolvedNames.push_back(Components[slot]);
+
+			// **A component declared `Observed` is observed here rather than by
+			// whoever built the authority, because the pairing is worth nothing
+			// if its two halves can disagree.** `Observed` means "read the
+			// store's dirty bits", and a store that is not recording them
+			// answers `false` for every row - so a host that declared the
+			// detector and forgot `Store::Observe` sends nothing, reports
+			// nothing, and looks exactly like a component nobody wrote to. That
+			// is the failure `ReplicatedComponent::Detection`'s own comment
+			// calls silent in both directions, and there were three hosts to
+			// forget it in.
+			//
+			// `ObserveComponent` is idempotent, so the steady cost is a set
+			// lookup per replicated component per tick. The *first* call is not
+			// free: it moves every entity already carrying the component into an
+			// archetype with somewhere to put the bits, which happens once, on
+			// the tick the first client makes this run.
+			if (Detection[slot] == ChangeDetection::Observed) {
+				store.ObserveComponent(id);
 			}
 		}
 
@@ -412,6 +435,53 @@ namespace engine::replication {
 
 		for (std::unordered_map<uint64_t, Outstanding> &unconfirmed : client.Unconfirmed) {
 			unconfirmed.clear();
+		}
+
+		// Cleared here rather than where it is read: a world blob carries every
+		// value at any size, so whatever the oversized list was asking for is
+		// already in the bytes above.
+		client.Oversize.clear();
+	}
+
+	void Authority::StageOversize(Client &client, ecs::Store &store, uint64_t tick) {
+		std::sort(client.Oversize.begin(), client.Oversize.end());
+		client.Oversize.erase(
+			std::unique(client.Oversize.begin(), client.Oversize.end()), client.Oversize.end()
+		);
+
+		Preceding.clear();
+		for (const uint64_t named : client.Oversize) {
+			const ecs::Entity entity{named};
+
+			// **Still alive and still this client's to see.** The list is built
+			// a tick before it is read, and an entity that left interest in
+			// between is one this client is about to be told to forget.
+			if (store.Alive(entity) && client.Known.find(named) != client.Known.end()) {
+				Preceding.push_back(entity);
+			}
+		}
+
+		client.Oversize.clear();
+		if (Preceding.empty()) {
+			return;
+		}
+
+		// **The preface slot, and it cannot collide with a join.** The caller
+		// only reaches here with nothing owed, so both staged blobs are empty -
+		// and a join beginning later overwrites this one deliberately, because a
+		// world blob carries these entities anyway.
+		//
+		// **Applied as an overlay, which is the whole reason this can be a slice
+		// at all.** `Replica` sweeps for a `World` blob and merges a `Preface`
+		// one; a handful of entities applied authoritatively would delete every
+		// other row the client holds.
+		Staged &staged = client.Snapshots[static_cast<size_t>(SnapshotStage::Preface)];
+		staged = Staged{};
+		staged.Bytes = Capture(store, Preceding);
+		staged.Tick = tick;
+
+		if (staged.Bytes.empty()) {
+			ENGINE_ERROR("replication: {} oversized rows could not be captured.", Preceding.size());
 		}
 	}
 
@@ -944,6 +1014,43 @@ namespace engine::replication {
 					WriteValue(values, descriptor, value);
 				}
 
+				// **A row that cannot fit a message is sent by the other path,
+				// and the point is that it is *not* sent by this one.** `Pack`
+				// has no smaller unit than a row: too big for a piece, it goes
+				// into one anyway, the encoded message is over
+				// `net::Packet::MAXIMUM_MESSAGE_BYTES`, `Link::Reserve` refuses
+				// it - and a refusal is what ordinary backpressure looks like,
+				// so `Unsent` puts it back and the same row is rebuilt and
+				// refused every tick for the life of the connection. Four
+				// kilobytes of Luau in a `script.Program` reaches that on the
+				// tick a game clones a script.
+				//
+				// A snapshot blob is the bulk path this module already has - it
+				// is chunked, it is offset-addressed and it is reassembled - so
+				// the entity goes into one through `StageOversize`, which builds
+				// the same slice-shaped blob a preface does. Re-snapshotting the
+				// whole world was the first answer and cost 81 ticks of
+				// streaming an event, during which the client is told about
+				// nothing else at all.
+				//
+				// **The unconfirmed entry is erased and not left**, which is the
+				// half that took a suite to find. The recovery walk exists to
+				// keep offering a value until the client acknowledges a tick it
+				// was in, so an entry for a row no message can hold is one it
+				// re-offers on every tick for the life of the connection. The
+				// staged blob is what carries it, and nothing is left to chase.
+				//
+				// The bytes stay in `values` because `core::ByteWriter` does not
+				// rewind. Nothing reads them: a row is only ever sliced out
+				// through a `Candidate`, and this one produces none.
+				const size_t wrote = values.Bytes().size() - at;
+				if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + wrote > Settings_.ChunkBytes) {
+					unconfirmed.erase(entity.Id);
+					client.Oversize.push_back(entity.Id);
+					Stats_.Oversized++;
+					return;
+				}
+
 				Candidates.push_back(
 					Candidate{
 						entry,
@@ -1119,6 +1226,14 @@ namespace engine::replication {
 			const bool joining = Owed(client) == 0 && client.Known.empty() && client.Applied == 0;
 			if (joining || adrift) {
 				BeginSnapshot(client, store, tick);
+			} else if (Owed(client) == 0 && !client.Oversize.empty()) {
+				// **After the two above and never beside them.** A join or a
+				// re-snapshot carries these entities in the world blob, so
+				// staging a slice as well would send the same bytes twice - and
+				// the list is cleared by `BeginSnapshot` for exactly that
+				// reason. Owed nothing, because a blob part way out must not be
+				// replaced by one taken later.
+				StageOversize(client, store, tick);
 			}
 
 			if (Owed(client) > 0) {

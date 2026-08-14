@@ -53,6 +53,18 @@ namespace defaults_test {
 		int Value = 0;
 	};
 
+	// The interface twin of `Shared`. A second type rather than a second name
+	// for the first: `ecs::Components` gives a type exactly one name and says so
+	// by aborting, which is the same rule the comment above records paying for.
+	struct Panel {
+		float Value = 0.0f;
+	};
+
+	// A `script.` component this module has not been told about.
+	struct Sidecar {
+		int Value = 0;
+	};
+
 	// **Registered by this suite, which is what makes the cases below say
 	// anything.** The table is a function-local static built on first use, so in
 	// a host it is built after start-up registered everything and here it is
@@ -83,6 +95,31 @@ namespace defaults_test {
 		);
 		engine::ecs::Components::Register<Bulky>("scene.DefaultsTestBulky");
 		engine::ecs::Components::Register<Outside>("defaults_test.Outside");
+
+		// The interface half of the prefix rule, under this suite's own spelling
+		// for the reason above. `gui.` joined `scene.` at v0.15: an interface a
+		// server authors is state a client is shown, and it used to cross as a
+		// name and a class with no rectangle on it.
+		engine::ecs::Components::Register<Panel>(
+			"gui.DefaultsTestShared",
+			[](engine::core::ByteWriter &writer, const void *values, size_t count) {
+				const auto *panels = static_cast<const Panel *>(values);
+				for (size_t index = 0; index < count; index++) {
+					writer.WriteFloat(panels[index].Value);
+				}
+			},
+			[](engine::core::ByteReader &reader, void *values, size_t count) {
+				auto *panels = static_cast<Panel *>(values);
+				for (size_t index = 0; index < count; index++) {
+					panels[index].Value = reader.ReadFloat();
+				}
+			}
+		);
+
+		// And a `script.` component nobody named, which is the other half of
+		// **that** rule: scripts are a list rather than a prefix, so a component
+		// this module has not been told about does not ride in on a spelling.
+		engine::ecs::Components::Register<Sidecar>("script.DefaultsTestOutside");
 
 		// **The `ecs.` half of the table, and it has to be registered before the
 		// table is built or the exhaustiveness case below asserts over nothing.**
@@ -209,11 +246,16 @@ TEST_CASE("the set is derived, and never contradicts the exclusions", "[replicat
 		// Nothing local ever appears, whatever is registered.
 		CHECK_FALSE(LocalToTheClient(component.Name));
 
-		// And nothing that is neither a scene component nor part of an
-		// instance's identity.
-		const bool shared = component.Name.starts_with("scene.") || component.Name == "ecs.Hierarchy" ||
-							component.Name == "ecs.InstanceName" || component.Name == "ecs.InstanceClass";
-		CHECK(shared);
+		// And nothing that is neither a world's own state, nor part of an
+		// instance's identity, nor one of the script rows the table names.
+		const bool prefixed = component.Name.starts_with("scene.") || component.Name.starts_with("gui.");
+		const bool instance = component.Name == "ecs.Hierarchy" || component.Name == "ecs.InstanceName" ||
+							  component.Name == "ecs.InstanceClass";
+		const bool scripted = component.Name == "script.LuaSourceContainer" ||
+							  component.Name == "script.JavaScriptSourceContainer" ||
+							  component.Name == "script.CodeSourceContainerSelector" ||
+							  component.Name == "script.Disabled" || component.Name == "script.Program";
+		CHECK((prefixed || instance || scripted));
 	}
 }
 
@@ -272,7 +314,54 @@ TEST_CASE("every ecs component is classified rather than left to a prefix", "[re
 	}
 }
 
-TEST_CASE("only the two written every tick are observed", "[replication][defaults]") {
+TEST_CASE("an interface crosses and the machine looking at it does not", "[replication][defaults]") {
+	defaults_test::Ready();
+
+	// **The rule the gui set turns on**, and it is the same one `scene.` is on
+	// one dimension up: what the authority decided crosses, and what this
+	// machine's display, pointer or keyboard decided does not.
+	//
+	// `gui.Resolved` is where the layout put a rectangle *on this screen*, and
+	// `gui.SpatialCanvas` is the same fact fitted to a surface by whoever holds
+	// a camera. Both are recomputed by every client that draws, so sending
+	// either is wire spent on a value the far side overwrites - and the
+	// authority's answer is for the authority's window.
+	CHECK(LocalToTheClient("gui.Resolved"));
+	CHECK(LocalToTheClient("gui.SpatialCanvas"));
+
+	// **The one that would be wrong rather than merely wasteful.**
+	// `gui.GuiServiceState` holds which `TextBox` has the keyboard, and there is
+	// one row of it per world - so two clients typing into two boxes would be
+	// two clients writing one row.
+	CHECK(LocalToTheClient("gui.GuiServiceState"));
+
+	// Everything else about an interface is authored, and authored state is what
+	// replication is for.
+	CHECK_FALSE(LocalToTheClient("gui.Element"));
+	CHECK_FALSE(LocalToTheClient("gui.Label"));
+	CHECK_FALSE(LocalToTheClient("gui.Layer"));
+
+	// And the prefix admits one, which is what stops every case here agreeing
+	// about an empty table.
+	CHECK(Row("gui.DefaultsTestShared") != nullptr);
+}
+
+TEST_CASE("a script's program crosses and the table it came from does not", "[replication][defaults]") {
+	defaults_test::Ready();
+
+	// **`script.` is a list and not a prefix, and the one it leaves out is the
+	// reason.** `script.SourceCache` is a world resource - one table of every
+	// program the world holds - and interest filters entities, so it could only
+	// ever cross whole. Whole means a client holding `ServerScriptService`'s
+	// programs, which is the leak `scene::VisibleToClients` closed for the
+	// instances themselves.
+	//
+	// A component registered under the prefix and named nowhere therefore does
+	// not cross, which is what this asserts with a spelling of its own.
+	CHECK(Row("script.DefaultsTestOutside") == nullptr);
+}
+
+TEST_CASE("only what a system writes or a hash cannot cover is observed", "[replication][defaults]") {
 	defaults_test::Ready();
 
 	// Observed: written every tick by a system, so the dirty bits already know
@@ -283,14 +372,25 @@ TEST_CASE("only the two written every tick are observed", "[replication][default
 	// the v0.7 bug where a part recoloured at runtime kept its old colour on
 	// every client for ever.
 	//
-	// Asserted as "no third one" rather than as a list, because the list depends
+	// **And the third reason, which is not about how often a value is written.**
+	// A signature hashes the object representation, and a `std::string`'s object
+	// representation is a pointer - so `gui.Label`, `gui.Entry` and
+	// `script.Program` cannot be signed at all and are observed instead. That is
+	// the mechanism `Authority::Resign` already names when it declines a
+	// non-trivial component rather than a fourth detector.
+	//
+	// Asserted as "no fifth one" rather than as a list, because the list depends
 	// on what this process registered and the *rule* does not.
 	for (const auto &component : DefaultReplicatedComponents()) {
 		if (component.Detection != ChangeDetection::Observed) {
 			continue;
 		}
 		INFO("component: " << component.Name);
-		CHECK((component.Name == "scene.Transform" || component.Name == "scene.Motion"));
+		CHECK(
+			(component.Name == "scene.Transform" || component.Name == "scene.Motion" ||
+			 component.Name == "gui.Label" || component.Name == "gui.Entry" ||
+			 component.Name == "script.Program")
+		);
 	}
 }
 

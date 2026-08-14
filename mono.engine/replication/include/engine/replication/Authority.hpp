@@ -527,6 +527,22 @@ namespace engine::replication {
 			//
 			// @since v0.15
 			size_t Repaired = 0;
+
+			// Rows no delta message could ever carry, since this authority was
+			// made.
+			//
+			// **The number that says a value is crossing by the other path.** A
+			// delta row has to fit one message whole, and a `script.Program`
+			// holding four kilobytes of Luau does not - so the entity is staged
+			// as an overlay blob instead, through the chunking a preface already
+			// uses, because a second bulk path would be a second way to do one
+			// job. A figure that climbs on a running world is a game creating
+			// large values mid-session rather than authoring them; one that
+			// climbs every tick is a row being chased rather than staged, which
+			// is the bug `Client::Oversize` exists to have fixed.
+			//
+			// @since v0.15
+			size_t Oversized = 0;
 		};
 
 		// What the last `Publish` did.
@@ -671,6 +687,14 @@ namespace engine::replication {
 			// What the link last said the path will carry in a tick, or
 			// `SIZE_MAX` for a caller that has never said. See `SetAllowance`.
 			size_t AllowanceBytes = SIZE_MAX;
+
+			// Entities owed an overlay because one of their rows is larger than
+			// any delta message.
+			//
+			// Filled by `BuildComponents` and drained by `StageOversize`, which
+			// captures exactly these into the same staged blob a preface uses.
+			// See `Statistics::Oversized`.
+			std::vector<uint64_t> Oversize;
 		};
 
 		// One entity's value for one component, built and waiting for a place
@@ -734,6 +758,18 @@ namespace engine::replication {
 		std::vector<std::byte> Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const;
 
 		void BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick);
+
+		// Stages the entities `Client::Oversize` names as an overlay blob.
+		//
+		// **The same three pieces of machinery a preface uses, aimed at a
+		// handful of entities instead of at a container.** A value larger than a
+		// delta message needs a path that chunks, and this module has exactly
+		// one; what it does not need is the whole world, which is what a
+		// re-snapshot would have cost - measured at 81 ticks of streaming on a
+		// scene of a hundred entities, twice, for three module scripts nothing
+		// had edited.
+		void StageOversize(Client &client, ecs::Store &store, uint64_t tick);
+
 		void StreamSnapshot(Client &client);
 		void BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
 		void Prioritise(ClientId client, uint64_t tick);

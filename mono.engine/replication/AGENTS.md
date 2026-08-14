@@ -641,6 +641,127 @@ class tree this engine implements a fraction of, so substituting is right there
 and here it would make `:IsA` tell a confident lie about two builds that do not
 match. Every other component on the entity still arrives.
 
+## An interface and a program cross, and what looks at them does not
+
+`gui.` joined `scene.` as a replicated prefix at v0.15 and five `script.` rows
+were named beside the three `ecs.` ones. One sentence decides all of it: **a row
+crosses when the authority decided it, and stays local when the machine looking
+at the world decided it.**
+
+- **What a `TextLabel` says, how big it is, what colour it is** - authored, so it
+  crosses. A `ScreenGui` used to arrive as a name and a class with no
+  `gui.Element` on it, which is an interface a client holds every instance of and
+  can draw none of.
+- **`gui.Resolved`** is where the layout put that rectangle *on this screen*, and
+  `gui.SpatialCanvas` is the same fact fitted to a surface by whoever holds a
+  camera. Both are recomputed by every client that draws, so the authority's
+  answer is right for the authority's window and wrong for everybody else - the
+  rule `scene.Rendered` and `scene.PreviousTransform` are already excluded by.
+- **`gui.GuiServiceState` is the one that would be wrong rather than wasteful.**
+  It holds which `TextBox` has the keyboard and there is one row of it per world,
+  so two people typing into two boxes would be two clients writing one row and
+  the authority handing each of them back the other's answer. The router's hover
+  and press need no decision: they are private members of `gui::Router` and never
+  components at all.
+
+**A script crosses as a path per language, a selector, a `script.Disabled` tag
+and the program itself.** The program is `script.Program`, a row on the instance
+that `script::MirrorSourcePrograms` fills from the world's `SourceCache`.
+
+**The cache itself must never be replicated, and that is the sharpest decision
+in this set.** It is a world *resource* - one table of every program the world
+holds - and interest filters *entities*, so a resource can only cross whole.
+Whole means `ServerScriptService`'s programs on every client, which is precisely
+the leak `scene::VisibleToClients` was added at v0.15 to close for the instances
+themselves. A row on the instance is hidden by exactly the rule that hides the
+instance, and the mirror never writes one for a `Script` at all - so a server's
+logic is not one predicate away from being public.
+
+**A tag is not a component with no serialisation.** `script.Disabled` is empty,
+so `TypeDescriptor::Serialisable` is false - there are no bytes to write - and
+the table read that as "cannot cross" and left it off. `WriteComponents` has
+always handled a zero-sized component by naming the entity and writing nothing.
+A script an author switched off must be switched off on a client too.
+
+## A person typing into a `TextBox` is the one place the two ends are meant to disagree
+
+`gui::Type` writes `Label::Text` in the replica - there is no edit buffer
+anywhere else, which is `gui/AGENTS.md`'s rule - and it is a component write
+rather than a property write, so `Store::SetProperty`'s adopt-only refusal does
+not stand in its way and should not: a box a person is typing into is the
+person's.
+
+That makes `gui.Label` on a `TextBox` a row the authority holds one value of and
+the replica another, for as long as somebody is typing. Two things would have put
+the authority's answer back on top of it, and one mechanism turns off both:
+**`SuppressWhenTagged("gui.Label", "gui.Entry")`**. A `TextBox` is the only class
+carrying a `gui.Entry`, so the tag already means what the filter needs it to mean
+- the same "it already means exactly this" `scene.CharacterLimb` was chosen for.
+
+- The **delta** path stops offering that row, and the baseline still carries one
+  copy, so an authored placeholder or default text arrives.
+- The **audit** leaves the entity out entirely, because `EmitAudit` skips
+  anything carrying a registered suppressor tag. Without that, every sweep would
+  report the box as divergent and the repair would put the empty string back a
+  few ticks after somebody typed.
+
+**What it costs is stated rather than hidden**: a script writing `TextBox.Text`
+after a client has joined does not reach that client. Roblox makes the same trade
+from the other side, where the server's write lands on top of whatever somebody
+had typed. A `TextLabel` is unaffected - it carries no `gui.Entry`, so nothing is
+suppressed and a scoreboard updates for ever.
+
+**The caret was already safe and for a reason worth knowing.** `WriteEntries`
+writes `CursorPosition` and `SelectionStart` as `-1` rather than as themselves,
+so a caret cannot cross in either direction and both ends hash the same bytes.
+That is the wire form doing the work a suppressor would otherwise have to.
+
+## A row too large for a message is staged, not resent for ever
+
+`Pack` has no unit smaller than a row. A row that does not fit goes into a piece
+anyway, the encoded message is over `net::Packet::MAXIMUM_MESSAGE_BYTES`,
+`Link::Reserve` refuses it - and a refusal is what ordinary backpressure looks
+like, so `Unsent` puts it back and the same row is rebuilt and refused every tick
+for the life of the connection. Four kilobytes of Luau in a `script.Program`
+reaches that on the tick a game clones a script.
+
+**The answer is the bulk path this module already has, aimed at a handful of
+entities.** `Authority::StageOversize` captures exactly the entities whose rows
+were turned away into `client.Snapshots[Preface]` - the same `Staged` buffer, the
+same `SnapshotChunk` framing, the same cursor and the same `Unsent` rollback -
+and `Replica` applies a `Preface` blob as an **overlay**, so a slice of a world
+merges rather than sweeping everything it does not mention.
+
+Three things about it, and each was reached by getting it wrong first:
+
+- **The unconfirmed entry is erased when the row is turned away.** The recovery
+  walk keeps offering a value until the client acknowledges a tick it was in, so
+  an entry for a row no message can hold is one it re-offers every tick for ever.
+- **A full re-snapshot is what this replaced, and it was not affordable.** It
+  measured 81 ticks of streaming per event on a scene of a hundred entities, and
+  a client spends that time being sent no structural change at all - so a world
+  admitting players stopped telling anybody about them.
+- **It runs only with nothing owed, and `BeginSnapshot` clears the list.** A join
+  or a re-snapshot carries these entities in the world blob anyway, so staging a
+  slice beside one would send the same bytes twice.
+
+`Statistics::Oversized` is the number that says it is happening, and it is
+cumulative rather than per-`Publish`.
+
+## The detector is declared once and turned on here
+
+`ChangeDetection::Observed` means "read the store's dirty bits", and a store that
+is not recording them answers `false` for every row - so a host that declared the
+detector and forgot `Store::Observe` sends nothing, reports nothing, and looks
+exactly like a component nobody wrote to. There were three hosts to forget it in.
+
+`Authority::Survey` observes every component declared `Observed`, on the world it
+was handed, once per `Publish`. `ObserveComponent` is idempotent, so the steady
+cost is a set lookup per replicated component per tick; the first call is not
+free, because observing moves every entity already carrying the component into an
+archetype with somewhere to put the bits. That happens once, on the tick the
+first client makes `Publish` do any work.
+
 ## A delta's rows are not one width
 
 `Authority::Pack` records an **offset and a length per row**, not one stride per

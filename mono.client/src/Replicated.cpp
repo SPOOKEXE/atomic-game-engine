@@ -2,6 +2,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -185,6 +186,19 @@ namespace client {
 		// Register snapshot component names before applying one.
 		engine::scene::RegisterSceneComponents();
 
+		// **The interface and the scripts too, and before rather than lazily.**
+		// A snapshot naming a component this build has not registered is refused
+		// whole - `Store::Apply` will not half-merge a world - so a replica that
+		// waited for `InstallGuiServices` to register `gui.` on its first tick
+		// would refuse the join that arrived before it. The *classes* have the
+		// same deadline for a different reason: an instance whose class name
+		// does not resolve here arrives untyped, and `ClientScriptsIn` decides
+		// what to run by asking whether a row is a `LocalScript`.
+		//
+		// Both calls register their components first and both are idempotent.
+		(void)engine::gui::RegisterGuiClasses();
+		(void)engine::script::ScriptClass();
+
 		// Register client resources before their component ids are minted.
 		RegisterClientComponents();
 
@@ -234,13 +248,16 @@ namespace client {
 		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimReplicatedSurfaces);
 		scheduler.Add("collect-replicated", Phase::PreRender, CollectReplicated);
 
-		// **`GuiService` comes over the wire without the thing it is for.** No
-		// `gui.` component is replicated, so the row a client is shown is a name
-		// and a class; `gui::Focus` and `gui::Select` both read the state on it
-		// and both answer `false` without one, which is a keyboard that never
-		// reaches a `TextBox` and nothing saying why. `InstallGuiServices` mints
-		// nothing in a replica and completes whatever arrived, so this is safe
-		// once a tick and does nothing on the ticks before the join.
+		// **`GuiService` comes over the wire without the thing it is for**, and
+		// that stayed true when the rest of `gui.` started crossing at v0.15.
+		// `gui.GuiServiceState` holds `FocusedTextBox` - which box *this* person
+		// is typing into - so it is deliberately client-local, and the row a
+		// client is shown is a name and a class; `gui::Focus` and `gui::Select`
+		// both read the state on it and both answer `false` without one, which
+		// is a keyboard that never reaches a `TextBox` and nothing saying why.
+		// `InstallGuiServices` mints nothing in a replica and completes whatever
+		// arrived, so this is safe once a tick and does nothing on the ticks
+		// before the join.
 		scheduler.Add("replica-gui-services", Phase::PreSimulation, [](Store &world) {
 			(void)engine::gui::InstallGuiServices(world);
 		});

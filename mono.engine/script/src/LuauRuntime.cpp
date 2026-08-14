@@ -614,16 +614,14 @@ namespace engine::script {
 				}
 			}
 
-			const core::Name modulePath = ActiveSourceOf(store, module);
-			if (!modulePath.IsValid()) {
-				luaL_errorL(
-					state, "'%s' has no source to require", store.InstanceNameOf(module).Text().data()
-				);
-			}
-
+			// **Through the instance rather than the path**, so a module
+			// required in a replica reads the `script::Program` row that
+			// arrived. `require` is how a client's `LocalScript` reaches a
+			// library, and the path alone finds nothing there.
+			core::Name modulePath;
 			std::string program;
 			std::string error;
-			if (!ReadSource(store, modulePath, program, error)) {
+			if (!ReadProgram(store, module, modulePath, program, error)) {
 				luaL_errorL(state, "%s", error.c_str());
 			}
 
@@ -714,21 +712,22 @@ namespace engine::script {
 
 		// **The active container** - `script::CodeSourceContainerSelector` says
 		// which of an instance's programs is the one to run.
-		const core::Name path = ActiveSourceOf(Store, instance);
-		if (!path.IsValid()) {
+		if (!ActiveSourceOf(Store, instance).IsValid()) {
 			// A script with no path is a no-op rather than an error: an author
 			// makes the instance before choosing the file, and that is a legal
 			// state.
 			return true;
 		}
 
-		// **The world's `SourceCache` before the filesystem**, through the one
-		// function that knows both. A studio's unsaved edit lives in that table
-		// and a game file's scripts arrive in it, so a second resolver here
-		// would be a second place to forget it - and the symptom would be
-		// edited code that runs from one entry point and not another.
+		// **The world's `SourceCache`, then the row the authority sent, then the
+		// filesystem**, through the one function that knows all three. A
+		// studio's unsaved edit lives in that table, a game file's scripts
+		// arrive in it, and a replica has neither - so a second resolver here
+		// would be a second place to forget one of them, and the symptom would
+		// be code that runs from one entry point and not another.
+		core::Name path;
 		std::string program;
-		if (!ReadSource(Store, path, program, Error)) {
+		if (!ReadProgram(Store, instance, path, program, Error)) {
 			return false;
 		}
 
@@ -777,6 +776,18 @@ namespace engine::script {
 		// wrote. A single `script heartbeat` bar that spikes says only that
 		// something did, which is where this was before a spike had to be found
 		// in `Mirrors-1-world` and nothing under it could be read.
+		{
+			// **Before everything, because what it produces is read after the
+			// barrier rather than inside it.** The `script::Program` rows are
+			// what a client is sent, and `replication::Authority::Publish` runs
+			// once the tick is over - so a program edited between two ticks has
+			// to be mirrored at the head of this one or a client waits a tick
+			// for every save. It is also the cheapest thing in the beat: a
+			// 64-bit compare unless somebody wrote to the cache.
+			ENGINE_PROFILE_CAT("script source", core::ProfileCategory::Script);
+			MirrorSourcePrograms(Store, Mirrored);
+		}
+
 		std::string firstError;
 		{
 			ENGINE_PROFILE_CAT("script deliveries", core::ProfileCategory::Script);

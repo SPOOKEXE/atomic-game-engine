@@ -43,6 +43,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -52,6 +53,18 @@ namespace replication_wire {
 	struct Spot {
 		float X = 0.0f;
 		float Y = 0.0f;
+	};
+
+	// A value larger than any one datagram, for the cases about what happens
+	// then.
+	//
+	// **Registered here and replicated by the case that wants it**, because a
+	// component every case sent would put four kilobytes into every join in both
+	// suites. `script::Program` is the real one this stands in for -
+	// `replication` links no module that has such a type, which is the same
+	// reason `Defaults.cpp`'s suite spells its own.
+	struct Bulk {
+		std::string Text;
 	};
 
 	// A transport that watches the nonce counter of everything sent through it.
@@ -159,6 +172,21 @@ namespace replication_wire {
 	inline void RegisterTypes() {
 		static bool once = [] {
 			engine::ecs::Components::Register<Spot>("endtoend_test.Spot");
+			engine::ecs::Components::Register<Bulk>(
+				"endtoend_test.Bulk",
+				[](engine::core::ByteWriter &writer, const void *values, size_t count) {
+					const auto *bulk = static_cast<const Bulk *>(values);
+					for (size_t index = 0; index < count; index++) {
+						writer.WriteString(bulk[index].Text);
+					}
+				},
+				[](engine::core::ByteReader &reader, void *values, size_t count) {
+					auto *bulk = static_cast<Bulk *>(values);
+					for (size_t index = 0; index < count; index++) {
+						bulk[index].Text = std::string(reader.ReadString());
+					}
+				}
+			);
 			return true;
 		}();
 		(void)once;

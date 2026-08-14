@@ -28,6 +28,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/replication/Connector.hpp>
@@ -39,6 +40,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tools.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -87,6 +89,17 @@ namespace server_replication_test {
 	// declaration rather than renaming around the collision.
 	void RegisterTypes() {
 		engine::scene::RegisterSceneComponents();
+
+		// **And the two sets that started crossing at v0.15**, because this
+		// replica is a client and a client is what receives them. A snapshot
+		// naming a component the receiving build never registered is refused
+		// whole rather than half-merged - the join simply never completes and
+		// the log says which name - so a harness registering less than
+		// `client::BuildReplicatedWorld` does is a harness testing a client that
+		// does not exist. `gui.Element` on a `ScreenGui` and `script.Program` on
+		// a `LocalScript` are what made that reachable.
+		(void)engine::gui::RegisterGuiClasses();
+		(void)engine::script::ScriptClass();
 	}
 
 	std::filesystem::path ServerProgram() {

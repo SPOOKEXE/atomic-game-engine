@@ -93,7 +93,18 @@ namespace engine::replication {
 	// twentieth; the two encodings are indistinguishable from the bytes alone,
 	// which is the same test `ecs::Store::SNAPSHOT_VERSION` 3 applies to the
 	// same change on the other side.
-	inline constexpr uint16_t PROTOCOL_VERSION = 8;
+	//
+	// **9 - the same shape of change, one type along, plus components a version
+	// 8 peer has never registered.** `script.LuaSourceContainer` now writes its
+	// path as text where it used to write the `core::Name`'s interning index, so
+	// a version 8 reader would consume a length prefix as a four-byte id and
+	// lose every value behind it - the version 8 story exactly, and the reason
+	// `ecs::Store::SNAPSHOT_VERSION` moved to 4 beside it. The interface and
+	// script sets crossing for the first time is the milder half: a peer that
+	// never registered `gui.Element` refuses the whole delta as naming an
+	// unknown component, which is loud, but there is no reason to make it find
+	// that out one message at a time.
+	inline constexpr uint16_t PROTOCOL_VERSION = 9;
 
 	// Which half of a join a snapshot chunk belongs to.
 	//
@@ -106,12 +117,19 @@ namespace engine::replication {
 	//
 	// @since v0.15
 	enum class SnapshotStage : uint8_t {
-		// The entities a host asked for ahead of the world.
+		// A slice of a world rather than the whole of one.
 		//
-		// Applied as an overlay rather than authoritatively, because it is a
-		// slice of a world and not the whole of one: a receiver that swept
-		// everything this blob failed to mention would empty the world it is
-		// about to be sent again.
+		// Applied as an overlay rather than authoritatively, because a receiver
+		// that swept everything this blob failed to mention would empty the
+		// world it is about to be sent again.
+		//
+		// **Two senders build one, and the shape is what they have in common.**
+		// `Authority::SetPreface` puts the entities a host wants a client to
+		// hold before the world in front of the join; `Authority::StageOversize`
+		// puts an entity whose row is larger than any delta message here
+		// mid-session, because a value that needs chunking needs the path that
+		// chunks. Neither can be in flight while the other is: both require the
+		// client to be owed nothing.
 		Preface,
 
 		// The whole of what a client may see, and the blob that ends the join.

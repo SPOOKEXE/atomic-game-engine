@@ -8,14 +8,28 @@
 namespace engine::replication {
 
 	namespace {
-		// The prefix a world's shared state lives under.
+		// The prefixes a world's shared state lives under.
 		//
-		// **`scene.` is the game's state.** Nothing else is included by prefix:
+		// **`scene.` is the game's state and `gui.` is the game's interface**,
+		// and the two are one question asked in three dimensions and in two.
 		// `physics.` is derived from the shared state every tick and
-		// reconstructed on the far side, `script.` is a server's own, and a
-		// module that wants its components on the wire says so rather than
-		// inheriting it from a naming convention.
-		constexpr std::string_view SHARED_PREFIX = "scene.";
+		// reconstructed on the far side; a module that wants its components on
+		// the wire says so rather than inheriting it from a naming convention.
+		//
+		// **`gui.` joined at v0.15 and that is what makes an authored interface
+		// arrive.** A `ScreenGui` crossed as a name and a class with no
+		// `gui.Element` on it, so a client held the shape of an interface and
+		// none of it - which reads as the server having authored nothing.
+		constexpr std::string_view SHARED_PREFIXES[] = {"scene.", "gui."};
+
+		bool UnderASharedPrefix(std::string_view component) {
+			for (const std::string_view prefix : SHARED_PREFIXES) {
+				if (component.starts_with(prefix)) {
+					return true;
+				}
+			}
+			return false;
+		}
 
 		// What an instance *is*, and all three of them named rather than a
 		// prefix.
@@ -69,6 +83,40 @@ namespace engine::replication {
 			return false;
 		}
 
+		// What a script *is*, named rather than taken by prefix - and the one it
+		// leaves out is the reason why.
+		//
+		// **`script.SourceCache` must never be here.** It is a world resource:
+		// one table of every program the world holds, keyed by path, with no
+		// entity to hang it on. Interest filters entities, so a resource can
+		// only cross whole - and whole means `ServerScriptService`'s programs on
+		// every client, which is the leak `scene::VisibleToClients` was added to
+		// close for the instances themselves. `script.Program` is the row that
+		// crosses instead: it sits on the instance, so it is hidden by exactly
+		// the rule that hides the instance, and `script::MirrorSourcePrograms`
+		// never writes one for a `Script`.
+		//
+		// A prefix could not have said that, and the suite is what keeps it
+		// true: `engine.replication.defaults` walks every registered `script.`
+		// component and requires each to be classified here or named in the
+		// exclusions it carries.
+		constexpr std::string_view SCRIPT_COMPONENTS[] = {
+			"script.LuaSourceContainer",
+			"script.JavaScriptSourceContainer",
+			"script.CodeSourceContainerSelector",
+			"script.Disabled",
+			"script.Program",
+		};
+
+		bool PartOfAScript(std::string_view component) {
+			for (const std::string_view named : SCRIPT_COMPONENTS) {
+				if (component == named) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// The two written by a system every tick, so the dirty bits already
 		// know.
 		//
@@ -79,6 +127,32 @@ namespace engine::replication {
 		// its old colour on every client for ever.
 		bool WrittenEveryTick(std::string_view component) {
 			return component == "scene.Transform" || component == "scene.Motion";
+		}
+
+		// The three a signature cannot cover, because a signature hashes the
+		// object representation.
+		//
+		// **A `std::string` is a pointer in its object representation, so
+		// hashing one answers about the allocation and not about the text.**
+		// Two boxes holding the same words hash differently, one box hashes
+		// differently after a reallocation that did not change a character, and
+		// - the failure that matters - text edited in place inside a capacity
+		// that did not move hashes the *same*. `Authority::Resign` refuses a
+		// non-trivial type outright and says to observe it instead; these are
+		// the three that took it up on that.
+		//
+		// **What `Observed` costs is a dirty bit per row and nothing per tick**,
+		// which is the opposite trade from `Signature` and the right one here:
+		// a label's text and a script's program are written by an author and
+		// then left alone for the life of the world, so the bit is set on the
+		// tick somebody wrote and never again. A signature over
+		// `script.Program` would be a hash of every kilobyte of Luau in the
+		// world, sixty times a second, to learn that nobody had touched it.
+		//
+		// `Authority::Survey` is what turns the observation on, so declaring one
+		// here is the whole of the wiring.
+		bool CannotBeSigned(std::string_view component) {
+			return component == "gui.Label" || component == "gui.Entry" || component == "script.Program";
 		}
 	}
 
@@ -181,6 +255,34 @@ namespace engine::replication {
 			return true;
 		}
 
+		// **The rule the interface set turns on: what the authority decided
+		// crosses, what this machine's display, pointer or keyboard decided does
+		// not.**
+		//
+		// A `TextLabel`'s words, colour and rectangle are authored - a server
+		// wrote them and every client should read the same thing. Where that
+		// rectangle *lands* is not: `gui.Resolved` is what `gui::Layout`
+		// computes from the local window's size, so a replicated one would be
+		// the server's answer for the server's display, overwritten by the next
+		// layout pass on every client that has a different one. `scene.Rendered`
+		// and `scene.PreviousTransform` are excluded one section up for exactly
+		// this reason.
+		//
+		// `gui.SpatialCanvas` is the same fact for a surface: it is fitted by
+		// whoever holds a camera, which is the machine looking.
+		//
+		// **`gui.GuiServiceState` is the sharpest of the three, because sending
+		// it would be wrong rather than merely wasteful.** It holds
+		// `FocusedTextBox` - which box *this* person is typing into - and there
+		// is one row of it per world. Two clients typing into two boxes would be
+		// two clients writing one row, and the authority would hand each of them
+		// back the other's answer. A client's own keyboard is its own, exactly
+		// as `scene.InputState` is.
+		if (component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
+			component == "gui.GuiServiceState") {
+			return true;
+		}
+
 		// Marked as not outliving the run that made it, so replicating it would
 		// be shipping a thing whose whole point is that it is not kept.
 		return component == "scene.Transient";
@@ -199,7 +301,7 @@ namespace engine::replication {
 					ecs::Components::Describe(ecs::ComponentId{static_cast<uint32_t>(index)});
 
 				const std::string_view name = type.Name.Text();
-				const bool shared = name.starts_with(SHARED_PREFIX) || PartOfAnInstance(name);
+				const bool shared = UnderASharedPrefix(name) || PartOfAnInstance(name) || PartOfAScript(name);
 				if (!shared || LocalToTheClient(name)) {
 					continue;
 				}
@@ -208,24 +310,42 @@ namespace engine::replication {
 				// rather than declared.** Declaring one would have the authority
 				// refuse it per tick - a component that looks replicated,
 				// reports nothing and costs a check for ever.
-				if (!type.Serialisable) {
+				//
+				// **A *tag* is not that, and reading it as one kept
+				// `script.Disabled` off the wire.** `Serialisable` is false for
+				// an empty struct because there are no bytes to write, not
+				// because there is no way to say it - and `WriteComponents` has
+				// always handled a zero-sized component by naming the entity and
+				// writing nothing, which is the same test `BuildComponents`
+				// applies one layer down. A script the author disabled must not
+				// run on a client either.
+				//
+				// **What a delta cannot say is that a tag was *removed*, and
+				// that is the delta path's shape rather than this rule's.** A
+				// message names rows to write; nothing in it says "this entity
+				// stopped carrying that". A script switched back on mid-session
+				// therefore stays switched off on a client until a snapshot -
+				// which sweeps what it does not mention - reaches it. Sending
+				// the removal is a wire change and wants a caller asking for it.
+				if (type.Size > 0 && !type.Serialisable) {
 					continue;
 				}
 
-				// **And a type that is not trivially copyable cannot be
-				// *signed*, which is what everything here but the two above
-				// uses.** `Authority` warns and declines it, so declaring one is
-				// a warning per host per run describing a component nobody meant
-				// to send: the catalogues are the case - `scene.TextureCatalogue`
-				// and its two siblings are resources holding maps, they hang off
-				// no entity, and they arrived here only because they share the
-				// prefix.
+				// **A type that is not trivially copyable cannot be *signed*,
+				// so it crosses only if somebody decided it should be
+				// observed.** `Authority::Resign` warns and declines one, so
+				// declaring an unnamed non-trivial component is a warning per
+				// host per run describing a component nobody meant to send: the
+				// catalogues are the case - `scene.TextureCatalogue` and its two
+				// siblings are resources holding maps, they hang off no entity,
+				// and they arrived here only because they share the prefix.
 				//
-				// A non-trivial component that genuinely should cross needs
-				// `Observed` and a matching `Store::Observe`, which is a decision
-				// per component rather than something a prefix can infer - so it
-				// is named in the host that wants it rather than defaulted here.
-				if (!type.Trivial && !WrittenEveryTick(name)) {
+				// Which is a decision per component rather than something a
+				// prefix can infer - and `CannotBeSigned` is where the three
+				// that have been made are written down, one line from the
+				// argument for each.
+				const bool observed = WrittenEveryTick(name) || CannotBeSigned(name);
+				if (!type.Trivial && !observed) {
 					continue;
 				}
 
@@ -247,13 +367,34 @@ namespace engine::replication {
 				// rows for those entities stop, and only as deltas - the baseline a
 				// newly admitted client receives still carries one copy, so its
 				// first frame is right before any derivation has run. `D00115`.
-				const bool derived = name == "scene.Transform";
+				//
+				// **`gui.Label` is the second row on that mechanism, and it is
+				// there for a person rather than for a budget.** The text of a
+				// `TextBox` is what somebody is typing: `gui::Type` writes
+				// `Label::Text` in the replica as they type, so the two ends are
+				// *meant* to disagree - and an authority that went on offering its
+				// own copy would wipe a half-typed word, either through a delta or
+				// through an audit reporting the box as divergent and repairing it
+				// back. `gui.Entry` is the tag because a `TextBox` is the only class
+				// that carries one, which is the same "it already means exactly
+				// this" the limb tag is chosen for.
+				//
+				// The baseline still carries one copy, so an authored placeholder
+				// or default text arrives; what stops is the per-tick repeat, and
+				// what it costs is that a script writing `TextBox.Text` after a
+				// client has joined does not reach that client. That is the honest
+				// half of the trade and it is the same one Roblox makes from the
+				// other side, where the server's write lands on top of whatever
+				// somebody had typed.
+				const std::string_view suppressor = name == "scene.Transform" ? "scene.CharacterLimb"
+													: name == "gui.Label"	  ? "gui.Entry"
+																			  : std::string_view();
 
 				found.push_back(
 					ReplicatedComponent{
 						name,
-						WrittenEveryTick(name) ? ChangeDetection::Observed : ChangeDetection::Signature,
-						derived ? std::string_view("scene.CharacterLimb") : std::string_view(),
+						observed ? ChangeDetection::Observed : ChangeDetection::Signature,
+						suppressor,
 					}
 				);
 			}

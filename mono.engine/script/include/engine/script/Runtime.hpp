@@ -41,6 +41,7 @@
 #include <engine/script/Debugger.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Language.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/script/Vocabulary.hpp>
 
 #include <cstddef>
@@ -476,6 +477,13 @@ namespace engine::script {
 
 		// Where execution should be reported from. Read through `Debug`.
 		Debugger Breakpoints;
+
+		// What `MirrorSourcePrograms` remembered, for the beat to hand back.
+		//
+		// Here rather than in each VM because both beats run the same pass over
+		// the same world, and a second copy of "which generation have I
+		// mirrored" is a second answer to it.
+		SourceMirror Mirrored;
 
 	  private:
 		// Records `instance` as started here, answering whether it is new.

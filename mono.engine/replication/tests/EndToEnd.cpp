@@ -349,6 +349,61 @@ TEST_CASE("movement streams as deltas after the join", "[replication]") {
 	REQUIRE(wire.Replica_.Stats().Deltas > 0);
 }
 
+TEST_CASE("a value no delta message can hold crosses as a staged overlay", "[replication]") {
+	Wire wire;
+
+	// **Observed rather than signed, which is the only pairing a value like this
+	// can have.** A signature hashes the object representation, and this one is
+	// a pointer into the heap.
+	wire.Authority_.Replicate(
+		engine::core::Name("endtoend_test.Bulk"), engine::replication::ChangeDetection::Observed
+	);
+
+	const Entity entity = wire.Server.Create();
+	wire.Server.Set<Spot>(entity, Spot{0.0f, 0.0f});
+	wire.Server.Set<Bulk>(entity, Bulk{std::string(4096, 'a')});
+
+	REQUIRE(wire.Join());
+
+	// The join carries it whatever its size: a snapshot is chunked, offset
+	// addressed and reassembled, which is exactly what a delta message is not.
+	REQUIRE(wire.Client.Get<Bulk>(entity) != nullptr);
+	REQUIRE(wire.Client.Get<Bulk>(entity)->Text == std::string(4096, 'a'));
+
+	const size_t oversizedAtJoin = wire.Authority_.Stats().Oversized;
+
+	// **Now the case the delta path cannot serve.** `Pack` has no unit smaller
+	// than a row, so this one goes into a message larger than a datagram, the
+	// link refuses it, `Unsent` puts it back, and the same row is rebuilt and
+	// refused every tick for the life of the connection. What happens instead is
+	// a blob of just this entity, applied as an overlay.
+	wire.Server.Set<Bulk>(entity, Bulk{std::string(4096, 'b')});
+
+	for (int step = 0; step < 60; step++) {
+		wire.Tick();
+	}
+
+	CHECK(wire.Client.Get<Bulk>(entity)->Text == std::string(4096, 'b'));
+	CHECK(wire.Authority_.Stats().Oversized > oversizedAtJoin);
+
+	// **And it stops.** The unconfirmed entry is erased when the row is turned
+	// away, so nothing chases a value no message can carry - the first version
+	// of this left the entry in place, and the client spent the rest of the
+	// connection being re-staged once a tick and never told about anything else.
+	const size_t settled = wire.Authority_.Stats().Oversized;
+	for (int step = 0; step < 60; step++) {
+		wire.Tick();
+	}
+	CHECK(wire.Authority_.Stats().Oversized == settled);
+
+	// The rest of the world still moves, which is the property the stall broke.
+	wire.Server.GetMutable<Spot>(entity)->X = 7.0f;
+	for (int step = 0; step < 10; step++) {
+		wire.Tick();
+	}
+	CHECK(wire.Client.Get<Spot>(entity)->X == 7.0f);
+}
+
 TEST_CASE("an input reaches the server over the reliable channel", "[replication]") {
 	Wire wire;
 	wire.Server.Set<Spot>(wire.Server.Create(), Spot{1.0f, 0.0f});

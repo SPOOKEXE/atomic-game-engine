@@ -1704,7 +1704,18 @@ namespace engine::ecs {
 		// describes, and that is not a reason to leave it. `ecs.InstanceName`
 		// went the same way at v0.8 without one, and every world saved before it
 		// loaded with its names garbled rather than being refused.
-		static constexpr uint32_t SNAPSHOT_VERSION = 3;
+		//
+		// **4 - a script's source path is written as its text.**
+		// `script.LuaSourceContainer` and its JavaScript twin hold a
+		// `core::Name` and had no writer of their own, so raw serialisation put
+		// an *interning index* in the file - the exact hazard
+		// `DescribeType`'s warning names. A world written by one process and
+		// read by another resolved every script's path to whatever that process
+		// happened to have interned in that slot, which is a game file that
+		// loads cleanly and runs the wrong programs. Same shape as 3, one type
+		// along, and refused for the same reason: a length prefix read as a
+		// four-byte id consumes the values behind it.
+		static constexpr uint32_t SNAPSHOT_VERSION = 4;
 
 		// The number of tables this world holds.
 		//

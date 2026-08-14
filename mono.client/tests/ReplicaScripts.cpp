@@ -108,8 +108,11 @@ namespace {
 
 		// What the authority sent: the fixtures, two occupants and their
 		// containers. Written straight into the store because a snapshot is what
-		// this stands in for - `gui.` components do not cross a wire today, so
-		// the arriving interface cannot be built by replicating one.
+		// this stands in for, and this suite is about *which* scripts a replica
+		// runs rather than about how a row got there - `client.replica.arrival`
+		// is the one that carries every one of these over a real link, and it
+		// exists because a hand-built replica cannot tell a component that
+		// crosses from one that does not.
 		void Arrive() {
 			REQUIRE(engine::scene::InstallServices(World) != NULL_ENTITY);
 			REQUIRE(engine::gui::InstallGuiServices(World) != NULL_ENTITY);
