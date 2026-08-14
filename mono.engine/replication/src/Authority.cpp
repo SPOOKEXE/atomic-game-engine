@@ -955,7 +955,7 @@ namespace engine::replication {
 			return !IdentityCheck || IdentityCheck(client, read.Identify);
 
 		case MessageKind::Delta:
-			return Submit(client, *found, std::move(read.Delta));
+			return Submit(*found, std::move(read.Delta));
 
 		case MessageKind::SnapshotChunk:
 		case MessageKind::Structure:
@@ -965,13 +965,21 @@ namespace engine::replication {
 			// one thing an authority may never be told.
 			Stats_.Refused++;
 			return false;
+
+		case MessageKind::User:
+			// Opaque to this module by design, so whoever owns the link peels
+			// one off before here — `Replica::Receive` refuses it for the same
+			// reason. Reaching this is a routing mistake, and counting it is how
+			// it becomes visible.
+			Stats_.Refused++;
+			return false;
 		}
 
 		Stats_.Refused++;
 		return false;
 	}
 
-	bool Authority::Submit(ClientId client, Client &into, Delta &&delta) {
+	bool Authority::Submit(Client &into, Delta &&delta) {
 		// **Nothing may be written until somebody has said who owns what.** The
 		// alternative default — accept, and restrict later — makes the insecure
 		// state the one a host gets by forgetting, which is the shape of most of

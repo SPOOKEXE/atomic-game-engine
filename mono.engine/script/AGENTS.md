@@ -17,6 +17,44 @@ and every caller keeps working. The moment a vendor type reaches a public
 header, that stops being true — which is why the CMake row says `VENDOR` and not
 `VENDOR_PUBLIC`.
 
+## Three kinds of file in `src/`, and the build tells them apart
+
+`mono_check_script_vm_naming` in this module's `CMakeLists.txt` enforces one
+sentence, on every configure, transitively:
+
+> **A file in `src/` that reaches `<lua.h>` or `<quickjs.h>` — however many
+> `#include` hops away — has a name beginning `Luau`, `Js` or `JavaScript`.**
+
+Which makes the three kinds legible from the file list alone:
+
+- **Internal machinery** — runs per tick whether or not a script exists.
+  `Tweens.cpp`, `Debris.cpp`, `Bus.cpp`, `Actions.cpp`, `Teleport.cpp`,
+  `Signals.cpp`, `Changes.cpp`, `Tasks.cpp`. A system here compiles in a build
+  that never opens a VM, which is what `AdmitTeleports` has to be: a world can be
+  a teleport destination without containing a line of script.
+- **The scripting-exposed surface** — `ServiceSurface`, `ScriptMethod`,
+  `ServiceProperty` and `ServiceSignal` rows, named for the service a script
+  names. `UserInputService.cpp`, `ContextActionService.cpp`, `HttpService.cpp`,
+  `TweenService.cpp`, `RunService.cpp` and the rest. No VM, so both languages
+  install from the one description.
+- **Per-VM adapters** — `Luau*.cpp` and `Js*.cpp`, in pairs wherever the fact is
+  shared and only the wrapper is not: `LuauInput.cpp`/`JsInput.cpp`,
+  `LuauTween.cpp`/`JsTween.cpp`, `LuauServiceSurface.cpp`/`JsServiceSurface.cpp`.
+
+**`ServiceCatalogue.cpp` is the one exemption and it is named in the check.** It
+has met both VMs deliberately — it names every installer so the static archive
+cannot drop one, and it walks the table once per language. A second name on that
+list is a claim that a file cannot be split and needs the same kind of argument
+written where the file is.
+
+**A neutral file needing one Luau *number* is not an exception to this.**
+`ServiceProperty` makes a service a userdata in Luau, so `UserInputService.cpp`
+and `SoundService.cpp` each name a tag — `LuauTags.hpp` is the tag block on its
+own, with no `<lua.h>` under it, which is why they are still descriptions. The
+same shape closed `Vocabulary.cpp`: `LuauInstanceSignalNames()` has no VM type in
+its signature, so it is declared in `Signals.hpp` rather than reached through the
+Luau umbrella.
+
 ## An instance is a shim, and there is nothing underneath it
 
 This is the whole model, so it is worth stating without hedging:
@@ -51,19 +89,19 @@ organisational, so parenting moves nothing.
 
 ## The marshalling knows types, never names
 
-`Instances.cpp` switches on `PropertyType` and nothing else. No property is
+`LuauInstances.cpp` switches on `PropertyType` and nothing else. No property is
 named anywhere in this module, and none ever should be: a property declared in
 `scene` tomorrow is readable and writable from Luau today.
 
 A `if (name == "Size")` here would be the second source of truth the whole
 conversion design exists to prevent.
 
-## A method is data too, and nine of thirty are
+## A method is data too, and all forty are
 
 A property was neutral from the start and a method was not, and the difference
 cost exactly what two lists cost. `ecs::PropertyDescriptor` is data, so `scene`
 declares a property once and Luau, JavaScript and the properties panel all read
-it. A method was a `lua_CFunction` in `Instances.cpp` and a `JSCFunction` in
+it. A method was a `lua_CFunction` in `LuauInstances.cpp` and a `JSCFunction` in
 `JsSurface.cpp`, written twice — Luau reached thirty entries and JavaScript
 twenty-one, nothing in the build named the nine that were missing, and the
 TypeScript declarations claimed all nine anyway.
@@ -97,7 +135,7 @@ Four rules a reviewer should hold to:
   the trampoline catches, because QuickJS reports an error by returning rather
   than by unwinding — and nothing may escape that frame, since the caller is C.
 
-## A service is data too, and all seven crossed on it
+## A service is data too, and every one of them crossed on it
 
 The same argument one level up. `ServiceSurface` described a service in
 `lua_CFunction`s, so it could only build a Luau one — and every JavaScript
@@ -125,71 +163,142 @@ only one: `ServiceProperty` is a name and two `ScriptMethod`s, Luau's `__index`
 walks it and JavaScript defines an accessor per row, and the userdata apparatus —
 `Tag`, `MethodsKey` — is unchanged because the trap it defeats has not gone away.
 
+**The last seven crossed on three additions rather than on a rewrite**, and
+naming them is the useful half because each is a mechanism the next service will
+want. `RunService`, `Debris`, `TweenService` and the bus four were the services
+still written twice: `ScriptCall::Await` is how a store method suspends — a
+yielded coroutine on one side and a `Promise` on the other, which is the one
+thing about them a VM genuinely decides; `ReadFieldNames`/`ReadFieldProperty` are
+how `TweenService:Create` reads a goal record whose values are `UDim2`s and
+`ColorSequence`s, by *name and declared type*, because `ScriptValue` has no tag
+for either and must not gain one; and `ReturnTween` is `ReturnSignal`'s split
+again, one entity wrapped per language.
+
+`ContextActionService`'s two reporting methods went the same way and are worth
+their own sentence, because they had been described as impossible: a record
+holding `Enum.KeyCode` members has no `ScriptValue` form, so the *record* became
+a `BoundActionReport` and each adapter builds its own — exactly what
+`InputReport` already did for an `InputObject`. The rule that fell out is that a
+record with a datatype in it wants a report struct, not a widened wire format.
+
 Five rules a reviewer should hold to:
 
-- **`ServiceSurface::LuauMethods` is a debt and reads as one.** A row there is a
-  method JavaScript does not have, which is the honest shape for a service that
-  is part way across — and it is the first place `TeleportService::
-  GetTeleportData` could have been declared rather than described in a comment.
-  `ContextActionService`'s two reporting methods are all that is left in it.
-  Moving a row out of it is what gives the other language that method.
+- **`ServiceSurface::LuauMethods` is down to one service, and that one is not a
+  debt.** A row there is a method JavaScript does not have, which was the honest
+  shape for a service part way across — `RunService`, `TweenService`, `Debris`,
+  the bus four and `ContextActionService`'s two reporting methods each sat there
+  and each moved. What is left is `BreakpointService`'s four, whose JavaScript
+  half cannot exist for the reason below. A row *added* to that span is a claim
+  that a method cannot cross, and it needs the same kind of argument.
 - **A property list is data and a property *name* must not appear in an
   adapter.** `LuauServiceIndex` and `InstallJsServiceProperties` walk
   `ServiceSurface::Properties` and know nothing else; a `if (field == "Volume")`
   in either would be the second source of truth the whole arrangement exists to
-  prevent, one level up from `Instances.cpp`'s rule about `PropertyType`.
+  prevent, one level up from `LuauInstances.cpp`'s rule about `PropertyType`.
 - **A binding is not a pump, and shipping one without the other is the failure
-  this module names twice.** `CrossWorldService.MessageReceived` needed
+  this module names twice.** `CrossWorldService`'s channel signal needed
   `PumpJsDeliveries` to learn `BusKind::Channel`; `ContextActionService` needed
-  a JavaScript input pump to exist at all; `UserInputService`'s five signals
+  a JavaScript input pump to exist at all; `UserInputService`'s six signals
   needed that pump to grow the whole of `PumpInput`'s signal half in the same
   commit. A service installed in a VM that cannot deliver to it is
   `InputChanged` again.
+- **A dynamic set of signals is a `Connection::Property` filter, not a signal
+  kind each.** `CrossWorldService:OpenChannel(name)` hands back the signal for
+  one channel, and both pumps fire only the connections carrying that name — the
+  mechanism `GetPropertyChangedSignal` has had since v0.6 and
+  `GetAttributeChangedSignal` already reuses for a name the engine never
+  declared. The catch-all `MessageReceived` it replaced could not be kept beside
+  it: a message on a channel this world never opened is refused at the *bus*, so
+  a signal promising "anything addressed to this world" would fire for exactly
+  the channels a script had already named, reached by a route that cannot say
+  which one arrived. `FireSignal` and `FireJsSignal` take the filter, so a third
+  hand-written filtered fire beside `FireInputSignal`'s two was not added.
 - **`ScriptValue` is a payload on this interface and never a handle.**
   `ReadValue`/`ReturnValue` carry the tree `HttpService` writes as JSON and
   `CrossWorldService` puts on a bus — values that already leave a world. It has
-  no tag for an `EnumItem` and must not gain one, which is why
-  `GetBoundActionInfo` is still written twice: its record holds `Enum.KeyCode`
-  members, and a return type invented for one service's shape is what the
-  interface is not for. **`ScriptCall::ReturnEnum` is not a counter-example and
-  the difference is the point**: one member handed back from a method crosses
-  nothing, so each VM builds its own `EnumItem` and no wire format learns about
-  enums. A *record* holding them still has no neutral form.
+  no tag for an `EnumItem` and must not gain one. `GetBoundActionInfo` is the
+  case that pressed on it: its record holds `Enum.KeyCode` members, and it was
+  written twice for two versions on the argument that a return type invented for
+  one service's shape is what the interface is not for. What closed it is not a
+  widened `ScriptValue` and not a record return — it is
+  `ScriptCall::ReturnBoundAction` over a `BoundActionReport`, which is the shape
+  `ReturnInputObjects` already had: the *fact* is one struct and only the wrapper
+  is two. **`ScriptCall::ReturnEnum` is the same point one size down**: one member
+  handed back from a method crosses nothing, so each VM builds its own `EnumItem`
+  and no wire format learns about enums.
 - **A return is added when a caller asks and never before.** `ReturnVector2`,
   `ReturnEnum`, `ReturnEnums` and `ReturnInputObjects` arrived with
-  `UserInputService`'s six methods, each named by exactly one of them. A pure
-  virtual with no caller is a line every adapter has to satisfy the compiler with
-  and nobody has to get right.
+  `UserInputService`'s seven methods; `Role`, `Tweens`, `Debris`, `Subscriptions`,
+  `AsTweenInfo`, the two record readers, `ReturnTween`, `ReturnBoundAction`,
+  `ForgetSubject` and `Await` arrived with the seven services that stopped being
+  written twice. Each names its caller in its own comment, so a member nothing
+  calls any more is a member with a lie above it. A pure virtual with no caller
+  is a line every adapter has to satisfy the compiler with and nobody has to get
+  right.
 
-**`BreakpointService` stays Luau-only for a reason that is not a binding.**
-`Debugger::Add` refuses a `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` chunk, so a
-JavaScript binding would answer "nothing can be armed" to everything — the
-surface `HttpService`'s absent three are refused for being.
+**`BreakpointService` stays Luau-only for a reason that is not a binding, and it
+is the only row that does.** `Debugger::Add` refuses a `.js`, `.mjs`, `.cjs`,
+`.ts` or `.tsx` chunk, so a JavaScript binding would answer "nothing can be
+armed" to everything — the surface `HttpService`'s absent three are refused for
+being. `DEFERRED.md` D00106 carries what closing it would take.
 
-**The nine that moved are the nine JavaScript did not have**: `GetPivot`,
+**The shared half of a service is shared machinery, and there are seven of them
+now.** `SignalTable`, `ChangeQueue`, `TaskQueue`, `ActionStack`,
+`TopicSubscriptions`, `TweenTable` and `DebrisQueue` each hold an ordering a
+recording depends on with the callables left opaque. A service
+whose per-language halves differ only in where a list lives is a service whose
+list belongs in one of these — `MessagingService` was a Lua registry table on one
+side and an `unordered_map` on the other, and neither half decided anything a
+language decides.
+
+**Nothing in the catalogue is installed per language any more**, which is what
+`ServiceCatalogue.cpp`'s `Row` says by having no `JavaScript` field: every
+`Always` row is a `ServiceSurface`, the JavaScript walk installs surfaces and
+nothing else, and the one `Luau` pointer left is the studio row's. A pointer
+nothing sets is a hole the next service falls into rather than describing itself.
+
+**The nine that moved first are the nine JavaScript did not have**: `GetPivot`,
 `PivotTo`, `AddTag`, `RemoveTag`, `HasTag`, `GetAttribute`, `SetAttribute`,
-`GetAttributes` and `GetAttributeChangedSignal`. The other twenty-one stay where
-they are and migrate one at a time, so the engine works at every step.
+`GetAttributes` and `GetAttributeChangedSignal`. The other twenty-one migrated
+one at a time so the engine worked at every step, and **the last twenty crossed
+at v0.18**. There is no per-VM instance method table left: `LuauInstances.cpp` keeps
+the property surface, the signal branches and `Instance.new`; `JsSurface.cpp`
+keeps their JavaScript twins; and the only list either one still builds is
+signals. `ScriptMethods.cpp` and `GuiMethods.cpp` are the table, split by what a
+method has to reach rather than by size.
 
-**Three of the twenty-one are not a straight lift, and each is a decision rather
-than a chore:**
+**Three of the twenty were not a straight lift, and each was a decision rather
+than a chore. All three are answered, and how is worth keeping:**
 
 - **`Destroy` and `ClearAllChildren` release the VM's own callback refs.**
   `ForgetSubtree` takes a lambda that is `lua_unref` on one side and an index
   into `JsContext::Callables` on the other, so the interesting half of both
   methods is per-language by construction. What crosses is an entity and a
-  request to forget it, which wants a `Forget(subtree)` on `ScriptCall` rather
-  than a return.
-- **`GetPropertyChangedSignal` would change JavaScript's behaviour on the way
-  through.** Luau refuses a name that is not a *scriptable* property and
-  JavaScript compares `PropertyDescriptor::Name` and ignores `Scriptable`, so
-  the two already disagree about what a script may watch. Migrating it fixes
-  that, which is a good change and not a silent one.
-- **`SetNetworkOwner` takes an optional instance, and the two refuse differently
-  today.** `CheckInstance` raises for a non-instance where `JsEntityOf` answers
-  a null entity for anything at all, which is why the JavaScript half carries a
-  hand-written guard the Luau half does not need. One reader would settle it,
-  and settling it is a behaviour change to state rather than to slip in.
+  request to forget it, and that is `ScriptCall::Forget` — the `Forget(subtree)`
+  shape this file predicted, arriving with the caller that needed it. The *walk*
+  is shared now, which is what stops a grandchild's connections outliving the row
+  they watched in one language and not the other.
+- **`GetPropertyChangedSignal` changed JavaScript's behaviour on the way
+  through, and that is a change to state rather than to slip in.** Luau refused a
+  name that is not a *scriptable* property and JavaScript compared
+  `PropertyDescriptor::Name` and ignored `Scriptable`, so the two disagreed about
+  what a script may watch — a JavaScript script could watch `ShaderScript.Source`,
+  which the read path refuses by answering "no such member" precisely so an error
+  cannot tell a program what is there to reach for. `ScriptableProperty` is the
+  one reader now and JavaScript gets the stricter answer.
+- **`SetNetworkOwner` took an optional instance and the two refused
+  differently.** `CheckInstance` raised for a non-instance where `JsEntityOf`
+  answered a null entity for anything at all, which is why the JavaScript half
+  carried a hand-written guard the Luau half did not need. `IsNil` then
+  `AsInstance` are the two questions it was really asking, and asking them in
+  that order is one body that refuses in both.
+
+**One loop replaced three, and finding that was worth more than the migration.**
+`LuauInstances.cpp`, `TweenService.cpp` and the JavaScript half of
+`GetPropertyChangedSignal` each walked `PropertiesOf` looking for a spelling, and
+the third of them had already drifted. `ScriptableProperty` is the one door, and
+the rule it carries is the one this module has always stated: **a non-scriptable
+property is not found, rather than found and refused.**
 
 ## What a script may not do is the design
 
@@ -315,7 +424,7 @@ should look the same rather than inventing a route.
 
 **What the tier decides is scope, not plumbing.** A member needing a *node* the
 audio graph does not have cannot be honestly bound however the seam is shaped, so
-`SoundService.cpp` names the eleven Roblox members it does not have and what each
+`SoundService.cpp` names every Roblox member it does not have and what each
 would need first — a filter node for reverb, a Doppler node for `DopplerScale`, a
 shape in the emitter for `VolumetricAudio`, and for `PlayLocalSound` something
 that reports a sound has finished. That list is the file's most useful half, and
@@ -332,9 +441,28 @@ clean against a declaration that agreed with neither.
 
 That is what a datatype nobody built costs, and it is worth naming because the
 same shape is still open one door along: `PumpGuiEvents` passes nothing to a
-`TextButton`'s `InputBegan`, and `Bindings.hpp` says what closing it needs —
+`TextButton`'s `InputBegan`, and `LuauBindings.hpp` says what closing it needs —
 `gui::Router` recording which button produced an event, which is a change in
 `gui` rather than here.
+
+**`MouseButton1Click` is `Activated` under Roblox's other name, and one
+`SignalKind` serves both.** The router produces exactly one primary button, so
+the two questions have one answer here — and a second kind would be a second list
+for one event, where whichever name the pump did not know would never fire. That
+is the rule for a synonym: **two spellings of one signal, never two lists.**
+
+**`GuiObject.InputChanged` is absent and that is the same rule from the other
+side.** Roblox's fires for pointer motion *and* for the wheel over an element;
+`gui::Router` produces motion only, and `MouseMoved` already carries it with the
+position an argument-less signal could not. Half a member under a familiar name
+is what `SoundService.cpp` keeps a list of refusing.
+
+**`engine.script.guisurface` is where a gui signal stops being a claim.** It
+stands a world up, lays it out, compiles the list, drives a real `gui::Router`
+with a pointer and hands what comes out to `Runtime::DeliverGuiEvents` — so every
+one of the seven names above is asserted to have *fired*, in both languages, from
+one script. A suite that synthesised a `GuiEvent` would pass against a router
+nothing calls, which is exactly the bug that shipped.
 
 **A signal that exists and never fires is the same failure wearing a different
 hat.** `InputChanged` was reachable and connectable from v0.10 and nothing ever
@@ -343,13 +471,74 @@ their edges since the same version. Both read as a broken engine rather than as
 an unfinished one, which is the trade `v0.5` records for `Heartbeat` and the
 reason `CollectionService` has no `GetInstanceAddedSignal`.
 
-**The five signals are one `SignalKind` told apart by name, in both languages.**
+**The six signals are one `SignalKind` told apart by name, in both languages.**
 `ServiceSignal::Property` is what carries the filter, `PumpInput` and
 `PumpJsInput` fire the row that matches, and the four report builders —
 `KeyReport`, `ButtonReport`, `MotionReport`, `WheelReport` — live in `Actions.cpp`
 because two pumps building a report each is two answers to what a frame did. An
 engine where a click carried a position in one language and not the other is one
 nobody could port a handler between.
+
+**`gameProcessedEvent` is real, and what backs it is the router's own events.**
+Roblox's second argument was passing nothing at all, so a handler written
+`function(input, gameProcessed)` — the form every Roblox place uses — read nil on
+every edge and treated a click on its own menu as a click on the world.
+Swallowing the click instead would have been the other wrong answer; the right
+one is to deliver it *marked*. So both pumps are handed this beat's
+`PendingGuiEvents` and ask `InterfaceHasPointer` once, because an event naming an
+element is the only record there is of a press having been taken — `gui::Router`
+emits one exactly when the pointer is over or pressed on something that takes
+input, and `MouseLeave` is the one kind that means the opposite.
+
+**A key is never game-processed, and that is a gap named rather than a decision.**
+`gui` has no keyboard focus: `Router` holds a hover and a press, and a `TextBox`
+is a class that draws. Closing it needs the router to hold a focused element and
+release it on a press elsewhere, which is a change in `gui` — and until then a key
+is honestly unprocessed. `IsPointerReport` is the filter that keeps the answer
+from leaking onto one.
+
+**A bound action's return value decides who else hears the key.** The pump called
+the winner with `lua_pcall(..., 0, 0)` and a `JS_Call` whose result it freed
+unread, so `Enum.ContextActionResult` was unspellable and the case
+`ContextActionService` exists for was unsolvable in the interesting direction: a
+vehicle nobody is driving wants to let E through to the door it is parked beside.
+`ActionStack::ClaimingFrom` is the walk, `Pass` continues it, and `Sink`, nil or a
+handler that raised stop it — a raise sinks because handing the key down on the
+strength of a crash would make a broken script change which *other* script runs.
+
+**A signal that fires every frame is `InputChanged` wearing the other hat.**
+`LastInputTypeChanged` is an edge over `InputState::LastSource`, and the roll that
+makes it one lives in `input::Translator::BeginFrame` beside the other three —
+`input/AGENTS.md` states it from that side. A version that fired on the value
+rather than the change would fire on every frame the player was doing anything.
+
+## A signal about a thing that is destroyed cannot be queued
+
+`Player.CharacterAdded` and `CharacterRemoving` arrive by two different routes,
+and the split is forced rather than stylistic — it is `PlayerAdded` and
+`PlayerRemoving`'s split, one class along, for a sharper reason.
+
+- **`CharacterAdded` is queued.** `scene::SetPlayerCharacter` records it —
+  `scene` is L7 and cannot fire a signal — and `PumpCharacters` drains it at the
+  barrier, after `PumpTree`, so a handler indexing `character.Humanoid` sees a
+  world whose tree signals have already agreed the model is there.
+- **`CharacterRemoving` rides `Store::OnDescendantRemoving`.** Dying in this
+  engine *is* the model being destroyed, so a queue drained a tick later hands a
+  handler an instance it cannot read a single property off. The first version did
+  exactly that and the Luau half raised *"'Name' is not a valid member of this
+  instance"* on the second spawn of `engine.script.scriptcall`.
+
+**The two are disjoint and nothing fires twice.** The pump skips a change whose
+model is no longer alive, which is every removal the hook already reported; what
+is left for the pump is the release that did *not* destroy —
+`player.Character = nil` — which the hook cannot see. `PlayerLosingCharacter` is
+the filter, and the gate on the *nearest* ancestor is what makes it fire once
+rather than once per level of the tree.
+
+**A signal about something being torn down belongs on the hook, not the queue.**
+That is the general rule this pair establishes, and `Changes.hpp` already permits
+it: nothing is half-written at `OnDescendantRemoving`, because nothing has been
+written.
 
 ## The debugger captures, and `BreakpointService` is the same object
 
@@ -435,6 +624,38 @@ are installed flat on *every* instance, and `Play` is a name Roblox puts on
 three classes — claiming it there would take it from every part, sound and
 animation in the engine. Three small methods written twice is the cheaper of
 the two, and it is what `RBXScriptConnection` already pays.
+
+**`GuiObject`'s three tween methods go the other way, and the difference is the
+name.** `TweenPosition`, `TweenSize` and `TweenSizeAndPosition` are neutral rows
+in `GuiMethods.cpp`, because none of those three names collides with anything and
+each is a `TweenService:Create` a script would otherwise write by hand. They build
+`TweenGoal`s through `ScriptCall::ReadProperty` — the argument is read as the
+*target's own* `Position` or `Size`, so none of the three names a datatype and
+`TweenSize` on a `BasePart` tweens a `Vector3` — and then go through
+`TweenTable::Create` and `Play` like everything else. **There is no second
+interpolator, no second easing table and no second drain**, which is the rule to
+hold to: a convenience method that animated a property itself would be a second
+answer to what half way between two `UDim2`s means.
+
+**`override` needed two methods on the table and `callback` needed one on the
+interface.** `TweenTable::Driving` and `CancelFor` are what Roblox's flag
+actually asks — is something already animating this object, and stop it — and
+`ScriptCall::ConnectOnce` is the completion callback, which is a `:Once` on the
+tween's `Completed` rather than a second delivery path. Neither is a shortcut: a
+`override` that ignored its argument and a `callback` that was read and dropped
+are both members that exist and do nothing.
+
+**The *service* is neutral and the handle is not, and the two live in three
+files that each say which they are.** `TweenService.cpp` is the surface —
+`GetValue`, `Create` and the goal policy, with no VM in it — and `LuauTween.cpp`
+and `JsTween.cpp` are the handle. `ScriptCall::ReturnTween` is where they meet,
+which is the split `ReturnSignal` was already on: one entity, two wrappers.
+
+**`PumpDebris` is one function and `PumpTweens` is two, which is the same rule
+from the other side.** Draining debris destroys instances and fires nothing, so
+it takes a store and a queue and both runtimes call it; a tween's `Completed` is
+a signal, and calling a callable is the half no shared function can do. A pump
+that ends up written twice should be asked which of the two it is.
 
 **Both queues are capped, and they fail in opposite directions on purpose.**
 `TweenTable` reclaims the oldest *finished* tween and refuses when every record

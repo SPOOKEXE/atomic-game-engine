@@ -150,6 +150,30 @@ TEST_CASE("a fresh state reports nothing down", "[scene][input]") {
 	CHECK(state.Focused);
 	CHECK(state.Behaviour == MouseBehavior::Default);
 	CHECK(state.WheelDelta == 0.0f);
+
+	// **The two that travel towards the window default to what a window does
+	// without being asked**, so a world nobody has scripted draws its pointer and
+	// leaves it free.
+	CHECK(state.MouseIconEnabled);
+	CHECK(state.LastSource == InputSource::Keyboard);
+	CHECK_FALSE(state.WasLastSourceChanged());
+}
+
+TEST_CASE("the device change is an edge and not a value", "[scene][input]") {
+	// **`LastInputTypeChanged` is the difference between two frames**, exactly as
+	// the focus pair is — a place swaps "press E" for "click here" on the moment
+	// the answer changed, not on the answer. A state that reported a change while
+	// the two agreed would fire it every frame.
+	InputState state;
+	state.LastSource = InputSource::MouseMovement;
+	CHECK(state.WasLastSourceChanged());
+
+	state.PreviousLastSource = state.LastSource;
+	CHECK_FALSE(state.WasLastSourceChanged());
+
+	// And it changes back, which is the case a one-way flag would miss.
+	state.LastSource = InputSource::Keyboard;
+	CHECK(state.WasLastSourceChanged());
 }
 
 TEST_CASE("every key name round-trips", "[scene][input]") {

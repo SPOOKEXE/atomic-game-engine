@@ -232,7 +232,7 @@ That is what makes a module a thing in the tree rather than a thing on disk, and
 it is why `require` takes an instance and never a string.
 
 `Players.LocalPlayer` is a **computed property**, not a script-side special case.
-`Instances.cpp` switches on `PropertyType` and nothing else, so declaring it in
+`LuauInstances.cpp` switches on `PropertyType` and nothing else, so declaring it in
 `scene` made it readable from Luau, from JavaScript and in the properties panel
 with none of them changing. It is read-only and nil on a server: a `Script`
 reaching for it gets nothing rather than somebody else's player, which is the one

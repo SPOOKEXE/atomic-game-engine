@@ -2,7 +2,7 @@
 //
 // **The universe is the game and a world is a scene**, which is the mapping a
 // script already sees through `game` and `workspace`. Nothing here invents a
-// second vocabulary — `script/src/Services.cpp` established it at v0.6 and the
+// second vocabulary — `script/src/RunService.cpp` establishes it and the
 // explorer draws the same objects.
 //
 // **Every one of these runs on the caller's thread, inside a frame or a tick.**

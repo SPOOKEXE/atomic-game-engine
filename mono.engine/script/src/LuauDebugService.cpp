@@ -31,7 +31,7 @@
 // Neither is a wrapper over the other's storage. Both write the same
 // `Debugger`, which is the object the runtime consults.
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>

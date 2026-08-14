@@ -397,3 +397,54 @@ TEST_CASE("what is not a collector is copied and never cleared", "[gui][services
 	CHECK(ResetPlayerGui(world.Data, world.Player) == 0);
 	CHECK(world.FindIn(world.PlayerGui, "Assets") == copied);
 }
+
+TEST_CASE("two players hold two interfaces and three spawns keep them apart", "[gui][services]") {
+	// **The multiplayer half, which is the whole reason `StarterGui` is a
+	// template.** A one-player check passes against the version this replaced,
+	// where every client drew the template's own instances — so a script hiding
+	// one player's health bar hid everybody's.
+	//
+	// **Three spawns rather than two**, because a survivor has to keep its
+	// identity for as long as it lives and not merely across the first death: a
+	// reset that re-cloned every other time would pass a two-spawn test.
+	SpawnWorld world("gui.spawn.two");
+
+	const auto plain = engine::ecs::Classes::Find(engine::core::Name("Instance"));
+	const Entity second = world.Data.CreateInstance(plain, "Somebody Else");
+	const Entity secondGui = world.Data.CreateInstance(plain, std::string(PLAYER_GUI));
+	world.Data.SetParent(secondGui, second);
+
+	world.Collector(world.Starter, "Hud", true);
+	world.Collector(world.Starter, "Minimap", false);
+
+	REQUIRE(ResetPlayerGui(world.Data, world.Player) == 2);
+	REQUIRE(ResetPlayerGui(world.Data, second) == 2);
+
+	// Four copies of two templates, and no two of them are the same instance.
+	const Entity mineHud = world.FindIn(world.PlayerGui, "Hud");
+	const Entity mineMap = world.FindIn(world.PlayerGui, "Minimap");
+	const Entity theirsHud = world.FindIn(secondGui, "Hud");
+	const Entity theirsMap = world.FindIn(secondGui, "Minimap");
+
+	REQUIRE(mineHud != engine::ecs::NULL_ENTITY);
+	REQUIRE(theirsHud != engine::ecs::NULL_ENTITY);
+	CHECK(mineHud != theirsHud);
+	CHECK(mineMap != theirsMap);
+	CHECK(mineHud != world.FindIn(world.Starter, "Hud"));
+
+	// Two more lives for the first player, and the second's is untouched by
+	// either — a reset that reached the template rather than the copy would
+	// show up here and nowhere else.
+	CHECK(ResetPlayerGui(world.Data, world.Player) == 1);
+	CHECK(ResetPlayerGui(world.Data, world.Player) == 1);
+
+	CHECK(world.CountIn(world.PlayerGui) == 2);
+	CHECK(world.CountIn(secondGui) == 2);
+	CHECK(world.FindIn(world.PlayerGui, "Minimap") == mineMap);
+	CHECK(world.FindIn(world.PlayerGui, "Hud") != mineHud);
+	CHECK(world.FindIn(secondGui, "Hud") == theirsHud);
+	CHECK(world.FindIn(secondGui, "Minimap") == theirsMap);
+
+	// The template is still exactly two, after five resets.
+	CHECK(world.CountIn(world.Starter) == 2);
+}

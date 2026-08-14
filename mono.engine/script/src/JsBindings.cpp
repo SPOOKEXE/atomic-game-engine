@@ -12,7 +12,9 @@
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -126,6 +128,10 @@ namespace engine::script {
 		return ValueOf<core::Rect>(context, value, JsOf(context).RectClass);
 	}
 
+	core::TweenInfo *AsTweenInfo(JSContext *context, JSValueConst value) {
+		return ValueOf<core::TweenInfo>(context, value, JsOf(context).TweenInfoClass);
+	}
+
 	// The three `effects` is authored in, and the same gap again: `JsDatatypes.cpp`
 	// has installed the constructors and the class ids since v0.6, and what was
 	// missing was the pair that carries a property's bytes — which is why a
@@ -170,7 +176,7 @@ namespace engine::script {
 		// side is. No property is named in either file, which is what makes one
 		// property declaration reach both languages.
 
-		// How wide a property value can be. See `Instances.cpp`, which carries
+		// How wide a property value can be. See `LuauInstances.cpp`, which carries
 		// the whole argument — this is the same constant on the other language's
 		// side, and the two being spelled from the same two `sizeof`s is what
 		// stops a property that reads in Luau failing in JavaScript.
@@ -416,13 +422,13 @@ namespace engine::script {
 
 		// --- instances -------------------------------------------------------
 
-		// Text, not an interned id, for the reason `Instances.cpp`'s twin gives
+		// Text, not an interned id, for the reason `LuauInstances.cpp`'s twin gives
 		// at length: building the id takes a lock on the process-wide registry,
 		// and this is on the path of every property a script reads or writes.
 		// The two surfaces share rules rather than code, and this is one of the
 		// rules.
 		// **A non-scriptable property is not found here either.** The two
-		// surfaces share rules rather than code — `Instances.cpp`'s twin
+		// surfaces share rules rather than code — `LuauInstances.cpp`'s twin
 		// carries why the answer is "no such member" rather than a refusal.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, const char *name) {
 			const std::string_view key(name);
@@ -971,184 +977,6 @@ namespace engine::script {
 		//
 		// The only way out of a world, for the reason the Luau side gives:
 		// a script holds one `Store` and no binding hands it another.
-		JSValue PublishAsync(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			if (argc < 2) {
-				return JS_ThrowTypeError(context, "PublishAsync needs a topic and a message");
-			}
-
-			const char *topic = JS_ToCString(context, argv[0]);
-			if (topic == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			// **Through the codec, not `JS_ToCString`.** v0.5 stringified the
-			// message because the codec did not exist, which meant an object
-			// crossed as `"[object Object]"` and a function crossed as its own
-			// source — both accepted, both meaningless on the far side. The
-			// codec refuses each by name instead, and an object crosses as the
-			// map a Luau subscriber receives.
-			ScriptValue tree;
-			CodecStatus why = CodecStatus::Ok;
-
-			if (!ToScriptValue(context, argv[1], tree, 0, why)) {
-				JSValue error =
-					JS_ThrowTypeError(context, "the value cannot cross a world boundary: %s", Describe(why));
-				JS_FreeCString(context, topic);
-				return error;
-			}
-
-			std::vector<std::byte> payload;
-			if (const CodecStatus status = Encode(tree, payload); status != CodecStatus::Ok) {
-				JSValue error = JS_ThrowTypeError(
-					context, "the value cannot cross a world boundary: %s", Describe(status)
-				);
-				JS_FreeCString(context, topic);
-				return error;
-			}
-
-			world::Postbox box(*JsOf(context).World);
-			const bool sent = box.Publish(topic, payload);
-
-			JSValue error = JS_UNDEFINED;
-			if (!sent) {
-				// Over budget. Named rather than silent: each bus gives a world
-				// an allowance per tick, and a publish that vanished would look
-				// like a subscriber that never fired.
-				error = JS_ThrowTypeError(context, "PublishAsync: over this world's budget for '%s'", topic);
-			}
-
-			JS_FreeCString(context, topic);
-			return sent ? JS_UNDEFINED : error;
-		}
-
-		// TeleportService.Teleport(placeName, player, data?)
-		//
-		// The Luau side in `Services.cpp` carries the argument for every line of
-		// this; what is here is the same operation through QuickJS's calling
-		// convention. **Both languages or neither**: the engine's own record
-		// says a surface promised in a declaration file and missing from one run
-		// time survives two versions before anybody notices, so a
-		// `TeleportService` a Luau script could reach and a JavaScript one could
-		// not is the exact shape of that bug.
-		JSValue Teleport(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			if (argc < 2) {
-				return JS_ThrowTypeError(context, "Teleport needs a place name and a player");
-			}
-
-			const char *place = JS_ToCString(context, argv[0]);
-			if (place == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			ecs::Store &store = *JsOf(context).World;
-			const ecs::Entity player = JsEntityOf(context, argv[1]);
-
-			if (!store.Alive(player) || !store.IsA(player, scene::PlayerClass())) {
-				JS_FreeCString(context, place);
-				return JS_ThrowTypeError(context, "Teleport: the second argument must be a Player");
-			}
-
-			world::Postbox box(store);
-			if (box.IsReplica() || store.AdoptOnly()) {
-				JS_FreeCString(context, place);
-				return JS_ThrowTypeError(
-					context, "Teleport: this world is a replica and does not decide who is in it"
-				);
-			}
-
-			ScriptValue envelope{ValueTag::Map};
-
-			ScriptValue label{ValueTag::String};
-			const core::Name name = store.InstanceNameOf(player);
-			label.Text = name.IsValid() ? std::string(name.Text()) : std::string("Player");
-			envelope.Entries.emplace_back("Player", std::move(label));
-
-			if (argc >= 3 && !JS_IsUndefined(argv[2]) && !JS_IsNull(argv[2])) {
-				ScriptValue data;
-				CodecStatus why = CodecStatus::Ok;
-				if (!ToScriptValue(context, argv[2], data, 0, why)) {
-					JS_FreeCString(context, place);
-					return JS_ThrowTypeError(
-						context, "Teleport: the data cannot cross a world boundary: %s", Describe(why)
-					);
-				}
-				envelope.Entries.emplace_back("Data", std::move(data));
-			}
-
-			std::vector<std::byte> payload;
-			if (const CodecStatus status = Encode(envelope, payload); status != CodecStatus::Ok) {
-				JS_FreeCString(context, place);
-				return JS_ThrowTypeError(
-					context, "Teleport: the data cannot cross a world boundary: %s", Describe(status)
-				);
-			}
-
-			const bool queued = box.Teleport(place, payload).Value != world::Ticket::NONE;
-			if (!queued) {
-				JSValue error =
-					JS_ThrowTypeError(context, "Teleport: over this world's budget for '%s'", place);
-				JS_FreeCString(context, place);
-				return error;
-			}
-			JS_FreeCString(context, place);
-
-			// Removed here for the reason the Luau side gives: the two worlds
-			// cannot reach each other, so only this one can stop the player
-			// being in both.
-			(void)scene::RemoveCharacter(store, player);
-			store.DestroyInstance(player);
-			return JS_UNDEFINED;
-		}
-
-		// TeleportService.GetLocalPlayerTeleportData()
-		JSValue GetLocalPlayerTeleportData(JSContext *context, JSValueConst, int, JSValueConst *) {
-			ecs::Store &store = *JsOf(context).World;
-
-			const auto *local = store.Resource<scene::LocalPlayer>();
-			if (local == nullptr || !store.Alive(local->Instance)) {
-				return JS_NULL;
-			}
-
-			const ecs::Entity held = store.FindFirstChild(local->Instance, "TeleportData");
-			const auto *text = held == ecs::NULL_ENTITY ? nullptr : store.Get<scene::TextContent>(held);
-			if (text == nullptr || text->Value.empty()) {
-				return JS_NULL;
-			}
-
-			const auto *bytes = reinterpret_cast<const std::byte *>(text->Value.data());
-
-			ScriptValue value;
-			if (Decode({bytes, text->Value.size()}, value) != CodecStatus::Ok) {
-				return JS_NULL;
-			}
-
-			return FromScriptValue(context, value);
-		}
-
-		JSValue SubscribeAsync(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			if (argc < 2 || !JS_IsFunction(context, argv[1])) {
-				return JS_ThrowTypeError(context, "SubscribeAsync needs a topic and a function");
-			}
-
-			const char *topic = JS_ToCString(context, argv[0]);
-			if (topic == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			JsContext &bound = JsOf(context);
-			world::Postbox box(*bound.World);
-			if (!box.Subscribe(topic)) {
-				JSValue error =
-					JS_ThrowTypeError(context, "SubscribeAsync: over this world's budget for '%s'", topic);
-				JS_FreeCString(context, topic);
-				return error;
-			}
-
-			bound.Subscriptions[topic].push_back(Retain(context, argv[1]));
-			JS_FreeCString(context, topic);
-			return JS_UNDEFINED;
-		}
-
 		JSValue Print(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			std::string line;
 			for (int index = 0; index < argc; index++) {
@@ -1426,49 +1254,6 @@ namespace engine::script {
 		return MakeEnumItem(context, enumName, member);
 	}
 
-	// --- the services, one installer each --------------------------------------
-	//
-	// **One function per service, and that is what `ServiceCatalogue.cpp` needs
-	// to name.** These were three anonymous blocks inside `OpenJsBindings` and
-	// two more inside `InstallJsServices`, which is a list of services written as
-	// control flow — unnameable, so the catalogue could not point at them, and
-	// invisible to anything asking what this language actually binds.
-	//
-	// They stay in this file rather than moving beside their Luau twins, because
-	// the handlers they name are in the anonymous namespace above and are this
-	// translation unit's. What the two halves share is the *catalogue*, not a
-	// file.
-
-	void OpenJsMessagingService(JSContext *context, JSValueConst global) {
-		// The Universe's bus, not this world's.
-		JSValue service = JS_NewObject(context);
-		JS_SetPropertyStr(
-			context, service, "PublishAsync", JS_NewCFunction(context, PublishAsync, "PublishAsync", 2)
-		);
-		JS_SetPropertyStr(
-			context, service, "SubscribeAsync", JS_NewCFunction(context, SubscribeAsync, "SubscribeAsync", 2)
-		);
-		JS_SetPropertyStr(context, global, "MessagingService", service);
-	}
-
-	void OpenJsTeleportService(JSContext *context, JSValueConst global) {
-		// The only bus operation that names a world.
-		//
-		// **`GetTeleportData` is missing here and present in Luau**, which is one
-		// of the drifts the catalogue exists to make visible rather than to
-		// excuse. It is the authority's half of the call — what arrived with a
-		// player somebody else sent — and a JavaScript server cannot ask it.
-		JSValue service = JS_NewObject(context);
-		JS_SetPropertyStr(context, service, "Teleport", JS_NewCFunction(context, Teleport, "Teleport", 3));
-		JS_SetPropertyStr(
-			context,
-			service,
-			"GetLocalPlayerTeleportData",
-			JS_NewCFunction(context, GetLocalPlayerTeleportData, "GetLocalPlayerTeleportData", 0)
-		);
-		JS_SetPropertyStr(context, global, "TeleportService", service);
-	}
-
 	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role) {
 		auto *bound = new JsContext();
 		bound->World = &store;
@@ -1587,9 +1372,9 @@ namespace engine::script {
 			// property prevents for components, and there is no such mechanism for
 			// a library constant — so the only thing keeping `Vector3.zero`
 			// meaning the same in both languages is that both are written here and
-			// in `Values.cpp` from `core::Vector3`'s own members.
+			// in `LuauValues.cpp` from `core::Vector3`'s own members.
 			//
-			// Lowercase, because Roblox's are. `Values.cpp` carries the argument.
+			// Lowercase, because Roblox's are. `LuauValues.cpp` carries the argument.
 			JS_SetPropertyStr(context, table, "zero", MakeVector3(context, core::Vector3::Zero));
 			JS_SetPropertyStr(context, table, "one", MakeVector3(context, core::Vector3::One));
 			JS_SetPropertyStr(context, global, "Vector3", table);
@@ -1632,7 +1417,7 @@ namespace engine::script {
 			JS_SetPropertyStr(context, global, "CFrame", table);
 		}
 
-		// Before anything constructs a `Postbox` — see `Services.cpp` for what
+		// Before anything constructs a `Postbox` — see `ServiceCatalogue.cpp` for what
 		// happens otherwise, which is an abort in an unrelated test.
 		world::RegisterMailboxTypes();
 
@@ -1716,7 +1501,7 @@ namespace engine::script {
 		}
 
 		// workspace — **this world's `Workspace` service**, and until v0.7 it
-		// was a plain object standing for the world itself. `Bindings.hpp`
+		// was a plain object standing for the world itself. `LuauBindings.hpp`
 		// carries the whole reason the two were collapsed; the short version is
 		// that a world now has a real `Workspace` instance, keeping both meant
 		// two answers to "what is in the scene", and the renderer listened to
@@ -1807,31 +1592,6 @@ namespace engine::script {
 		return failure;
 	}
 
-	namespace {
-		// A stable, human-readable name for a bus refusal.
-		//
-		// §5: "Named, not swallowed." Each of these is something a script author
-		// has to be able to see and handle, so each arrives as a string beside
-		// the value rather than as a null that could mean three things.
-		const char *DescribeStatus(world::BusStatus status) {
-			switch (status) {
-			case world::BusStatus::Ok:
-				return "Ok";
-			case world::BusStatus::NotFound:
-				return "NotFound";
-			case world::BusStatus::Conflict:
-				return "Conflict";
-			case world::BusStatus::OverBudget:
-				return "OverBudget";
-			case world::BusStatus::NoSuchWorld:
-				return "NoSuchWorld";
-			case world::BusStatus::Unsupported:
-				return "Unsupported";
-			}
-			return "Unknown";
-		}
-	}
-
 	std::string PumpJsDeliveries(JSContext *context, ecs::Store &store) {
 		auto *bound = static_cast<JsContext *>(JS_GetContextOpaque(context));
 		if (bound == nullptr) {
@@ -1900,16 +1660,18 @@ namespace engine::script {
 				continue;
 			}
 
-			// **A channel message is delivered to the world rather than to a
-			// topic**, so it goes to one signal with no subject rather than to a
-			// list of subscribers keyed by name. See `SignalKind::
-			// CrossWorldMessage` and `CrossWorldService.cpp`.
+			// **A channel message goes to the channel's own connections**, which
+			// is one `SignalKind` with no subject filtered by name — the trick
+			// `getPropertyChangedSignal` and `getAttributeChangedSignal` are
+			// already on. Without the filter every listener in this world would
+			// hear every channel it had opened, which is the traffic separation
+			// `CrossWorldService` exists to provide.
 			//
 			// **Absent until v0.16, which is why the service could not be bound
 			// here.** `CrossWorldService` is described once now and both
-			// languages install it; a `MessageReceived` this pump never fired
-			// would have been a signal that exists and is silent, which reads as
-			// a broken engine rather than an unfinished one.
+			// languages install it; a channel signal this pump never fired would
+			// have been a signal that exists and is silent, which reads as a
+			// broken engine rather than an unfinished one.
 			if (delivery.Bus == world::BusKind::Channel) {
 				JSValue arguments[2];
 
@@ -1920,13 +1682,14 @@ namespace engine::script {
 
 				// **The sender's name, second, which is what makes a channel a
 				// channel.** A topic subscriber is told which topic; a channel
-				// receiver is told who to answer, because answering is the point
-				// and the destination already knows it is itself.
+				// receiver already knows the channel — it named it to get this
+				// handle — and what it cannot know is who to answer.
 				const std::string_view from = delivery.From.Text();
 				arguments[1] = JS_NewStringLen(context, from.data(), from.size());
 
-				std::string failure =
-					FireJsSignal(context, SignalKind::CrossWorldMessage, ecs::NULL_ENTITY, 2, arguments);
+				std::string failure = FireJsSignal(
+					context, SignalKind::CrossWorldMessage, ecs::NULL_ENTITY, 2, arguments, delivery.Key
+				);
 				if (!failure.empty() && firstError.empty()) {
 					firstError = std::move(failure);
 				}
@@ -1936,12 +1699,17 @@ namespace engine::script {
 				continue;
 			}
 
-			if (delivery.Bus != world::BusKind::Messaging || bound->Subscriptions.empty()) {
+			if (delivery.Bus != world::BusKind::Messaging || bound->Subscriptions.Empty()) {
 				continue;
 			}
 
-			const auto found = bound->Subscriptions.find(std::string(delivery.Key.Text()));
-			if (found == bound->Subscriptions.end()) {
+			// **From `TopicSubscriptions` rather than a map of this file's**,
+			// which is the same list `MessagingService.SubscribeAsync` writes in
+			// either language. What stays this file's is the lines that *call*
+			// one.
+			const std::string_view topic = delivery.Key.Text();
+			const std::span<const CallbackRef> listeners = bound->Subscriptions.Listeners(topic);
+			if (listeners.empty()) {
 				continue;
 			}
 
@@ -1954,9 +1722,9 @@ namespace engine::script {
 			arguments[0] = Decode(delivery.Payload, decoded) == CodecStatus::Ok
 							   ? FromScriptValue(context, decoded)
 							   : JS_NULL;
-			arguments[1] = JS_NewString(context, delivery.Key.Text().data());
+			arguments[1] = JS_NewStringLen(context, topic.data(), topic.size());
 
-			for (const CallbackRef callback : found->second) {
+			for (const CallbackRef callback : listeners) {
 				JSValue result = JS_Call(context, Held(context, callback), JS_UNDEFINED, 2, arguments);
 				if (JS_IsException(result)) {
 					JSValue thrown = JS_GetException(context);

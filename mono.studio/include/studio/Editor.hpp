@@ -9,7 +9,7 @@
 // shipped game because a default was optimistic. This is the thing that sets
 // it.
 //
-// **The universe is the game and a world is a scene.** `Bindings.hpp` already
+// **The universe is the game and a world is a scene.** `LuauBindings.hpp` already
 // maps `game` to `world::Universe` and `workspace` to the world a script runs
 // on; the explorer draws exactly that, so what an author sees in the tree and
 // what a script reaches through `game` are the same object rather than two

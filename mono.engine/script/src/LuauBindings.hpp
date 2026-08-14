@@ -12,9 +12,11 @@
 // property's name. That is the payoff for making a property a conversion.
 
 #include "Actions.hpp"
+#include "Bus.hpp"
 #include "Changes.hpp"
 #include "Codec.hpp"
 #include "Debris.hpp"
+#include "LuauTags.hpp"
 #include "ScriptCall.hpp"
 #include "ServiceCatalogue.hpp"
 #include "ServiceSurface.hpp"
@@ -46,116 +48,6 @@
 #include <vector>
 
 namespace engine::script {
-
-	// Userdata tags. Luau checks these on every access, so a `Color3` handed to
-	// something expecting a `Vector3` is caught by the VM rather than by a
-	// reinterpret_cast that happens to line up — the two are three floats each.
-	//
-	// **Values are explicit and must not be reordered.** Nothing serialises one,
-	// so this is not rule 4 — it is that a tag is compared against a userdata
-	// created earlier in the same process, and renumbering mid-edit is the kind
-	// of change that produces a type confusion nothing reports.
-	enum : int {
-		TAG_VECTOR3 = 1,
-		TAG_COLOR3 = 2,
-		TAG_CFRAME = 3,
-		TAG_INSTANCE = 4,
-
-		// **Retired at v0.7, and the number is held down rather than reused.**
-		// This tagged `workspace`, back when `workspace` was the world itself
-		// rather than an instance in it. It is a `TAG_INSTANCE` now — see
-		// `OpenWorkspace` for why the two notions were collapsed.
-		//
-		// Not deleted, because the paragraph above this enum gives the reason:
-		// a tag is compared against userdata created earlier in the same
-		// process, and handing 5 to a new type is how a type confusion nothing
-		// reports gets introduced.
-		TAG_WORLD_RETIRED = 5,
-
-		// v0.6's datatype vocabulary.
-		TAG_VECTOR2 = 6,
-		TAG_UDIM = 7,
-		TAG_UDIM2 = 8,
-		TAG_RECT = 9,
-		TAG_REGION3 = 10,
-		TAG_NUMBER_RANGE = 11,
-		TAG_NUMBER_SEQUENCE = 12,
-		TAG_COLOR_SEQUENCE = 13,
-		TAG_TWEEN_INFO = 14,
-		TAG_RAY = 15,
-		TAG_RANDOM = 16,
-
-		// The signal surface. A signal is a handle onto `SignalTable`; a
-		// connection is a handle onto one entry in it.
-		TAG_SIGNAL = 17,
-		TAG_CONNECTION = 18,
-
-		// One member of one enum, which is a pair of interned names.
-		TAG_ENUM_ITEM = 19,
-
-		// What a raycast is told to ignore.
-		TAG_RAYCAST_PARAMS = 20,
-
-		// One stop in a sequence.
-		//
-		// **Added at v0.10 because a particle emitter made the table form
-		// insufficient**, which is a reversal of the note above
-		// `ReadNumberKeypoint` and worth recording rather than quietly editing
-		// out. That note said two more userdata types for a value an author
-		// writes inline once was surface nobody asked for, and while a sequence
-		// was only ever constructed from a literal it was right.
-		//
-		// What changed is that a sequence is now a *property*: an emitter's
-		// `Transparency` is read back, and `emitter.Transparency.Keypoints[1]`
-		// handed back a bare `{time, value, envelope}` table — three anonymous
-		// numbers with no `typeof`, no way to tell one from a `ColorSequence`'s
-		// stop, and nothing to compare against. Reading a value back in a shape
-		// its own constructor accepts is the round trip a property surface owes,
-		// and the table form does not give it a name.
-		//
-		// The table form still works everywhere it did. Both constructors take
-		// either.
-		TAG_NUMBER_KEYPOINT = 21,
-		TAG_COLOR_KEYPOINT = 22,
-
-		// `UserInputService`, which is a userdata rather than a table.
-		//
-		// **Because a table cannot hold a property that changes.** `luaL_sandbox`
-		// freezes the globals and enables `safeenv`, and Luau then compiles
-		// `Service.Field` on a constant global table into a `GETIMPORT` resolved
-		// once per closure — so `UserInputService.MouseBehavior` would read
-		// whatever it was the first time a script asked, forever. A userdata's
-		// field access always goes through `__index`.
-		//
-		// It carries no payload. What the object is, is its metatable.
-		TAG_INPUT_SERVICE = 23,
-
-		// `SoundService`, a userdata for `TAG_INPUT_SERVICE`'s reason: it has a
-		// live `Volume`, and a property on a frozen global table is a
-		// `GETIMPORT` resolved once. Carries no payload either.
-		TAG_SOUND_SERVICE = 24,
-
-		// What an input signal hands its listener.
-		//
-		// **Roblox's `InputObject`, and the reason it is a userdata rather than
-		// a table is not `safeenv` this time** — it is that a table would be a
-		// value a handler could write into and hand on, and an input report is
-		// a fact about a frame rather than a document. The tag is also what
-		// makes `typeof` answer `"InputObject"`.
-		TAG_INPUT_OBJECT = 25,
-
-		// What `TweenService:Create` hands back.
-		//
-		// **A userdata of its own rather than the ordinary instance handle**,
-		// even though a tween *is* an entity — see `Tweens.hpp`. The neutral
-		// instance methods are installed flat on every instance, so a `Play`
-		// there would claim the name for every part and folder in the engine,
-		// and `Play` is a name Roblox puts on three classes.
-		//
-		// Carries the tween's entity, which is the key to `TweenTable` and the
-		// subject of its `Completed`.
-		TAG_TWEEN = 26,
-	};
 
 	// Everything one Luau runtime needs, hung off the state rather than a
 	// static.
@@ -190,6 +82,15 @@ namespace engine::script {
 		// two copies of that would agree until one was fixed. See `Actions.hpp`;
 		// the callables stay this VM's, as registry refs inside a `CallbackRef`.
 		ActionStack Actions;
+
+		// Who is listening to which bus topic.
+		//
+		// **Shared machinery beside `Actions`, and it was a registry table
+		// until v0.16.** The topic-to-callbacks map is the whole of what
+		// `MessagingService:SubscribeAsync` records, it names no VM, and keeping
+		// it in `engine.messaging.subscriptions` was what stopped that service
+		// being described once. See `Bus.hpp`.
+		TopicSubscriptions Subscriptions;
 
 		// The VM this context belongs to, so a `Connection` userdata can reach
 		// the table without a second upvalue on every method.
@@ -404,17 +305,6 @@ namespace engine::script {
 	// @param state The VM.
 	void OpenDatatypes(lua_State *state);
 
-	// The easing enums, converted between their C++ form and their member name.
-	//
-	// `TweenInfo` holds a `core::EasingStyle` and a script names one, so
-	// something has to join the two. Here rather than in `core` because the
-	// *names* are userland vocabulary — `core/types/TweenInfo.hpp` is L1 and
-	// knows nothing about a script.
-	core::EasingStyle EasingStyleOf(core::Name member);
-	core::Name NameOf(core::EasingStyle style);
-	core::EasingDirection EasingDirectionOf(core::Name member);
-	core::Name NameOf(core::EasingDirection direction);
-
 	// Pushes a fresh value of each type and returns it for filling in. The
 	// instance binding uses these to hand a property's bytes back to a script.
 	core::Vector3 *PushVector3(lua_State *state);
@@ -446,10 +336,14 @@ namespace engine::script {
 	core::UDim2 &CheckUDim2(lua_State *state, int index);
 	core::Rect &CheckRect(lua_State *state, int index);
 
+	// The curve a tween is authored with. Raises for anything else, exactly as
+	// the four above do.
+	core::TweenInfo &CheckTweenInfoValue(lua_State *state, int index);
+
 	// --- the three a curve is authored in -------------------------------------
 	//
 	// The same split again: the metatables are `LuauDatatypes.cpp`'s and these
-	// hand a property's bytes across. See `Values.cpp` for what makes these three
+	// hand a property's bytes across. See `LuauValues.cpp` for what makes these three
 	// different from the seven above — they are hundreds of bytes rather than a
 	// handful of floats.
 
@@ -464,7 +358,8 @@ namespace engine::script {
 	// --- the codec bridge -----------------------------------------------------
 	//
 	// **One answer to "what is a Lua table", reached from two places.** These are
-	// defined in `Services.cpp` because `MessagingService` was the first caller,
+	// defined in `LuauBus.cpp`, beside the pump `MessagingService` was the first
+	// caller from,
 	// and they are declared here because they must not gain a second
 	// implementation: `Codec.hpp` decides which tables are arrays, what a cycle
 	// is and what a key becomes, and `HttpService:JSONEncode` has to give the
@@ -518,12 +413,23 @@ namespace engine::script {
 	// Calls everything connected to one signal, with the arguments already on
 	// the stack.
 	//
+	// **`property` is the same filter `Connection::Property` carries**, and it is
+	// how one `SignalKind` serves a set of names told apart at fire time:
+	// `PropertyChanged` does it for a property and `CrossWorldMessage` for a
+	// channel. An invalid name fires every connection on the signal, which is what
+	// a kind with one meaning wants and what every caller but the channel pump
+	// passes.
+	//
 	// @param state     The VM.
 	// @param kind      Which signal.
 	// @param subject   The instance, or `NULL_ENTITY`.
 	// @param arguments How many values on top of the stack to pass.
+	// @param property  Fire only connections carrying this name, or all of them
+	//        when it is invalid.
 	// @return An error message when a handler raised, or empty.
-	std::string FireSignal(lua_State *state, SignalKind kind, ecs::Entity subject, int arguments);
+	std::string FireSignal(
+		lua_State *state, SignalKind kind, ecs::Entity subject, int arguments, core::Name property = {}
+	);
 
 	// --- services -------------------------------------------------------------
 	//
@@ -568,17 +474,13 @@ namespace engine::script {
 	// @since v0.15
 	void InstallLuauServices(lua_State *state, ServiceAvailability phase);
 
-	// Installs `RunService`, whose `Heartbeat` a script connects behaviour to,
-	// and whose `IsServer`/`IsClient`/`IsStudio` say where a script is standing.
-	void OpenRunService(lua_State *state);
-
 	// Installs the `InputObject` metatable, and pushes one.
 	//
 	// **The datatype before anything that produces one**, so a metatable is never
 	// looked up before it is registered — which is why `LuauRuntime` calls the
 	// first of these beside the other value types rather than leaving it to
 	// whichever service happens to install earliest. Here rather than in
-	// `Values.cpp` because `InputServices.cpp` is the only file that makes one: an
+	// `LuauValues.cpp` because `LuauInput.cpp` is the only file that makes one: an
 	// `InputObject` has no constructor and cannot arrive from anywhere else.
 	//
 	// `PushInputObject` is not file-local because `LuauCall.cpp` builds the list
@@ -604,12 +506,16 @@ namespace engine::script {
 
 	// `ContextActionService`, whose priority stack is what it adds over polling.
 	//
-	// **Four of its six methods are neutral and two are not**, which
-	// `ServiceSurface::LuauMethods` is how this file says so:
-	// `GetBoundActionInfo` and `GetAllBoundActionInfo` answer a record holding a
-	// list of `Enum.KeyCode` members, and an `EnumItem` has no neutral return —
-	// `ScriptValue` has no tag for one, and inventing a record return for one
-	// service's shape is what `ScriptCall.hpp` says the interface is not for.
+	// **All six methods are neutral**, and the last two to get there are the ones
+	// worth naming: `GetBoundActionInfo` and `GetAllBoundActionInfo` answer a
+	// record holding a list of `Enum.KeyCode` members, and an `EnumItem` has no
+	// neutral return — `ScriptValue` has no tag for one, and inventing a record
+	// return for one service's shape is what `ScriptCall.hpp` says the interface
+	// is not for. `ScriptCall::ReturnBoundAction` over a `BoundActionReport` is
+	// what closed it, which is the split `ReturnInputObjects` was already on.
+	//
+	// **The stack is a walk and not a lookup**, because a handler answers
+	// `Enum.ContextActionResult` — see `ActionStack::ClaimingFrom`.
 	const ServiceSurface &ContextActionServiceSurface();
 
 	// `ContentService`, which answers what content this world holds.
@@ -656,6 +562,11 @@ namespace engine::script {
 	// it. `world::BusKind::Channel` is the kind, appended beside `Teleport`
 	// because a channel is a teleport with nobody attached.
 	//
+	// **The address is `(world, channel)` and both halves matter.** A receiver
+	// opens a named channel and gets that channel's signal back; a sender names
+	// both and suspends on the answer. See the file for why the catch-all signal
+	// it replaced could not be kept beside it.
+	//
 	// @since v0.15
 	const ServiceSurface &CrossWorldServiceSurface();
 
@@ -685,6 +596,59 @@ namespace engine::script {
 	//
 	// @since v0.16
 	const ServiceSurface &SoundServiceSurface();
+
+	// `Debris`, whose one method destroys an instance later.
+	//
+	// **The queue is per VM and everything about it is shared** — the tick
+	// arithmetic, the drain order and the cap that evicts rather than refusing.
+	// See `Debris.hpp`; `PumpDebris` is the other half.
+	//
+	// @since v0.16
+	const ServiceSurface &DebrisServiceSurface();
+
+	// `TweenService`: `GetValue`, and `Create`.
+	//
+	// **`GetValue` is the whole easing surface a script can reach without
+	// building anything**, and `Create` is the rest: a target, a `TweenInfo` and
+	// a map from property name to where it should end up. See `Tweens.hpp` for
+	// what a tween is, why it is an entity, and why its handle is a userdata of
+	// its own rather than an ordinary instance.
+	//
+	// **The `Tween` handle's three methods stay per language on purpose.** The
+	// neutral instance methods are installed flat on *every* instance, and `Play`
+	// is a name Roblox puts on three classes — claiming it there would take it
+	// from every part and sound in the engine. `ScriptCall::ReturnTween` is where
+	// the two halves meet.
+	//
+	// @since v0.16
+	const ServiceSurface &TweenServiceSurface();
+
+	// `RunService`: `Heartbeat`, and the four questions about this host.
+	//
+	// **`IsReplica` is not Roblox's and is the more precise question**:
+	// `IsServer` is about the process and this is about the *world*, so a
+	// single-player host answers true to both from its client-side world. See
+	// `RunService.cpp`.
+	//
+	// @since v0.16
+	const ServiceSurface &RunServiceSurface();
+
+	// The Universe's services — the only route out of a world.
+	//
+	// `MessagingService` fans out to a topic, `TeleportService` moves a person to
+	// a named world, and the two stores answer a key. The last two want a reply,
+	// and a reply arrives at a later barrier, so a script **suspends** on one —
+	// which is legal under `docs/retired/SCRIPT_CONCURRENCY.md` §1 precisely
+	// because the barrier applies replies in a deterministic order, and which is
+	// what `ScriptCall::Await` is for.
+	//
+	// @since v0.16
+	//@{
+	const ServiceSurface &MessagingServiceSurface();
+	const ServiceSurface &TeleportServiceSurface();
+	const ServiceSurface &MemoryStoreServiceSurface();
+	const ServiceSurface &DataStoreServiceSurface();
+	//@}
 	//@}
 
 	// Turns this frame's input edges into bound actions and input signals.
@@ -693,43 +657,38 @@ namespace engine::script {
 	// that mutated the world would otherwise do it in the middle of a loop over
 	// it.
 	//
-	// **Five things now and one until v0.16**: the focus edges, key edges, mouse
-	// button edges, pointer motion and the wheel — in that order, so a listener
-	// sees `WindowFocusReleased` before the releases losing focus caused. Every
-	// signal but the focus pair is handed an `InputObject`, which is Roblox's
-	// shape and which this passed nothing resembling before; `InputServices.cpp`
-	// carries what the three previous answers were.
+	// **Six things now and one until v0.16**: the focus edges, the device change,
+	// key edges, mouse button edges, pointer motion and the wheel — in that
+	// order, so a listener sees `WindowFocusReleased` before the releases losing
+	// focus caused and hears which device is live before the press that proves
+	// it. Every signal but the focus pair is handed an argument;
+	// `LuauInput.cpp` carries what the three previous answers were.
 	//
-	// @param state The VM.
+	// **The interface's events are taken as well as the input state, and that is
+	// what `gameProcessedEvent` is.** A pointer press the 2D tree consumed has to
+	// arrive at `InputBegan` marked rather than swallowed or passed as though
+	// nobody handled it, and the only record of it having been consumed is what
+	// `gui::Router` produced for this beat. See `InterfaceHasPointer`.
+	//
+	// @param state     The VM.
+	// @param interface What the router produced for this beat, in its order. The
+	//        caller still delivers these to `PumpGuiEvents` afterwards; this
+	//        reads them and dispatches nothing.
 	// @return An error message when a handler raised, or empty.
-	std::string PumpInput(lua_State *state);
+	std::string PumpInput(lua_State *state, std::span<const gui::GuiEvent> interface);
 
 	// Installs `game`, whose `GetService` is how a Roblox script reaches one.
 	void OpenGame(lua_State *state);
 
-	// Installs the Universe's services — the only route out of a world.
+	// Installs the `Tween` metatable and the three methods on a tween handle.
 	//
-	// `MessagingService`, `MemoryStoreService` and `DataStoreService`. The last
-	// two want a reply, and a reply arrives at a later barrier, so a script
-	// **yields** on one — which is legal under `docs/retired/SCRIPT_CONCURRENCY.md` §1
-	// precisely because the barrier applies replies in a deterministic order.
-	void OpenBusSupport(lua_State *state);
-	void OpenMessagingService(lua_State *state);
-	void OpenTeleportService(lua_State *state);
-	void OpenMemoryStoreService(lua_State *state);
-	void OpenDataStoreService(lua_State *state);
-
-	// Installs `TweenService`, and the `Tween` metatable it hands back.
-	//
-	// **`GetValue` is the whole easing surface a script can reach without
-	// building anything**, and `Create` is the rest: a target, a `TweenInfo` and
-	// a map from property name to where it should end up. See `Tweens.hpp` for
-	// what a tween is, why it is an entity, and why its handle is a userdata of
-	// its own rather than an ordinary instance.
+	// **The handle and not the service**, which is a `ServiceSurface` —
+	// `TweenServiceSurface` says why `Play`, `Pause` and `Cancel` are the one
+	// place this module deliberately did not use `ScriptCall`.
 	//
 	// @param state The VM.
 	// @since v0.16
-	void OpenTweenService(lua_State *state);
+	void OpenTweenHandle(lua_State *state);
 
 	// Pushes a `Tween` userdata for a tween's entity.
 	//
@@ -751,22 +710,6 @@ namespace engine::script {
 	// @return An error message when a `Completed` handler raised, or empty.
 	// @since v0.16
 	std::string PumpTweens(lua_State *state, float delta);
-
-	// Installs `Debris`, whose one method destroys an instance later.
-	//
-	// @param state The VM.
-	// @since v0.16
-	void OpenDebrisService(lua_State *state);
-
-	// Destroys everything whose deadline the world has reached.
-	//
-	// Beside `PumpTweens` and immediately after it, for the reason
-	// `LuauRuntime::Heartbeat` gives: an instance's last tick of motion happens
-	// before it is taken away.
-	//
-	// @param state The VM.
-	// @since v0.16
-	void PumpDebris(lua_State *state);
 
 	// Installs `require`, which is the only route to a `ModuleScript`.
 	//
@@ -912,6 +855,21 @@ namespace engine::script {
 	// @return The first error a handler raised, or empty.
 	std::string PumpTree(lua_State *state);
 
+	// Fires `Player.CharacterAdded` and `CharacterRemoving` for everything
+	// `scene` recorded since the last barrier.
+	//
+	// **Beside `PumpTree` and for the same reason, one layer down.** A character
+	// is bound to a player by `scene::SetPlayerCharacter`, which is L7 and
+	// cannot call a signal at L9; so that module writes the transitions down in
+	// order and this hands them over. See `scene::CharacterChange`, which also
+	// carries the one consequence a caller has to know: the model named by a
+	// removal may already have been destroyed.
+	//
+	// @param state The VM to deliver into.
+	// @return The first error a handler raised, or empty.
+	// @since v0.17
+	std::string PumpCharacters(lua_State *state);
+
 	// Delivers what a pointer did to the 2D tree since the last beat.
 	//
 	// **Beside `PumpTree` and for the same reason one door along**: the events
@@ -984,7 +942,7 @@ namespace engine::script {
 	// Pushes an instance userdata onto the stack.
 	//
 	// Used by `Runtime::RunInstance` to bind `script`, which is why it is not
-	// file-local to `Instances.cpp`.
+	// file-local to `LuauInstances.cpp`.
 	//
 	// @param state    The VM or one of its threads.
 	// @param instance The instance to push.
@@ -994,7 +952,7 @@ namespace engine::script {
 	//
 	// **Shared rather than copied**, because the second copy is the one that
 	// forgets the tag check and reads eight bytes of somebody else's userdata
-	// as an entity handle. `Instances.cpp` owns the tag and this is how anything
+	// as an entity handle. `LuauInstances.cpp` owns the tag and this is how anything
 	// else asks it.
 	//
 	// @param state The VM.
@@ -1021,17 +979,6 @@ namespace engine::script {
 	// @param state The VM.
 	// @since v0.16
 	void InstallLuauNeutralMethods(lua_State *state);
-
-	// The signals `InstanceIndex` answers from its branch chain.
-	//
-	// **Here because a branch cannot be walked.** Everything else the editor
-	// offers is read back out of a live VM — the globals from its global table,
-	// the instance methods from the registry table `OpenInstances` fills — and a
-	// signal is the one member that exists only as a string comparison. See
-	// `script::InstanceSignals`, which is the public face of this.
-	//
-	// @return The signal names, in the order the chain tests them.
-	std::vector<std::string_view> LuauInstanceSignalNames();
 
 	// Installs the world clock under names that do not lie about it.
 	//

@@ -97,19 +97,4 @@ namespace engine::script {
 		}
 		return std::make_unique<LuauRuntime>(store, limits);
 	}
-
-	bool RunScriptFile(
-		ecs::Store &store, const std::string &path, std::string &error, const RuntimeLimits &limits
-	) {
-		// The extension picks the VM, which is what makes "two languages, one
-		// binding surface" a fact a caller never has to think about: a loader
-		// hands over a path and the same world comes back either way.
-		const std::unique_ptr<Runtime> runtime = MakeRuntime(store, LanguageOf(path), limits);
-		if (runtime->RunFile(path)) {
-			return true;
-		}
-
-		error = runtime->LastError();
-		return false;
-	}
 }

@@ -119,8 +119,7 @@ namespace engine::script {
 			property.Type = ecs::PropertyType::Enum;
 			property.Size = sizeof(core::Name);
 			property.EnumName = LanguageEnum();
-			property.Reads =
-				&ecs::ComponentSet::Intern({ecs::Components::Of<CodeSourceContainerSelector>()});
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<CodeSourceContainerSelector>()});
 			property.Writes = property.Reads;
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
@@ -271,8 +270,7 @@ namespace engine::script {
 		// **No selector means Luau**, which is what every script in this engine
 		// was before there were two — so a world loaded from an older file runs
 		// exactly as it did.
-		const CodeSourceContainerSelector *selector =
-			store.Get<CodeSourceContainerSelector>(instance);
+		const CodeSourceContainerSelector *selector = store.Get<CodeSourceContainerSelector>(instance);
 		return selector != nullptr ? selector->Active : Language::Luau;
 	}
 

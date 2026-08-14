@@ -184,6 +184,13 @@ namespace engine::input {
 		// it; `scene::InputState::WasFocusGained` is what does.
 		Current.PreviousFocused = Current.Focused;
 
+		// The same rule once more, for the edge a place watches to swap "press E"
+		// for "click here". **Rolled here and not on the event that changes it**,
+		// so several events in one frame produce at most one change: a player who
+		// moved the mouse and then typed has changed device once as far as a
+		// script is concerned.
+		Current.PreviousLastSource = Current.LastSource;
+
 		Current.MouseDelta = {};
 		Current.WheelDelta = 0.0f;
 	}
@@ -205,6 +212,12 @@ namespace engine::input {
 				return false;
 			}
 			Current.Down.Set(key, event.type == SDL_EVENT_KEY_DOWN);
+
+			// **Set on the release as well as the press**, because letting go of
+			// a key is the keyboard speaking too — a place that swapped its
+			// prompts on the press and swapped them back on the release would
+			// flicker every time somebody walked.
+			Current.LastSource = scene::InputSource::Keyboard;
 			return true;
 		}
 
@@ -220,11 +233,19 @@ namespace engine::input {
 			} else {
 				Current.Buttons &= static_cast<uint8_t>(~bit);
 			}
+
+			// **The button and not `MouseButton1` for all three**, because
+			// `InputSource` shares its first three ordinals with `MouseButton` by
+			// construction — see the `static_assert`s in `scene/Input.cpp` — so a
+			// right-click reports as `MouseButton2` and a script asking which
+			// device is live gets the one it saw in `InputBegan`.
+			Current.LastSource = static_cast<scene::InputSource>(button);
 			return true;
 		}
 
 		case SDL_EVENT_MOUSE_MOTION:
 			Current.MousePosition = core::Vector2{event.motion.x, event.motion.y};
+			Current.LastSource = scene::InputSource::MouseMovement;
 
 			// **Accumulated rather than assigned**, because several motion events
 			// arrive per frame and a camera wants all of the movement. Assigning
@@ -236,6 +257,7 @@ namespace engine::input {
 
 		case SDL_EVENT_MOUSE_WHEEL:
 			Current.WheelDelta += event.wheel.y;
+			Current.LastSource = scene::InputSource::MouseWheel;
 			return true;
 
 		case SDL_EVENT_WINDOW_FOCUS_GAINED:

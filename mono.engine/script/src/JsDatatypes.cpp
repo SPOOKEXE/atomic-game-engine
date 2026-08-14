@@ -1,10 +1,14 @@
-// The datatype vocabulary and the bus services, in JavaScript.
+// The datatype vocabulary and the raycast query, in JavaScript.
 //
-// The twin of `LuauDatatypes.cpp` and the second half of `Services.cpp`, split
-// off from `JsSurface.cpp` for the reason that file was split from
-// `JsBindings.cpp`: these are value types and a wire, and they are reviewed
-// against `core/types/` and `world::Postbox` rather than against the class
-// table.
+// The twin of `LuauDatatypes.cpp` and `LuauQuery.cpp`, split off from
+// `JsSurface.cpp` for the reason that file was split from `JsBindings.cpp`:
+// these are value types and a query, and they are reviewed against
+// `core/types/` and `physics::Raycast` rather than against the class table.
+//
+// **The two store services used to be here too, and are not any more.** They are
+// `ServiceSurface`s in `BusServices.cpp` now — one description both languages
+// install — which is what `ScriptCall::Await` was added for: the promise this
+// file used to build is what the JavaScript adapter answers a suspension with.
 //
 // **Every type here is the same C++ value the Luau side wraps.** `Region3` is a
 // `core::AABB` and `Ray` a `core::Ray`, because the engine already had both;
@@ -26,7 +30,6 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
-#include <engine/world/Postbox.hpp>
 
 #include <string>
 #include <vector>
@@ -48,10 +51,6 @@ namespace engine::script {
 		using core::UDim;
 		using core::UDim2;
 		using core::Vector2;
-		using world::BusKind;
-		using world::BusStatus;
-		using world::Postbox;
-		using world::Ticket;
 
 		double Arg(JSContext *context, int argc, JSValueConst *argv, int index, double fallback = 0.0) {
 			if (index >= argc) {
@@ -541,161 +540,6 @@ namespace engine::script {
 			return Wrap(context, JsOf(context).RandomClass, stream);
 		}
 
-		// --- the store services ----------------------------------------------
-		//
-		// **The calls a script genuinely suspends on.** A `Get` returns a
-		// `Ticket`; the reply lands in the inbox at a later tick, applied sorted
-		// at the barrier — which is §1's *first* legal resume source. The
-		// suspension is a promise here rather than a coroutine, and the host
-		// resolves it in `PumpJsDeliveries`.
-
-		JSValue AwaitTicket(JSContext *context, Ticket ticket, const char *what) {
-			if (!ticket.Expected()) {
-				return JS_ThrowTypeError(context, "%s: over this world's budget", what);
-			}
-
-			JsContext &bound = JsOf(context);
-
-			JSValue settle[2];
-			JSValue promise = JS_NewPromiseCapability(context, settle);
-			if (JS_IsException(promise)) {
-				return promise;
-			}
-
-			// `insert_or_assign` for the reason the Luau side gives: a chained
-			// call reuses the ticket slot and the stale resolver would leak.
-			bound.AwaitedTickets.insert_or_assign(ticket.Value, Retain(context, settle[0]));
-			JS_FreeValue(context, settle[0]);
-			JS_FreeValue(context, settle[1]);
-			return promise;
-		}
-
-		// Encodes an argument, throwing a named error on refusal.
-		bool EncodeArgument(JSContext *context, JSValueConst value, std::vector<std::byte> &out) {
-			ScriptValue tree;
-			CodecStatus why = CodecStatus::Ok;
-
-			if (!ToScriptValue(context, value, tree, 0, why)) {
-				JS_ThrowTypeError(context, "the value cannot cross a world boundary: %s", Describe(why));
-				return false;
-			}
-
-			if (const CodecStatus status = Encode(tree, out); status != CodecStatus::Ok) {
-				JS_ThrowTypeError(context, "the value cannot cross a world boundary: %s", Describe(status));
-				return false;
-			}
-			return true;
-		}
-
-		JSValue StoreGet(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int magic) {
-			if (argc < 1) {
-				return JS_ThrowTypeError(context, "GetAsync needs a key");
-			}
-
-			const char *key = JS_ToCString(context, argv[0]);
-			if (key == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			Postbox box(*JsOf(context).World);
-			JSValue promise = AwaitTicket(
-				context, box.Get(magic == 0 ? BusKind::MemoryStore : BusKind::DataStore, key), "GetAsync"
-			);
-			JS_FreeCString(context, key);
-			return promise;
-		}
-
-		JSValue StoreSet(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int magic) {
-			if (argc < 2) {
-				return JS_ThrowTypeError(context, "SetAsync needs a key and a value");
-			}
-
-			const char *key = JS_ToCString(context, argv[0]);
-			if (key == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			std::vector<std::byte> payload;
-			if (!EncodeArgument(context, argv[1], payload)) {
-				JS_FreeCString(context, key);
-				return JS_EXCEPTION;
-			}
-
-			Postbox box(*JsOf(context).World);
-
-			// Both flags, for the reason `Services.cpp` gives: the bus's own
-			// `Replica` resource and the store's adopt-only flag are the same
-			// fact in two places, and checking one is checking half.
-			if (box.IsReplica() || JsOf(context).World->AdoptOnly()) {
-				JS_FreeCString(context, key);
-				return JS_ThrowTypeError(
-					context,
-					"SetAsync: this world is a replica and its store writes are refused. Test "
-					"RunService.IsReplica() first"
-				);
-			}
-
-			JSValue promise = AwaitTicket(
-				context,
-				box.Set(magic == 0 ? BusKind::MemoryStore : BusKind::DataStore, key, payload),
-				"SetAsync"
-			);
-			JS_FreeCString(context, key);
-			return promise;
-		}
-
-		JSValue StoreRemove(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int magic) {
-			if (argc < 1) {
-				return JS_ThrowTypeError(context, "RemoveAsync needs a key");
-			}
-
-			const char *key = JS_ToCString(context, argv[0]);
-			if (key == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			Postbox box(*JsOf(context).World);
-			JSValue promise = AwaitTicket(
-				context,
-				box.Remove(magic == 0 ? BusKind::MemoryStore : BusKind::DataStore, key),
-				"RemoveAsync"
-			);
-			JS_FreeCString(context, key);
-			return promise;
-		}
-
-		// The compare-and-swap, which is the cross-world lock.
-		//
-		// §4: a lock in the shape an author expects cannot exist here, because
-		// rule 3 leaves no shared memory to guard. What they actually want is
-		// this — the version the caller read goes in, and `Conflict` comes back
-		// when it has moved on.
-		JSValue MemoryStoreUpdate(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			if (argc < 3) {
-				return JS_ThrowTypeError(context, "UpdateAsync needs a key, a version and a value");
-			}
-
-			const char *key = JS_ToCString(context, argv[0]);
-			if (key == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			double version = 0.0;
-			JS_ToFloat64(context, &version, argv[1]);
-
-			std::vector<std::byte> payload;
-			if (!EncodeArgument(context, argv[2], payload)) {
-				JS_FreeCString(context, key);
-				return JS_EXCEPTION;
-			}
-
-			Postbox box(*JsOf(context).World);
-			JSValue promise =
-				AwaitTicket(context, box.Update(key, static_cast<uint64_t>(version), payload), "UpdateAsync");
-			JS_FreeCString(context, key);
-			return promise;
-		}
-
 		// --- raycasting ------------------------------------------------------
 		//
 		// The JavaScript twin of `LuauQuery.cpp`, against the same
@@ -967,41 +811,5 @@ namespace engine::script {
 		JS_SetPropertyStr(
 			context, workspace, "Raycast", JS_NewCFunction(context, WorkspaceRaycast, "Raycast", 3)
 		);
-	}
-
-	// **One installer per service, which is what `ServiceCatalogue.cpp` names.**
-	// These were two anonymous blocks inside one `InstallJsServices` — a list of
-	// services written as control flow, which nothing outside could point at.
-	//
-	// The magic argument is which store: 0 is the memory store and 1 is the data
-	// store, and the two share `StoreGet`/`StoreSet`/`StoreRemove` because the
-	// only difference between them is how long an entry lives.
-
-	void OpenJsMemoryStoreService(JSContext *context, JSValueConst global) {
-		static const JSCFunctionListEntry members[] = {
-			JS_CFUNC_MAGIC_DEF("GetAsync", 1, StoreGet, 0),
-			JS_CFUNC_MAGIC_DEF("SetAsync", 2, StoreSet, 0),
-			JS_CFUNC_MAGIC_DEF("RemoveAsync", 1, StoreRemove, 0),
-			JS_CFUNC_DEF("UpdateAsync", 3, MemoryStoreUpdate),
-		};
-		JSValue service = JS_NewObject(context);
-		JS_SetPropertyFunctionList(context, service, members, 4);
-		JS_PreventExtensions(context, service);
-		JS_SetPropertyStr(context, global, "MemoryStoreService", service);
-	}
-
-	void OpenJsDataStoreService(JSContext *context, JSValueConst global) {
-		// **No `UpdateAsync`, and that is the data store's own rule rather than
-		// an omission here**: a compare-and-set needs a version, and the Luau
-		// side declares the same three.
-		static const JSCFunctionListEntry members[] = {
-			JS_CFUNC_MAGIC_DEF("GetAsync", 1, StoreGet, 1),
-			JS_CFUNC_MAGIC_DEF("SetAsync", 2, StoreSet, 1),
-			JS_CFUNC_MAGIC_DEF("RemoveAsync", 1, StoreRemove, 1),
-		};
-		JSValue service = JS_NewObject(context);
-		JS_SetPropertyFunctionList(context, service, members, 3);
-		JS_PreventExtensions(context, service);
-		JS_SetPropertyStr(context, global, "DataStoreService", service);
 	}
 }

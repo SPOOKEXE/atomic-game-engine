@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/ecs/EnumTable.hpp>
 

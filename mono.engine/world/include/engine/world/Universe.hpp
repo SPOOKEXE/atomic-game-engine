@@ -80,6 +80,29 @@ namespace engine::world {
 		// request budgets because they turned out to be necessary; there is no
 		// reason to rediscover that.
 		uint32_t BusBudgetPerTick = 64;
+
+		// How many channel deliveries one world may have queued for it in one
+		// barrier, before the senders are told `BusStatus::Overflow`.
+		//
+		// **The bound on the queue between two worlds, and it needs one.**
+		// `BusBudgetPerTick` bounds what a *sender* emits; nothing bounded what a
+		// *destination* accumulates, so a thousand worlds each spending their
+		// allowance on one victim queued sixty-four thousand payloads into one
+		// inbox in one barrier. That is a memory leak with extra steps, and the
+		// version of it that silently discards the tail is worse — a game that
+		// works until the day it is busy.
+		//
+		// Four times the default budget, so four worlds may each spend their whole
+		// allowance on one destination before the fifth is refused. Past that the
+		// destination is the bottleneck and the sender is the only one that can do
+		// anything about it, which is why it is told rather than absorbed.
+		//
+		// Channel deliveries only. A reply is bounded by the sender's own budget —
+		// one per request — a publish needs the destination to have subscribed,
+		// and a teleport moves a player, which nothing can do in a loop.
+		//
+		// @since v0.17
+		uint32_t ChannelQueueLimit = 256;
 	};
 
 	// One delivery for a world that lives in another process.

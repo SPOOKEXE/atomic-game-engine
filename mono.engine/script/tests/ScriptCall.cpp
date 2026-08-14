@@ -40,6 +40,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <functional>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -59,6 +60,14 @@ namespace {
 	Store Fresh(const char *name) {
 		engine::scene::EnsureClassTree();
 		engine::scene::RegisterSceneComponents();
+
+		// **The whole class tree and not only the core of it**, which
+		// `EnsureClassTree` is: `ShaderScript` and the rest arrive through
+		// `RegisterSceneClasses`, and a case naming one of them without this gets
+		// "not a registered class" — a chunk that fails for a reason that has
+		// nothing to do with what it was asserting. Registration is process-wide
+		// and idempotent, so the cost is a compare after the first call.
+		engine::scene::RegisterSceneClasses();
 		return Store(name);
 	}
 
@@ -98,6 +107,28 @@ namespace {
 		return Let(language, "part", "Instance.new('Part')");
 	}
 
+	// One value as text: `tostring(x)` and `String(x)`.
+	//
+	// **Needed where `Cat` is not enough**, which is a boolean: JavaScript
+	// concatenates one straight into a string and Luau refuses to.
+	std::string Text(Language language, const std::string &expression) {
+		return (language == Language::Luau ? "tostring(" : "String(") + expression + ")";
+	}
+
+	// Several expressions joined into one string, in each language's operator.
+	//
+	// **`..` and `+`, which is the second thing after `:` and `.` that a case
+	// cannot spell once.** Writing the two halves out instead is how a probe
+	// ends up asserting two different scripts.
+	std::string Cat(Language language, std::initializer_list<std::string> parts) {
+		const std::string glue = language == Language::Luau ? " .. " : " + ";
+		std::string joined;
+		for (const std::string &part : parts) {
+			joined += joined.empty() ? part : glue + part;
+		}
+		return joined;
+	}
+
 	// What a case needs in the world before its chunk runs.
 	//
 	// **A callback rather than a fixture, because the service cases each want a
@@ -128,10 +159,12 @@ namespace {
 		REQUIRE(runtime != nullptr);
 
 		// **Held before the chunk runs, because the chunk renames it.**
-		// `scene::WorkspaceOf` is a lookup by name over the roots, so asking
-		// afterwards finds nothing and `InstallServices` would helpfully mint a
-		// second Workspace — which reads as the answer never having been
-		// written.
+		// `scene::WorkspaceOf` resolves by *class* since v0.17, so a rename no
+		// longer strands it — but holding the handle is still what makes the
+		// answer readable without asking a renamed world for a name it no longer
+		// has. Until that fix this was load-bearing for a worse reason: the
+		// lookup was by name, so asking afterwards found nothing and
+		// `InstallServices` helpfully minted a second Workspace.
 		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
 		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
 
@@ -141,6 +174,15 @@ namespace {
 		REQUIRE(ok);
 
 		for (int beat = 0; beat < beats; beat++) {
+			// **The store's own boundary before the runtime's**, which is what
+			// `World::Tick` does around a real one. A *property* change reaches
+			// `ChangeQueue` through `Store::OnChangedComponent`, and that fires at
+			// `FlushSignals` — so without this a `GetPropertyChangedSignal` case
+			// beats with an empty queue and reads as a signal that never fires.
+			// An attribute needs none of it, which is why the cases here got by
+			// without it until a property one arrived.
+			store.FlushSignals();
+
 			const bool beaten = runtime->Heartbeat(1.0f / 60.0f);
 			INFO(runtime->LastError());
 			REQUIRE(beaten);
@@ -164,7 +206,12 @@ namespace {
 		int Beats = 0;
 
 		// What the world holds first, for a case that reads one.
-		Setup World;
+		//
+		// **Defaulted rather than left to the aggregate**: most rows stop
+		// before it, and `-Wmissing-field-initializers` is fatal under the `ci`
+		// preset. An empty `Setup` is "the world starts as it comes", which is
+		// what a row omitting it already means.
+		Setup World = {};
 	};
 
 	// Runs one case in both languages and asserts they agree with each other and
@@ -551,6 +598,281 @@ TEST_CASE("the player pair answers the same in both languages", "[scripting][scr
 	}
 }
 
+namespace {
+	// A furnished world holding one occupant, with a template in each of the
+	// three containers a `Starter*` service copies from.
+	//
+	// **Through `scene::AddPlayer` rather than `Instance.new('Player')`**,
+	// because the containers and the two join-time copies are what that function
+	// *is*: a player parented in by hand is a row with nothing under it, which is
+	// exactly the state the pipeline exists to stop a host reaching.
+	void OneOccupant(Store &store) {
+		engine::scene::RegisterSceneClasses();
+		REQUIRE(engine::scene::InstallServices(store) != engine::ecs::NULL_ENTITY);
+
+		const auto plain = engine::ecs::Classes::Find(engine::core::Name("Instance"));
+		const engine::ecs::Entity starterPlayer = store.FindFirstRoot("StarterPlayer");
+
+		store.SetParent(
+			store.CreateInstance(plain, "CameraScript"),
+			store.FindFirstChild(starterPlayer, "StarterPlayerScripts")
+		);
+		store.SetParent(
+			store.CreateInstance(plain, "Animate"),
+			store.FindFirstChild(starterPlayer, "StarterCharacterScripts")
+		);
+		store.SetParent(store.CreateInstance(plain, "Sword"), store.FindFirstRoot("StarterPack"));
+
+		// Local, so `Players.LocalPlayer` answers — the probe below is the other
+		// half of the one three cases up, which asserts it is nil where nobody
+		// is looking.
+		REQUIRE(engine::scene::AddPlayer(store, "Ada", true, 99) != engine::ecs::NULL_ENTITY);
+	}
+}
+
+TEST_CASE("the whole player surface answers the same in both languages", "[scripting][scriptcall]") {
+	// **Every member the join pipeline added, read through a real VM of each
+	// language.** A property is neutral by construction and a method is neutral
+	// because `ScriptMethods.cpp` is one table — but "by construction" is what
+	// the twenty-one hand-written JavaScript methods were also said to be, so
+	// this runs both and compares.
+	const auto players = [](Language language) {
+		return Let(language, "players", Call(language, "game", "GetService('Players')"));
+	};
+
+	const auto ada = [&](Language language) {
+		return players(language) + Let(language, "ada", "players.LocalPlayer");
+	};
+
+	const std::vector<ParityCase> PROBES = {
+		{"the service carries its four settings",
+		 [&](Language language) {
+			 return players(language) + Say(language,
+											Cat(language,
+												{"players.MaxPlayers",
+												 "'/'",
+												 "players.NumPlayers",
+												 "'/'",
+												 "players.RespawnTime",
+												 "'/'",
+												 Text(language, "players.CharacterAutoLoads")}));
+		 },
+		 "50/1/5/true",
+		 0,
+		 OneOccupant},
+
+		{"the occupant carries an identity",
+		 [&](Language language) {
+			 return ada(language) + Say(language,
+										Cat(language,
+											{"ada.Name",
+											 "'/'",
+											 "ada.DisplayName",
+											 "'/'",
+											 "ada.UserId",
+											 "'/'",
+											 "ada.RespawnTime"}));
+		 },
+		 "Ada/Ada/99/5",
+		 0,
+		 OneOccupant},
+
+		{"the four containers are reachable by name",
+		 [&](Language language) {
+			 return ada(language) + Say(language,
+										Cat(language,
+											{"ada.PlayerGui.Name",
+											 "'/'",
+											 "ada.PlayerScripts.Name",
+											 "'/'",
+											 "ada.Backpack.Name",
+											 "'/'",
+											 "ada.StarterGear.Name"}));
+		 },
+		 "PlayerGui/PlayerScripts/Backpack/StarterGear",
+		 0,
+		 OneOccupant},
+
+		{"the join copied the scripts and the gear, and left the backpack empty",
+		 [&](Language language) {
+			 return ada(language) +
+					Say(language,
+						Cat(language,
+							{Call(language, "ada.PlayerScripts", "FindFirstChild('CameraScript')") + ".Name",
+							 "'/'",
+							 Call(language, "ada.StarterGear", "FindFirstChild('Sword')") + ".Name",
+							 "'/'",
+							 Length(language, Call(language, "ada.Backpack", "GetChildren()"))}));
+		 },
+		 "CameraScript/Sword/0",
+		 0,
+		 OneOccupant},
+
+		{"a spawn copies the character scripts and fills the backpack",
+		 [&](Language language) {
+			 return ada(language) + Let(language, "body", Call(language, "ada", "LoadCharacter()")) +
+					Say(language,
+						Cat(language,
+							{Call(language, "body", "FindFirstChild('Animate')") + ".Name",
+							 "'/'",
+							 Call(language, "ada.Backpack", "FindFirstChild('Sword')") + ".Name"}));
+		 },
+		 "Animate/Sword",
+		 0,
+		 OneOccupant},
+
+		{"the service lists and finds its occupants",
+		 [&](Language language) {
+			 return players(language) +
+					Say(language,
+						Cat(language,
+							{Length(language, Call(language, "players", "GetPlayers()")),
+							 "'/'",
+							 First(language, Call(language, "players", "GetPlayers()")) + ".Name",
+							 "'/'",
+							 Call(language, "players", "GetPlayerByUserId(99)") + ".Name"}));
+		 },
+		 "1/Ada/Ada",
+		 0,
+		 OneOccupant},
+
+		{"a number nobody holds is nil rather than an error",
+		 [&](Language language) {
+			 return players(language) +
+					Say(language, IsNil(language, Call(language, "players", "GetPlayerByUserId(7)")));
+		 },
+		 "true",
+		 0,
+		 OneOccupant},
+
+		{"LocalPlayer is whoever this host is looking through",
+		 [&](Language language) { return players(language) + Say(language, "players.LocalPlayer.Name"); },
+		 "Ada",
+		 0,
+		 OneOccupant},
+
+		{"CharacterAdded arrives at the barrier with the body",
+		 [&](Language language) {
+			 if (language == Language::Luau) {
+				 return ada(language) +
+						"ada.CharacterAdded:Connect(function(model) workspace.Name = model.Name end)\n"
+						"ada:LoadCharacter()\n";
+			 }
+			 return ada(language) +
+					"ada.CharacterAdded.Connect(function (model) { workspace.Name = model.Name })\n"
+					"ada.LoadCharacter()\n";
+		 },
+		 "Ada",
+		 1,
+		 OneOccupant},
+	};
+
+	for (const ParityCase &probe : PROBES) {
+		Both(probe);
+	}
+}
+
+TEST_CASE("two lives fire both character signals, in both languages", "[scripting][scriptcall]") {
+	// **Two spawns, and they have to be two *ticks*, which is what the parity
+	// harness cannot express.** A body that arrives and goes inside one barrier
+	// is one no handler could act on, so the arrival is dropped — the sequence
+	// only reads as a life when there is a beat between the two.
+	//
+	// **And the two signals arrive by two different routes**, which is the thing
+	// this case exists to hold. `CharacterAdded` is queued by
+	// `scene::SetPlayerCharacter` and delivered at the barrier;
+	// `CharacterRemoving` is dispatched synchronously from
+	// `Store::OnDescendantRemoving`, because dying here *is* being destroyed and
+	// a queue drained a tick later would hand a handler a model it cannot read a
+	// property off. A version that queued both fired `CharacterRemoving` with a
+	// dead handle and the Luau half raised "'Name' is not a valid member of this
+	// instance" — which is how the split was found.
+	//
+	// The log rides an **attribute** rather than a local, because each chunk runs
+	// on its own sandboxed thread and its globals are its own; the world is the
+	// only thing three chunks share.
+	for (const Language language : LANGUAGES) {
+		INFO(std::string(language == Language::Luau ? "luau" : "javascript"));
+
+		Store store = Fresh("scriptcall.lives");
+		OneOccupant(store);
+
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const std::string connect =
+			language == Language::Luau
+				? "local ada = game:GetService('Players').LocalPlayer\n"
+				  "local function note(mark)\n"
+				  "	workspace:SetAttribute('log', (workspace:GetAttribute('log') or '') .. mark)\n"
+				  "end\n"
+				  "ada.CharacterAdded:Connect(function(model) note('+' .. model.Name) end)\n"
+				  "ada.CharacterRemoving:Connect(function(model) note('-' .. model.Name) end)\n"
+				  "ada:LoadCharacter()\n"
+				: "let ada = game.GetService('Players').LocalPlayer\n"
+				  "function note(mark) {\n"
+				  "	workspace.SetAttribute('log', (workspace.GetAttribute('log') || '') + mark)\n"
+				  "}\n"
+				  "ada.CharacterAdded.Connect(function (model) { note('+' + model.Name) })\n"
+				  "ada.CharacterRemoving.Connect(function (model) { note('-' + model.Name) })\n"
+				  "ada.LoadCharacter()\n";
+
+		INFO(runtime->LastError());
+		REQUIRE(runtime->Run(connect.c_str()));
+		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+		// The second life. The removal fires inside this chunk, while the old
+		// body is still whole — which is exactly what the handler reads.
+		const std::string again = language == Language::Luau
+									  ? "game:GetService('Players').LocalPlayer:LoadCharacter()\n"
+									  : "game.GetService('Players').LocalPlayer.LoadCharacter()\n";
+		REQUIRE(runtime->Run(again.c_str()));
+		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+		const std::string report = language == Language::Luau
+									   ? "workspace.Name = workspace:GetAttribute('log')\n"
+									   : "workspace.Name = workspace.GetAttribute('log')\n";
+		REQUIRE(runtime->Run(report.c_str()));
+
+		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		CHECK(std::string(store.InstanceNameOf(workspace).Text()) == "+Ada-Ada+Ada");
+	}
+}
+
+TEST_CASE("who you are is not yours to assign, in both languages", "[scripting][scriptcall]") {
+	// **`UserId` is read-only and `LocalPlayer` is read-only, and the refusal is
+	// the point.** A script that could write either could claim to be somebody
+	// else — which is the one thing a shared world must not let a game script do
+	// by accident. `PropertyDescriptor::Writable` is the whole enforcement, so a
+	// test that only read them would pass against a surface that let both be set.
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall.readonly");
+		OneOccupant(store);
+
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const std::string colon = language == Language::Luau ? ":" : ".";
+		const std::string players = "game" + colon + "GetService('Players')";
+
+		CHECK_FALSE(runtime->Run((players + ".LocalPlayer.UserId = 5\n").c_str()));
+		CHECK_FALSE(runtime->Run((players + ".LocalPlayer = nil\n").c_str()));
+		CHECK_FALSE(runtime->Run((players + ".NumPlayers = 9\n").c_str()));
+		CHECK_FALSE(runtime->Run((players + ".LocalPlayer.Backpack = nil\n").c_str()));
+
+		// The writable half still writes, or the four above would pass against a
+		// surface that refused everything.
+		CHECK(runtime->Run((players + ".MaxPlayers = 8\n").c_str()));
+
+		int32_t seats = 0;
+		REQUIRE(store.GetProperty(
+			engine::scene::PlayersOf(store), engine::core::Name("MaxPlayers"), &seats, sizeof(seats)
+		));
+		CHECK(seats == 8);
+	}
+}
+
 TEST_CASE("a wrong argument type is refused in both languages", "[scripting][scriptcall]") {
 	// **A reader raises rather than answering**, which is what lets a neutral
 	// method body read its arguments straight through. The two idioms are
@@ -758,17 +1080,23 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 
 		// --- CrossWorldService ------------------------------------------------
 		//
-		// **`true` here means "queued inside this world's budget" and not
-		// "delivered", which is what `Ticket::Expected` answers.** A world with
-		// no router around it still takes the envelope; whether anybody is
-		// listening is a reply this world never sees the far side of. The
-		// declaration says "false when the world is not running", and that
-		// sentence describes the *router's* answer rather than this one — worth
-		// pinning either way, because the two VMs must say the same thing.
-		{"Send answers the same in both when nothing is listening",
+		// **`OpenChannel` is the member this suite can reach, and `SendAsync` is
+		// not.** A send suspends on a reply the barrier decides, so against a bare
+		// store with no router around it there is nothing to resume — which is
+		// what `engine.script.crossworldservice` exists for, over a real
+		// `Universe` with two worlds in it.
+		//
+		// What is pinned here is that both VMs hand back a *signal* rather than
+		// nil or a table: a connection object means `ReturnSignal` carried the
+		// channel's name through, which is the mechanism the per-channel delivery
+		// turns on.
+		{"OpenChannel hands back a connectable signal in both",
 		 [](Language language) {
-			 const std::string message = language == Language::Luau ? "{a = 1}" : "{a: 1}";
-			 return Say(language, Call(language, "CrossWorldService", "Send('nowhere', " + message + ")"));
+			 const std::string connect =
+				 language == Language::Luau
+					 ? "CrossWorldService:OpenChannel('c'):Connect(function() end) ~= nil"
+					 : "CrossWorldService.OpenChannel('c').Connect(function () {}) !== undefined";
+			 return Say(language, connect);
 		 },
 		 "true"},
 
@@ -1193,7 +1521,7 @@ TEST_CASE("the listener pair reads the same in both languages", "[scripting][scr
 
 TEST_CASE("an input signal delivers the same report in both languages", "[scripting][scriptcall]") {
 	// **A binding is not a pump, and shipping one without the other is the
-	// failure this module names twice.** `UserInputService`'s five signals became
+	// failure this module names twice.** `UserInputService`'s six signals became
 	// reachable from JavaScript with the service; a signal that exists and never
 	// fires reads as a broken engine rather than an unfinished one, so
 	// `PumpJsInput` grew the whole of `PumpInput`'s signal half at the same time.
@@ -1254,7 +1582,7 @@ TEST_CASE("an input signal delivers the same report in both languages", "[script
 		 1,
 		 FocusRegained},
 
-		// **The five share one `SignalKind` and are told apart by name**, so a
+		// **The six share one `SignalKind` and are told apart by name**, so a
 		// listener on one must not hear another's edge. This is the case that
 		// would fail if the name filter were dropped.
 		{"a listener on one signal does not hear another",
@@ -1297,7 +1625,15 @@ TEST_CASE("a service property refuses the same writes in both languages", "[scri
 		{"UserInputService", "TouchEnabled = true"},
 		{"UserInputService", "KeyboardEnabled = false"},
 		{"SoundService", "AmbientReverb = 1"},
-		{"UserInputService", "MouseIconEnabled = true"},
+
+		// **A Roblox member this engine deliberately does not have**, which is
+		// the more useful unknown-name probe than a typo: `MouseIcon` is a cursor
+		// *image* and nothing in `render` produces one, so it must raise rather
+		// than being kept as a new property nobody reads. It replaced
+		// `MouseIconEnabled`, which sat here until that one became a real
+		// writable row — an absent member turning into a present one is exactly
+		// the change this case should notice.
+		{"UserInputService", "MouseIcon = 'cursor'"},
 
 		// A wrong type for a property that *is* writable, which is the reader
 		// raising rather than the row refusing.
@@ -1318,6 +1654,249 @@ TEST_CASE("a service property refuses the same writes in both languages", "[scri
 			CHECK_FALSE(runtime->Run(source.c_str()));
 			CHECK_FALSE(runtime->LastError().empty());
 		}
+	}
+}
+
+TEST_CASE("the migrated tree methods answer the same in both languages", "[scripting][scriptcall]") {
+	// **The last twenty, and this is the case that has to exist for the migration
+	// to have been worth doing.** Each of these was two functions in two files
+	// until v0.18, and two of them had already drifted: `GetPropertyChangedSignal`
+	// honoured `PropertyDescriptor::Scriptable` in one language and ignored it in
+	// the other, and `SetNetworkOwner` raised for a non-instance in one and read a
+	// null entity out of anything at all in the other.
+	const std::vector<ParityCase> CASES = {
+		{"IsA walks the class tree, and an unknown class is a no rather than an error",
+		 [](Language language) {
+			 return APart(language) + Say(language,
+										  Join(
+											  language,
+											  Call(language, "part", "IsA('BasePart')"),
+											  Call(language, "part", "IsA('Nonsense')")
+										  ));
+		 },
+		 "true/false"},
+
+		{"Clone copies, and the copy is a different instance",
+		 [](Language language) {
+			 return APart(language) + "part.Name = 'original'\n" +
+					Let(language, "copy", Call(language, "part", "Clone()")) +
+					Say(language, Join(language, "copy.Name", Call(language, "part", "Equals(copy)")));
+		 },
+		 "original/false"},
+
+		{"GetChildren counts what is parented and GetDescendants reaches deeper",
+		 [](Language language) {
+			 return APart(language) + "part.Parent = workspace\n" +
+					Let(language, "child", "Instance.new('Part')") + "child.Parent = part\n" +
+					Let(language, "grandchild", "Instance.new('Part')") + "grandchild.Parent = child\n" +
+					Say(language,
+						Join(
+							language,
+							Length(language, Call(language, "part", "GetChildren()")),
+							Length(language, Call(language, "part", "GetDescendants()"))
+						));
+		 },
+		 "1/2"},
+
+		// **The recursive flag, which both halves used to read and ignore.** The
+		// two answers differ, so a binding that dropped the argument fails the
+		// second half while passing the first.
+		{"FindFirstChild answers the question it was asked",
+		 [](Language language) {
+			 return APart(language) + Let(language, "child", "Instance.new('Model')") +
+					"child.Parent = part\n" + Let(language, "deep", "Instance.new('Part')") +
+					"deep.Name = 'Buried'\n"
+					"deep.Parent = child\n" +
+					Say(language,
+						Join(
+							language,
+							IsNil(language, Call(language, "part", "FindFirstChild('Buried')")),
+							IsNil(language, Call(language, "part", "FindFirstChild('Buried', true)"))
+						));
+		 },
+		 "true/false"},
+
+		{"the class lookups find by exact class and by kind",
+		 [](Language language) {
+			 return APart(language) + Let(language, "child", "Instance.new('Model')") +
+					"child.Parent = part\n" +
+					Say(language,
+						Join(
+							language,
+							IsNil(language, Call(language, "part", "FindFirstChildOfClass('BasePart')")),
+							IsNil(language, Call(language, "part", "FindFirstChildWhichIsA('PVInstance')"))
+						));
+		 },
+		 "true/false"},
+
+		{"the ancestor lookups climb by name and by class",
+		 [](Language language) {
+			 return APart(language) +
+					"part.Name = 'Root'\n"
+					"part.Parent = workspace\n" +
+					Let(language, "child", "Instance.new('Part')") + "child.Parent = part\n" +
+					Say(language,
+						Join(
+							language,
+							Call(language, "child", "FindFirstAncestor('Root')") + ".Name",
+							Call(language, "child", "FindFirstAncestorWhichIsA('BasePart')") + ".Name"
+						));
+		 },
+		 "Root/Root"},
+
+		{"GetFullName spells the path from the root",
+		 [](Language language) {
+			 return APart(language) +
+					"part.Name = 'Door'\n"
+					"part.Parent = workspace\n" +
+					Say(language, Call(language, "part", "GetFullName()"));
+		 },
+		 "Workspace.Door"},
+
+		// **`IsAncestorOf` is `IsDescendantOf` with the arguments swapped**, and
+		// Roblox has both — this engine had one until v0.18. Asserted as a pair so
+		// a binding that answered the same thing to both fails.
+		{"the two containment questions are each other's inverse",
+		 [](Language language) {
+			 return APart(language) + "part.Parent = workspace\n" +
+					Let(language, "child", "Instance.new('Part')") + "child.Parent = part\n" +
+					Say(language,
+						Cat(language,
+							{Text(language, Call(language, "child", "IsDescendantOf(part)")),
+							 "'/'",
+							 Text(language, Call(language, "part", "IsAncestorOf(child)")),
+							 "'/'",
+							 Text(language, Call(language, "child", "IsAncestorOf(part)"))}));
+		 },
+		 "true/true/false"},
+
+		{"Destroy takes the subtree and ClearAllChildren takes only the children",
+		 [](Language language) {
+			 return APart(language) + "part.Parent = workspace\n" +
+					Let(language, "keep", "Instance.new('Part')") + "keep.Parent = part\n" +
+					Let(language, "gone", "Instance.new('Part')") + "gone.Parent = keep\n" +
+					Send(language, "part", "ClearAllChildren()") +
+					Say(language,
+						Join(
+							language,
+							Length(language, Call(language, "part", "GetChildren()")),
+							Length(language, Call(language, "workspace", "GetChildren()"))
+						));
+		 },
+		 "0/1"},
+
+		{"GetTags answers what one instance carries, sorted",
+		 [](Language language) {
+			 return APart(language) + Send(language, "part", "AddTag('zebra')") +
+					Send(language, "part", "AddTag('anvil')") +
+					Say(language,
+						Join(
+							language,
+							Length(language, Call(language, "part", "GetTags()")),
+							First(language, Call(language, "part", "GetTags()"))
+						));
+		 },
+		 "2/anvil"},
+
+		// **An instance with no tags at all**, which is where a null `Tags`
+		// component would otherwise surface as a crash rather than an empty list.
+		{"and an empty list for an instance nobody tagged",
+		 [](Language language) {
+			 return APart(language) + Say(language, Length(language, Call(language, "part", "GetTags()")));
+		 },
+		 "0"},
+
+		{"SetNetworkOwner hands a body over and nil takes it back",
+		 [](Language language) {
+			 return APart(language) +
+					"part.Anchored = false\n"
+					"part.Parent = workspace\n" +
+					Let(language, "who", "Instance.new('Player')") +
+					"who.Parent = " + Call(language, "game", "GetService('Players')") + "\n" +
+					Send(language, "part", "SetNetworkOwner(who)") +
+					Let(language, "owned", Call(language, "part", "GetNetworkOwner()") + ".Name") +
+					Send(language, "part", "SetNetworkOwner(nil)") +
+					Say(
+						language,
+						Join(language, "owned", IsNil(language, Call(language, "part", "GetNetworkOwner()")))
+					);
+		 },
+		 "Player/true"},
+
+		// **The signal, which now filters on the same rule in both.** Its refusal
+		// half is the case below; this is the half that has to keep working.
+		{"GetPropertyChangedSignal delivers at the barrier",
+		 [](Language language) {
+			 if (language == Language::Luau) {
+				 return APart(language) + "part.Parent = workspace\n"
+										  "part:GetPropertyChangedSignal('Transparency'):Connect(function()\n"
+										  "	workspace.Name = 'fired'\n"
+										  "end)\n"
+										  "part.Transparency = 0.5\n";
+			 }
+			 return APart(language) + "part.Parent = workspace\n"
+									  "part.GetPropertyChangedSignal('Transparency').Connect(function () {\n"
+									  "	workspace.Name = 'fired'\n"
+									  "})\n"
+									  "part.Transparency = 0.5\n";
+		 },
+		 "fired",
+		 1},
+	};
+
+	for (const ParityCase &probe : CASES) {
+		Both(probe);
+	}
+}
+
+TEST_CASE("the two refusals that used to differ now agree", "[scripting][scriptcall]") {
+	// **The behaviour change the migration carries, pinned in the language that
+	// used to be laxer.**
+	//
+	//   - `GetPropertyChangedSignal` compared `PropertyDescriptor::Name` in
+	//     JavaScript and ignored `Scriptable`, so a JavaScript script could watch
+	//     `ShaderScript.Source` — a property the read path refuses by answering
+	//     "no such member", precisely so an error message cannot tell a program
+	//     what is there to reach for. Luau refused it. One reader settles it.
+	//   - `SetNetworkOwner` read a null entity out of *anything* in JavaScript, so
+	//     `SetNetworkOwner(5)` was a silent hand-back to the server where Luau
+	//     raised. `IsNil` then `AsInstance` is one body that refuses in both.
+	//
+	// Written as receiver-and-call pairs rather than a parity list because what is
+	// asserted is a refusal, and `Answer` requires the chunk to run.
+	const std::vector<std::pair<const char *, const char *>> PROBES = {
+		{"Instance.new('ShaderScript')", "GetPropertyChangedSignal('Source')"},
+		{"Instance.new('Part')", "GetPropertyChangedSignal('Nonsense')"},
+		{"Instance.new('Part')", "SetNetworkOwner(5)"},
+		{"Instance.new('Part')", "SetNetworkOwner('nobody')"},
+	};
+
+	for (const Language language : LANGUAGES) {
+		for (const auto &[receiver, probe] : PROBES) {
+			Store store = Fresh("scriptcall.refusals");
+			const auto runtime = MakeRuntime(store, language);
+			REQUIRE(runtime != nullptr);
+
+			const std::string source = Let(language, "subject", receiver) + Send(language, "subject", probe);
+
+			INFO(source);
+			CHECK_FALSE(runtime->Run(source.c_str()));
+			CHECK_FALSE(runtime->LastError().empty());
+		}
+	}
+
+	// The writable half still works, or the four above would pass against a
+	// binding that refused everything.
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall.refusals.ok");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const std::string source = Let(language, "ok", "Instance.new('Part')") +
+								   Send(language, "ok", "SetNetworkOwner()") +
+								   Send(language, "ok", "GetPropertyChangedSignal('Transparency')");
+		INFO(runtime->LastError());
+		CHECK(runtime->Run(source.c_str()));
 	}
 }
 

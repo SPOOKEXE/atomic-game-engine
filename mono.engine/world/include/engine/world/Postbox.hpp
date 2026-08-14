@@ -212,7 +212,37 @@ namespace engine::world {
 		// @return The ticket the reply will carry, or NONE when over budget.
 		Ticket Teleport(std::string_view world, std::span<const std::byte> payload);
 
-		// Sends a payload to a named world, with nobody attached.
+		// Opens a named channel on this world, so sends may address it.
+		//
+		// **A channel is opened by the world that receives on it**, which is what
+		// makes `NoSuchChannel` answerable at all: the bus knows what a world is
+		// listening for and can tell a sender that named something else. Nothing
+		// is delivered on a channel this was never called for.
+		//
+		// Idempotent, and it takes effect at the next barrier — so a message sent
+		// in the same tick as the open is refused, which is the honest answer
+		// since the channel did not exist when it was addressed. That is
+		// `Subscribe`'s rule, said again because it is the same one.
+		//
+		// @param channel The channel to listen on.
+		// @return `false` when the world is over budget.
+		// @since v0.17
+		bool OpenChannel(std::string_view channel);
+
+		// Closes a named channel on this world.
+		//
+		// Sends addressed to it afterwards are `NoSuchChannel`. Deliveries
+		// already queued for this barrier are not withdrawn: they were accepted
+		// while the channel was open, and unpicking that would make what a world
+		// received depend on what it did later in the same tick.
+		//
+		// @param channel The channel to stop listening on.
+		// @return `false` when the world is over budget.
+		// @since v0.17
+		bool CloseChannel(std::string_view channel);
+
+		// Sends a payload to a named channel on a named world, with nobody
+		// attached.
 		//
 		// **The addressed route out of a world, which this module did not have.**
 		// `Publish` is a topic fan-out — the sender does not know or care who is
@@ -222,25 +252,33 @@ namespace engine::world {
 		// to say something to one particular world had to either broadcast it to
 		// everybody or teleport a player carrying it.
 		//
+		// **The channel is half the address, and v0.15's cut had only the other
+		// half.** One unnamed pipe per world pair meant every receiver in the
+		// destination saw everything the pair exchanged, so two subsystems talking
+		// between the same two worlds read each other's traffic and had to tell it
+		// apart by looking inside the payload. Naming the channel puts that
+		// distinction where the bus can enforce it.
+		//
 		// **No entity crosses, exactly as with a teleport**, and for the same
 		// reason: rule 3 says nothing crossing a world boundary is a pointer, and
 		// two worlds must not have to agree on class versions to talk.
 		//
-		// **A world that is not running is `NoSuchWorld` rather than silence.**
-		// A publish with no subscribers is a quiet afternoon; a message addressed
-		// to a name nothing answers to is a mistake the sender wants told about,
-		// and being able to tell the difference is half the reason this exists
-		// beside `Publish`.
+		// **Every refusal is a `BusStatus` on the reply rather than silence.** A
+		// publish with no subscribers is a quiet afternoon; a message addressed to
+		// a name nothing answers to is a mistake the sender wants told about, and
+		// being able to tell the difference is half the reason this exists beside
+		// `Publish`. `BusStatus` carries the table of what each case answers.
 		//
-		// The delivery arrives with `Bus == BusKind::Channel` and `Key` set to
-		// the *sender's* name — a channel is the one route where answering is the
-		// point, and the destination already knows it is itself.
+		// The delivery arrives with `Bus == BusKind::Channel`, `Key` set to the
+		// channel and `From` to the sender — a channel is the one route where
+		// answering is the point, and the destination already knows it is itself.
 		//
 		// @param world   The destination world's name.
+		// @param channel The channel on it, which that world must have opened.
 		// @param payload The bytes to send.
 		// @return The ticket the reply will carry, or NONE when over budget.
 		// @since v0.15
-		Ticket SendTo(std::string_view world, std::span<const std::byte> payload);
+		Ticket SendTo(std::string_view world, std::string_view channel, std::span<const std::byte> payload);
 
 		// Reports whether this world is a replica, and so may not write.
 		//
@@ -254,13 +292,18 @@ namespace engine::world {
 
 	  private:
 		// Queues an envelope, or reports that the budget is spent.
+		//
+		// `target` is the destination world and only a channel send has one, so
+		// it is last and defaulted rather than sitting beside `key` — the two are
+		// both `core::Name` and adjacent is where a positional call swaps them.
 		Ticket Post(
 			BusKind bus,
 			BusOperation operation,
 			core::Name key,
 			std::span<const std::byte> payload,
 			uint64_t version,
-			bool wantsReply
+			bool wantsReply,
+			core::Name target = {}
 		);
 
 		ecs::Store *Store_;

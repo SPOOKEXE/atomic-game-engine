@@ -10,7 +10,7 @@
 // would regenerate.
 //
 // This module has already paid for that mistake twice, and both are recorded
-// where they happened. `Values.cpp` carries `Magnitude` and `Unit`, which
+// where they happened. `LuauValues.cpp` carries `Magnitude` and `Unit`, which
 // `engine.d.luau` promised for two versions while the run time answered
 // "Vector3 has no member 'Unit'" — a script that typechecked clean and failed
 // anyway, invisible to `bindings-check` because it compares the declarations
@@ -30,7 +30,7 @@
 // *methods* are fine: they live in a real table, Luau's in the registry under
 // `engine.instance.methods` and JavaScript's in `__instanceMethods`, so a walk
 // finds them. Instance *signals* on the Luau side are the branch chain, so
-// `Instances.cpp` keeps a list beside it and the suite checks every entry
+// `LuauInstances.cpp` keeps a list beside it and the suite checks every entry
 // against a live VM.
 //
 // Classes, properties and enums are not here at all, because `ecs::Classes` and
@@ -126,5 +126,29 @@ namespace engine::script {
 	// @return The names to drop, sorted.
 	// @since v0.14
 	std::span<const std::string_view> Withheld(Language language);
+
+	// Every word a bus reply's status can be, in ordinal order, `"Unknown"` last.
+	//
+	// **`script::DescribeStatus`'s switch, read rather than transcribed.** The
+	// generated declarations carry a `BusStatus` string union, and until v0.18
+	// both of them were hand-written text in `mono.tools/bindings/app/main.cpp`
+	// with a comment asking whoever added a status to remember. Nothing in the
+	// build checked it, which is the third category rule 6 refuses: a status
+	// appended to `world::BusStatus` typechecked as an error in correct script
+	// code, and the only thing that would have said so was somebody re-reading a
+	// comment.
+	//
+	// `just bindings-check` is what closes it now — the generator builds both
+	// unions from this list, so a new status that has not reached the checked-in
+	// declarations fails the check by name.
+	//
+	// **`"Unknown"` is a real member and is last.** It is what `DescribeStatus`
+	// answers for a value it does not recognise, which a script can be handed
+	// after a version skew between two processes, so a union without it makes
+	// correct handling code a typecheck failure.
+	//
+	// @return The words, valid for the life of the program.
+	// @since v0.18
+	std::span<const std::string_view> BusStatusWords();
 
 }

@@ -5,9 +5,17 @@
 // **The stack is shared and the callables are not**, which is `Signals.hpp`'s
 // arrangement one door along and for the same reason. What a bound action *is* —
 // a name, the keys it claims, a priority, and the rule that the highest claim
-// wins and the rest never see the press — names no VM, and the order two actions
-// at one priority fire in is a thing a recording depends on. Two hand-written
-// copies of that would agree until the first time one was fixed.
+// hears the press first and decides whether anything below it does — names no
+// VM, and the order two actions at one priority fire in is a thing a recording
+// depends on. Two hand-written copies of that would agree until the first time
+// one was fixed.
+//
+// **What a frame *did* is here too, and for the same argument one size down.**
+// The four report builders and the pair behind `gameProcessedEvent` answer
+// questions about an input rather than about the stack, and two pumps answering
+// either one is two answers — an engine where a click carried a position, or
+// read as handled, in one language and not the other is one nobody could port a
+// handler between.
 //
 // A Luau handler is a registry ref and a JavaScript one an index into
 // `JsContext::Callables`, so a callable crosses as an opaque `CallbackRef`
@@ -25,6 +33,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/scene/Input.hpp>
 
 #include <cstdint>
@@ -44,7 +53,7 @@ namespace engine::script {
 	// one thing and only its wrapper is two.
 	//
 	// Trivially copyable on purpose: the Luau half placement-news it into
-	// userdata memory, exactly as every value type in `Values.cpp` is.
+	// userdata memory, exactly as every value type in `LuauValues.cpp` is.
 	struct InputReport {
 		// Where the pointer was, in pixels from the top-left of the window,
 		// with the wheel's notches in Z.
@@ -111,6 +120,44 @@ namespace engine::script {
 	// A report for this frame's wheel movement.
 	InputReport WheelReport(const scene::InputState &input);
 
+	// Whether the 2D interface has the pointer this beat.
+	//
+	// **What `gameProcessedEvent` actually is here, and it is shared for the
+	// reason the four builders above are**: two pumps deciding what "the game
+	// already handled this" means is two answers to one question, and a place
+	// ported between the languages would find its click swallowed in one and not
+	// the other.
+	//
+	// **The router's own events are the evidence, because they are the only
+	// record of a press being taken.** `gui::Router` emits an event naming an
+	// element exactly when the pointer is over or pressed on something that takes
+	// input — `Pick` walks past anything inactive — so an event in this beat's
+	// queue *is* the interface having consumed the pointer. `MouseLeave` is the
+	// one exception and it is the important one: it is emitted for the element
+	// the pointer has just left, which is the frame the interface stopped having
+	// it.
+	//
+	// **A keyboard press is never processed, and that is a gap rather than a
+	// decision.** Roblox's answer is true while a `TextBox` has focus, and `gui`
+	// has no focus at all — `Router` tracks a hover and a press and nothing else,
+	// and a `TextBox` is a class that draws. Closing it needs the router to hold a
+	// focused element and release it on a press elsewhere, which is a change in
+	// `gui` rather than here; until then a key is honestly unprocessed, which is
+	// what it is. `DEFERRED.md` D00117 carries the whole of what it would take.
+	//
+	// @param events What the router produced for this beat, in its order.
+	// @return `true` when a pointer event this beat should read as handled.
+	bool InterfaceHasPointer(std::span<const gui::GuiEvent> events);
+
+	// Whether an input report describes the pointer rather than the keyboard.
+	//
+	// The filter `InterfaceHasPointer` is applied through: the interface takes
+	// clicks, moves and wheel notches, and nothing it does can consume a key.
+	//
+	// @param report The report.
+	// @return `true` for a button, a motion or a wheel notch.
+	bool IsPointerReport(const InputReport &report);
+
 	// One action bound through `ContextActionService`.
 	//
 	// @since v0.10
@@ -130,6 +177,45 @@ namespace engine::script {
 
 		// Higher wins. Roblox's default is zero and so is this.
 		int Priority = 0;
+	};
+
+	// One bound action as a script sees it, which is Roblox's
+	// `GetBoundActionInfo` record.
+	//
+	// **`InputReport`'s shape one door along, and it is here for that struct's
+	// reason.** The record holds `Enum.KeyCode` members, and `ScriptValue` — the
+	// tree a method may return — has no tag for an `EnumItem` and must not gain
+	// one, because it crosses a world and `Codec.hpp` is a wire format. So the
+	// *fact* is one struct and only the wrapper is two: each VM builds the table
+	// or object and its own `EnumItem`s from this, exactly as each builds its own
+	// `InputObject`.
+	//
+	// **The keys arrive as member names rather than as ordinals**, so
+	// `scene::Describe` is called once here rather than once per adapter — the
+	// same rule `KeyReport` and its three neighbours keep.
+	//
+	// @since v0.16
+	struct BoundActionReport {
+		// What the script bound it as, and the key it is reported under.
+		std::string_view Name;
+
+		// The keys it claims, as `Enum.KeyCode` member names.
+		std::span<const core::Name> Keys;
+
+		// Higher wins. Roblox calls this `priorityLevel`.
+		int Priority = 0;
+
+		// **Inverted from this engine's own order, so higher still wins.**
+		// `ActionStack` is sorted highest priority *first* and Roblox's
+		// `stackOrder` counts the other way — the largest number is the claim
+		// that gets the key. Reporting the index under Roblox's name would be the
+		// same word meaning the opposite thing, which is worse than not reporting
+		// it.
+		int StackOrder = 0;
+
+		// Accepted and ignored at bind time, for the reason `BindAction` gives,
+		// so it is always false rather than whatever was passed.
+		bool CreateTouchButton = false;
 	};
 
 	// Every action one VM has bound, highest priority first.
@@ -167,14 +253,25 @@ namespace engine::script {
 		// @param released Appended with every callable the stack held.
 		void UnbindAll(std::vector<CallbackRef> &released);
 
-		// The highest-priority action claiming a key, or null.
+		// The next action claiming a key, at or after a position in the stack.
 		//
-		// **The first claim wins and the rest never see it**, which is the whole
-		// reason `ContextActionService` exists beside polling.
+		// **A walk rather than a single answer, because
+		// `Enum.ContextActionResult.Pass` exists.** The highest claim gets the key
+		// first and *decides* whether anything below it hears about it: returning
+		// `Sink`, or returning nothing, stops the press here, and returning `Pass`
+		// hands it down. Answering only the winner made `Pass` unimplementable and
+		// made a handler's return value dead.
 		//
-		// @param key A `scene::KeyCode` ordinal.
-		// @return The action, or null when nothing claims it.
-		const BoundAction *Claiming(uint16_t key) const;
+		// **An index and not an iterator, so a handler may rebind mid-walk without
+		// a dangling pointer.** A handler that binds or unbinds shifts the stack
+		// under this loop; the position is then approximate, which is the honest
+		// cost of letting a handler do it at all — Roblox does not define that case
+		// either. What it must not be is a use-after-free.
+		//
+		// @param key      A `scene::KeyCode` ordinal.
+		// @param position Where to start. Advanced past whatever is returned.
+		// @return The action, or null when nothing else claims it.
+		const BoundAction *ClaimingFrom(uint16_t key, size_t &position) const;
 
 		// One action by name, or null.
 		const BoundAction *Find(std::string_view name) const;

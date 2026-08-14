@@ -187,7 +187,12 @@ namespace engine::world {
 		void ReadBuses(core::ByteReader &reader, const WorldDirectory &directory);
 
 	  private:
-		void ApplyEnvelope(World &sender, const Envelope &envelope, const WorldDirectory &directory);
+		void ApplyEnvelope(
+			World &sender,
+			const Envelope &envelope,
+			const WorldDirectory &directory,
+			const UniverseSettings &settings
+		);
 		uint64_t DeliverInboxes(const WorldDirectory &directory, const UniverseSettings &settings);
 
 		Buses Backends;
@@ -196,6 +201,15 @@ namespace engine::world {
 		// Reused between barriers so routing allocates nothing in a steady
 		// universe.
 		std::vector<std::vector<Delivery>> Fanout;
+
+		// How many of each world's queued deliveries this barrier are channel
+		// messages, by world index.
+		//
+		// Counted rather than derived, because deriving it means walking
+		// `Fanout[destination]` per send — quadratic in exactly the case the
+		// bound exists to survive. Reset with the fanout at the top of every
+		// barrier, so the limit is per barrier and says so.
+		std::vector<uint32_t> ChannelQueued;
 
 		// The world tick each world's inbox was filled at, by world index.
 		//

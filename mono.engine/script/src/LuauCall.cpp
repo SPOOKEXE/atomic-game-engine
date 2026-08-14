@@ -27,8 +27,9 @@
 //
 // @tier L9 · shared
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 #include "ScriptCall.hpp"
+#include "Subtree.hpp"
 
 #include <engine/ecs/Attributes.hpp>
 
@@ -39,6 +40,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace engine::script {
 
@@ -246,8 +248,33 @@ namespace engine::script {
 				return Context.NextGuid++;
 			}
 
+			const HostRole &Role() const override {
+				return Context.Role;
+			}
+
+			TweenTable &Tweens() override {
+				return Context.Tweens;
+			}
+
+			DebrisQueue &Debris() override {
+				return Context.Debris;
+			}
+
+			TopicSubscriptions &Subscriptions() override {
+				return Context.Subscriptions;
+			}
+
 			Entity Subject() const override {
 				return Self;
+			}
+
+			// Whether the method suspended the thread rather than answering.
+			//
+			// **Read by the service trampoline and by nothing else.** `lua_yield`
+			// takes its results from the stack top at the moment the C function
+			// returns, so the yield has to *be* the return — see `Await`.
+			bool Suspended() const {
+				return Yielded;
 			}
 
 			bool IsNil(size_t index) const override {
@@ -306,6 +333,10 @@ namespace engine::script {
 				return CheckCFrame(State, Slot(index));
 			}
 
+			const core::TweenInfo &AsTweenInfo(size_t index) override {
+				return CheckTweenInfoValue(State, Slot(index));
+			}
+
 			ecs::Entity AsInstance(size_t index) override {
 				return CheckInstanceArgument(State, Slot(index));
 			}
@@ -323,6 +354,46 @@ namespace engine::script {
 				return ReadScriptValue(State, Slot(index), out, 0, why);
 			}
 
+			void ReadFieldNames(size_t index, std::vector<std::string> &out) override {
+				const int table = Slot(index);
+				luaL_checktype(State, table, LUA_TTABLE);
+
+				// **The key is tested rather than converted.** `lua_tostring` on a
+				// number key rewrites the value on the stack, which is exactly
+				// what `lua_next` is documented to break on — a record with a
+				// numeric key would otherwise end the walk somewhere arbitrary.
+				lua_pushnil(State);
+				while (lua_next(State, table) != 0) {
+					if (lua_type(State, -2) != LUA_TSTRING) {
+						// The value and the key both go, so the stack is clean
+						// before the raise unwinds out of here.
+						lua_pop(State, 2);
+						Raise("every field of this record is named by a string");
+					}
+
+					size_t length = 0;
+					const char *text = lua_tolstring(State, -2, &length);
+					out.emplace_back(text, length);
+					lua_pop(State, 1);
+				}
+			}
+
+			bool ReadFieldProperty(
+				size_t index, const std::string &field, ecs::PropertyType type, Name enumName, void *out
+			) override {
+				lua_getfield(State, Slot(index), field.c_str());
+
+				// An absolute index, because `ReadPropertyValue` pushes for some
+				// types and a relative one would be wrong the moment it did.
+				const bool read = ReadPropertyValue(State, lua_gettop(State), type, enumName, out);
+				lua_pop(State, 1);
+				return read;
+			}
+
+			bool ReadProperty(size_t index, ecs::PropertyType type, Name enumName, void *out) override {
+				return ReadPropertyValue(State, Slot(index), type, enumName, out);
+			}
+
 			CallbackRef RetainCallback(size_t index) override {
 				luaL_checktype(State, Slot(index), LUA_TFUNCTION);
 
@@ -334,6 +405,10 @@ namespace engine::script {
 
 			void ReleaseCallback(CallbackRef callback) override {
 				lua_unref(State, callback);
+			}
+
+			void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) override {
+				Context.Signals.MarkOnce(Context.Signals.Connect(kind, subject, callback));
 			}
 
 			void ReturnNil() override {
@@ -420,12 +495,30 @@ namespace engine::script {
 				Pushed++;
 			}
 
+			void ReturnBoundAction(const BoundActionReport &report) override {
+				PushBoundAction(report);
+				Pushed++;
+			}
+
+			void ReturnBoundActions(std::span<const BoundActionReport> reports) override {
+				// **Keyed by name rather than an array**, which is Roblox's shape
+				// and the one a caller wants: the question this answers is "what
+				// has claimed E", and the name is how anything is unbound
+				// afterwards.
+				lua_createtable(State, 0, static_cast<int>(reports.size()));
+				for (const BoundActionReport &report : reports) {
+					PushBoundAction(report);
+					lua_setfield(State, -2, std::string(report.Name).c_str());
+				}
+				Pushed++;
+			}
+
 			void ReturnInstance(ecs::Entity value) override {
 				// **Nil for a null, and `PushInstanceValue` does not do that.**
 				// It is the raw pusher: it makes a userdata whatever it is
 				// handed, so a null entity came out as an instance handle to
 				// nothing and `if player then` was true for a player who does
-				// not exist. `Instances.cpp` has always had a separate
+				// not exist. `LuauInstances.cpp` has always had a separate
 				// `PushFound` for exactly this, and every Luau lookup uses it —
 				// which is precisely why the first version of this line looked
 				// right and was not.
@@ -463,6 +556,49 @@ namespace engine::script {
 				Pushed++;
 			}
 
+			void ReturnTween(ecs::Entity tween) override {
+				PushTween(State, tween);
+				Pushed++;
+			}
+
+			void ForgetSubject(ecs::Entity subject) override {
+				std::vector<CallbackRef> released;
+				Context.Signals.DropSubject(subject, released);
+				for (const CallbackRef reference : released) {
+					lua_unref(State, reference);
+				}
+			}
+
+			void Forget(ecs::Entity instance) override {
+				lua_State *state = State;
+				ForgetSubtree(
+					*Context.World,
+					Context.Signals,
+					Context.Changes,
+					instance,
+					[state](CallbackRef reference) { lua_unref(state, reference); }
+				);
+			}
+
+			void Await(uint64_t ticket) override {
+				// **The thread is kept alive by a registry ref**, because nothing
+				// else holds a suspended coroutine: the script that started it has
+				// returned into this call and the barrier is what resumes it.
+				lua_pushthread(State);
+				lua_xmove(State, Context.State, 1);
+				const int reference = lua_ref(Context.State, -1);
+				lua_pop(Context.State, 1);
+
+				// **`insert_or_assign`, not `emplace`.** A resumed script that
+				// calls another store method suspends again on the same thread,
+				// and `emplace` would keep the *old* reference — so the fresh one
+				// would leak and the next reply would resume a thread nothing was
+				// holding.
+				Context.Threads.insert_or_assign(State, reference);
+				Context.AwaitedTickets.insert_or_assign(ticket, State);
+				Yielded = true;
+			}
+
 			[[noreturn]] void Raise(const char *message) override {
 				// `"%s"` rather than the message as the format, because a message
 				// this file did not write may contain a percent and `luaL_errorL`
@@ -471,6 +607,34 @@ namespace engine::script {
 			}
 
 		  private:
+			// One action's record, left on the stack.
+			//
+			// Roblox's four fields, and the two it does not have are absent from
+			// the *binding* rather than from the record: `title` and
+			// `description` come from `SetTitle` and `SetDescription`, which
+			// decorate a touch button, and there is no touch surface — so
+			// reporting them as empty strings would claim they had been set to
+			// nothing.
+			void PushBoundAction(const BoundActionReport &report) {
+				lua_createtable(State, 0, 4);
+
+				lua_createtable(State, static_cast<int>(report.Keys.size()), 0);
+				for (size_t index = 0; index < report.Keys.size(); index++) {
+					PushEnumItem(State, Name("KeyCode"), report.Keys[index]);
+					lua_rawseti(State, -2, static_cast<int>(index) + 1);
+				}
+				lua_setfield(State, -2, "inputTypes");
+
+				lua_pushinteger(State, report.Priority);
+				lua_setfield(State, -2, "priorityLevel");
+
+				lua_pushinteger(State, report.StackOrder);
+				lua_setfield(State, -2, "stackOrder");
+
+				lua_pushboolean(State, report.CreateTouchButton ? 1 : 0);
+				lua_setfield(State, -2, "createTouchButton");
+			}
+
 			// Where the receiver sits, and therefore where the arguments start.
 			static constexpr int RECEIVER = 1;
 
@@ -482,6 +646,7 @@ namespace engine::script {
 			LuauContext &Context;
 			Entity Self;
 			int Pushed = 0;
+			bool Yielded = false;
 		};
 
 		// The one bound function every neutral method is installed as.
@@ -511,6 +676,16 @@ namespace engine::script {
 
 			LuauCall call(state, LuauCall::OnService{});
 			row->Function(call);
+
+			// **A yield is the return and cannot be anything else.** `lua_yield`
+			// takes the results from the stack top as it is called and hands back
+			// the sentinel a C function must return, so the branch is here rather
+			// than inside `Await` — which returns to a method body that then
+			// returns to this line. The store services are the callers; every
+			// other method leaves this false.
+			if (call.Suspended()) {
+				return lua_yield(state, 0);
+			}
 			return call.Results();
 		}
 

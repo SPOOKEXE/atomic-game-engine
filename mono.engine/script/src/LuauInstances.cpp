@@ -1,10 +1,9 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 #include "Subtree.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
-#include <engine/scene/Awake.hpp>
-#include <engine/scene/Ownership.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
 
 #include <algorithm>
@@ -70,30 +69,13 @@ namespace engine::script {
 		// only ever learned the shapes a value can have.
 
 		// **Both halves live at the bottom of this file and are declared in
-		// `Bindings.hpp`.** They used to be file-local and took a
+		// `LuauBindings.hpp`.** They used to be file-local and took a
 		// `PropertyDescriptor`, which was right while a property was the only
 		// thing with a `PropertyType`. It is not: v0.12's ECS surface marshals
 		// the same value types for a **component field**, which is not a
 		// property and has no descriptor. Taking the type and the enum name
 		// instead of the descriptor is what keeps that one switch rather than
 		// two that agree until somebody edits one.
-
-		// Compare the stored spelling directly. Interning each lookup takes the
-		// process-wide registry lock and adds a hash lookup to every property access.
-		// **A non-scriptable property is not found, rather than found and
-		// refused.** `PropertyDescriptor::Scriptable` is about who is asking,
-		// and the honest answer to a script asking for a script's `Source` is
-		// the same one it gets for a member that does not exist — otherwise the
-		// error message itself tells a program what is there to reach for. It
-		// also means the read path needs no second check: this is the one door.
-		const PropertyDescriptor *Find(const Store &store, Entity instance, std::string_view name) {
-			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-				if (property.Spelling == name) {
-					return property.Scriptable ? &property : nullptr;
-				}
-			}
-			return nullptr;
-		}
 
 		// The `Players` service's class, resolved once.
 		//
@@ -107,350 +89,6 @@ namespace engine::script {
 				return ecs::Classes::Find(Name("Players"));
 			}();
 			return id;
-		}
-
-		// --- methods ---------------------------------------------------------
-		//
-		// Every one of these is a call `Store` already had and a script could
-		// not spell. Nothing new happens in the storage; what is new is that
-		// `part:Destroy()` reaches `Store::DestroyInstance` instead of being a
-		// missing member.
-
-		// `instance:IsA(className)`
-		int InstanceIsA(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			const char *className = luaL_checkstring(state, 2);
-
-			const ecs::ClassId wanted = ecs::Classes::Find(Name(className));
-			if (!wanted.IsValid()) {
-				// False rather than an error, matching Roblox. A script testing
-				// for a class this game does not register is asking a question
-				// with a correct answer, and it is "no".
-				lua_pushboolean(state, false);
-				return 1;
-			}
-
-			lua_pushboolean(state, ecs::Classes::IsA(store.ClassOf(instance), wanted));
-			return 1;
-		}
-
-		// `players:GetPlayers()`
-		//
-		// **The `Player` children of the receiver, which on `Players` is the
-		// answer Roblox gives and on anything else is an empty table.** Filtered
-		// rather than returning every child, because `Players` is an ordinary
-		// container: a `Folder` somebody parented there is not a player, and a
-		// list that included it is a list every caller has to re-filter.
-		int InstanceGetPlayers(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			lua_newtable(state);
-			int index = 1;
-			store.EachChild(instance, [&](Entity child) {
-				if (!ecs::Classes::IsA(store.ClassOf(child), scene::PlayerClass())) {
-					return;
-				}
-				PushInstance(state, child);
-				lua_rawseti(state, -2, index++);
-			});
-			return 1;
-		}
-
-		// `instance:SetNetworkOwner(player)` and `instance:GetNetworkOwner()`
-		//
-		// **Roblox's pair, spelled Roblox's way, including the nil.** Passing no
-		// argument gives the body back to the server, which is what
-		// `SetNetworkOwner(nil)` means there and what a script that has just seen
-		// a player leave will reach for.
-		//
-		// The refusal raises rather than answering `false`, which departs from
-		// the tag calls in `ScriptMethods.cpp` and for the reason those give: a
-		// full tag table is a
-		// *scene* running out of room, where handing a body to a `Folder` is a
-		// script naming the wrong variable. A silent `false` there is a body
-		// nothing simulates and no line of output.
-		//
-		// **Two things are refused and the message names both**, because a
-		// script that gets this wrong is far more likely to have passed a good
-		// player and an anchored part than a bad player: ownership decides who
-		// runs the physics, and an anchored part has none to run.
-		int InstanceSetNetworkOwner(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			Entity player = ecs::NULL_ENTITY;
-			if (!lua_isnoneornil(state, 2)) {
-				player = CheckInstance(state, 2);
-			}
-
-			if (!scene::SetNetworkOwner(store, instance, player)) {
-				luaL_error(
-					state, "SetNetworkOwner needs a Player or nil, and an unanchored part to hand over"
-				);
-			}
-			return 0;
-		}
-
-		int InstanceGetNetworkOwner(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			const Entity owner = scene::NetworkOwnerOf(store, instance);
-			if (owner == ecs::NULL_ENTITY) {
-				// Nil is "the server", which is the same answer Roblox gives and
-				// the same answer an unassigned body gives. A script that wants
-				// to know which of the two it is asked the wrong question.
-				lua_pushnil(state);
-				return 1;
-			}
-
-			PushInstance(state, owner);
-			return 1;
-		}
-
-		int InstanceKeepWorldAwake(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			// **The reason is required**, which is the one thing this surface
-			// insists on. A world that will not sleep costs a machine until
-			// somebody works out what is holding it up, and the answer should be
-			// a sentence rather than an entity id — see `scene/Awake.hpp`.
-			const char *reason = luaL_checkstring(state, 2);
-			if (!scene::KeepWorldAwake(store, instance, core::Name(reason))) {
-				luaL_error(state, "KeepWorldAwake needs a live instance");
-			}
-			return 0;
-		}
-
-		int InstanceLetWorldSleep(lua_State *state) {
-			Store &store = StoreOf(state);
-			scene::LetWorldSleep(store, CheckInstance(state, 1));
-			return 0;
-		}
-
-		int InstanceIsKeepingWorldAwake(lua_State *state) {
-			Store &store = StoreOf(state);
-			lua_pushboolean(state, scene::HoldsWorldAwake(store, CheckInstance(state, 1)) ? 1 : 0);
-			return 1;
-		}
-
-		// `instance:Destroy()`
-		int InstanceDestroy(lua_State *state) {
-			LuauContext &context = UpvalueContext(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			// **The signal table is told before the storage is**, and it is told
-			// about the whole subtree. `DestroyInstance` takes every descendant,
-			// so a connection anywhere under here would otherwise outlive the row
-			// it watched: the ref is never given up, so the closure and
-			// everything it captured stay alive for the rest of the world's life.
-			ForgetSubtree(
-				*context.World, context.Signals, context.Changes, instance, [state](CallbackRef reference) {
-					lua_unref(state, reference);
-				}
-			);
-
-			context.World->DestroyInstance(instance);
-			return 0;
-		}
-
-		// `instance:Clone()`
-		int InstanceClone(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			const Entity copy = store.CloneInstance(instance);
-			if (copy == ecs::NULL_ENTITY) {
-				// Nil rather than an error, matching Roblox: a clone of
-				// something unclonable is nil, and a script can test for it.
-				lua_pushnil(state);
-				return 1;
-			}
-
-			PushInstance(state, copy);
-			return 1;
-		}
-
-		// `instance:GetChildren()`
-		int InstanceGetChildren(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			lua_newtable(state);
-			int index = 0;
-			store.EachChild(instance, [&](Entity child) {
-				PushInstance(state, child);
-				lua_rawseti(state, -2, ++index);
-			});
-			return 1;
-		}
-
-		// `instance:GetDescendants()`
-		//
-		// Depth first, children before grandchildren, which is Roblox's order
-		// and the one a script writing a recursive walk by hand would produce.
-		int InstanceGetDescendants(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			lua_newtable(state);
-			int index = 0;
-
-			EachDescendant(store, instance, [&](Entity descendant) {
-				PushInstance(state, descendant);
-				lua_rawseti(state, -2, ++index);
-			});
-			return 1;
-		}
-
-		// Pushes an instance, or nil for the null handle.
-		//
-		// Every lookup below ends the same way, and writing it out six times is
-		// six chances to push a userdata wrapping `NULL_ENTITY` — which is not
-		// nil, compares equal to nothing, and is the shape a script cannot test
-		// for.
-		int PushFound(lua_State *state, Entity found) {
-			if (found == ecs::NULL_ENTITY) {
-				lua_pushnil(state);
-				return 1;
-			}
-
-			PushInstance(state, found);
-			return 1;
-		}
-
-		// The class named by an argument, or an invalid id.
-		ecs::ClassId CheckClass(lua_State *state, int index) {
-			return ecs::Classes::Find(core::Name(luaL_checkstring(state, index)));
-		}
-
-		// `instance:FindFirstChild(name, recursive)`
-		int InstanceFindFirstChild(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			const char *name = luaL_checkstring(state, 2);
-
-			// **The second argument, which used to be read and ignored.** A
-			// script calling `FindFirstChild("Humanoid", true)` got the
-			// non-recursive answer — nil for anything not a direct child — and
-			// nothing said so. Silently answering a different question than the
-			// one asked is the worst kind of gap in a binding.
-			const bool recursive = lua_toboolean(state, 3) != 0;
-
-			return PushFound(state, store.FindFirstChild(instance, name, recursive));
-		}
-
-		// `instance:FindFirstChildOfClass(className)`
-		int InstanceFindFirstChildOfClass(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			return PushFound(state, store.FindFirstChildOfClass(instance, CheckClass(state, 2)));
-		}
-
-		// `instance:FindFirstChildWhichIsA(className, recursive)`
-		int InstanceFindFirstChildWhichIsA(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			const ecs::ClassId klass = CheckClass(state, 2);
-			const bool recursive = lua_toboolean(state, 3) != 0;
-
-			return PushFound(state, store.FindFirstChildWhichIsA(instance, klass, recursive));
-		}
-
-		// `instance:FindFirstAncestor(name)`
-		int InstanceFindFirstAncestor(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			return PushFound(state, store.FindFirstAncestor(instance, luaL_checkstring(state, 2)));
-		}
-
-		// `instance:FindFirstAncestorOfClass(className)`
-		int InstanceFindFirstAncestorOfClass(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			return PushFound(state, store.FindFirstAncestorOfClass(instance, CheckClass(state, 2)));
-		}
-
-		// `instance:FindFirstAncestorWhichIsA(className)`
-		int InstanceFindFirstAncestorWhichIsA(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			return PushFound(state, store.FindFirstAncestorWhichIsA(instance, CheckClass(state, 2)));
-		}
-
-		// `instance:GetFullName()`
-		int InstanceGetFullName(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			const std::string full = store.GetFullName(instance);
-			lua_pushlstring(state, full.data(), full.size());
-			return 1;
-		}
-
-		// `instance:IsDescendantOf(ancestor)`
-		int InstanceIsDescendantOf(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			// No case for the workspace any more, and losing it is the point:
-			// `part:IsDescendantOf(workspace)` used to be true for every live
-			// instance in the world, because the world was every root's
-			// ancestor. It is now the real subtree question — the same one the
-			// renderer asks — so a script and the render gate cannot disagree
-			// about whether something is in the scene.
-			lua_pushboolean(state, store.IsDescendantOf(instance, CheckInstance(state, 2)));
-			return 1;
-		}
-
-		// `instance:ClearAllChildren()`
-		int InstanceClearAllChildren(lua_State *state) {
-			LuauContext &context = UpvalueContext(state);
-			const Entity instance = CheckInstance(state, 1);
-
-			// Collected first. `DestroyInstance` unlinks from the sibling list
-			// the walk is standing in, so destroying inside `EachChild` would
-			// visit whatever moved into the slot — or nothing.
-			std::vector<Entity> children;
-			context.World->EachChild(instance, [&](Entity child) { children.push_back(child); });
-
-			for (const Entity child : children) {
-				// The child's whole subtree, because that is what destroying it
-				// takes — forgetting only the child leaves every grandchild's
-				// connections pointing at rows that no longer exist.
-				ForgetSubtree(
-					*context.World, context.Signals, context.Changes, child, [state](CallbackRef reference) {
-						lua_unref(state, reference);
-					}
-				);
-				context.World->DestroyInstance(child);
-			}
-			return 0;
-		}
-
-		// `instance:GetPropertyChangedSignal(name)`
-		int InstanceGetPropertyChangedSignal(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			const char *field = luaL_checkstring(state, 2);
-
-			// Refused for a property that does not exist, which is the one place
-			// a typo in a signal name can still be caught. A signal that
-			// silently never fired would be indistinguishable from a value that
-			// never changed.
-			if (Find(store, instance, field) == nullptr) {
-				luaL_errorL(state, "'%s' is not a valid member of this instance", field);
-			}
-
-			PushSignal(state, SignalKind::PropertyChanged, instance, Name(field));
-			return 1;
 		}
 
 		// The method table, built once and shared by every instance.
@@ -485,7 +123,10 @@ namespace engine::script {
 			"AncestryChanged",
 			"PlayerAdded",
 			"PlayerRemoving",
+			"CharacterAdded",
+			"CharacterRemoving",
 			"Activated",
+			"MouseButton1Click",
 			"InputBegan",
 			"InputEnded",
 			"MouseEnter",
@@ -547,6 +188,20 @@ namespace engine::script {
 				return 1;
 			}
 
+			// **A player's own pair, offered on every instance for the reason
+			// the two above it are.** Nothing fires one at a subject that is not
+			// a `Player`, so a connection on a `Part` is inert by construction —
+			// which is the same answer a class gate would give, at none of the
+			// cost of testing a class on every field access in the world.
+			if (name == "CharacterAdded") {
+				PushSignal(state, SignalKind::CharacterAdded, instance);
+				return 1;
+			}
+			if (name == "CharacterRemoving") {
+				PushSignal(state, SignalKind::CharacterRemoving, instance);
+				return 1;
+			}
+
 			// The 2D tree's input, in the same place and for the same reason:
 			// none of these projects onto a component either.
 			//
@@ -558,7 +213,21 @@ namespace engine::script {
 			// names elements it found in a compiled draw list, so a connection
 			// on a `Part` is inert by construction, which is the same answer at
 			// none of the cost.
-			if (name == "Activated") {
+			// **`MouseButton1Click` beside `Activated`, and they are one signal
+			// under two names rather than two lists.** Roblox has both — the
+			// second on `GuiButton` — and this engine's router produces exactly
+			// one primary button, so the two questions have one answer here. A
+			// second `SignalKind` would be a second list to fan the same event
+			// out to, and the first handler an author wrote against the name
+			// this file did not know would never fire.
+			//
+			// **Not `InputChanged`, which stays absent.** Roblox's fires for
+			// pointer motion *and* the wheel over an element; `gui::Router`
+			// produces motion only, and `MouseMoved` already carries it with the
+			// position an argument-less `InputChanged` could not. Half a member
+			// under a familiar name is the trade `SoundService.cpp` refuses a
+			// list of.
+			if (name == "Activated" || name == "MouseButton1Click") {
 				PushSignal(state, SignalKind::GuiActivated, instance);
 				return 1;
 			}
@@ -583,7 +252,7 @@ namespace engine::script {
 				return 1;
 			}
 
-			const PropertyDescriptor *property = Find(store, instance, field);
+			const PropertyDescriptor *property = ScriptableProperty(store, instance, field);
 			if (property != nullptr) {
 				// **The one type that cannot ride the shared byte buffer**, and
 				// it is worth saying why rather than leaving it to look like an
@@ -689,7 +358,7 @@ namespace engine::script {
 				return 0;
 			}
 
-			const PropertyDescriptor *property = Find(store, instance, field);
+			const PropertyDescriptor *property = ScriptableProperty(store, instance, field);
 			if (property == nullptr) {
 				luaL_errorL(state, "'%s' is not a valid member of this instance", field);
 			}
@@ -1013,51 +682,21 @@ namespace engine::script {
 		// The method table, in the registry so `__index` hands back one shared
 		// closure per method rather than building one per access.
 		//
-		// **The editor reads this same table back**, rather than a list of
-		// method names kept beside it: `LuauRuntime::Vocabulary` walks the
-		// registry entry below, so a method added here is offered in the script
-		// editor with nothing else changing. `LuauEcs` appends five more to it
-		// and those arrive the same way.
-		static const struct {
-			const char *Name;
-			lua_CFunction Function;
-		} METHODS[] = {
-			{"IsA", InstanceIsA},
-			{"KeepWorldAwake", InstanceKeepWorldAwake},
-			{"LetWorldSleep", InstanceLetWorldSleep},
-			{"IsKeepingWorldAwake", InstanceIsKeepingWorldAwake},
-			{"SetNetworkOwner", InstanceSetNetworkOwner},
-			{"GetNetworkOwner", InstanceGetNetworkOwner},
-			{"GetPlayers", InstanceGetPlayers},
-			{"Destroy", InstanceDestroy},
-			{"Clone", InstanceClone},
-			{"GetChildren", InstanceGetChildren},
-			{"GetDescendants", InstanceGetDescendants},
-			{"FindFirstChild", InstanceFindFirstChild},
-			{"FindFirstChildOfClass", InstanceFindFirstChildOfClass},
-			{"FindFirstChildWhichIsA", InstanceFindFirstChildWhichIsA},
-			{"FindFirstAncestor", InstanceFindFirstAncestor},
-			{"FindFirstAncestorOfClass", InstanceFindFirstAncestorOfClass},
-			{"FindFirstAncestorWhichIsA", InstanceFindFirstAncestorWhichIsA},
-			{"GetFullName", InstanceGetFullName},
-			{"IsDescendantOf", InstanceIsDescendantOf},
-			{"ClearAllChildren", InstanceClearAllChildren},
-			{"GetPropertyChangedSignal", InstanceGetPropertyChangedSignal},
-		};
-
+		// **Empty when it is made, and that is the change v0.18 finished.** This
+		// file used to build twenty `lua_CFunction`s into it and the neutral layer
+		// appended to what was left; there is no Luau-only instance method any
+		// more, so the table is created here and filled entirely by
+		// `InstallLuauNeutralMethods` and by `LuauEcs`, which appends five of its
+		// own.
+		//
+		// **The editor reads this same table back**, rather than a list of method
+		// names kept beside it: `LuauRuntime::Vocabulary` walks this registry
+		// entry, so a method added to `ScriptMethods.cpp` is offered in the script
+		// editor with nothing else changing.
 		lua_newtable(state);
-		for (const auto &method : METHODS) {
-			lua_pushlightuserdata(state, &context);
-			lua_pushcclosure(state, method.Function, method.Name, 1);
-			lua_setfield(state, -2, method.Name);
-		}
 		lua_setfield(state, LUA_REGISTRYINDEX, "engine.instance.methods");
 
-		// **The other half of the table, written once for both languages.** A
-		// neutral method is a row in `ScriptMethods.cpp` and lands here through
-		// one trampoline — see `ScriptCall.hpp`. It goes into the same registry
-		// entry as the rows above, so the editor's vocabulary and `__index` reach
-		// it without either of them learning that a method has two homes.
+		// One trampoline per row — see `ScriptCall.hpp`.
 		InstallLuauNeutralMethods(state);
 
 		luaL_newmetatable(state, "Instance");
@@ -1083,7 +722,7 @@ namespace engine::script {
 		lua_pushstring(state, "Instance");
 		lua_setfield(state, -2, "__metatable");
 
-		// What `typeof` reads — see `Values.cpp`'s `Install`.
+		// What `typeof` reads — see `LuauValues.cpp`'s `Install`.
 		lua_pushstring(state, "Instance");
 		lua_setfield(state, -2, "__type");
 
@@ -1140,6 +779,19 @@ namespace engine::script {
 		}
 		return ecs::Classes::IsA(store.ClassOf(container), PlayersClass()) &&
 			   ecs::Classes::IsA(store.ClassOf(instance), scene::PlayerClass());
+	}
+
+	ecs::Entity PlayerLosingCharacter(const Store &store, ecs::Entity container, ecs::Entity instance) {
+		if (container == ecs::NULL_ENTITY || instance == ecs::NULL_ENTITY) {
+			return ecs::NULL_ENTITY;
+		}
+
+		// The nearest ancestor only — see the declaration for why the gate is
+		// what makes this fire once rather than once per level.
+		if (store.ParentOf(instance) != container) {
+			return ecs::NULL_ENTITY;
+		}
+		return scene::PlayerOf(store, instance);
 	}
 
 	std::string PumpTree(lua_State *state) {
@@ -1216,6 +868,42 @@ namespace engine::script {
 			context.World->EachDescendant(change.Instance, ancestry);
 		}
 
+		return firstError;
+	}
+
+	std::string PumpCharacters(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+
+		std::vector<scene::CharacterChange> changes;
+		scene::TakeCharacterChanges(*context.World, changes);
+		if (changes.empty()) {
+			return {};
+		}
+
+		std::string firstError;
+		for (const scene::CharacterChange &change : changes) {
+			// **A model that has gone is not reported here**, and the two halves
+			// are disjoint rather than one covering for the other: a body
+			// destroyed already fired `CharacterRemoving` synchronously from
+			// `OnDescendantRemoving` with the instance still readable, and a body
+			// that arrived and went inside one tick is one no handler could act
+			// on. What is left is the release that did not destroy —
+			// `player.Character = nil` — which the hook cannot see.
+			if (!context.World->Alive(change.Character)) {
+				continue;
+			}
+
+			PushInstance(state, change.Character);
+			const std::string failed = FireSignal(
+				state,
+				change.Added ? SignalKind::CharacterAdded : SignalKind::CharacterRemoving,
+				change.Player,
+				1
+			);
+			if (firstError.empty() && !failed.empty()) {
+				firstError = failed;
+			}
+		}
 		return firstError;
 	}
 
@@ -1307,7 +995,7 @@ namespace engine::script {
 
 		// The table `InstanceIndex` consults for the two members only the
 		// Workspace has. Created empty here and filled by `OpenQueries`, which
-		// runs after this — `Bindings.hpp` states that ordering, and it is why
+		// runs after this — `LuauBindings.hpp` states that ordering, and it is why
 		// the table has to exist by the time this returns.
 		lua_newtable(state);
 		lua_setfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");

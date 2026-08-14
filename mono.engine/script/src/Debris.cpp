@@ -1,7 +1,8 @@
 // The deadline queue, in insertion order underneath the tick order.
 //
-// Nothing here names a VM. `DebrisService.cpp` and `JsDebrisService.cpp` are
-// what meet one on this file's behalf.
+// Nothing here names a VM, and since v0.16 nothing that reaches it does either:
+// `DebrisService.cpp` is one `ServiceSurface` both languages install, and
+// `PumpDebris` takes a store and a queue.
 //
 // @tier L9 · shared
 

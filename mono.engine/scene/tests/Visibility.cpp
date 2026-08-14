@@ -381,8 +381,7 @@ TEST_CASE("a row drawn for the first time is not interpolated from the origin", 
 	placed.Frame = engine::core::CFrame(engine::core::Vector3{40.0f, 9.0f, -3.0f});
 	store.Set(part, placed);
 
-	const engine::scene::PreviousTransform *before =
-		store.Get<engine::scene::PreviousTransform>(part);
+	const engine::scene::PreviousTransform *before = store.Get<engine::scene::PreviousTransform>(part);
 	REQUIRE(before != nullptr);
 	CHECK(before->Frame.Position.X == 0.0f);
 
@@ -390,8 +389,7 @@ TEST_CASE("a row drawn for the first time is not interpolated from the origin", 
 	REQUIRE(store.SetParent(part, workspace));
 	CHECK(SyncRendered(store) == 1);
 
-	const engine::scene::PreviousTransform *after =
-		store.Get<engine::scene::PreviousTransform>(part);
+	const engine::scene::PreviousTransform *after = store.Get<engine::scene::PreviousTransform>(part);
 	REQUIRE(after != nullptr);
 	CHECK(after->Frame.Position.X == 40.0f);
 	CHECK(after->Frame.Position.Y == 9.0f);
@@ -417,8 +415,7 @@ TEST_CASE("a row already on screen keeps the frame it came from", "[scene][visib
 	// **Still the old frame**, which is what buys smooth motion between ticks.
 	// If this ever reads 5, the seeding above has stopped asking whether the row
 	// is new and every animation in the engine is stepping at the tick rate.
-	const engine::scene::PreviousTransform *previous =
-		store.Get<engine::scene::PreviousTransform>(part);
+	const engine::scene::PreviousTransform *previous = store.Get<engine::scene::PreviousTransform>(part);
 	REQUIRE(previous != nullptr);
 	CHECK(previous->Frame.Position.X == 0.0f);
 }
@@ -444,8 +441,7 @@ TEST_CASE("a part shown again after being moved while hidden does not slide", "[
 
 	// It did not travel a hundred studs — nobody was watching, and drawing the
 	// journey is inventing motion that never happened.
-	const engine::scene::PreviousTransform *previous =
-		store.Get<engine::scene::PreviousTransform>(part);
+	const engine::scene::PreviousTransform *previous = store.Get<engine::scene::PreviousTransform>(part);
 	REQUIRE(previous != nullptr);
 	CHECK(previous->Frame.Position.Y == 100.0f);
 }

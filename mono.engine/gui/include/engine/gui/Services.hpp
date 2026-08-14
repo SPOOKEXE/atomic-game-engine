@@ -97,6 +97,18 @@ namespace engine::gui {
 	// service holding its own copy would be a second answer that drifts the
 	// first time a panel resizes.
 	//
+	// **There is deliberately no script binding for this, and the reason is the
+	// argument above.** A script reaches `GuiService` through
+	// `game:GetService("GuiService")` and its three settings are ordinary
+	// declared properties, so what a game *decides* is reachable; what it cannot
+	// reach is this, because the answer is a fact about the surface being drawn
+	// and the scripting layer at L9 cannot name a `Screen`. It would also be
+	// `(0, 0)` in every world today — `Screen::TopInset` is zero because this
+	// engine has no top bar — so a binding would be a member that exists, answers
+	// one constant forever and looks decided. `PlayerGui`'s `SetTopbarTransparency`
+	// pair is absent for the same missing thing; `script/src/GuiMethods.cpp` names
+	// it where an author would look for it.
+	//
 	// @param screen The screen the world was laid out against.
 	// @return The reserved offset from the top-left, in pixels.
 	core::Vector2 GuiInset(const Screen &screen);

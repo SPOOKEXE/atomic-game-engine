@@ -332,13 +332,18 @@ namespace engine::script {
 		// a tween and a deadline are not resumes, and everything the rest of the
 		// barrier delivers should see the world they already moved.
 		note(PumpJsTweens(Context, delta));
-		PumpJsDebris(Context);
+		PumpDebris(Store, JsOf(Context).Debris);
 
 		// **Input first, and that ordering is the useful one** — the same place
 		// `LuauRuntime::Heartbeat` puts it, and for its reason: a bound action's
 		// handler writes properties, and those writes should reach their
 		// listeners on *this* barrier rather than the next.
-		note(PumpJsInput(Context));
+		//
+		// **It is handed this beat's interface events even though it dispatches
+		// none of them**, which is what `gameProcessedEvent` is: a click the 2D
+		// tree consumed has to arrive at `InputBegan` marked. They are still
+		// queued at this point and are drained below.
+		note(PumpJsInput(Context, PendingGuiEvents));
 
 		note(PumpJsChanges(Context));
 
@@ -347,6 +352,12 @@ namespace engine::script {
 		// and a handler watching a part's position and its ancestry should see
 		// one world rather than two.
 		note(PumpJsTree(Context));
+
+		// After the tree, exactly as the Luau side orders it: a respawn is a
+		// model parented into `Workspace` *and* a link written onto the
+		// `Player`, and a `CharacterAdded` handler should find a world whose
+		// tree signals have already agreed the model is there.
+		note(PumpJsCharacters(Context));
 
 		// Last within step 2 and before the tasks, exactly as the Luau side
 		// orders it — see `LuauRuntime::Heartbeat`, which also gives the reason

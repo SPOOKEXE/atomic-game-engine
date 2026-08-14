@@ -122,6 +122,24 @@ namespace engine::script {
 		//@}
 	};
 
+	// The easing enums, converted between their C++ form and their member name.
+	//
+	// `TweenInfo` holds a `core::EasingStyle` and a script names one, so something
+	// has to join the two. Here rather than in `core` because the *names* are
+	// userland vocabulary — `core/types/TweenInfo.hpp` is L1 and knows nothing
+	// about a script — and here rather than in either binding because both need
+	// them: each header declared all four until v0.18, on the grounds that neither
+	// may include the other's VM. Neither has to.
+	//
+	// An unknown member reads as `Linear` and `Out` rather than raising, because
+	// the caller has already checked membership through `ScriptCall::ReadEnum`.
+	//@{
+	core::EasingStyle EasingStyleOf(core::Name member);
+	core::Name NameOf(core::EasingStyle style);
+	core::EasingDirection EasingDirectionOf(core::Name member);
+	core::Name NameOf(core::EasingDirection direction);
+	//@}
+
 	// Reports whether a property type has a meaningful midpoint.
 	//
 	// **A closed list, and everything outside it is refused by name.** The
@@ -232,6 +250,31 @@ namespace engine::script {
 		// @param tween The tween's entity.
 		// @return `true` when it is known.
 		bool Known(ecs::Entity tween) const;
+
+		// Whether anything is currently animating an instance.
+		//
+		// **The pair below is `GuiObject:TweenPosition`'s `override` argument and
+		// nothing else asks.** Roblox's flag means "replace whatever is already
+		// running on this object", and answering it needs the two halves of one
+		// question — is there one, and stop it — which a caller cannot ask of
+		// `Cancel` because it names a tween rather than a target.
+		//
+		// `Playing` only: a finished or cancelled record has already done what it
+		// was made for, so it does not stand in the way of the next one.
+		//
+		// @param target The instance a tween would drive.
+		// @return `true` when at least one record is playing against it.
+		bool Driving(ecs::Entity target) const;
+
+		// Stops everything currently animating an instance.
+		//
+		// `Cancel`'s rule per record, so the properties are left where they are
+		// and no `Completed` fires — a script asking for an override is asking for
+		// the new motion, not to be told the old one arrived.
+		//
+		// @param target The instance whose tweens stop.
+		// @return How many were stopped.
+		size_t CancelFor(ecs::Entity target);
 
 		// What a tween is doing.
 		//

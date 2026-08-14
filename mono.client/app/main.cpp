@@ -53,9 +53,7 @@ int main(int argc, char **argv) {
 	arguments.Value("view-spacing", "UNITS", "World units between composited views (default 40)");
 	arguments.Value("tick-rate", "HZ", "Simulation ticks per second (default 60)");
 	arguments.Value("frames", "N", "Exit after N presented frames");
-	arguments.Value(
-		"surface-bounces", "N", "Levels of mirror-in-mirror resolved per frame (default 2)"
-	);
+	arguments.Value("surface-bounces", "N", "Levels of mirror-in-mirror resolved per frame (default 2)");
 	arguments.Value("width", "PX", "Window width (default 1280)");
 	arguments.Value("height", "PX", "Window height (default 720)");
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems or counters");

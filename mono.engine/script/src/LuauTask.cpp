@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <cmath>
 #include <lualib.h>
@@ -20,7 +20,7 @@ namespace engine::script {
 			const int reference = lua_ref(context.State, -1);
 			lua_pop(context.State, 1);
 
-			// `insert_or_assign` for the reason `Services.cpp` gives: a thread
+			// `insert_or_assign` for the reason `LuauBus.cpp` gives: a thread
 			// that suspends twice must not leave the first reference behind.
 			context.Threads.insert_or_assign(thread, reference);
 			return reference;
@@ -29,24 +29,6 @@ namespace engine::script {
 		void ReleaseThread(LuauContext &context, lua_State *thread, CallbackRef reference) {
 			context.Threads.erase(thread);
 			lua_unref(context.State, reference);
-		}
-
-		// How many ticks a duration in seconds rounds to.
-		//
-		// **Up, and never to zero.** `task.wait(0)` in Roblox resumes on the
-		// next frame rather than immediately, and a wait that resumed inside the
-		// same beat would make `while true do task.wait() end` an infinite loop
-		// inside one tick rather than a loop across them. Rounding up also means
-		// a wait is never *shorter* than asked, which is the direction an author
-		// can reason about.
-		uint64_t TicksFor(const LuauContext &context, double seconds) {
-			const float delta = context.World->Time().Delta;
-			if (seconds <= 0.0 || delta <= 0.0f) {
-				return 1;
-			}
-
-			const double ticks = std::ceil(seconds / static_cast<double>(delta));
-			return ticks < 1.0 ? 1 : static_cast<uint64_t>(ticks);
 		}
 
 		// `task.wait(seconds)` — resumes at a tick boundary.
@@ -61,7 +43,7 @@ namespace engine::script {
 			LuauContext &context = UpvalueContext(state);
 			const double seconds = luaL_optnumber(state, 1, 0.0);
 
-			const uint64_t ticks = TicksFor(context, seconds);
+			const uint64_t ticks = TicksFor(*context.World, seconds);
 			const CallbackRef reference = RetainThread(context, state);
 
 			context.Tasks.Delay(reference, context.World->Time().Tick + ticks);
@@ -153,7 +135,7 @@ namespace engine::script {
 			lua_xmove(state, thread, arguments + 1);
 
 			const CallbackRef reference = RetainThread(context, thread);
-			context.Tasks.Delay(reference, context.World->Time().Tick + TicksFor(context, seconds));
+			context.Tasks.Delay(reference, context.World->Time().Tick + TicksFor(*context.World, seconds));
 			context.PendingArguments.insert_or_assign(thread, arguments);
 			return 1;
 		}

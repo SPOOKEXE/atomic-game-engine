@@ -618,7 +618,36 @@ namespace server {
 				return blocked;
 			};
 
-			Replication->Authority().SetPriority(score);
+			// **`ReplicatedFirst` outranks the distance, which is the whole of
+			// what that container is for.** Roblox replicates it ahead of the
+			// rest of the tree so a loading screen is up before the world it
+			// covers arrives; here it was an ordinary root with an ordinary
+			// score, so a screen in it landed somewhere in the middle of the
+			// scene it was meant to hide.
+			//
+			// **Above the falloff's range rather than inside it.**
+			// `DistancePriority` answers zero to one, so any number above one
+			// sorts every one of its answers below this — and the starvation
+			// rotation still outranks *this*, which is right: a value that has
+			// waited its deadline goes first whatever it is about, or the
+			// bound `AGENTS.md` calls "a bound rather than a hope" would stop
+			// being one.
+			//
+			// **A world entry per candidate, which is `PositionOf`'s cost and
+			// is paid the same way.** The alternative is a set rebuilt per
+			// publish, which is a second record of a containment the tree
+			// already states.
+			Replication->Authority().SetPriority(
+				[this, score](engine::replication::ClientId client, engine::ecs::Entity entity) {
+					constexpr float REPLICATED_FIRST = 2.0f;
+
+					bool first = false;
+					Worlds().Enter(PrimaryWorld, [entity, &first](engine::ecs::Store &store) {
+						first = engine::scene::InReplicatedFirst(store, entity);
+					});
+					return first ? REPLICATED_FIRST : score(client, entity);
+				}
+			);
 		}
 
 		// **A `Player` per connection, which nothing in this engine was
@@ -644,6 +673,13 @@ namespace server {
 				const std::string name = "Player" + std::to_string(client.Index + 1);
 				const engine::ecs::Entity player = engine::scene::AddPlayer(store, name);
 				if (player == engine::ecs::NULL_ENTITY) {
+					// **A world at `Players.MaxPlayers` is the case worth
+					// saying out loud.** The transport admitted the socket —
+					// `ListenerSettings::MaximumClients` is a different number
+					// and a different question — so a silent return here is a
+					// connected client watching a world it can never enter,
+					// with nothing anywhere saying why.
+					ENGINE_WARN("server: '{}' got no player — the world is full or has no Players", name);
 					return;
 				}
 
@@ -672,8 +708,20 @@ namespace server {
 				// handler on.
 				(void)engine::gui::ResetPlayerGui(store, player);
 
-				const engine::ecs::Entity character = engine::scene::LoadCharacter(store, player);
-				if (character == engine::ecs::NULL_ENTITY) {
+				// **Unless the game says it spawns its own occupants.**
+				// `Players.CharacterAutoLoads` is what a lobby sets to false,
+				// and a host that ignored it would hand everybody a body the
+				// game then has to destroy — which is a frame of a character
+				// standing in the world before a script can stop it.
+				//
+				// The same flag is what `scene::UpdateRespawns` reads for every
+				// life after this one, so the join and the respawn are one
+				// decision rather than two that can disagree.
+				const engine::scene::PlayersServiceComponent *settings =
+					store.Get<engine::scene::PlayersServiceComponent>(engine::scene::PlayersOf(store));
+				if (settings != nullptr && !settings->CharacterAutoLoads) {
+					ENGINE_INFO("server: {} joined without a body — CharacterAutoLoads is off", name);
+				} else if (engine::scene::LoadCharacter(store, player) == engine::ecs::NULL_ENTITY) {
 					ENGINE_WARN("server: '{}' has no character — the world has no Workspace", name);
 				}
 

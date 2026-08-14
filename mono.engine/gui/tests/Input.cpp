@@ -304,6 +304,115 @@ TEST_CASE("an invisible button is not hit", "[gui][input]") {
 	CHECK(Pick(world.Data, world.List.Commands(), Vector2{50.0f, 50.0f}) == NULL_ENTITY);
 }
 
+TEST_CASE("every element under a point comes back front to back", "[gui][input]") {
+	// **The three things `Pick` cannot answer**, which is why `ElementsAt` exists:
+	// what is under the pointer *as well as* the thing that takes the click, in
+	// what order, and only within one player's container.
+	//
+	// Two overlapping frames, so the order is actually asserted rather than
+	// "something came back", and the assertion is made twice with the `ZIndex`
+	// swapped — a walk that happened to return tree order would pass the first
+	// half and fail the second.
+	World world("gui_input.elements");
+
+	const Entity mine = world.Make("ScreenGui");
+	const Entity under = world.Make("Frame", mine);
+	const Entity over = world.Make("Frame", mine);
+	const Entity elsewhere = world.Make("Frame", mine);
+
+	// **A second container, which is a player's own `PlayerGui` beside the
+	// `StarterGui` template the fixture makes.** The layout resolves every
+	// collector in the world — `Layout.hpp` names both containers — so an
+	// unscoped answer would hand one player the rectangles of the template and of
+	// everybody else's copy, which is the failure `ResetPlayerGui` exists one door
+	// along to prevent.
+	const Entity theirs =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "PlayerGui");
+	const Entity intruder = world.Make("Frame", world.Make("ScreenGui", theirs));
+
+	Element top;
+	top.Position = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	top.Size = UDim2{0.0f, 200.0f, 0.0f, 200.0f};
+	top.ZIndex = 5;
+	world.Data.Set(over, top);
+
+	world.Box(under, 0.0f, 0.0f, 200.0f, 200.0f);
+	world.Box(elsewhere, 400.0f, 400.0f, 100.0f, 100.0f);
+	world.Box(intruder, 0.0f, 0.0f, 200.0f, 200.0f);
+	world.Compile();
+
+	std::vector<Entity> found;
+	CHECK(ElementsAt(world.Data, mine, Vector2{50.0f, 50.0f}, found) == 2);
+	REQUIRE(found.size() == 2);
+
+	// Front to back, so the higher `ZIndex` leads — and neither answer is the
+	// frame in the other container or the one nowhere near the point.
+	CHECK(found[0] == over);
+	CHECK(found[1] == under);
+	CHECK(found[0] != intruder);
+	CHECK(found[1] != elsewhere);
+
+	// **A plain `Frame` is in the list where `Pick` refuses it**, which is the
+	// whole difference between the two questions: a decorative panel is
+	// transparent to a click and is still under the pointer.
+	CHECK(Pick(world.Data, world.List.Commands(), Vector2{50.0f, 50.0f}) == NULL_ENTITY);
+
+	// The same point, the order swapped by the property that decides it.
+	top.ZIndex = -5;
+	world.Data.Set(over, top);
+	world.Compile();
+
+	REQUIRE(ElementsAt(world.Data, mine, Vector2{50.0f, 50.0f}, found) == 2);
+	CHECK(found[0] == under);
+	CHECK(found[1] == over);
+
+	// The other container answers about its own, and a point over nothing is an
+	// empty list rather than a stale one.
+	REQUIRE(ElementsAt(world.Data, theirs, Vector2{50.0f, 50.0f}, found) == 1);
+	CHECK(found[0] == intruder);
+
+	CHECK(ElementsAt(world.Data, mine, Vector2{700.0f, 50.0f}, found) == 0);
+	CHECK(found.empty());
+	CHECK(ElementsAt(world.Data, NULL_ENTITY, Vector2{50.0f, 50.0f}, found) == 0);
+}
+
+TEST_CASE("a hidden or clipped element is not under the point either", "[gui][input]") {
+	// `ElementsAt` drops the `Active` test and keeps every other one, and this is
+	// where that is pinned: the two filters below are what make the answer "what
+	// is on screen here" rather than "what has a rectangle here".
+	World world("gui_input.elements.hidden");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity window = world.Make("Frame", screen);
+	const Entity inside = world.Make("Frame", window);
+	const Entity hidden = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Size = UDim2{0.0f, 100.0f, 0.0f, 100.0f};
+	outer.ClipsDescendants = true;
+	world.Data.Set(window, outer);
+
+	Element invisible;
+	invisible.Size = UDim2{0.0f, 400.0f, 0.0f, 400.0f};
+	invisible.Visible = false;
+	world.Data.Set(hidden, invisible);
+
+	world.Box(inside, 0.0f, 0.0f, 400.0f, 400.0f);
+	world.Compile();
+
+	std::vector<Entity> found;
+
+	// Inside the clip: the child and the window it is in, child first.
+	REQUIRE(ElementsAt(world.Data, screen, Vector2{50.0f, 50.0f}, found) == 2);
+	CHECK(found[0] == inside);
+	CHECK(found[1] == window);
+
+	// Inside the child's rectangle and outside its clip. The rectangle survives
+	// deliberately, so the clip test is what stops it — and the invisible frame
+	// covering the same point is absent for the other reason.
+	CHECK(ElementsAt(world.Data, screen, Vector2{250.0f, 250.0f}, found) == 0);
+}
+
 TEST_CASE("a rotated element is clickable where it is drawn", "[gui][input]") {
 	// **`D00025`, closed, and it is the half no backend could fix.** `Pick`
 	// tested `DrawCommand::Bounds` as an axis-aligned rectangle and ignored

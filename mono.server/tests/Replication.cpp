@@ -790,3 +790,70 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);
 }
+
+TEST_CASE("a client holds its own containers and none of anybody else's", "[server][replication]") {
+	// **The interest predicate, asserted in both directions over a real wire.**
+	// A check that only proved a client can see its own `PlayerGui` would pass
+	// against a server that sent everybody everything, which is exactly the
+	// state this repository was in until v0.15 and exactly what the four
+	// containers made worse: a `Backpack` is what a game keys "what am I
+	// holding" off, and one client reading another's would be reading their
+	// inventory.
+	//
+	// **From the replica rather than from the server's log**, for the reason the
+	// case above gives: what a client holds is the only fact about this that a
+	// test can hold.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_private.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local block = Instance.new(\"Part\")\n"
+			 << "block.Anchored = true\n"
+			 << "block.Parent = workspace\n";
+	}
+
+	Remote first;
+	REQUIRE(first.Start(0, scene.string()));
+	REQUIRE(first.Join(400));
+
+	Remote second;
+	REQUIRE(second.Connect(first.Port));
+	REQUIRE(second.Join(400));
+
+	Settle(first);
+	Settle(second);
+
+	REQUIRE(first.Mine != engine::ecs::NULL_ENTITY);
+	REQUIRE(second.Mine != engine::ecs::NULL_ENTITY);
+	REQUIRE(first.Mine != second.Mine);
+
+	const auto children = [](const Store &world, Entity parent) {
+		size_t found = 0;
+		world.EachChild(parent, [&](Entity) { found++; });
+		return found;
+	};
+
+	// **Both `Player` rows are public**, which is the half a stricter predicate
+	// would get wrong: `GetPlayers` is how a game knows who is in it, and a
+	// client shown only its own row would think it was alone.
+	CHECK(first.World.Alive(first.Mine));
+	CHECK(first.World.Alive(second.Mine));
+
+	// **And what is under one is not.** Four containers of its own, none of
+	// theirs — `PlayerGui`, `PlayerScripts`, `Backpack` and `StarterGear`.
+	CHECK(children(first.World, first.Mine) == 4);
+	CHECK(children(first.World, second.Mine) == 0);
+
+	// The same from the other side, so the answer is per client rather than
+	// "the first one to ask wins".
+	CHECK(children(second.World, second.Mine) == 4);
+	CHECK(children(second.World, first.Mine) == 0);
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
+}

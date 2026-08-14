@@ -168,6 +168,34 @@ Two rules inside it are worth keeping:
   two adjacent buttons produces an enter against state the leave is about to
   undo.
 
+## `ElementsAt` asks `Pick`'s question and reads the compile's answer
+
+`PlayerGui:GetGuiObjectsAtPosition` wants *everything* under a point, in paint
+order, within one container — three ways `Pick` cannot answer. It is still not a
+second traversal deciding what is on top, and the reason it does not have to be
+is `Resolved::Order`: the compile writes each element's paint position back into
+its own row, so **sorting by that descending is front to back**, and the section
+above stays true.
+
+Three things about it are decisions rather than details:
+
+- **The `Active` test is dropped and every other filter is kept.** A decorative
+  `Frame` is transparent to a *click* and is still an object under the pointer,
+  which is exactly the difference between the two questions. `Rendered`, the
+  clip and the rotation all still apply, because the answer is "what is on
+  screen here" rather than "what has a rectangle here".
+- **It is scoped to a root and the root is not optional.** `Layout` resolves
+  every collector in the world — the `StarterGui` template and every player's
+  copy — so an unscoped answer would hand one player somebody else's rectangles.
+- **`Resolved::Depth` breaks a tie and the entity id breaks that.** A world
+  nothing has compiled has every `Order` at zero, and the deeper element is
+  still the one in front; the id is last so the answer never depends on the
+  order the walk happened to visit siblings in.
+
+`Element` is what tells a `GuiObject` from a `LayerCollector` here, and no class
+lookup is needed for it — a collector has no such component, which is the same
+fact the class-tree section states from the other side.
+
 ## The hover is fed back and is one frame late, deliberately
 
 `CompileRequest::Hovered` is an *input* to the compile, and the compile is what
@@ -180,6 +208,26 @@ it appears. One frame, and the alternative is a cycle.
 **The lit colour never goes back into `Background::Color`.** A hover written
 into the component would make `BackgroundColor3` read differently depending on
 where the mouse is, which is a script bug nobody could see from the script.
+
+## `ResetPlayerGui` is one step of a pipeline this module cannot see
+
+`scene` copies four `Starter*` services into a player — two on the join, two on
+every spawn — and this is the fifth, on every spawn. It is here rather than there
+because `scene` may not link `gui`, and it stays a *function* rather than a
+system for the same reason: whoever spawns calls both halves.
+`scene::UpdateRespawns` hands back who it spawned so a host can loop over them,
+and `mono.server`'s `player.respawn` is what does.
+
+**It is not the same shape as the other four and must not be made so.**
+`scene::CloneChildrenInto` is a plain copy; this one carries the `ResetOnSpawn`
+survival rule, and a survivor of a name is what stops a player being handed two
+of a collector one of which nothing updates. `Services.hpp` states the three
+steps in order.
+
+**Three spawns, not two, is what the suite asserts**, because a reset that
+re-cloned every *other* time passes a two-spawn check — and the second player in
+`engine.gui.services` is what catches a reset reaching the template rather than
+the copy.
 
 ## Text and image names intern, and that has a stated cost
 

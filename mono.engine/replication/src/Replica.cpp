@@ -266,9 +266,7 @@ namespace engine::replication {
 
 			// Nothing to give a parent back to. Left in the list it would be a
 			// `SetParent` on a dead handle every time a tick completed.
-			std::erase_if(Arriving_, [entity](const Arrival &arriving) {
-				return arriving.Entity == entity;
-			});
+			std::erase_if(Arriving_, [entity](const Arrival &arriving) { return arriving.Entity == entity; });
 		}
 		Forgotten_.insert(Forgotten_.end(), structure.Forgotten.begin(), structure.Forgotten.end());
 
@@ -298,6 +296,12 @@ namespace engine::replication {
 		case MessageKind::Input:
 		case MessageKind::Applied:
 		case MessageKind::Identify:
+		// **`User` is refused here rather than ignored.** Its payload is opaque
+		// to this module by design — see `MessageKind::User` — so whoever owns
+		// the link peels one off before this point. One arriving here means the
+		// caller did not, which is a routing mistake worth counting rather than
+		// a message to drop quietly.
+		case MessageKind::User:
 			Stats_.Malformed++;
 			return ApplyStatus::Malformed;
 		}

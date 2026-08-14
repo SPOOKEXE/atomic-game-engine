@@ -298,12 +298,46 @@ namespace engine::scene {
 
 		// How the pointer should behave.
 		//
-		// **Written by a script and read by the client**, which is the one field
-		// here that travels in that direction. `UserInputService.MouseBehavior` is
-		// a property an author sets, and the client applies it to the window on
-		// the next frame — so this resource is the seam in both directions rather
-		// than a one-way report.
+		// **Written by a script and read by the client**, which is one of the two
+		// fields here that travel in that direction.
+		// `UserInputService.MouseBehavior` is a property an author sets, and the
+		// client applies it to the window on the next frame — so this resource is
+		// the seam in both directions rather than a one-way report.
 		MouseBehavior Behaviour = MouseBehavior::Default;
+
+		// Whether the pointer is drawn at all.
+		//
+		// **The second field travelling towards the window**, and it is separate
+		// from `Behaviour` because Roblox's two are: a menu wants the pointer
+		// visible and free, an inventory screen wants it visible while the camera
+		// stays locked, and folding the two into one enum would make
+		// `MouseIconEnabled = false` unspellable without also changing how the
+		// pointer moves.
+		//
+		// **`LockCenter` hides it regardless**, because a pointer held at the
+		// centre of the window is not a pointer any more — see the client's
+		// `SDL_SetWindowRelativeMouseMode` call, where relative mode owns the
+		// cursor and this is the request that applies to every other mode.
+		bool MouseIconEnabled = true;
+
+		// Which device produced the most recent input, and which produced the one
+		// before it.
+		//
+		// **A pair for `WasFocusGained`'s reason**: `LastInputTypeChanged` is an
+		// *edge*, and an edge is the difference between two frames. Deriving it in
+		// whoever pumps the events would put the answer in the client, where a
+		// script cannot reach it.
+		//
+		// **`Keyboard` on a world nobody has touched**, rather than a fourth
+		// "None" member nothing else in the engine can produce. Roblox answers
+		// `Enum.UserInputType.None` there and this engine has no such member for
+		// the reason `InputSource` gives — every member is one something can
+		// produce — so the honest default is the device a headless world would
+		// have if it had one, and the *edge* is what a script watches anyway.
+		//@{
+		InputSource LastSource = InputSource::Keyboard;
+		InputSource PreviousLastSource = InputSource::Keyboard;
+		//@}
 
 		// Whether the window has keyboard focus.
 		//
@@ -330,19 +364,20 @@ namespace engine::scene {
 		// no uninitialised bytes.
 		//
 		// **It has to reach the end or it is not doing the job it is here for.**
-		// The members above end at 43 and the type aligns to 8, so seven declared
-		// bytes are what stops the compiler inserting seven nobody named — and
+		// The members above end at 52 and the type aligns to 8, so four declared
+		// bytes are what stops the compiler inserting four nobody named — and
 		// those would be written to a save file by `Column::Write`, which sends
 		// `sizeof(T)` bytes and does not know which of them a member claimed.
 		// This is the only component in the module where that was got wrong
 		// once, and the rest are the reason the rule is worth keeping.
 		//
-		// **Seven since `PreviousFocused` took one of the eight**, so `sizeof` is
-		// still 64 and no save format moved. It has been 64 since `Pressed`
-		// joined the two key sets above it — a save written before *that* reads
-		// its input resource back wrong, which is a break the pre-release format
-		// is allowed and the dropped jump was not.
-		uint8_t Reserved[7] = {};
+		// **Four since `MouseIconEnabled` and the two source fields took three of
+		// the seven**, so `sizeof` has not moved and no save format has either.
+		// That is the whole reason a padding member is declared rather than left
+		// to the compiler: a field added at the *end* would grow the object and
+		// rewrite the layout `Column::Write` sends, where a field taken out of
+		// here costs nothing. `SIZE_IS_PINNED` in `Input.cpp` is what checks it.
+		uint8_t Reserved[4] = {};
 
 		// Whether a key is down now.
 		//
@@ -453,6 +488,18 @@ namespace engine::scene {
 		// @return `true` on the frame it was lost.
 		bool WasFocusLost() const {
 			return !Focused && PreviousFocused;
+		}
+
+		// Whether the player changed device since the previous frame.
+		//
+		// **What `UserInputService.LastInputTypeChanged` is**, and it is an edge
+		// for the reason the two focus questions are: a place that swaps its
+		// prompts between "press E" and "click here" wants the moment the answer
+		// changed, not the answer.
+		//
+		// @return `true` on the frame the device changed.
+		bool WasLastSourceChanged() const {
+			return LastSource != PreviousLastSource;
 		}
 	};
 

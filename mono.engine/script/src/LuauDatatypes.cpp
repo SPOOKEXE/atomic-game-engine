@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
@@ -834,7 +834,7 @@ namespace engine::script {
 			lua_pushcfunction(state, type.Index, "__index");
 			lua_setfield(state, -2, "__index");
 
-			// What `typeof` reads — see `Values.cpp`'s `Install`.
+			// What `typeof` reads — see `LuauValues.cpp`'s `Install`.
 			lua_pushstring(state, type.Name);
 			lua_setfield(state, -2, "__type");
 
@@ -867,64 +867,6 @@ namespace engine::script {
 			luaL_register(state, nullptr, type.Constructors);
 			lua_setglobal(state, type.Name);
 		}
-	}
-
-	core::EasingStyle EasingStyleOf(core::Name member) {
-		static const struct {
-			const char *Name;
-			core::EasingStyle Style;
-		} STYLES[] = {
-			{"Linear", EasingStyle::Linear},
-			{"Quad", EasingStyle::Quad},
-			{"Cubic", EasingStyle::Cubic},
-			{"Quart", EasingStyle::Quart},
-			{"Quint", EasingStyle::Quint},
-			{"Sine", EasingStyle::Sine},
-			{"Exponential", EasingStyle::Exponential},
-			{"Circular", EasingStyle::Circular},
-			{"Back", EasingStyle::Back},
-			{"Elastic", EasingStyle::Elastic},
-			{"Bounce", EasingStyle::Bounce},
-		};
-
-		for (const auto &entry : STYLES) {
-			if (member == core::Name(entry.Name)) {
-				return entry.Style;
-			}
-		}
-		return EasingStyle::Linear;
-	}
-
-	core::Name NameOf(core::EasingStyle style) {
-		static const char *NAMES[] = {
-			"Linear",
-			"Quad",
-			"Cubic",
-			"Quart",
-			"Quint",
-			"Sine",
-			"Exponential",
-			"Circular",
-			"Back",
-			"Elastic",
-			"Bounce",
-		};
-		return core::Name(NAMES[static_cast<size_t>(style)]);
-	}
-
-	core::EasingDirection EasingDirectionOf(core::Name member) {
-		if (member == core::Name("In")) {
-			return EasingDirection::In;
-		}
-		if (member == core::Name("InOut")) {
-			return EasingDirection::InOut;
-		}
-		return EasingDirection::Out;
-	}
-
-	core::Name NameOf(core::EasingDirection direction) {
-		static const char *NAMES[] = {"In", "Out", "InOut"};
-		return core::Name(NAMES[static_cast<size_t>(direction)]);
 	}
 
 	// The two enums this vocabulary needs.

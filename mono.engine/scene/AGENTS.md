@@ -73,6 +73,73 @@ type on both sides of that call is the only thing that narrows it.
 - Anything that makes `scene` construct or query a grid. `scene` takes an
   `ecs::Store &` and nothing larger, and it holds data and one resolver.
 
+## A fixture is found by class and never by name
+
+`WorkspaceOf` was `FindFirstRoot("Workspace")` from v0.7 to v0.17, and so was
+every other fixture lookup including the one `InstallServices` uses to decide
+what a world is missing. A script renaming the workspace therefore made
+`WorkspaceOf` answer nothing **and** made the next `InstallServices` mint a
+second `Workspace` beside the one holding the scene — two roots, one of which has
+everything in it and neither of which a script can be sure it reached.
+
+`ServiceOf(store, klass)` and `ServiceUnder(store, parent, klass)` are the whole
+answer: a class is registered once and a rename cannot touch it.
+`engine.scene.services` renames the `Workspace`, the `Players` and the
+`StarterPlayer` and requires all three still to resolve and no duplicate to
+appear.
+
+**A new fixture lookup that spells a name is the change to refuse.** The one
+exception is `gui`, which may not link this module and finds `StarterGui` and
+`PlayerGui` by the names `Layout` already walks ancestors comparing — that is a
+cross-module contract stated in `gui/Layout.hpp` and pinned by
+`examples/tests/Scene.cpp`, not a lookup somebody forgot to convert.
+
+## A join is once and a spawn is every time, and the containers say which
+
+Four `Starter*` services and four per-player containers, and the whole design is
+in *when* each pair is copied. `Services.hpp` and `Characters.hpp` carry the two
+ordered lists; what belongs here is what a reviewer should refuse.
+
+- **`StarterPlayerScripts` → `PlayerScripts` and `StarterPack` → `StarterGear`
+  are `AddPlayer`'s, once.** Copying either on a spawn would double a player's
+  client scripts per death and double their gear.
+- **`StarterCharacterScripts` → the character and `StarterGear` → `Backpack` are
+  `LoadCharacter`'s, every time.** The first is a script about a body and the
+  body is new; the second is what makes gear a game granted at run time survive
+  dying — add to `StarterGear`, never to `Backpack`.
+- **`StarterGui` → `PlayerGui` is `gui::ResetPlayerGui`'s and cannot be here.**
+  This module may not link `gui`. Whoever spawns calls both, which is why
+  `UpdateRespawns` hands back who it spawned instead of finishing the job.
+- **The per-spawn half is the authority's and must not move into
+  `SetPlayerCharacter`.** That function is also what a *client* runs when a
+  `PlayerCharacter` arrives over the wire, and a client clearing its own
+  `Backpack` would be fighting the replication that fills it.
+
+**Everything under a `Player` is that player's**, which `PlayerOwning` already
+said and the three new containers inherit for free. A container added beside them
+needs no predicate change and needs the scoping test extended in both directions
+— `server.replication` asserts a client holds four of its own and none of
+anybody else's.
+
+## Death is the model being destroyed, and the delay is a tick number
+
+There is no health on `Humanoid` — see its header for why it is deliberately
+small — so `UpdateRespawns` measures `Player.RespawnTime` from the tick a player
+was first seen without a character. `D00121` carries what a health model would
+have to decide.
+
+Two things about it are load-bearing:
+
+- **The deadline is `ceil(seconds / delta)` against the fixed tick delta**, which
+  is `DebrisQueue`'s rule. A float accumulated per tick drifts and
+  `just replay-check` would fail a long way from here.
+- **`RemoveCharacter` stops, then destroys, then releases**, and that order is
+  not tidiness. `Player.CharacterRemoving` rides
+  `Store::OnDescendantRemoving` and filters on `Character::Owner`, so releasing
+  first fired the signal for nobody on every respawn — and the queued half then
+  reports it with a handle nothing can read. `StopCharacter` is called directly
+  so the release no longer has to happen first to do its job.
+
 ## `Part` is a class, not a component
 
 There is no `struct Part`, and adding one would be adding a second answer to
@@ -195,10 +262,19 @@ them.** It is named padding and not a spare field; see the section below.
 
 A trivially copyable component is serialised as its object representation,
 padding included, and padding is never initialised. `RigidBody::Reserved`,
-`Collider::Reserved`, `Visual::Reserved` and `ActiveCamera::Reserved` exist for
-that reason and are not spare fields to repurpose. Adding a member that
-reintroduces a hole makes two runs of one scene produce different bytes, and
-`just determinism` reports it a long way from here.
+`Collider::Reserved`, `Visual::Reserved`, `ActiveCamera::Reserved` and
+`InputState::Reserved` exist for that reason and are not spare fields to
+repurpose. Adding a member that reintroduces a hole makes two runs of one scene
+produce different bytes, and `just determinism` reports it a long way from here.
+
+**`InputState` is the one that has been added to most, and its rule is to take
+the bytes out of `Reserved` rather than off the end.** `Pressed`, then
+`PreviousFocused`, then `MouseIconEnabled` and the two source fields all came out
+of it; a field appended instead would grow the object, move the layout
+`Column::Write` sends and do it silently. `SIZE_IS_PINNED` in `Input.cpp` is what
+turns that from a habit into a compile error, and the number in it is what the
+members add up to rather than a target — changing it is a decision somebody has
+to make there.
 
 Anything holding a `core::Name` is registered with an explicit writer that
 writes the name as **text**. Registering one of these with the plain

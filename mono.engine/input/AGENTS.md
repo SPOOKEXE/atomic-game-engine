@@ -31,6 +31,26 @@ flickering rather than as a wrong API.
 Autorepeat is dropped: the OS turning a held key into a stream of presses is
 not the player expressing an intent many times.
 
+## `BeginFrame` rolls four fields, and every edge a script sees is one of them
+
+`Translator::BeginFrame` copies `Down`, `Buttons`, `Focused` and `LastSource`
+into their `Previous` twins and clears the two deltas. That is not four
+housekeeping lines — it is the whole of `InputBegan`, `InputEnded`,
+`WindowFocused`, `WindowFocusReleased` and `LastInputTypeChanged`, because every
+one of those is `scene::InputState` comparing a pair.
+
+**A fifth field read as an edge needs a fifth roll here**, and forgetting it
+produces a signal that fires on every frame the player is doing anything —
+which reads as a broken engine rather than as an unfinished one.
+`engine.input.translate` presses twice and compares, because a suite that only
+looks at the live half passes either way.
+
+**Anything `HandleEvent` consumes also stamps `LastSource`, and a focus change
+deliberately does not.** Losing a window is not a device speaking, and a place
+that swapped its prompts on an alt-tab would be reporting a keyboard nobody
+touched. A key *release* does stamp it, or a place flickers every time somebody
+stops walking.
+
 ## Every action needs a binding and a name
 
 `GetActionBinding` feeds the overlay, so an action with no binding string is a

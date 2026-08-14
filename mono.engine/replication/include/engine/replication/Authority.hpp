@@ -524,7 +524,11 @@ namespace engine::replication {
 
 		// Queues an inbound delta, having checked only that somebody has said
 		// who owns what. The filtering is `ApplySubmitted`'s.
-		bool Submit(ClientId client, Client &into, Delta &&delta);
+		//
+		// **Takes the resolved `Client` and not its id**, because the one caller
+		// has already looked it up and a second lookup from the same id would be
+		// a second answer to a question already answered.
+		bool Submit(Client &into, Delta &&delta);
 
 		Client *Reach(ClientId client);
 		const Client *Reach(ClientId client) const;

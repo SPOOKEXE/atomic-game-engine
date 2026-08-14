@@ -60,7 +60,7 @@ namespace {
 	//
 	// **`part.Parent = workspace` used to make a root and now makes a child of
 	// the `Workspace` service**, so a lookup by root finds nothing. See
-	// `script/Bindings.hpp`'s `OpenWorkspace` for why the two notions of "the
+	// `script/LuauBindings.hpp`'s `OpenWorkspace` for why the two notions of "the
 	// workspace" were collapsed, and `scene/Visibility.hpp` for what the tree
 	// now decides.
 	//
@@ -1003,6 +1003,65 @@ TEST_CASE("an attribute change reaches a listener", "[scripting]") {
 	)");
 }
 
+// --- what the input and the gui cases both need ------------------------------
+//
+// **Above both sections rather than beside the gui one, because
+// `gameProcessedEvent` joined them.** A pointer press the 2D tree consumed
+// arrives at `UserInputService.InputBegan` marked, so a case about the input
+// pump has to be able to make a button and hand the router's event over — and
+// two copies of `MakeLog` is the duplicate the root `AGENTS.md` calls the
+// expensive kind.
+//
+// **Handlers record into the world rather than into a global**, because both
+// VMs freeze their globals — `script/AGENTS.md` calls that the design rather
+// than a hardening pass. A part's `Name` is appended to, which records order as
+// well as count in one readable value.
+namespace {
+	// One gui event, spelled out.
+	engine::gui::GuiEvent
+	Happened(engine::gui::EventKind kind, Entity instance, float x = 0.0f, float y = 0.0f) {
+		engine::gui::GuiEvent event;
+		event.Kind = kind;
+		event.Instance = instance;
+		event.Position = engine::core::Vector2{x, y};
+		return event;
+	}
+
+	// A `TextButton` under the workspace, which is where a script can find it.
+	Entity MakeButton(Store &store, const char *name) {
+		engine::gui::RegisterGuiClasses();
+		const Entity button = store.CreateInstance(engine::gui::GuiClass("TextButton"), name);
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		store.SetParent(button, workspace);
+		return button;
+	}
+
+	// The name the trace part starts with, and the prefix `Trace` strips.
+	//
+	// **Not the empty string**, which was the obvious choice and is the one
+	// thing that cannot work: `LuauInstances.cpp` refuses `FindFirstChild(x, "")`
+	// because `core::Name("")` is the invalid name and would match anything
+	// unnamed. A handler looking the log up would get `nil`, fail at beat time
+	// rather than at `Run` time, and record nothing — which reads exactly like
+	// the signal never firing.
+	constexpr const char *LOG_NAME = "Log";
+
+	// The part handlers write their trace onto.
+	Entity MakeLog(Store &store) {
+		const Entity log = store.CreateInstance(PartClass(), LOG_NAME);
+		store.SetParent(log, engine::scene::WorkspaceOf(store));
+		return log;
+	}
+
+	// What the handlers recorded, in order, with the starting name removed.
+	std::string Trace(Store &store, Entity log) {
+		const std::string name(store.InstanceNameOf(log).Text());
+		const std::string prefix(LOG_NAME);
+		return name.rfind(prefix, 0) == 0 ? name.substr(prefix.size()) : name;
+	}
+}
+
 // --- input ------------------------------------------------------------------
 
 TEST_CASE("UserInputService answers from the world's input state", "[scripting]") {
@@ -1458,44 +1517,103 @@ TEST_CASE("the input surface answers honestly about what it does not have", "[sc
 	CHECK(runtime->LastError().find("has no member") != std::string::npos);
 }
 
-TEST_CASE("a bound action can say what it claimed", "[scripting]") {
+TEST_CASE("a bound action can say what it claimed, in both languages", "[scripting]") {
+	// **Luau's alone until v0.16, and the gap was invisible from here.** The
+	// two reporting methods answer a record holding `Enum.KeyCode` members and
+	// `ScriptValue` has no tag for an `EnumItem`, so they stayed in
+	// `ServiceSurface::LuauMethods` while the other four crossed —
+	// `ScriptCall::ReturnBoundAction` is what closed it, by making the *fact* a
+	// `BoundActionReport` and leaving each VM to build its own record.
+	//
+	// Both halves assert the same six things, so a divergence in the record's
+	// field names, its key order or its `stackOrder` direction fails in exactly
+	// one language and says which.
 	RegisterClasses();
-	Store store("script_test");
-	store.SetResource(engine::scene::InputState{});
 
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	SECTION("luau") {
+		Store store("script_test");
+		store.SetResource(engine::scene::InputState{});
 
-	MustRun(*runtime, R"(
-		local CAS = game:GetService('ContextActionService')
-		local function nothing() end
+		const auto runtime = MakeRuntime(store, Language::Luau);
 
-		CAS:BindActionAtPriority('door', nothing, false, 1, Enum.KeyCode.E)
-		CAS:BindActionAtPriority('vehicle', nothing, false, 10, Enum.KeyCode.E, Enum.KeyCode.F)
+		MustRun(*runtime, R"(
+			local CAS = game:GetService('ContextActionService')
+			local function nothing() end
 
-		local vehicle = CAS:GetBoundActionInfo('vehicle')
-		assert(vehicle ~= nil, 'a bound action reported nothing')
-		assert(vehicle.priorityLevel == 10, 'the priority was lost')
-		assert(#vehicle.inputTypes == 2, 'the keys were lost')
-		assert(vehicle.inputTypes[1] == Enum.KeyCode.E, 'the keys came back in another order')
-		assert(not vehicle.createTouchButton, 'there is no touch surface to have made a button on')
+			CAS:BindActionAtPriority('door', nothing, false, 1, Enum.KeyCode.E)
+			CAS:BindActionAtPriority('vehicle', nothing, false, 10, Enum.KeyCode.E, Enum.KeyCode.F)
 
-		-- **Higher wins, which is Roblox's direction.** The engine's own list is
-		-- sorted highest-priority-first, so reporting our index under Roblox's
-		-- name would be the same word meaning the opposite thing.
-		local door = CAS:GetBoundActionInfo('door')
-		assert(door.stackOrder < vehicle.stackOrder, 'the claim that wins does not have the higher order')
+			local vehicle = CAS:GetBoundActionInfo('vehicle')
+			assert(vehicle ~= nil, 'a bound action reported nothing')
+			assert(vehicle.priorityLevel == 10, 'the priority was lost')
+			assert(#vehicle.inputTypes == 2, 'the keys were lost')
+			assert(vehicle.inputTypes[1] == Enum.KeyCode.E, 'the keys came back in another order')
+			assert(not vehicle.createTouchButton, 'there is no touch surface to have made a button on')
 
-		-- Nil for a name nothing bound, which is what `if info then` reads. An
-		-- empty table is truthy and would report every name as bound.
-		assert(CAS:GetBoundActionInfo('nothing at all') == nil, 'an unbound name reported a table')
+			-- **Higher wins, which is Roblox's direction.** The engine's own list
+			-- is sorted highest-priority-first, so reporting our index under
+			-- Roblox's name would be the same word meaning the opposite thing.
+			local door = CAS:GetBoundActionInfo('door')
+			assert(door.stackOrder < vehicle.stackOrder, 'the claim that wins does not have the higher order')
 
-		local all = CAS:GetAllBoundActionInfo()
-		assert(all.door ~= nil and all.vehicle ~= nil, 'the map lost a row')
-		assert(all.vehicle.priorityLevel == 10, 'the map and the single lookup disagree')
+			-- Nil for a name nothing bound, which is what `if info then` reads.
+			-- An empty table is truthy and would report every name as bound.
+			assert(CAS:GetBoundActionInfo('nothing at all') == nil, 'an unbound name reported a table')
 
-		CAS:UnbindAllActions()
-		assert(next(CAS:GetAllBoundActionInfo()) == nil, 'unbinding left something behind')
-	)");
+			local all = CAS:GetAllBoundActionInfo()
+			assert(all.door ~= nil and all.vehicle ~= nil, 'the map lost a row')
+			assert(all.vehicle.priorityLevel == 10, 'the map and the single lookup disagree')
+
+			CAS:UnbindAllActions()
+			assert(next(CAS:GetAllBoundActionInfo()) == nil, 'unbinding left something behind')
+		)");
+	}
+
+	SECTION("javascript") {
+		Store store("script_test");
+		store.SetResource(engine::scene::InputState{});
+
+		const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+		MustRun(*runtime, R"(
+			const CAS = game.GetService('ContextActionService');
+			const nothing = () => {};
+
+			CAS.BindActionAtPriority('door', nothing, false, 1, Enum.KeyCode.E);
+			CAS.BindActionAtPriority('vehicle', nothing, false, 10, Enum.KeyCode.E, Enum.KeyCode.F);
+
+			const vehicle = CAS.GetBoundActionInfo('vehicle');
+			if (vehicle === null) throw new Error('a bound action reported nothing');
+			if (vehicle.priorityLevel !== 10) throw new Error('the priority was lost');
+			if (vehicle.inputTypes.length !== 2) throw new Error('the keys were lost');
+			if (!vehicle.inputTypes[0].Equals(Enum.KeyCode.E)) {
+				throw new Error('the keys came back in another order');
+			}
+			if (vehicle.createTouchButton) throw new Error('there is no touch surface');
+
+			const door = CAS.GetBoundActionInfo('door');
+			if (!(door.stackOrder < vehicle.stackOrder)) {
+				throw new Error('the claim that wins does not have the higher order');
+			}
+
+			// `null` rather than an empty object, which is what `if (info)`
+			// reads — the same rule the Luau half states for a truthy table.
+			if (CAS.GetBoundActionInfo('nothing at all') !== null) {
+				throw new Error('an unbound name reported a record');
+			}
+
+			const all = CAS.GetAllBoundActionInfo();
+			if (all.door === undefined || all.vehicle === undefined) throw new Error('the map lost a row');
+			if (all.vehicle.priorityLevel !== 10) {
+				throw new Error('the map and the single lookup disagree');
+			}
+
+			CAS.UnbindAllActions();
+			if (Object.keys(CAS.GetAllBoundActionInfo()).length !== 0) {
+				throw new Error('unbinding left something behind');
+			}
+		)");
+	}
 }
 
 TEST_CASE("a bound action's handler is given an InputObject", "[scripting]") {
@@ -1534,6 +1652,294 @@ TEST_CASE("a bound action's handler is given an InputObject", "[scripting]") {
 			'got ' .. board:GetAttribute('Log')
 		)
 	)");
+}
+
+TEST_CASE("a bound action decides who else hears the key, in both languages", "[scripting]") {
+	// **`Enum.ContextActionResult` existed in Roblox and nowhere here.** The pump
+	// called the highest claim with `lua_pcall(..., 0, 0)` and `JS_Call` whose
+	// result it freed unread, so `Pass` was unspellable and a handler's return
+	// value was dead — which made the one case `ContextActionService` is *for*
+	// unsolvable in the interesting direction. A vehicle nobody is driving wants
+	// to let E through to the door it is parked beside.
+	//
+	// **Three claims, two edges and a rebind, not one press and a flag.** A test
+	// that bound two actions and checked the winner ran passes against the broken
+	// pump; what is wrong is only visible in whether the *second* claim heard
+	// anything, and whether the third then did not.
+	//
+	// Both languages, because the two pumps are where this kind of thing drifts.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store("script_test");
+		store.SetResource(engine::scene::InputState{});
+
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const Entity log = MakeLog(store);
+
+		const bool luau = language == Language::Luau;
+		INFO((luau ? "luau" : "javascript"));
+
+		MustRun(
+			*runtime,
+			luau ? R"(
+			local CAS = game:GetService('ContextActionService')
+			local log = workspace:FindFirstChild('Log')
+
+			CAS:BindActionAtPriority('vehicle', function()
+				log.Name = log.Name .. 'vehicle;'
+				return Enum.ContextActionResult.Pass
+			end, false, 10, Enum.KeyCode.E)
+
+			CAS:BindActionAtPriority('door', function()
+				log.Name = log.Name .. 'door;'
+				return Enum.ContextActionResult.Sink
+			end, false, 5, Enum.KeyCode.E)
+
+			CAS:BindActionAtPriority('floor', function()
+				log.Name = log.Name .. 'floor;'
+			end, false, 1, Enum.KeyCode.E)
+		)"
+				 : R"(
+			const CAS = game.GetService('ContextActionService');
+			const log = workspace.FindFirstChild('Log');
+
+			CAS.BindActionAtPriority('vehicle', () => {
+				log.Name = log.Name + 'vehicle;';
+				return Enum.ContextActionResult.Pass;
+			}, false, 10, Enum.KeyCode.E);
+
+			CAS.BindActionAtPriority('door', () => {
+				log.Name = log.Name + 'door;';
+				return Enum.ContextActionResult.Sink;
+			}, false, 5, Enum.KeyCode.E);
+
+			CAS.BindActionAtPriority('floor', () => {
+				log.Name = log.Name + 'floor;';
+			}, false, 1, Enum.KeyCode.E);
+		)"
+		);
+
+		// Two edges: the press and the release. Each walks the stack again, so a
+		// `Pass` recorded once rather than decided per edge would show up here.
+		for (const bool down : {true, false}) {
+			auto *input = store.ResourceMutable<engine::scene::InputState>();
+			input->Previous = input->Down;
+			input->Down.Set(engine::scene::KeyCode::E, down);
+			REQUIRE(runtime->Heartbeat(0.016f));
+		}
+
+		// **`floor` never runs**, which is the half `Sink` is for — and `door`
+		// running at all is the half `Pass` is for. The old pump produced
+		// `vehicle;vehicle;`.
+		CHECK(Trace(store, log) == "vehicle;door;vehicle;door;");
+
+		// **Reset from C++, because the trace *is* the name.** A second chunk
+		// cannot look the part up again — `FindFirstChild('Log')` is a lookup by
+		// the name the first chunk has been appending to.
+		REQUIRE(store.SetInstanceName(log, LOG_NAME));
+
+		// **Returning nothing sinks**, which is Roblox's default and is what a
+		// handler that forgot to return anything must mean. Rebinding by name
+		// replaces rather than stacks, so this is the same claim with a new
+		// answer.
+		MustRun(
+			*runtime,
+			luau ? R"(
+			local board = workspace:FindFirstChild('Log')
+			game:GetService('ContextActionService'):BindActionAtPriority('vehicle', function()
+				board.Name = board.Name .. 'vehicle;'
+			end, false, 10, Enum.KeyCode.E)
+		)"
+				 : R"(
+			{
+				const board = workspace.FindFirstChild('Log');
+				game.GetService('ContextActionService').BindActionAtPriority('vehicle', () => {
+					board.Name = board.Name + 'vehicle;';
+				}, false, 10, Enum.KeyCode.E);
+			}
+		)"
+		);
+
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		input->Previous = input->Down;
+		input->Down.Set(engine::scene::KeyCode::E, true);
+		REQUIRE(runtime->Heartbeat(0.016f));
+
+		CHECK(Trace(store, log) == "vehicle;");
+	}
+}
+
+TEST_CASE("a click the interface took is game-processed and a key is not", "[scripting][gui]") {
+	// **Roblox's second argument, which this passed nothing at all for.** A
+	// handler written `function(input, gameProcessed)` — the form every Roblox
+	// place is written in — read nil for the second argument on every edge, so a
+	// place that guarded on it treated a click on its own menu as a click on the
+	// world. Swallowing the click instead would have been the other wrong answer;
+	// Roblox's is to deliver it *marked*.
+	//
+	// **What backs it is the router's own events**, because they are the only
+	// record of a press having been taken — `InterfaceHasPointer` carries the
+	// argument, including why a key is honestly never processed.
+	//
+	// **Four observations over two beats, and the mouse differs between them.** A
+	// test with one edge would pass against a pump that hard-coded either answer,
+	// and one that only pressed the mouse would pass against a pump that marked
+	// every input on a beat the interface was busy.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store("script_test");
+		store.SetResource(engine::scene::InputState{});
+
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const Entity button = MakeButton(store, "Go");
+		const Entity log = MakeLog(store);
+
+		const bool luau = language == Language::Luau;
+		INFO((luau ? "luau" : "javascript"));
+
+		MustRun(
+			*runtime,
+			luau ? R"(
+			local log = workspace:FindFirstChild('Log')
+			local UIS = game:GetService('UserInputService')
+			local function note(input, gameProcessed)
+				log.Name = log.Name .. input.UserInputType.Name .. '=' .. tostring(gameProcessed) .. ';'
+			end
+			UIS.InputBegan:Connect(note)
+			UIS.InputEnded:Connect(note)
+		)"
+				 : R"(
+			const log = workspace.FindFirstChild('Log');
+			const UIS = game.GetService('UserInputService');
+			const note = (input, gameProcessed) => {
+				log.Name = log.Name + input.UserInputType.Name + '=' + String(gameProcessed) + ';';
+			};
+			UIS.InputBegan.Connect(note);
+			UIS.InputEnded.Connect(note);
+		)"
+		);
+
+		// The beat the interface took the press. A `gui::EventKind::InputBegan`
+		// naming an element is what the router emits when a press lands on
+		// something that takes input, and it is queued for this same beat.
+		const engine::gui::GuiEvent taken = Happened(engine::gui::EventKind::InputBegan, button);
+		runtime->DeliverGuiEvents(std::span(&taken, 1));
+
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		input->Previous = input->Down;
+		input->Down.Set(engine::scene::KeyCode::Q, true);
+		input->PreviousButtons = input->Buttons;
+		input->Buttons = 1u << static_cast<uint8_t>(engine::scene::MouseButton::Left);
+		REQUIRE(runtime->Heartbeat(0.016f));
+
+		// The beat it did not. Both edges reverse, and nothing is delivered.
+		input = store.ResourceMutable<engine::scene::InputState>();
+		input->Previous = input->Down;
+		input->Down.Set(engine::scene::KeyCode::Q, false);
+		input->PreviousButtons = input->Buttons;
+		input->Buttons = 0;
+		REQUIRE(runtime->Heartbeat(0.016f));
+
+		// **The key is false on the beat the click was true**, which is the pair
+		// that says this is the interface's answer and not the frame's.
+		CHECK(Trace(store, log) == "Keyboard=false;MouseButton1=true;Keyboard=false;MouseButton1=false;");
+	}
+}
+
+TEST_CASE("the device the player switched to reaches a script, in both languages", "[scripting]") {
+	// **The edge and the poll, which Roblox offers as a pair and this had
+	// neither of.** A place swaps "press E" for "click here" on
+	// `LastInputTypeChanged` and asks `GetLastInputType` for what to draw when a
+	// menu opens with no edge coming.
+	//
+	// **Three beats and a count, not one beat and a value.** A pump that fired
+	// the signal whenever the source was set rather than when it *changed* passes
+	// any test that presses once; the second beat here is the one that catches
+	// it.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store("script_test");
+		store.SetResource(engine::scene::InputState{});
+
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const Entity log = MakeLog(store);
+
+		const bool luau = language == Language::Luau;
+		INFO((luau ? "luau" : "javascript"));
+
+		MustRun(
+			*runtime,
+			luau ? R"(
+			local log = workspace:FindFirstChild('Log')
+			local UIS = game:GetService('UserInputService')
+			assert(UIS:GetLastInputType() == Enum.UserInputType.Keyboard, 'a fresh world is a keyboard')
+			UIS.LastInputTypeChanged:Connect(function(kind)
+				log.Name = log.Name .. kind.Name .. ';'
+			end)
+		)"
+				 : R"(
+			const log = workspace.FindFirstChild('Log');
+			const UIS = game.GetService('UserInputService');
+			if (!UIS.GetLastInputType().Equals(Enum.UserInputType.Keyboard)) {
+				throw new Error('a fresh world is a keyboard');
+			}
+			UIS.LastInputTypeChanged.Connect((kind) => {
+				log.Name = log.Name + kind.Name + ';';
+			});
+		)"
+		);
+
+		const auto spoke = [&](engine::scene::InputSource source) {
+			auto *input = store.ResourceMutable<engine::scene::InputState>();
+			input->PreviousLastSource = input->LastSource;
+			input->LastSource = source;
+			REQUIRE(runtime->Heartbeat(0.016f));
+		};
+
+		spoke(engine::scene::InputSource::MouseMovement);
+		spoke(engine::scene::InputSource::MouseMovement);
+		spoke(engine::scene::InputSource::Keyboard);
+
+		// **Two entries from three beats.** Three is the defect: a signal that
+		// reported the value rather than the change fires on every beat the
+		// player is doing anything at all.
+		CHECK(Trace(store, log) == "MouseMovement;Keyboard;");
+
+		MustRun(
+			*runtime,
+			luau ? R"(
+			local UIS = game:GetService('UserInputService')
+			assert(UIS:GetLastInputType() == Enum.UserInputType.Keyboard, 'the poll disagrees with the edge')
+
+			-- **The second property that travels towards the window.** True until
+			-- somebody says otherwise, and a write has to reach the resource
+			-- rather than a copy of it.
+			assert(UIS.MouseIconEnabled, 'a fresh world draws its pointer')
+			UIS.MouseIconEnabled = false
+			assert(not UIS.MouseIconEnabled, 'MouseIconEnabled did not round-trip')
+		)"
+				 : R"(
+			// Braced, because JavaScript chunks share one global object — see
+			// `JavaScriptRuntime` — so a second top-level `const UIS` is a
+			// redeclaration rather than a fresh binding.
+			{
+				const service = game.GetService('UserInputService');
+				if (!service.GetLastInputType().Equals(Enum.UserInputType.Keyboard)) {
+					throw new Error('the poll disagrees with the edge');
+				}
+				if (!service.MouseIconEnabled) throw new Error('a fresh world draws its pointer');
+				service.MouseIconEnabled = false;
+				if (service.MouseIconEnabled) throw new Error('MouseIconEnabled did not round-trip');
+			}
+		)"
+		);
+
+		CHECK_FALSE(store.Resource<engine::scene::InputState>()->MouseIconEnabled);
+	}
 }
 
 // --- the datatype vocabulary ------------------------------------------------
@@ -3862,57 +4268,8 @@ TEST_CASE("javascript announces a destroyed subtree once", "[scripting][js]") {
 // is what makes these cases about delivery: a test that drove a real pointer
 // would fail for either module's reasons and name neither.
 //
-// **Handlers record into the world rather than into a global**, because both
-// VMs freeze their globals — `script/AGENTS.md` calls that the design rather
-// than a hardening pass, and a test that wanted `_G` would be asking for the
-// one thing a loaded script may not have. A part's `Name` is appended to, which
-// records order as well as count in one readable value.
-
-namespace {
-	// One gui event, spelled out.
-	engine::gui::GuiEvent
-	Happened(engine::gui::EventKind kind, Entity instance, float x = 0.0f, float y = 0.0f) {
-		engine::gui::GuiEvent event;
-		event.Kind = kind;
-		event.Instance = instance;
-		event.Position = engine::core::Vector2{x, y};
-		return event;
-	}
-
-	// A `TextButton` under the workspace, which is where a script can find it.
-	Entity MakeButton(Store &store, const char *name) {
-		engine::gui::RegisterGuiClasses();
-		const Entity button = store.CreateInstance(engine::gui::GuiClass("TextButton"), name);
-		const Entity workspace = engine::scene::WorkspaceOf(store);
-		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
-		store.SetParent(button, workspace);
-		return button;
-	}
-
-	// The name the trace part starts with, and the prefix `Trace` strips.
-	//
-	// **Not the empty string**, which was the obvious choice and is the one
-	// thing that cannot work: `Instances.cpp` refuses `FindFirstChild(x, "")`
-	// because `core::Name("")` is the invalid name and would match anything
-	// unnamed. A handler looking the log up would get `nil`, fail at beat time
-	// rather than at `Run` time, and record nothing — which reads exactly like
-	// the signal never firing.
-	constexpr const char *LOG_NAME = "Log";
-
-	// The part handlers write their trace onto.
-	Entity MakeLog(Store &store) {
-		const Entity log = store.CreateInstance(PartClass(), LOG_NAME);
-		store.SetParent(log, engine::scene::WorkspaceOf(store));
-		return log;
-	}
-
-	// What the handlers recorded, in order, with the starting name removed.
-	std::string Trace(Store &store, Entity log) {
-		const std::string name(store.InstanceNameOf(log).Text());
-		const std::string prefix(LOG_NAME);
-		return name.rfind(prefix, 0) == 0 ? name.substr(prefix.size()) : name;
-	}
-}
+// `Happened`, `MakeButton`, `MakeLog` and `Trace` are above the input section,
+// which is the other half that needs them — see the comment there.
 
 TEST_CASE("a gui event reaches a script's Activated", "[scripting][gui]") {
 	RegisterClasses();

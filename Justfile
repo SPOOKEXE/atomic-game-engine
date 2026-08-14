@@ -559,10 +559,19 @@ format:
 # Missing tool is a failure, not a skip. A check that exits 0 when it did not
 # run is worse than no check at all: CI goes green having verified nothing, and
 # everyone downstream reads that green as "formatting is fine".
+#
+# **It names the tool it used, and that is a diagnostic rather than a
+# constraint.** `.clang-format` pins no version and `find-clang-format` takes
+# whichever candidate answers first, so two machines with different majors
+# reformat the same file differently — which is what a run that reflows files
+# nobody touched actually is. `docs/DEFERRED.md` D00126 carries why pinning a
+# major is a toolchain decision rather than a patch; until then, a reflow
+# surprise at least arrives with the version that caused it.
 format-check:
     #!/usr/bin/env bash
     set -euo pipefail
     {{find-clang-format}}
+    echo "format-check with $cf $("$cf" --version | sed -nE 's/.*version ([0-9.]+).*/\1/p')" >&2
     find {{mono_sources}} \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
         | xargs -0 "$cf" --dry-run --Werror
 

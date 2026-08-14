@@ -2,7 +2,7 @@
 
 // What a JavaScript script can hold and what it can touch.
 //
-// The JavaScript twin of `Bindings.hpp`, and deliberately the same shape: value
+// The JavaScript twin of `LuauBindings.hpp`, and deliberately the same shape: value
 // types, an `Instance` constructor, and property access that switches on
 // `PropertyType` and never on a property's name.
 //
@@ -34,6 +34,8 @@
 #include "Codec.hpp"
 #include "JsContext.hpp"
 #include "ServiceCatalogue.hpp"
+#include "ServiceSurface.hpp"
+#include "Tweens.hpp"
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
@@ -143,6 +145,19 @@ namespace engine::script {
 		std::span<const ServiceProperty> properties
 	);
 
+	// One whole service, as a JavaScript object on the global.
+	//
+	// **`InstallService`'s twin, and `JsServiceSurface.cpp` is where it lives.**
+	// Signals, then methods, then properties — the order the Luau installer fixes
+	// for the same reason, so a name claimed twice resolves the same way in both
+	// languages. `ServiceCatalogue.cpp` is the only caller.
+	//
+	// @param context The VM.
+	// @param global  The global object the service is named on.
+	// @param surface The description both languages read.
+	// @since v0.18
+	void InstallJsService(JSContext *context, JSValueConst global, const ServiceSurface &surface);
+
 	// One member of one enum, as an `EnumItem`.
 	//
 	// **Exported because the input pump needs one and is not this file's.** A
@@ -175,22 +190,24 @@ namespace engine::script {
 	// `ContextActionService` crossed at v0.16 with no input pump in this
 	// language, so a JavaScript `BindAction` would have taken a handler and
 	// forgotten it; `UserInputService` crossed with the property mechanism, and
-	// its five signals would have been connectable and silent — which is the
+	// its six signals would have been connectable and silent — which is the
 	// state this module names twice as reading like a broken engine.
 	//
-	// **Five things, in `PumpInput`'s order**: the focus edges, key edges, mouse
-	// button edges, pointer motion and the wheel — so a listener sees
-	// `WindowFocusReleased` before the releases losing focus caused, in either
-	// language.
+	// **Six things, in `PumpInput`'s order**: the focus edges, the device change,
+	// key edges, mouse button edges, pointer motion and the wheel — so a listener
+	// sees `WindowFocusReleased` before the releases losing focus caused, in
+	// either language.
 	//
 	// Called at the same place in the barrier the Luau pump is — before the
 	// changes, so a handler's writes reach their listeners on this beat rather
 	// than the next.
 	//
-	// @param context The VM.
+	// @param context   The VM.
+	// @param interface What the router produced for this beat, which is what
+	//        `gameProcessedEvent` is decided from. See `InterfaceHasPointer`.
 	// @return An error message when a handler threw, or empty.
 	// @since v0.16
-	std::string PumpJsInput(JSContext *context);
+	std::string PumpJsInput(JSContext *context, std::span<const gui::GuiEvent> interface);
 
 	std::string PumpJsChanges(JSContext *context);
 
@@ -204,6 +221,13 @@ namespace engine::script {
 	// @return The first error a handler raised, or empty.
 	std::string PumpJsTree(JSContext *context);
 
+	// The JavaScript half of `PumpCharacters`.
+	//
+	// @param context The VM to deliver into.
+	// @return The first error a handler raised, or empty.
+	// @since v0.17
+	std::string PumpJsCharacters(JSContext *context);
+
 	// The JavaScript half of `PumpGuiEvents`, with the same argument rule:
 	// `MouseEnter`, `MouseLeave` and `MouseMoved` get `(x, y)`, and the three
 	// input signals get nothing until there is an `InputObject` to hand them.
@@ -216,26 +240,33 @@ namespace engine::script {
 	// Resolves every task due at the world's current tick.
 	std::string PumpJsTasks(JSContext *context);
 
-	// Advances every tween by one tick and fires what completed, and destroys
-	// everything whose deadline the world has reached.
+	// Advances every tween by one tick and fires what completed.
 	//
-	// **The twins of `PumpTweens` and `PumpDebris`, at the same place in the
-	// barrier**, which is the head of it — see `LuauRuntime::Heartbeat` for the
-	// whole order and why the world's own timed work goes before the pumps that
-	// deliver to scripts. `delta` is the fixed tick delta and never wall time.
-	//@{
+	// **The twin of `PumpTweens`, at the same place in the barrier**, which is
+	// the head of it — see `LuauRuntime::Heartbeat` for the whole order and why
+	// the world's own timed work goes before the pumps that deliver to scripts.
+	// `delta` is the fixed tick delta and never wall time.
+	//
+	// **There is no `PumpJsDebris` beside it, and that is the difference between
+	// the two queues.** Draining debris fires nothing, so `PumpDebris` takes a
+	// store and a queue and both runtimes call the one function; a tween's
+	// `Completed` is a signal, and calling a callable is the half no shared
+	// function can do.
 	std::string PumpJsTweens(JSContext *context, float delta);
-
-	// Answers nothing, unlike every other pump: a removal's handler runs from
-	// inside the store, where its failure is logged rather than returned.
-	void PumpJsDebris(JSContext *context);
-	//@}
 
 	// Calls everything connected to one signal.
 	//
+	// `property` is `FireSignal`'s filter, for its reason: one `SignalKind` serving
+	// a set of names told apart at fire time. Invalid fires every connection.
+	//
 	// @return An error message when a handler threw, or empty.
 	std::string FireJsSignal(
-		JSContext *context, SignalKind kind, ecs::Entity subject, int count, JSValueConst *arguments
+		JSContext *context,
+		SignalKind kind,
+		ecs::Entity subject,
+		int count,
+		JSValueConst *arguments,
+		core::Name property = {}
 	);
 
 	// A signal handle, and a connection handle.
@@ -261,6 +292,10 @@ namespace engine::script {
 	core::UDim *AsUDim(JSContext *context, JSValueConst value);
 	core::UDim2 *AsUDim2(JSContext *context, JSValueConst value);
 	core::Rect *AsRect(JSContext *context, JSValueConst value);
+
+	// The curve a tween is authored with, or null. `JsCall::AsTweenInfo` is what
+	// asked for it; `TweenService` used to reach the class id directly.
+	core::TweenInfo *AsTweenInfo(JSContext *context, JSValueConst value);
 
 	// The three `effects` is authored in, added at v0.10 with the property types.
 	JSValue MakeNumberRange(JSContext *context, const core::NumberRange &value);
@@ -326,33 +361,28 @@ namespace engine::script {
 	// @since v0.15
 	void InstallJsServices(JSContext *context, JSValueConst global, ServiceAvailability phase);
 
-	// --- this language's service installers -----------------------------------
+	// --- what is left of this language's own service code ---------------------
 	//
-	// **One per service, named, because `ServiceCatalogue.cpp` has to point at
-	// them.** They were three anonymous blocks in `OpenJsBindings` and two more
-	// inside a single `InstallJsServices` — a list of services written as
-	// control flow, which nothing outside the function could see or enumerate.
-	// That is how this language came to bind five services where Luau binds nine
-	// with nothing in the build to say so.
+	// **Nothing, and the list that used to be here is the point.** There were
+	// seven `OpenJs*Service` functions at v0.15 and none now: every service is a
+	// `ServiceSurface` that `ServiceCatalogue.cpp` builds twice, so a service
+	// added to this engine cannot be a service this language does not have. The
+	// linker argument that made them named in the first place still applies to
+	// the surfaces, and `ServiceCatalogue.cpp` is still the file that names every
+	// one.
 	//
-	// **Naming them is also what keeps them.** The catalogue is one translation
-	// unit that references every installer, and a static archive is free to drop
-	// an object file no symbol reaches — see `ServiceCatalogue.hpp`.
-	//
-	// The signature is the same for all of them: the context, and the global
-	// object to hang the service on.
-	//@{
-	void OpenJsMessagingService(JSContext *context, JSValueConst global);
-	void OpenJsTeleportService(JSContext *context, JSValueConst global);
-	void OpenJsRunService(JSContext *context, JSValueConst global);
-	void OpenJsMemoryStoreService(JSContext *context, JSValueConst global);
-	void OpenJsDataStoreService(JSContext *context, JSValueConst global);
+	// What remains per language is *apparatus* rather than service: the `Tween`
+	// class below, which is a value type a method hands back.
 
-	// `TweenService` and `Debris`. The first also installs the `Tween` class its
-	// `Create` hands back, which is why it is one call rather than two.
-	void OpenJsTweenService(JSContext *context, JSValueConst global);
-	void OpenJsDebrisService(JSContext *context, JSValueConst global);
-	//@}
+	// Installs the `Tween` class and the three methods on a tween handle.
+	//
+	// **The handle and not the service.** `TweenServiceSurface` describes
+	// `GetValue` and `Create` for both languages; `Play`, `Pause` and `Cancel`
+	// belong to the object `Create` answers with, and that object is a registered
+	// class here and a tagged userdata there. See `Tweens.hpp`.
+	//
+	// @since v0.16
+	void OpenJsTweenHandle(JSContext *context);
 
 	// One `Tween` object for a tween's entity.
 	//
@@ -369,15 +399,6 @@ namespace engine::script {
 
 	// An `EnumItem`, and reading one back — the JavaScript spellings.
 	bool ReadJsEnumValue(JSContext *context, JSValueConst value, core::Name enumName, core::Name &out);
-
-	// The easing enums, converted between their C++ form and their member name.
-	//
-	// Declared here as well as in `Bindings.hpp` because both bindings need
-	// them and neither header may include the other's VM.
-	core::EasingStyle EasingStyleOf(core::Name member);
-	core::Name NameOf(core::EasingStyle style);
-	core::EasingDirection EasingDirectionOf(core::Name member);
-	core::Name NameOf(core::EasingDirection direction);
 
 	// A JavaScript value to the shared tree, and back.
 	//

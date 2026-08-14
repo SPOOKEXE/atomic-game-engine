@@ -11,16 +11,16 @@
 //
 // **Per world, not per universe, and that is Roblox's arrangement rather than
 // a shortcut.** An entity is a row in one `ecs::Store` and a store is a world,
-// so a universe-level service would need a store of its own with nothing in it
-// but nine rows. It would also be wrong: each place in a Roblox game has its
+// so a universe-level service would need a store of its own holding nothing but
+// the service rows. It would also be wrong: each place in a Roblox game has its
 // own ServerScriptService and its own Lighting, and two places sharing one set
 // is not a thing an author can express today or would want to.
 //
 // **What makes them different from an ordinary instance is a component, not a
 // class check.** `ServiceComponent` is on every one of them, so "is this a
 // fixture" and "show me this world's services" are queries. The alternative —
-// comparing class names at each call site — is nine string comparisons that
-// drift the first time somebody adds a tenth service.
+// comparing class names at each call site — is one string comparison per
+// service, and they drift the first time somebody adds another one.
 //
 // @tier L7 · shared
 
@@ -30,6 +30,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Enums.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -90,8 +91,8 @@ namespace engine::scene {
 
 	// What `Lighting` holds that no other service does.
 	//
-	// **A component of its own rather than fields on `ServiceComponent`.** Nine
-	// services carry that one; exactly one of them has a fog colour, and a
+	// **A component of its own rather than fields on `ServiceComponent`.** Every
+	// service carries that one; exactly one of them has a fog colour, and a
 	// shared component with eight unused floats on every service is eight
 	// floats in every snapshot of every world.
 	//
@@ -127,7 +128,93 @@ namespace engine::scene {
 		float GeographicLatitude = 41.733f;
 	};
 
-	// Registers `Service` and the nine classes under it.
+	// What `Players` holds that no other service does.
+	//
+	// **A component of its own rather than fields on `ServiceComponent`**, for
+	// `LightingServiceComponent`'s reason: twelve services carry that one and
+	// exactly one of them has a respawn delay.
+	//
+	// @since v0.17
+	struct PlayersServiceComponent {
+		// What the next player admitted is numbered, when nobody says.
+		//
+		// **A counter on the world rather than a clock or a random draw**, which
+		// is what makes two runs of one recording hand out the same identities.
+		// It is not a declared property: a game authors `MaxPlayers`, and the
+		// next free number is bookkeeping the engine owns.
+		int64_t NextUserId = 1;
+
+		// How many players this world admits.
+		//
+		// **Enforced by `AddPlayer`, which is the one door a player arrives
+		// through.** The transport has its own cap —
+		// `replication::ListenerSettings::MaximumClients` — and the two are
+		// different questions: that one is how many sockets a process will hold,
+		// this one is how many occupants the *game* is for.
+		int32_t MaxPlayers = 50;
+
+		// How long after losing a character a player waits for the next one,
+		// in seconds. What a new `Player` starts its own `RespawnTime` from.
+		float RespawnTime = 5.0f;
+
+		// Whether losing a character earns a new one without a script asking.
+		//
+		// Roblox's `Players.CharacterAutoLoads`. False is a game that spawns
+		// its occupants itself, through `Player:LoadCharacter()`.
+		bool CharacterAutoLoads = true;
+
+		// Explicit padding, so the object representation a snapshot writes holds
+		// no uninitialised bytes. The reason every other `Reserved` here gives.
+		uint8_t Reserved[7] = {};
+	};
+
+	// Who one occupant is, held on the `Player`.
+	//
+	// **Separate from `PlayerCharacter` because the two have different
+	// lifetimes.** Who somebody is lasts as long as they are connected; what
+	// body they are driving is gone and remade on every respawn, and a component
+	// holding both would be written on every spawn for the sake of two fields
+	// that never change.
+	//
+	// @since v0.17
+	struct PlayerIdentity {
+		// The stable number a game keys saved data by.
+		//
+		// **Widest first**, so the object representation a snapshot writes holds
+		// no padding between this and the two fields below it.
+		int64_t UserId = 0;
+
+		// What to show instead of `Name`.
+		//
+		// **A `core::Name` like `Instance.Name` beside it**, and for that
+		// property's reason rather than in spite of `PropertyType::String`: a
+		// display name is assigned once per occupant and never computed per
+		// frame, so it is exactly the bounded set interning is for. A score or a
+		// chat line would be a `String`; this is not one.
+		core::Name DisplayName;
+
+		// How long *this* player waits, which is `PlayersServiceComponent`'s
+		// value at the moment they joined unless a game has changed it.
+		float RespawnTime = 5.0f;
+	};
+
+	// When this player may have a body again.
+	//
+	// **A tick number rather than a countdown**, which is `DebrisQueue`'s rule
+	// and is what keeps a respawn on the same beat on a fast machine and a slow
+	// one: `ceil(seconds / delta)` is computed once, from the fixed tick delta,
+	// and nothing afterwards reads a clock.
+	//
+	// Present only between losing a character and gaining the next one, so the
+	// ordinary state of a living player is not to have this row at all.
+	//
+	// @since v0.17
+	struct PlayerRespawn {
+		// The tick `UpdateRespawns` spawns on.
+		uint64_t DueTick = 0;
+	};
+
+	// Registers `Service` and the twelve classes under it.
 	//
 	// Idempotent and process-wide, like every other registration here. Calls
 	// `PartClass` first: a service derives from `Instance`, which that
@@ -155,6 +242,36 @@ namespace engine::scene {
 	// @return The `Workspace`, which is the one callers usually want next.
 	ecs::Entity InstallServices(ecs::Store &store);
 
+	// The world's service of one class, or a null entity when it has none.
+	//
+	// **By class and never by name, and that distinction was a live bug.**
+	// `WorkspaceOf` was `FindFirstRoot("Workspace")`, so a script renaming the
+	// workspace made it answer nothing — and `InstallServices`, which used the
+	// same lookup to decide what a world was missing, then minted a *second*
+	// `Workspace` beside the one holding the scene. A class is registered once
+	// and a rename cannot touch it, so this is the shape every fixture lookup in
+	// this module takes.
+	//
+	// **Roots only**, which is what a service is: `InstallServices` parents
+	// eleven of them to nothing, and `StarterPlayerScripts` and
+	// `StarterCharacterScripts` to `StarterPlayer`. Those two are found through
+	// `ServiceUnder`.
+	//
+	// @param store The world.
+	// @param klass The service's class.
+	// @return The instance, or `ecs::NULL_ENTITY`.
+	// @since v0.17
+	ecs::Entity ServiceOf(const ecs::Store &store, ecs::ClassId klass);
+
+	// The same, for a service that lives under another one.
+	//
+	// @param store  The world.
+	// @param parent The service it sits under.
+	// @param klass  The service's class.
+	// @return The instance, or `ecs::NULL_ENTITY`.
+	// @since v0.17
+	ecs::Entity ServiceUnder(const ecs::Store &store, ecs::Entity parent, ecs::ClassId klass);
+
 	// The world's `Workspace`, or a null entity when it has none.
 	//
 	// @param store The world.
@@ -166,6 +283,27 @@ namespace engine::scene {
 	// @param store The world.
 	// @return The service instance.
 	ecs::Entity PlayersOf(const ecs::Store &store);
+
+	// Whether a client should be sent this instance ahead of the rest of the
+	// world.
+	//
+	// **What `ReplicatedFirst` is for, and the container had no reader.** Roblox
+	// replicates that service and runs its scripts before the rest of the tree
+	// arrives, which is the whole point of it existing beside
+	// `ReplicatedStorage`; here it was an ordinary root with an ordinary
+	// priority, so a loading screen in it arrived somewhere in the middle of the
+	// world it was meant to cover.
+	//
+	// **A predicate rather than a filter, for `VisibleToClients`' reason.**
+	// `mono.engine/replication` does not depend on `scene` and must not, so the
+	// rule lives here beside the service it reads and the plumbing lives in
+	// whoever owns a connection — `Authority::SetPriority` is the hook.
+	//
+	// @param store    The world.
+	// @param instance Anything in the tree.
+	// @return `true` for anything under `ReplicatedFirst`.
+	// @since v0.17
+	bool InReplicatedFirst(const ecs::Store &store, ecs::Entity instance);
 
 	// Which player this host is, when it is a client.
 	//
@@ -185,33 +323,136 @@ namespace engine::scene {
 		ecs::Entity Instance;
 	};
 
-	// Adds a `Player` under `Players` and names it.
+	// Admits one occupant: the `Player`, its four containers, and the two
+	// `Starter*` copies that are made once and never again.
 	//
 	// **Not automatic.** Who is in a game is the host's business — a dedicated
 	// server admits players as they connect and the studio admits one per client
 	// view — so furnishing a world does not invent an occupant.
 	//
-	// @param store The world.
-	// @param name  What to call them.
-	// @param local Whether this host is looking through them, which is what
+	// ## What a join does, in order
+	//
+	//   1. The `Player` row, under `Players`, named `name`.
+	//   2. `PlayerGui`, `PlayerScripts`, `Backpack` and `StarterGear` under it.
+	//      All four are private to that player on the wire — see `PlayerOwning`.
+	//   3. Every child of `StarterPlayer.StarterPlayerScripts` cloned into
+	//      `PlayerScripts`. **Once, on join, and never on a respawn**, which is
+	//      Roblox's rule and the whole reason that container is not
+	//      `StarterCharacterScripts`.
+	//   4. Every child of `StarterPack` cloned into `StarterGear`.
+	//      `StarterGear` is the *persistent* gear list: what a game adds to it
+	//      later survives every respawn, because it is `Backpack` that is
+	//      refilled from this rather than the other way round.
+	//
+	// The interface is deliberately not step five: `StarterGui` is copied into
+	// `PlayerGui` on **every** spawn rather than on the join, and it is
+	// `gui::ResetPlayerGui` that does it because `scene` may not link `gui`.
+	//
+	// **Refused past `Players.MaxPlayers`**, which is what gives that property a
+	// reader. A host that gets a null back has a world that is full.
+	//
+	// @param store  The world.
+	// @param name   What to call them.
+	// @param local  Whether this host is looking through them, which is what
 	//        makes `Players.LocalPlayer` answer. At most one player per world
 	//        should be marked local; the last one marked wins.
-	// @return The player instance, or `NULL_ENTITY` when there is no `Players`.
-	ecs::Entity AddPlayer(ecs::Store &store, std::string_view name, bool local = false);
+	// @param userId The stable number a game keys saved data by. Zero takes the
+	//        next one the world has not handed out, which is what a host with no
+	//        account system behind it wants.
+	// @return The player instance, or `NULL_ENTITY` when there is no `Players`
+	//         or the world is full.
+	ecs::Entity AddPlayer(ecs::Store &store, std::string_view name, bool local = false, int64_t userId = 0);
 
-	// What a player's interface container is called.
+	// Copies every child of one container into another.
 	//
-	// **Spelled here and again in `gui::PLAYER_GUI`**, because `gui` decides
-	// whether a `ScreenGui` draws by walking its ancestors and comparing names,
-	// and the two modules may not link each other — `gui/AGENTS.md` refuses the
-	// edge, and this is the other side of the same refusal.
+	// **The whole of what a `Starter*` service does, in one function, because
+	// there are four of them and they differ only in which pair they name.**
+	// `StarterPlayerScripts` into `PlayerScripts`, `StarterPack` into
+	// `StarterGear`, `StarterCharacterScripts` into the character, `StarterGear`
+	// into `Backpack` — four calls rather than four copies of a loop, which is
+	// the paste `docs/CODE_QUALITY.md` asks about. The fifth,
+	// `StarterGui` into `PlayerGui`, is `gui::ResetPlayerGui`'s because it
+	// carries a survival rule the other four do not have.
+	//
+	// **Cloned rather than moved**, so the template is still there for the next
+	// player and the next life.
+	//
+	// **Collected before anything is cloned.** Each copy is parented into the
+	// destination while the source's child list is being walked; a walk that
+	// mutates the store the walk is reading is the shape that bites eventually
+	// rather than immediately, and `gui::ResetPlayerGui` takes the same
+	// precaution one door along.
+	//
+	// @param store       The world.
+	// @param source      What to copy from. A null entity copies nothing, which
+	//        is what a world with no such service is.
+	// @param destination What to copy into. A null entity copies nothing.
+	// @return How many children were cloned.
+	// @since v0.17
+	size_t CloneChildrenInto(ecs::Store &store, ecs::Entity source, ecs::Entity destination);
+
+	// Destroys every child of a container.
+	//
+	// **`Backpack`'s half of a respawn, and it is a function because the
+	// gathering matters.** `DestroyInstance` walks the instance's own children,
+	// so calling it from inside `EachChild` is destroying what the walk is
+	// holding — the same collect-then-act `ResetPlayerGui` and
+	// `ReclaimOrphanedCharacters` both make.
+	//
+	// @param store     The world.
+	// @param container What to empty. A null entity empties nothing.
+	// @return How many children were destroyed.
+	// @since v0.17
+	size_t ClearChildren(ecs::Store &store, ecs::Entity container);
+
+	// How many `Player` instances the world's `Players` service holds.
+	//
+	// **Filtered by class**, because `Players` is an ordinary container and a
+	// `Folder` somebody parented there is not an occupant.
+	//
+	// @param store The world.
+	// @return The count, and zero for a world with no `Players`.
+	// @since v0.17
+	size_t PlayerCount(const ecs::Store &store);
+
+	// The player holding one `UserId`, or a null entity.
+	//
+	// @param store  The world.
+	// @param userId The number to look for.
+	// @return The `Player`, or `ecs::NULL_ENTITY`.
+	// @since v0.17
+	ecs::Entity PlayerByUserId(const ecs::Store &store, int64_t userId);
+
+	// What a player's containers are called.
+	//
+	// **`PlayerGui` is spelled here and again in `gui::PLAYER_GUI`**, because
+	// `gui` decides whether a `ScreenGui` draws by walking its ancestors and
+	// comparing names, and the two modules may not link each other —
+	// `gui/AGENTS.md` refuses the edge, and this is the other side of the same
+	// refusal.
 	//
 	// `examples/tests/Scene.cpp` pins the two against each other from the one
 	// place both are linked. A rename on either side without the other would not
 	// break a build; it would make every client interface stop drawing.
 	//
+	// The other three are named here alone. They are looked up by name rather
+	// than by class because they are plain `Instance`s: a `Backpack` class would
+	// be a row every consumer of the class table then has to describe, plus an
+	// `Instance.new("Backpack")` that mints a container belonging to nobody.
+	//
+	//@{
 	// @since v0.8
 	inline constexpr std::string_view PLAYER_GUI_NAME = "PlayerGui";
+
+	// @since v0.17
+	inline constexpr std::string_view PLAYER_SCRIPTS_NAME = "PlayerScripts";
+
+	// @since v0.17
+	inline constexpr std::string_view BACKPACK_NAME = "Backpack";
+
+	// @since v0.17
+	inline constexpr std::string_view STARTER_GEAR_NAME = "StarterGear";
+	//@}
 
 	// The `Player` class id, registering the service tree on first call.
 	//

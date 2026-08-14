@@ -49,17 +49,26 @@ namespace engine::script {
 	// itself.
 	using LuauFunction = int (*)(lua_State *state);
 
-	// One method on a service's table that is still written per language.
+	// One method on a service's table that is written per language.
 	//
-	// **The migration's other half, and it is named so that it reads as a debt.**
-	// `ServiceMethod` is a `ScriptMethod` — a service is described once and both
-	// VMs build it — and the services that have not moved yet keep their Luau
-	// functions in this list instead, so the engine works at every step.
-	// `RunService`, `TweenService`, `Debris`, the bus four, `BreakpointService`
-	// and `ContextActionService`'s two reporting methods are here today — the two
-	// property-bearing services left at v0.16, when `ServiceProperty` gave a live
-	// value a neutral shape. A row moved from this span to `Methods` is a row
-	// JavaScript gains in the same commit.
+	// **It was the migration's other half and it is down to one service.** The
+	// list was named so that it would read as a debt: `ServiceMethod` is a
+	// `ScriptMethod`, a service described once is built by both VMs, and anything
+	// still spelled as a `lua_CFunction` was a method JavaScript did not have.
+	// `RunService`, `TweenService`, `Debris`, the bus four and
+	// `ContextActionService`'s two reporting methods each sat here and each
+	// moved; the last of them needed `ScriptCall::Await` and
+	// `ReturnBoundAction`, which is what a row leaving this span usually costs.
+	//
+	// **`BreakpointService` is what is left, and it is not a debt.** Its methods
+	// read the runtime's `Debugger` and arm `lua_callbacks()->debugstep`, and
+	// `Debugger::Add` refuses a JavaScript chunk outright — so there is no
+	// JavaScript half to write, which is why its catalogue row says
+	// `ServiceLanguages::Luau` and why this span is the honest place for its four
+	// methods. See `DEFERRED.md` D00106.
+	//
+	// A row moved from this span to `Methods` is still a row JavaScript gains in
+	// the same commit; there is simply nothing left that should move.
 	struct LuauServiceMethod {
 		const char *Name;
 		LuauFunction Function;
@@ -114,14 +123,15 @@ namespace engine::script {
 		// rather than of a Luau one.
 		std::span<const ServiceMethod> Methods;
 
-		// The methods this service has not moved across yet, Luau only.
+		// The methods only Luau has, which is `BreakpointService`'s four.
 		//
-		// **A second span rather than a second surface**, so a half-migrated
-		// service is one description with a visible remainder — and so the
-		// catalogue's language mask stays a statement about the *service* while
-		// the per-method gap is stated where the methods are. `TeleportService`
-		// already had exactly this shape with no way to say so; see the note on
-		// its catalogue row.
+		// **A second span rather than a second surface**, so a service that is
+		// part way across is one description with a visible remainder — and so
+		// the catalogue's language mask stays a statement about the *service*
+		// while a per-method gap is stated where the methods are.
+		// `TeleportService::GetTeleportData` was exactly that gap with no way to
+		// say so, and it is a neutral row now; see `LuauServiceMethod` for what
+		// is left and why it is not a gap at all.
 		std::span<const LuauServiceMethod> LuauMethods;
 
 		// Pushed as fields before the methods, so a service may name a signal
@@ -162,7 +172,7 @@ namespace engine::script {
 		// because a userdata has no fields to hold its methods in.
 		std::span<const ServiceProperty> Properties;
 
-		// The userdata tag, from `Bindings.hpp`'s tag block. Required when
+		// The userdata tag, from `LuauTags.hpp`. Required when
 		// `Properties` is non-empty and ignored otherwise.
 		int Tag = 0;
 
@@ -188,7 +198,7 @@ namespace engine::script {
 	// **`surface` must outlive the VM**, because a property-bearing service puts
 	// its address on the metamethods' upvalue rather than copying the lists. Every
 	// caller hands over a `static const` built once — which is what the
-	// `...Surface()` accessor shape in `Bindings.hpp` is for, and why a
+	// `...Surface()` accessor shape in `LuauBindings.hpp` is for, and why a
 	// `ServiceSurface` built as a local would compile and then read freed memory
 	// on the first property access.
 	//

@@ -8,6 +8,8 @@
 #include <engine/scene/Services.hpp>
 
 #include <array>
+#include <cmath>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -108,6 +110,54 @@ namespace engine::scene {
 			}
 
 			return root != ecs::NULL_ENTITY;
+		}
+
+		// Writes down that a player gained or lost a body.
+		//
+		// **One place, because `SetPlayerCharacter` is one door.** Every path
+		// that binds or releases a character goes through that function —
+		// `LoadCharacter`, `RemoveCharacter`, `LinkPlayerCharacters` and the
+		// `Player.Character` setter — so recording here is recording once. A
+		// second record beside it would be the copy that disagreed.
+		// The most a world will hold before it starts dropping the oldest.
+		//
+		// **A bound, because nothing guarantees a drain.** A world with no
+		// script runtime — a client replica, a headless world a host never
+		// scripted — records here and never empties, which is an allocation that
+		// grows with the session and nothing to notice it. Dropping the *oldest*
+		// is the conservative direction for a signal nobody is listening to: the
+		// newest transition is the one a runtime attached later would care about.
+		//
+		// A hundred and twenty-eight is two respawns a second for a minute in a
+		// world nothing drains, which is far past any real barrier interval.
+		constexpr size_t MAXIMUM_PENDING_CHANGES = 128;
+
+		void RecordCharacterChange(ecs::Store &store, ecs::Entity player, ecs::Entity model, bool added) {
+			CharacterChanges changes;
+			if (const CharacterChanges *held = store.Resource<CharacterChanges>()) {
+				changes = *held;
+			}
+			changes.Pending.push_back(CharacterChange{player, model, added, {}});
+
+			if (changes.Pending.size() > MAXIMUM_PENDING_CHANGES) {
+				changes.Pending.erase(changes.Pending.begin());
+			}
+			store.SetResource(changes);
+		}
+
+		// How many ticks a delay in seconds is.
+		//
+		// **`DebrisQueue`'s conversion, and it is the same one for the same
+		// reason**: a deadline computed once from the fixed tick delta lands on
+		// the same tick on a fast machine and a slow one, where a float
+		// accumulated per tick drifts. At least one, so a respawn is never
+		// instant in a way a script cannot see.
+		uint64_t TicksFor(float seconds, float delta) {
+			if (seconds <= 0.0f || delta <= 0.0f) {
+				return 1;
+			}
+			const double ticks = std::ceil(static_cast<double>(seconds) / static_cast<double>(delta));
+			return ticks < 1.0 ? 1 : static_cast<uint64_t>(ticks);
 		}
 
 		// Takes the intent off a body that is no longer anybody's.
@@ -244,6 +294,22 @@ namespace engine::scene {
 			return ecs::NULL_ENTITY;
 		}
 
+		// **Steps four and five of the spawn, and they are here rather than in
+		// `SetPlayerCharacter` on purpose.** That function is also what a client
+		// runs when a `PlayerCharacter` arrives over the wire, and a client
+		// clearing its own `Backpack` would be fighting the replication that
+		// fills it. This is the authority's call and only the authority's.
+		const ecs::Entity starterPlayer = ServiceOf(store, ecs::Classes::Find(core::Name("StarterPlayer")));
+		(void)CloneChildrenInto(
+			store,
+			ServiceUnder(store, starterPlayer, ecs::Classes::Find(core::Name("StarterCharacterScripts"))),
+			model
+		);
+
+		const ecs::Entity backpack = store.FindFirstChild(player, BACKPACK_NAME);
+		(void)ClearChildren(store, backpack);
+		(void)CloneChildrenInto(store, store.FindFirstChild(player, STARTER_GEAR_NAME), backpack);
+
 		// **The camera is not aimed here.** `FollowOwnCharacter` is the one rule
 		// and it runs every frame — see its header for why the moment of
 		// spawning is the wrong place to decide what a viewer is looking at.
@@ -260,18 +326,26 @@ namespace engine::scene {
 			return false;
 		}
 
-		// **Released before it is destroyed**, so the release can still read the
-		// rig it is stopping. Reversed, `SetPlayerCharacter` would be handed a
-		// dead model and the humanoid's last `MoveDirection` would go with it —
-		// harmless for a body about to vanish, and exactly the ordering mistake
-		// that stops being harmless the first time somebody reuses the model.
-		(void)SetPlayerCharacter(store, player, ecs::NULL_ENTITY);
+		// **Stopped, then destroyed, then released — and the order was reversed
+		// until v0.17.** The release used to come first so that it could read
+		// the rig it was stopping; `StopCharacter` on its own does that, and
+		// doing it here rather than through the release is what lets the destroy
+		// happen while the model is still *somebody's*.
+		//
+		// That is what `Player.CharacterRemoving` rides:
+		// `Store::OnDescendantRemoving` announces the model before a single link
+		// moves, and the filter is `Character::Owner` — so releasing first meant
+		// the signal fired for nobody, on every respawn, for ever. The queued
+		// half then reports it with a handle nothing can read.
+		StopCharacter(store, model);
 
 		// **The model, which takes its children with it.** Destroying the root
 		// alone would leave five limbs following an entity that is not alive —
 		// which `PoseCharacters` handles by leaving them where they fell, and
 		// which is still a pile of limbs nobody asked for.
 		store.DestroyInstance(model);
+
+		(void)SetPlayerCharacter(store, player, ecs::NULL_ENTITY);
 		return true;
 	}
 
@@ -288,6 +362,15 @@ namespace engine::scene {
 				rig->Owner = ecs::NULL_ENTITY;
 			}
 			store.Set(player, PlayerCharacter{ecs::NULL_ENTITY});
+
+			// **Only when there was something to lose.** A release against a
+			// player who already had no body is what `LinkPlayerCharacters`
+			// does to tidy up a failed assignment, and a `CharacterRemoving`
+			// for a character that never existed is a signal a game cannot act
+			// on.
+			if (previous != ecs::NULL_ENTITY) {
+				RecordCharacterChange(store, player, previous, false);
+			}
 			return true;
 		}
 
@@ -310,6 +393,7 @@ namespace engine::scene {
 			if (Character *rig = store.GetMutable<Character>(previous); rig != nullptr) {
 				rig->Owner = ecs::NULL_ENTITY;
 			}
+			RecordCharacterChange(store, player, previous, false);
 		}
 
 		// **Written back, so every later pass resolves the body this did.** A
@@ -323,11 +407,118 @@ namespace engine::scene {
 		store.Set(model, Character{root, humanoid, player});
 		store.Set(player, PlayerCharacter{model});
 
+		// **Only a body that was not already theirs is an arrival.** Reassigning
+		// the model a player already holds is what makes `LinkPlayerCharacters`
+		// cheap to run every tick, and firing `CharacterAdded` for it would fire
+		// one per tick for the life of the world.
+		if (previous != model) {
+			RecordCharacterChange(store, player, model, true);
+		}
+
 		// **The client may move its own body and nobody else's**, which is the
 		// whole of what ownership buys a character. The limbs are anchored and
 		// have nothing to own.
 		(void)SetNetworkOwner(store, root, player);
 		return true;
+	}
+
+	void TakeCharacterChanges(ecs::Store &store, std::vector<CharacterChange> &out) {
+		out.clear();
+
+		auto *changes = store.ResourceMutable<CharacterChanges>();
+		if (changes == nullptr) {
+			return;
+		}
+
+		// **Swapped rather than copied**, which is what makes the list a handler
+		// causes belong to the next drain: a respawn inside a `CharacterAdded`
+		// handler records into an empty list rather than appending to the one
+		// being walked.
+		out.swap(changes->Pending);
+	}
+
+	size_t UpdateRespawns(ecs::Store &store, std::vector<ecs::Entity> &spawned) {
+		spawned.clear();
+
+		const ecs::Entity players = PlayersOf(store);
+		if (players == ecs::NULL_ENTITY) {
+			return 0;
+		}
+
+		const PlayersServiceComponent *settings = store.Get<PlayersServiceComponent>(players);
+
+		// **A `Players` with no settings row admits and auto-loads.** That is a
+		// service somebody built by hand rather than through `InstallServices`,
+		// and refusing to respawn in it would be inventing a policy out of a
+		// missing component.
+		const bool autoLoads = settings == nullptr || settings->CharacterAutoLoads;
+
+		const uint64_t tick = store.Time().Tick;
+		const float delta = store.Time().Delta;
+		const ecs::ClassId playerClass = PlayerClass();
+
+		// **Gathered before anything is written**, for `LinkPlayerCharacters`'
+		// reason: adding or removing `PlayerRespawn` is an archetype move, and
+		// an archetype move under a walk of the children is the walk
+		// invalidating itself. All three lists are empty on a settled world.
+		std::vector<ecs::Entity> clearing;
+		std::vector<std::pair<ecs::Entity, uint64_t>> scheduling;
+		std::vector<ecs::Entity> loading;
+
+		store.EachChild(players, [&](ecs::Entity player) {
+			if (!store.IsA(player, playerClass)) {
+				return;
+			}
+
+			if (CharacterOf(store, player) != ecs::NULL_ENTITY) {
+				if (store.Has<PlayerRespawn>(player)) {
+					clearing.push_back(player);
+				}
+				return;
+			}
+
+			if (!autoLoads) {
+				return;
+			}
+
+			const PlayerRespawn *waiting = store.Get<PlayerRespawn>(player);
+			if (waiting == nullptr) {
+				const PlayerIdentity *identity = store.Get<PlayerIdentity>(player);
+				const float seconds = identity != nullptr ? identity->RespawnTime : 5.0f;
+				scheduling.emplace_back(player, tick + TicksFor(seconds, delta));
+				return;
+			}
+
+			if (tick >= waiting->DueTick) {
+				loading.push_back(player);
+			}
+		});
+
+		for (const ecs::Entity player : clearing) {
+			store.Remove<PlayerRespawn>(player);
+		}
+		for (const auto &[player, due] : scheduling) {
+			store.Set(player, PlayerRespawn{due});
+		}
+
+		size_t made = 0;
+		for (const ecs::Entity player : loading) {
+			// **The deadline goes first, so a spawn that cannot happen is
+			// retried on the next tick rather than immediately and for ever.** A
+			// world with no `Workspace` is the case: `LoadCharacter` answers
+			// null, and without this the player would be handed a fresh deadline
+			// on the very next pass and try again a respawn later, which is the
+			// behaviour a game would want anyway.
+			store.Remove<PlayerRespawn>(player);
+
+			if (LoadCharacter(store, player) == ecs::NULL_ENTITY) {
+				continue;
+			}
+			spawned.push_back(player);
+			made++;
+		}
+
+		return made;
 	}
 
 	size_t ReclaimOrphanedCharacters(ecs::Store &store) {

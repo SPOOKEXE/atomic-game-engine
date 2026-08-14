@@ -72,9 +72,11 @@ namespace client {
 					// optional components stay optional here: a replicated row
 					// may arrive without an appearance, which is the difference
 					// from the local collector that made these two drift.
-					drawList->Instances.push_back(engine::scene::MakeDrawInstance(
-						interpolated.value_or(transform.Frame), bounds, visual, appearance, tags
-					));
+					drawList->Instances.push_back(
+						engine::scene::MakeDrawInstance(
+							interpolated.value_or(transform.Frame), bounds, visual, appearance, tags
+						)
+					);
 				}
 			);
 

@@ -56,7 +56,7 @@ namespace {
 	//
 	// **`part.Parent = workspace` used to make a root and now makes a child of
 	// the `Workspace` service**, so a lookup by root finds nothing. See
-	// `script/Bindings.hpp`'s `OpenWorkspace` for why the two notions of "the
+	// `script/LuauBindings.hpp`'s `OpenWorkspace` for why the two notions of "the
 	// workspace" were collapsed, and `scene/Visibility.hpp` for what the tree
 	// now decides.
 	//

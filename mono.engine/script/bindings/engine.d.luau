@@ -129,13 +129,36 @@ end
 --
 -- Its own type rather than `PropertyChangedSignal`, which these three were
 -- declared as and which passes nothing.
+--
+-- **`gameProcessedEvent` is Roblox's second argument and it is real here**: it
+-- is true when the 2D interface took the pointer this beat, which is what a
+-- click on a `TextButton` is. It is always false for a keyboard event, because
+-- `gui` has no keyboard focus to take one with — `InterfaceHasPointer` in
+-- `script/src/Actions.cpp` carries what would close that.
 declare extern type InputSignal with
-	function Connect(self, handler: (input: InputObject) -> ()): RBXScriptConnection
-	function Once(self, handler: (input: InputObject) -> ()): RBXScriptConnection
+	function Connect(
+		self, handler: (input: InputObject, gameProcessedEvent: boolean) -> ()
+	): RBXScriptConnection
+	function Once(
+		self, handler: (input: InputObject, gameProcessedEvent: boolean) -> ()
+	): RBXScriptConnection
+end
+
+-- What `LastInputTypeChanged` calls a handler with.
+declare extern type LastInputTypeSignal with
+	function Connect(self, handler: (lastInputType: Enum_UserInputType) -> ()): RBXScriptConnection
+	function Once(self, handler: (lastInputType: Enum_UserInputType) -> ()): RBXScriptConnection
 end
 
 declare extern type UserInputServiceType with
 	MouseBehavior: Enum_MouseBehavior
+
+	-- Whether the pointer is drawn. **Separate from `MouseBehavior` because
+	-- Roblox's two are**: an inventory screen wants the pointer visible while the
+	-- camera stays locked. `LockCenter` and `LockCurrentPosition` hide it
+	-- whatever this says, which is the client's rule and not a script's.
+	MouseIconEnabled: boolean
+
 	MouseDeltaSensitivity: number
 	read KeyboardEnabled: boolean
 	read MouseEnabled: boolean
@@ -164,6 +187,11 @@ declare extern type UserInputServiceType with
 	read WindowFocused: PropertyChangedSignal
 	read WindowFocusReleased: PropertyChangedSignal
 
+	-- Which device the player switched to. **The edge beside
+	-- `GetLastInputType`'s poll**, which is the pair a place needs to swap
+	-- "press E" for "click here" and to know which to draw when a menu opens.
+	read LastInputTypeChanged: LastInputTypeSignal
+
 	function IsKeyDown(self, key: Enum_KeyCode): boolean
 
 	-- False for the three `Enum.UserInputType` members that are not buttons.
@@ -176,7 +204,20 @@ declare extern type UserInputServiceType with
 	-- `InputObject`s and not `EnumItem`s, which is Roblox's shape: the object
 	-- carries where the pointer was as well as which button it is.
 	function GetMouseButtonsPressed(self): { InputObject }
+
+	-- **`Enum.UserInputType.Keyboard` on a world nobody has touched**, where
+	-- Roblox answers `None`. There is no such member here for `InputSource`'s
+	-- reason: every member is one something in this engine can produce.
+	function GetLastInputType(self): Enum_UserInputType
 end
+
+-- **What `UserInputService` deliberately does not have**, which is the half a
+-- migrating author needs most. `script/src/UserInputService.cpp` names each and
+-- what closing it would take; the short version is that there is no gamepad, no
+-- touch surface, no keyboard focus in `gui`, no cursor image in `render` and no
+-- keyboard-layout query below L12 — so `GetConnectedGamepads`, `GetGamepadState`,
+-- the six touch signals, `GetFocusedTextBox`, `MouseIcon` and
+-- `GetStringForKeyCode` are absent rather than present and useless.
 
 declare UserInputService: UserInputServiceType
 
@@ -211,10 +252,15 @@ declare extern type ContextActionServiceType with
 	-- what Roblox has always passed. It was an `Enum.KeyCode`, so a handler
 	-- reading `input.KeyCode` — the form every Roblox place is written in — got
 	-- nil.
+	--
+	-- **What it returns decides who else hears the key.**
+	-- `Enum.ContextActionResult.Pass` hands the press to the next claim down;
+	-- `Sink`, `nil`, or a handler that raised, stop it here. Returning nothing is
+	-- the ordinary case and sinks, which is Roblox's default.
 	function BindAction(
 		self,
 		name: string,
-		handler: (string, Enum_UserInputState, InputObject) -> (),
+		handler: (string, Enum_UserInputState, InputObject) -> Enum_ContextActionResult?,
 		createTouchButton: boolean,
 		...: Enum_KeyCode
 	): ()
@@ -222,7 +268,7 @@ declare extern type ContextActionServiceType with
 	function BindActionAtPriority(
 		self,
 		name: string,
-		handler: (string, Enum_UserInputState, InputObject) -> (),
+		handler: (string, Enum_UserInputState, InputObject) -> Enum_ContextActionResult?,
 		createTouchButton: boolean,
 		priority: number,
 		...: Enum_KeyCode
@@ -329,6 +375,9 @@ declare extern type Enum_BorderMode extends EnumItem with
 end
 
 declare extern type Enum_CameraType extends EnumItem with
+end
+
+declare extern type Enum_ContextActionResult extends EnumItem with
 end
 
 declare extern type Enum_DominantAxis extends EnumItem with
@@ -453,6 +502,10 @@ declare Enum: {
 		LockFirstPerson: Enum_CameraType,
 		ShiftLock: Enum_CameraType,
 		Scriptable: Enum_CameraType,
+	},
+	ContextActionResult: {
+		Sink: Enum_ContextActionResult,
+		Pass: Enum_ContextActionResult,
 	},
 	DominantAxis: {
 		Width: Enum_DominantAxis,
@@ -904,12 +957,20 @@ declare extern type Instance with
 	function AddTag(self, tag: string): boolean
 	function RemoveTag(self, tag: string): boolean
 	function HasTag(self, tag: string): boolean
+	function GetTags(self): { string }
 	function Destroy(self): ()
 	function Clone(self): Instance
 	function GetChildren(self): { Instance }
 	function GetDescendants(self): { Instance }
-	function FindFirstChild(self, name: string): Instance?
+	function FindFirstChild(self, name: string, recursive: boolean?): Instance?
+	function FindFirstChildOfClass(self, className: string): Instance?
+	function FindFirstChildWhichIsA(self, className: string, recursive: boolean?): Instance?
+	function FindFirstAncestor(self, name: string): Instance?
+	function FindFirstAncestorOfClass(self, className: string): Instance?
+	function FindFirstAncestorWhichIsA(self, className: string): Instance?
+	function GetFullName(self): string
 	function IsDescendantOf(self, ancestor: Instance): boolean
+	function IsAncestorOf(self, descendant: Instance): boolean
 	function ClearAllChildren(self): ()
 	function GetPivot(self): CFrame
 	function PivotTo(self, target: CFrame): ()
@@ -921,7 +982,10 @@ declare extern type Instance with
 	AncestryChanged: AncestrySignal
 	PlayerAdded: InstanceSignal
 	PlayerRemoving: InstanceSignal
+	CharacterAdded: InstanceSignal
+	CharacterRemoving: InstanceSignal
 	function GetPlayers(self): { Instance }
+	function GetPlayerByUserId(self, userId: number): Instance?
 	function Equals(self, other: Instance): boolean
 	function GetPlayerFromCharacter(self, character: Instance): Instance?
 	function LoadCharacter(self): Instance?
@@ -940,11 +1004,16 @@ declare extern type Instance with
 	function RemoveComponent(self, component: string): ()
 	function GetComponents(self): { string }
 	Activated: GuiSignal
+	MouseButton1Click: GuiSignal
 	InputBegan: GuiSignal
 	InputEnded: GuiSignal
 	MouseEnter: PointerSignal
 	MouseLeave: PointerSignal
 	MouseMoved: PointerSignal
+	function GetGuiObjectsAtPosition(self, x: number, y: number): { Instance }
+	function TweenPosition(self, endPosition: UDim2 | Vector3, easingDirection: Enum_EasingDirection?, easingStyle: Enum_EasingStyle?, time: number?, override: boolean?, callback: (() -> ())?): boolean
+	function TweenSize(self, endSize: UDim2 | Vector3, easingDirection: Enum_EasingDirection?, easingStyle: Enum_EasingStyle?, time: number?, override: boolean?, callback: (() -> ())?): boolean
+	function TweenSizeAndPosition(self, endSize: UDim2 | Vector3, endPosition: UDim2 | Vector3, easingDirection: Enum_EasingDirection?, easingStyle: Enum_EasingStyle?, time: number?, override: boolean?, callback: (() -> ())?): boolean
 end
 
 declare extern type PVInstance extends Instance with
@@ -1491,31 +1560,56 @@ end
 declare extern type StarterGui extends Service with
 end
 
+declare extern type StarterPack extends Service with
+end
+
 declare extern type StarterPlayer extends Service with
 end
 
 declare extern type StarterPlayerScripts extends Service with
 end
 
--- The service every game asks who is in it. `LocalPlayer` is below;
--- `GetPlayers`, `GetPlayerFromCharacter`, `PlayerAdded` and
--- `PlayerRemoving` are inherited from `Instance` and are about this
--- one — nothing fires a player signal at any other subject.
-declare extern type Players extends Service with
-	read LocalPlayer: Instance
+declare extern type StarterCharacterScripts extends Service with
 end
 
--- One occupant. `LoadCharacter` is inherited from `Instance` and is
--- about this one: it destroys the old body and spawns a new one at
--- `SpawnLocation`, which is what a respawn is.
+-- The service every game asks who is in it. `LocalPlayer` and the
+-- rest are below; `GetPlayers`, `GetPlayerByUserId`,
+-- `GetPlayerFromCharacter`, `PlayerAdded` and `PlayerRemoving` are
+-- inherited from `Instance` and are about this one — nothing fires a
+-- player signal at any other subject.
+declare extern type Players extends Service with
+	CharacterAutoLoads: boolean
+	read LocalPlayer: Instance
+	MaxPlayers: number
+	read NumPlayers: number
+	RespawnTime: number
+end
+
+-- One occupant. `LoadCharacter`, `CharacterAdded` and
+-- `CharacterRemoving` are inherited from `Instance` and are about
+-- this one: the first destroys the old body and spawns a new one at
+-- `SpawnLocation`, and the other two fire when it arrives and goes.
+-- `PlayerGui`, `PlayerScripts`, `Backpack` and `StarterGear` are the
+-- four containers a join makes, and every one of them is private to
+-- this player on the wire.
 declare extern type Player extends Instance with
+	read Backpack: Instance
 	Character: Instance
+	DisplayName: string
 	read PlayerGui: Instance
+	read PlayerScripts: Instance
+	RespawnTime: number
+	read StarterGear: Instance
+	read UserId: number
 end
 
 -- --- the bus services ------------------------------------------------------
 
-export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchWorld" | "Unsupported" | "Unknown"
+-- Every word `script::DescribeStatus` can hand back, generated from that
+-- switch. A status a script branches on cannot be missing here, and a
+-- status appended to `world::BusStatus` fails `just bindings-check` until
+-- these files are regenerated.
+export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchWorld" | "Unsupported" | "NoSuchChannel" | "Overflow" | "WorldNotReady" | "Unknown"
 
 declare extern type MessagingService with
 	function PublishAsync(self, topic: string, message: any): (any, BusStatus, number)
@@ -1538,26 +1632,44 @@ declare extern type TeleportService with
 	function GetTeleportData(self, player: Instance): any
 end
 
+-- One channel's arrivals. `OpenChannel` hands one back per channel, so two
+-- subsystems in one world listen to two of these rather than filtering one.
+declare extern type CrossWorldSignal with
+	function Connect(self, handler: (message: any, fromWorld: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (message: any, fromWorld: string) -> ()): RBXScriptConnection
+end
+
 -- The addressed route out of a world, which `MessagingService` is not.
 --
 -- A topic is a fan-out: the publisher does not know or care who is listening,
 -- which is right for "the boss died" and wrong for "world B, here is the score
--- you asked me for". This names one world and delivers to it alone.
+-- you asked me for". This names one channel on one world and delivers there
+-- alone, so two subsystems talking between the same pair of worlds do not read
+-- each other's traffic.
 --
 -- There is deliberately no `GetWorlds`. A world's storage cannot see its
 -- siblings — the directory belongs to the barrier's router — so answering it
 -- would mean the barrier stamping a list into every world every tick, which is
--- machinery nobody has asked for. `Send` answering false for a world that is
--- not running is the honest half of the same question.
+-- machinery nobody has asked for. `SendAsync` answering `NoSuchWorld` is the
+-- honest half of the same question.
 declare extern type CrossWorldService with
-	-- Sends a value to a named world. False when the world is not running or
-	-- this world is over its bus budget for the tick.
-	function Send(self, world: string, message: any): boolean
+	-- Listens on a named channel and hands back that channel's signal. The
+	-- handler is called `(message, fromWorldName)` — the sender's name is second
+	-- because answering is the point, and the receiver already named the channel.
+	--
+	-- Takes effect at the next barrier, so a message sent in the same tick is
+	-- refused. Raises when this world is over its bus budget for the tick.
+	function OpenChannel(self, channel: string): CrossWorldSignal
 
-	-- `(message, fromWorldName)`. The sender's name is second because a channel
-	-- is the one route where answering is the point — the receiver already
-	-- knows it is itself.
-	MessageReceived: HeartbeatSignal
+	-- Stops delivery on a channel. Handlers already connected are left alone, so
+	-- reopening it later finds them still there.
+	function CloseChannel(self, channel: string): ()
+
+	-- Sends a value to a named channel on a named world, and suspends until the
+	-- barrier answers. `Ok`, or `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady`
+	-- or `Overflow` — a channel send carries no value back, so the status is the
+	-- answer. Raises when this world is over its bus budget for the tick.
+	function SendAsync(self, world: string, channel: string, message: any): (any, BusStatus, number)
 end
 
 declare extern type MemoryStoreService with
@@ -1924,8 +2036,10 @@ type Services = {
 	ServerScriptService: ServerScriptService,
 	ServerStorage: ServerStorage,
 	StarterGui: StarterGui,
+	StarterPack: StarterPack,
 	StarterPlayer: StarterPlayer,
 	StarterPlayerScripts: StarterPlayerScripts,
+	StarterCharacterScripts: StarterCharacterScripts,
 	Players: Players,
 	RunService: RunService,
 	MessagingService: MessagingService,

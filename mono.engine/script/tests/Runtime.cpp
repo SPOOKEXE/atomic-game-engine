@@ -625,7 +625,7 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	// `workspace` used to stand for the world itself, so it had the world's
 	// name and `part.Parent = workspace` meant "a root of this world". A world
 	// now holds a real `Workspace` service and the two were collapsed into it —
-	// see `script/Bindings.hpp` on `OpenWorkspace`. It is an ordinary instance:
+	// see `script/LuauBindings.hpp` on `OpenWorkspace`. It is an ordinary instance:
 	// it has a class, a name of its own, and a place in the tree.
 	REQUIRE(runtime->Run(R"(
 		assert(typeof(workspace) == 'Instance', typeof(workspace))
@@ -645,7 +645,7 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	REQUIRE(runtime->Run("assert(game.Workspace == workspace)"));
 	REQUIRE(runtime->Run("assert(game:GetService('Workspace') == workspace)"));
 
-	// The part, the Workspace, and the nine other services `InstallServices`
+	// The part, the Workspace, and the eleven other services `InstallServices`
 	// puts in every world. A phantom row standing for the world is exactly what
 	// there is still none of — `workspace` names something that was already
 	// there.
@@ -657,7 +657,7 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	store.Each<const engine::ecs::InstanceClass>([&](Entity, const engine::ecs::InstanceClass &) {
 		instances++;
 	});
-	CHECK(instances == 11);
+	CHECK(instances == 13);
 }
 
 // **The rule the render gate rests on**, stated from the script side: an

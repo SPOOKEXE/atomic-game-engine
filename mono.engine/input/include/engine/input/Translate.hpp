@@ -36,11 +36,16 @@ namespace engine::input {
 	// @client
 	class Translator {
 	  public:
-		// Starts a frame: rolls `Down` into `Previous` and clears the deltas.
+		// Starts a frame: rolls the four `Previous` fields and clears the deltas.
 		//
 		// **Call once before pumping that frame's events, not after them** —
 		// `Actions::BeginFrame`'s rule and for the same reason: a delta cleared
 		// after the pump is a delta nobody ever read.
+		//
+		// The four are the keys, the buttons, the focus flag and the last source,
+		// and every one of them is rolled here because every one of them is read
+		// as an *edge* — `InputBegan`, `WindowFocused` and `LastInputTypeChanged`
+		// are all the difference between two frames.
 		void BeginFrame();
 
 		// Folds one event into the state.
@@ -49,6 +54,12 @@ namespace engine::input {
 		// focus change. **Returns whether it was consumed rather than swallowing
 		// it**, because the caller also feeds `Actions` and an editor's interface
 		// layer, and each of them decides for itself.
+		//
+		// Anything it does consume also stamps `InputState::LastSource`, which is
+		// what `UserInputService:GetLastInputType` answers with. A focus change
+		// deliberately does not: losing a window is not a device speaking, and a
+		// place that swapped its prompts on an alt-tab would be reporting a
+		// keyboard nobody touched.
 		//
 		// @param event The event from the caller-owned pump.
 		// @return `true` when this event changed the state.

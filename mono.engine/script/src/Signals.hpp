@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -102,6 +103,34 @@ namespace engine::script {
 		PlayerAdded,
 		PlayerRemoving,
 
+		// `player.CharacterAdded` and `player.CharacterRemoving`. The subject is
+		// the `Player`, and the handler is called with the character model.
+		//
+		// **Not the tree's, unlike the pair above them.** A player arriving *is*
+		// a reparent, so `PlayerAdded` is `ChildAdded` with a filter; a character
+		// is a `Model` under `Workspace` and the link to its player is a
+		// component, so nothing in the tree changes shape when somebody
+		// respawns. What records it is `scene::SetPlayerCharacter` — the one
+		// door every assignment goes through — and `scene::TakeCharacterChanges`
+		// is what both pumps drain.
+		//
+		// **Two different mechanisms, matching the pair above them.**
+		// `CharacterAdded` is recorded by `scene::SetPlayerCharacter` and
+		// delivered at the barrier like every other arrival. `CharacterRemoving`
+		// rides `Store::OnDescendantRemoving` instead, for the reason
+		// `PlayerRemoving` does: dying in this engine *is* the model being
+		// destroyed, so a queue drained a tick later would hand a handler an
+		// instance it cannot read a single property off.
+		//
+		// The queue still records removals, and the pump fires only the ones
+		// whose model is **still alive** — which is exactly the case the hook did
+		// not cover: `player.Character = nil` releases a body without destroying
+		// it. The two are disjoint, so nothing fires twice.
+		//
+		// @since v0.17
+		CharacterAdded,
+		CharacterRemoving,
+
 		// --- the 2D tree's input, from `gui::Router` ------------------------
 		//
 		// **The six below are one mechanism and it is not the tree's.** Every
@@ -143,13 +172,19 @@ namespace engine::script {
 		// `guiObject.MouseMoved` — it moved while over the element.
 		GuiMouseMoved,
 
-		// `CrossWorldService.MessageReceived` — a payload another world in this
-		// universe addressed to this one.
+		// `CrossWorldService:OpenChannel(name)` — a payload another world in this
+		// universe addressed to that channel on this one.
 		//
 		// **No subject, like `Heartbeat` and unlike everything between them.** A
 		// channel message arrives at the world rather than at any instance in it,
-		// so the subject is `NULL_ENTITY` and the service's table carries the
-		// signal as a field.
+		// so the subject is `NULL_ENTITY`.
+		//
+		// **The channel is the connection's `Property`**, which is what makes one
+		// kind serve every channel a world opens. It is
+		// `GetPropertyChangedSignal`'s mechanism used for a name the engine never
+		// declared, exactly as `GetAttributeChangedSignal` uses it — and it is why
+		// there is no signal *field* on the service: a field is one list, and two
+		// subsystems in one world listening on two channels need two.
 		//
 		// **Fired at the deliveries barrier**, which is the first of the four
 		// stages `LuauRuntime::Heartbeat` runs — a message the barrier applied
@@ -200,6 +235,44 @@ namespace engine::script {
 	// @return `true` when a player joined or left.
 	// @since v0.13
 	bool IsPlayerOfService(const ecs::Store &store, ecs::Entity container, ecs::Entity instance);
+
+	// The signals `LuauInstances.cpp`'s `InstanceIndex` answers from its branch
+	// chain.
+	//
+	// **Declared here rather than in `LuauBindings.hpp` because nothing in the
+	// signature is Luau's.** `Vocabulary.cpp` is the caller, it describes both
+	// languages, and reaching this through the Luau umbrella header meant a file
+	// that opens no VM was compiled against `<lua.h>` for one `vector` of names.
+	//
+	// **Here because a branch cannot be walked.** Everything else the editor
+	// offers is read back out of a live VM — the globals from its global table,
+	// the instance methods from the registry table `OpenInstances` fills — and a
+	// signal is the one member that exists only as a string comparison. See
+	// `script::InstanceSignals`, which is the public face of this.
+	//
+	// @return The signal names, in the order the chain tests them.
+	std::vector<std::string_view> LuauInstanceSignalNames();
+
+	// Which player is about to lose the body being removed, or a null entity.
+	//
+	// **`IsPlayerOfService`'s shape for the other synchronous signal**, and the
+	// gate on `container` is what makes it fire once. `OnDescendantRemoving`
+	// announces a leaving instance to *every* ancestor above it, so a test that
+	// only asked "is this somebody's character" would fire `CharacterRemoving`
+	// once per level of the tree above `Workspace`.
+	//
+	// **Null for an NPC and for a body already released**, both through
+	// `scene::PlayerOf`, which reads `Character::Owner` and checks it is alive.
+	// The second is what keeps this disjoint from the queued half: a release
+	// clears the owner, so a model destroyed after being released is nobody's
+	// here and its removal was already reported at the barrier.
+	//
+	// @param store     The world.
+	// @param container The ancestor being told.
+	// @param instance  The instance leaving.
+	// @return The `Player`, or `ecs::NULL_ENTITY`.
+	// @since v0.17
+	ecs::Entity PlayerLosingCharacter(const ecs::Store &store, ecs::Entity container, ecs::Entity instance);
 
 	// A callable, as the VM that owns it names one.
 	//

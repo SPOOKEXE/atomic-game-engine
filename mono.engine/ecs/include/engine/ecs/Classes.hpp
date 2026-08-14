@@ -229,7 +229,7 @@ namespace engine::ecs {
 		// hundred property writes a frame that is over a thousand lock
 		// acquisitions to compare strings that never change.
 		//
-		// `script/src/Instances.cpp` compares keys as *text* rather than
+		// `script/src/LuauInstances.cpp` compares keys as *text* rather than
 		// interning them, and its comment records the measurement behind that:
 		// interning takes the same registry lock plus a hash. That reasoning is
 		// still right — what it assumed was that reading the text was free, and

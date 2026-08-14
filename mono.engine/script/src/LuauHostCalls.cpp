@@ -23,7 +23,7 @@
 // `ScriptValue` refuses one and `HostValue` does not. `Host.hpp` carries that
 // argument.
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 

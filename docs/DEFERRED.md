@@ -36,6 +36,330 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00126
+
+**`just format` and `just format-check` do not pin a clang-format major, and the
+tool that answers is whichever the machine happens to have.** `find-clang-format`
+in the `Justfile` walks `clang-format`, `clang-format-23`, `clang-format-22`,
+`clang-format-21` and takes the first whose major is 21 or newer — so a machine
+carrying both an unversioned 21 and a versioned 23 formats with 21, and a machine
+with only 23 formats with 23. `.clang-format` names no version, and two majors do
+not agree on the same file: include grouping and the wrapping of a long call are
+both places where 21 and 23 differ.
+
+**Investigated because it was reported as a per-file problem and is not.** Ten
+files in `mono.cdn`, `mono.client/app`, `physics`, `replication`, `graph`,
+`scene/tests/Visibility.cpp`, `script/src/ScriptInstances.cpp` and
+`SourceCache.cpp` were said to reflow under `just format` while nothing in the
+change had touched them, and every agent had been reverting them by hand to keep
+the diff behavioural. On this machine they do not: `clang-format --dry-run
+--Werror` over all 1,088 first-party sources names exactly the files a change
+actually edited, and `just format-check` is clean before and after this one. So
+there is nothing wrong with those ten files — what differs is the tool, and the
+recipe cannot say which one it used.
+
+**Not closed here because the fix is a decision about the toolchain rather than a
+patch.** Pinning means either requiring one major (which breaks a contributor who
+has the next one, and the `Justfile`'s own comment records how much pain the
+*previous* version bump caused) or checking the version into `.clang-format` via
+`# Requires: clang-format-21`, which the tool does not read. `just format` now
+prints the tool and version it used, which is enough to identify the cause the
+next time a reflow surprises somebody — but a printed version is a diagnostic and
+not a constraint, which is `AGENTS.md` rule 6's own distinction and the reason
+this is filed rather than claimed.
+
+**Reopen trigger: a second reflow report naming files the reporter did not
+touch.** With the version now printed, that report carries its own diagnosis.
+
+### [_] D00125
+
+**`mono.client` has no suite that drives a render loop, so the client's *wiring*
+of gui input has no automated test — only its behaviour does.** At v0.18 the
+shipped client never routed interface input at all: `Client::InterfaceRouter` was
+constructed, read for `Hovered` and `Pressed`, and never `Update`d, so a
+`TextButton` in a game never lit and its `Activated` never fired while the same
+tree worked in the editor, which drives a router of its own. That is fixed, and
+`engine.script.guisurface` now covers the *behaviour* end to end — it stands a
+world up, lays it out, compiles the draw list, drives a real `gui::Router` with a
+pointer, hands the events to `Runtime::DeliverGuiEvents` and asserts every signal
+fired, in both languages.
+
+**What has no test is that `Client` calls any of it.** Those lines live inside
+the present path, between `InterfaceList.Rebuild` and `Interface.Submit`, and
+that function cannot exist without an `SDL_Window` and a GPU device. `AGENTS.md`
+names this case: a header needing a GPU has no unit suite, and a mock renderer
+added to close the gap on paper is refused. A seam extracted for the test would
+not close it either — the bug was that a call was missing, and a test of the
+extracted function passes just as happily when nothing calls it.
+
+**The reachable version is a recipe and not a suite, and it needs a flag the
+client does not have.** `just studio-smoke` is the shape: `--headless --frames N`
+renders into an offscreen target and writes an image, which is why the editor is
+checkable by something that is not a person. The client has no `--headless`, and
+adding one is a real change to its startup — the window, the swapchain and the
+input translator are all built assuming one exists. It would also stay outside
+`just check` for `studio-smoke`'s reason: it needs a GPU, and a build container
+with none would fail a check about the client for a reason that is not about the
+client.
+
+**Reopen trigger: `client --headless --frames N --capture`.** The moment the
+client can render without a display, a `just client-smoke` that presses a button
+in a scripted scene and reads the answer back is a short recipe rather than a
+subsystem.
+
+### [_] D00124
+
+**`scene::ServiceComponent::Fixture` says an author may not delete or reparent a
+service, and nothing refuses either.** The field has carried that sentence since
+v0.7 with the argument beside it — a world with no `Workspace` is not a world an
+author meant to build, and deleting one turns every `game:GetService` in the
+place into a runtime error a long way from the delete that caused it — and a
+script can still call `Destroy()` on `Lighting` and the editor can still delete it
+with the Delete key. Rule 6 in its plainest form: the constraint is documentation.
+
+**Why it is not a guard in the obvious place.** The two operations are
+`ecs::Store::DestroyInstance` and `ecs::Store::SetParent`, both L2; the fact is
+`scene::ServiceComponent`, L7. Rule 1 forbids the edge, and a mirrored flag on
+the `ecs` row would be the second copy of one fact rule 2 exists to refuse.
+
+**Why guarding each author's door is worse than it sounds.** "An author" is a
+question only the caller can answer, and the callers are not interchangeable:
+`studio::PlayLink` destroying a player, `Debris` draining its queue, `RojoSync`
+rebuilding a subtree and `Editor::EnsureViewerCamera` destroying a camera are the
+engine moving its own furniture and must not be refused, while a script's
+`Destroy()`, a script's `.Parent =`, the editor's Delete key and the properties
+panel's `Parent` field are the four that must. Three of those four are reachable
+— `ScriptMethods.cpp`'s `Destroy`, `Editor.cpp`'s delete loop and `Explorer.cpp`'s
+drag. The fourth is not: `.Parent` is a *computed property* registered in
+`ecs/src/Instances.cpp`, whose setter is one lambda serving both VMs and the
+properties panel alike. Enforcing three of four ships a rule that holds in Luau
+and not in the panel, which reads as a bug in the panel rather than as a rule.
+
+**What closing it takes.** A policy seam in `ecs` that `scene` configures — a set
+of component ids the store refuses to unparent or destroy, plus an "authored"
+distinction on the two calls so the engine's own moves still go through. That is
+a change to the storage API with a caller in every module, and it has its own
+trap: a seam configured per world is a seam somebody forgets to configure on the
+next world, and a rule that silently does not apply is the failure this entry is
+about wearing a different hat. `ecs::Store::SetAdoptOnly` is the shape to copy and
+also the warning — it is set by exactly one caller and nothing checks that it was.
+
+**Reopen trigger: the second field like this one.** `Fixture` is alone today; a
+second "an author may not" flag makes the seam pay for itself rather than being
+built for one bit.
+
+### [_] D00123
+
+**`Instance:WaitForChild` is the one member of Roblox's tree surface this engine
+does not have, and it is absent because it is a *yield* rather than a lookup.**
+Every other method on that list crossed to `ScriptCall` at v0.18 —
+`FindFirstChild`, the two `WhichIsA` pairs, `GetFullName`, `IsAncestorOf` and the
+rest — and each of them answers from the store on the tick it was called. This
+one does not: it suspends until a child of that name arrives, or until a timeout,
+and both of those are resumes.
+
+**The mechanism exists and is pointed the wrong way.** `ScriptCall::Await`
+suspends a call — a yielded coroutine in Luau, a `Promise` in JavaScript — and
+`AwaitedTickets` is keyed on a `world::Ticket`, because the only thing that has
+ever resumed a script here is a bus reply the barrier applied. A `WaitForChild`
+resumes on a *tree change*, which is a different source: `PumpTree` already walks
+`ecs::TreeChange` at the barrier and would have to check a table of
+`(parent, name)` waiters against every arrival, resume the ones that match, and
+time the rest out on a tick count rather than a clock — `Debris` computes a
+deadline as `ceil(seconds / delta)` and that is the shape this needs.
+
+**What makes it more than plumbing is the timeout's default.** Roblox's
+`WaitForChild(name)` with no timeout waits **forever** and warns after five
+seconds. A script that waits forever is a script that never finishes its tick,
+and `Runtime::Run` refuses a suspended thread rather than carrying one across a
+tick boundary — `script/AGENTS.md` states that as a decision rather than a gap.
+So closing this is not "add a method": it is deciding what an unbounded wait
+means in an engine whose whole scheduling argument is that work does not cross a
+tick, and either taking Roblox's answer and its consequences or refusing the
+no-timeout form and diverging from every script that would be ported in.
+
+**Absent rather than approximated, which is the same call `SoundService.cpp` and
+`HttpService.cpp` each make a list of.** The tempting cheap version — return
+`FindFirstChild`'s answer immediately, warn on a miss — is worse than nothing: it
+typechecks, it works in every scene where the child is already there, and it
+returns nil exactly in the case the method exists for. `examples/MagicTests.luau`
+records the one line it had to change to run here, and it changed it to
+`FindFirstChild` deliberately.
+
+**Reopen trigger: a second resume source at the barrier.** The first thing that
+resumes a script on something other than a bus ticket is the change that makes
+this a table and a filter rather than a mechanism.
+
+### [_] D00122
+
+**`ReplicatedFirst` is first in the delta stream and not in the join snapshot,
+and the second half is where a loading screen actually lives.**
+`scene::InReplicatedFirst` gives that service the reader it never had and
+`mono.server` hangs it on `Authority::SetPriority`, so anything under it outranks
+every distance score for the life of the connection. That is the right rule and
+it covers the wrong moment: a client's *first* view of a world is
+`Authority::BeginSnapshot`, which is one `ecs::Store::Save` chunked across ticks
+in whatever order the store writes its archetypes — and priority does not touch a
+chunk cursor.
+
+**What closing it would take, and why none of it is a small edit.** A snapshot is
+one blob and one cursor, so "these entities first" means either two blobs — a
+`ReplicatedFirst` snapshot completed before the world's begins, with its own
+cursor, its own completion and its own re-snapshot path — or a `Save` that takes
+an ordering predicate, which is a change in `ecs` for one caller's benefit and
+would put a replication policy inside the storage. The first is the honest shape
+and it doubles the join state machine; `replication/AGENTS.md`'s account of the
+refused chunk and `applied=184 refused=17865` is what a second cursor would be
+re-earning.
+
+**Nor is the script half here.** Roblox also runs `ReplicatedFirst`'s scripts
+before the rest of the tree arrives. `mono.client` runs no replicated scripts at
+all today — `Replicated.cpp` presents received state and there is no spawn moment
+for one — so an ordering guarantee about script execution would be a guarantee
+about something that does not happen.
+
+**Reopen trigger: a client that runs scripts out of its replica.** That is the
+first moment the ordering is observable by a game rather than by a packet
+counter, and it is also the moment the two-blob join has a user who can tell
+whether it worked.
+
+### [_] D00121
+
+**A character dies by being destroyed, because `scene::Humanoid` has no health.**
+`scene::UpdateRespawns` measures `Player.RespawnTime` from the tick a player was
+first seen with no character, which is Roblox's *delay* with Roblox's *trigger*
+missing: there the humanoid's `Health` reaches zero, `Died` fires, the body stays
+where it fell for the delay and is then removed and replaced. Here a game
+destroys the model and the clock starts.
+
+**`Humanoid` is deliberately small and that is the constraint rather than an
+oversight.** Its header says so: a capsule, a speed, a jump and whether the
+ground is under it — no state machine, no animator, no ladder, no swim. `Health`
+and `MaxHealth` are two floats and would be the cheapest half; what they drag in
+is the rest of the model — who is allowed to write them, `TakeDamage`, a `Died`
+signal that must fire exactly once, a forcefield, and the question of whether a
+client may write its own health, which is an authority question rather than a
+gameplay one.
+
+**Two things already hold that a health model would have to keep.** The delay is
+a tick number computed once from the fixed delta, so a respawn lands on the same
+tick on every machine; and `CharacterAutoLoads` is read by the join *and* by the
+respawn, so a lobby that spawns its own occupants is one decision rather than
+two.
+
+**Reopen trigger: anything in the engine that damages a character.**
+`examples::Shooting` is the nearest — it is a hit test with no consequence — and
+the moment a hit subtracts something, "dead" needs a definition that is not "the
+model is gone".
+
+### [_] D00120
+
+**A `Player.Backpack` holds instances and nothing in the engine is a `Tool`.**
+The container is real, it is private to its player on the wire, and the spawn
+pipeline empties and refills it from `StarterGear` exactly as Roblox does — so a
+game can put whatever it likes in it and read it back. What it cannot do is have
+the engine *understand* one: there is no `Tool` class, no equip, no
+`Character`-parented handle, and no `Humanoid:EquipTool`.
+
+**Deliberately absent rather than half-built**, for `gui/Services.hpp`'s stated
+reason about `Path2D`: a `Tool` class registered with no equip behaviour would
+appear in the insert palette, be parentable into a `Backpack`, save into a game
+file — and then do nothing, for ever, with no error. That is worse than not
+having it.
+
+**What it needs first.** Equipping is a reparent from `Backpack` into the
+character plus a weld from the tool's handle to the right arm, and this engine
+has no joints — `Characters.hpp` says the limbs are `CharacterLimb` rows resolved
+in one flat pass precisely *because* there is no constraint solver that respects
+`Motor6D`. So a tool that follows a hand is the same missing piece as a rig that
+does not fall apart on a slope.
+
+**Reopen trigger: a joint, or an attachment strong enough to carry a handle.**
+`scene::Attachment` exists and resolves a frame off a part; whether that is
+enough for a tool is the first question to ask when somebody wants one.
+
+### [_] D00119
+
+**`Player.Team` and `Player.CharacterAppearanceId` are absent, and both are
+absent because the thing behind them is.** A `Team` is a `Teams` service, a
+`TeamColor`, a spawn filter on `SpawnLocation`, and a rule about who a
+`TeamCreate`-style permission applies to — none of which exists; and
+`scene::FindSpawn` is a part *named* `SpawnLocation` rather than a class with
+teams and a forcefield on it, which `Characters.hpp` already records as a
+deliberate stop. An appearance id is a content reference to an avatar the engine
+has no notion of: `CharacterDesc` is three colours and six boxes, and there is no
+catalogue, no bundle format and no loader that could resolve a number to a body.
+
+**A property with nothing behind it reads as decided**, which is
+`SoundService.cpp`'s rule and the reason both are named here rather than declared
+and left returning zero. The same paragraph in that file lists eleven Roblox
+members it does not have and what each would need first; this is the same
+statement one class along.
+
+**Reopen triggers, and they are separate.** For `Team`: a `SpawnLocation` class,
+because a team whose only effect is a coloured name is a field rather than a
+feature. For `CharacterAppearanceId`: an avatar format — the moment
+`MakeCharacter` can be handed something other than three colours, the id is what
+names it.
+
+### [_] D00118
+
+**A channel is opened by a world and never by an authority, so nothing rations
+how many a world may hold.** `Postbox::OpenChannel` costs one bus operation and
+one entry in `ChannelBus::Open`, and `BusBudgetPerTick` bounds the *rate* rather
+than the total — a world that opens a distinct channel every tick for an hour has
+two hundred thousand entries in the router's table and every one of them is live
+universe state that a snapshot carries. Nothing in the engine does this today
+because a channel name is written in a script and scripts do not generate them,
+which is exactly the reason a bound would be a guess right now.
+
+**What a bound would have to decide, and why none of it is obvious.** A cap per
+world needs a number, and the honest number depends on whether a channel is a
+subsystem (a handful) or a conversation (one per player, so hundreds). The
+refusal needs a status — `OverBudget` is the nearest and means something else —
+and it has to arrive at `OpenChannel`, which is fire-and-forget today and would
+have to grow a reply to carry one. And a channel with no traffic for N barriers
+could be *closed* instead of refused, which is a different feature with a
+different failure mode: a channel that goes away while somebody is still holding
+its signal is `InputChanged` again.
+
+**The bound that does exist is the one that was actually reachable.**
+`UniverseSettings::ChannelQueueLimit` caps deliveries queued for one world in one
+barrier, and `BusStatus::Overflow` is what the senders past it are told. That is
+the queue between two worlds, which is the thing a single misbehaving sender can
+fill from outside; the channel *table* can only be filled by the receiving world
+itself, which is a world misbehaving in its own storage and has the same shape as
+a script creating instances in a loop.
+
+**Reopen trigger: a game that names channels from data rather than from source.**
+Per-player channels, per-match channels, or anything where the set of names is
+not written down in a script. At that point the cap has a number to be chosen
+against and the refusal has a caller who can act on it.
+
+### [_] D00117
+
+**`gameProcessedEvent` is true for a pointer and never for a key, because `gui`
+has no keyboard focus.** Roblox's answer is true while a `TextBox` has focus and
+this engine has nothing to be focused: `gui::Router` holds a hover and a press,
+`Pick` walks a draw list, and `TextBox` is a class that draws and takes no
+characters. So a key is honestly unprocessed and `IsPointerReport` in
+`script/src/Actions.cpp` is what keeps the answer from leaking onto one.
+
+**The pointer half is real and is the half that matters today.** A press the
+router took produces a `gui::GuiEvent` naming an element, both input pumps read
+that beat's queue through `InterfaceHasPointer`, and a click on a `TextButton`
+therefore arrives at `InputBegan` marked rather than swallowed. That is the
+behaviour a place actually guards on.
+
+**What closing the keyboard half needs, in order:** a focused element on
+`gui::Router`, set when a press lands on a `TextBox` and released when one lands
+elsewhere; a `Focused`/`FocusReleased` pair in `gui::EventKind` so a script can
+hear it; text entry from `SDL_EVENT_TEXT_INPUT`, which `input::Translator` does
+not handle at all today; and then `UserInputService:GetFocusedTextBox` and the
+two `TextBox` signals follow for free. None of it is in this module.
+
+**Reopen trigger: the first `TextBox` somebody wants to type into.**
+
 ### [_] D00116
 
 **A client cannot ask its server to teleport it, so `TeleportService` is
@@ -902,7 +1226,7 @@ through it — so two viewports each update at half the rate.**
 - `UserInputService.MouseBehavior` is the first property in the engine that lives on a global rather than on an instance, and it does not work when it is read that way. `local UIS = game:GetService("UserInputService")` works; `UserInputService.MouseBehavior` returns whatever it was the first time any closure asked.
 - **The mechanism, because it is not obvious and cost an hour.** `luaL_sandbox` freezes the global table and turns on `safeenv`, which lets the compiler emit `GETIMPORT` for a constant global followed by constant fields. `GETIMPORT` resolves the chain once per closure and caches the **value**. It does this whether the intermediate is a table or a userdata, so making the service a userdata does not fix it — that was tried, and the observation that settled it is that `__index` fires for the first read of a field and never for the second, with no raw key on the object to explain it.
 - **The userdata is still right and is kept.** It is what makes every read *through a local* go to `__index`; a plain table would have been cached there too.
-- **In practice it does not bite, which is why this is filed rather than fixed.** Every Roblox script begins `local UIS = game:GetService("UserInputService")`, and `game:GetService` is a method call that cannot be an import. The engine's own declaration files describe the property, the test uses the idiomatic form, and the comment in `InputServices.cpp` says so.
+- **In practice it does not bite, which is why this is filed rather than fixed.** Every Roblox script begins `local UIS = game:GetService("UserInputService")`, and `game:GetService` is a method call that cannot be an import. The engine's own declaration files describe the property, the test uses the idiomatic form, and the comment in `UserInputService.cpp` says so.
 - **What closing it would take.** Either not sandboxing — which is not on the table, `LuauRuntime` freezes the globals so one script cannot change the language the next one runs in — or making the service a *function call* rather than a global, which changes the surface away from Roblox's. Neither is worth it for a property nobody reaches the broken way.
 - **This is Luau's alone, and v0.16 proved it rather than assumed it.** `UserInputService` and `SoundService` are bound by both languages now, and the JavaScript half is a plain object with a `JS_DefinePropertyGetSet` accessor per name — an accessor is not an import, so there is no chain to cache and nothing to defeat. `engine.script.scriptcall` reads, writes and reads again in *both* VMs and asserts the second read moved, which is what turns "JavaScript does not have this problem" into something the build holds.
 - **The reopen trigger fired at v0.16 and the answer is still globals.** The count went from one mutable global property to three — `MouseBehavior`, `MouseDeltaSensitivity` and `SoundService.Volume` — with seven read-only ones beside them, so this is a pattern rather than an oddity. What the trigger asked was whether the surface should stop being globals; it should not, because the shape it would move to is not Roblox's and every script already writes `local UIS = game:GetService(...)`. What the growth *did* buy is that the workaround is no longer a comment in one file: `ServiceProperty` is a list both VMs walk, so the rule lives on the type and a tenth property costs a row.

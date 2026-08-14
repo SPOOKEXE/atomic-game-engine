@@ -1,7 +1,7 @@
 // What a world decides about how it is heard — **and almost nothing else**.
 //
-// Roblox's `SoundService` is seven properties and six methods. Two of the
-// thirteen are here, and the other eleven are absent rather than stubbed, for
+// Three of Roblox's `SoundService` are here — `GetListener`, `SetListener` and
+// `Volume` — and every other member of it is absent rather than stubbed, for
 // `HttpService.cpp`'s reason: a member that exists and does nothing is a surface
 // an author writes against and then finds does nothing, and worse, it *looks*
 // decided, so the next reader assumes somebody thought about it. Everything left
@@ -82,7 +82,9 @@
 // @tier L9 · shared
 // @since v0.16
 
-#include "Bindings.hpp"
+#include "LuauTags.hpp"
+#include "ScriptCall.hpp"
+#include "ServiceSurface.hpp"
 
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
@@ -99,7 +101,7 @@ namespace engine::script {
 		// Where `SoundService`'s method table lives, since the Luau half is a
 		// userdata and a userdata has no fields.
 		//
-		// **One constant on the surface**, exactly as `InputServices.cpp` keeps
+		// **One constant on the surface**, exactly as `UserInputService.cpp` keeps
 		// one: `SoundServiceSurface` sets it and `LuauServiceIndex` reads it back
 		// off that same surface, so the install and the lookup cannot name
 		// different keys.

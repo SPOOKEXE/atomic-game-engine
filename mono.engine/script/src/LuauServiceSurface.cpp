@@ -1,14 +1,19 @@
-// How a surface service becomes a global.
+// One `ServiceSurface` as a Luau global.
 //
-// **One file for the ten lines that were in five.** `Bindings.hpp`'s services
+// **One file for the ten lines that were in five.** `LuauBindings.hpp`'s services
 // section carries the argument; what is here is the loop itself, which is short
 // enough that having it five times looked harmless and was not — the reason to
 // have it once is that it is now somewhere a rule about services can be written
 // down and stay true, rather than five places that each have to remember.
 //
+// **Named `ServiceSurface.cpp` until v0.18, which read as the implementation of
+// the neutral header of that name and is not.** `ServiceSurface.hpp` says what a
+// service *is*, in neither language; this meets a `lua_State` on its behalf, and
+// `JsServiceSurface.cpp` is the other half.
+//
 // @tier L9 · shared
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <lua.h>
 #include <lualib.h>

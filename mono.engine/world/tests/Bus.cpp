@@ -740,32 +740,48 @@ TEST_CASE("the replica flag survives a snapshot", "[world]") {
 
 // --- channels ---------------------------------------------------------------
 
-TEST_CASE("a channel message reaches the world it names and nobody else", "[world]") {
-	// **The addressed route, which this module did not have.** `Publish` is a
-	// topic fan-out with no destination — right for "the boss died", wrong for
-	// "world B, here is the score you asked me for" — and the only other
-	// operation that named a world moved a *person*. So a game saying one thing
-	// to one world had to broadcast it to everybody or send a player carrying
-	// it.
+TEST_CASE("a channel message reaches the channel it names and nobody else", "[world]") {
+	// **The addressed route, and the address is two names.** `Publish` is a topic
+	// fan-out with no destination — right for "the boss died", wrong for "world
+	// B, here is the score you asked me for" — and the only other operation that
+	// named a world moved a *person*. v0.15 closed the first half and left the
+	// second: one unnamed pipe per pair of worlds, so a match controller and a
+	// chat relay talking between the same two worlds each heard the other.
 	Universe universe;
 	const WorldId lobby = universe.Create(Named("channel.lobby"));
 	const WorldId arena = universe.Create(Named("channel.arena"));
 	const WorldId other = universe.Create(Named("channel.other"));
 
-	universe.Enter(lobby, [](Store &store) { Postbox(store).SendTo("channel.arena", Bytes("score:12")); });
+	universe.Enter(arena, [](Store &store) {
+		Postbox box(store);
+		REQUIRE(box.OpenChannel("scores"));
+		REQUIRE(box.OpenChannel("chat"));
+	});
 	universe.Tick(1.0f / 60.0f);
 
-	const std::vector<Delivery> arrived = Received(universe, arena);
-	REQUIRE(arrived.size() == 1);
-	REQUIRE(arrived[0].Bus == BusKind::Channel);
-	REQUIRE(Text(arrived[0].Payload) == "score:12");
+	universe.Enter(lobby, [](Store &store) {
+		Postbox box(store);
+		REQUIRE(box.SendTo("channel.arena", "scores", Bytes("score:12")).Expected());
+		REQUIRE(box.SendTo("channel.arena", "chat", Bytes("hello")).Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
 
-	// **The sender's name, which is what makes it a channel.** A topic
-	// subscriber is told which topic; a channel receiver is told who to answer,
-	// because answering is the point and the destination already knows it is
-	// itself.
-	REQUIRE(arrived[0].From == Name("channel.lobby"));
-	REQUIRE(arrived[0].Key == Name("channel.lobby"));
+	std::vector<Delivery> arrived = Received(universe, arena);
+	std::erase_if(arrived, [](const Delivery &delivery) { return delivery.Bus != BusKind::Channel; });
+	REQUIRE(arrived.size() == 2);
+
+	// **`Key` is the channel and `From` is the sender**, which is `Messaging`'s
+	// shape. v0.15 put the sender in both, because there was no channel to name —
+	// so a receiver could not tell two conversations apart without opening the
+	// payload.
+	CHECK(arrived[0].Key == Name("scores"));
+	CHECK(Text(arrived[0].Payload) == "score:12");
+	CHECK(arrived[1].Key == Name("chat"));
+	CHECK(Text(arrived[1].Payload) == "hello");
+
+	for (const Delivery &delivery : arrived) {
+		CHECK(delivery.From == Name("channel.lobby"));
+	}
 
 	// **And nobody else got it**, which is the entire difference from a publish
 	// and the one thing a fan-out cannot promise.
@@ -784,10 +800,13 @@ TEST_CASE("a channel is not a teleport, and a receiver can tell", "[world]") {
 	const WorldId from = universe.Create(Named("channel.sender"));
 	const WorldId to = universe.Create(Named("channel.receiver"));
 
+	universe.Enter(to, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("news")); });
+	universe.Tick(1.0f / 60.0f);
+
 	universe.Enter(from, [](Store &store) {
 		Postbox box(store);
 		box.Teleport("channel.receiver", Bytes("a person"));
-		box.SendTo("channel.receiver", Bytes("a message"));
+		box.SendTo("channel.receiver", "news", Bytes("a message"));
 	});
 	universe.Tick(1.0f / 60.0f);
 
@@ -804,19 +823,187 @@ TEST_CASE("a channel is not a teleport, and a receiver can tell", "[world]") {
 	CHECK(channels == 1);
 }
 
-TEST_CASE("a channel to a world that is not running is reported", "[world]") {
+TEST_CASE("every way a channel send can fail is a status the sender reads", "[world]") {
 	// **Named rather than silent, and that is half the reason this exists beside
 	// `Publish`.** A publish with no subscribers is a quiet afternoon and cannot
-	// be told from a publish nobody wanted; a message addressed to a name
-	// nothing answers to is a sender holding a name that is wrong, and it wants
-	// to know.
+	// be told from a publish nobody wanted. Every case below is something the
+	// sender has to be able to act on, and each is a different thing to go and
+	// fix — which is why they are four statuses rather than one.
 	Universe universe;
-	const WorldId id = universe.Create(Named("channel.alone"));
+	const WorldId sender = universe.Create(Named("channel.asker"));
+	const WorldId listener = universe.Create(Named("channel.listener"));
+	const WorldId broken = universe.Create(Named("channel.broken"));
 
-	universe.Enter(id, [](Store &store) { Postbox(store).SendTo("channel.nowhere", Bytes("x")); });
+	universe.Enter(listener, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("open")); });
+	universe.Enter(broken, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("open")); });
 	universe.Tick(1.0f / 60.0f);
 
-	const std::vector<Delivery> replies = Received(universe, id);
-	REQUIRE(replies.size() == 1);
+	REQUIRE(universe.SetState(broken, engine::world::WorldState::Faulted) == engine::world::WorldStatus::Ok);
+	universe.Tick(1.0f / 60.0f);
+
+	universe.Enter(sender, [](Store &store) {
+		Postbox box(store);
+		box.SendTo("channel.nowhere", "open", Bytes("x"));
+		box.SendTo("channel.listener", "never.opened", Bytes("x"));
+		box.SendTo("channel.broken", "open", Bytes("x"));
+		box.SendTo("channel.listener", "open", Bytes("x"));
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	// Replies come back in the order the sends were made, because a world's own
+	// outbox is ordered by construction and the barrier keeps it.
+	const std::vector<Delivery> replies = Received(universe, sender);
+	REQUIRE(replies.size() == 4);
 	CHECK(replies[0].Status == BusStatus::NoSuchWorld);
+	CHECK(replies[1].Status == BusStatus::NoSuchChannel);
+	CHECK(replies[2].Status == BusStatus::WorldNotReady);
+	CHECK(replies[3].Status == BusStatus::Ok);
+
+	// A closed channel is `NoSuchChannel` again rather than a world that has
+	// gone: the world is still there and the sender's name for it is still right.
+	universe.Enter(listener, [](Store &store) { REQUIRE(Postbox(store).CloseChannel("open")); });
+	universe.Tick(1.0f / 60.0f);
+
+	universe.Enter(sender, [](Store &store) {
+		REQUIRE(Postbox(store).SendTo("channel.listener", "open", Bytes("x")).Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> closed = Received(universe, sender);
+	REQUIRE(closed.size() == 1);
+	CHECK(closed[0].Status == BusStatus::NoSuchChannel);
+}
+
+TEST_CASE("a full destination is Overflow rather than an unbounded queue", "[world]") {
+	// **The bound made visible.** `BusBudgetPerTick` bounds what a sender emits
+	// and nothing bounded what a destination accumulated, so a thousand worlds
+	// each spending their allowance on one victim queued sixty-four thousand
+	// payloads into one inbox in a single barrier. Discarding the tail silently
+	// would be worse than the leak: a game that works until the day it is busy.
+	UniverseSettings settings;
+	settings.ChannelQueueLimit = 3;
+
+	Universe universe(settings);
+	const WorldId sender = universe.Create(Named("channel.flood.sender"));
+	const WorldId victim = universe.Create(Named("channel.flood.victim"));
+
+	universe.Enter(victim, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("firehose")); });
+	universe.Tick(1.0f / 60.0f);
+
+	universe.Enter(sender, [](Store &store) {
+		Postbox box(store);
+		for (int message = 0; message < 5; message++) {
+			REQUIRE(box.SendTo("channel.flood.victim", "firehose", Bytes("x")).Expected());
+		}
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	CHECK(Received(universe, victim).size() == 3);
+
+	const std::vector<Delivery> replies = Received(universe, sender);
+	REQUIRE(replies.size() == 5);
+	CHECK(replies[2].Status == BusStatus::Ok);
+	CHECK(replies[3].Status == BusStatus::Overflow);
+	CHECK(replies[4].Status == BusStatus::Overflow);
+
+	// **The bound is per barrier, not for ever.** The next barrier's fanout is
+	// cleared with the counter, so a destination that was full once is not
+	// permanently refused — which is what makes `Overflow` backpressure rather
+	// than a broken channel.
+	universe.Enter(sender, [](Store &store) {
+		REQUIRE(Postbox(store).SendTo("channel.flood.victim", "firehose", Bytes("x")).Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> after = Received(universe, sender);
+	REQUIRE(after.size() == 1);
+	CHECK(after[0].Status == BusStatus::Ok);
+}
+
+TEST_CASE("two senders into one receiver arrive in sender-name order", "[world]") {
+	// **The ordering rule, and the sort key it turns on.** Traffic is applied in
+	// `(From.Text(), Sequence)` order — both recorded in the envelope, neither a
+	// function of which worker claimed a world or of the order the registry
+	// happened to be walked in.
+	//
+	// **The names below are chosen so interning order is the reverse of name
+	// order**, which is what makes this catch the bug it was written for: the
+	// router sorted on `core::Name::Id()` until v0.17, and an id is handed out in
+	// interning order. A universe restored from a snapshot interns in file order
+	// where the run that wrote it interned in creation order, so the same two
+	// envelopes applied in the opposite order and a replay diverged from its
+	// recording. Under the id, "zulu" — interned first here — arrives first.
+	const auto arrivalsInto = [](WorldId first, WorldId second, Universe &universe, WorldId sink) {
+		universe.Enter(sink, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("race")); });
+		universe.Tick(1.0f / 60.0f);
+
+		universe.Enter(first, [](Store &store) {
+			REQUIRE(Postbox(store).SendTo("order.sink", "race", Bytes("from-zulu")).Expected());
+		});
+		universe.Enter(second, [](Store &store) {
+			REQUIRE(Postbox(store).SendTo("order.sink", "race", Bytes("from-alpha")).Expected());
+		});
+		universe.Tick(1.0f / 60.0f);
+
+		std::vector<std::string> order;
+		for (const Delivery &delivery : Received(universe, sink)) {
+			if (delivery.Bus == BusKind::Channel) {
+				order.push_back(Text(delivery.Payload));
+			}
+		}
+		return order;
+	};
+
+	// Named — and therefore interned — zulu first, alpha second.
+	Universe universe;
+	const WorldId zulu = universe.Create(Named("order.zulu"));
+	const WorldId alpha = universe.Create(Named("order.alpha"));
+	const WorldId sink = universe.Create(Named("order.sink"));
+
+	const std::vector<std::string> once = arrivalsInto(zulu, alpha, universe, sink);
+	REQUIRE(once.size() == 2);
+	CHECK(once[0] == "from-alpha");
+	CHECK(once[1] == "from-zulu");
+
+	// **Run twice, and the second universe creates its worlds in the opposite
+	// order.** Registry index decides which outbox the barrier collects first, so
+	// a comparator that was not a total order over recorded data — or a barrier
+	// that skipped the sort — would answer differently here and identically above.
+	Universe again;
+	const WorldId sinkAgain = again.Create(Named("order.sink"));
+	const WorldId alphaAgain = again.Create(Named("order.alpha"));
+	const WorldId zuluAgain = again.Create(Named("order.zulu"));
+
+	CHECK(arrivalsInto(zuluAgain, alphaAgain, again, sinkAgain) == once);
+}
+
+TEST_CASE("an open channel survives a snapshot", "[world]") {
+	// Otherwise a restored universe answers `NoSuchChannel` to every addressed
+	// send until each world happens to open its channels again — which for a
+	// world whose open ran once at startup is never. A topic subscription has
+	// been carried since v0.2 for the same reason.
+	Universe universe;
+	const WorldId listener = universe.Create(Named("channel.saved.listener"));
+	universe.Create(Named("channel.saved.sender"));
+
+	universe.Enter(listener, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("kept")); });
+	universe.Tick(1.0f / 60.0f);
+
+	engine::core::ByteWriter writer;
+	REQUIRE(universe.Save(writer));
+
+	Universe restored;
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+
+	const WorldId sender = restored.Find(Name("channel.saved.sender"));
+	REQUIRE(sender.IsValid());
+	restored.Enter(sender, [](Store &store) {
+		REQUIRE(Postbox(store).SendTo("channel.saved.listener", "kept", Bytes("x")).Expected());
+	});
+	restored.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> replies = Received(restored, sender);
+	REQUIRE(replies.size() == 1);
+	CHECK(replies[0].Status == BusStatus::Ok);
 }

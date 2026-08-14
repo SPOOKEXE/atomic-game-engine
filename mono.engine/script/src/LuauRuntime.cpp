@@ -1,6 +1,6 @@
 #include "LuauRuntime.hpp"
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
@@ -358,6 +358,13 @@ namespace engine::script {
 		// that hands one over would be looked up before it exists. The JavaScript
 		// runtime installs its class in the same position and for this reason.
 		OpenInputObject(State);
+
+		// **Before the services too, and for `OpenInputObject`'s reason.**
+		// `TweenService:Create` hands back a `Tween`, whose metatable is
+		// registered here — a service installed first would be one whose method
+		// looks up a metatable that does not exist yet. The JavaScript runtime
+		// installs its class in the same position.
+		OpenTweenHandle(State);
 
 		// **Every service this language binds, from the catalogue.** They used to
 		// be a hand-written call list here, which is how "which services exist"
@@ -808,7 +815,7 @@ namespace engine::script {
 			// recording depends on and nobody wrote down.
 			ENGINE_PROFILE_CAT("script tweens", core::ProfileCategory::Script);
 			note(PumpTweens(State, delta));
-			PumpDebris(State);
+			PumpDebris(Store, ContextOf(State).Debris);
 		}
 
 		{
@@ -820,8 +827,16 @@ namespace engine::script {
 			// The reverse order works and puts every scripted response a frame
 			// late, which is the kind of latency nobody can find by reading a
 			// handler.
+			//
+			// **It is handed this beat's interface events even though it
+			// dispatches none of them**, which is what `gameProcessedEvent` is: a
+			// click the 2D tree consumed has to arrive at `InputBegan` marked
+			// rather than swallowed or passed as though nobody handled it. They
+			// are still queued at this point and `PumpGuiEvents` below drains
+			// them — reading the queue twice is what lets the two pumps stay one
+			// each.
 			ENGINE_PROFILE_CAT("script input", core::ProfileCategory::Script);
-			note(PumpInput(State));
+			note(PumpInput(State, PendingGuiEvents));
 		}
 		{
 			ENGINE_PROFILE_CAT("script changes", core::ProfileCategory::Script);
@@ -835,6 +850,16 @@ namespace engine::script {
 			// world rather than two.
 			ENGINE_PROFILE_CAT("script tree", core::ProfileCategory::Script);
 			note(PumpTree(State));
+		}
+		{
+			// **After the tree, because a respawn is both.** A new character is
+			// a `Model` parented into `Workspace` — which is a `ChildAdded` the
+			// pump above delivers — and a link written onto the `Player`, which
+			// is this one. A `CharacterAdded` handler indexing
+			// `character.Humanoid` should find a world whose tree signals have
+			// already agreed the model is there.
+			ENGINE_PROFILE_CAT("script characters", core::ProfileCategory::Script);
+			note(PumpCharacters(State));
 		}
 		{
 			// **Still inside step 2 — "what the previous barrier recorded" —
@@ -966,7 +991,7 @@ namespace engine::script {
 		lua_pop(State, 1);
 
 		// The signals, which are a branch chain rather than a table. This is the
-		// one member list in the module that is written down; `Instances.cpp`
+		// one member list in the module that is written down; `LuauInstances.cpp`
 		// keeps it beside the chain and `engine.script.vocabulary` checks it.
 		for (const std::string_view signal : LuauInstanceSignalNames()) {
 			surface.InstanceMembers.emplace_back(signal);

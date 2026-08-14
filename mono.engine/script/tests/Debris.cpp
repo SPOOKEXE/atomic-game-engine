@@ -254,3 +254,64 @@ TEST_CASE("a full queue destroys its oldest item early", "[scripting][debris]") 
 	CHECK(expired.front() == added[1]);
 	CHECK(expired.back() == late);
 }
+
+TEST_CASE("a debris deadline and a wait of the same length come due together", "[scripting][debris]") {
+	// **One arithmetic, asserted from both sides.** `script/AGENTS.md` states
+	// that a debris deadline is a tick number "computed by the same
+	// `ceil(seconds / delta)` `task.wait` uses" — and until v0.18 that sentence
+	// was true only because three files happened to contain the same four lines.
+	// `TicksFor` had a copy in `DebrisService.cpp`, one in `LuauTask.cpp` and one
+	// in `JsSurface.cpp`, each taking a different handle to the same world, so
+	// the claim was a convention nothing checked.
+	//
+	// It is one function in `Tasks.hpp` now, and this is what would notice if it
+	// stopped being one: both facts are asserted on *both* beats rather than
+	// either alone, because one of the two firing a tick early is exactly what a
+	// second copy of the rounding would produce.
+	//
+	// **A duration of one and a half ticks, so rounding is what decides.** A
+	// whole number of ticks would pass against `floor`, `ceil` and a truncation
+	// alike.
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("debris_wait_agree");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(workspace != NULL_ENTITY);
+
+		const double seconds = static_cast<double>(store.Time().Delta) * 1.5;
+		const std::string wait = "task.wait(" + std::to_string(seconds) + ")";
+
+		// **The waiter parents a part rather than setting a global**, because
+		// each chunk's globals are its own — and rather than writing the
+		// workspace's name, which is what the rest of this suite reads its
+		// answer out of and which the two would then be racing for.
+		const std::string mark =
+			language == Language::Luau
+				? "local m = Instance.new('Part')\n  m.Name = 'woke'\n  m.Parent = workspace\n"
+				: "const m = Instance.new('Part'); m.Name = 'woke'; m.Parent = workspace;";
+
+		const std::string body = language == Language::Luau
+									 ? "task.spawn(function()\n  " + wait + "\n  " + mark + "end)\n"
+									 : "task.spawn(async () => { await " + wait + "; " + mark + " })\n";
+
+		const std::string source =
+			(language == Language::Luau ? "local " : "let ") + std::string("part = Instance.new('Part')\n") +
+			"part.Name = 'doomed'\n" + "part.Parent = workspace\n" +
+			Send(language, "Debris", "AddItem(part, " + std::to_string(seconds) + ")") + body;
+
+		INFO(source);
+		REQUIRE(runtime->Run(source.c_str()));
+
+		// One beat short, and neither has happened.
+		Beat(store, *runtime);
+		CHECK(store.FindFirstChild(workspace, "doomed") != NULL_ENTITY);
+		CHECK(store.FindFirstChild(workspace, "woke") == NULL_ENTITY);
+
+		// The beat both are due on.
+		Beat(store, *runtime);
+		CHECK(store.FindFirstChild(workspace, "doomed") == NULL_ENTITY);
+		CHECK(store.FindFirstChild(workspace, "woke") != NULL_ENTITY);
+	}
+}

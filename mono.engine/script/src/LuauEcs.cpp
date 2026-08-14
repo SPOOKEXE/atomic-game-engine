@@ -36,7 +36,7 @@
 //   a script reads those with `GetComponent`, because handing back a table per
 //   component per row would allocate more than the query costs.
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/ecs/Schema.hpp>
 

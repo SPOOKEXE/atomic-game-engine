@@ -116,6 +116,12 @@ namespace studio {
 			input->Previous = input->Down;
 			input->PreviousButtons = input->Buttons;
 
+			// Rolled with the two above because it is read the same way — the
+			// device change is an edge, and `input::Translator::BeginFrame` rolls
+			// it there for this reason. This panel is that translator for a played
+			// world.
+			input->PreviousLastSource = input->LastSource;
+
 			input->Down = {};
 			input->Buttons = 0;
 			input->MouseDelta = {};
@@ -136,6 +142,7 @@ namespace studio {
 			for (const auto &key : PLAYED_KEYS) {
 				if (ImGui::IsKeyDown(key.From)) {
 					input->Down.Set(key.To, true);
+					input->LastSource = engine::scene::InputSource::Keyboard;
 				}
 			}
 
@@ -145,9 +152,13 @@ namespace studio {
 			if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
 				input->Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Right));
 				input->MouseDelta = {io.MouseDelta.x, io.MouseDelta.y};
+				input->LastSource = engine::scene::InputSource::MouseButton2;
 			}
 
 			input->WheelDelta = io.MouseWheel;
+			if (io.MouseWheel != 0.0f) {
+				input->LastSource = engine::scene::InputSource::MouseWheel;
+			}
 
 			// **The press edges, kept for the tick that will read them.**
 			// `PlayLink::Step` runs once per tick and frames outnumber ticks, so

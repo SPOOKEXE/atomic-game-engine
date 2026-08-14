@@ -61,6 +61,43 @@ namespace engine::scene {
 			}
 		}
 
+		// `PlayerIdentity::DisplayName` is a `core::Name`, so this pair exists
+		// for the reason the paragraph at the top of this file gives: the raw
+		// object representation would write the id this process happened to
+		// assign, and a reading process would resolve it to whatever string took
+		// the same number. A player called somebody else is a file that loads
+		// and is wrong.
+		// A tick's worth of arrivals and departures, drained by whoever fires
+		// signals — so a saved world holding last session's list would deliver a
+		// `CharacterAdded` for a body that no longer exists. Written as nothing
+		// and read back empty, which is `RenderedSignature`'s pair.
+		void WriteCharacterChanges(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadCharacterChanges(core::ByteReader &, void *destination, size_t count) {
+			auto *changes = static_cast<CharacterChanges *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				changes[index] = CharacterChanges{};
+			}
+		}
+
+		void WritePlayerIdentities(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *identities = static_cast<const PlayerIdentity *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteInt64(identities[index].UserId);
+				writer.WriteName(identities[index].DisplayName);
+				writer.WriteFloat(identities[index].RespawnTime);
+			}
+		}
+
+		void ReadPlayerIdentities(core::ByteReader &reader, void *destination, size_t count) {
+			auto *identities = static_cast<PlayerIdentity *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				identities[index].UserId = reader.ReadInt64();
+				identities[index].DisplayName = reader.ReadName();
+				identities[index].RespawnTime = reader.ReadFloat();
+			}
+		}
+
 		void WriteVisuals(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *visuals = static_cast<const Visual *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -679,6 +716,27 @@ namespace engine::scene {
 		// reason this list keeps repeating, and the generated form: two scalars
 		// with no name and no handle in them.
 		ecs::Components::Register<PortalTransit>("scene.PortalTransit");
+
+		// **The three the player pipeline added, appended for this list's
+		// standing reason.** Component ids are a dense counter and an archetype
+		// is a sorted list of them, so inserting one anywhere but the end
+		// changes the order every row in the engine is visited in.
+		//
+		// **`PlayersServiceComponent` and `PlayerIdentity` cross and
+		// `PlayerRespawn` does not need to.** A client reads `Player.UserId` and
+		// `DisplayName` off its own store, and `Players.MaxPlayers` is what a
+		// game's own interface shows — where a respawn deadline is the
+		// authority's bookkeeping and is recomputed there. All three are
+		// registered because a component a snapshot meets and nothing registered
+		// aborts the process; what differs is only what a game does with them.
+		ecs::Components::Register<PlayersServiceComponent>("scene.PlayersService");
+		ecs::Components::Register<PlayerIdentity>(
+			"scene.PlayerIdentity", WritePlayerIdentities, ReadPlayerIdentities
+		);
+		ecs::Components::Register<PlayerRespawn>("scene.PlayerRespawn");
+		ecs::Components::Register<CharacterChanges>(
+			"scene.CharacterChanges", WriteCharacterChanges, ReadCharacterChanges
+		);
 	}
 
 	void RegisterSceneClasses() {

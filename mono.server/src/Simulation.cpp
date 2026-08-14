@@ -2,8 +2,10 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
@@ -194,6 +196,33 @@ namespace server {
 		// writer. The input half stays out: a server has no keyboard, and what
 		// moves a client-owned character here is its submitted `Motion`.
 		engine::physics::RegisterCharacterSystems(scheduler);
+
+		// **The respawn loop, and it is here rather than in `physics` because
+		// half of it is `gui`'s.** A spawn is two things: a new body, which is
+		// `scene::UpdateRespawns`, and a fresh copy of `StarterGui` in the
+		// player's own `PlayerGui`, which is `gui::ResetPlayerGui` — and `scene`
+		// may not link `gui`, so the two meet in whoever hosts. That is the same
+		// split `ResetPlayerGui`'s own header states from the other side, and it
+		// is why the pass hands back who it spawned instead of doing it all.
+		//
+		// **`PreSimulation`, after the character link.** `LinkPlayerCharacters`
+		// is what releases a player whose model was destroyed, so running before
+		// it would measure the delay from a tick later than the death — and
+		// `RegisterCharacterSystems` above registers that one first, which is the
+		// ordering the scheduler gives between two entries only by their being
+		// in the same phase. Composed into its own entry rather than into
+		// `character.link` because it reads that system's writes and nothing
+		// else reads its own.
+		scheduler.Add("player.respawn", Phase::PreSimulation, [](Store &store) {
+			std::vector<engine::ecs::Entity> spawned;
+			if (engine::scene::UpdateRespawns(store, spawned) == 0) {
+				return;
+			}
+
+			for (const engine::ecs::Entity player : spawned) {
+				(void)engine::gui::ResetPlayerGui(store, player);
+			}
+		});
 	}
 
 	void RegisterPlaceholderComponents() {

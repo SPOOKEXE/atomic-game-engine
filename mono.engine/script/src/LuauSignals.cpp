@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 
@@ -28,7 +28,8 @@ namespace engine::script {
 				return;
 			}
 
-			if (kind != SignalKind::DescendantRemoving && kind != SignalKind::PlayerRemoving) {
+			if (kind != SignalKind::DescendantRemoving && kind != SignalKind::PlayerRemoving &&
+				kind != SignalKind::CharacterRemoving) {
 				return;
 			}
 
@@ -66,6 +67,21 @@ namespace engine::script {
 				// somebody's progress on the way out needs the player still
 				// there to read, and a queue drained a tick later has nothing
 				// to hand it.
+				// **`CharacterRemoving` rides it too, and for a sharper version
+				// of the same reason.** A character dies in this engine by being
+				// destroyed, so the barrier would hand a handler a model it
+				// cannot read a property off — where here it is still whole.
+				// `PlayerLosingCharacter` is the filter and it is what makes this
+				// fire once rather than once per ancestor.
+				if (const ecs::Entity losing = PlayerLosingCharacter(*world, ancestor, leaving);
+					losing != ecs::NULL_ENTITY) {
+					PushInstanceValue(state, leaving);
+					const std::string lost = FireSignal(state, SignalKind::CharacterRemoving, losing, 1);
+					if (!lost.empty()) {
+						ENGINE_WARN("[script] a CharacterRemoving handler failed: {}", lost);
+					}
+				}
+
 				if (!IsPlayerOfService(*world, ancestor, leaving)) {
 					return;
 				}
@@ -338,7 +354,8 @@ namespace engine::script {
 		lua_pop(state, 1);
 	}
 
-	std::string FireSignal(lua_State *state, SignalKind kind, Entity subject, int arguments) {
+	std::string
+	FireSignal(lua_State *state, SignalKind kind, Entity subject, int arguments, core::Name property) {
 		LuauContext &context = ContextOf(state);
 		const int base = lua_gettop(state) - arguments;
 
@@ -346,6 +363,12 @@ namespace engine::script {
 		std::vector<ConnectionId> spent;
 
 		context.Signals.Fire(kind, subject, [&](const Connection &connection) {
+			// An invalid filter fires everything, which is what a kind with one
+			// meaning wants; a valid one is a channel or a property name.
+			if (property.IsValid() && connection.Property != property) {
+				return;
+			}
+
 			lua_getref(state, connection.Callback);
 			for (int index = 1; index <= arguments; index++) {
 				lua_pushvalue(state, base + index);

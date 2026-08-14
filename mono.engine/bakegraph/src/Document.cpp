@@ -20,17 +20,6 @@ namespace engine::bake {
 			return kind != OperationKind::Connect;
 		}
 
-		// Whether a node kind carries no parameter, and so may travel as a bare
-		// `AddNode`.
-		//
-		// **A closed list rather than the complement of the parameterised
-		// ones.** A node kind added to `Graph` later arrives here as "not
-		// allowed" and has to be thought about, rather than silently becoming
-		// legal with its parameter dropped.
-		bool IsBare(NodeKind kind) {
-			return IsBareNode(kind);
-		}
-
 		// The text spelling of a bare node kind.
 		std::string_view NodeText(NodeKind kind) {
 			switch (kind) {

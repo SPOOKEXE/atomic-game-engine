@@ -8,7 +8,7 @@
 // line translation unit would have made that impossible. Both files need the
 // same state, so the state moved out and neither owns it.
 //
-// This is the JavaScript twin of `Bindings.hpp`'s `LuauContext`, and the
+// This is the JavaScript twin of `LuauBindings.hpp`'s `LuauContext`, and the
 // shared members are deliberately the same types. `SignalTable`, `ChangeQueue`
 // and `TaskQueue` decide **ordering**, and ordering is what a recording depends
 // on — so the two languages cannot disagree about it, because there is one
@@ -17,6 +17,7 @@
 // @tier L9 · shared
 
 #include "Actions.hpp"
+#include "Bus.hpp"
 #include "Changes.hpp"
 #include "Debris.hpp"
 #include "ScriptCall.hpp"
@@ -178,8 +179,13 @@ namespace engine::script {
 		// assigned rather than a second object that behaves alike.
 		JSValue Workspace = JS_UNDEFINED;
 
-		// Topic to callbacks, one list per topic.
-		std::unordered_map<std::string, std::vector<CallbackRef>> Subscriptions;
+		// Who is listening to which bus topic.
+		//
+		// **The same type the Luau context holds since v0.16**, which is what let
+		// `MessagingService` be described once: this was an `unordered_map` here
+		// and a registry table there, and neither half did anything a language
+		// decides. See `Bus.hpp`.
+		TopicSubscriptions Subscriptions;
 
 		// Which promise resolver is waiting on which `world::Ticket`.
 		//

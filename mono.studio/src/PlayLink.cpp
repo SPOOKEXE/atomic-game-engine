@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/scene/Characters.hpp>
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <client/Replicated.hpp>
 #include <string>
+#include <vector>
 #include <studio/PlayLink.hpp>
 
 namespace studio {
@@ -125,6 +127,12 @@ namespace studio {
 
 			Player_ = engine::scene::AddPlayer(store, label);
 			if (Player_ != engine::ecs::NULL_ENTITY) {
+				// **The interface before the body, which is `mono.server`'s
+				// order and for its reason**: a `ScreenGui` a script reaches
+				// for from a spawn handler has to exist by the time the handler
+				// runs. `StarterGui` is a template and what a player sees is
+				// their own copy — see `gui::ResetPlayerGui`.
+				(void)engine::gui::ResetPlayerGui(store, Player_);
 				(void)engine::scene::LoadCharacter(store, Player_);
 			}
 		});
@@ -211,6 +219,28 @@ namespace studio {
 				});
 			}
 		}
+
+		// **The respawn loop, and it is here rather than in a scheduler for the
+		// one reason that decides where it can go: only the authority may run
+		// it.** The editor registers its character systems through
+		// `client::InstallPresentation`, which runs on *both* of this link's
+		// worlds — and a replica handing itself a new body would be minting an
+		// entity the server never issued. This function is the one place that
+		// knows which of the two is the authority.
+		//
+		// The interface half is the caller's, exactly as it is in `mono.server`:
+		// `scene::UpdateRespawns` hands back who it spawned and
+		// `gui::ResetPlayerGui` is what gives each of them their own copy of
+		// `StarterGui`.
+		universe.Enter(Authority_, [](Store &store) {
+			std::vector<engine::ecs::Entity> spawned;
+			if (engine::scene::UpdateRespawns(store, spawned) == 0) {
+				return;
+			}
+			for (const engine::ecs::Entity player : spawned) {
+				(void)engine::gui::ResetPlayerGui(store, player);
+			}
+		});
 
 		// Publish while the authority store is scoped; its outgoing span is borrowed.
 		universe.Enter(Authority_, [this, &report](Store &store) {

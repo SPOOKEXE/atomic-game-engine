@@ -8,7 +8,7 @@
 // JavaScript and in the properties panel with none of the three changing,
 // because every binding switches on the type and never on the name.
 //
-// A method had no such shape. It was a `lua_CFunction` in `Instances.cpp` and a
+// A method had no such shape. It was a `lua_CFunction` in `LuauInstances.cpp` and a
 // `JSCFunction` in `JsSurface.cpp`, written twice, and the two drifted exactly as
 // two lists do: Luau's instance method table held thirty entries and
 // JavaScript's held twenty-one, and nothing in the build named the nine that
@@ -60,12 +60,24 @@
 //
 // ## The interface carries what its callers ask for and nothing else
 //
-// There is no `AsBoolean`, no `OptionalNumber` and no `ReturnEnum`, because
+// There is no `AsBoolean`, no `OptionalNumber` and no `ReturnColor3`, because
 // nothing written against this takes or returns one. A pure virtual with no
 // caller is a line every adapter has to implement to satisfy the compiler and
 // nobody has to get right, which is the shape a mistake hides in — and adding
 // one when the first method needs it is a three-line change the build refuses
 // to let anybody forget.
+//
+// Every member is here because exactly one service asked. `ReturnVector2`,
+// `ReturnEnum`, `ReturnEnums` and `ReturnInputObjects` arrived with
+// `UserInputService`'s seven methods; `Role`, `Tweens`, `Debris`, `Subscriptions`,
+// `AsTweenInfo`, the two record readers, `ReturnTween`, `ForgetSubject` and
+// `Await` arrived with the seven services that stopped being written twice at
+// v0.16. `Forget`, `ReadProperty` and `ConnectOnce` arrived at v0.18 with the
+// last twenty instance methods and the interface a UI author reaches for —
+// `Forget` is what made `Destroy` and `ClearAllChildren` neutral, and the other
+// two are `GuiObject`'s three tween methods. Each one names its caller in its
+// own comment, so a member nothing calls any more is a member with a lie above
+// it.
 //
 // ## `ScriptValue` is a *payload* here, and that is not a contradiction
 //
@@ -83,22 +95,28 @@
 // @since v0.16
 
 #include "Actions.hpp"
+#include "Bus.hpp"
 #include "Changes.hpp"
 #include "Codec.hpp"
+#include "Debris.hpp"
 #include "Signals.hpp"
+#include "Tweens.hpp"
 
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/TweenInfo.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/script/Runtime.hpp>
 
 #include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace engine::script {
 
@@ -150,6 +168,34 @@ namespace engine::script {
 		// module's own reason: two runtimes over two worlds must not share one
 		// stream. Advances by one per call.
 		virtual uint64_t NextGuid() = 0;
+
+		// What kind of host this is, for `RunService:IsServer()` and its three
+		// neighbours.
+		//
+		// **A copy of the role and never a `Runtime`**, because the question a
+		// script asks is about the *process* and the answer was fixed when the
+		// runtime was built. Handing the runtime over would put every other thing
+		// on it — `Run`, `Debug`, the limits — one dot away from a service method.
+		virtual const HostRole &Role() const = 0;
+
+		// Every tween this VM has made.
+		//
+		// **On the interface for `Changes`' reason**: what a tween is and the
+		// order two of them finish in is shared machinery both languages hold one
+		// copy of, and `TweenService` is written against it once. See
+		// `Tweens.hpp`.
+		virtual TweenTable &Tweens() = 0;
+
+		// What this VM has queued for destruction, and when.
+		virtual DebrisQueue &Debris() = 0;
+
+		// Who is listening to which bus topic in this VM.
+		//
+		// **A `CallbackRef` list and nothing else**, which is what lets
+		// `MessagingService:SubscribeAsync` be one method: the callable stays
+		// opaque and the pump — which is per language, because calling a callable
+		// is — walks the same list in both. See `Bus.hpp`.
+		virtual TopicSubscriptions &Subscriptions() = 0;
 
 		// The instance the method was called on.
 		//
@@ -207,6 +253,13 @@ namespace engine::script {
 
 		// An argument as a `CFrame`. Raises when it is not one.
 		virtual core::CFrame AsCFrame(size_t index) = 0;
+
+		// An argument as a `TweenInfo`. Raises when it is not one.
+		//
+		// **A reference into the VM's own storage rather than a copy**, which is
+		// safe for exactly as long as the call is: both languages hold the value
+		// in the argument itself, and `TweenTable::Create` copies what it keeps.
+		virtual const core::TweenInfo &AsTweenInfo(size_t index) = 0;
 
 		// An argument as an instance. Raises when it is not one.
 		//
@@ -266,6 +319,65 @@ namespace engine::script {
 		// @return `false` when the value has no representation.
 		virtual bool ReadValue(size_t index, ScriptValue &out, CodecStatus &why) = 0;
 
+		// The field names of a record argument. Raises when it is not one.
+		//
+		// **The pair below is what `ScriptValue` cannot do**, and
+		// `TweenService:Create`'s goal map is the caller that asked: a goal's
+		// value is a `UDim2`, a `Rect` or a `ColorSequence`, and `ValueTag` has
+		// no tag for any of them and must not gain one — it is what crosses a
+		// world. So the record is read by *name and declared type* instead: the
+		// names come out first, and each value is then read as the property it
+		// is named after.
+		//
+		// **Names first and values second, rather than one walk**, which is
+		// Luau's constraint rather than a preference: `lua_next` is documented to
+		// break if a key is converted in place, so a walk that read a value with
+		// anything that might push would end somewhere arbitrary. Copying the
+		// names out is what the JavaScript half already had to do to free its
+		// atoms, so this is the shape both languages were in anyway.
+		//
+		// @param index Zero-based.
+		// @param out   Filled in, in whatever order the language offers. A
+		//              caller that cares about order sorts.
+		virtual void ReadFieldNames(size_t index, std::vector<std::string> &out) = 0;
+
+		// One field of a record argument, as a value of a stated property type.
+		//
+		// **The type comes from the descriptor and never from the value**, which
+		// is `LuauInstances.cpp`'s rule one level up: what a goal *is* was decided by
+		// whoever declared the property, and a reader that guessed would let
+		// `{Size = 5}` set a `Vector3` to something.
+		//
+		// @param index    Zero-based.
+		// @param field    The name, from `ReadFieldNames`.
+		// @param type     What to read it as.
+		// @param enumName Which set an `Enum` value must belong to.
+		// @param out      At least `Schemas::SizeOf(type)` bytes.
+		// @return `false` when the field's value has no form of that type.
+		virtual bool ReadFieldProperty(
+			size_t index, const std::string &field, ecs::PropertyType type, core::Name enumName, void *out
+		) = 0;
+
+		// An argument as a value of a stated property type.
+		//
+		// **`ReadFieldProperty` without the field, and it exists for the same
+		// reason that one does**: a `UDim2` is not a `ScriptValue` and must not
+		// become one, so a method taking a datatype argument reads it as the
+		// property it is about to write. `GuiObject:TweenPosition` is the caller
+		// — it takes a `UDim2` and a `TweenSize` a `UDim2` of a different
+		// meaning, and reading each *as the target's own `Position`* is what
+		// keeps the three tween methods from naming a datatype at all.
+		//
+		// **The type comes from the descriptor and never from the value**, which
+		// is `ReadFieldProperty`'s rule one door along and `LuauInstances.cpp`'s two.
+		//
+		// @param index    Zero-based, `self` excluded.
+		// @param type     What to read it as.
+		// @param enumName Which set an `Enum` value must belong to.
+		// @param out      At least `Schemas::SizeOf(type)` bytes.
+		// @return `false` when the argument has no form of that type.
+		virtual bool ReadProperty(size_t index, ecs::PropertyType type, core::Name enumName, void *out) = 0;
+
 		// Keeps an argument that is a function, and hands back the VM's name for
 		// it. Raises when it is not one.
 		//
@@ -287,6 +399,27 @@ namespace engine::script {
 		//
 		// @param callback What `RetainCallback` handed back.
 		virtual void ReleaseCallback(CallbackRef callback) = 0;
+
+		// Puts a retained callable on a signal, to be called once and dropped.
+		//
+		// **`RetainCallback`'s other half, and the three tween methods are what
+		// asked.** `GuiObject:TweenPosition(..., callback)` is Roblox's shape for
+		// "tell me when this arrives", which here is exactly a `:Once` on the
+		// tween's `Completed` — so rather than a second delivery path, the method
+		// hands the callable to the table both pumps already walk. `SignalTable`
+		// is shared machinery and only the `CallbackRef` is a VM's, which is why
+		// this is a request rather than an accessor handing the table over.
+		//
+		// **Once and never a plain connect**, because that is the whole of what
+		// the caller means and because the retirement is what releases the
+		// callable — a connection that fired forever would hold a closure for the
+		// life of the world.
+		//
+		// @param kind     Which signal.
+		// @param subject  The entity it is about.
+		// @param callback What `RetainCallback` handed back. Owned by the table
+		//        from here on.
+		virtual void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) = 0;
 
 		// Returning. A method calls one of these, none for a method that answers
 		// nothing, or **several for a method that answers several things**.
@@ -344,6 +477,24 @@ namespace engine::script {
 		// pointer was as well as which button it is.
 		virtual void ReturnInputObjects(std::span<const InputReport> reports) = 0;
 
+		// One bound action's record, or every one of them keyed by name.
+		//
+		// **`ReturnInputObjects`' split exactly, and it is what closed the last
+		// per-method gap in a service both languages bind.** The record holds
+		// `Enum.KeyCode` members, so it cannot be a `ScriptValue` — that tree
+		// crosses a world and has no tag for an `EnumItem`. What it can be is a
+		// `BoundActionReport` per language: the fact is one struct and each
+		// adapter builds the table or object, exactly as each builds its own
+		// `InputObject` over one `InputReport`.
+		//
+		// `ContextActionService:GetBoundActionInfo` and `GetAllBoundActionInfo`
+		// are the two callers, and they are the whole reason this is a pair —
+		// keying a map by name is a language's own business.
+		//@{
+		virtual void ReturnBoundAction(const BoundActionReport &report) = 0;
+		virtual void ReturnBoundActions(std::span<const BoundActionReport> reports) = 0;
+		//@}
+
 		// One string, bytes and all.
 		//
 		// **A `string_view` and not a `const char *`**, because a JSON document
@@ -399,6 +550,19 @@ namespace engine::script {
 		// @param property What a `PropertyChanged` connection filters on.
 		virtual void ReturnSignal(SignalKind kind, core::Name property) = 0;
 
+		// One tween, as the handle each language wraps an entity in.
+		//
+		// **`ReturnSignal`'s split exactly** — a tagged userdata on one side and
+		// an object of a registered class on the other, over one `ecs::Entity` —
+		// and it is here for that return's reason: the difference between the two
+		// wrappers is the whole of what an adapter is for.
+		//
+		// **A handle of its own rather than the ordinary instance one**, even
+		// though a tween *is* an entity. `Tweens.hpp` carries the argument: the
+		// neutral instance methods are installed flat on every instance, so a
+		// `Play` there would claim the name for every part in the world.
+		virtual void ReturnTween(ecs::Entity tween) = 0;
+
 		// The shared value tree, as the language's own value.
 		//
 		// **What a record with no datatype in it is returned as**, and
@@ -416,6 +580,61 @@ namespace engine::script {
 		// invisible.
 		virtual void ReturnValue(const ScriptValue &value) = 0;
 		//@}
+
+		// Drops every connection whose subject is this entity, and releases the
+		// VM's own refs for them.
+		//
+		// **The `Forget` shape `script/AGENTS.md` predicted, arriving with the
+		// caller that needed it.** `SignalTable::DropSubject` hands back a list of
+		// `CallbackRef`, and only a VM knows what one means — so the shared half
+		// is a request and the per-language half is `lua_unref` against an index
+		// into `JsContext::Callables`. `TweenService:Create` is the caller: a
+		// tween reclaimed to make room takes its `Completed` listeners with it,
+		// and a reclaim that left them behind would leak a closure per tween for
+		// the life of the world.
+		//
+		// @param subject The entity whose connections go.
+		virtual void ForgetSubject(ecs::Entity subject) = 0;
+
+		// The same for an entity **and everything under it**, before it is
+		// destroyed.
+		//
+		// **The `Forget(subtree)` shape `script/AGENTS.md` predicted, and it is
+		// what made `Destroy` and `ClearAllChildren` neutral.** Those two were
+		// named as not a straight lift because the interesting half of each is
+		// per-language by construction: `ForgetSubtree` takes a callback that is
+		// `lua_unref` on one side and an index into `JsContext::Callables` on the
+		// other. What actually crosses is an entity and a request to forget it,
+		// which is this — so the *walk*, which has to reach every descendant or a
+		// grandchild's connections outlive the row they watched, is written once.
+		//
+		// **Called before `Store::DestroyInstance` and never after.** The walk
+		// needs the hierarchy the destroy is about to take apart; see
+		// `Subtree.hpp`, which both adapters call through.
+		//
+		// @param instance The root of the subtree, itself forgotten too.
+		virtual void Forget(ecs::Entity instance) = 0;
+
+		// Suspends the caller until a bus reply arrives, in whichever way this
+		// language suspends.
+		//
+		// **The one place the two languages hand back genuinely different
+		// things, and it is a difference the interface cannot hide.** Luau yields
+		// the running thread and the barrier resumes it with `(value, status,
+		// version)`; JavaScript answers a `Promise` the barrier resolves with the
+		// same three. Both are `docs/retired/SCRIPT_CONCURRENCY.md` §1's first
+		// legal resume source — a `Ticket` reply the barrier applied — and neither
+		// is expressible in the other's idiom, so what is shared is *which ticket*
+		// and nothing else.
+		//
+		// A method calls this last and returns: nothing may be pushed after it,
+		// because on the Luau side the stack top is where the yield takes its
+		// results from.
+		//
+		// @param ticket `world::Ticket::Value` for a ticket that `Expected()`.
+		//               The caller refuses an unexpected one itself, because the
+		//               message names the method.
+		virtual void Await(uint64_t ticket) = 0;
 
 		// Refuses the call, in the language's own idiom. Never returns.
 		//
@@ -487,6 +706,32 @@ namespace engine::script {
 		ScriptMethod Set;
 	};
 
+	// One instance's property of a name, or null when a script may not see it.
+	//
+	// **A non-scriptable property is *not found* rather than found and refused**,
+	// which is `LuauInstances.cpp`'s rule and the reason this is one function rather
+	// than a predicate beside a lookup. `PropertyDescriptor::Scriptable` is about
+	// who is asking, and the honest answer to a script asking for a script's
+	// `Source` is the one it gets for a member that does not exist — otherwise the
+	// error message itself tells a program what is there to reach for.
+	//
+	// **One reader, because there were three.** The property surface, the tween
+	// goal policy and `GetPropertyChangedSignal` each had a copy of this loop, and
+	// the copies had already drifted: the JavaScript half of the third compared
+	// `PropertyDescriptor::Name` and ignored `Scriptable` entirely, so the two
+	// languages disagreed about what a script may watch.
+	//
+	// Compares the stored spelling directly rather than interning the name, which
+	// would take the process-wide registry's lock on every property access.
+	//
+	// @param store    The world.
+	// @param instance The instance whose class is asked.
+	// @param name     The property, as a script spells it.
+	// @return The descriptor, or null.
+	// @since v0.18
+	const ecs::PropertyDescriptor *
+	ScriptableProperty(const ecs::Store &store, ecs::Entity instance, std::string_view name);
+
 	// Every instance method that is written once.
 	//
 	// **Both VMs install every row**, which is what makes the parity a property
@@ -497,4 +742,16 @@ namespace engine::script {
 	//
 	// @return The table, valid for the life of the program.
 	std::span<const InstanceMethod> NeutralInstanceMethods();
+
+	// The rows `GuiMethods.cpp` contributes to that table.
+	//
+	// **Declared rather than folded into one array**, because the split is by
+	// what a method reaches: these four name `engine::gui` or drive a
+	// `TweenTable`, and the rest name only the class tree and the store. There is
+	// still one table — `NeutralInstanceMethods` concatenates — so nothing
+	// installs a partial surface.
+	//
+	// @return The gui-facing rows.
+	// @since v0.18
+	std::span<const InstanceMethod> GuiInstanceMethods();
 }

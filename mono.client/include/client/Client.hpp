@@ -510,6 +510,12 @@ namespace client {
 		// every frame would pay for it every frame to say what it already said.
 		engine::scene::MouseBehavior PointerMode = engine::scene::MouseBehavior::Default;
 		engine::scene::MouseBehavior AppliedPointerMode = engine::scene::MouseBehavior::Default;
+
+		// Whether a script wants the cursor drawn, and what the window was last
+		// told. The pair above's arrangement, for the pair above's reason —
+		// `SDL_ShowCursor` is the same kind of round trip.
+		bool PointerIconEnabled = true;
+		bool AppliedPointerIcon = true;
 		engine::core::FrameClock Clock;
 
 		// The world, and the only place simulation state lives. Everything
@@ -530,7 +536,19 @@ namespace client {
 		// well as by each world's scheduler, for the reason
 		// `game::StartWorldScripts` gives: the scheduler's copy is a capture
 		// inside a lambda and nothing else names it.
-		std::vector<std::shared_ptr<engine::script::Runtime>> Runtimes;
+		//
+		// **Keyed by world rather than parallel to `Simulated`**, because the
+		// drawn world's VM is what `DeliverGuiEvents` needs and the two vectors
+		// only line up on the path that fills both. `BuildDemoWorlds` fills one
+		// of them, so an index into the other would have been right until
+		// somebody ran the client without `--game`.
+		std::vector<std::pair<engine::world::WorldId, std::shared_ptr<engine::script::Runtime>>> Runtimes;
+
+		// The VM for one world, or null when it runs no scripts.
+		//
+		// @param world Which world.
+		// @return The runtime, or null.
+		engine::script::Runtime *RuntimeOf(engine::world::WorldId world);
 
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;

@@ -84,8 +84,12 @@ namespace studio {
 		// `assetc::Settings::Only` takes. Empty for everything that is already
 		// an asset.
 		//
+		// Defaulted rather than left to the aggregate: the built-in rows name
+		// the members before it and stop, and `-Wmissing-field-initializers` is
+		// fatal under the `ci` preset.
+		//
 		// @since v0.14
-		std::string Unbaked;
+		std::string Unbaked = {};
 	};
 
 	// One tab: a place, and what it holds.
@@ -100,17 +104,20 @@ namespace studio {
 		CatalogueOrigin Origin = CatalogueOrigin::Directory;
 
 		// Where it is: a path, or a `host:port`. Empty for the engine's own.
-		std::string Location;
+		//
+		// The three below are defaulted rather than left to the aggregate, for
+		// `CatalogueEntry::Unbaked`'s reason.
+		std::string Location = {};
 
 		// What it holds, in name order.
-		std::vector<CatalogueEntry> Entries;
+		std::vector<CatalogueEntry> Entries = {};
 
 		// Why the list is empty, when a reason is worth saying.
 		//
 		// **A sentence rather than an empty table**, because "nothing published
 		// here" and "this kind of source does not enumerate" are two different
 		// facts and a blank tab reads as the first one.
-		std::string Note;
+		std::string Note = {};
 	};
 
 	// Why an origin's tab holds what it holds.

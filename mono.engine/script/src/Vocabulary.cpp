@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "Signals.hpp"
 
 #include <engine/script/Vocabulary.hpp>
 
@@ -71,15 +71,19 @@ namespace engine::script {
 	}
 
 	std::span<const std::string_view> InstanceSignals(const Language language) {
-		// **Luau's alone.** JavaScript installs the same fourteen as accessors
-		// on `__instanceMethods`, so a walk of that object already reports
-		// them; answering here as well would offer every one of them twice.
+		// **Luau's alone.** JavaScript installs the same list as accessors on
+		// `__instanceMethods`, so a walk of that object already reports them;
+		// answering here as well would offer every one of them twice.
+		//
+		// Deliberately not a count, for `ServiceCatalogue.cpp`'s reason: the
+		// number in this sentence has been wrong once already, and a stale one
+		// reads as a fact somebody checked.
 		if (language != Language::Luau) {
 			return {};
 		}
 
 		// Built once from the array that sits beside the branch chain in
-		// `Instances.cpp`, so this file names no signal of its own.
+		// `LuauInstances.cpp`, so this file names no signal of its own.
 		static const std::vector<std::string_view> signals = LuauInstanceSignalNames();
 		return signals;
 	}

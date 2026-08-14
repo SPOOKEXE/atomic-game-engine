@@ -34,6 +34,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.script.servicecatalogue")
 
@@ -169,6 +170,152 @@ TEST_CASE("a name in no row still fails the old way", "[scripting][services]") {
 
 		CHECK_FALSE(runtime->Run(Fetch(language, "MarketplaceService").c_str()));
 		CHECK(runtime->LastError().find("not a service this engine provides") != std::string::npos);
+	}
+}
+
+TEST_CASE("every service member is reachable in both languages", "[scripting][services]") {
+	// **The case that would have caught `GetTeleportData`.** The three above ask
+	// whether a *service* is reachable, which is what the catalogue claims; this
+	// asks whether every *member* of one is, which the catalogue cannot claim
+	// because a language mask is per service. `TeleportService::GetTeleportData`
+	// lived in that gap from v0.15 to v0.16 — declared in `engine.d.ts`, present
+	// in Luau, absent in JavaScript — and so did `ContextActionService`'s two
+	// reporting methods.
+	//
+	// **A hand-written list, deliberately, and it is the point rather than a
+	// duplicate.** Reading the surfaces back would assert that the installers
+	// install what the surfaces say, which is a tautology: both walks read the
+	// same span. What is worth checking is that the *engine* offers what a
+	// script author was told it offers, so the list is written here from the
+	// declaration files and asked of a running VM.
+	struct Surface {
+		const char *Service;
+
+		// Members that must be callable.
+		std::vector<const char *> Methods;
+
+		// Signals and live properties: reachable and not functions.
+		std::vector<const char *> Values;
+	};
+
+	const std::vector<Surface> SURFACES = {
+		{"MessagingService", {"PublishAsync", "SubscribeAsync"}, {}},
+		{"TeleportService", {"Teleport", "GetLocalPlayerTeleportData", "GetTeleportData"}, {}},
+		{"MemoryStoreService", {"GetAsync", "SetAsync", "UpdateAsync", "RemoveAsync"}, {}},
+		{"DataStoreService", {"GetAsync", "SetAsync", "RemoveAsync"}, {}},
+		{"CrossWorldService", {"OpenChannel", "CloseChannel", "SendAsync"}, {}},
+		{"RunService", {"IsServer", "IsClient", "IsStudio", "IsReplica"}, {"Heartbeat"}},
+		{"UserInputService",
+		 {"IsKeyDown",
+		  "IsMouseButtonPressed",
+		  "GetMouseLocation",
+		  "GetMouseDelta",
+		  "GetKeysPressed",
+		  "GetMouseButtonsPressed",
+		  "GetLastInputType"},
+		 {"MouseBehavior",
+		  "MouseIconEnabled",
+		  "MouseDeltaSensitivity",
+		  "KeyboardEnabled",
+		  "MouseEnabled",
+		  "GamepadEnabled",
+		  "TouchEnabled",
+		  "VREnabled",
+		  "AccelerometerEnabled",
+		  "GyroscopeEnabled",
+		  "InputBegan",
+		  "InputEnded",
+		  "InputChanged",
+		  "WindowFocused",
+		  "WindowFocusReleased",
+		  "LastInputTypeChanged"}},
+		{"SoundService", {"GetListener", "SetListener"}, {"Volume"}},
+		{"ContextActionService",
+		 {"BindAction",
+		  "BindActionAtPriority",
+		  "UnbindAction",
+		  "UnbindAllActions",
+		  "GetBoundActionInfo",
+		  "GetAllBoundActionInfo"},
+		 {}},
+		{"ContentService",
+		 {"GetMeshes",
+		  "GetPublishedMeshes",
+		  "GetMeshTextures",
+		  "GetTextures",
+		  "GetFlipbook",
+		  "GetTriangleCount"},
+		 {}},
+		{"CollectionService", {"AddTag", "RemoveTag", "HasTag", "GetTagged", "GetTags", "GetAllTags"}, {}},
+		{"HttpService", {"JSONEncode", "JSONDecode", "GenerateGUID", "UrlEncode"}, {}},
+		{"TweenService", {"GetValue", "Create"}, {}},
+		{"Debris", {"AddItem"}, {}},
+	};
+
+	// **Every `Always` row appears above.** A service added to the catalogue and
+	// not to this list would otherwise be checked by nothing here, which is the
+	// silent half of the failure this suite exists for.
+	std::set<std::string> listed;
+	for (const Surface &surface : SURFACES) {
+		listed.insert(surface.Service);
+	}
+	std::set<std::string> expected;
+	for (const ServiceDefinition &definition : Services()) {
+		if (definition.Availability == ServiceAvailability::Always) {
+			expected.insert(definition.Name);
+		}
+	}
+	CHECK(listed == expected);
+
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		Store store = Fresh("catalogue_members");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		for (const Surface &surface : SURFACES) {
+			// **The probe raises rather than answering, because `Run` reports
+			// whether a chunk *ran*.** A script returning `false` ran perfectly
+			// well, so `return typeof(x) == 'function'` passes whatever the answer
+			// is — which is how the first version of this case reported green
+			// against a `TeleportService` with `GetTeleportData` deliberately
+			// removed.
+			//
+			// **`type`/`typeof` and not a nil test**, because a member that exists
+			// and is not callable is the other half of the same mistake: a signal
+			// installed where a method was meant reads as present and fails at the
+			// call site.
+			for (const char *member : surface.Methods) {
+				const std::string reached =
+					std::string(language == Language::Luau ? "game:GetService('" : "game.GetService('") +
+					surface.Service + "')." + member;
+
+				const std::string source =
+					language == Language::Luau
+						? "assert(type(" + reached + ") == 'function', 'missing')"
+						: "if (typeof " + reached + " !== 'function') { throw new Error('missing'); }";
+
+				INFO(source);
+				const bool ok = runtime->Run(source.c_str());
+				INFO(runtime->LastError());
+				CHECK(ok);
+			}
+
+			for (const char *member : surface.Values) {
+				const std::string reached =
+					std::string(language == Language::Luau ? "game:GetService('" : "game.GetService('") +
+					surface.Service + "')." + member;
+
+				const std::string source =
+					language == Language::Luau
+						? "assert(" + reached + " ~= nil, 'missing')"
+						: "if (" + reached + " === undefined) { throw new Error('missing'); }";
+
+				INFO(source);
+				const bool ok = runtime->Run(source.c_str());
+				INFO(runtime->LastError());
+				CHECK(ok);
+			}
+		}
 	}
 }
 

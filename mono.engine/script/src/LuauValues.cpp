@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
@@ -472,6 +472,18 @@ namespace engine::script {
 			luaL_typeerrorL(state, index, "Rect");
 		}
 		return *static_cast<core::Rect *>(value);
+	}
+
+	// **Here rather than in `TweenService.cpp`, where it used to be a
+	// file-local.** `LuauCall::AsTweenInfo` is the second caller, and a checker
+	// written twice is the shape `CheckVector2Value`'s comment already regrets
+	// one entry up.
+	core::TweenInfo &CheckTweenInfoValue(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_TWEEN_INFO);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "TweenInfo");
+		}
+		return *static_cast<core::TweenInfo *>(value);
 	}
 
 	// --- the three a curve is authored in ------------------------------------

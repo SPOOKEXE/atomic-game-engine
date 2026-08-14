@@ -103,9 +103,7 @@ namespace engine::script {
 		// pre-release, and this one is visible rather than silent.
 		ecs::Components::Register<LuaSourceContainer>("script.LuaSourceContainer");
 		ecs::Components::Register<JavaScriptSourceContainer>("script.JavaScriptSourceContainer");
-		ecs::Components::Register<CodeSourceContainerSelector>(
-			"script.CodeSourceContainerSelector"
-		);
+		ecs::Components::Register<CodeSourceContainerSelector>("script.CodeSourceContainerSelector");
 		ecs::Components::Register<Disabled>("script.Disabled");
 		ecs::Components::Register<SourceCache>("script.SourceCache", WriteSourceCaches, ReadSourceCaches);
 	}

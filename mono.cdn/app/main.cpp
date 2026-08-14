@@ -333,9 +333,8 @@ int main(int argc, char **argv) {
 		// an inbox *inside* it is at least a path somebody can predict.
 		service.Ingest.Inbox = arguments.Get("inbox").has_value()
 								   ? std::filesystem::path(*arguments.Get("inbox"))
-							   : storePath.filename() == "processed"
-								   ? storePath.parent_path() / "raw"
-								   : storePath / "inbox";
+							   : storePath.filename() == "processed" ? storePath.parent_path() / "raw"
+																	 : storePath / "inbox";
 	} else if (arguments.Get("inbox").has_value()) {
 		// An inbox with no key refuses every upload — `IngestSettings::Key`
 		// says so — and an origin that looks configured for uploads and takes

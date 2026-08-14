@@ -125,6 +125,34 @@ namespace engine::gui {
 	// @return The element, or `NULL_ENTITY`.
 	ecs::Entity Pick(const ecs::Store &store, const DrawList &list, const core::Vector2 &point);
 
+	// Every element under a point within one subtree, front to back.
+	//
+	// **`Pick`'s question without the `Active` filter and scoped to a
+	// container**, which is what `PlayerGui:GetGuiObjectsAtPosition` asks: a
+	// decorative `Frame` is transparent to *input* and is still an object that
+	// is under the pointer, and a player asking what is under theirs must not be
+	// told about somebody else's interface.
+	//
+	// **Ordered by `Resolved::Order`, which is the compile's own answer read
+	// back rather than derived again.** `gui/AGENTS.md` refuses a second
+	// traversal that re-decides what is on top, and this is why there does not
+	// have to be one: `Compiled::Rebuild` writes each element's paint position
+	// into its `Resolved`, so sorting by it descending *is* front to back. A
+	// world nothing has compiled has every `Order` at zero, and `Resolved::Depth`
+	// — which the layout writes — breaks the tie the way paint order would, with
+	// the deeper element in front.
+	//
+	// @param store The world.
+	// @param root  The container to search under, itself excluded. A `PlayerGui`
+	//        at the call site this exists for.
+	// @param point The position, in canvas pixels.
+	// @param out   Filled in, front to back. Cleared first.
+	// @return How many were found.
+	// @since v0.18
+	size_t ElementsAt(
+		const ecs::Store &store, ecs::Entity root, const core::Vector2 &point, std::vector<ecs::Entity> &out
+	);
+
 	// Turns a polled pointer into events, and remembers enough to do it.
 	//
 	// Long-lived, one per canvas being driven. It holds the hover and the press

@@ -1428,6 +1428,13 @@ namespace engine::scene {
 				std::array<std::string_view, 3>{"Default", "LockCenter", "LockCurrentPosition"}
 			);
 
+			// **What a bound action's handler answers with**, and the two members
+			// are the whole of Roblox's set. Registered here for the reason
+			// `UserInputState` above it is: the bindings generator does not open a
+			// VM, so an enum registered at VM-open time is one the declaration
+			// files never learn about.
+			ecs::EnumTable::Register("ContextActionResult", std::array<std::string_view, 2>{"Sink", "Pass"});
+
 			// **Where the ear is, and only the two modes the mixer can honour.**
 			// Roblox's `Enum.ListenerType` has four; `CFrame` and `ObjectCFrame`
 			// place the ear *and turn it*, and `client::SoundStage` posts a

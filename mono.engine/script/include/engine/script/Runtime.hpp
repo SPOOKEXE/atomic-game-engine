@@ -464,17 +464,6 @@ namespace engine::script {
 	std::unique_ptr<Runtime>
 	MakeRuntime(ecs::Store &store, Language language, const RuntimeLimits &limits = {});
 
-	// Opens the VM a file's extension names and runs it.
-	//
-	// @param store  The world to build into.
-	// @param path   The script to run.
-	// @param error  Filled in with the failure when this returns false.
-	// @param limits What bounds the script.
-	// @return `false` when the file could not be read, compiled or run.
-	bool RunScriptFile(
-		ecs::Store &store, const std::string &path, std::string &error, const RuntimeLimits &limits = {}
-	);
-
 	// Takes in everybody a teleport has sent to this world.
 	//
 	// **A world that is not running scripts still has to accept people.** This

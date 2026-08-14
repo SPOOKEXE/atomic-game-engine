@@ -2,7 +2,7 @@
 // actually may name.
 //
 // **The failure this exists to catch has happened twice in this module and both
-// times it was silent.** `Values.cpp` records `Magnitude` and `Unit`, promised
+// times it was silent.** `LuauValues.cpp` records `Magnitude` and `Unit`, promised
 // by `engine.d.luau` for two versions while the run time answered "Vector3 has
 // no member 'Unit'" — a script that typechecked clean and failed anyway.
 // `JsSurface.cpp` records a hand-written `10` on a list of sixteen methods,
@@ -19,11 +19,17 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/script/Vocabulary.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Bus.hpp>
+
+// The status words are `script::DescribeStatus`'s, which is private to the
+// module — the test links `src/` for exactly this.
+#include "Bus.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +37,8 @@
 TEST_SUITE_ID("engine.script.vocabulary")
 
 using engine::ecs::Store;
+namespace world = engine::world;
+
 using engine::script::Language;
 using engine::script::MakeRuntime;
 using engine::script::NameKind;
@@ -122,8 +130,8 @@ TEST_CASE("every offered instance member resolves on a real instance", "[script]
 	// so it grows with the surface instead of having to be remembered.
 	//
 	// It matters most for the Luau signals. Methods live in a table the walk
-	// reads, so they cannot be wrong by construction; `.Changed` and the
-	// thirteen beside it are a chain of string comparisons in `InstanceIndex`
+	// reads, so they cannot be wrong by construction; `.Changed` and the rest
+	// of them are a chain of string comparisons in `InstanceIndex`
 	// with a list kept next to them, and a list beside a branch is exactly the
 	// arrangement that goes stale. Nothing can enumerate a branch, so nothing
 	// can check the other direction — a signal added to the chain and not to
@@ -239,4 +247,49 @@ TEST_CASE("keywords are offered and are not engine names", "[script][vocabulary]
 	const std::span<const std::string_view> javascript = engine::script::Keywords(Language::JavaScript);
 	CHECK(std::find(javascript.begin(), javascript.end(), "const") != javascript.end());
 	CHECK(std::find(javascript.begin(), javascript.end(), "local") == javascript.end());
+}
+
+TEST_CASE("the bus status words are the switch, not a copy of it", "[script][vocabulary]") {
+	// **The list the generated declarations' `BusStatus` union is built from,
+	// and it was hand-written text until v0.18.** `mono.tools/bindings` carried
+	// both spellings of the union in raw string literals with a comment asking
+	// whoever appended a status to remember, and nothing in the build compared
+	// them against `script::DescribeStatus`. That is `AGENTS.md` rule 6's third
+	// category exactly: a status appended to `world::BusStatus` would have made
+	// correct script code fail to typecheck, and the only thing that would have
+	// said so was somebody re-reading a comment.
+	//
+	// `just bindings-check` is the build half. This is the unit half: it pins
+	// the two properties of the *walk* that a byte-compare of two generated
+	// files cannot explain when it goes red.
+	const std::span<const std::string_view> words = engine::script::BusStatusWords();
+	REQUIRE(words.size() >= 2);
+
+	// **The three appended at v0.17 are the ones the hand-written union
+	// missed**, which is why they are named here rather than left to the loop
+	// below: a walk that stops at the first gap answers a shorter list, and a
+	// shorter list is a union that typechecks and is wrong.
+	for (const world::BusStatus status :
+		 {world::BusStatus::Ok,
+		  world::BusStatus::NoSuchChannel,
+		  world::BusStatus::Overflow,
+		  world::BusStatus::WorldNotReady}) {
+		const std::string_view word = engine::script::DescribeStatus(status);
+		INFO(word);
+		CHECK(std::find(words.begin(), words.end(), word) != words.end());
+	}
+
+	// **`Unknown` is last and is a member.** It is what `DescribeStatus`
+	// answers for a value it does not recognise, which a script can be handed
+	// after a version skew between two processes — so a union without it makes
+	// correct handling code a typecheck failure, and one with it anywhere but
+	// the end means the walk read past the enum.
+	CHECK(words.back() == "Unknown");
+	CHECK(std::count(words.begin(), words.end(), std::string_view("Unknown")) == 1);
+
+	// No word twice, because a repeated member in the emitted union is a
+	// declaration that reads as though two statuses meant the same thing.
+	std::vector<std::string_view> sorted(words.begin(), words.end());
+	std::sort(sorted.begin(), sorted.end());
+	CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
 }

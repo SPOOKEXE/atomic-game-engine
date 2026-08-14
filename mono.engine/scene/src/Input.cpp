@@ -92,6 +92,21 @@ namespace engine::scene {
 			static_cast<size_t>(InputSource::MouseButton3) == static_cast<size_t>(MouseButton::Middle)
 		);
 		static_assert(static_cast<size_t>(MouseButton::Count) <= static_cast<size_t>(InputSource::Count));
+
+		// **The layout is pinned, because `Column::Write` sends `sizeof(T)` bytes
+		// and does not know which of them a member claimed.** Every field added
+		// since v0.10 has come out of `Reserved` for that reason, and this is what
+		// turns "came out of `Reserved`" from a habit into a checked claim: a
+		// member appended to the end instead grows the object, moves the save
+		// format, and does it silently.
+		//
+		// The number is what the members happen to add up to rather than a target
+		// — the point is that changing it is a decision somebody has to make here.
+		constexpr size_t SIZE_IS_PINNED = 56;
+		static_assert(
+			sizeof(InputState) == SIZE_IS_PINNED,
+			"InputState changed size: take a new field out of Reserved, or move the save format on purpose"
+		);
 	}
 
 	const char *Describe(KeyCode key) {

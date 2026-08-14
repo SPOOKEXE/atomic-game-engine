@@ -36,7 +36,9 @@
 #include <engine/ecs/Entity.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -135,6 +137,104 @@ namespace engine::scene {
 	// is a character that can never jump and gives no clue why.
 	inline constexpr float CHARACTER_HEIGHT = 5.0f;
 
+	// One player gaining or losing a body.
+	//
+	// **Recorded rather than dispatched, because `scene` is L7 and signals are
+	// L9.** `Player.CharacterAdded` and `CharacterRemoving` are script-facing
+	// facts and this module cannot fire a signal; what it can do is write down
+	// what happened, in order, and let whoever owns a scripting layer drain it —
+	// which is the same split `gui::Router` uses for input and
+	// `ecs::Store::TakeTreeChanges` for the tree.
+	//
+	// @since v0.17
+	struct CharacterChange {
+		// Who gained or lost it.
+		ecs::Entity Player;
+
+		// The `Model`. **For a removal this may already be destroyed**, and that
+		// is inherent rather than an oversight: a character dies in this engine
+		// by being destroyed, and the record is written where the link is broken
+		// — which is after the destroy in every path but a script's own
+		// `player.Character = nil`. Roblox's guarantee that the handler runs
+		// while the body is still there needs a synchronous fire from inside a
+		// store write, which `script/Changes.hpp` refuses for every signal but
+		// `DescendantRemoving`. `docs/DEFERRED.md` D00120 carries what closing it
+		// would take.
+		ecs::Entity Character;
+
+		// True for an arrival, false for a departure.
+		bool Added = false;
+
+		// Explicit padding, so the object representation a snapshot writes holds
+		// no uninitialised bytes.
+		uint8_t Reserved[7] = {};
+	};
+
+	// Every character arrival and departure since the last drain.
+	//
+	// **A resource rather than a component, because there is one of it** —
+	// `ecs/AGENTS.md`'s rule — and because the order two players respawning on
+	// one tick are reported in is a fact a recording depends on.
+	//
+	// @since v0.17
+	struct CharacterChanges {
+		std::vector<CharacterChange> Pending;
+	};
+
+	// Hands over what has happened and empties the list.
+	//
+	// **Taken, not read**, for `Store::TakeTreeChanges`' reason: a handler may
+	// respawn somebody, and a swap leaves the list empty before the first one
+	// runs — so the spawn it causes belongs to the next drain instead of being
+	// appended to the list being walked.
+	//
+	// @param store The world.
+	// @param out   Filled with what happened, in order. Cleared first.
+	// @since v0.17
+	void TakeCharacterChanges(ecs::Store &store, std::vector<CharacterChange> &out);
+
+	// Gives back a body to everybody who has lost one and waited long enough.
+	//
+	// **The respawn loop, and the engine had none.** A character was built once
+	// at admission and never again: a player whose body was destroyed stood in
+	// `Players` for the rest of the session with nothing to drive, and the only
+	// way back was a script calling `LoadCharacter` on a timer of its own.
+	//
+	// The rule, which is Roblox's:
+	//
+	//   1. A player with a live character is not waiting, so any deadline they
+	//      were carrying is dropped.
+	//   2. A player with none and `Players.CharacterAutoLoads` set gets a
+	//      deadline of `Player.RespawnTime` seconds from the tick they were
+	//      first seen without one.
+	//   3. On that tick they are handed a new character through `LoadCharacter`,
+	//      which is the same door a script's `player:LoadCharacter()` goes
+	//      through and therefore runs the whole spawn pipeline.
+	//
+	// **A tick number rather than a countdown of seconds**, which is
+	// `DebrisQueue`'s rule: `ceil(seconds / delta)` against the fixed tick delta
+	// means five seconds is three hundred ticks at sixty hertz on every machine,
+	// where a float accumulated per tick would drift and `just replay-check`
+	// would fail a long way from the cause.
+	//
+	// **Death is the character being gone, because this engine has no health
+	// model.** Roblox waits for `Humanoid.Health` to reach zero and removes the
+	// body itself; `scene::Humanoid` is a capsule, a speed and a jump — see its
+	// header — so what a game does here is destroy the model, and the delay is
+	// measured from that. `docs/DEFERRED.md` D00121 carries the gap.
+	//
+	// **The interface half is not here and cannot be.** `StarterGui` is copied
+	// into a player's `PlayerGui` on every spawn and `scene` may not link `gui`,
+	// so a caller loops over `spawned` calling `gui::ResetPlayerGui` — the same
+	// split that function's own header states.
+	//
+	// @param store   The world.
+	// @param spawned Filled with every player handed a new character. Cleared
+	//        first.
+	// @return How many were spawned.
+	// @since v0.17
+	size_t UpdateRespawns(ecs::Store &store, std::vector<ecs::Entity> &spawned);
+
 	// Builds a character and parents it to the world's `Workspace`.
 	//
 	// The model holds a `HumanoidRootPart`, a `Humanoid`, and five limbs named
@@ -157,6 +257,31 @@ namespace engine::scene {
 	// `workspace:FindFirstChild(player.Name)` the lookup a game script expects.
 	// Network ownership of the root goes to the player, so a client may move
 	// its own body and no one else's.
+	//
+	// ## What a spawn does, in order
+	//
+	//   1. The old body, if any, is destroyed.
+	//   2. The rig is built and parented into `Workspace`.
+	//   3. `Player.Character` is pointed at it, which is `SetPlayerCharacter` and
+	//      is what records the `CharacterAdded` this drain will report.
+	//   4. Every child of `StarterPlayer.StarterCharacterScripts` is cloned into
+	//      the model. **Every spawn**, because what it holds is a script about a
+	//      body and the body is new each time — the opposite of
+	//      `StarterPlayerScripts`, which `AddPlayer` copies once.
+	//   5. `Player.Backpack` is emptied and refilled from `Player.StarterGear`.
+	//      That direction is the whole reason there are two containers: gear a
+	//      game grants by adding to `StarterGear` survives a death, and gear
+	//      dropped straight into `Backpack` does not.
+	//
+	// **The interface is deliberately not a sixth step.** `StarterGui` is copied
+	// into `PlayerGui` on every spawn too, and `scene` may not link `gui` — so
+	// `gui::ResetPlayerGui` is the caller's to run, which its own header states
+	// from the other side.
+	//
+	// **This is the authority's call and never a replica's.** A client learns it
+	// has a character by receiving `PlayerCharacter` and rebuilding the link in
+	// `LinkPlayerCharacters`; running the pipeline there would have a client
+	// clearing a `Backpack` whose contents are replicated into it.
 	//
 	// @param store  The world.
 	// @param player The `Player` instance.

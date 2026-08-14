@@ -11,8 +11,8 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Solver.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Part.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 
 #include <algorithm>
@@ -134,8 +134,8 @@ namespace engine::physics {
 			axis.SecondAngular = AngularResponse(second, axis.SecondTorque);
 
 			const float linear = first.InverseMass + second.InverseMass;
-			const float angular = axis.FirstAngular.Dot(axis.FirstTorque) +
-								  axis.SecondAngular.Dot(axis.SecondTorque);
+			const float angular =
+				axis.FirstAngular.Dot(axis.FirstTorque) + axis.SecondAngular.Dot(axis.SecondTorque);
 			const float total = linear + angular;
 			axis.Mass = total > 0.0f ? 1.0f / total : 0.0f;
 		}

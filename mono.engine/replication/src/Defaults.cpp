@@ -68,6 +68,27 @@ namespace engine::replication {
 			return true;
 		}
 
+		// **The authority's bookkeeping about a life that has not started yet.**
+		// `scene.PlayerRespawn` is a deadline `scene::UpdateRespawns` computes
+		// and only the authority runs that pass, so a replicated one is a row a
+		// client can do nothing with — and it is added and removed on every
+		// death and spawn, which is an archetype move and a structural message
+		// per respawn per player for a number nobody reads.
+		//
+		// `scene.PlayersService` and `scene.PlayerIdentity` are deliberately not
+		// here: `MaxPlayers`, `UserId` and `DisplayName` are what a game's own
+		// interface shows, and Roblox puts all three on the client too.
+		//
+		// **`scene.CharacterChanges` is a *queue*, and the whole of it is
+		// per-machine.** Each side records its own transitions and drains them
+		// into its own VM — a client learns it has a character by receiving
+		// `PlayerCharacter` and rebuilding the link locally — so shipping the
+		// authority's list would fire every client's `CharacterAdded` twice, once
+		// for its own record and once for a copy of somebody else's.
+		if (component == "scene.PlayerRespawn" || component == "scene.CharacterChanges") {
+			return true;
+		}
+
 		// **A statement about hosting, not about what the world looks like.**
 		// `scene.AwakeWorld` is how a game tells its host that a world with
 		// nobody in it still has to tick — NPCs, an economy, a round timer. A

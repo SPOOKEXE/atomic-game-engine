@@ -663,9 +663,14 @@ namespace engine::gui {
 		// makes paint order total.
 		int32_t Depth = 0;
 
-		// The position in the compile's paint order. Assigned by the compile
-		// and read by nothing else, but stored rather than local so that a
-		// panel or a test can ask why one element covered another.
+		// The position in the compile's paint order.
+		//
+		// Assigned by `Compiled::Rebuild` and stored rather than left local so
+		// that a panel or a test can ask why one element covered another.
+		// `ElementsAt` is the reader that turned that from a convenience into a
+		// contract: `PlayerGui:GetGuiObjectsAtPosition` answers front to back,
+		// and this is how it does so without a second traversal deciding what is
+		// on top.
 		int32_t Order = 0;
 
 		// Whether this element descends from an enabled collector and every

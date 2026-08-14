@@ -117,10 +117,12 @@ declare interface AncestrySignal {
 // `__index` there — and `engine.script.servicecatalogue` asks a running VM
 // whether every row it claims is reachable.
 //
-// **What a JavaScript author still does not get is `GetBoundActionInfo` and
-// `GetAllBoundActionInfo`** — they answer a record holding `Enum.KeyCode`
-// members, which has no neutral return — so they are absent below rather than
-// declared and undefined.
+// **The two that were absent here are declared now**, which is what
+// `ScriptCall::ReturnBoundAction` bought: `GetBoundActionInfo` and
+// `GetAllBoundActionInfo` answer a record holding `Enum.KeyCode` members, and a
+// record with an `EnumItem` in it still has no `ScriptValue` form — so the *fact*
+// became a `BoundActionReport` and each adapter builds its own record, exactly as
+// each builds its own `InputObject`.
 
 // What a bound action's handler is handed. Roblox's `InputObject`, and the same
 // five fields the Luau half offers over the same report.
@@ -137,9 +139,13 @@ declare interface InputObject {
 // What `InputBegan`, `InputEnded` and `InputChanged` call a handler with.
 //
 // Its own type rather than `PropertyChangedSignal`, which passes nothing.
+//
+// `gameProcessedEvent` is true when the 2D interface took the pointer this beat,
+// which is what a click on a `TextButton` is. Always false for a keyboard event:
+// `gui` has no keyboard focus to take one with.
 declare interface InputSignal {
-	Connect(handler: (input: InputObject) => void): RBXScriptConnection;
-	Once(handler: (input: InputObject) => void): RBXScriptConnection;
+	Connect(handler: (input: InputObject, gameProcessedEvent: boolean) => void): RBXScriptConnection;
+	Once(handler: (input: InputObject, gameProcessedEvent: boolean) => void): RBXScriptConnection;
 }
 
 // The window's focus edges, which Roblox calls with nothing.
@@ -148,8 +154,19 @@ declare interface WindowFocusSignal {
 	Once(handler: () => void): RBXScriptConnection;
 }
 
+// What `LastInputTypeChanged` calls a handler with.
+declare interface LastInputTypeSignal {
+	Connect(handler: (lastInputType: Enum.UserInputType) => void): RBXScriptConnection;
+	Once(handler: (lastInputType: Enum.UserInputType) => void): RBXScriptConnection;
+}
+
 declare interface UserInputService {
 	MouseBehavior: Enum.MouseBehavior;
+
+	// Whether the pointer is drawn. Separate from `MouseBehavior` because
+	// Roblox's two are; the two locking modes hide it whatever this says.
+	MouseIconEnabled: boolean;
+
 	MouseDeltaSensitivity: number;
 	readonly KeyboardEnabled: boolean;
 	readonly MouseEnabled: boolean;
@@ -177,6 +194,9 @@ declare interface UserInputService {
 	readonly WindowFocused: WindowFocusSignal;
 	readonly WindowFocusReleased: WindowFocusSignal;
 
+	// Which device the player switched to, beside `GetLastInputType`'s poll.
+	readonly LastInputTypeChanged: LastInputTypeSignal;
+
 	IsKeyDown(key: Enum.KeyCode): boolean;
 
 	// False for the three `Enum.UserInputType` members that are not buttons.
@@ -189,7 +209,19 @@ declare interface UserInputService {
 	// `InputObject`s and not `EnumItem`s, which is Roblox's shape: the object
 	// carries where the pointer was as well as which button it is.
 	GetMouseButtonsPressed(): InputObject[];
+
+	// `Enum.UserInputType.Keyboard` on a world nobody has touched, where Roblox
+	// answers `None` — there is no such member here.
+	GetLastInputType(): Enum.UserInputType;
 }
+
+// What `UserInputService` deliberately does not have, and it is the half a
+// migrating author needs most: no gamepad, no touch surface, no keyboard focus
+// in `gui`, no cursor image in `render`, no keyboard-layout query below L12. So
+// `GetConnectedGamepads`, `GetGamepadState`, the six touch signals,
+// `GetFocusedTextBox`, `MouseIcon` and `GetStringForKeyCode` are absent rather
+// than present and useless. `script/src/UserInputService.cpp` names each one and
+// what closing it would take.
 
 // What a world decides about how it is heard. See the Luau half for the eleven
 // Roblox members that are absent and what each would need first.
@@ -281,6 +313,7 @@ declare namespace Enum {
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
+	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
 	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
 	interface EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
 	interface EasingStyle extends EnumItem { readonly __enum: "EasingStyle"; }
@@ -339,6 +372,10 @@ declare namespace Enum {
 		readonly LockFirstPerson: CameraType;
 		readonly ShiftLock: CameraType;
 		readonly Scriptable: CameraType;
+	};
+	const ContextActionResult: {
+		readonly Sink: ContextActionResult;
+		readonly Pass: ContextActionResult;
 	};
 	const DominantAxis: {
 		readonly Width: DominantAxis;
@@ -767,12 +804,20 @@ declare interface Instance {
 	AddTag(tag: string): boolean;
 	RemoveTag(tag: string): boolean;
 	HasTag(tag: string): boolean;
+	GetTags(): string[];
 	Destroy(): void;
 	Clone(): Instance;
 	GetChildren(): Instance[];
 	GetDescendants(): Instance[];
-	FindFirstChild(name: string): Instance | null;
+	FindFirstChild(name: string, recursive?: boolean): Instance | null;
+	FindFirstChildOfClass(className: string): Instance | null;
+	FindFirstChildWhichIsA(className: string, recursive?: boolean): Instance | null;
+	FindFirstAncestor(name: string): Instance | null;
+	FindFirstAncestorOfClass(className: string): Instance | null;
+	FindFirstAncestorWhichIsA(className: string): Instance | null;
+	GetFullName(): string;
 	IsDescendantOf(ancestor: Instance): boolean;
+	IsAncestorOf(descendant: Instance): boolean;
 	ClearAllChildren(): void;
 	GetPivot(): CFrame;
 	PivotTo(target: CFrame): void;
@@ -784,7 +829,10 @@ declare interface Instance {
 	readonly AncestryChanged: AncestrySignal;
 	readonly PlayerAdded: InstanceSignal;
 	readonly PlayerRemoving: InstanceSignal;
+	readonly CharacterAdded: InstanceSignal;
+	readonly CharacterRemoving: InstanceSignal;
 	GetPlayers(): Instance[];
+	GetPlayerByUserId(userId: number): Instance | undefined;
 	Equals(other: Instance): boolean;
 	GetPlayerFromCharacter(character: Instance): Instance | undefined;
 	LoadCharacter(): Instance | undefined;
@@ -803,11 +851,16 @@ declare interface Instance {
 	RemoveComponent(component: string): void;
 	GetComponents(): string[];
 	readonly Activated: GuiSignal;
+	readonly MouseButton1Click: GuiSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;
 	readonly MouseEnter: PointerSignal;
 	readonly MouseLeave: PointerSignal;
 	readonly MouseMoved: PointerSignal;
+	GetGuiObjectsAtPosition(x: number, y: number): Instance[];
+	TweenPosition(endPosition: UDim2 | Vector3, easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, time?: number, override?: boolean, callback?: () => void): boolean;
+	TweenSize(endSize: UDim2 | Vector3, easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, time?: number, override?: boolean, callback?: () => void): boolean;
+	TweenSizeAndPosition(endSize: UDim2 | Vector3, endPosition: UDim2 | Vector3, easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, time?: number, override?: boolean, callback?: () => void): boolean;
 }
 
 declare interface PVInstance extends Instance {
@@ -1348,23 +1401,43 @@ declare interface ServerStorage extends Service {
 declare interface StarterGui extends Service {
 }
 
+declare interface StarterPack extends Service {
+}
+
 declare interface StarterPlayer extends Service {
 }
 
 declare interface StarterPlayerScripts extends Service {
 }
 
+declare interface StarterCharacterScripts extends Service {
+}
+
 declare interface Players extends Service {
+	CharacterAutoLoads: boolean;
 	readonly LocalPlayer: Instance;
+	MaxPlayers: number;
+	readonly NumPlayers: number;
+	RespawnTime: number;
 }
 
 declare interface Player extends Instance {
+	readonly Backpack: Instance;
 	Character: Instance;
+	DisplayName: string;
 	readonly PlayerGui: Instance;
+	readonly PlayerScripts: Instance;
+	RespawnTime: number;
+	readonly StarterGear: Instance;
+	readonly UserId: number;
 }
 
 // --- the bus services ------------------------------------------------------
 
+// Every word `script::DescribeStatus` can hand back, generated from that
+// switch. A status a script branches on cannot be missing here, and a
+// status appended to `world::BusStatus` fails `just bindings-check` until
+// these files are regenerated.
 declare type BusStatus =
 	| "Ok"
 	| "NotFound"
@@ -1372,6 +1445,9 @@ declare type BusStatus =
 	| "OverBudget"
 	| "NoSuchWorld"
 	| "Unsupported"
+	| "NoSuchChannel"
+	| "Overflow"
+	| "WorldNotReady"
 	| "Unknown";
 
 declare interface StoreReply {
@@ -1410,24 +1486,32 @@ declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
 }
 
-// `(message, fromWorldName)`. The sender's name is second because a channel is
-// the one route where answering is the point — the receiver already knows it is
-// itself.
+// One channel's arrivals, handed back by `OpenChannel`. `(message,
+// fromWorldName)`: the sender's name is second because answering is the point,
+// and the receiver already named the channel.
 declare interface CrossWorldSignal {
 	Connect(handler: (message: unknown, fromWorld: string) => void): RBXScriptConnection;
 	Once(handler: (message: unknown, fromWorld: string) => void): RBXScriptConnection;
 }
 
 // The addressed route out of a world, where `MessagingService` is the fan-out.
-// There is deliberately no `GetWorlds`: a world's storage cannot see its
-// siblings, and `Send` answering false for a world that is not running is the
-// honest half of the same question.
+// One channel on one world, so two subsystems talking between the same pair of
+// worlds do not read each other's traffic. There is deliberately no
+// `GetWorlds`: a world's storage cannot see its siblings, and `SendAsync`
+// answering `NoSuchWorld` is the honest half of the same question.
 declare interface CrossWorldService {
-	// False when the world is not running or this world is over its bus budget
-	// for the tick.
-	Send(world: string, message: unknown): boolean;
+	// Listens on a named channel and hands back that channel's signal. Takes
+	// effect at the next barrier, so a message sent in the same tick is refused.
+	// Throws when this world is over its bus budget for the tick.
+	OpenChannel(channel: string): CrossWorldSignal;
 
-	readonly MessageReceived: CrossWorldSignal;
+	// Stops delivery. Handlers already connected are left alone, so reopening
+	// the channel later finds them still there.
+	CloseChannel(channel: string): void;
+
+	// `Ok`, or `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady` or `Overflow` — a
+	// channel send carries no value back, so the status is the answer.
+	SendAsync(world: string, channel: string, message: unknown): Promise<StoreReply>;
 }
 
 // What content this world holds, which is the other half of naming an asset.
@@ -1504,26 +1588,57 @@ declare interface HttpService {
 	UrlEncode(text: string): string;
 }
 
-// A priority stack over the keyboard, which is what this adds over polling: the
-// highest claim on a key wins and the rest never see the press.
+// What `GetBoundActionInfo` reports about one bound action.
 //
-// **`GetBoundActionInfo` and `GetAllBoundActionInfo` are Luau's alone** — they
-// answer a record holding `Enum.KeyCode` members and there is no neutral return
-// for one, so they are absent here rather than declared and undefined.
+// **Four of Roblox's six fields.** `title` and `description` come from
+// `SetTitle` and `SetDescription`, which decorate a touch button — there is no
+// touch surface, so the pair is not bound and reporting them as empty strings
+// would claim they had been set to nothing.
+declare interface BoundActionInfo {
+	// The keys this action claims. **Keys only**: `BindAction` takes
+	// `Enum.KeyCode` here where Roblox also takes `Enum.UserInputType`.
+	readonly inputTypes: Enum.KeyCode[];
+
+	readonly priorityLevel: number;
+
+	// **Higher wins, which is Roblox's direction.** The engine's own list is
+	// sorted highest-priority-first, so this is that index inverted rather than
+	// the same word meaning the opposite thing.
+	readonly stackOrder: number;
+
+	// Always false: the argument is accepted at bind time and ignored.
+	readonly createTouchButton: boolean;
+}
+
+// A priority stack over the keyboard, which is what this adds over polling: the
+// highest claim on a key decides, and what its handler returns decides whether
+// anything below it hears the press.
 declare interface ContextActionService {
 	// The touch-button argument is accepted and ignored: there is no touch
 	// surface, and refusing it would make a script fail on a line describing
 	// something this engine does not have.
+	//
+	// **What the handler returns decides who else hears the key.**
+	// `Enum.ContextActionResult.Pass` hands the press to the next claim down;
+	// `Sink`, `undefined`, or a handler that threw, stop it here.
 	BindAction(
 		name: string,
-		handler: (name: string, state: Enum.UserInputState, input: InputObject) => void,
+		handler: (
+			name: string,
+			state: Enum.UserInputState,
+			input: InputObject
+		) => Enum.ContextActionResult | void,
 		createTouchButton: boolean,
 		...keys: Enum.KeyCode[]
 	): void;
 
 	BindActionAtPriority(
 		name: string,
-		handler: (name: string, state: Enum.UserInputState, input: InputObject) => void,
+		handler: (
+			name: string,
+			state: Enum.UserInputState,
+			input: InputObject
+		) => Enum.ContextActionResult | void,
 		createTouchButton: boolean,
 		priority: number,
 		...keys: Enum.KeyCode[]
@@ -1531,6 +1646,11 @@ declare interface ContextActionService {
 
 	UnbindAction(name: string): void;
 	UnbindAllActions(): void;
+
+	// `null` for a name nothing has bound, which is what `if (info)` reads.
+	GetBoundActionInfo(name: string): BoundActionInfo | null;
+
+	GetAllBoundActionInfo(): Record<string, BoundActionInfo>;
 }
 
 // `tween.Completed`, which takes no arguments. Its own type rather than
@@ -1661,8 +1781,10 @@ declare const game: {
 		(service: "ServerScriptService"): ServerScriptService;
 		(service: "ServerStorage"): ServerStorage;
 		(service: "StarterGui"): StarterGui;
+		(service: "StarterPack"): StarterPack;
 		(service: "StarterPlayer"): StarterPlayer;
 		(service: "StarterPlayerScripts"): StarterPlayerScripts;
+		(service: "StarterCharacterScripts"): StarterCharacterScripts;
 		(service: "Players"): Players;
 		(service: "RunService"): RunService;
 		(service: "MessagingService"): MessagingService;

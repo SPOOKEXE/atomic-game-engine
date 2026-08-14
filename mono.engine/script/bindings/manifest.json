@@ -1578,6 +1578,18 @@
 			]
 		},
 		{
+			"name": "StarterPack",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
 			"name": "StarterPlayer",
 			"parent": "Service",
 			"constructible": false,
@@ -1602,15 +1614,31 @@
 			]
 		},
 		{
-			"name": "Players",
+			"name": "StarterCharacterScripts",
 			"parent": "Service",
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
 				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
-				{"name": "LocalPlayer", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "Players",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.PlayersService", "scene.Service"],
+			"properties": [
+				{"name": "CharacterAutoLoads", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.PlayersService"], "writes": ["scene.PlayersService"]},
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "LocalPlayer", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
+				{"name": "MaxPlayers", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PlayersService"], "writes": ["scene.PlayersService"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NumPlayers", "type": "int32", "kind": "computed", "bytes": 4, "writable": false, "reads": [], "writes": []},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "RespawnTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PlayersService"], "writes": ["scene.PlayersService"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -1618,12 +1646,18 @@
 			"name": "Player",
 			"parent": "Instance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.PlayerIdentity"],
 			"properties": [
+				{"name": "Backpack", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
 				{"name": "Character", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["scene.PlayerCharacter"], "writes": ["scene.PlayerCharacter"]},
+				{"name": "DisplayName", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PlayerIdentity"], "writes": ["scene.PlayerIdentity"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "PlayerGui", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []}
+				{"name": "PlayerGui", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
+				{"name": "PlayerScripts", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
+				{"name": "RespawnTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PlayerIdentity"], "writes": ["scene.PlayerIdentity"]},
+				{"name": "StarterGear", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
+				{"name": "UserId", "type": "int64", "kind": "computed", "bytes": 8, "writable": false, "reads": ["scene.PlayerIdentity"], "writes": []}
 			]
 		}
 	],
@@ -1633,6 +1667,7 @@
 		{"name": "AutomaticSize", "members": ["None", "X", "Y", "XY"]},
 		{"name": "BorderMode", "members": ["Outline", "Middle", "Inset"]},
 		{"name": "CameraType", "members": ["Classic", "LockFirstPerson", "ShiftLock", "Scriptable"]},
+		{"name": "ContextActionResult", "members": ["Sink", "Pass"]},
 		{"name": "DominantAxis", "members": ["Width", "Height"]},
 		{"name": "EasingDirection", "members": ["In", "Out", "InOut"]},
 		{"name": "EasingStyle", "members": ["Linear", "Quad", "Cubic", "Quart", "Quint", "Sine", "Exponential", "Circular", "Back", "Elastic", "Bounce"]},

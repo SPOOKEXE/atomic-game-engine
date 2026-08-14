@@ -684,7 +684,8 @@ namespace engine::script {
 		//   which writes `[]`, and from `ReadHostValue`, which reads `{}` as an
 		//   array for a reason of its own that `script/AGENTS.md` gives.
 		// - **A key that is not a string, a number or a boolean is refused**, and
-		//   `Services.cpp` has the reason: stringifying a table gives its
+		//   `LuauBus.cpp`'s `ReadScriptValue` has the reason: stringifying a table
+		//   gives its
 		//   address.
 		// - **A cycle is an error**, named as one, rather than a hang.
 		// - **Nesting past `CODEC_MAX_DEPTH` is refused.**

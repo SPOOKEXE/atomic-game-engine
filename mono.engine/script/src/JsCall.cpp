@@ -23,6 +23,7 @@
 
 #include "JsBindings.hpp"
 #include "ScriptCall.hpp"
+#include "Subtree.hpp"
 
 #include <engine/ecs/Attributes.hpp>
 
@@ -175,6 +176,22 @@ namespace engine::script {
 				return JsOf(Context).NextGuid++;
 			}
 
+			const HostRole &Role() const override {
+				return JsOf(Context).Role;
+			}
+
+			TweenTable &Tweens() override {
+				return JsOf(Context).Tweens;
+			}
+
+			DebrisQueue &Debris() override {
+				return JsOf(Context).Debris;
+			}
+
+			TopicSubscriptions &Subscriptions() override {
+				return JsOf(Context).Subscriptions;
+			}
+
 			Entity Subject() const override {
 				return Self;
 			}
@@ -240,6 +257,16 @@ namespace engine::script {
 					Raise("expected a CFrame");
 				}
 				return *frame;
+			}
+
+			const core::TweenInfo &AsTweenInfo(size_t index) override {
+				// Qualified, because this member shares the free function's name.
+				const core::TweenInfo *info =
+					index < Argc ? script::AsTweenInfo(Context, Argv[index]) : nullptr;
+				if (info == nullptr) {
+					Raise("expected a TweenInfo");
+				}
+				return *info;
 			}
 
 			ecs::Entity AsInstance(size_t index) override {
@@ -337,6 +364,47 @@ namespace engine::script {
 				return ToScriptValue(Context, Argv[index], out, 0, why);
 			}
 
+			void ReadFieldNames(size_t index, std::vector<std::string> &out) override {
+				if (index >= Argc || !JS_IsObject(Argv[index])) {
+					Raise("expected an object of named fields");
+				}
+
+				JSPropertyEnum *properties = nullptr;
+				uint32_t count = 0;
+				if (JS_GetOwnPropertyNames(
+						Context, &properties, &count, Argv[index], JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY
+					) != 0) {
+					Raise("could not read the fields of this record");
+				}
+
+				// **Copied out and every atom freed before anything else runs.**
+				// `JS_GetOwnPropertyNames` hands back reference-counted atoms, and
+				// the caller reads a value per name — which may raise — so a walk
+				// that held them would strand one per field it had taken.
+				for (uint32_t next = 0; next < count; next++) {
+					if (const char *text = JS_AtomToCString(Context, properties[next].atom);
+						text != nullptr) {
+						out.emplace_back(text);
+						JS_FreeCString(Context, text);
+					}
+					JS_FreeAtom(Context, properties[next].atom);
+				}
+				js_free(Context, properties);
+			}
+
+			bool ReadFieldProperty(
+				size_t index, const std::string &field, ecs::PropertyType type, Name enumName, void *out
+			) override {
+				JSValue value = JS_GetPropertyStr(Context, Argv[index], field.c_str());
+				const bool read = FromJsValue(Context, value, type, enumName, out);
+				JS_FreeValue(Context, value);
+				return read;
+			}
+
+			bool ReadProperty(size_t index, ecs::PropertyType type, Name enumName, void *out) override {
+				return index < Argc && FromJsValue(Context, Argv[index], type, enumName, out);
+			}
+
 			CallbackRef RetainCallback(size_t index) override {
 				if (index >= Argc || !JS_IsFunction(Context, Argv[index])) {
 					Raise("expected a function");
@@ -346,6 +414,11 @@ namespace engine::script {
 
 			void ReleaseCallback(CallbackRef callback) override {
 				Release(Context, callback);
+			}
+
+			void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) override {
+				SignalTable &signals = JsOf(Context).Signals;
+				signals.MarkOnce(signals.Connect(kind, subject, callback));
 			}
 
 			void ReturnNil() override {
@@ -439,6 +512,24 @@ namespace engine::script {
 				Set(array);
 			}
 
+			void ReturnBoundAction(const BoundActionReport &report) override {
+				Set(MakeBoundAction(report));
+			}
+
+			void ReturnBoundActions(std::span<const BoundActionReport> reports) override {
+				// **Keyed by name rather than an array**, which is Roblox's shape
+				// and the one a caller wants: the question this answers is "what
+				// has claimed E", and the name is how anything is unbound
+				// afterwards.
+				JSValue object = JS_NewObject(Context);
+				for (const BoundActionReport &report : reports) {
+					JS_SetPropertyStr(
+						Context, object, std::string(report.Name).c_str(), MakeBoundAction(report)
+					);
+				}
+				Set(object);
+			}
+
 			void ReturnInstance(ecs::Entity value) override {
 				// Nil for a null, which this language spells `null` — see the
 				// interface. `MakeJsInstance` makes the same call.
@@ -469,6 +560,49 @@ namespace engine::script {
 				Set(MakeJsSignal(Context, kind, Self, property));
 			}
 
+			void ReturnTween(ecs::Entity tween) override {
+				Set(MakeJsTween(Context, tween));
+			}
+
+			void ForgetSubject(ecs::Entity subject) override {
+				std::vector<CallbackRef> released;
+				JsOf(Context).Signals.DropSubject(subject, released);
+				for (const CallbackRef reference : released) {
+					Release(Context, reference);
+				}
+			}
+
+			void Forget(ecs::Entity instance) override {
+				JsContext &bound = JsOf(Context);
+				JSContext *context = Context;
+				ForgetSubtree(
+					*bound.World, bound.Signals, bound.Changes, instance, [context](CallbackRef reference) {
+						Release(context, reference);
+					}
+				);
+			}
+
+			void Await(uint64_t ticket) override {
+				// **A promise rather than a suspended thread**, which is the
+				// language's own idiom and the whole reason `Await` exists as one
+				// member: `PumpJsDeliveries` resolves it with the same three
+				// values the Luau barrier resumes a coroutine with.
+				JSValue settle[2];
+				JSValue promise = JS_NewPromiseCapability(Context, settle);
+				if (JS_IsException(promise)) {
+					// The exception is already on the context. Raising here would
+					// replace it with a less specific one.
+					throw JsRaised{};
+				}
+
+				// `insert_or_assign` for the Luau half's reason: a chained call
+				// reuses the ticket slot and the stale resolver would leak.
+				JsOf(Context).AwaitedTickets.insert_or_assign(ticket, Retain(Context, settle[0]));
+				JS_FreeValue(Context, settle[0]);
+				JS_FreeValue(Context, settle[1]);
+				Set(promise);
+			}
+
 			[[noreturn]] void Raise(const char *message) override {
 				// The value is discarded because the exception is on the context
 				// now; the trampoline turns the throw below back into
@@ -478,6 +612,32 @@ namespace engine::script {
 			}
 
 		  private:
+			// One action's record as a plain object.
+			//
+			// Roblox's four fields, and the two it does not have are absent from
+			// the *binding* rather than from the record — see the Luau twin.
+			JSValue MakeBoundAction(const BoundActionReport &report) {
+				JSValue record = JS_NewObject(Context);
+
+				JSValue keys = JS_NewArray(Context);
+				for (size_t index = 0; index < report.Keys.size(); index++) {
+					JS_SetPropertyUint32(
+						Context,
+						keys,
+						static_cast<uint32_t>(index),
+						MakeJsEnumItem(Context, Name("KeyCode"), report.Keys[index])
+					);
+				}
+
+				JS_SetPropertyStr(Context, record, "inputTypes", keys);
+				JS_SetPropertyStr(Context, record, "priorityLevel", JS_NewInt32(Context, report.Priority));
+				JS_SetPropertyStr(Context, record, "stackOrder", JS_NewInt32(Context, report.StackOrder));
+				JS_SetPropertyStr(
+					Context, record, "createTouchButton", JS_NewBool(Context, report.CreateTouchButton)
+				);
+				return record;
+			}
+
 			void Set(JSValue value) {
 				// **Appended rather than replacing**, so a method with more than
 				// one answer keeps them all — see `Take`. Every method but

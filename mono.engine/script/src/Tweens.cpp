@@ -1,8 +1,14 @@
 // Stepping every tween in one world, on the tick's own clock.
 //
-// Nothing here names a VM. `TweenService.cpp` and `JsTweenService.cpp` are what
-// meet one on this file's behalf, exactly as `LuauCall.cpp` and `JsCall.cpp` do
-// for the neutral instance methods.
+// Nothing here names a VM. `LuauTween.cpp` and `JsTween.cpp` are what meet one
+// on this file's behalf — the *handle* is per language and the service is not,
+// which is the split `ScriptCall::ReturnTween` sits on.
+//
+// **The easing name conversions are at the foot of this file rather than in a
+// binding**, and moving them there closed a duplicate: `LuauBindings.hpp` and
+// `JsBindings.hpp` each declared all four, on the stated grounds that neither
+// header may include the other's VM. Neither has to — a name and an enum member
+// are what a tween is made of and this is the tween file.
 //
 // @tier L9 · shared
 
@@ -326,6 +332,28 @@ namespace engine::script {
 		return Find(tween) != nullptr;
 	}
 
+	bool TweenTable::Driving(ecs::Entity target) const {
+		for (const Record &record : Records) {
+			if (record.Target == target && record.State == TweenState::Playing) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	size_t TweenTable::CancelFor(ecs::Entity target) {
+		size_t stopped = 0;
+		for (Record &record : Records) {
+			if (record.Target != target || record.State != TweenState::Playing) {
+				continue;
+			}
+			record.State = TweenState::Cancelled;
+			record.Elapsed = 0.0;
+			stopped++;
+		}
+		return stopped;
+	}
+
 	TweenState TweenTable::StateOf(ecs::Entity tween) const {
 		const Record *record = Find(tween);
 
@@ -409,5 +437,63 @@ namespace engine::script {
 			// barrier to report it to.
 			(void)store.SetProperty(record.Target, goal.Property, bytes, goal.Size);
 		}
+	}
+
+	core::EasingStyle EasingStyleOf(core::Name member) {
+		static const struct {
+			const char *Name;
+			core::EasingStyle Style;
+		} STYLES[] = {
+			{"Linear", core::EasingStyle::Linear},
+			{"Quad", core::EasingStyle::Quad},
+			{"Cubic", core::EasingStyle::Cubic},
+			{"Quart", core::EasingStyle::Quart},
+			{"Quint", core::EasingStyle::Quint},
+			{"Sine", core::EasingStyle::Sine},
+			{"Exponential", core::EasingStyle::Exponential},
+			{"Circular", core::EasingStyle::Circular},
+			{"Back", core::EasingStyle::Back},
+			{"Elastic", core::EasingStyle::Elastic},
+			{"Bounce", core::EasingStyle::Bounce},
+		};
+
+		for (const auto &entry : STYLES) {
+			if (member == core::Name(entry.Name)) {
+				return entry.Style;
+			}
+		}
+		return core::EasingStyle::Linear;
+	}
+
+	core::Name NameOf(core::EasingStyle style) {
+		static const char *NAMES[] = {
+			"Linear",
+			"Quad",
+			"Cubic",
+			"Quart",
+			"Quint",
+			"Sine",
+			"Exponential",
+			"Circular",
+			"Back",
+			"Elastic",
+			"Bounce",
+		};
+		return core::Name(NAMES[static_cast<size_t>(style)]);
+	}
+
+	core::EasingDirection EasingDirectionOf(core::Name member) {
+		if (member == core::Name("In")) {
+			return core::EasingDirection::In;
+		}
+		if (member == core::Name("InOut")) {
+			return core::EasingDirection::InOut;
+		}
+		return core::EasingDirection::Out;
+	}
+
+	core::Name NameOf(core::EasingDirection direction) {
+		static const char *NAMES[] = {"In", "Out", "InOut"};
+		return core::Name(NAMES[static_cast<size_t>(direction)]);
 	}
 }

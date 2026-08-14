@@ -2,7 +2,12 @@
 //
 // **Nothing here names a VM**, which is the point: `Actions.hpp` carries the
 // argument, and what is left is the ordering rules — replace by name, sort
-// stably by priority, first claim wins.
+// stably by priority, and walk the claims highest first so that the one that
+// answers `Pass` can hand the key down.
+//
+// The two questions a pump asks about a *frame* rather than about the stack —
+// what a report holds, and whether the interface already took the pointer — are
+// here for the same reason. Two pumps answering either one is two answers.
 //
 // @tier L9 · shared
 
@@ -55,6 +60,19 @@ namespace engine::script {
 		return report;
 	}
 
+	bool InterfaceHasPointer(std::span<const gui::GuiEvent> events) {
+		for (const gui::GuiEvent &event : events) {
+			if (event.Kind != gui::EventKind::MouseLeave) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool IsPointerReport(const InputReport &report) {
+		return report.Source != scene::InputSource::Keyboard;
+	}
+
 	bool ActionStack::Bind(BoundAction action, CallbackRef &released) {
 		const auto existing = std::find_if(Bound.begin(), Bound.end(), [&action](const BoundAction &bound) {
 			return bound.Name == action.Name;
@@ -97,12 +115,18 @@ namespace engine::script {
 		Bound.clear();
 	}
 
-	const BoundAction *ActionStack::Claiming(uint16_t key) const {
-		for (const BoundAction &action : Bound) {
+	const BoundAction *ActionStack::ClaimingFrom(uint16_t key, size_t &position) const {
+		for (size_t index = position; index < Bound.size(); index++) {
+			const BoundAction &action = Bound[index];
 			if (std::find(action.Keys.begin(), action.Keys.end(), key) != action.Keys.end()) {
+				position = index + 1;
 				return &action;
 			}
 		}
+
+		// **Left past the end rather than reset**, so a caller that keeps asking
+		// after an empty answer keeps getting one.
+		position = Bound.size();
 		return nullptr;
 	}
 

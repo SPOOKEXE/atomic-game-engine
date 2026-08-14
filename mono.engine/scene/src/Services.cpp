@@ -9,8 +9,12 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace engine::scene {
 
@@ -54,7 +58,7 @@ namespace engine::scene {
 		// is legible.
 		// `Players.LocalPlayer`.
 		//
-		// **A property, so no binding ever learns the name.** `Instances.cpp`
+		// **A property, so no binding ever learns the name.** `LuauInstances.cpp`
 		// switches on `PropertyType` and nothing else — that is what makes a
 		// property declared here readable from Luau, from JavaScript and in the
 		// properties panel with none of them changing. A `if (name ==
@@ -91,15 +95,15 @@ namespace engine::scene {
 			return property;
 		}
 
-		// `Player.PlayerGui`, the container a client's interface lives in.
+		// One of a player's four containers, as a reference a script can name.
 		//
-		// **The container has existed since v0.8 and nothing could name it.**
-		// `AddPlayer` creates it beside every player because `gui::Layout` draws
-		// a `ScreenGui` only from `StarterGui` or from a player's `PlayerGui` —
-		// so a script wanting to put an interface up had to find the child by
-		// string and hope the spelling matched the one two modules agree on.
-		// `PLAYER_GUI_NAME` is that spelling, and this is it handed over rather
-		// than retyped.
+		// **The containers existed and nothing could name them.** `AddPlayer`
+		// creates all four beside every player — `gui::Layout` draws a
+		// `ScreenGui` only from `StarterGui` or from a player's `PlayerGui`, and
+		// the spawn pipeline refills `Backpack` from `StarterGear` — so a script
+		// wanting to reach one had to find the child by string and hope the
+		// spelling matched the one the engine uses. The name constants are that
+		// spelling, and these are them handed over rather than retyped.
 		//
 		// **A lookup rather than a stored handle**, and that is the same call
 		// `Character` makes one property down: a stored entity is a second place
@@ -107,17 +111,23 @@ namespace engine::scene {
 		// destroys the container. Finding the child by name is one source of
 		// truth and costs a walk of a player's few children.
 		//
-		// **Read-only.** Roblox does not let a script assign it either, and here
-		// the reason is sharper: `gui` decides whether an interface draws by
-		// walking ancestors and comparing this name, so a script pointing the
-		// property somewhere else would move nothing — the interface would still
-		// draw from the real container and the property would describe a place
-		// it is not.
+		// **Read-only, all four.** Roblox does not let a script assign any of
+		// them either, and here the reason is sharper: every consumer finds the
+		// container by walking the tree, so a script pointing the property
+		// somewhere else would move nothing — the interface would still draw
+		// from the real container and the property would describe a place it is
+		// not.
+		//
+		// **A template over the name rather than four near-identical
+		// functions.** `PropertyDescriptor::Get` is a raw function pointer, so
+		// the conversion has to be captureless — which makes the container's
+		// name a template argument and not a parameter. That is the same
+		// constraint `Classes::ClampedProperty` is built around.
 		//
 		// @since v0.15
-		PropertyDescriptor PlayerGuiProperty() {
+		template <const std::string_view &Container> PropertyDescriptor ContainerProperty() {
 			PropertyDescriptor property;
-			property.Name = core::Name("PlayerGui");
+			property.Name = core::Name(Container);
 			property.Type = PropertyType::Reference;
 			property.Size = sizeof(Entity);
 			property.Kind = PropertyKind::Computed;
@@ -134,7 +144,72 @@ namespace engine::scene {
 				// is a player some other host built without going through
 				// `AddPlayer`. `if player.PlayerGui then` is how a script asks,
 				// and it is the same shape `Character` answers with.
-				*static_cast<Entity *>(out) = store.FindFirstChild(instance, PLAYER_GUI_NAME);
+				*static_cast<Entity *>(out) = store.FindFirstChild(instance, Container);
+				return true;
+			};
+			return property;
+		}
+
+		// `Player.UserId`, the number a game keys saved data by.
+		//
+		// **Read-only, for `Players.LocalPlayer`'s reason one property up: who
+		// you are is not yours to assign.** A script that could write this could
+		// read another player's data store entry by claiming their number, which
+		// is the one thing a shared world must not let a game script do by
+		// accident. The host assigns it at `AddPlayer` and nothing else may.
+		//
+		// @since v0.17
+		PropertyDescriptor UserIdProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("UserId");
+			property.Type = PropertyType::Int64;
+			property.Size = sizeof(int64_t);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			// **Reads the row and writes nothing, and the two sets differ for
+			// once.** A `.Changed` listener should hear a `UserId` that was
+			// assigned, so `Reads` names the component it comes off; nothing may
+			// assign it, so `Writes` is empty — which is the contradiction
+			// `mono.tools/bindings` refuses when a read-only property claims a
+			// write set, and it refused this one first.
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<PlayerIdentity>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				const PlayerIdentity *identity = store.Get<PlayerIdentity>(instance);
+				if (identity == nullptr) {
+					return false;
+				}
+				*static_cast<int64_t *>(out) = identity->UserId;
+				return true;
+			};
+			return property;
+		}
+
+		// `Players.NumPlayers`, which is `#Players:GetPlayers()` without the
+		// table.
+		//
+		// **Counted rather than kept.** A field incremented on arrival and
+		// decremented on departure is a second copy of a fact the tree already
+		// holds, and it is the copy that goes wrong the first time a script
+		// calls `player:Destroy()` — rule 2, with a scoreboard attached. A
+		// player's few siblings are a short walk.
+		//
+		// @since v0.17
+		PropertyDescriptor NumPlayersProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("NumPlayers");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+
+			// Reads nothing on the row: the answer is the tree.
+			property.Reads = &ecs::ComponentSet::Intern({});
+			property.Writes = property.Reads;
+
+			property.Get = [](const Store &store, Entity, void *out) -> bool {
+				*static_cast<int32_t *>(out) = static_cast<int32_t>(PlayerCount(store));
 				return true;
 			};
 			return property;
@@ -233,7 +308,7 @@ namespace engine::scene {
 			std::string_view Parent;
 		};
 
-		constexpr std::array<ServiceDesc, 10> SERVICES{{
+		constexpr std::array<ServiceDesc, 12> SERVICES{{
 			// **Workspace first, and the order matters.** These are created in
 			// this order and the explorer draws roots in creation order, so
 			// this is the order an author sees — Workspace at the top, exactly
@@ -245,8 +320,26 @@ namespace engine::scene {
 			{"ServerScriptService", ServiceScope::Server, {}},
 			{"ServerStorage", ServiceScope::Server, {}},
 			{"StarterGui", ServiceScope::Client, {}},
+
+			// **The gear template, and it is copied on the join rather than on
+			// the spawn.** Roblox clones this into `Player.StarterGear` once,
+			// and refills `Backpack` from *that* on every respawn — so a tool a
+			// game grants at run time is added to `StarterGear` and survives
+			// dying, where one added to `Backpack` does not. Two containers,
+			// two lifetimes; collapsing them is how "my tool vanished when I
+			// died" happens.
+			{"StarterPack", ServiceScope::Client, {}},
+
 			{"StarterPlayer", ServiceScope::Client, {}},
 			{"StarterPlayerScripts", ServiceScope::Client, "StarterPlayer"},
+
+			// **The other half of the pair, and the difference between them is
+			// *when*.** `StarterPlayerScripts` is copied once, on the join;
+			// this is copied into the character model on every spawn, because
+			// what it holds is a script about a body and the body is new each
+			// time. A world with one container instead of two cannot express a
+			// script that should survive a death.
+			{"StarterCharacterScripts", ServiceScope::Client, "StarterPlayer"},
 
 			// **`Shared`, because both halves need it and for different
 			// things.** A server enumerates who is connected; a client asks
@@ -364,9 +457,18 @@ namespace engine::scene {
 				ecs::Components::Of<LightingServiceComponent>(),
 			};
 
+			const std::array playersSet{
+				ecs::Components::Of<ServiceComponent>(),
+				ecs::Components::Of<PlayersServiceComponent>(),
+			};
+
 			for (const ServiceDesc &desc : SERVICES) {
 				if (desc.Name == "Lighting") {
 					Classes::Register(desc.Name, service, lightingSet);
+					continue;
+				}
+				if (desc.Name == "Players") {
+					Classes::Register(desc.Name, service, playersSet);
 					continue;
 				}
 				Classes::Register(desc.Name, service, {});
@@ -378,7 +480,8 @@ namespace engine::scene {
 			// has. Derived from `Instance` rather than from `Service` so the
 			// class picker's service exclusion does not hide it, and so a world
 			// can hold as many as it has occupants.
-			const ClassId player = Classes::Register("Player", instance, {});
+			const std::array playerSet{ecs::Components::Of<PlayerIdentity>()};
+			const ClassId player = Classes::Register("Player", instance, playerSet);
 
 			// **The one hook a game needs to make a character walk.** Setting it
 			// is what links a model to a player, and every consumer downstream —
@@ -386,9 +489,22 @@ namespace engine::scene {
 			// camera — reads that link rather than being told separately.
 			Classes::Computed(player, CharacterProperty());
 
-			// **Where a client's interface goes**, and the container has been
-			// there since v0.8 with no way to name it. See the descriptor.
-			Classes::Computed(player, PlayerGuiProperty());
+			// **The four containers a join makes**, none of which a script could
+			// name before. See `ContainerProperty`.
+			Classes::Computed(player, ContainerProperty<PLAYER_GUI_NAME>());
+			Classes::Computed(player, ContainerProperty<PLAYER_SCRIPTS_NAME>());
+			Classes::Computed(player, ContainerProperty<BACKPACK_NAME>());
+			Classes::Computed(player, ContainerProperty<STARTER_GEAR_NAME>());
+
+			Classes::Computed(player, UserIdProperty());
+			Classes::Property<&PlayerIdentity::DisplayName>(player, "DisplayName");
+
+			// **Per player as well as per world, which is Roblox's
+			// arrangement.** `Players.RespawnTime` is what a new occupant starts
+			// from and `Player.RespawnTime` is what that occupant actually
+			// waits, so a game can hold one person out of a round without
+			// changing the rule for everybody.
+			Classes::Property<&PlayerIdentity::RespawnTime>(player, "RespawnTime");
 
 			Classes::Computed(service, ScopeProperty());
 
@@ -397,6 +513,10 @@ namespace engine::scene {
 
 			const ClassId players = Classes::Find(core::Name("Players"));
 			Classes::Computed(players, LocalPlayerProperty());
+			Classes::Computed(players, NumPlayersProperty());
+			Classes::Property<&PlayersServiceComponent::MaxPlayers>(players, "MaxPlayers");
+			Classes::Property<&PlayersServiceComponent::RespawnTime>(players, "RespawnTime");
+			Classes::Property<&PlayersServiceComponent::CharacterAutoLoads>(players, "CharacterAutoLoads");
 			Classes::Property<&ServiceComponent::Fixture>(service, "Fixture");
 
 			const ClassId lighting = Classes::Find(core::Name("Lighting"));
@@ -418,12 +538,58 @@ namespace engine::scene {
 		return service;
 	}
 
+	Entity ServiceOf(const Store &store, ecs::ClassId klass) {
+		if (!klass.IsValid()) {
+			return NULL_ENTITY;
+		}
+
+		Entity found = NULL_ENTITY;
+		store.EachRoot([&](Entity root) {
+			// **The first in `EachRoot`'s order**, which is creation order — the
+			// same tie-break `FindFirstRoot` made, kept so a world that somehow
+			// holds two of one service resolves to the same one it always did.
+			if (found == NULL_ENTITY && store.IsA(root, klass)) {
+				found = root;
+			}
+		});
+		return found;
+	}
+
+	Entity ServiceUnder(const Store &store, Entity parent, ecs::ClassId klass) {
+		if (parent == NULL_ENTITY || !klass.IsValid()) {
+			return NULL_ENTITY;
+		}
+		return store.FindFirstChildWhichIsA(parent, klass);
+	}
+
 	Entity WorkspaceOf(const Store &store) {
-		return store.FindFirstRoot("Workspace");
+		return ServiceOf(store, Classes::Find(core::Name("Workspace")));
 	}
 
 	Entity PlayersOf(const Store &store) {
-		return store.FindFirstRoot("Players");
+		return ServiceOf(store, Classes::Find(core::Name("Players")));
+	}
+
+	bool InReplicatedFirst(const Store &store, Entity instance) {
+		const ecs::ClassId klass = Classes::Find(core::Name("ReplicatedFirst"));
+		if (!klass.IsValid()) {
+			return false;
+		}
+
+		// **Up the chain rather than down from the service**, which is
+		// `ScopeOfInstance`'s walk and its argument: containment is the fact,
+		// and a flag copied onto every descendant would be the one that went
+		// stale on a reparent. A world's tree is shallow, and this is asked once
+		// per entity per publish beside a walk that already happens.
+		//
+		// Bounded by the walk itself: `SetParent` refuses a cycle, so every
+		// chain ends.
+		for (Entity at = instance; at != NULL_ENTITY; at = store.ParentOf(at)) {
+			if (store.IsA(at, klass)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	ServiceScope ScopeOfInstance(const Store &store, Entity instance) {
@@ -486,13 +652,89 @@ namespace engine::scene {
 		return Classes::Find(core::Name("Player"));
 	}
 
-	Entity AddPlayer(Store &store, std::string_view name, bool local) {
+	size_t CloneChildrenInto(Store &store, Entity source, Entity destination) {
+		if (source == NULL_ENTITY || destination == NULL_ENTITY) {
+			return 0;
+		}
+
+		std::vector<Entity> sources;
+		store.EachChild(source, [&](Entity child) { sources.push_back(child); });
+
+		size_t cloned = 0;
+		for (const Entity child : sources) {
+			const Entity copy = store.CloneInstance(child);
+			if (copy == NULL_ENTITY) {
+				continue;
+			}
+			store.SetParent(copy, destination);
+			cloned++;
+		}
+		return cloned;
+	}
+
+	size_t ClearChildren(Store &store, Entity container) {
+		if (container == NULL_ENTITY) {
+			return 0;
+		}
+
+		std::vector<Entity> going;
+		store.EachChild(container, [&](Entity child) { going.push_back(child); });
+
+		for (const Entity child : going) {
+			store.DestroyInstance(child);
+		}
+		return going.size();
+	}
+
+	size_t PlayerCount(const Store &store) {
+		const Entity players = PlayersOf(store);
+		if (players == NULL_ENTITY) {
+			return 0;
+		}
+
+		const ecs::ClassId player = Classes::Find(core::Name("Player"));
+		size_t counted = 0;
+		store.EachChild(players, [&](Entity child) { counted += store.IsA(child, player) ? 1u : 0u; });
+		return counted;
+	}
+
+	Entity PlayerByUserId(const Store &store, int64_t userId) {
+		const Entity players = PlayersOf(store);
+		if (players == NULL_ENTITY) {
+			return NULL_ENTITY;
+		}
+
+		Entity found = NULL_ENTITY;
+		store.EachChild(players, [&](Entity child) {
+			if (found != NULL_ENTITY) {
+				return;
+			}
+			const PlayerIdentity *identity = store.Get<PlayerIdentity>(child);
+			if (identity != nullptr && identity->UserId == userId) {
+				found = child;
+			}
+		});
+		return found;
+	}
+
+	Entity AddPlayer(Store &store, std::string_view name, bool local, int64_t userId) {
 		const Entity players = PlayersOf(store);
 		if (players == NULL_ENTITY) {
 			// **Refused rather than furnished on the way past.** A caller adding
 			// a player to a world with no `Players` has skipped
 			// `InstallServices`, and quietly creating the service here would
 			// make that omission invisible until something else asked for it.
+			return NULL_ENTITY;
+		}
+
+		auto *settings = store.GetMutable<PlayersServiceComponent>(players);
+
+		// **Refused when the world is full, which is what `MaxPlayers` means.**
+		// A world from before that property existed has the component with its
+		// default; a `Players` with none at all is one somebody built by hand,
+		// and the honest answer for it is to admit rather than to invent a cap.
+		if (settings != nullptr &&
+			PlayerCount(store) >= static_cast<size_t>(std::max(0, settings->MaxPlayers))) {
 			return NULL_ENTITY;
 		}
 
@@ -503,26 +745,65 @@ namespace engine::scene {
 
 		store.SetParent(player, players);
 
-		// **A `PlayerGui`, because a client's interface has nowhere else to
-		// live.** `gui::Layout` draws a `ScreenGui` only from `StarterGui` or
-		// from a player's `PlayerGui` — Roblox's containment rule — so a player
-		// without one is a viewer that can never be shown an interface, and the
-		// symptom is a black overlay rather than an error.
+		PlayerIdentity identity;
+		identity.DisplayName = core::Name(name);
+		identity.RespawnTime = settings != nullptr ? settings->RespawnTime : 5.0f;
+
+		// **Zero means "take the next one", and the counter is on the world.**
+		// A host with an account system behind it passes the real number; one
+		// without gets identities that are stable across two runs of the same
+		// recording, which a clock or a random draw would not be.
+		if (userId != 0) {
+			identity.UserId = userId;
+		} else if (settings != nullptr) {
+			identity.UserId = settings->NextUserId++;
+		}
+		store.Set(player, identity);
+
+		// **The four containers, because everything under a player has to be
+		// somewhere and every consumer finds them by these names.**
+		// `gui::Layout` draws a `ScreenGui` only from `StarterGui` or from a
+		// player's `PlayerGui` — Roblox's containment rule — so a player without
+		// one is a viewer that can never be shown an interface, and the symptom
+		// is a black overlay rather than an error. The other three are the gear
+		// pipeline and the client's own scripts.
 		//
 		// Made here rather than by whoever adds the player, for
 		// `InstallServices`' reason: a container every consumer has to remember
 		// to create is one somebody will not, and the failure is silent.
 		//
-		// **A plain `Instance` rather than a `gui` class.** `scene` may not link
-		// `gui` — the refusal runs both ways, and `gui/AGENTS.md` states this
-		// side of it — and what the containment test reads is the *name*. So the
-		// spelling is what matters, and `examples/tests/Scene.cpp` pins it
-		// against `gui::PLAYER_GUI` from the one place both are linked.
-		const Entity playerGui =
-			store.CreateInstance(Classes::Find(core::Name("Instance")), std::string(PLAYER_GUI_NAME));
-		if (playerGui != NULL_ENTITY) {
-			store.SetParent(playerGui, player);
+		// **Plain `Instance`s rather than classes of their own.** `scene` may
+		// not link `gui` — the refusal runs both ways, and `gui/AGENTS.md`
+		// states this side of it — and what every containment test reads is the
+		// *name*. So the spelling is what matters, and `examples/tests/Scene.cpp`
+		// pins `PlayerGui` against `gui::PLAYER_GUI` from the one place both are
+		// linked.
+		const ecs::ClassId container = Classes::Find(core::Name("Instance"));
+		for (const std::string_view label :
+			 {PLAYER_GUI_NAME, PLAYER_SCRIPTS_NAME, BACKPACK_NAME, STARTER_GEAR_NAME}) {
+			const Entity child = store.CreateInstance(container, std::string(label));
+			if (child != NULL_ENTITY) {
+				store.SetParent(child, player);
+			}
 		}
+
+		// **The two copies a join makes, and neither is made again.**
+		// `StarterPlayerScripts` is the client's own code and `StarterPack` is
+		// the gear a game starts somebody with; a respawn refills `Backpack`
+		// from what this put in `StarterGear`, which is why a tool granted at
+		// run time survives a death and one dropped straight into `Backpack`
+		// does not. `Services.hpp` carries the whole sequence.
+		const Entity starterPlayer = ServiceOf(store, Classes::Find(core::Name("StarterPlayer")));
+		CloneChildrenInto(
+			store,
+			ServiceUnder(store, starterPlayer, Classes::Find(core::Name("StarterPlayerScripts"))),
+			store.FindFirstChild(player, PLAYER_SCRIPTS_NAME)
+		);
+		CloneChildrenInto(
+			store,
+			ServiceOf(store, Classes::Find(core::Name("StarterPack"))),
+			store.FindFirstChild(player, STARTER_GEAR_NAME)
+		);
 
 		if (local) {
 			// One per world, and the last marked wins. A resource rather than a
@@ -544,19 +825,25 @@ namespace engine::scene {
 			// instances — they were saved like everything else — so creating
 			// them unconditionally would give an author two Workspaces, one of
 			// which holds their scene and one of which is empty.
+			// **Found by class, never by name, and that was a real bug.** These
+			// lookups were `FindFirstRoot(desc.Name)`, so a script that renamed
+			// the `Workspace` made this find nothing and mint a *second* one
+			// beside the scene — see `ServiceOf`. A class survives a rename by
+			// construction.
+			const ClassId klass = Classes::Find(core::Name(desc.Name));
+
 			Entity parent = NULL_ENTITY;
 			if (!desc.Parent.empty()) {
-				parent = store.FindFirstRoot(desc.Parent);
+				parent = ServiceOf(store, Classes::Find(core::Name(desc.Parent)));
 				if (parent == NULL_ENTITY) {
 					continue;
 				}
 			}
 
-			Entity existing = parent == NULL_ENTITY ? store.FindFirstRoot(desc.Name)
-													: store.FindFirstChild(parent, desc.Name);
+			Entity existing =
+				parent == NULL_ENTITY ? ServiceOf(store, klass) : ServiceUnder(store, parent, klass);
 
 			if (existing == NULL_ENTITY) {
-				const ClassId klass = Classes::Find(core::Name(desc.Name));
 				existing = store.CreateInstance(klass, desc.Name);
 				if (existing == NULL_ENTITY) {
 					continue;

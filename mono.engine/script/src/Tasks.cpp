@@ -1,8 +1,21 @@
 #include "Tasks.hpp"
 
+#include <engine/ecs/Store.hpp>
+
 #include <algorithm>
+#include <cmath>
 
 namespace engine::script {
+
+	uint64_t TicksFor(const ecs::Store &store, double seconds) {
+		const float delta = store.Time().Delta;
+		if (seconds <= 0.0 || delta <= 0.0f) {
+			return 1;
+		}
+
+		const double ticks = std::ceil(seconds / static_cast<double>(delta));
+		return ticks < 1.0 ? 1 : static_cast<uint64_t>(ticks);
+	}
 
 	void TaskQueue::Delay(CallbackRef thread, uint64_t resumeAt) {
 		const Wait wait{resumeAt, NextSequence++, thread};

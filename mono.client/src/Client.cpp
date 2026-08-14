@@ -162,7 +162,7 @@ namespace client {
 
 				// The scripts before the camera, so a scene that aimed one of
 				// its own keeps it — see `InstallDefaultCamera`.
-				Runtimes.push_back(engine::game::StartWorldScripts(store, systems, limits, failure));
+				Runtimes.emplace_back(id, engine::game::StartWorldScripts(store, systems, limits, failure));
 				InstallDefaultCamera(store, systems);
 			});
 
@@ -1072,6 +1072,15 @@ namespace client {
 		return true;
 	}
 
+	engine::script::Runtime *Client::RuntimeOf(engine::world::WorldId world) {
+		for (const auto &[id, runtime] : Runtimes) {
+			if (id == world) {
+				return runtime.get();
+			}
+		}
+		return nullptr;
+	}
+
 	void Client::WriteInput(engine::ecs::Store &store) {
 		auto *state = store.ResourceMutable<engine::scene::InputState>();
 		if (state == nullptr) {
@@ -1083,17 +1092,21 @@ namespace client {
 		// window; copying the whole translator over the resource would throw
 		// that away every frame. `scene::InputState` is the seam in both
 		// directions.
-		// **Two fields survive the overwrite, for two different reasons.** The
-		// pointer mode travels the other way — a script writes it and the window
-		// obeys — and the tap latch is *older than this frame* by design: it is
-		// what a key pressed between two ticks is remembered in, and
-		// `Input.State()` only knows about the frame it just read.
+		// **Three fields survive the overwrite, for two different reasons.** The
+		// pointer mode and whether the cursor is drawn travel the other way — a
+		// script writes them and the window obeys — and the tap latch is *older
+		// than this frame* by design: it is what a key pressed between two ticks
+		// is remembered in, and `Input.State()` only knows about the frame it
+		// just read.
 		const engine::scene::MouseBehavior wanted = state->Behaviour;
+		const bool wantedIcon = state->MouseIconEnabled;
 		const engine::scene::KeyBits taps = state->Pressed;
 		*state = Input.State();
 		state->Behaviour = wanted;
+		state->MouseIconEnabled = wantedIcon;
 		state->Pressed = taps;
 		PointerMode = wanted;
+		PointerIconEnabled = wantedIcon;
 
 		// Latched here, where every frame is seen. This used to set a private
 		// `PendingJump` on the client, which `SubmitMove` then had to merge back
@@ -1256,20 +1269,30 @@ namespace client {
 		// `SDL_SetWindowRelativeMouseMode` is a system call and a window-manager
 		// round trip on some platforms, so setting it every frame is a per-frame
 		// cost to say what it already says. The compare is what makes it free.
-		if (Window != nullptr && PointerMode != AppliedPointerMode) {
+		if (Window != nullptr &&
+			(PointerMode != AppliedPointerMode || PointerIconEnabled != AppliedPointerIcon)) {
 			const bool relative = PointerMode == engine::scene::MouseBehavior::LockCenter;
 			SDL_SetWindowRelativeMouseMode(Window, relative);
 
-			// `LockCurrentPosition` hides the pointer without warping it, which is
-			// what a drag-to-rotate wants: the pointer is back where it started
-			// when the drag ends. Relative mode would warp it to the centre.
-			if (PointerMode == engine::scene::MouseBehavior::LockCurrentPosition) {
+			// **`LockCurrentPosition` hides the pointer whatever
+			// `MouseIconEnabled` says, and relative mode owns it outright.** The
+			// two properties overlap and the mode is the stronger claim: a
+			// drag-to-rotate wants the pointer gone and back where it started when
+			// the drag ends, which is why it hides without warping where relative
+			// mode would warp to the centre. `MouseIconEnabled` is what decides
+			// every other case, which is the one Roblox uses it for — a cutscene
+			// with the pointer free and invisible.
+			const bool hidden = relative ||
+								PointerMode == engine::scene::MouseBehavior::LockCurrentPosition ||
+								!PointerIconEnabled;
+			if (hidden) {
 				SDL_HideCursor();
-			} else if (!relative) {
+			} else {
 				SDL_ShowCursor();
 			}
 
 			AppliedPointerMode = PointerMode;
+			AppliedPointerIcon = PointerIconEnabled;
 		}
 
 		if (Actions.Fired(Action::Quit)) {
@@ -1833,6 +1856,7 @@ namespace client {
 		engine::render::InterfacePass *hook = nullptr;
 		if (Rendered.IsValid()) {
 			engine::gui::CompileRequest request;
+			std::span<const engine::gui::GuiEvent> interfaceEvents;
 			request.Display.Width = static_cast<float>(Settings.Width);
 			request.Display.Height = static_cast<float>(Settings.Height);
 
@@ -1855,7 +1879,41 @@ namespace client {
 				engine::render::ResolveSpatialCanvases(store, request.Display);
 				engine::gui::Layout(store, request.Display);
 				InterfaceList.Rebuild(store, request);
+
+				// **The hit test, which a shipped client did not do at all.** The
+				// router was constructed, read for `Hovered` and `Pressed`, and
+				// never `Update`d — so a `TextButton` in a game never lit up and
+				// its `Activated` never fired, while the same tree worked in the
+				// editor because `studio::Overlay` drives a router of its own.
+				// A button that does nothing in the shipped build and works in
+				// the editor is the worst version of this bug, because it is
+				// invisible to whoever is authoring.
+				//
+				// **Against the list that was just compiled**, and the hover it
+				// fed that compile is deliberately the previous frame's — see
+				// `Router::Hovered`, which explains why the one-frame loop is the
+				// alternative to a compile that depends on its own output.
+				engine::gui::Pointer pointer;
+				pointer.Position = Input.State().MousePosition;
+				pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
+
+				// **Focus and not a rectangle test.** The position is already in
+				// window pixels, and a pointer that has left the window stops
+				// producing motion — what it does *not* do is end the hover,
+				// which is what this flag is for.
+				pointer.Inside = Input.State().Focused;
+
+				interfaceEvents = InterfaceRouter.Update(store, InterfaceList.Commands(), pointer);
 			});
+
+			// **Outside the world's lock, because it reaches a VM.** The span
+			// points into the router's own vector, which is a member and is only
+			// rewritten by the next `Update`; `DeliverGuiEvents` copies.
+			if (!interfaceEvents.empty()) {
+				if (engine::script::Runtime *runtime = RuntimeOf(Rendered); runtime != nullptr) {
+					runtime->DeliverGuiEvents(interfaceEvents);
+				}
+			}
 
 			if (!InterfaceList.Commands().Commands.empty()) {
 				Interface.Submit(

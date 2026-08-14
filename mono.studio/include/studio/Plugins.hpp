@@ -264,7 +264,11 @@ namespace studio {
 		// palette around it — see `engine::ui::ScopedColours`.
 		//
 		// @since v0.13
-		engine::ui::ThemeColours Colours;
+		// Defaulted rather than left to the aggregate, so a `PluginWidget`
+		// built by naming the members before it does not warn under the `ci`
+		// preset. An empty override set is "take the editor's theme", which is
+		// what those sites mean.
+		engine::ui::ThemeColours Colours = {};
 	};
 
 	// One plugin, as the editor holds it.

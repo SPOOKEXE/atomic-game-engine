@@ -108,8 +108,7 @@ namespace engine::physics {
 				// Lying on its side: the contact is the line where the barrel
 				// touches, which is two points and never one. A single point
 				// here is a cylinder that rolls on its side while resting.
-				const core::Vector3 outward =
-					across > RADIAL_EPSILON ? radial / across : shape.Axis[0];
+				const core::Vector3 outward = across > RADIAL_EPSILON ? radial / across : shape.Axis[0];
 				const core::Vector3 centre = shape.Frame.Position + outward * radius;
 				feature.Plane = outward;
 				feature.Count = 2;
@@ -144,8 +143,7 @@ namespace engine::physics {
 	ShapeInstance::ShapeInstance(
 		const core::CFrame &frame, const core::Vector3 &extent, scene::ShapeKind shape
 	)
-		: Frame(frame),
-		  Extent(extent),
+		: Frame(frame), Extent(extent),
 		  Axis{frame.RightVector(), frame.UpVector(), frame.VectorToWorldSpace(core::Vector3::ZAxis)},
 		  Shape(shape) {}
 

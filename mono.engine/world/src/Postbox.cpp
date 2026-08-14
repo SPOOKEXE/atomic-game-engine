@@ -125,7 +125,8 @@ namespace engine::world {
 		core::Name key,
 		std::span<const std::byte> payload,
 		uint64_t version,
-		bool wantsReply
+		bool wantsReply,
+		core::Name target
 	) {
 		if (IsReplica()) {
 			// A replica simulates its own copy and reconciles against
@@ -151,6 +152,7 @@ namespace engine::world {
 		envelope.Bus = bus;
 		envelope.Operation = operation;
 		envelope.Key = key;
+		envelope.Target = target;
 		envelope.Sequence = outbox.NextSequence++;
 		envelope.Version = version;
 		envelope.Payload.assign(payload.begin(), payload.end());
@@ -169,7 +171,7 @@ namespace engine::world {
 		return issued;
 	}
 
-	// The three fire-and-forget operations check the budget themselves, because
+	// The five fire-and-forget operations check the budget themselves, because
 	// `Post` reports failure by returning no ticket and these never ask for one
 	// — so success and refusal would otherwise look identical.
 
@@ -194,6 +196,27 @@ namespace engine::world {
 			return false;
 		}
 		Post(BusKind::Messaging, BusOperation::Unsubscribe, core::Name(topic), {}, 0, false);
+		return true;
+	}
+
+	// **A channel is opened with `Subscribe` one bus along**, which is `Bus.hpp`'s
+	// argument: the act is the same one — a world declaring what it wants
+	// delivered — and the router tells the two apart by the `BusKind` it has to
+	// read anyway.
+
+	bool Postbox::OpenChannel(std::string_view channel) {
+		if (IsReplica() || Remaining() == 0) {
+			return false;
+		}
+		Post(BusKind::Channel, BusOperation::Subscribe, core::Name(channel), {}, 0, false);
+		return true;
+	}
+
+	bool Postbox::CloseChannel(std::string_view channel) {
+		if (IsReplica() || Remaining() == 0) {
+			return false;
+		}
+		Post(BusKind::Channel, BusOperation::Unsubscribe, core::Name(channel), {}, 0, false);
 		return true;
 	}
 
@@ -225,7 +248,10 @@ namespace engine::world {
 		return Post(BusKind::Teleport, BusOperation::Send, core::Name(world), payload, 0, true);
 	}
 
-	Ticket Postbox::SendTo(std::string_view world, std::span<const std::byte> payload) {
-		return Post(BusKind::Channel, BusOperation::Send, core::Name(world), payload, 0, true);
+	Ticket
+	Postbox::SendTo(std::string_view world, std::string_view channel, std::span<const std::byte> payload) {
+		return Post(
+			BusKind::Channel, BusOperation::Send, core::Name(channel), payload, 0, true, core::Name(world)
+		);
 	}
 }

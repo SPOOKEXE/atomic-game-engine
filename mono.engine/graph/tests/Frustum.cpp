@@ -310,9 +310,7 @@ TEST_CASE("a surface two bounces deep counts when the pass will draw it", "[grap
 	eyes[0].Index = 0;
 	eyes[0].ViewProjection =
 		engine::scene::ResolveCamera(
-			CFrame::LookAt(Vector3{0.0f, 0.0f, -10.0f}, Vector3{0.0f, 0.0f, 40.0f}),
-			nearSighted,
-			16.0f / 9.0f
+			CFrame::LookAt(Vector3{0.0f, 0.0f, -10.0f}, Vector3{0.0f, 0.0f, 40.0f}), nearSighted, 16.0f / 9.0f
 		)
 			.ViewProjection;
 

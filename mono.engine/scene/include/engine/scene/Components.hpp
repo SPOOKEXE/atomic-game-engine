@@ -778,8 +778,13 @@ namespace engine::scene {
 		// `Material` is an instance at all. A part with no `Material` child is
 		// never visited by the resolve pass and draws with the engine's shader.
 		//
+		// **Defaulted rather than left to the aggregate**, matching
+		// `Visual::Shader` one struct up and for the plainer reason too: every
+		// construction site names the members before it and stops, and
+		// `-Wmissing-field-initializers` is fatal under the `ci` preset.
+		//
 		// @since v0.15
-		core::Name Shader;
+		core::Name Shader = {};
 	};
 
 	// Which tags an entity carries, as a bitmask.
@@ -886,7 +891,7 @@ namespace engine::scene {
 		//
 		// **A property rather than a `Play()` method, and that is a statement
 		// about the binding rather than about audio.** Script methods live on
-		// one metatable shared by every instance — `script/src/Instances.cpp` —
+		// one metatable shared by every instance — `script/src/LuauInstances.cpp` —
 		// so a `Play` there would be a method on every `Part` in the world.
 		// Roblox has this property too and `sound.Playing = true` is what it
 		// means; the day classes can carry their own methods, `Play()` sets
@@ -1095,8 +1100,15 @@ namespace engine::scene {
 		// that matches no world leaves the pane showing this world, which is the
 		// same fallback an unlinked portal gets and fails the same visible way.
 		//
+		// **Defaulted rather than left to the aggregate.** Every construction
+		// site names the members before this one and stops, and
+		// `-Wmissing-field-initializers` is fatal under the `ci` preset — so
+		// this said "not set" in thirty-five warnings rather than in one `= {}`.
+		// A default-constructed `Name` is the invalid one, which is already what
+		// "no destination" means here.
+		//
 		// @since v0.14
-		core::Name DestinationWorld;
+		core::Name DestinationWorld = {};
 
 		// Explicit padding, for the reason every other `Reserved` gives.
 		//

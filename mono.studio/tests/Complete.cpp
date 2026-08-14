@@ -196,7 +196,7 @@ TEST_CASE("a class name is offered where a class name goes", "[studio][complete]
 		CHECK(Offers(entries, "Part"));
 
 		// **The abstract bases are refused here and nowhere else.** The run time
-		// would mint an `Instance` perfectly happily — `Instances.cpp` looks the
+		// would mint an `Instance` perfectly happily — `LuauInstances.cpp` looks the
 		// name up and takes whatever it finds — so offering one produces a row
 		// nothing knows how to draw.
 		CHECK_FALSE(Offers(entries, "PVInstance"));

@@ -9,7 +9,7 @@
 // for six versions, and `CollectionService` has no `GetInstanceAddedSignal`
 // precisely so that it cannot happen again.
 //
-// **`UserInputService`'s five signals are here too, since that service crossed.**
+// **`UserInputService`'s six signals are here too, since that service crossed.**
 // They were deliberately absent while it was Luau's alone — a signal surface for
 // a service this language cannot reach is a signal nothing can connect — and
 // leaving them out once it *had* crossed would have been the same failure in the
@@ -21,7 +21,7 @@
 // **The report is shared and only the wrapper is here.** `Actions.hpp` holds
 // `InputReport` and all four builders — `KeyReport`, `ButtonReport`,
 // `MotionReport` and `WheelReport` — because two pumps building a report each is
-// two answers to what a frame did; `InputServices.cpp` builds the Luau userdata
+// two answers to what a frame did; `LuauInput.cpp` builds the Luau userdata
 // and this builds the JavaScript object. Both are the same five fields over the
 // same fact, which is what makes a handler ported between the two languages read
 // the same.
@@ -127,20 +127,26 @@ namespace engine::script {
 		// not filter, which is the same reason `PumpJsChanges` walks the table
 		// itself.
 		//
-		// **One `InputObject` for every handler on one edge**, built once and
-		// freed once. It is read-only and sealed, so nothing a handler does to it
-		// can reach the next.
+		// **One argument list for every handler on one edge**, built once by the
+		// caller and freed once. An `InputObject` is read-only and sealed, so
+		// nothing a handler does to it can reach the next.
 		//
-		// @param context The VM.
-		// @param signal  Which signal, by name.
-		// @param report  What to hand over, or null for the two focus signals,
-		//        which Roblox calls with nothing.
+		// **The caller builds the arguments where the Luau twin passes a
+		// callable, and that is the one place the two pumps genuinely differ.**
+		// Luau's arguments live on a stack and have to be pushed per call;
+		// JavaScript's are values, so building them once is both simpler and
+		// cheaper. What is shared is the rule underneath — which signals get what
+		// — and that lives in the two pumps' identical call sites.
+		//
+		// @param context   The VM.
+		// @param signal    Which signal, by name.
+		// @param arguments What to hand over. Empty for the two focus signals,
+		//        which Roblox calls with nothing. Owned by the caller.
 		// @return The first handler failure, or empty.
-		std::string FireInputSignal(JSContext *context, core::Name signal, const InputReport *report) {
+		std::string FireInputSignal(JSContext *context, core::Name signal, std::span<JSValue> arguments) {
 			JsContext &bound = JsOf(context);
 
 			std::string firstError;
-			JSValue argument = report == nullptr ? JS_UNDEFINED : MakeJsInputObject(context, *report);
 
 			// **What a `Once` connection spends.** `SignalTable::Fire` retires
 			// nothing itself — only the VM knows how to release a callable — so
@@ -159,8 +165,8 @@ namespace engine::script {
 						context,
 						Held(context, connection.Callback),
 						JS_UNDEFINED,
-						report == nullptr ? 0 : 1,
-						&argument
+						static_cast<int>(arguments.size()),
+						arguments.data()
 					);
 
 					// **Every connection runs even when one throws**, which is
@@ -189,42 +195,55 @@ namespace engine::script {
 				}
 			}
 
-			JS_FreeValue(context, argument);
 			return firstError;
 		}
 
-		// Hands one key edge to the first bound action that claims it.
+		// Hands one key edge down the claims until one of them sinks it.
 		//
-		// **The first claim wins and the rest never see it**, which is the whole
-		// reason `ContextActionService` exists beside polling —
-		// `ActionStack::Claiming` is what decides, so this pump and the Luau one
-		// are the same rule rather than two that agree today.
+		// **`ActionStack::ClaimingFrom` decides the order and
+		// `Enum.ContextActionResult` decides how far the walk gets**, so this pump
+		// and the Luau one are the same rule rather than two that agree today.
+		// `LuauInput.cpp`'s twin carries the argument for why anything that is
+		// not `Pass` sinks, and for why a handler that threw sinks too.
 		//
-		// @return The handler's failure, or empty.
-		std::string RunBoundAction(JSContext *context, KeyCode key, const InputReport &report) {
+		// @return The first handler's failure, or empty.
+		std::string RunBoundActions(JSContext *context, KeyCode key, const InputReport &report) {
 			JsContext &bound = JsOf(context);
 
-			const BoundAction *action = bound.Actions.Claiming(static_cast<uint16_t>(key));
-			if (action == nullptr) {
-				return {};
-			}
+			size_t position = 0;
+			while (true) {
+				const BoundAction *action = bound.Actions.ClaimingFrom(static_cast<uint16_t>(key), position);
+				if (action == nullptr) {
+					return {};
+				}
 
-			JSValue arguments[3];
-			arguments[0] = JS_NewStringLen(context, action->Name.data(), action->Name.size());
-			arguments[1] = MakeJsEnumItem(context, core::Name("UserInputState"), report.State);
-			arguments[2] = MakeJsInputObject(context, report);
+				JSValue arguments[3];
+				arguments[0] = JS_NewStringLen(context, action->Name.data(), action->Name.size());
+				arguments[1] = MakeJsEnumItem(context, core::Name("UserInputState"), report.State);
+				arguments[2] = MakeJsInputObject(context, report);
 
-			std::string failure;
-			JSValue result = JS_Call(context, Held(context, action->Callback), JS_UNDEFINED, 3, arguments);
-			if (JS_IsException(result)) {
-				failure = ThrownBy(context, "a bound action failed");
-			}
+				JSValue result =
+					JS_Call(context, Held(context, action->Callback), JS_UNDEFINED, 3, arguments);
 
-			JS_FreeValue(context, result);
-			for (JSValue &argument : arguments) {
-				JS_FreeValue(context, argument);
+				std::string failure;
+				bool pass = false;
+				if (JS_IsException(result)) {
+					failure = ThrownBy(context, "a bound action failed");
+				} else {
+					core::Name answer;
+					pass = ReadJsEnumValue(context, result, core::Name("ContextActionResult"), answer) &&
+						   answer == core::Name("Pass");
+				}
+
+				JS_FreeValue(context, result);
+				for (JSValue &argument : arguments) {
+					JS_FreeValue(context, argument);
+				}
+
+				if (!pass) {
+					return failure;
+				}
 			}
-			return failure;
 		}
 	}
 
@@ -261,7 +280,7 @@ namespace engine::script {
 		return object;
 	}
 
-	std::string PumpJsInput(JSContext *context) {
+	std::string PumpJsInput(JSContext *context, std::span<const gui::GuiEvent> interface) {
 		JsContext &bound = JsOf(context);
 		if (bound.World == nullptr) {
 			return {};
@@ -281,16 +300,45 @@ namespace engine::script {
 			}
 		};
 
+		// Decided once for the whole beat, exactly as the Luau pump does — see
+		// `InterfaceHasPointer` for what it means and why a key is never
+		// processed.
+		const bool processed = InterfaceHasPointer(interface);
+
+		// One edge's arguments: the `InputObject` and Roblox's
+		// `gameProcessedEvent`. Built and freed per edge, because the object
+		// carries that edge's report.
+		const auto fireReport = [&](core::Name signal, const InputReport &report) {
+			JSValue arguments[2];
+			arguments[0] = MakeJsInputObject(context, report);
+			arguments[1] = JS_NewBool(context, processed && IsPointerReport(report));
+
+			note(FireInputSignal(context, signal, arguments));
+
+			for (JSValue &argument : arguments) {
+				JS_FreeValue(context, argument);
+			}
+		};
+
 		// **Focus first, before the releases it caused.**
 		// `input::Translator::ReleaseAll` clears every key on the frame focus is
 		// lost, so this pump is also the one that reports them released — and a
 		// listener that hears "you lost focus" after "W came up" has to guess
 		// which of the two explains the other.
 		if (input->WasFocusGained()) {
-			note(FireInputSignal(context, core::Name("WindowFocused"), nullptr));
+			note(FireInputSignal(context, core::Name("WindowFocused"), {}));
 		}
 		if (input->WasFocusLost()) {
-			note(FireInputSignal(context, core::Name("WindowFocusReleased"), nullptr));
+			note(FireInputSignal(context, core::Name("WindowFocusReleased"), {}));
+		}
+
+		// Before the edges, because it explains them — the Luau pump's order.
+		if (input->WasLastSourceChanged()) {
+			JSValue member = MakeJsEnumItem(
+				context, core::Name("UserInputType"), core::Name(scene::Describe(input->LastSource))
+			);
+			note(FireInputSignal(context, core::Name("LastInputTypeChanged"), std::span(&member, 1)));
+			JS_FreeValue(context, member);
 		}
 
 		// **Edges only**, which is what a bound action means — `Begin` and `End`
@@ -306,13 +354,13 @@ namespace engine::script {
 			}
 
 			const InputReport report = KeyReport(key, began);
-			note(RunBoundAction(context, key, report));
+			note(RunBoundActions(context, key, report));
 
 			// The service's own signals, after the bound actions. **Not gated by
 			// them**: `InputBegan` is a report of what happened and a claim on a
 			// key does not stop it having happened, which is Roblox's split and
 			// the one that lets a debug overlay watch every key regardless.
-			note(FireInputSignal(context, core::Name(began ? "InputBegan" : "InputEnded"), &report));
+			fireReport(core::Name(began ? "InputBegan" : "InputEnded"), report);
 		}
 
 		// **The buttons.** No bound actions here, for the reason
@@ -327,7 +375,7 @@ namespace engine::script {
 			}
 
 			const InputReport report = ButtonReport(*input, button, began);
-			note(FireInputSignal(context, core::Name(began ? "InputBegan" : "InputEnded"), &report));
+			fireReport(core::Name(began ? "InputBegan" : "InputEnded"), report);
 		}
 
 		// **`InputChanged`, over the two things this engine can report
@@ -337,13 +385,11 @@ namespace engine::script {
 		// — and an epsilon would swallow the one-pixel move a slow drag is made
 		// of.
 		if (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f) {
-			const InputReport report = MotionReport(*input);
-			note(FireInputSignal(context, core::Name("InputChanged"), &report));
+			fireReport(core::Name("InputChanged"), MotionReport(*input));
 		}
 
 		if (input->WheelDelta != 0.0f) {
-			const InputReport report = WheelReport(*input);
-			note(FireInputSignal(context, core::Name("InputChanged"), &report));
+			fireReport(core::Name("InputChanged"), WheelReport(*input));
 		}
 
 		return firstError;

@@ -32,7 +32,7 @@
 //
 // @tier L9 · shared
 
-#include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Store.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -114,4 +114,21 @@ namespace engine::script {
 		std::vector<Item> Items;
 		uint64_t NextSequence = 1;
 	};
+
+	// Destroys everything whose deadline the world has reached.
+	//
+	// **A store and a queue rather than a VM, so both runtimes call this one.**
+	// Draining debris destroys instances and fires nothing, so there is no
+	// callable for a language to know how to call — which is the whole of why
+	// `PumpTweens` is still two functions and this is one. It was two identical
+	// ten-line functions until v0.16.
+	//
+	// Runs at the head of the barrier, immediately after the tweens, for the
+	// reason `LuauRuntime::Heartbeat` gives: an instance's last tick of motion
+	// happens before it is taken away.
+	//
+	// @param store The world.
+	// @param queue That VM's queue.
+	// @since v0.16
+	void PumpDebris(ecs::Store &store, DebrisQueue &queue);
 }
