@@ -28,6 +28,7 @@
 #include <engine/replication/Protocol.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <unordered_set>
 #include <vector>
@@ -127,6 +128,26 @@ namespace engine::replication {
 		// @since v0.15
 		bool Prefaced() const {
 			return Prefaced_;
+		}
+
+		// Called at the instant the preface is applied, with the store it went
+		// into.
+		//
+		// **Because the moment `Prefaced` names cannot be polled for.** One
+		// `Connector::Poll` drains the socket and applies everything that was in
+		// it, so the preface and the first of the world behind it routinely land
+		// in the same call - and anything checking `Prefaced()` between polls
+		// sees a replica that has already joined and a store that already holds
+		// the world. The window is real on the wire and invisible from outside
+		// it. This is the only place it is observable.
+		//
+		// Runs before anything of the world behind the preface has been applied,
+		// and once per preface. Replaced rather than added to.
+		//
+		// @param callback What to run, or `{}` to stop listening.
+		// @since v0.15
+		void OnPreface(std::function<void(ecs::Store &)> callback) {
+			Preface_ = std::move(callback);
 		}
 
 		// How much of the joining snapshot is still missing, in bytes.
@@ -370,6 +391,10 @@ namespace engine::replication {
 		uint64_t Applied_ = 0;
 		bool Joined_ = false;
 		bool Prefaced_ = false;
+
+		// Fired the moment the preface lands. See `OnPreface`.
+		std::function<void(ecs::Store &)> Preface_;
+
 		Statistics Stats_;
 	};
 }

@@ -168,6 +168,20 @@ namespace engine::replication {
 			return Replica_.Prefaced();
 		}
 
+		// Called the moment the preface lands, with the replicated store.
+		//
+		// **`Prefaced()` says it happened; this says when.** A single `Poll`
+		// drains the socket and applies every message that was in it, so the
+		// preface and the world behind it commonly arrive in one call and the
+		// window between them is not visible to anything reading state between
+		// polls. Whoever raises a loading screen wants this rather than the flag.
+		//
+		// @param callback What to run, or `{}` to stop listening.
+		// @since v0.15
+		void OnPreface(std::function<void(ecs::Store &)> callback) {
+			Replica_.OnPreface(std::move(callback));
+		}
+
 		// The last tick applied in full.
 		//
 		// @return The tick, or zero before joining.

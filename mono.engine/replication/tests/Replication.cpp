@@ -277,6 +277,112 @@ TEST_CASE("what a host puts in front of the world arrives in front of it", "[rep
 	CHECK(pair.Replica_.Stats().Snapshots == 1);
 }
 
+TEST_CASE("the preface is observable when a poll drains both blobs at once", "[replication]") {
+	// **The defect that made `server.replication`'s version of the case above a
+	// coin toss.** A poll is not a moment. `Connector::Poll` drains the socket
+	// and applies every message that was waiting in it, so on a machine with no
+	// spare core a client that sleeps 4 ms between polls wakes to several ticks'
+	// worth of datagrams and applies the preface and the world behind it in one
+	// call. Everything outside that call then sees a replica that has already
+	// joined, and the window a loading screen lives in never existed as far as
+	// any caller could tell. Measured at six failures in six under a saturating
+	// build and none on an idle one.
+	//
+	// Reproduced here by holding the stream back and applying half a second of
+	// it in one go, which is what a socket buffer does for free.
+	// `Replica::OnPreface` runs inside the apply, so it sees the same window
+	// whether the caller polls every tick or once a second.
+	AuthoritySettings settings;
+	settings.ChunkBytes = 512;
+	settings.ChunksPerTick = 1;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SetPreface([](Entity entity, const Store &store) {
+		return store.Get<Marked>(entity) != nullptr;
+	});
+
+	const Entity screen = pair.Server.Create();
+	pair.Server.Set<Spot>(screen, Spot{-1.0f, -1.0f});
+	pair.Server.Set<Marked>(screen, Marked{1});
+
+	for (int index = 0; index < 400; index++) {
+		pair.Server.Set<Spot>(pair.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	int prefaces = 0;
+	bool joinedInside = true;
+	bool screenInside = false;
+	size_t rowsInside = 0;
+	pair.Replica_.OnPreface([&](Store &world) {
+		prefaces++;
+		joinedInside = pair.Replica_.Joined();
+		screenInside = world.Get<Spot>(screen) != nullptr;
+		rowsInside = world.CountMatching<Spot>();
+	});
+
+	// What a caller polling between drains would have seen, kept running beside
+	// the hook so the difference between them is measured here rather than
+	// asserted in a comment.
+	bool seenBetweenPolls = false;
+
+	std::vector<std::vector<std::byte>> waiting;
+	for (int tick = 0; tick < 1024 && !pair.Replica_.Joined(); tick++) {
+		pair.Now++;
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+			waiting.push_back(message);
+		}
+		pair.Server.ClearChanges();
+
+		// **One drain per thirty-two ticks, which is half a second at 60 Hz.**
+		// The number has to be larger than the join is long or the drain lands
+		// mid-world and the window is visible again for an uninteresting
+		// reason - the point being reproduced is a client that was away for
+		// the whole of it, which is what a 4 ms poll on a saturated machine
+		// amounts to.
+		if (tick % 32 != 31) {
+			continue;
+		}
+
+		for (const std::vector<std::byte> &message : waiting) {
+			pair.Replica_.Receive(pair.Client, message);
+		}
+		waiting.clear();
+
+		const std::vector<std::byte> ack = pair.Replica_.Acknowledge();
+		if (!ack.empty()) {
+			pair.Authority_.Receive(pair.Handle, ack);
+		}
+
+		seenBetweenPolls = seenBetweenPolls || (pair.Replica_.Prefaced() && !pair.Replica_.Joined());
+	}
+
+	REQUIRE(pair.Replica_.Joined());
+
+	// **The hook saw it**, once, with the screen present and the world absent.
+	REQUIRE(prefaces == 1);
+	CHECK_FALSE(joinedInside);
+	CHECK(screenInside);
+	CHECK(rowsInside == 1);
+
+	// **And nothing outside the apply did**, which is the whole reason the hook
+	// exists rather than a flag somebody checks after polling. If this ever
+	// starts passing, the batching above has stopped reproducing what a loaded
+	// machine does and the case is no longer about anything.
+	CHECK_FALSE(seenBetweenPolls);
+
+	// The world behind the preface still arrived whole and did not sweep the
+	// preface's row back out.
+	CHECK(pair.Client.CountMatching<Spot>() == 401);
+	CHECK(pair.Client.Get<Marked>(screen) != nullptr);
+	CHECK(pair.Replica_.Stats().Prefaces == 1);
+	CHECK(pair.Replica_.Stats().Snapshots == 1);
+}
+
 TEST_CASE("a host that declares no preface joins in one blob", "[replication]") {
 	// The default has to stay exactly what it was: one snapshot, one cursor, no
 	// window. A preface nobody asked for would be a second blob's worth of

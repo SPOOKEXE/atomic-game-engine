@@ -573,13 +573,46 @@ client-smoke: (build "client")
     # same breath - at 60 frames the run ended before it had, about one time in
     # four, which is a flake that would read as the click being broken. The run
     # costs about a third of a second either way.
-    ./{{build}}/client/client --headless --frames 300 --width 960 --height 540 \
-        --script "$scene" --click Swatch3 > "$log" 2>&1
+    # **Bounded, because this recipe cannot report a hang otherwise.** The run
+    # takes about a third of a second and the client's teardown is where it has
+    # gone wrong before - see `just client-exit`. Without this, a client that
+    # never exits stops the build rather than failing it.
+    timeout 120 ./{{build}}/client/client --headless --frames 300 --width 960 --height 540 \
+        --script "$scene" --click Swatch3 > "$log" 2>&1 \
+        || { echo "FAIL: the client exited $? (124 means it never exited at all)"; tail -20 "$log"; exit 1; }
     grep -q "click: pressed 'Swatch3'" "$log" \
         || { echo "FAIL: the client never found or pressed the button"; tail -20 "$log"; exit 1; }
     grep -q "interface: swatch 3 activated" "$log" \
         || { echo "FAIL: the button was pressed and its Activated never reached the script"; tail -20 "$log"; exit 1; }
     echo "client ok - pressed a button with no display and the script heard it"
+
+# Run the client to a frame budget and check the process actually ends.
+#
+# **A hang is the one failure a `TEST_CASE` cannot report**, which is why this
+# is a script with a `timeout` rather than a case in the suite: Catch2 has no
+# way to fail something that never returns, so a hung teardown stops the run
+# instead of failing it.
+#
+# The bug it was written for shipped at v0.15. `Client::Shutdown` released the
+# GPU device while `InterfacePass` still held a raw pointer to it, so
+# `~InterfacePass` released its glyph atlas through a freed device and blocked
+# forever on a mutex that had been freed with it. `Run()` had already drawn its
+# frames, printed its statistics and returned 0 - a hung run's log and a
+# healthy one's are identical up to the last line.
+#
+# **And it was invisible because teardown had two paths.** `Renderer::Shutdown`
+# was guarded by `if (Window)`, so a headless run skipped the device entirely
+# and every check this repository had walked an order the shipped windowed
+# client never takes. Both are one path now, and this checks both.
+#
+# Not part of `just check`, for `client-smoke`'s reason: it needs a GPU. The
+# windowed half additionally needs a display, and is skipped rather than failed
+# without one.
+#
+# Draws twenty frames headless and windowed, and fails if either process outlives
+# its own run.
+client-exit: (build "client")
+    ./scripts/client-exit-test.sh ./{{build}}/client/client
 
 # Drag the editor's window and check it is still alive afterwards.
 #

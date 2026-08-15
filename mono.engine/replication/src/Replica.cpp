@@ -140,6 +140,16 @@ namespace engine::replication {
 			// world it has been sent a corner of.
 			Prefaced_ = true;
 			Stats_.Prefaces++;
+
+			// **Here rather than left to the caller's next poll**, because the
+			// caller's next poll is not a moment - `Connector::Poll` applies the
+			// preface and whatever of the world arrived with it in one call, so
+			// by the time anything outside looks, the window this preface exists
+			// to open has already closed. See `OnPreface`.
+			if (Preface_) {
+				Preface_(store);
+			}
+
 			return ApplyStatus::Ok;
 		}
 

@@ -967,12 +967,31 @@ namespace client {
 			Socket.reset();
 		}
 
+		// **Every borrower of the device before the device.** `InterfacePass`
+		// keeps a raw `SDL_GPUDevice *` it does not own and releases its atlas,
+		// its buffers and its pipeline through it. Members are destroyed *after*
+		// this body has run, so a teardown that took the device down here left
+		// `~InterfacePass` releasing through a freed device - which is not a
+		// crash but a lock taken on a mutex that no longer exists, and the
+		// process hangs having already run, reported and returned 0.
+		Interface.Shutdown();
+
+		// **Not guarded by the window, and that guard was the reason nothing
+		// caught the above.** Tearing the renderer down only when there was a
+		// window gave headless a second teardown path that skipped the device
+		// entirely, so `just client-smoke` exercised an order the shipped
+		// windowed run never takes. One path, whether or not anybody is
+		// watching it.
+		Renderer.Shutdown();
 		if (Window) {
-			Renderer.Shutdown();
 			SDL_DestroyWindow(Window);
 			Window = nullptr;
-			SDL_Quit();
 		}
+
+		// Paired with the unconditional `SDL_Init` in `Initialise`, which a
+		// headless run also makes.
+		SDL_Quit();
+
 		engine::parallel::Jobs::Stop();
 	}
 

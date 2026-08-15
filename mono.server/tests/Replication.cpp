@@ -49,6 +49,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <numbers>
 #include <string>
 #include <string_view>
@@ -413,15 +414,45 @@ namespace server_replication_test {
 			Link->Advance(Now);
 		}
 
-		bool Join(int ticks) {
-			for (int attempt = 0; attempt < ticks && !Link->Joined(); attempt++) {
+		// Ticks until `ready`, giving up after what `ticks` is worth in real
+		// time on a machine that is not busy.
+		//
+		// **The bound is a deadline and not a count of iterations, and that is
+		// not a detail.** The far side is a process competing for the same
+		// cores, so N iterations buys a different amount of *its* progress on a
+		// loaded machine than on an idle one - the join `D00122`'s case waits
+		// for finished inside 1200 iterations on a quiet box and needed about
+		// 1400 under a saturating build, so the case passed or failed on what
+		// else happened to be running. A count cannot express "long enough for
+		// the server to have got there"; a clock can.
+		//
+		// The multiplier is the room a busy machine needs, and it costs nothing
+		// on a quiet one because the loop stops the moment `ready` is true.
+		//
+		// @param ready What is being waited for.
+		// @param ticks The wait's length in ticks, as an idle machine would run
+		//        them.
+		// @return Whatever `ready` says at the end.
+		bool Wait(const std::function<bool()> &ready, int ticks) {
+			constexpr int STEP_MILLISECONDS = 4;
+			constexpr int SLACK = 4;
+
+			const auto deadline = std::chrono::steady_clock::now() +
+								  std::chrono::milliseconds(ticks * STEP_MILLISECONDS * SLACK);
+
+			while (!ready() && std::chrono::steady_clock::now() < deadline) {
 				Tick();
 
 				// Real time, because the far side is a real process running at
 				// its own rate rather than a function this loop calls.
-				std::this_thread::sleep_for(std::chrono::milliseconds(4));
+				std::this_thread::sleep_for(std::chrono::milliseconds(STEP_MILLISECONDS));
 			}
-			return Link->Joined();
+
+			return ready();
+		}
+
+		bool Join(int ticks) {
+			return Wait([this] { return Link->Joined(); }, ticks);
 		}
 
 		size_t Entities() {
@@ -635,30 +666,43 @@ TEST_CASE("what ReplicatedFirst holds arrives before the world it covers", "[ser
 	Remote remote;
 	REQUIRE(remote.Start(0, scene.string()));
 
-	bool prefaced = false;
+	int prefaces = 0;
 	bool joinedThen = true;
 	bool screenThen = false;
 	size_t entitiesThen = 0;
 
-	for (int tick = 0; tick < 1200 && !remote.Link->Joined(); tick++) {
-		remote.Tick();
-		std::this_thread::sleep_for(std::chrono::milliseconds(4));
-
-		if (prefaced || !remote.Link->Prefaced()) {
-			continue;
-		}
-
-		prefaced = true;
+	// **Sampled from inside the apply rather than between polls, and that is
+	// the difference between a check and a coin toss.** One `Connector::Poll`
+	// drains the socket and applies every message that was in it, so a machine
+	// with no spare core hands the preface and the world behind it to the same
+	// call - and this case used to read its four facts *after* that call, by
+	// which time the window it is about had closed. It failed six times in six
+	// under a saturating build and passed on an idle one, which is a case
+	// measuring the scheduler rather than the stream.
+	//
+	// `Replica::OnPreface` runs before anything of the world has been applied,
+	// so what the closure sees is the preface and nothing else by construction.
+	remote.Link->OnPreface([&](Store &world) {
+		prefaces++;
 		joinedThen = remote.Link->Joined();
-		screenThen = holdsScreen(remote.World);
-		entitiesThen = remote.Entities();
-	}
+		screenThen = holdsScreen(world);
 
-	REQUIRE(remote.Link->Joined());
-	REQUIRE(prefaced);
+		entitiesThen = 0;
+		world.EachEntity([&](Entity) { entitiesThen++; });
+	});
+
+	REQUIRE(remote.Join(1200));
+
+	// Once. A second would mean the server re-declared a preface mid-join,
+	// which would put a loading screen back over a world already being drawn.
+	REQUIRE(prefaces == 1);
 
 	INFO("the preface landed with " << entitiesThen << " entities in the replica");
 	CHECK(screenThen);
+
+	// The ordering the stage enum is for, read where it is decided. `Joined`
+	// is set by the world blob and this runs on the preface, so a build where
+	// this is true is one where the two blobs have been merged back into one.
 	CHECK_FALSE(joinedThen);
 
 	// The container and what is under it, and none of the fifteen hundred parts
