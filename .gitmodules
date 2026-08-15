@@ -126,18 +126,22 @@
 ; the same situation as glm and the cryptopp pair above, and the superproject
 ; pins the SHA regardless.
 ;
-; **Held at 0.731 deliberately, and this is the one submodule that is not simply
-; "as new as possible".** It is pinned to the same commit as
+; **Held at luau-lsp's revision deliberately, and this is the one submodule that
+; is not simply "as new as possible".** It is pinned to the same commit as
 ; `mono.vendor/luau-lsp/luau`, so the language server in an editor and
 ; `mono.tools/scriptcheck` in `just typecheck` type-check against one Luau and
 ; cannot disagree about the language.
 ;
-; **What holds it there is luau-lsp, not us.** 0.732 removed the
-; `ConstraintSolver::reportError` overloads that luau-lsp calls in
-; `src/platform/roblox/RobloxLuauExt.cpp` - sixteen call sites - so the newest
-; Luau both trees compile against is 0.731. `just luau-lsp` asserts the two match
-; rather than trusting this comment, and `docs/DEFERRED.md` D00019 carries the
-; reopen trigger: bump both the day luau-lsp syncs past 0.732.
+; **What sets the number is luau-lsp, not us.** It is `fd83819b`, one commit
+; before the 0.734 tag, which is what luau-lsp `d5df9af` - "Sync to upstream Luau
+; 0.733" - pins. `just luau-lsp` asserts the two match rather than trusting this
+; comment, and `docs/DEFERRED.md` D00019 carries the reopen trigger: bump both
+; the day luau-lsp syncs again.
+;
+; It was 0.731 from v0.7 to v0.15, held there because 0.732 removed the
+; `ConstraintSolver::reportError` overloads luau-lsp called in
+; `src/platform/roblox/RobloxLuauExt.cpp`. Upstream did that work, so the ceiling
+; that argument describes is gone rather than raised.
 [submodule "mono.vendor/luau"]
 	path = mono.vendor/luau
 	url = https://github.com/luau-lang/luau.git
@@ -179,10 +183,12 @@
 ; constraint on `mono.vendor/luau` as much as on this one - see its entry - and
 ; `just luau-lsp` asserts it instead of trusting either comment.
 ;
-; The ceiling is luau-lsp's: Luau 0.732 removed the `ConstraintSolver::reportError`
-; overloads it calls in `src/platform/roblox/RobloxLuauExt.cpp`, so 0.731 is the
-; newest both trees build against. `docs/DEFERRED.md` D00019 holds the reopen
-; trigger.
+; The revision is luau-lsp's: whatever its nested `luau` pins is what both trees
+; build against, because it is the tree that cannot follow upstream freely. That
+; was 0.731 for eight versions - 0.732 removed the
+; `ConstraintSolver::reportError` overloads it calls in
+; `src/platform/roblox/RobloxLuauExt.cpp` - and `d5df9af` is upstream doing that
+; work. `docs/DEFERRED.md` D00019 holds the reopen trigger.
 ;
 ; Pinned to a commit on `main` rather than to the 1.69.0 tag, because that tag
 ; carries an older Luau still: matching the engine matters more here than

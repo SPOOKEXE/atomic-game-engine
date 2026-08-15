@@ -635,7 +635,10 @@ server --game path/to/game.agame
 
 `.ts` is TypeScript/JavaScript and `.luau` is Luau; which one a file is comes
 from its extension, and a game may mix them. TypeScript is transpiled to staged
-JavaScript during the build when the pinned compiler is available.
+JavaScript during the build when the pinned compiler is available, with a
+`.js.map` beside each one - **so a script that throws names the line in the
+`.ts` you wrote** rather than a line in the generated file. Stripping types
+shifts everything below a multi-line annotation upward, so the two rarely agree.
 `mono.engine/examples/` holds the demo scenes, each written twice - once in each
 language, doing the same thing - so that the binding surface is exercised from
 both.

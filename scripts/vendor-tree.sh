@@ -73,13 +73,8 @@ fi
 
 # **What makes the tree stale, and nothing else.** The pinned commit of the
 # vendor and each of its nested submodules, plus the name and content of every
-# patch.
-#
-# Re-extracting is cheaper than it looks - `tar` takes its mtimes from the
-# archive, and `git archive` writes the commit's date, so an unchanged file comes
-# back older than the object built from it and ninja leaves it alone. Only the
-# files a patch touches come out stamped now. The stamp is still worth keeping:
-# it makes a re-run cost nothing rather than a re-extract and a partial rebuild.
+# patch. A match skips the extraction entirely, so an ordinary run costs nothing
+# and the build below it is a no-op.
 stamp=$(
     {
         git -C "$src" rev-parse HEAD
@@ -130,6 +125,19 @@ for patch in "${patches[@]}"; do
     fi
     echo "$name: applied $(basename "$patch")" >&2
 done
+
+# **Stamped to now, and leaving them alone is a wrong build rather than a slow
+# one.** `tar` takes its mtimes from the archive and `git archive` writes the
+# *commit's* date, which for a vendor bump is months before the object files
+# already sitting in the build tree - so ninja reads a whole new upstream release
+# as "nothing to do" and relinks the previous one's objects against it. That was
+# observed rather than reasoned about: bumping Luau 0.731 to 0.734 rebuilt three
+# files and produced a binary out of two versions.
+#
+# Extraction only happens when the stamp moved, and the stamp moving means the
+# sources really are different, so the full rebuild this forces is the honest
+# cost of the change rather than waste.
+find "$dest" -exec touch {} +
 
 # Last, so an interrupted run leaves a tree that is rebuilt rather than trusted.
 echo "$stamp" > "$dest/.stamp"

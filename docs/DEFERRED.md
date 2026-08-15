@@ -317,11 +317,19 @@ a template literal, a string, a comment, or a regex, where regex-versus-division
 is the hard case), and it changes what runs. It is the cheapest path that
 touches no submodule, and it is more work than it first looks.
 
-**And TypeScript needs a second thing regardless of the first.** The studio's
-`tsc` invocation emits no `--sourceMap`, so the engine runs transpiled
-JavaScript whose lines do not correspond to the `.ts`. Even a perfect VM
-debugger would put breakpoints in generated code; the mapper is cheap and would
-be conspicuous by its absence.
+**TypeScript needed a second thing regardless of the first, and that half
+shipped at v0.15.** It is the only part of this entry that was never blocked on
+the VM, which is why it could go first.
+
+- **The entry named the wrong file, and the correction is the useful part.** It said "the studio's `tsc` invocation". There is no studio `tsc`: the transpile is `mono.engine/examples/CMakeLists.txt`, at build time, `--isolatedModules` over each `.ts` scene, and `tsconfig.json` is `noEmit` for the editor and `just typecheck` alone. A reader following this entry would have gone looking in `mono.studio` and found nothing.
+- **`--sourceMap` is emitted and `script::SourceMap` reads it.** Source Map v3, base64 VLQ, decoded for one question - which source line did this generated line come from. `JavaScriptRuntime`'s exception text rewrites every frame it has a map for and leaves the rest exactly as the VM printed them, so hand-written JavaScript and a chunk named after an instance fall through untouched.
+- **The consumer is a stack trace, not a breakpoint, and that is why this was worth building alone.** The entry framed the mapper as debugger plumbing, which made it look like dead code until QuickJS grows an API. It is not: a `.ts` scene that throws named a line in generated JavaScript the author had never opened. Measured on a probe whose type annotations strip out, the throw sits at `.ts:13` and `.js:9` - four lines of drift on a fifteen-line file, and it grows with the annotations.
+- **The column is dropped on a rewrite rather than carried.** It is a column in the generated file, so `scene.ts:13:15` would point at a character somewhere else - precision that is wrong, which this entry's own argument about a silently-armed breakpoint says is worse than nothing. A frame that is *not* rewritten keeps its column, because nothing about it moved.
+- **What it still does not do**, so nobody reads more into it: no column recovery, no `names`, no `sourcesContent`, and no index maps with `sections`. One source per map, because `--isolatedModules` emits one and naming the wrong file is worse than naming none.
+
+**So a VM debugger would now land on the right lines.** That was the second
+thing this entry said TypeScript needed; what is left is the first, and it is
+unchanged.
 
 **Reopen trigger: a vendored QuickJS with a debugger API**, or the first
 TypeScript plugin big enough that its author asks for one.
@@ -500,17 +508,23 @@ through it - so two viewports each update at half the rate.**
 ### [_] D00019
 
 **The engine's Luau is held at the revision the editor tool can consume so that
-the editor and the type check agree. The current engine revision is Luau 0.731,
-and 0.732 is the ceiling it is held under rather than where it is.**
+the editor and the type check agree. The trigger fired at v0.15 and both
+submodules moved together: 0.731 to `fd83819b`, one commit before the 0.734
+tag.** The entry stays open because the constraint is permanent - it is a policy
+about how this submodule is bumped, not a version waiting to be reached.
 
-- `mono.vendor/luau` is pinned to commit `f8ca77ac`, which is `Sync to upstream/release/731` and which `git describe` reports as **0.731**. 0.732 is the first revision luau-lsp cannot build against - it removed the `ConstraintSolver::reportError` overloads that `src/platform/roblox/RobloxLuauExt.cpp` calls - so it is the number that bounds this entry, not the number either tree is on. `mono.vendor/luau-lsp/luau` must be pinned to the same commit when that optional submodule is checked out. `mono.tools/scriptcheck` links the first and gates `just typecheck`; the language server in an editor uses the second. Two Luaus would mean an author reading diagnostics from a language the engine does not run, which is worse than no editor support because it looks authoritative.
+- `mono.vendor/luau` is pinned to `fd83819b`, which is what luau-lsp `d5df9af` - "Sync to upstream Luau 0.733" - pins as its own nested Luau. `mono.vendor/luau-lsp/luau` must be pinned to the same commit when that optional submodule is checked out. `mono.tools/scriptcheck` links the first and gates `just typecheck`; the language server in an editor uses the second. Two Luaus would mean an author reading diagnostics from a language the engine does not run, which is worse than no editor support because it looks authoritative.
+- **The 0.732 ceiling this entry was built on is gone rather than raised, and upstream is what removed it.** 0.732 deleted the `ConstraintSolver::reportError` overloads `src/platform/roblox/RobloxLuauExt.cpp` called - sixteen call sites - and that was the whole reason 0.731 was the newest revision both trees could build. luau-lsp did that work itself. So the fork-versus-patch argument three bullets down was never exercised: the cost it was weighing was upstream's to pay, and upstream paid it.
+- **A flag came off with the bump, and it came off after being tested rather than assumed.** `just luau-lsp` passed `-include cstdint` because the old pin's `Ast/src/StringUtils.cpp` named `uint8_t` without including it. Built without the flag at the new pin: clean. `-Wno-error=maybe-uninitialized` is still needed and is now needed somewhere else - `src/operations/CallHierarchy.cpp` rather than nlohmann's `NLOHMANN_DEFINE_TYPE_*` macros - which is why the recipe's comment names the file instead of the library.
 - **The exact upstream ceiling belongs to luau-lsp.** Its nested Luau must remain buildable against the language-server sources. Do not bump the engine submodule alone: the sync check is the contract, and a failed `just luau-lsp` is preferable to silently giving authors diagnostics for another language revision.
 - **Checked, not written down.** `just luau-lsp` compares the two `HEAD`s and refuses to build when they differ, naming both. Verified by mutation: bumping `mono.vendor/luau` alone makes the recipe fail with the two SHAs printed. Without that, the drift is invisible - the engine keeps passing every check it has, and only an editor is wrong.
 - **What the choice actually costs, so a later reader can weigh it.** The engine follows the editor's compatible revision rather than independently following upstream. The trade is only defensible while the gap stays small; a long-lived gap would invert it, and the answer then is the fork below rather than a wider gap.
 - **The fork is the way out and was declined at v0.7 on purpose.** Pointing luau-lsp at `mono.vendor/luau` needs sixteen mechanical call-site changes, and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork whose remote is recorded in `.gitmodules` - never into a file in this tree. That is a fork to maintain against a moving target, for a developer tool.
 - **The third option arrived at v0.15 and this entry did not take it.** `docs/retired/DEFERRED.md` D00031 needed a change inside luau-lsp too, and what it used is a `.patch` under `mono.vendor/patches/` that `just luau-lsp` applies after cloning - no fork, no remote, no push. So "a patch goes upstream or into a fork" is no longer the whole of the rule, and the sixteen call sites above are now *mechanically* available at that price. They are still not worth it: D00031's patch is one hunk in a function that has not moved in two years, where sixteen hunks across a file upstream edits every release is a rebase every bump - which is a fork's cost with a fork's ceremony removed rather than a cheaper thing. The reopen trigger below is unchanged; what changed is that the way out is now measured in hunks rather than in whether a mechanism exists.
-- **Checked at v0.13 and the trigger has not fired.** Upstream luau-lsp at `53f4238` pins Luau `f8ca77acdcb50241e3da21af663f8ef97b4b5ce4`, which is byte for byte the commit `mono.vendor/luau` is on. **There is no gap to close**: this engine is already at the editor's ceiling rather than lagging behind it, which is the state this entry describes as defensible. Worth recording because "held at the revision the editor can consume" reads as a compromise, and right now it costs nothing at all.
-- **Reopen trigger: luau-lsp syncs to a later Luau revision.** Bump both submodules together, run `just luau-lsp` - which refuses if only one moved - then run `just check`.
+- **Checked at v0.13 and it had not fired; fired at v0.15 and was answered the same day.** The v0.13 check found upstream luau-lsp at `53f4238` pinning the same Luau `mono.vendor/luau` was on, so there was no gap. By v0.15 upstream had moved to `d5df9af` and Luau `fd83819b` - twelve commits ahead of ours and none behind. Both were bumped together, `just check` passed, and the engine is again at the editor's revision rather than lagging behind it.
+- **What the bump cost is worth recording, because the answer is nothing.** The engine compiled against 0.734 with no source change; `scriptcheck` reads the same 38 enums and 32 scripts; `dotted-enum-types.patch` applied to the new luau-lsp unchanged; determinism and replay are byte-identical. Three releases of a language the engine embeds, and the only edit was two submodule pointers and a compiler flag removed.
+- **One defect was found by the bump rather than by the code**, and it belonged to the machinery underneath. `scripts/vendor-tree.sh` extracts a vendor with `git archive`, and `tar` takes its mtimes from the archive - which is the *commit's* date, months older than the object files already in the build tree. So the first build after the bump rebuilt three files and linked a 0.733 language server against 0.731 objects, reporting success. The extraction now stamps the tree to now, which forces the full rebuild a changed pin actually needs. **A vendor bump that appears to cost six seconds is the symptom to remember.**
+- **Reopen trigger: luau-lsp syncs to a later Luau revision.** Bump both submodules together, run `just luau-lsp` - which refuses if only one moved - then run `just check`. The refusal was exercised at v0.15: moving `mono.vendor/luau` while the superproject still recorded the old luau-lsp gitlink stopped the recipe with both SHAs printed.
 
 ### [PARTIAL] D00017
 

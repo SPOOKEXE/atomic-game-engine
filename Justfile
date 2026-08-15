@@ -393,10 +393,12 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 # the same `Luau.*` target names ours does. Adding it to this build fails at
 # configure time; `.gitmodules` carries the full argument.
 #
-# **`-Wno-error=maybe-uninitialized`, and the narrowness is the point.** 1.9.2
-# hardcodes `-Wall -Werror` with no option to disable it, and GCC reports a
-# false positive inside nlohmann/json's `NLOHMANN_DEFINE_TYPE_*` macros - so the
-# build fails on a warning about vendored code in a vendored tree.
+# **`-Wno-error=maybe-uninitialized`, and the narrowness is the point.** luau-lsp
+# hardcodes `-Wall -Werror` with no option to disable it, and GCC 13 reports a
+# false positive in `src/operations/CallHierarchy.cpp`: a `std::string` inside an
+# `std::optional` inside the `FunctionName` pair, reported against
+# `bits/basic_string.h` rather than against any line upstream wrote. So the build
+# fails on a warning about vendored code in a vendored tree.
 # `MonoVendor.cmake` turns Luau's own `LUAU_WERROR` off for exactly this reason.
 #
 # A blanket `-Wno-error` does not work here: `CMAKE_CXX_FLAGS` lands *before*
@@ -405,16 +407,12 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 # order, which is why this names the warning rather than silencing all of them -
 # every other warning upstream cares about still fails the build.
 #
-# **`-include cstdint` is the second one, and it is a dated bug rather than a
-# taste question.** luau-lsp 1.9.2 pins a Luau from before GCC 13 stopped
-# including `<cstdint>` transitively, so `Ast/src/StringUtils.cpp` names
-# `uint8_t` without including it and does not compile on a current toolchain.
-# Forcing the header in is the standard answer and costs one flag; the
-# alternative is editing a file inside two vendored trees.
-#
-# **This is the version skew `.gitmodules` warns about, arriving early.** Our own
-# `mono.vendor/luau` is 0.731 and builds clean - the tree that does not is the
-# one luau-lsp brought with it.
+# **`-include cstdint` was the second one and is gone.** It was here because
+# luau-lsp pinned a Luau from before GCC 13 stopped including `<cstdint>`
+# transitively, so `Ast/src/StringUtils.cpp` named `uint8_t` without including
+# it. The v0.15 bump to the revision luau-lsp `d5df9af` pins carries the fix, and
+# the flag was removed after building without it rather than on the assumption
+# that a newer tree would be fine. `docs/DEFERRED.md` D00019 is the bump.
 #
 # Flags rather than patches wherever a flag will do. Where one will not, the
 # patch is a file under `mono.vendor/patches/luau-lsp/` - the third shape
@@ -466,7 +464,7 @@ luau-lsp:
 
     cmake -S "$src" -B .cache/build/luau-lsp -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized -include cstdint" > /dev/null
+          -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized" > /dev/null
     cmake --build .cache/build/luau-lsp --target luau-lsp
     echo ""
     echo "luau-lsp built: $(pwd)/.cache/build/luau-lsp/luau-lsp"

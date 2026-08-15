@@ -1,6 +1,7 @@
 #include "JavaScriptRuntime.hpp"
 
 #include "JsBindings.hpp"
+#include "SourceMap.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
@@ -96,7 +97,17 @@ namespace engine::script {
 
 			JS_FreeValue(context, stack);
 			JS_FreeValue(context, thrown);
-			return message.empty() ? "the script failed" : message;
+			if (message.empty()) {
+				return "the script failed";
+			}
+
+			// **The frames name what the author wrote, when a map says what that
+			// was.** A `.ts` scene is transpiled before it ever reaches this VM,
+			// so every line number QuickJS knows is a line in generated
+			// JavaScript. `MapStackFrames` rewrites the ones it can and leaves
+			// the rest alone, which is why this is unconditional rather than
+			// asking first whether the chunk was TypeScript.
+			return MapStackFrames(message);
 		}
 	}
 

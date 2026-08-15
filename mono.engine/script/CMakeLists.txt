@@ -66,6 +66,12 @@ mono_add_library(script
 		Vendor::luau_vm
 		Vendor::luau_compiler
 		Vendor::quickjs
+
+		# For `SourceMap.cpp` and nothing else. A `.js.map` is JSON, and the
+		# alternative was scanning for two known keys in a generated file -
+		# cheaper to write and a parser either way, only an unreviewed one.
+		# Header-only, and it reaches no public header here.
+		Vendor::json
 )
 
 # Every file in `src/` that meets a VM is named for that VM.

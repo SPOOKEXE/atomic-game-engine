@@ -80,15 +80,29 @@ foreach(scene IN LISTS example_scenes)
 		# person to open it would be reading a lie.
 		get_filename_component(scene_stem "${scene}" NAME_WE)
 		set(staged "${MONO_STAGE_ROOT}/assets/examples/${scene_stem}.js")
+		set(staged_map "${MONO_STAGE_ROOT}/assets/examples/${scene_stem}.js.map")
 
 		add_custom_command(
-			OUTPUT "${staged}"
+			OUTPUT "${staged}" "${staged_map}"
 			COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples"
 			COMMAND "${_mono_tsc}"
 				--target ES2020
 				--module ESNext
 				--isolatedModules
 				--skipLibCheck
+
+				# **`--sourceMap`, so a thrown error can name the line the author
+				# wrote.** Stripping types does not preserve line numbers - a
+				# multi-line annotation collapses - so without this every stack
+				# frame from a `.ts` scene points into generated JavaScript the
+				# author never saw. `script::SourceMap` reads the `.js.map` this
+				# emits and `JavaScriptRuntime`'s exception text rewrites the
+				# frames through it.
+				#
+				# `--sourceRoot` is deliberately absent: the map's `sources` are
+				# relative to the map, the map sits beside the `.js` in the stage,
+				# and a root would make them relative to somewhere neither file is.
+				--sourceMap
 
 				# **`--ignoreConfig`, because naming a file on the command line
 				# and having a `tsconfig.json` present is an error in tsc 7.**
@@ -115,7 +129,7 @@ foreach(scene IN LISTS example_scenes)
 			COMMENT "Transpiling example scene ${scene_name}"
 			VERBATIM)
 
-		list(APPEND staged_scenes "${staged}")
+		list(APPEND staged_scenes "${staged}" "${staged_map}")
 		continue()
 	endif()
 
