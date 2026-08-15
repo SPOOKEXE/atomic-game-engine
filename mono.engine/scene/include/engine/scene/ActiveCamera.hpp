@@ -233,4 +233,40 @@ namespace engine::scene {
 	//
 	// @param store The world to resolve in.
 	void ResolveActiveCamera(ecs::Store &store);
+
+	// Tells a world how big the thing drawing it is.
+	//
+	// **`ActiveCamera::AspectRatio` had no writer at all until this existed**,
+	// and the consequence was not a wrong projection - the renderer builds its
+	// own matrix from its own target size - but a wrong *mirror*. `FrustumCorners`
+	// reads this field to build the viewer's frustum, `FitExtents` clamps every
+	// surface camera's fit against it, and a fit narrower than the pane leaves
+	// the rest of the pane projecting outside `0..1`, where `opaque.frag` draws
+	// flat tint instead of the reflection. With the field left at its default
+	// `1.0` the clamp was a *square* screen, so a mirror on a 1631x599 viewport
+	// kept 37% of the width the viewer could actually see and lost the rest to a
+	// hard vertical edge that looked exactly like a cull box. Nothing was culled.
+	//
+	// **Every frame by whoever is drawing, not once at install.** Windows are
+	// resized and viewport panels are dragged, and the studio round-robins two
+	// panels of different sizes through one world - the same last-writer-wins
+	// arrangement `ActiveCamera::Entity` already has, and for the same reason:
+	// both are facts about the thing looking, and a world cannot know either.
+	//
+	// **Called after whatever names the eye**, because `SetResource` replaces the
+	// whole resource. `EnsureViewerCamera` and `AimReplicaViewer` both write one
+	// out per frame, so this landing first would be overwritten by it.
+	//
+	// A dimension of zero is ignored rather than stored: a minimised window
+	// reports zero height, and a zero aspect is a projection of infinities -
+	// which `ResolveCamera` already refuses, and which would make every mirror
+	// in the world unfittable for as long as the window stayed down.
+	//
+	// @param store  The world being drawn.
+	// @param width  How many pixels across.
+	// @param height How many pixels down.
+	// @return Whether it was recorded. False when the world has no `ActiveCamera`
+	//         to tell, and false for a degenerate size.
+	// @since v0.15
+	bool SetViewportSize(ecs::Store &store, uint32_t width, uint32_t height);
 }

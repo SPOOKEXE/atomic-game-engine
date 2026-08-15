@@ -389,6 +389,138 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 	CHECK((distant->Right - distant->Left) / distant->NearPlane < 0.2f);
 }
 
+TEST_CASE("the fit follows the screen's shape and not only its height", "[scene][surfacecameras]") {
+	// **`ActiveCamera::AspectRatio` had no writer outside this suite**, and the
+	// case above could not see that because it supplies its own `16/9` at both
+	// ends. Every real run left the field at its default `1.0`, so
+	// `FrustumCorners` built a *square* viewer frustum, `FitExtents` clamped
+	// every mirror against it, and the pane outside that square projected past
+	// the texture's `0..1` rectangle - where `opaque.frag` draws the plain lit
+	// pane. On the 1631x599 panel it was reported from that is 37% of the width
+	// the viewer could actually see, and the rest was a hard vertical edge on
+	// each side that read as a cull box. Nothing was culled.
+	//
+	// Vertical was always right, which is why nothing was ever cut top or
+	// bottom: the field of view *is* the vertical one, and only the width is
+	// derived from the aspect.
+	Mirror mirror;
+
+	// **Close, so the clamp actually binds.** From across a room the fit is
+	// already far tighter than the eye's frustum and intersecting with it
+	// changes nothing at any aspect - which is the case that must keep passing
+	// and is asserted above. Here the pane is 16 wide and the square screen
+	// reaches about 8.7 of it.
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, 6.0f});
+
+	// Whether everything the viewer can see of the pane lands inside the image,
+	// which is exactly the condition the shader falls back on.
+	const auto coveredOn = [&](float aspect) {
+		const Transform *placed = mirror.World.Get<Transform>(mirror.Reflection);
+		const SurfaceLens *fitted = mirror.World.Get<SurfaceLens>(mirror.Reflection);
+		const Transform *eyePlaced = mirror.World.Get<Transform>(mirror.Eye);
+		const Camera *eyeLens = mirror.World.Get<Camera>(mirror.Eye);
+		REQUIRE(placed != nullptr);
+		REQUIRE(fitted != nullptr);
+		REQUIRE(eyePlaced != nullptr);
+		REQUIRE(eyeLens != nullptr);
+
+		const glm::mat4 viewProjection =
+			engine::scene::ResolveSurfaceCamera(
+				placed->Frame, engine::scene::SurfaceProjection(*fitted, placed->Frame)
+			)
+				.ViewProjection;
+
+		const glm::mat4 screen =
+			engine::scene::ResolveCamera(eyePlaced->Frame, *eyeLens, aspect).ViewProjection;
+
+		bool covered = true;
+		constexpr int STEPS = 16;
+
+		for (int ix = 0; ix <= STEPS; ix++) {
+			for (int iy = 0; iy <= STEPS; iy++) {
+				const float x = -8.0f + 16.0f * static_cast<float>(ix) / STEPS;
+				const float y = -4.5f + 9.0f * static_cast<float>(iy) / STEPS;
+				const glm::vec4 point(x, y, -0.2f, 1.0f);
+
+				const glm::vec4 onScreen = screen * point;
+				if (!(onScreen.w > 0.0f) || std::abs(onScreen.x / onScreen.w) > 1.0f ||
+					std::abs(onScreen.y / onScreen.w) > 1.0f) {
+					continue;
+				}
+
+				const glm::vec4 clip = viewProjection * point;
+				INFO("pane point " << x << ", " << y << " at aspect " << aspect);
+
+				if (!(clip.w > 0.0f)) {
+					covered = false;
+					continue;
+				}
+				covered = covered && std::abs(clip.x / clip.w) <= 1.0f && std::abs(clip.y / clip.w) <= 1.0f;
+			}
+		}
+		return covered;
+	};
+
+	// The panel the report came from.
+	constexpr float WIDE = 1631.0f / 599.0f;
+
+	REQUIRE(engine::scene::SetViewportSize(mirror.World, 1631, 599));
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(coveredOn(WIDE));
+
+	// **And the failure it replaces, asserted rather than described.** With the
+	// field back at the default that nothing used to write, the same screen
+	// loses its sides - so this case is measuring the field and not merely the
+	// arithmetic downstream of it.
+	mirror.World.SetResource(ActiveCamera{mirror.Eye});
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK_FALSE(coveredOn(WIDE));
+
+	// A square panel is still covered by a square clamp, which says the
+	// difference above is the *shape* and not a fit that got wider by accident.
+	REQUIRE(engine::scene::SetViewportSize(mirror.World, 800, 800));
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(coveredOn(1.0f));
+
+	// Taller than it is wide, which no other case in this file exercises and
+	// which a fix that hard-coded a widening would get wrong in the other
+	// direction.
+	REQUIRE(engine::scene::SetViewportSize(mirror.World, 600, 1000));
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(coveredOn(600.0f / 1000.0f));
+}
+
+TEST_CASE("a viewport size is recorded, and a degenerate one is refused", "[scene][surfacecameras]") {
+	// **The writer the two programs call, checked where they cannot be.** A
+	// minimised window reports zero height and a closed panel reports zero of
+	// both; storing either is a zero or infinite aspect, which `ResolveCamera`
+	// already refuses and which would leave every mirror in the world unfittable
+	// for as long as the window stayed down. Keeping the last good value is what
+	// makes coming back from minimised free.
+	Mirror mirror;
+
+	REQUIRE(engine::scene::SetViewportSize(mirror.World, 1631, 599));
+	CHECK_THAT(
+		mirror.World.Resource<ActiveCamera>()->AspectRatio,
+		Catch::Matchers::WithinAbs(1631.0f / 599.0f, TOLERANCE)
+	);
+
+	CHECK_FALSE(engine::scene::SetViewportSize(mirror.World, 1024, 0));
+	CHECK_FALSE(engine::scene::SetViewportSize(mirror.World, 0, 768));
+	CHECK_FALSE(engine::scene::SetViewportSize(mirror.World, 0, 0));
+
+	// Unchanged by any of the three.
+	CHECK_THAT(
+		mirror.World.Resource<ActiveCamera>()->AspectRatio,
+		Catch::Matchers::WithinAbs(1631.0f / 599.0f, TOLERANCE)
+	);
+
+	// A world with no camera named has nothing to tell, and says so rather than
+	// creating one - a resource minted here would name a dead entity.
+	Store bare("no-camera");
+	CHECK_FALSE(engine::scene::SetViewportSize(bare, 1024, 768));
+}
+
 TEST_CASE("the frustum covers the pane when the viewer looks away from it", "[scene][surfacecameras]") {
 	// **Every other fit case moves the eye and leaves it pointed at the pane.**
 	// The fixture's viewer has identity rotation, which looks down -Z at a pane

@@ -73,6 +73,7 @@
 #include <nodegraph/Evaluate.hpp>
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Preview.hpp>
+#include <optional>
 #include <span>
 #include <string>
 #include <studio/AssetCatalogue.hpp>
@@ -3410,6 +3411,20 @@ namespace studio {
 			WorldId World;
 			Entity Instance;
 			//@}
+
+			// The lens this panel last wrote, or nothing when it has not written
+			// one.
+			//
+			// **What makes `FieldOfView` editable in the properties panel.** The
+			// editor used to assign the whole `Camera` component every frame, so
+			// an author's value survived one frame and snapped back to 69.9008
+			// degrees. `studio::ViewerLensToWrite` compares against this to tell
+			// "the editor's own value, unchanged" from "somebody has taken it",
+			// and reset with the rest of the record when the camera is re-minted
+			// - which is right, because the row that was edited is gone.
+			//
+			// @since v0.15
+			std::optional<engine::scene::Camera> Lens;
 		};
 
 		// Indexed the way `DrawingViewport` is: 0 is the main panel, 1.. are the

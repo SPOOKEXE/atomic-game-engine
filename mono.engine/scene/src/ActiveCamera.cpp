@@ -193,4 +193,18 @@ namespace engine::scene {
 		const CameraMatrices resolved = ResolveCamera(transform->Frame, drawn, aspectRatio);
 		store.ResourceMutable<ActiveCamera>()->Matrices = resolved;
 	}
+
+	bool SetViewportSize(ecs::Store &store, uint32_t width, uint32_t height) {
+		if (width == 0 || height == 0) {
+			return false;
+		}
+
+		auto *active = store.ResourceMutable<ActiveCamera>();
+		if (active == nullptr) {
+			return false;
+		}
+
+		active->AspectRatio = static_cast<float>(width) / static_cast<float>(height);
+		return true;
+	}
 }

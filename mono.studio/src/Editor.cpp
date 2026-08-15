@@ -40,6 +40,7 @@
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
+#include <studio/ViewerLens.hpp>
 #include <studio/RojoSync.hpp>
 #include <studio/Widgets.hpp>
 #include <thread>
@@ -1098,8 +1099,31 @@ namespace studio {
 			if (auto *transform = store.GetMutable<engine::scene::Transform>(viewer.Instance)) {
 				transform->Frame = eye;
 			}
+
+			// **The lens only while it is still the editor's**, which is the
+			// same rule the placement gets from `follow` two lines up and did
+			// not have. Assigning it every frame meant typing 35 into
+			// `FieldOfView` held for one frame and snapped back to 69.9008
+			// degrees - the default 1.22 radians in degrees, which is the
+			// fingerprint of this line rather than of a script. `NearPlane` and
+			// `FarPlane` went the same way, in Edit, Run and Play alike.
+			//
+			// The editor cannot simply stop writing: the far plane is stretched
+			// to the fly speed, and an author flying fast across a large world
+			// should not have to find that field. So it keeps the lens until
+			// somebody takes it. `studio::ViewerLensToWrite` is the decision,
+			// in a header because nothing in this class is reachable from a
+			// test.
 			if (auto *component = store.GetMutable<engine::scene::Camera>(viewer.Instance)) {
-				*component = lens;
+				if (const auto next = ViewerLensToWrite(*component, viewer.Lens, lens)) {
+					*component = *next;
+
+					// **Recorded only when it is written**, which is what makes
+					// the refusal above stick without a second flag to keep in
+					// step: an author's value goes on disagreeing with this for
+					// as long as it stands.
+					viewer.Lens = *next;
+				}
 			}
 		});
 	}
@@ -1414,6 +1438,27 @@ namespace studio {
 		// flying in the other, and stops moving when they stop.
 		if (shown.IsValid() && !IsReplicaWorld(shown)) {
 			EnsureViewerCamera(DrawingViewport, shown, eye, lens, follow);
+		}
+
+		// **How wide this panel is, which no world can work out for itself.**
+		// `aim-surface-cameras` clamps every mirror's fit against a frustum built
+		// from `ActiveCamera::AspectRatio`, and nothing wrote that field until
+		// this line: every mirror in the editor was fitted to a *square* screen,
+		// so a wide viewport lost the sides of every reflection to a hard
+		// vertical edge that looked like a cull box. See `scene::SetViewportSize`.
+		//
+		// **After both branches above and before `Present`.** Both of them write
+		// a whole `ActiveCamera` out, and `SetResource` replaces rather than
+		// merges, so this landing first would simply be overwritten. `Present` is
+		// what runs `PreRender`, which is where the fit happens.
+		//
+		// `target` is this panel's requested size rather than the block-rounded
+		// allocation behind it, which is the same number `Renderer::Render`
+		// projects with - see `render::SceneExtent` for why the two differ.
+		if (shown.IsValid() && target.IsValid()) {
+			Universe->Enter(shown, [&](Store &store) {
+				(void)engine::scene::SetViewportSize(store, target.Width, target.Height);
+			});
 		}
 
 		if (shown.IsValid()) {

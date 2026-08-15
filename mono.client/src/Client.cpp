@@ -1740,6 +1740,22 @@ namespace client {
 		// because presentation is where the frame stops being about state.
 		PumpSounds();
 
+		// **The requested size when there is no window to ask.** A headless run
+		// still lays the panels out and still renders into an offscreen target
+		// of this size, so the numbers have to come from somewhere - and
+		// `--width`/`--height` is what a caller asked for.
+		//
+		// **Read before `PreRender` rather than after it**, which is where it
+		// used to be. The debug panels are the obvious consumer and they are
+		// resized below; `scene::SetViewportSize` is the one that made the
+		// ordering matter, because `aim-surface-cameras` runs inside `PreRender`
+		// and clamps every mirror's fit against a frustum built from it.
+		int pixelWidth = Settings.Width;
+		int pixelHeight = Settings.Height;
+		if (Window != nullptr) {
+			SDL_GetWindowSizeInPixels(Window, &pixelWidth, &pixelHeight);
+		}
+
 		{
 			// Once per frame, and separate from the tick because a client draws
 			// one world while the rest keep simulating. This is the phase that
@@ -1780,7 +1796,24 @@ namespace client {
 				// polling `UserInputService` there should get the same answer -
 				// the alternative is input that works in one world and silently
 				// does not in another.
-				Universe_->Enter(id, [this](engine::ecs::Store &store) { WriteInput(store); });
+				// **And the size of what it is being drawn into, for the same
+				// reason and in the same breath.** `aim-surface-cameras` clamps
+				// every mirror's fit against a frustum built from it, so a world
+				// told after `Present` is a world whose mirrors were fitted to
+				// last frame's window - and a world never told at all, which is
+				// what this was, fits every mirror to a square screen and cuts
+				// the reflection off left and right. See `scene::SetViewportSize`.
+				//
+				// **Every simulated world for the same reason input is**: a
+				// world nobody is looking at still aims its mirrors, and one
+				// that works only while it happens to be the drawn one is the
+				// kind of difference nothing reports.
+				Universe_->Enter(id, [this, pixelWidth, pixelHeight](engine::ecs::Store &store) {
+					WriteInput(store);
+					(void)engine::scene::SetViewportSize(
+						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
+					);
+				});
 
 				Universe_->Present(id, delta, Universe_->AlphaOf(id));
 
@@ -1887,7 +1920,7 @@ namespace client {
 			// through it, so setting the eye afterwards would aim every mirror
 			// at where the client stood last frame.
 			if (ReportedJoin) {
-				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
+				Universe_->Enter(Replicated, [this, pixelWidth, pixelHeight](engine::ecs::Store &store) {
 					// **The replica takes this frame's input like a simulated
 					// world does**, because since v0.14 it has a camera and a
 					// character of its own to drive. It is not in `Simulated` -
@@ -1897,6 +1930,14 @@ namespace client {
 					WriteInput(store);
 
 					(void)AimReplicaViewer(store, ComposedFrame, ComposedCamera);
+
+					// **After `AimReplicaViewer` and not before it**, because
+					// that call writes a whole `ActiveCamera` out when it mints
+					// the viewer, and `SetResource` replaces rather than merges.
+					// See `scene::SetViewportSize`.
+					(void)engine::scene::SetViewportSize(
+						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
+					);
 				});
 
 				Universe_->Present(Replicated, delta, Universe_->AlphaOf(Replicated));
@@ -1950,16 +1991,6 @@ namespace client {
 			MeasuredTicksPerSecond = static_cast<float>(ticksNow - TicksAtWindowStart) / elapsed;
 			TickWindowStarted = Clock.Now();
 			TicksAtWindowStart = ticksNow;
-		}
-
-		// **The requested size when there is no window to ask.** A headless run
-		// still lays the panels out and still renders into an offscreen target
-		// of this size, so the numbers have to come from somewhere - and
-		// `--width`/`--height` is what a caller asked for.
-		int pixelWidth = Settings.Width;
-		int pixelHeight = Settings.Height;
-		if (Window != nullptr) {
-			SDL_GetWindowSizeInPixels(Window, &pixelWidth, &pixelHeight);
 		}
 
 		{
