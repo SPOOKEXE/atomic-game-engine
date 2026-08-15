@@ -50,6 +50,7 @@ using engine::ecs::Store;
 using engine::physics::PhysicsWorld;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::RegisterPhysicsSystems;
+using engine::scene::Anchored;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
@@ -102,9 +103,14 @@ namespace {
 		collider.Extent = part.Extent;
 		store.Set<Collider>(entity, collider);
 
-		if (!part.Anchored) {
+		// On both, anchored or not: `RigidBody` is what the part weighs and the
+		// `Anchored` tag is whether the world may move it. See `scene::Anchored`.
+		store.Set<RigidBody>(entity, RigidBody{});
+
+		if (part.Anchored) {
+			store.Set<Anchored>(entity, Anchored{});
+		} else {
 			store.Set<Motion>(entity, Motion{});
-			store.Set<RigidBody>(entity, RigidBody{});
 		}
 		return entity;
 	}

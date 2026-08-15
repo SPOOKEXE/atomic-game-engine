@@ -107,7 +107,11 @@ TEST_CASE("an anchored part is the server's and cannot be handed over", "[scene]
 	PartDesc anchored;
 	anchored.Anchored = true;
 	const Entity fixed = MakePart(store, anchored);
-	REQUIRE(store.Get<engine::scene::RigidBody>(fixed) == nullptr);
+	REQUIRE(store.Has<engine::scene::Anchored>(fixed));
+
+	// It keeps its body all the same, which is the v0.15 correction: what a
+	// part weighs is not the world's decision about whether it may move it.
+	REQUIRE(store.Get<engine::scene::RigidBody>(fixed) != nullptr);
 
 	const Entity player = AddPlayer(store, "Ada");
 
@@ -134,8 +138,9 @@ TEST_CASE("anchoring an owned body returns it to the server", "[scene][ownership
 	const Entity player = AddPlayer(store, "Ada");
 	REQUIRE(SetNetworkOwner(store, part, player));
 
-	// Anchoring, as the property does it: the body goes.
-	store.Remove<engine::scene::RigidBody>(part);
+	// Anchoring, as the property does it: the tag arrives, the velocity goes,
+	// and the body stays.
+	store.Set<engine::scene::Anchored>(part, engine::scene::Anchored{});
 	store.Remove<engine::scene::Motion>(part);
 
 	ReclaimAbandonedOwnership(store);

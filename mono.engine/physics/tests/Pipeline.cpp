@@ -365,9 +365,10 @@ TEST_CASE("a part authored the way a script authors one falls", "[physics][pipel
 	// that only asserts the fall.
 	CHECK(heightOf(block) > -2.0f);
 
-	// The anchored floor did not move, because an anchored part carries no
-	// rigid body at all. If this ever fails, "anchored" has stopped meaning what
-	// every example in this repository relies on it meaning.
+	// The anchored floor did not move, because an anchored part carries the
+	// `scene::Anchored` tag and so is never a body the solver may push. If this
+	// ever fails, "anchored" has stopped meaning what every example in this
+	// repository relies on it meaning.
 	CHECK(heightOf(floor) == Approx(-0.5f).margin(0.001));
 
 	// **The world's own index is deliberately not asserted here.** The counts

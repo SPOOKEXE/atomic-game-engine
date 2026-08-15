@@ -25,6 +25,7 @@ using engine::ecs::ClassId;
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
+using engine::scene::Anchored;
 using engine::scene::Bounds;
 using engine::scene::Collider;
 using engine::scene::MakePart;
@@ -108,7 +109,11 @@ TEST_CASE("MakePart with Anchored adds no Motion", "[scene][part]") {
 	REQUIRE(fixed != NULL_ENTITY);
 
 	CHECK_FALSE(store.Has<Motion>(fixed));
-	CHECK_FALSE(store.Has<RigidBody>(fixed));
+	CHECK(store.Has<Anchored>(fixed));
+
+	// **And it has a body regardless**, which is what stops anchoring a part
+	// from throwing away the mass and the drag an author typed.
+	CHECK(store.Has<RigidBody>(fixed));
 }
 
 TEST_CASE("a dynamic part is a body that moves", "[scene][part]") {
@@ -322,12 +327,12 @@ TEST_CASE("Anchored is presence rather than a flag", "[scene][part]") {
 	// A structural write: the row moves to another archetype rather than a
 	// boolean changing inside it.
 	REQUIRE(Write(store, dynamic, "Anchored", true));
-	CHECK(store.Get<RigidBody>(dynamic) == nullptr);
+	CHECK(store.Has<Anchored>(dynamic));
 	CHECK(store.Get<Motion>(dynamic) == nullptr);
 	CHECK(Read<bool>(store, dynamic, "Anchored"));
 
 	REQUIRE(Write(store, dynamic, "Anchored", false));
-	CHECK(store.Get<RigidBody>(dynamic) != nullptr);
+	CHECK_FALSE(store.Has<Anchored>(dynamic));
 	CHECK_FALSE(Read<bool>(store, dynamic, "Anchored"));
 }
 
@@ -752,4 +757,70 @@ TEST_CASE("the physical properties are on every part and readable by name", "[sc
 	REQUIRE(store.SetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
 	REQUIRE(store.GetProperty(part, Name("Mass"), &mass, sizeof(mass)));
 	CHECK(mass == Catch::Approx(0.0f));
+}
+
+TEST_CASE("anchoring a part keeps the numbers an author typed", "[scene][part]") {
+	// **The whole point of separating `RigidBody` from the anchored decision.**
+	// Until v0.15 the two were one component, so anchoring a part deleted its
+	// mass and its drag and unanchoring it brought back the defaults - an author
+	// who anchored a crate to move it and let it go again found it weighed one
+	// kilogram and slid like glass, with nothing saying why.
+	Store store("part_test.keeps");
+	engine::scene::EnsureClassTree();
+
+	PartDesc desc;
+	desc.Anchored = false;
+	const Entity part = MakePart(store, desc);
+	REQUIRE(part != NULL_ENTITY);
+
+	{
+		RigidBody *body = store.GetMutable<RigidBody>(part);
+		REQUIRE(body != nullptr);
+		body->Mass = 42.0f;
+		body->LinearDamping = 0.25f;
+		body->AngularDamping = 0.125f;
+	}
+
+	bool anchored = true;
+	REQUIRE(store.SetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
+
+	const RigidBody *whileAnchored = store.Get<RigidBody>(part);
+	REQUIRE(whileAnchored != nullptr);
+	CHECK(whileAnchored->Mass == 42.0f);
+	CHECK(whileAnchored->LinearDamping == 0.25f);
+	CHECK(whileAnchored->AngularDamping == 0.125f);
+
+	// And `Mass` still reads zero while it is anchored, which is what the solver
+	// takes as immovable - the stored number is not the answer to that question.
+	float mass = -1.0f;
+	REQUIRE(store.GetProperty(part, Name("Mass"), &mass, sizeof(mass)));
+	CHECK(mass == 0.0f);
+
+	anchored = false;
+	REQUIRE(store.SetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
+
+	const RigidBody *letGo = store.Get<RigidBody>(part);
+	REQUIRE(letGo != nullptr);
+	CHECK(letGo->Mass == 42.0f);
+	CHECK(letGo->LinearDamping == 0.25f);
+	CHECK(letGo->AngularDamping == 0.125f);
+}
+
+TEST_CASE("drag reads on an anchored part rather than raising", "[scene][part]") {
+	// `Store::GetProperty` returning false becomes `could not read 'X'` in Luau,
+	// so a getter that declines is a script error on a field access that looks
+	// like every other one. An anchored part had no `RigidBody` and both of
+	// these declined.
+	Store store("part_test.drag");
+	engine::scene::EnsureClassTree();
+
+	PartDesc desc;
+	desc.Anchored = true;
+	const Entity part = MakePart(store, desc);
+
+	float damping = -1.0f;
+	CHECK(store.GetProperty(part, Name("LinearDamping"), &damping, sizeof(damping)));
+	CHECK(damping == 0.0f);
+	CHECK(store.GetProperty(part, Name("AngularDamping"), &damping, sizeof(damping)));
+	CHECK(damping == 0.0f);
 }

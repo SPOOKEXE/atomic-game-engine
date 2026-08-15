@@ -4920,7 +4920,7 @@ TEST_CASE("a script hands a body to a player and back to the server", "[scriptin
 		local part = Instance.new('Part')
 		part.Parent = workspace
 
-		-- **Unanchored first, and this engine's default is not Roblox's.**
+		-- **Anchored first, and this engine's default is not Roblox's.**
 		-- `Instance.new('Part')` here carries neither `RigidBody` nor `Motion`
 		-- - the class sets deliberately leave them out, so whether a part is a
 		-- body is a decision rather than a flag - and ownership is about who
@@ -4996,7 +4996,7 @@ TEST_CASE("javascript hands a body to a player and back", "[scripting][js]") {
 	MustRun(*runtime, R"(
 		const part = Instance.new('Part');
 		part.Parent = workspace;
-		// Unanchored first, for the Luau half's reason.
+		// Anchored first, for the Luau half's reason.
 		part.Anchored = false;
 		if (part.GetNetworkOwner() !== null) throw new Error('a fresh part should be the server\'s');
 

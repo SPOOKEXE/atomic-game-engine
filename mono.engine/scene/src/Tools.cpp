@@ -65,11 +65,11 @@ namespace engine::scene {
 				}
 				store.Remove<CharacterLimb>(handle);
 
-				// **Only where there is a body to move.** An anchored handle has
-				// no `RigidBody` and must not gain a `Motion` - that pair is what
-				// `Anchored` means, and handing one back would silently unanchor
-				// a part the author anchored.
-				if (store.Has<RigidBody>(handle)) {
+				// **Only where there is a body to move.** An anchored handle
+				// carries the `Anchored` tag and must not gain a `Motion` - that
+				// pair is what `Anchored` means, and handing one back would
+				// silently unanchor a part the author anchored.
+				if (!store.Has<Anchored>(handle)) {
 					store.Set(handle, Motion{});
 				}
 				return;

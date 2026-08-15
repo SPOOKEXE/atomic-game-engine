@@ -289,7 +289,7 @@ TEST_CASE("an anchored handle is not unanchored by being carried", "[scene][tool
 	REQUIRE(UnequipTool(world.Store_, tool));
 
 	CHECK(world.Store_.Get<Motion>(handle) == nullptr);
-	CHECK(world.Store_.Get<engine::scene::RigidBody>(handle) == nullptr);
+	CHECK(world.Store_.Has<engine::scene::Anchored>(handle));
 }
 
 TEST_CASE("one hand holds one tool", "[scene][tools]") {

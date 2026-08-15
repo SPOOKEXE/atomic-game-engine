@@ -1493,25 +1493,29 @@ namespace server {
 			// could not be shot - and nothing reported it, because a hit test
 			// against an empty candidate list is an ordinary miss.
 			//
-			// `RigidBody` is the question actually being asked: an anchored part
-			// never gets one at all - `PartDesc::Anchored` decides whether to
-			// attach one - so this excludes the static geometry the old
-			// predicate was aiming at, and excludes nothing else. `Static` is
-			// skipped for the same reason one layer in: it is a body that does
-			// not move.
+			// `scene::Anchored` is the question actually being asked, and it is
+			// asked as an exclusion: an anchored part carries the tag, so this
+			// skips the static geometry the old predicate was aiming at and
+			// skips nothing else. `Static` is skipped for the same reason one
+			// layer in: it is a body that does not move.
+			//
+			// **It was the absence of `RigidBody` until v0.15**, when that
+			// component became the author's numbers rather than the world's
+			// decision and every part started carrying one. Left as it was, this
+			// would have recorded a rewind history for every wall in the map.
 			if (History.Begin(store.Time().Tick)) {
-				store.Each<const engine::scene::Transform, const engine::scene::RigidBody>(
-					[this](
-						engine::ecs::Entity entity,
-						const engine::scene::Transform &placement,
-						const engine::scene::RigidBody &body
-					) {
+				store.Query<const engine::scene::Transform, const engine::scene::RigidBody>()
+					.Without<engine::scene::Anchored>()
+					.Each([this](
+							  engine::ecs::Entity entity,
+							  const engine::scene::Transform &placement,
+							  const engine::scene::RigidBody &body
+						  ) {
 						if (body.Kind == engine::scene::BodyKind::Static) {
 							return;
 						}
 						History.Record(entity, placement.Frame.Position);
-					}
-				);
+					});
 			}
 
 			// Before `ClearChanges`, which the world does at the start of its

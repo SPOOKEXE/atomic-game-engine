@@ -186,7 +186,7 @@ TEST_CASE("anchoring is a structural change and locking is not", "[studio][tools
 
 	anchored = true;
 	REQUIRE(store.SetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
-	CHECK(store.Get<engine::scene::RigidBody>(part) == nullptr);
+	CHECK(store.Has<engine::scene::Anchored>(part));
 
 	bool locked = true;
 	REQUIRE(store.SetProperty(part, Name("Locked"), &locked, sizeof(locked)));

@@ -57,6 +57,7 @@ namespace registration_test {
 		"scene.WorldBounds", "scene.RenderedSignature", "scene.Portal",
 		"scene.SurfaceLens", "scene.SurfaceBounces",	"scene.Team",
 		"scene.PlayerTeam",	 "scene.SpawnLocation",		"scene.Tool",
+		"scene.Anchored",
 	};
 }
 
@@ -107,6 +108,16 @@ TEST_CASE("everything registered here can be snapshotted", "[scene][registration
 	for (const std::string_view expected : registration_test::EXPECTED) {
 		const TypeDescriptor &descriptor = Components::Describe(Components::Find(Name(expected)));
 		INFO(expected);
+
+		// **A tag is exempt, and `Store::Save` agrees.** It refuses a component
+		// with bytes and no serialisation; a tag has no bytes, crosses as
+		// presence, and is restored by being in the archetype at all. Requiring
+		// a writer for one would be asking for a function that writes nothing.
+		if (descriptor.Kind == engine::ecs::ComponentKind::Tag) {
+			CHECK(descriptor.Size == 0);
+			continue;
+		}
+
 		CHECK(descriptor.Serialisable);
 	}
 }

@@ -16,9 +16,19 @@
 namespace engine::ecs {
 
 	namespace {
-		// The key a query plan is cached under: the sorted term ids as raw
-		// bytes, so two systems asking for the same components in different
-		// orders share one plan.
+		// The key a query plan is cached under: the term ids as raw bytes, in
+		// the caller's order and with the required and excluded sets after
+		// them.
+		//
+		// **In the caller's order, and that is a correction rather than a
+		// choice.** It used to sort them, so that `Each<A, B>` and `Each<B, A>`
+		// shared one plan - and `Match::Positions` is built in the *caller's*
+		// term order, so the second of those two got the first's column
+		// bindings and read an `A` where it had asked for a `B`. Silent, and
+		// wrong in the way that is hardest to see: the types line up, the loop
+		// runs, and the numbers are somebody else's. Sharing a plan between two
+		// orders was never worth anything - a plan is a handful of indices -
+		// and it cost correctness.
 		//
 		// **Built on the caller's stack, not on the heap.** This runs once per
 		// query per system per tick - the hottest non-row path in the engine -
@@ -34,21 +44,45 @@ namespace engine::ecs {
 			std::vector<uint32_t> Overflow;
 			std::string_view Bytes;
 
-			explicit PlanKey(std::span<const ComponentId> terms) {
-				uint32_t *sorted = Inline;
-				if (terms.size() > INLINE_QUERY_TERMS) {
+			explicit PlanKey(const QueryTerms &terms) {
+				// **The two filter sets are sorted and the bound terms are
+				// not.** Order is meaningful for the bound terms, because it is
+				// what the body's parameters are matched against; `With` and
+				// `Without` are sets and nothing downstream reads their order,
+				// so normalising them keeps two spellings of one filter on one
+				// plan.
+				//
+				// `ComponentId::INVALID` separates the three runs. No
+				// registration produces it, so it cannot be mistaken for a term
+				// - which is what stops a bound `{A, B}` keying the same bytes
+				// as a bound `{A}` that excludes `B`.
+				const size_t total = terms.Bound.size() + terms.Required.size() + terms.Excluded.size() + 2;
+
+				uint32_t *keyed = Inline;
+				if (total > INLINE_QUERY_TERMS) {
 					// Absurd, but it must work rather than corrupt the stack.
-					Overflow.resize(terms.size());
-					sorted = Overflow.data();
+					Overflow.resize(total);
+					keyed = Overflow.data();
 				}
 
-				for (size_t index = 0; index < terms.size(); index++) {
-					sorted[index] = terms[index].Index;
+				size_t at = 0;
+				for (const ComponentId term : terms.Bound) {
+					keyed[at++] = term.Index;
 				}
-				std::sort(sorted, sorted + terms.size());
 
-				Bytes =
-					std::string_view(reinterpret_cast<const char *>(sorted), terms.size() * sizeof(uint32_t));
+				const auto appendSorted = [&](std::span<const ComponentId> ids) {
+					keyed[at++] = ComponentId::INVALID;
+					const size_t from = at;
+					for (const ComponentId id : ids) {
+						keyed[at++] = id.Index;
+					}
+					std::sort(keyed + from, keyed + at);
+				};
+
+				appendSorted(terms.Required);
+				appendSorted(terms.Excluded);
+
+				Bytes = std::string_view(reinterpret_cast<const char *>(keyed), at * sizeof(uint32_t));
 			}
 		};
 	}
@@ -72,6 +106,20 @@ namespace engine::ecs {
 
 	void Store::BindToCallingThread() {
 		Owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+	}
+
+	void Store::TooManyFilterTerms(const char *what) const {
+		// Abort rather than drop the term. A `Without` that quietly did nothing
+		// would be a query silently matching rows it was written to skip, which
+		// is worse than not running at all.
+		ENGINE_ERROR(
+			"store '{}': a query named more than {} `{}` terms. A filter is a handful of components; "
+			"past that it has stopped describing a set.",
+			StoreName,
+			Store::MAX_FILTER_TERMS,
+			what
+		);
+		std::abort();
 	}
 
 	void Store::RequireOwningThread(const char *what) const {
@@ -417,6 +465,10 @@ namespace engine::ecs {
 	void Store::VisitTables(
 		std::span<const ComponentId> terms, const std::function<void(const TableSlice &)> &body
 	) {
+		VisitTables(QueryTerms{terms, {}, {}}, body);
+	}
+
+	void Store::VisitTables(const QueryTerms &terms, const std::function<void(const TableSlice &)> &body) {
 		const PlanKey key(terms);
 
 		// Found without allocating; inserted only the first time, when the key
@@ -434,18 +486,35 @@ namespace engine::ecs {
 		if (plan.SeenTables < State->Tables.size()) {
 			for (size_t index = plan.SeenTables; index < State->Tables.size(); index++) {
 				const ComponentSet &set = State->Tables[index].Set();
-				if (!set.ContainsAll(terms)) {
+
+				// **All three tests are per table, never per row.** Whether a
+				// component is present is a property of the archetype, so an
+				// exclusion costs one binary search per table per plan rebuild
+				// and nothing at all afterwards - the same price an inclusion
+				// pays. That is what makes `Without` worth having rather than a
+				// branch in the body.
+				if (!set.ContainsAll(terms.Bound) || !set.ContainsAll(terms.Required)) {
+					continue;
+				}
+
+				bool excluded = false;
+				for (const ComponentId term : terms.Excluded) {
+					excluded = excluded || set.Contains(term);
+				}
+				if (excluded) {
 					continue;
 				}
 
 				QueryPlan::Match match;
 				match.Table = static_cast<uint32_t>(index);
-				match.Positions.reserve(terms.size());
+				match.Positions.reserve(terms.Bound.size());
 
 				// Resolved in the caller's term order, so the iteration code
 				// indexes by parameter position rather than searching per row.
+				// The key carries that order for the same reason - see
+				// `PlanKey`.
 				const std::span<const ComponentId> ids = set.Ids();
-				for (const ComponentId term : terms) {
+				for (const ComponentId term : terms.Bound) {
 					const auto at = std::lower_bound(ids.begin(), ids.end(), term);
 					match.Positions.push_back(static_cast<size_t>(at - ids.begin()));
 				}
@@ -461,8 +530,8 @@ namespace engine::ecs {
 		std::vector<void *const *> overflowColumns;
 
 		void *const **columns = inlineColumns;
-		if (terms.size() > INLINE_QUERY_TERMS) {
-			overflowColumns.resize(terms.size());
+		if (terms.Bound.size() > INLINE_QUERY_TERMS) {
+			overflowColumns.resize(terms.Bound.size());
 			columns = overflowColumns.data();
 		}
 
@@ -475,7 +544,7 @@ namespace engine::ecs {
 			// The chunk directory rather than a base address. One slice still
 			// covers the whole table - see `TableSlice` on why that is not a
 			// detail - and the visitors index it by `Column::ChunkOf(row)`.
-			for (size_t term = 0; term < terms.size(); term++) {
+			for (size_t term = 0; term < terms.Bound.size(); term++) {
 				columns[term] = table.ColumnAt(match.Positions[term]).ChunkData();
 			}
 
@@ -489,6 +558,10 @@ namespace engine::ecs {
 	}
 
 	size_t Store::CountRows(std::span<const ComponentId> terms) {
+		return CountRows(QueryTerms{terms, {}, {}});
+	}
+
+	size_t Store::CountRows(const QueryTerms &terms) {
 		size_t total = 0;
 		VisitTables(terms, [&total](const TableSlice &slice) { total += slice.Rows; });
 		return total;
@@ -945,12 +1018,19 @@ namespace engine::ecs {
 				const size_t start = Column::ChunkStart(chunk);
 				const size_t end = ChunkEnd(row, slice.Rows);
 				const auto *bits = static_cast<const DirtyBits *>(bitChunks[chunk]);
-				auto *values = static_cast<std::byte *>(valueChunks[chunk]);
+
+				// **A tag has no column, so there is no directory to index.**
+				// `TableSlice::Columns` is null for a component with no data,
+				// and this walked it anyway - so observing a tag and writing it
+				// crashed here rather than reporting a change with no value.
+				// Nothing observed one until a property named a tag among the
+				// components it reads, which is what `scene::Anchored` does.
+				auto *values = stride == 0 ? nullptr : static_cast<std::byte *>(valueChunks[chunk]);
 
 				for (; row < end; row++) {
 					const size_t offset = row - start;
 					if (bits[offset].Test(position)) {
-						body(slice.Entities[row], values + offset * stride);
+						body(slice.Entities[row], values == nullptr ? nullptr : values + offset * stride);
 					}
 				}
 			}

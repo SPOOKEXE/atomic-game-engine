@@ -57,6 +57,7 @@ using engine::physics::Publish;
 using engine::physics::SLEEP_SETTLE_SECONDS;
 using engine::physics::Solve;
 using engine::physics::SyncBroadphase;
+using engine::scene::Anchored;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
@@ -102,13 +103,18 @@ namespace {
 		}
 
 		// `Anchored` decides presence rather than setting a flag, exactly as
-		// `MakePart` does: an anchored body has neither `RigidBody` nor
-		// `Motion` and lands in a different archetype.
-		if (!description.Anchored) {
+		// `MakePart` does: an anchored body carries the tag and no `Motion`, and
+		// lands in a different archetype. The `RigidBody` is on both, because
+		// what a part weighs is not the world's decision about whether it may
+		// move it.
+		RigidBody body;
+		body.Mass = description.Mass;
+		store.Set<RigidBody>(entity, body);
+
+		if (description.Anchored) {
+			store.Set<Anchored>(entity, Anchored{});
+		} else {
 			store.Set<Motion>(entity, Motion{description.Velocity, Vector3::Zero});
-			RigidBody body;
-			body.Mass = description.Mass;
-			store.Set<RigidBody>(entity, body);
 		}
 		return entity;
 	}

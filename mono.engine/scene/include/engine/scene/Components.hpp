@@ -171,12 +171,41 @@ namespace engine::scene {
 		core::Vector3 Angular;
 	};
 
-	// What makes a moving thing a body the solver may push.
+	// Whether the world may not move this part.
 	//
-	// Present only on dynamic and kinematic parts, because `MakePart` decides
-	// from `PartDesc::Anchored` whether to attach one at all. Static geometry
-	// therefore lands in a different archetype rather than being visited and
-	// skipped once per tick per entity.
+	// **A tag rather than a flag.** Until v0.15 anchoring was said by the
+	// *absence* of `RigidBody`, which put the decision and the parameters in one
+	// component: anchoring a part therefore threw away its mass and its drag,
+	// and unanchoring it brought the defaults back rather than what the author
+	// had typed. Those two jobs are separate now - `RigidBody` describes the
+	// part and this says what the world may do with it.
+	//
+	// **Presence rather than a boolean, so the dynamic queries skip an anchored
+	// part instead of visiting and rejecting it.** Whether a component is on a
+	// row is a property of the archetype, so `Query<...>().Without<Anchored>()`
+	// costs one test per table per plan and nothing per row - which is the whole
+	// reason this is a component and not a `bool` on `RigidBody`.
+	//
+	// It marks the anchored ones, which reads the way the property does. That
+	// only became writable at v0.15: the ECS matched on presence and had no
+	// exclusion term, so a query meaning "the dynamic set" had to name something
+	// positive and this tag had to be spelled the other way round. `Store::
+	// Selection` is what changed.
+	//
+	// Paired with `Motion`, which is a different question: this is whether the
+	// world may move it, `Motion` is whether it is moving. A sleeping part has
+	// neither.
+	//
+	// @since v0.15
+	struct Anchored {};
+
+	// What a part weighs, how it sheds speed, and what the solver may do with
+	// it.
+	//
+	// **On every `BasePart`, anchored or not**, because all four fields are
+	// authored rather than simulated: an author types a mass and a drag, and a
+	// part that is anchored for a while should still have them afterwards.
+	// `Anchored` is what decides whether the solver visits the row.
 	//
 	// Widest-first with named padding, so the object representation a snapshot
 	// writes holds no uninitialised bytes.

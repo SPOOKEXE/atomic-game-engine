@@ -196,12 +196,21 @@ namespace engine::physics {
 		BodyFacts FactsFor(
 			const scene::RigidBody *body,
 			const scene::Collider *collider,
-			const scene::PhysicsProperties *physical
+			const scene::PhysicsProperties *physical,
+			bool unanchored
 		) {
-			if (body == nullptr || collider == nullptr) {
-				// No `RigidBody` is not a static body - `scene::Enums` is
-				// explicit that it is not a body at all. It still stops things,
-				// which is exactly what an infinite mass does.
+			// **Anchored is asked first, and it used to be asked by omission.**
+			// Until v0.15 an anchored part had no `RigidBody` at all, so a null
+			// pointer here meant "the world may not move this" and the infinite
+			// mass below was the right answer to it. Every part carries one now
+			// - it is what the part weighs, not whether it may be pushed - so
+			// the question is asked through `scene::Anchored` instead. Left as
+			// it was, every anchored floor in every scene became a dynamic body
+			// and the things standing on it fell through.
+			if (!unanchored || body == nullptr || collider == nullptr) {
+				// Not a body at all - `scene::Enums` is explicit that this is
+				// not the same as a static one. It still stops things, which is
+				// exactly what an infinite mass does.
 				return BodyFacts{};
 			}
 
@@ -340,7 +349,8 @@ namespace engine::physics {
 				body.Restitution = physical->Elasticity;
 			}
 
-			const BodyFacts facts = FactsFor(rigid, collider, physical);
+			const BodyFacts facts =
+				FactsFor(rigid, collider, physical, !store.Has<scene::Anchored>(body.Owner));
 			body.InverseMass = facts.InverseMass;
 			body.InverseInertia = facts.InverseInertia;
 			body.Movable = facts.Dynamic;

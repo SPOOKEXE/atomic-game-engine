@@ -316,6 +316,11 @@ namespace engine::scene {
 				ecs::Components::Of<RigidBody>(),
 				ecs::Components::Of<Collider>(),
 				ecs::Components::Of<PhysicsProperties>(),
+
+				// Named because the answer depends on it: an anchored part
+				// weighs zero here, and `.Changed` on `Mass` has to fire when a
+				// part is anchored or let go.
+				ecs::Components::Of<Anchored>(),
 			});
 
 			// **The empty set rather than nothing at all.** A read-only
@@ -334,7 +339,14 @@ namespace engine::scene {
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const RigidBody *body = store.Get<RigidBody>(instance);
 				const Collider *collider = store.Get<Collider>(instance);
-				if (body == nullptr || collider == nullptr) {
+
+				// **Anchored still weighs zero**, which is what the solver reads
+				// as immovable and the honest number for a thing the world may
+				// not move. The test is `Anchored` rather than a missing
+				// `RigidBody` because a part now keeps its body while anchored -
+				// the number it would weigh is still there and is still not the
+				// answer to this question.
+				if (body == nullptr || collider == nullptr || store.Has<Anchored>(instance)) {
 					*static_cast<float *>(out) = 0.0f;
 					return true;
 				}
@@ -347,60 +359,19 @@ namespace engine::scene {
 			return property;
 		}
 
-		// LinearDamping and AngularDamping: drag, which only a body has.
-		//
-		// **Computed rather than the generated field pair, so that reading one
-		// off an anchored part answers rather than fails.** An anchored part
-		// carries no `RigidBody` - that is what anchored *means* here - and
-		// `Classes::Property<&RigidBody::LinearDamping>` produced a getter that
-		// returned false for it. `Store::GetProperty` returning false becomes
-		// `could not read 'LinearDamping'` in Luau, so `print(part.LinearDamping)`
-		// on an ordinary anchored part raised an error on a field access that
-		// looks like every other one. `ecs::AuditProperties` is what found it.
-		//
-		// The answer for a part with no body is the default a body would have
-		// had, which is `Mass`'s convention one function up and stated there:
-		// the honest number for a thing the world may not move.
-		//
-		// **A write still needs a body.** There is nowhere to keep drag for a
-		// part that has none, and inventing a `RigidBody` to hold it would
-		// unanchor the part as a side effect of setting its drag.
-		template <auto Member> PropertyDescriptor DampingProperty(std::string_view name) {
-			PropertyDescriptor property;
-			property.Name = core::Name(name);
-			property.Type = PropertyType::Float;
-			property.Size = sizeof(float);
-			property.Kind = PropertyKind::Computed;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<RigidBody>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const RigidBody *body = store.Get<RigidBody>(instance);
-				const RigidBody fallback;
-				*static_cast<float *>(out) = (body == nullptr ? fallback : *body).*Member;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				RigidBody *body = store.GetMutable<RigidBody>(instance);
-				if (body == nullptr) {
-					return false;
-				}
-				body->*Member = *static_cast<const float *>(value);
-				return true;
-			};
-
-			return property;
-		}
-
 		// Anchored: whether the world may move it - and the one property that
 		// is not stored anywhere.
 		//
-		// `MakePart` says it in as many words: **anchored decides presence, not
-		// a flag.** An anchored part carries neither `RigidBody` nor `Motion`,
-		// so it sits in a different archetype and the dynamic queries never
-		// visit it. Reading it is therefore a component test and writing it is
-		// an archetype move - which is what `PropertyKind::Structural` exists to
+		// **Anchored decides presence, not a flag**, and since v0.15 the
+		// presence it decides is the `scene::Anchored` tag's rather than
+		// `RigidBody`'s. An anchored part carries the tag and no `Motion`, so it
+		// sits in a different archetype and the dynamic queries skip it with a
+		// `Without` - which is the same archetype split as before. What changed
+		// is that it keeps its `RigidBody`, so the mass and the drag an author
+		// typed are still there when the part is let go again.
+		//
+		// Reading it is therefore a component test and writing it is an
+		// archetype move - which is what `PropertyKind::Structural` exists to
 		// announce, so a caller knows this one defers where the others do not.
 		PropertyDescriptor AnchoredProperty() {
 			PropertyDescriptor property;
@@ -408,12 +379,12 @@ namespace engine::scene {
 			property.Type = PropertyType::Bool;
 			property.Size = sizeof(bool);
 			property.Kind = PropertyKind::Structural;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<RigidBody>()});
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Anchored>()});
 			property.Writes =
-				&ecs::ComponentSet::Intern({ecs::Components::Of<RigidBody>(), ecs::Components::Of<Motion>()});
+				&ecs::ComponentSet::Intern({ecs::Components::Of<Anchored>(), ecs::Components::Of<Motion>()});
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				*static_cast<bool *>(out) = store.Get<RigidBody>(instance) == nullptr;
+				*static_cast<bool *>(out) = store.Has<Anchored>(instance);
 				return true;
 			};
 
@@ -421,12 +392,16 @@ namespace engine::scene {
 			// the whole reason the kind is declared rather than inferred: a
 			// structural change applied inline would move the row out from
 			// under the loop walking it.
+			//
+			// **`RigidBody` is not touched either way.** Removing it here was
+			// the bug: it is the author's numbers, and anchoring a part to move
+			// it and unanchoring it again should not reset its mass.
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				if (*static_cast<const bool *>(value)) {
-					store.Remove<RigidBody>(instance);
+					store.Set(instance, Anchored{});
 					store.Remove<Motion>(instance);
 				} else {
-					store.Set(instance, RigidBody{});
+					store.Remove<Anchored>(instance);
 					store.Set(instance, Motion{});
 				}
 				return true;
@@ -1394,15 +1369,38 @@ namespace engine::scene {
 				// flag inside says whether any of it is used -
 				// `PhysicsProperties::Custom`.
 				ecs::Components::Of<PhysicsProperties>(),
+
+				// **On the class since v0.15, for the same reason
+				// `PhysicsProperties` is.** All four of its fields are authored
+				// - a mass, two drags and a body kind - and while its presence
+				// was what said "unanchored", anchoring a part deleted them and
+				// unanchoring it brought back the defaults rather than what the
+				// author typed. `Anchored` carries that decision now, so this
+				// is free to be what it reads as: the part's physical
+				// description. Sixteen bytes on every part, which is the trade
+				// the two entries above already make.
+				ecs::Components::Of<RigidBody>(),
+
+				// **So that a part is anchored until something says otherwise.**
+				// The tag marks the anchored ones, so its *absence* is what puts
+				// a row in the simulated set - and a bare `CreateInstance`, which
+				// is what `Instance.new("Part")` is, would otherwise produce a
+				// part the solver treats as dynamic while the broad phase has it
+				// in the static index. Anchored is the safe default and Roblox's
+				// `Instance.new` is the only caller that notices.
+				ecs::Components::Of<Anchored>(),
 			};
 			const ecs::ClassId basePart = ecs::Classes::Register("BasePart", pvInstance, base);
 
 			// Part adds nothing of its own: BasePart already holds the set
 			// `v02v03v04.md` §3.3 names, and Part is the concrete leaf a script
-			// asks for by name. `RigidBody` and `Motion` are deliberately
-			// absent from every class here - whether a part has them is
-			// `PartDesc::Anchored`'s decision, and putting them in the class
-			// set would land static geometry in the dynamic archetype.
+			// asks for by name. `Motion` is the one deliberately absent - whether
+			// a part has one is `PartDesc::Anchored`'s decision, and putting it
+			// in the class set would land static geometry in the dynamic
+			// archetype. `RigidBody` used to be in that sentence and no longer
+			// is: it holds the author's numbers rather than the world's
+			// decision, and the `Anchored` tag is what keeps static geometry out
+			// of the dynamic archetype now.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});
 
 			// **A `SpawnLocation` is a `Part` that says who may stand up on
@@ -1746,12 +1744,16 @@ namespace engine::scene {
 
 			// **Drag, under the names the integrator already reads.** A second
 			// pair on `PhysicsProperties` would be two places to write one
-			// number; these are `RigidBody`'s own fields, so a part that is
-			// anchored has neither - which is honest, because an anchored part
-			// has no motion to damp and Roblox's `Anchored` part ignores drag
-			// in the same way.
-			ecs::Classes::Computed(basePart, DampingProperty<&RigidBody::LinearDamping>("LinearDamping"));
-			ecs::Classes::Computed(basePart, DampingProperty<&RigidBody::AngularDamping>("AngularDamping"));
+			// number; these are `RigidBody`'s own fields.
+			//
+			// **Generated again since v0.15.** They were briefly hand-written to
+			// answer a default for a part with no `RigidBody`, because an
+			// anchored part had none and `print(part.LinearDamping)` raised
+			// `could not read` on an ordinary part. `RigidBody` is on the class
+			// now, so there is nothing to fall back to and the generated pair is
+			// correct as it stands.
+			ecs::Classes::Property<&RigidBody::LinearDamping>(basePart, "LinearDamping");
+			ecs::Classes::Property<&RigidBody::AngularDamping>(basePart, "AngularDamping");
 
 			ecs::Classes::Computed(basePart, MassProperty());
 
@@ -2178,11 +2180,17 @@ namespace engine::scene {
 		store.Set(part, visual);
 
 		// **Anchored decides presence, not a flag.** An anchored part carries
-		// neither of these, so it sits in a different archetype and the dynamic
-		// queries never visit it - which beats testing a boolean per row per
-		// tick and is the form the ECS is built for.
+		// the tag and no `Motion`, so it sits in a different archetype and the
+		// dynamic queries skip it with a `Without` rather than a branch per row
+		// per tick - which is the form the ECS is built for.
+		//
+		// The tag arrives with the class set, so this only has to take it off.
+		//
+		// `RigidBody` is on both and arrives from the class set: it is what the
+		// part weighs and how it sheds speed, which an anchored part still has.
+		// See `scene::Anchored`.
 		if (!desc.Anchored) {
-			store.Set(part, RigidBody{});
+			store.Remove<Anchored>(part);
 			store.Set(part, Motion{});
 		}
 

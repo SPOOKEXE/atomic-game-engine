@@ -495,6 +495,11 @@ namespace engine::scene {
 		ecs::Components::Register<Bounds>("scene.Bounds");
 		ecs::Components::Register<Motion>("scene.Motion", MotionWire());
 		ecs::Components::Register<RigidBody>("scene.RigidBody");
+
+		// A tag, so it costs a column of nothing and crosses as presence. The
+		// authority decides whether a part is anchored, so it crosses like every
+		// other `scene.` row.
+		ecs::Components::Register<Anchored>("scene.Anchored");
 		ecs::Components::Register<Collider>("scene.Collider");
 		ecs::Components::Register<Surface>("scene.Surface", WriteSurfaces, ReadSurfaces);
 

@@ -74,11 +74,15 @@ namespace engine::scene {
 
 		// Whether the world may move it.
 		//
-		// **This decides whether `RigidBody` and `Motion` exist on the entity
-		// at all**, rather than setting a flag the physics step reads. An
-		// anchored part therefore lands in a different archetype, and the
-		// dynamic queries never visit it - which is the ECS-native form of the
-		// optimisation and strictly better than a branch per row per tick.
+		// **This decides whether the `scene::Anchored` tag and `Motion` exist
+		// on the entity at all**, rather than setting a flag the physics step
+		// reads. An anchored part therefore lands in a different archetype, and
+		// the dynamic queries skip it with a `Without` - which is the ECS-native
+		// form of the optimisation and strictly better than a branch per row per
+		// tick.
+		//
+		// `RigidBody` is on every part either way, since v0.15: what a part
+		// weighs is not the world's decision about whether it may move it.
 		bool Anchored = false;
 	};
 

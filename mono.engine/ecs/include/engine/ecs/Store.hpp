@@ -56,6 +56,33 @@ namespace engine::ecs {
 	// spans of them out. Include `Classes.hpp` to read one.
 	struct PropertyDescriptor;
 
+	// What a query matches on, in three parts.
+	//
+	// **Every one of them is answered per archetype, never per row.** Whether a
+	// table holds a component is a property of the table, so a query with two
+	// exclusions costs two binary searches the first time it meets a table and
+	// nothing at all on every tick afterwards - the same price an inclusion
+	// pays. That is what makes `Without` worth having: the alternative is a
+	// branch per row per tick over rows the loop should never have visited.
+	//
+	// @since v0.15
+	struct QueryTerms {
+		// The components the body is handed a reference to, in the order it
+		// names them. Order is meaningful here and nowhere else in this struct.
+		std::span<const ComponentId> Bound;
+
+		// Components an entity must carry, without the body being handed them.
+		//
+		// **The half that is easy to overlook and is used more often.** A tag
+		// has no data, so naming it in `Bound` forces the body to take a
+		// parameter it cannot use; naming it here says the same thing and
+		// leaves the signature alone.
+		std::span<const ComponentId> Required;
+
+		// Components an entity must not carry.
+		std::span<const ComponentId> Excluded;
+	};
+
 	// Owns every entity, component, resource, and clock value for one world.
 	//
 	// A Store starts bound to its construction thread. Checked storage mutations
@@ -719,6 +746,184 @@ namespace engine::ecs {
 
 			const ComponentId terms[] = {Components::Of<std::remove_const_t<Ts>>()...};
 			return CountRows(terms);
+		}
+
+		// The most `With` and `Without` terms one query may name.
+		//
+		// A filter is a handful of components. Eight is far past anything real,
+		// and a query that wants a ninth is a query that has stopped describing
+		// a set - so this refuses rather than growing, which is the same call
+		// `Components::Adopt` makes about a type registered twice.
+		static constexpr size_t MAX_FILTER_TERMS = 8;
+
+		// A query being built: the components to hand the body, and the ones to
+		// match on without handing over.
+		//
+		// **One shape for every iteration this class offers**, which is the
+		// point of it. `Each`, `EachBatch`, `EachParallel` and `CountMatching`
+		// each took a term list and nothing else, so a query that wanted to say
+		// "and not a wall" had to say it as a branch inside the body - over rows
+		// the loop should never have visited, once per row per tick, forever.
+		// The filter is answered per archetype instead.
+		//
+		// Built by `Store::Query` and finished by one of the terminal calls
+		// below. Nothing is evaluated until then, so the chain costs nothing on
+		// its own:
+		//
+		//     store.Query<Transform, const Motion>()
+		//          .With<Collider>()
+		//          .Without<Anchored>()
+		//          .Each([](Entity, Transform &frame, const Motion &motion) { ... });
+		//
+		// A selection holds a reference to its store and spans into its own
+		// arrays, so it is a scope-local value: build it, finish it, drop it.
+		//
+		// @since v0.15
+		template <class... Ts> class Selection {
+		  public:
+			// Requires `Us...` without handing them to the body.
+			//
+			// **The half worth reaching for first.** A tag has no data, so
+			// naming it in `Query<...>` forces the body to take a parameter it
+			// cannot read; this says the same thing and leaves the signature
+			// alone. Repeatable, and the sets are unioned.
+			//
+			// @return This selection, for chaining.
+			template <class... Us> Selection &With() {
+				Append(RequiredTerms, RequiredCount, "With", {Components::Of<std::remove_const_t<Us>>()...});
+				return *this;
+			}
+
+			// Refuses any entity carrying one of `Us...`.
+			//
+			// Answered per archetype, so an exclusion costs one binary search
+			// per table the first time the plan meets it and nothing
+			// afterwards. Repeatable, and the sets are unioned.
+			//
+			// @return This selection, for chaining.
+			template <class... Us> Selection &Without() {
+				Append(
+					ExcludedTerms, ExcludedCount, "Without", {Components::Of<std::remove_const_t<Us>>()...}
+				);
+				return *this;
+			}
+
+			// `Store::Each`, over what this selection matches.
+			//
+			// @param body Called as `body(Entity, Ts &...)` for every match.
+			template <class Body> void Each(Body &&body) {
+				Owner->RequireOwningThread("Query::Each");
+
+				const DeferScope defer(*Owner);
+				Owner->VisitTables(Terms(), [&](const TableSlice &slice) {
+					Owner->VisitRows<Ts...>(slice, body, std::index_sequence_for<Ts...>{});
+				});
+			}
+
+			// `Store::EachBatch`, over what this selection matches.
+			//
+			// @param body Called as `body(size_t rows, Ts *...columns)` per run.
+			template <class Body> void EachBatch(Body &&body) {
+				Owner->RequireOwningThread("Query::EachBatch");
+
+				Owner->VisitTables(Terms(), [&](const TableSlice &slice) {
+					Owner->VisitBatch<Ts...>(slice, body, std::index_sequence_for<Ts...>{});
+				});
+			}
+
+			// `Store::EachParallel`, over what this selection matches.
+			//
+			// Every restriction that call carries applies here unchanged - most
+			// of all that the body makes no structural change and writes no row
+			// but its own.
+			//
+			// @param body  Called concurrently as `body(Entity, Ts &...)`.
+			// @param grain The minimum run of rows worth handing to a worker.
+			template <class Body>
+			void EachParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
+				Owner->RequireOwningThread("Query::EachParallel");
+
+				Owner->VisitTables(Terms(), [&](const TableSlice &slice) {
+					Owner->VisitRowsParallel<Ts...>(slice, body, grain, std::index_sequence_for<Ts...>{});
+				});
+			}
+
+			// `Store::EachBatchParallel`, over what this selection matches.
+			//
+			// @param body  Called concurrently as `body(size_t first, size_t
+			//              rows, Ts *...columns)`.
+			// @param grain The minimum run of rows worth handing to a worker.
+			// @return Rows visited in total.
+			template <class Body>
+			size_t EachBatchParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
+				Owner->RequireOwningThread("Query::EachBatchParallel");
+
+				size_t visited = 0;
+				Owner->VisitTables(Terms(), [&](const TableSlice &slice) {
+					visited += Owner->VisitBatchParallel<Ts...>(
+						slice, body, grain, visited, std::index_sequence_for<Ts...>{}
+					);
+				});
+				return visited;
+			}
+
+			// How many entities `Each` would visit.
+			//
+			// @return The live number of entities this selection matches.
+			size_t Count() {
+				Owner->RequireOwningThread("Query::Count");
+				return Owner->CountRows(Terms());
+			}
+
+		  private:
+			friend class Store;
+
+			explicit Selection(Store &owner)
+				: Owner(&owner), BoundTerms{Components::Of<std::remove_const_t<Ts>>()...} {}
+
+			void Append(
+				ComponentId (&into)[MAX_FILTER_TERMS],
+				size_t &count,
+				const char *what,
+				std::initializer_list<ComponentId> ids
+			) {
+				for (const ComponentId id : ids) {
+					if (count == MAX_FILTER_TERMS) {
+						Owner->TooManyFilterTerms(what);
+					}
+					into[count++] = id;
+				}
+			}
+
+			QueryTerms Terms() const {
+				return QueryTerms{
+					std::span<const ComponentId>(BoundTerms, sizeof...(Ts)),
+					std::span<const ComponentId>(RequiredTerms, RequiredCount),
+					std::span<const ComponentId>(ExcludedTerms, ExcludedCount),
+				};
+			}
+
+			Store *Owner = nullptr;
+
+			// One extra, so a selection binding nothing still declares an array
+			// rather than a zero-length one.
+			ComponentId BoundTerms[sizeof...(Ts) + 1];
+			ComponentId RequiredTerms[MAX_FILTER_TERMS];
+			ComponentId ExcludedTerms[MAX_FILTER_TERMS];
+			size_t RequiredCount = 0;
+			size_t ExcludedCount = 0;
+		};
+
+		// Begins a query binding `Ts...` to the body's parameters.
+		//
+		// `Each<Ts...>(body)` is this with no filters and is still the right
+		// call when there are none. Reach for this one to add a `With` or a
+		// `Without`; see `Selection`.
+		//
+		// @return A selection to add filters to and then finish.
+		// @since v0.15
+		template <class... Ts> Selection<Ts...> Query() {
+			return Selection<Ts...>(*this);
 		}
 
 		// Visits every entity carrying all of `components`, named at run time.
@@ -1933,7 +2138,13 @@ namespace engine::ecs {
 
 		void
 		VisitTables(std::span<const ComponentId> terms, const std::function<void(const TableSlice &)> &body);
+		void VisitTables(const QueryTerms &terms, const std::function<void(const TableSlice &)> &body);
 		size_t CountRows(std::span<const ComponentId> terms);
+		size_t CountRows(const QueryTerms &terms);
+
+		// Reports a query naming more filter terms than `MAX_FILTER_TERMS`, and
+		// does not return.
+		[[noreturn]] void TooManyFilterTerms(const char *what) const;
 
 		void ObserveRaw(ComponentId id);
 		bool ObservedRaw(ComponentId id) const;
