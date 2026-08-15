@@ -39,7 +39,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.15
 
-- [_] the rest of `docs/DEFERRED.md`, each blocked on something named in its own entry - a missing subsystem, hardware nobody has, or a decision that is the owner's
+- [_] `server.replication`'s "what ReplicatedFirst holds arrives before the world it covers" samples a remote process on a 4 ms poll, so a loaded machine sees the join land before the poll notices the preface and the case fails. Measured: 6 of 6 failures under saturating load, 5 of 6 on the SDL it was written against, so it is the sampling and not a regression
+- [_] the windowed client renders its `--frames` and then never exits. Both SDL versions do it, and `client-smoke` runs `--headless`, so `just check` cannot see it
 
 ### v0.16
 
@@ -83,6 +84,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms.
 - [_] consider adding C# as another scripting langauge?
 - [_] constraints system
-- [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike.
+- [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike. **The TypeScript half of the entry shipped at v0.15 and is not part of this** - source maps are emitted and read, so the lines a debugger would land on are already the right ones.
 - [_] full audio DAW (digital audio workbench) system
 
