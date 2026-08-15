@@ -175,7 +175,7 @@ TEST_CASE("two servers built the same way stay identical", "[server]") {
 TEST_CASE("the tick rate does not change the simulation", "[server]") {
 	// A fixed delta means the tick rate is a pacing decision, not a simulation
 	// one. Twenty ticks at 30 Hz and twenty at 120 Hz must land in the same
-	// place — if they do not, the delta has leaked in from the wall clock.
+	// place - if they do not, the delta has leaked in from the wall clock.
 	auto run = [](double rate) {
 		server::Server host;
 		auto options = Headless(48, 20);
@@ -279,7 +279,7 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 TEST_CASE("a recorded run replays to the same state", "[server]") {
 	// The determinism guarantee end to end, through the program's own options
 	// rather than through the engine API: record a run, replay it, and compare
-	// every entity. Same binary, same machine — which is what `v02v03.md`
+	// every entity. Same binary, same machine - which is what `v02v03.md`
 	// decision 8 promises and all it promises.
 	const std::filesystem::path recording = std::filesystem::temp_directory_path() / "mono-server-replay.rec";
 
@@ -337,7 +337,7 @@ TEST_CASE("recording a replay reproduces the recording it replayed", "[server]")
 	// The strongest statement the replay path can make about itself, and the
 	// one `just replay-check` runs in CI. Comparing *positions* after a replay
 	// says the simulation agreed; comparing the two recordings byte for byte
-	// says the snapshot, the frame times and every envelope agreed too — which
+	// says the snapshot, the frame times and every envelope agreed too - which
 	// is what a supervisor restoring a crashed host is relying on.
 	const auto directory = std::filesystem::temp_directory_path();
 	const std::filesystem::path source = directory / "mono-server-replay-source.rec";

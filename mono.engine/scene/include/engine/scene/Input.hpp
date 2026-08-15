@@ -5,7 +5,7 @@
 // **This exists because `input` is `client` and `script` is `shared`.**
 // `engine::input` owns the SDL event pump and sits at L12; a script binding is at
 // L9 and may not name it. So `UserInputService` cannot read the module that
-// produces its data — the state has to come to rest somewhere both can see, and
+// produces its data - the state has to come to rest somewhere both can see, and
 // that place is a resource on the world.
 //
 // The shape follows from that. **This module holds no SDL type and pumps
@@ -14,7 +14,7 @@
 // the world lives; who produced it is somebody else's business.
 //
 // **Keys are named, never scancoded.** `KeyCode` is Roblox's `Enum.KeyCode` in
-// spelling and its ordinals are this file's own — a script says
+// spelling and its ordinals are this file's own - a script says
 // `Enum.KeyCode.Space` and never a number, and the number is free to move because
 // nothing writes it down. The one thing that *would* pin it is a saved keybinding
 // file, and there is not one; when there is, it saves names.
@@ -41,7 +41,7 @@ namespace engine::scene {
 	// is one the client's translation layer can produce; a name that mapped to
 	// nothing would be offering an author completion for a key that never fires.
 	//
-	// The ordinals are this file's own and are free to move — nothing serialises
+	// The ordinals are this file's own and are free to move - nothing serialises
 	// one. Scripts say `Enum.KeyCode.Space`.
 	//
 	// @since v0.10
@@ -133,6 +133,36 @@ namespace engine::scene {
 		Middle = 2,
 
 		// Not a button. The count.
+		Count,
+	};
+
+	// Where one input came from, which is what `Enum.UserInputType` names.
+	//
+	// **A superset of `MouseButton`, sharing its first three ordinals**, and the
+	// overlap is deliberate rather than a coincidence to be tidied away:
+	// `UserInputService:IsMouseButtonPressed` takes an `Enum.UserInputType` and
+	// casts the ordinal it resolves straight to a `MouseButton`, so the buttons
+	// have to come first and keep their numbers. The `static_assert`s in
+	// `Input.cpp` are what hold that rather than a comment.
+	//
+	// The three that are not buttons exist because an `InputObject` has to be able
+	// to say where an event came from, and `MouseButton1..3` can only describe a
+	// click - a key press, a pointer move and a wheel notch had no spelling at
+	// all. Roblox's `Enum.UserInputType` is longer than this; every member absent
+	// here is one nothing in this engine can produce, which is `KeyCode`'s own
+	// rule about offering completion for a key that never fires.
+	//
+	// @since v0.16
+	enum class InputSource : uint8_t {
+		MouseButton1 = 0,
+		MouseButton2 = 1,
+		MouseButton3 = 2,
+
+		Keyboard = 3,
+		MouseMovement = 4,
+		MouseWheel = 5,
+
+		// Not a source. The count.
 		Count,
 	};
 
@@ -231,7 +261,7 @@ namespace engine::scene {
 		// outnumber ticks, so a key tapped and released between two ticks was
 		// pressed on a frame no tick ever looked at. A jump read that way is
 		// dropped about two times in three, and both hosts had independently
-		// grown the same private latch to hide it — `PlayLink::PendingJump` and
+		// grown the same private latch to hide it - `PlayLink::PendingJump` and
 		// `client::Client::PendingJump`, each bypassing `InputState` entirely
 		// and each having to be wired to its own character by hand.
 		//
@@ -240,7 +270,7 @@ namespace engine::scene {
 		// here, and the tick that acts on it clears it. Nothing is read twice
 		// and nothing is missed.
 		//
-		// `WasKeyPressed` deliberately does *not* consult this — a script's
+		// `WasKeyPressed` deliberately does *not* consult this - a script's
 		// `InputBegan` is a per-frame event and must stay one. `WasKeyTapped`
 		// is the tick-shaped question.
 		KeyBits Pressed;
@@ -251,7 +281,7 @@ namespace engine::scene {
 		// How far it moved since the last frame, in pixels.
 		//
 		// **Carried rather than derived from two positions**, because under
-		// `LockCenter` the position does not change — the pointer is held at the
+		// `LockCenter` the position does not change - the pointer is held at the
 		// centre and only the motion is real. A camera that differenced positions
 		// would stop turning the moment it locked, which is exactly when it needs
 		// to turn.
@@ -266,14 +296,67 @@ namespace engine::scene {
 		// Which were down last frame.
 		uint8_t PreviousButtons = 0;
 
+		// Which buttons have gone down since a tick last consumed the edges.
+		//
+		// **`Pressed`, one field along, and it was missing for exactly as long
+		// as a mouse button had nothing acting on it.** The frame/tick argument
+		// above `Pressed` is about a *key*, and it is about a key only because
+		// jump was the first thing a simulation acted on: frames outnumber
+		// ticks, so a click that began and ended between two ticks happened on
+		// a frame no tick ever looked at, and roughly two clicks in three are
+		// lost. Nothing noticed because nothing in this engine fired a shot
+		// until v0.15 - `examples::EncodeShot` had no caller anywhere in the
+		// tree.
+		//
+		// **Taken out of `Reserved` rather than added to the end**, so `sizeof`
+		// is still 56 and no save format moved. The byte was already being
+		// written; it simply had no name.
+		//
+		// @since v0.15
+		uint8_t PressedButtons = 0;
+
 		// How the pointer should behave.
 		//
-		// **Written by a script and read by the client**, which is the one field
-		// here that travels in that direction. `UserInputService.MouseBehavior` is
-		// a property an author sets, and the client applies it to the window on
-		// the next frame — so this resource is the seam in both directions rather
-		// than a one-way report.
+		// **Written by a script and read by the client**, which is one of the two
+		// fields here that travel in that direction.
+		// `UserInputService.MouseBehavior` is a property an author sets, and the
+		// client applies it to the window on the next frame - so this resource is
+		// the seam in both directions rather than a one-way report.
 		MouseBehavior Behaviour = MouseBehavior::Default;
+
+		// Whether the pointer is drawn at all.
+		//
+		// **The second field travelling towards the window**, and it is separate
+		// from `Behaviour` because Roblox's two are: a menu wants the pointer
+		// visible and free, an inventory screen wants it visible while the camera
+		// stays locked, and folding the two into one enum would make
+		// `MouseIconEnabled = false` unspellable without also changing how the
+		// pointer moves.
+		//
+		// **`LockCenter` hides it regardless**, because a pointer held at the
+		// centre of the window is not a pointer any more - see the client's
+		// `SDL_SetWindowRelativeMouseMode` call, where relative mode owns the
+		// cursor and this is the request that applies to every other mode.
+		bool MouseIconEnabled = true;
+
+		// Which device produced the most recent input, and which produced the one
+		// before it.
+		//
+		// **A pair for `WasFocusGained`'s reason**: `LastInputTypeChanged` is an
+		// *edge*, and an edge is the difference between two frames. Deriving it in
+		// whoever pumps the events would put the answer in the client, where a
+		// script cannot reach it.
+		//
+		// **`Keyboard` on a world nobody has touched**, rather than a fourth
+		// "None" member nothing else in the engine can produce. Roblox answers
+		// `Enum.UserInputType.None` there and this engine has no such member for
+		// the reason `InputSource` gives - every member is one something can
+		// produce - so the honest default is the device a headless world would
+		// have if it had one, and the *edge* is what a script watches anyway.
+		//@{
+		InputSource LastSource = InputSource::Keyboard;
+		InputSource PreviousLastSource = InputSource::Keyboard;
+		//@}
 
 		// Whether the window has keyboard focus.
 		//
@@ -282,23 +365,39 @@ namespace engine::scene {
 		// character walking forever, which is the bug every engine ships once.
 		bool Focused = true;
 
+		// Whether it had focus when the previous frame's input was written.
+		//
+		// **The third `Previous` field, and it is here for the reason the other
+		// two are**: `UserInputService.WindowFocused` and `WindowFocusReleased`
+		// are *edges*, and an edge is the difference between two frames. Deriving
+		// it in whoever pumps the events would put the answer in the client, where
+		// a script cannot reach it, and would make "did we have focus last frame"
+		// a question only one module could ask.
+		//
+		// **Taken out of `Reserved` rather than added to the end**, so `sizeof` is
+		// still 64 and a save written before this reads back unchanged. The bytes
+		// were already being written; they simply had no name.
+		bool PreviousFocused = true;
+
 		// Explicit padding, so the object representation a snapshot writes holds
 		// no uninitialised bytes.
 		//
-		// **Eight and not two, and the difference is the whole point of naming
-		// it.** The members above end at 42 and the type aligns to 8, so two
-		// bytes left six the compiler inserted and nobody declared — written to
-		// a save file by `Column::Write`, which sends `sizeof(T)` bytes and does
-		// not know which of them a member claimed. `Reserved` has to reach the
-		// end or it is not doing the job it is here for; this is the only
-		// component in the module where it did not, and the rest are the reason
-		// the rule is worth keeping.
+		// **It has to reach the end or it is not doing the job it is here for.**
+		// The members above end at 52 and the type aligns to 8, so four declared
+		// bytes are what stops the compiler inserting four nobody named - and
+		// those would be written to a save file by `Column::Write`, which sends
+		// `sizeof(T)` bytes and does not know which of them a member claimed.
+		// This is the only component in the module where that was got wrong
+		// once, and the rest are the reason the rule is worth keeping.
 		//
-		// `sizeof` is 64 since `Pressed` joined the two key sets above it — a
-		// save written before that reads its input resource back wrong, which
-		// is a break the pre-release format is allowed and the dropped jump was
-		// not.
-		uint8_t Reserved[8] = {};
+		// **Three since `MouseIconEnabled`, the two source fields and
+		// `PressedButtons` took four of the seven**, so `sizeof` has not moved
+		// and no save format has either. That is the whole reason a padding
+		// member is declared rather than left to the compiler: a field added at
+		// the *end* would grow the object and rewrite the layout
+		// `Column::Write` sends, where a field taken out of here costs nothing.
+		// `SIZE_IS_PINNED` in `Input.cpp` is what checks it.
+		uint8_t Reserved[3] = {};
 
 		// Whether a key is down now.
 		//
@@ -334,6 +433,13 @@ namespace engine::scene {
 			for (size_t word = 0; word < sizeof(Down.Words) / sizeof(Down.Words[0]); word++) {
 				Pressed.Words[word] |= Down.Words[word] & ~Previous.Words[word];
 			}
+
+			// **The buttons in the same call, because they are the same
+			// mistake.** Two calls would be two things a writer has to remember
+			// and one of them would be forgotten the first time somebody added a
+			// second input path - which is precisely how `PlayLink::PendingJump`
+			// and the client's own latch came to exist side by side.
+			PressedButtons |= static_cast<uint8_t>(Buttons & ~PreviousButtons);
 		}
 
 		// Whether a key went down since a tick last consumed the edges.
@@ -362,7 +468,48 @@ namespace engine::scene {
 		// would mean the second never sees a tap the first cleared, which is the
 		// dropped jump again with an extra step.
 		void ConsumeTaps() {
+			ConsumeKeyTaps();
+			ConsumeButtonTaps();
+		}
+
+		// Forgets the latched key edges alone.
+		//
+		// **Two halves under one name, because a client sends two messages and
+		// either can fail on its own.** `Client::SubmitMove` puts the jump in a
+		// `game::MoveInput` and the click in an `examples::Shot`, and clears
+		// each latch only once *that* message is on the wire - a shot refused by
+		// the send budget while the move went through would otherwise forget a
+		// click nobody was told about. `ConsumeTaps` is still the whole
+		// question, for the one caller that asks it whole.
+		//
+		// @since v0.15
+		void ConsumeKeyTaps() {
 			Pressed = KeyBits{};
+		}
+
+		// Forgets the latched button edges alone.
+		//
+		// @since v0.15
+		void ConsumeButtonTaps() {
+			PressedButtons = 0;
+		}
+
+		// Whether a mouse button went down since a tick last consumed the edges.
+		//
+		// **What a simulation should ask instead of `WasButtonPressed`**, for
+		// the reason `WasKeyTapped` gives one field up: a click that began and
+		// ended between two ticks is invisible to the frame-shaped question.
+		//
+		// The latch alone, deliberately, exactly as `WasKeyTapped` is - a host
+		// catching up runs several ticks between two writes, and folding the
+		// live frame edge in here would let the second read the same click the
+		// first had just consumed. One click, two shots.
+		//
+		// @param button The button.
+		// @return `true` when it was pressed since the last `ConsumeTaps`.
+		// @since v0.15
+		bool WasButtonTapped(MouseButton button) const {
+			return (PressedButtons & (1u << static_cast<uint8_t>(button))) != 0;
 		}
 
 		// Whether a mouse button is down now.
@@ -390,11 +537,43 @@ namespace engine::scene {
 			const uint8_t bit = 1u << static_cast<uint8_t>(button);
 			return (Buttons & bit) == 0 && (PreviousButtons & bit) != 0;
 		}
+
+		// Whether the window took focus since the previous frame.
+		//
+		// @return `true` on the frame it was gained.
+		bool WasFocusGained() const {
+			return Focused && !PreviousFocused;
+		}
+
+		// Whether the window lost focus since the previous frame.
+		//
+		// **The frame this is true on is also the frame every held key reports
+		// released**, because `input::Translator::ReleaseAll` clears `Down` and
+		// leaves `Previous` alone. A listener therefore sees the focus change and
+		// the releases it caused in the same pump, which is what makes the two
+		// consistent rather than merely both present.
+		//
+		// @return `true` on the frame it was lost.
+		bool WasFocusLost() const {
+			return !Focused && PreviousFocused;
+		}
+
+		// Whether the player changed device since the previous frame.
+		//
+		// **What `UserInputService.LastInputTypeChanged` is**, and it is an edge
+		// for the reason the two focus questions are: a place that swaps its
+		// prompts between "press E" and "click here" wants the moment the answer
+		// changed, not the answer.
+		//
+		// @return `true` on the frame the device changed.
+		bool WasLastSourceChanged() const {
+			return LastSource != PreviousLastSource;
+		}
 	};
 
 	// The name a key is known by.
 	//
-	// **Round-trips**, unlike `Describe(BodyKind)` — these are the names
+	// **Round-trips**, unlike `Describe(BodyKind)` - these are the names
 	// `ecs::EnumTable` registers and a script compares against, so they are the
 	// surface rather than a diagnostic.
 	//
@@ -410,7 +589,20 @@ namespace engine::scene {
 
 	// The name a mouse button is known by.
 	//
+	// **Delegates to `Describe(InputSource)` rather than holding a table of its
+	// own**, because the two would be the same three strings and the pair that
+	// drifts is the pair a script compares against.
+	//
 	// @param button The button.
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(MouseButton button);
+
+	// The name an input source is known by.
+	//
+	// **Round-trips**: these are the members `ecs::EnumTable` registers as
+	// `Enum.UserInputType`, so they are the surface rather than a diagnostic.
+	//
+	// @param source The source.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(InputSource source);
 }

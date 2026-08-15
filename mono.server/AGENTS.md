@@ -1,4 +1,4 @@
-# mono.server — module invariants
+# mono.server - module invariants
 
 The server program: a `server`-tier library and a thin main over it.
 
@@ -24,7 +24,7 @@ server does not actually need it.
 ## Do not include a client header
 
 `mono.client/include/client/` is invisible here by construction. When something
-genuinely has to be shared between the two programs — components, most likely —
+genuinely has to be shared between the two programs - components, most likely -
 it becomes a `shared` engine module, not an include across two programs.
 
 **That has happened, and the sharing is `mono.engine/scene` at L7.**
@@ -36,7 +36,7 @@ the same names applies a snapshot from here with no translation layer at all.
 
 So **a component declared in this directory that means something a `scene`
 component already means is the change to refuse.** `Chatter` and `Heard` are the
-two that remain, and neither is a duplicate of anything — they exist to put
+two that remain, and neither is a duplicate of anything - they exist to put
 traffic on a bus that would otherwise carry none, and they go when a game file
 brings traffic of its own.
 
@@ -48,7 +48,7 @@ elapsed time and a recorded run stops replaying, every physics result becomes
 machine-dependent, and the divergence shows up somewhere far from the cause.
 
 If a tick overruns, the loop counts it and carries on. It does not simulate
-extra ticks to catch up — a server that tries to make up a lost second by
+extra ticks to catch up - a server that tries to make up a lost second by
 running thirty ticks back to back falls further behind, and that spiral is much
 harder to diagnose than a dropped tick.
 
@@ -60,7 +60,7 @@ that can disagree with itself the first time one of the two is advanced inside a
 branch, and the disagreement surfaces as a summary nobody trusts.
 
 Same reason `scene::WorldBounds` is a resource rather than a component. It was
-the same four bytes on every entity — a property of the world stored 4096 times,
+the same four bytes on every entity - a property of the world stored 4096 times,
 which the bounce loop then loaded per row. It lives in `scene` now, because the
 client's `SceneBounds` was the same idea under a second name.
 
@@ -78,7 +78,7 @@ undefined behaviour that works right up until it does not.
 
 ## Not here yet
 
-`orchestration` at L12 — sessions, matchmaking, sharding, drain — is a `server`
+`orchestration` at L12 - sessions, matchmaking, sharding, drain - is a `server`
 module and does not exist. Neither do `ledger`, `net`, `persistence` or
 `gamefile`. When they arrive they are engine modules that this program links,
 not code that grows inside `mono.server/`.
@@ -86,3 +86,55 @@ not code that grows inside `mono.server/`.
 This directory holds the program's own attachments: the main, the tick loop,
 world placement and the drain path. Anything reusable belongs under
 `mono.engine/`.
+
+## The rewind history records what can move, not what is moving
+
+`ServeClients` walks `Transform` and `RigidBody` to fill
+`replication::Rewind`, and the predicate is load-bearing. It walked `Motion`
+until v0.15, on the reading that a `Motion` is what makes a placement worth
+remembering - and `physics` *takes a row's `Motion` away* when it puts the body
+to sleep, so that the solver's query never visits a resting row.
+
+The history therefore held whatever happened to be awake. A player standing
+still is asleep within a second, which meant they could not be shot, and it
+presented as an ordinary miss: a hit test against an empty candidate list
+strikes nothing and reports nothing.
+
+`RigidBody` is the question actually being asked - an anchored part never gets
+one, so the static geometry the old predicate was aiming at is still excluded -
+and `Static` is skipped one layer in, because it is a body that does not move.
+
+## A hit takes health off here, and a client's copy of that number is a copy
+
+`ApplyInputs` recolours what was struck *and* subtracts `SHOT_DAMAGE` when the
+struck part belongs to a character. Both cross as ordinary replicated state -
+`scene.Visual` and `scene.Humanoid` - so every client sees this process's verdict
+rather than the shooter's, which is the same division the whole function opens
+with: a client sends where it aimed and never what it hit.
+
+Two things a reviewer should refuse:
+
+- **A damage figure drawn from a random number.** `SHOT_DAMAGE` is a constant for
+  `scene::FindSpawn`'s reason about picking a pad in tree order: a roll inside a
+  tick is a recording that does not replay, and `just replay-check` reports it a
+  long way from here.
+- **A second subtracting path.** `scene::TakeDamage` is the one door, and its
+  refusal on `Store::AdoptOnly` is what stops a client running this same code
+  against its own replica and deciding who died. Reaching into
+  `scene::Humanoid::Health` directly walks past that.
+
+## A client's input tick is a claim, and a stale one means the world went quiet
+
+A client stamps its input with the newest tick it has *applied*, and a tick
+reaches it only when something changed. In a still scene its idea of the
+server's clock stops advancing while the server's does not, so `Rewind::
+TickSeenBy` can name a tick that has fallen out of the ring - and `Rewind::Each`
+answers nothing, which is a miss with no error anywhere.
+
+`ApplyInputs` resolves an out-of-window tick **at the present** rather than at
+the oldest frame held. That follows from why it goes stale: a world that has not
+been changing looks the same now as it did then. It also cannot be gamed -
+rewinding is the favourable answer for a laggy shooter, so claiming a tick this
+server no longer remembers buys the least favourable resolution there is, not
+the most. A tick inside the window is honoured exactly as before, and
+`RewindSettings::HistoryTicks` remains the fairness bound.

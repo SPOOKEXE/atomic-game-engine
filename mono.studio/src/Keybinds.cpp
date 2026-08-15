@@ -17,7 +17,7 @@ namespace studio {
 		// **Every action ships unbound, and that is a decision rather than an
 		// oversight.** The editor's commands are all reachable from the menus,
 		// and the menus are where a person finds a command they do not already
-		// know. Keys are then added deliberately — through the page, or by a
+		// know. Keys are then added deliberately - through the page, or by a
 		// later default set chosen once the manager they are managed by exists.
 		//
 		// Shipping a key nobody asked for is how F5 came to mean Play in one
@@ -47,7 +47,7 @@ namespace studio {
 			// field and an action in the tree.
 			//
 			// §4.6 of `docs/retired/v07v08.md` gives the viewport its own editing, and
-			// this wants a second home there when it does — scopes are one per
+			// this wants a second home there when it does - scopes are one per
 			// binding today, so that is a decision rather than a line.
 			{Action::Undo, "edit.undo", "Undo", "Reverse the last edit", Scope::Tree, {}},
 			{Action::Redo, "edit.redo", "Redo", "Reapply the last undone edit", Scope::Tree, {}},
@@ -62,7 +62,7 @@ namespace studio {
 			// ships unbound, because a default nobody asked for is how one key
 			// came to mean two things in three files. Shipping F2 would have
 			// been a decision to override a tested invariant to save one visit
-			// to the Keybinds page — so the action is here, the operator and
+			// to the Keybinds page - so the action is here, the operator and
 			// the tree's context menu make it reachable, and F2 is one binding
 			// away rather than baked in.
 			{Action::Rename, "edit.rename", "Rename", "Rename the selected instance", Scope::Tree, {}},
@@ -126,7 +126,7 @@ namespace studio {
 		}
 
 		// imgui's own name for the key, so a name never has to be written down
-		// twice — and so a key this table has never heard of still reads as
+		// twice - and so a key this table has never heard of still reads as
 		// something rather than as a number.
 		text += ImGui::GetKeyName(Key);
 		return text;
@@ -234,7 +234,7 @@ namespace studio {
 	namespace {
 		// **The key's name in the file, not its number.** `ImGuiKey` values move
 		// between imgui versions, so a file holding integers would rebind
-		// somebody's editor when the vendored library was updated — silently,
+		// somebody's editor when the vendored library was updated - silently,
 		// and to whatever key happened to take the number.
 		std::string NameOfKey(ImGuiKey key) {
 			const char *name = ImGui::GetKeyName(key);

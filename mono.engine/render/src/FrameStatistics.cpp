@@ -16,7 +16,7 @@ namespace engine::render {
 			// Full. Doubling and re-linearising, so the oldest sample is at
 			// index zero again and the wrap arithmetic stays simple. How many
 			// samples twenty seconds holds depends on the frame rate, so the
-			// size cannot be picked up front — but it settles after a second or
+			// size cannot be picked up front - but it settles after a second or
 			// two and never grows again.
 			std::vector<Sample> grown(Ring.empty() ? 256 : Ring.size() * 2);
 			for (size_t offset = 0; offset < Count; offset++) {
@@ -66,7 +66,7 @@ namespace engine::render {
 		// **The window is never emptied by that loop, and the sums below it are
 		// therefore never rebuilt from nothing.** The sample just recorded sits
 		// at `now`, so once it is the only one left `now - Ring[Head].Time` is
-		// zero and the condition is false whatever the window is set to — a
+		// zero and the condition is false whatever the window is set to - a
 		// clock that jumped backwards makes it negative, which fails the same
 		// way. `Record` leaves at least one sample behind, always.
 		//

@@ -5,7 +5,7 @@
 // WIN32_LEAN_AND_MEAN before anything, and it is load-bearing rather than a
 // compile-time saving: without it <windows.h> drags in the original <winsock.h>,
 // which redefines everything <winsock2.h> declares. With it, the two can be
-// included in either order — which they have to be, because `.clang-format`
+// included in either order - which they have to be, because `.clang-format`
 // regroups and sorts system includes and sorts "windows.h" ahead of
 // "winsock2.h". An ordering kept by a comment is one the formatter eventually
 // undoes.

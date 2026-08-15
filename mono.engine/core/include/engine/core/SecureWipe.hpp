@@ -9,8 +9,8 @@
 // spill, or in whatever allocates that address next. This is the call that is
 // not allowed to be deleted.
 //
-// **Not a general "clear a buffer".** It is slower than `memset` — that is the
-// entire point — and reaching for it to blank an image or reset a vector is
+// **Not a general "clear a buffer".** It is slower than `memset` - that is the
+// entire point - and reaching for it to blank an image or reset a vector is
 // paying for a guarantee that has nothing to do with the problem. If the bytes
 // are not secret, `std::fill` is the right call.
 //

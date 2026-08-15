@@ -10,14 +10,14 @@
 //
 // That is not a gap, it is `D00022`'s split arrived at again: **whoever draws
 // an adornment has both operands and this module has one.** So what is here is
-// the tree logic — the two questions a drawer would otherwise each answer
+// the tree logic - the two questions a drawer would otherwise each answer
 // differently:
 //
 //   - *what is this about?* An unset `Adornee` means "my parent", which is what
 //     makes a `SelectionBox` usable by parenting it to the thing it outlines
 //     and setting nothing else. Resolved once here rather than at each drawer.
 //   - *may it be drawn at all?* An adornment lives in `Workspace`, `StarterGui`
-//     or a player's `PlayerGui` — the same containment `Layout` applies to a
+//     or a player's `PlayerGui` - the same containment `Layout` applies to a
 //     `SurfaceGui`, and for the same reason: an adornment hangs off something
 //     in the world, so the world is a legal home for it.
 //
@@ -52,8 +52,8 @@ namespace engine::gui {
 	//
 	// The same containment `Layout` applies to the world-attached collectors:
 	// `Workspace`, `StarterGui` or a player's `PlayerGui`. An adornment under a
-	// `Part` is *not* contained — the part is what it adorns, not where it
-	// lives — which is the distinction that would otherwise be discovered by
+	// `Part` is *not* contained - the part is what it adorns, not where it
+	// lives - which is the distinction that would otherwise be discovered by
 	// somebody wondering why their handle vanished when they tidied the tree.
 	//
 	// @param store     The world.

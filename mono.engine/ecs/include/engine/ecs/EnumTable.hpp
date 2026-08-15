@@ -4,14 +4,14 @@
 //
 // **Why this is a table and not a C++ enum.** `scene::BodyKind` and
 // `scene::ShapeKind` are closed sets the engine switches on, and they are the
-// right shape for that — adding a case is a compiler error everywhere it
+// right shape for that - adding a case is a compiler error everywhere it
 // matters. A *property* enum is a different thing: `AlphaMode` is a set userland
 // picks from, a game may extend, and a manifest has to describe. A C++ enum can
 // do none of those, because the set has to be readable at run time by a binding
 // generator that never saw the header.
 //
 // So a property enum is a name and a list of member names, and both cross as
-// **text** — rule 4. What `PropertyType::Enum` adds is not a new storage form.
+// **text** - rule 4. What `PropertyType::Enum` adds is not a new storage form.
 // It is that userland gets a value it can compare and be told when it is wrong:
 //
 //     part.AlphaMode = "Clipp"   -- refused, naming the enum
@@ -56,7 +56,7 @@ namespace engine::ecs {
 		//
 		// **Order is registration order and it is what a binding lists.** Not
 		// sorted: the order an author reads them in should be the order they
-		// were declared, which is usually meaningful — `Static`, `Kinematic`,
+		// were declared, which is usually meaningful - `Static`, `Kinematic`,
 		// `Dynamic` is a progression and alphabetical is not.
 		//
 		// @param enumName The set's name, as a script spells it.
@@ -92,7 +92,7 @@ namespace engine::ecs {
 		// dangerous here: members are appended, so the vector behind them
 		// reallocates, and a span handed out before a late registration would
 		// point at freed memory. Registration does happen at startup in
-		// practice — but "in practice" is a convention, and rule 6 says a
+		// practice - but "in practice" is a convention, and rule 6 says a
 		// constraint the build does not check is documentation. A copy of a
 		// handful of interned ids costs nothing next to being wrong once.
 		//
@@ -104,7 +104,7 @@ namespace engine::ecs {
 		//
 		// **The other direction, and a table that could not answer it was half a
 		// table.** `Has` says whether a name is a member, which is everything a
-		// *checked string* property needs — and a component cannot hold a string,
+		// *checked string* property needs - and a component cannot hold a string,
 		// so the ones that matter store the ordinal and have to convert both ways
 		// on every read and write. Without this each of them would keep its own
 		// list of the names in order, which is the same fact recorded twice and
@@ -126,7 +126,7 @@ namespace engine::ecs {
 		// @param member   The member to find.
 		// @param ordinal  Filled with its position when this returns true.
 		// @return `false` when the enum is unregistered or holds no such member,
-		//         leaving `ordinal` untouched — which is what makes
+		//         leaving `ordinal` untouched - which is what makes
 		//         `part.Face = "Frnot"` a refusal at the assignment rather than a
 		//         face nobody chose.
 		static bool OrdinalOf(core::Name enumName, core::Name member, size_t &ordinal);

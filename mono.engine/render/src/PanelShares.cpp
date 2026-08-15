@@ -6,7 +6,7 @@ namespace engine::render {
 
 	// The panels are drawn by rasterising glyphs into a CPU image, one pixel at
 	// a time, every frame. That is the right trade for a tool that has to work
-	// with no second process attached — but it is not free, and until the
+	// with no second process attached - but it is not free, and until the
 	// profiling scopes existed the whole cost landed as self time on whatever
 	// the caller had opened around it. A panel reporting a frame it is a large
 	// part of, and not saying so, is the one measurement error a profiler
@@ -20,7 +20,7 @@ namespace engine::render {
 		const float denominator = std::max(data.BusyMilliseconds(), 0.0001f);
 
 		// The walk that used to be here now happens once in `FrameGraph`, where
-		// `RecordHistory` needs the same answer — a share taken from busy time
+		// `RecordHistory` needs the same answer - a share taken from busy time
 		// beside an RMAX taken from wall time is two numbers on one row that
 		// contradict each other.
 		std::vector<float> shares(data.Spans.size(), 0.0f);
@@ -33,8 +33,8 @@ namespace engine::render {
 	std::array<float, CATEGORY_BAR_COUNT> CategoryShares(const DebugPanelData &data) {
 		// **Busy, and this line is the whole fix.** The frame is the wrong
 		// denominator for a set of bars that idle is not one of, and the same
-		// floor the flamegraph uses keeps a frame that measured zero — the
-		// first one, or one taken across a coarse clock — from dividing by it.
+		// floor the flamegraph uses keeps a frame that measured zero - the
+		// first one, or one taken across a coarse clock - from dividing by it.
 		const float denominator = std::max(data.BusyMilliseconds(), 0.0001f);
 
 		std::array<float, CATEGORY_BAR_COUNT> shares{};
@@ -46,7 +46,7 @@ namespace engine::render {
 			const auto index = static_cast<size_t>(span.Category);
 			// A category outside the enum can only arrive from a caller
 			// filling `FrameSpan` by hand, and dropping it is better than
-			// writing past the array — the panels are the thing that says
+			// writing past the array - the panels are the thing that says
 			// whether the frame is trustworthy, so they do not get to be the
 			// thing that corrupts it.
 			if (index < static_cast<size_t>(core::ProfileCategory::Count)) {

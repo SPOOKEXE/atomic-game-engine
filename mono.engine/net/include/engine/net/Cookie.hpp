@@ -11,10 +11,10 @@
 //
 // **So nothing is remembered.** The cookie is derived from a secret this end
 // already holds plus the bytes the peer already sent, and it is verified by
-// deriving it again — never by looking it up. An unanswered challenge costs
+// deriving it again - never by looking it up. An unanswered challenge costs
 // **zero bytes** of state: this object is two 32-byte secrets and a deadline
 // whether one peer is mid-handshake or a hundred thousand are. That is the
-// whole reason it exists, and it is the mistake it exists to prevent — a server
+// whole reason it exists, and it is the mistake it exists to prevent - a server
 // that stored a pending challenge per source address would have moved the
 // exhaustion target rather than removed it. DTLS's `HelloVerifyRequest`
 // (RFC 6347 §4.2.1) is the same construction for the same reason.
@@ -23,14 +23,14 @@
 // a datagram this end sent there, recently. That is return routability and it
 // is all of it. It is not identity, it is not authorisation, and a peer on the
 // path can read a cookie off the wire and use it. Who is allowed to connect is
-// a decision one layer up — see `replication::Listener::SetAdmission`.
+// a decision one layer up - see `replication::Listener::SetAdmission`.
 //
 // **The answer is non-amplifying.** A challenge is the same size as the hello
 // that asked for it, so this cannot be pointed at a third party as a reflector.
 // An answer that were larger than its question is what turns a stateless
 // responder into somebody else's problem.
 //
-// **Time is passed in, never read** — the module rule. The secret rotates on a
+// **Time is passed in, never read** - the module rule. The secret rotates on a
 // deadline the caller states, which is what gives a cookie a lifetime without a
 // clock in here and makes that lifetime something a suite states rather than
 // waits for.
@@ -77,7 +77,7 @@ namespace engine::net {
 		//
 		// @param settings How often to rotate the secret.
 		// @return The issuer, or nothing if the operating system refused to
-		//         provide entropy — which is a refusal to admit anybody, never
+		//         provide entropy - which is a refusal to admit anybody, never
 		//         a fallback to a weaker source. A guessable secret here is a
 		//         cookie anybody can forge, which is the whole protection gone
 		//         while every counter still reads as healthy.
@@ -100,7 +100,7 @@ namespace engine::net {
 		// @param nowSeconds The current time, which is what rotates the secret.
 		// @param peer       Where the answer will have to come from. In the
 		//                   cookie, so an answer from anywhere else fails.
-		// @param evidence   Whatever else the answer has to repeat unchanged —
+		// @param evidence   Whatever else the answer has to repeat unchanged -
 		//                   the peer's key exchange message, so a relay cannot
 		//                   swap its own in and keep the cookie.
 		// @return The cookie to send back.
@@ -156,7 +156,7 @@ namespace engine::net {
 		double RotateAt = 0.0;
 
 		// Whether a time has ever been seen. The first call sets the deadline
-		// rather than rotating against a zero it never agreed to — otherwise a
+		// rather than rotating against a zero it never agreed to - otherwise a
 		// server started at any wall clock past its period would burn both
 		// secrets before the first peer had answered.
 		bool Timed = false;

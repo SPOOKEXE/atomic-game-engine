@@ -319,7 +319,7 @@ namespace engine::world {
 
 			// A closed link says the same thing sooner, and says it for an
 			// in-process host that has no child to reap. The heartbeat deadline
-			// stays as the answer for a host that is wedged rather than gone —
+			// stays as the answer for a host that is wedged rather than gone -
 			// those are two different failures and only one of them shows here.
 			if (!dead && entry.Link != nullptr && !entry.Link->Connected()) {
 				dead = true;

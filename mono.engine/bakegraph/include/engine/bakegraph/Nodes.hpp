@@ -4,7 +4,7 @@
 //
 // **This module exists so that `Engine::game` can read a pipeline document
 // without linking a JPEG decoder.** `bake` carries the PNG, JPEG, GIF, BMP, OBJ,
-// glTF and PMX readers — it is the only thing in the engine that parses a
+// glTF and PMX readers - it is the only thing in the engine that parses a
 // foreign format, and `bake/CMakeLists.txt` states at length that nothing a
 // shipped game links may link it. A save format that named `bake` to parse a
 // *text document* would put every one of those decoders into `server`, which has
@@ -55,6 +55,14 @@ namespace engine::bake {
 		// Force a texture's alpha opaque.
 		Opaque,
 
+		// Build a texture's mip chain.
+		//
+		// Last of the texture nodes in a chain, because every other one changes
+		// the pixels the levels are filtered from.
+		//
+		// @since v0.14
+		Mipmap,
+
 		// Restate a flipbook's frame rate.
 		//
 		// @since v0.10
@@ -62,6 +70,21 @@ namespace engine::bake {
 
 		// Serialize input into the engine format.
 		Write,
+
+		// Rasterise a vector source into a texture at a stated pixel size.
+		//
+		// **A separate kind rather than a parameter on `Import`, because it is
+		// the one import that cannot be decided from the bytes.** An SVG states
+		// a coordinate system and no pixels, so the size is the pipeline's
+		// decision - and a `Resize` afterwards is not the same picture, because
+		// it resamples a rasterisation that was never the right sharpness. An
+		// `Import` handed an SVG says so and names this node.
+		//
+		// **Appended, because the ordinals here are on the wire.** A document
+		// saved by an older build names its nodes by these numbers.
+		//
+		// @since v0.14
+		Rasterize,
 	};
 
 	// A node's handle.

@@ -2,7 +2,7 @@
 
 // One connection's life, with no socket anywhere in it.
 //
-// Join, leave, timeout and reconnect — v0.3's first roadmap item — expressed as
+// Join, leave, timeout and reconnect - v0.3's first roadmap item - expressed as
 // a state machine over *events*, not over a transport. A datagram socket, a
 // loopback and a test all drive the same object, which is what makes
 // `repo_layout.md` §16.6 honest: single-player uses a loopback with real
@@ -21,8 +21,16 @@
 // rather than in userland is the whole point: a limiter above this runs *after*
 // the payload has been received and parsed, which is the half that costs.
 //
+// **There are two limits on a send and they answer different questions.**
+// `BytesPerTick` is a cap a game states and it never moves; `CongestionControl`
+// is what the path looks able to take and it moves every tick. A send has to
+// pass both, and a refusal says which - `ConnectionStats::SendsOverBudget`
+// against the configuration, `SendsOverAllowance` against the path. Collapsing
+// them would make "raise the cap" look like a fix for congestion.
+//
 // @tier L11 · shared
 
+#include <engine/net/Congestion.hpp>
 #include <engine/net/ConnectionId.hpp>
 #include <engine/net/ConnectionStats.hpp>
 #include <engine/net/Enums.hpp>
@@ -36,7 +44,7 @@ namespace engine::net {
 	// How a connection is paced and when it is given up on.
 	//
 	// The defaults are conventional rather than measured, and saying so is
-	// better than implying otherwise — the same standing that `ChunkLimits` has.
+	// better than implying otherwise - the same standing that `ChunkLimits` has.
 	struct LinkSettings {
 		// How long a handshake may take before the attempt is abandoned.
 		double HandshakeTimeoutSeconds = 5.0;
@@ -54,7 +62,17 @@ namespace engine::net {
 		// them apart.
 		double KeepAliveSeconds = 1.0;
 
-		// Payload bytes this connection may send per tick.
+		// The most payload bytes this connection may send per tick, ever.
+		//
+		// **A ceiling the controller operates under, and no longer the only
+		// limit.** It was kept rather than removed when congestion control
+		// landed, because the two are answers to different questions: a game may
+		// legitimately refuse to spend more than N on one player even on a path
+		// that would carry ten times that - a hundred players on one host is a
+		// hundred of these, and the operator's bill is not a function of what
+		// the path can take. What it stopped being is a *rate*: it does not open
+		// up on a fat path and it never did back off on a congested one, and
+		// `CongestionControl` is the half that does both.
 		uint32_t BytesPerTick = 64 * 1024;
 
 		// Packets this connection may send per tick.
@@ -62,17 +80,28 @@ namespace engine::net {
 		// Separate from the byte budget because they bound different things: a
 		// thousand one-byte packets cost almost no bandwidth and a great deal of
 		// per-packet overhead at both ends.
+		//
+		// **Left as a fixed cap deliberately.** The controller paces bytes,
+		// because bytes are what a bottleneck queues; per-packet cost is a
+		// property of the two endpoints rather than of the path between them, so
+		// there is nothing on the wire for a controller to measure it against.
 		uint32_t PacketsPerTick = 64;
 
+		// How the send rate follows the path.
+		//
+		// @since v0.15
+		CongestionSettings Congestion;
+
 		// Whether these can be used. Requires positive timeouts, a keep-alive
-		// shorter than the idle timeout, and non-zero budgets.
+		// shorter than the idle timeout, non-zero budgets, and congestion
+		// settings that are themselves valid.
 		bool IsValid() const;
 	};
 
 	// The lifecycle of one connection.
 	//
-	// Owned by whatever holds the transport. It never sends anything itself — it
-	// says what *should* be sent and records what was — because a state machine
+	// Owned by whatever holds the transport. It never sends anything itself - it
+	// says what *should* be sent and records what was - because a state machine
 	// that can also do I/O is one that cannot be tested without doing I/O.
 	//
 	// @since v0.3
@@ -100,21 +129,40 @@ namespace engine::net {
 			return Ending;
 		}
 
-		// What it has cost and lost.
 		// Records the round trip whatever measured it.
 		//
 		// **A `Link` cannot measure this itself**, and that is why it is set
 		// rather than computed: the acknowledgement that closes a round trip is
 		// matched against a packet a `ReliableSender` is holding, and a link
-		// holds none — it stamps sequences and counts what arrives. Whoever owns
+		// holds none - it stamps sequences and counts what arrives. Whoever owns
 		// both halves tells it.
 		//
+		// **This is also the congestion controller's delay signal**, which is
+		// why it is no longer just a field being set. Nothing extra crosses the
+		// wire to feed it: it is the same estimate `ConnectionStats` has
+		// reported since v0.9, arriving at the same call.
+		//
+		// **No time argument, which is the one departure from this module's rule
+		// and is deliberate.** A round trip is recorded immediately after the
+		// packet that closed it was handed to `OnPacket`, so the link was told
+		// what time it is a moment ago and asking the caller again would be
+		// asking for a number it has already given. The controller is stamped
+		// with the last time this link was told, which is that one.
+		//
 		// @param seconds The smoothed estimate. Ignored when negative.
+		// @param varianceSeconds The estimate's variance -
+		//        `ReliableSender::RoundTripVarianceSeconds`. Negative is read as
+		//        unknown, and the controller's noise threshold then falls back
+		//        to `CongestionSettings::MinimumQueueSeconds` alone.
 		// @since v0.9
-		void RecordRoundTrip(double seconds) {
-			if (seconds >= 0.0) {
-				Totals.RoundTripMilliseconds = static_cast<float>(seconds * 1000.0);
-			}
+		void RecordRoundTrip(double seconds, double varianceSeconds = -1.0);
+
+		// How the send rate is following the path.
+		//
+		// @return The controller, valid for the life of the link.
+		// @since v0.15
+		const CongestionControl &Congestion() const {
+			return Control;
 		}
 
 		// What this link has carried and what it has refused.
@@ -136,7 +184,7 @@ namespace engine::net {
 		// Moves a `Connecting` link to `Connected`.
 		//
 		// @param nowSeconds The current time.
-		// @return False when the link was not `Connecting` — a handshake that
+		// @return False when the link was not `Connecting` - a handshake that
 		//         completes twice is a protocol error, not an idempotent call.
 		bool CompleteHandshake(double nowSeconds);
 
@@ -147,7 +195,7 @@ namespace engine::net {
 		// politely is indistinguishable from one that crashed, and every clean
 		// exit costs the other end a full idle timeout.
 		//
-		// @param reason Why. `None` is refused — an ending always has one.
+		// @param reason Why. `None` is refused - an ending always has one.
 		// @return False when already ending or ended.
 		bool Disconnect(DisconnectReason reason);
 
@@ -192,9 +240,12 @@ namespace engine::net {
 		//
 		// @param payloadBytes The payload about to be sent, before it is sealed.
 		// @return False when the link is not `Connected`, the payload is over
-		//         `Packet::MAXIMUM_MESSAGE_BYTES` — the limit less the tag it
-		//         will grow by — or a budget is spent. A refusal is counted in
-		//         `ConnectionStats::SendsOverBudget`.
+		//         `Packet::MAXIMUM_MESSAGE_BYTES` - the limit less the tag it
+		//         will grow by - or a budget is spent, whether the configured
+		//         one or the one the congestion controller allows.
+		//         `ConnectionStats::SendsOverBudget` counts the first and
+		//         `SendsOverAllowance` the second. **A caller that must not lose
+		//         the send reads both.**
 		bool Reserve(size_t payloadBytes);
 
 		// Stamps the header for the next outgoing packet on a channel.
@@ -206,8 +257,8 @@ namespace engine::net {
 		// **The acknowledgement is of the same channel this packet goes on**,
 		// because there is one sequence space per channel and one field to say
 		// which sequence arrived. A caller that needs the reliable stream
-		// acknowledged by every packet whatever its channel — which is what
-		// retires a reliable payload on a mostly one-way conversation —
+		// acknowledged by every packet whatever its channel - which is what
+		// retires a reliable payload on a mostly one-way conversation -
 		// overwrites these two fields with `ReliableReceiver::Acknowledging`.
 		//
 		// @param channel Which channel the packet belongs to.
@@ -240,7 +291,7 @@ namespace engine::net {
 		// One of these per channel because the sequences are per channel. A
 		// single mark for the whole link is judged with `Packet::IsNewer`
 		// against whichever channel most recently moved it, and the reliable
-		// channel moves it a long way at a join — so the first unreliable
+		// channel moves it a long way at a join - so the first unreliable
 		// packets after one were refused as stale, which is exactly the failure
 		// the per-channel counters exist to prevent.
 		struct ChannelWindow {
@@ -257,8 +308,8 @@ namespace engine::net {
 			// Whether anything has arrived on this channel at all.
 			//
 			// **A flag rather than a sentinel value, and that is the off-by-one
-			// this avoids.** All 65536 sequences are legitimate — zero most of
-			// all, since it is the first one `NextHeader` stamps — so there is
+			// this avoids.** All 65536 sequences are legitimate - zero most of
+			// all, since it is the first one `NextHeader` stamps - so there is
 			// no number that can mean "nothing yet". Starting `Highest` at zero
 			// and trusting it would read a channel's first packet as a repeat
 			// of one that never existed, and would count `Sequence` packets
@@ -267,6 +318,7 @@ namespace engine::net {
 		};
 
 		void Observe(ChannelWindow &window, uint16_t sequence);
+		void ObserveAcknowledgement(const PacketHeader &header);
 
 		ConnectionId Handle;
 		LinkSettings Paced;
@@ -274,11 +326,29 @@ namespace engine::net {
 		DisconnectReason Ending = DisconnectReason::None;
 		ConnectionStats Totals;
 
+		// The send rate as a function of the path, under `BytesPerTick`.
+		CongestionControl Control;
+
 		double OpenedAt = 0.0;
 		double LastReceiveAt = 0.0;
 		double LastSendAt = 0.0;
 
-		// One counter per channel, because they are ordered independently — a
+		// The last time anybody told this link what time it is, from either
+		// `Advance` or `OnPacket`. What the controller's observations are
+		// stamped with.
+		double LastKnownSeconds = 0.0;
+
+		// The last time `Advance` was called, and nothing else.
+		//
+		// **Separate from the above, and the separation is load-bearing.** A
+		// tick's length is the gap between two advances; measuring it against
+		// the last time *anything* named a time gives zero, because the packets
+		// that arrived earlier in the tick named the same instant. That reads as
+		// a stalled tick and clamps the allowance to almost nothing.
+		double LastAdvanceAt = 0.0;
+		bool Ticked = false;
+
+		// One counter per channel, because they are ordered independently - a
 		// reliable resend must not make an unreliable packet look stale.
 		//
 		// Sized from the enum rather than from a literal. The handshake slot is
@@ -287,7 +357,7 @@ namespace engine::net {
 		// off the end the day another one is added.
 		uint16_t OutgoingSequence[static_cast<size_t>(ChannelKind::Handshake) + 1]{};
 
-		// What has arrived, one window per channel — the receiving mirror of
+		// What has arrived, one window per channel - the receiving mirror of
 		// the counters above, and sized from the enum for the same reason.
 		//
 		// The handshake slot is never touched, because a handshake datagram
@@ -295,7 +365,33 @@ namespace engine::net {
 		// channel cannot run off the end.
 		ChannelWindow Incoming[static_cast<size_t>(ChannelKind::Handshake) + 1];
 
+		// Where the far side's acknowledgement of *this* end's reliable stream
+		// has been judged up to.
+		//
+		// **The outbound twin of `ChannelWindow`, and the reason it is here
+		// rather than in `ReliableSender` is that a `Link` may not have one.**
+		// Reliability is a layer above and is optional; congestion control is
+		// not, and both read the same two header fields the far side already
+		// sends. `ReliableSender` reads them to retire payloads; this reads them
+		// to decide whether the path dropped something. One acknowledgement,
+		// two questions, no second ack path.
+		uint16_t JudgedSequence = 0;
+		bool ReliableStreamOpen = false;
+
+		// The reliable sequence whose acknowledgement closes the controller's
+		// current observation period.
+		//
+		// Re-armed to whatever is being sent now each time the frontier reaches
+		// it, so "the period is over" means "everything outstanding when it
+		// opened has been answered" - which is one round trip, measured rather
+		// than assumed, on a loopback and on a satellite alike.
+		uint16_t PeriodSequence = 0;
+
 		uint32_t BytesLeft = 0;
 		uint32_t PacketsLeft = 0;
+
+		// What the controller allows this tick, spent alongside `BytesLeft`.
+		// Kept apart so that a refusal can say which of the two turned it away.
+		uint32_t AllowanceLeft = 0;
 	};
 }

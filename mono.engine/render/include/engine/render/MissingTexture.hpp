@@ -3,7 +3,7 @@
 // The picture a drawable gets when it names a texture that is not here.
 //
 // **A different question from the one `DefaultTexture` answers, and keeping
-// them apart is the whole point.** That header draws `Material = None` — a part
+// them apart is the whole point.** That header draws `Material = None` - a part
 // nobody textured, which is a finished state and looks like white plastic
 // because that is what it is. This draws a part that *asked* for a sheet the
 // renderer does not hold, which is not a finished state at all. Rendering both
@@ -20,7 +20,7 @@
 //
 // Half the industry's missing texture is a magenta checkerboard, and an author
 // who has touched any engine reads it before they have read a log line. That is
-// the entire argument — it is not a nicer colour, it is the one that already
+// the entire argument - it is not a nicer colour, it is the one that already
 // means this. Two properties earn it beyond familiarity:
 //
 //   - **No author picks it.** Full-saturation magenta against black is outside
@@ -58,7 +58,7 @@ namespace engine::render {
 	// The marker's pixels, ready to upload.
 	//
 	// Built on the first call and kept. A function-local static, so it is built
-	// after the process is running rather than during static initialisation —
+	// after the process is running rather than during static initialisation -
 	// the same shape `DefaultTexture` uses and for the same reason.
 	//
 	// @return A 64x64 `RGBA8` checkerboard. Valid on every call.

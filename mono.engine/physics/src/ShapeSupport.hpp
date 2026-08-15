@@ -7,7 +7,7 @@
 //
 // Private, and deliberately so. `AGENTS.md` in this directory lists support
 // mappings under "not here yet, so do not add half of one" precisely because
-// surface with no caller is a maintenance cost with nothing on the other side —
+// surface with no caller is a maintenance cost with nothing on the other side -
 // they arrive here, in `src/`, with the pair functions that need them.
 //
 // **All three shapes are centrally symmetric, and the narrow phase is built on
@@ -15,7 +15,7 @@
 // their centre, so the shadow one casts on any axis is an interval centred on
 // the shadow of its centre. The separating-axis test collapses to
 // `radiusA + radiusB - |offset . axis|` with no support point evaluated at all
-// — exact for *every* direction rather than only the ones a polytope's faces
+// - exact for *every* direction rather than only the ones a polytope's faces
 // name, and one expression for all six pairs. It is why the cylinder cases are
 // additions to the box-box machinery rather than a second approach.
 
@@ -56,7 +56,7 @@ namespace engine::physics {
 		//
 		// **The whole reason this type is not three plain fields.** `CFrame`
 		// holds a quaternion, so every one of these costs a rotation to derive
-		// — and every question this header answers is a dot product against one
+		// - and every question this header answers is a dot product against one
 		// of them. A pair function asks fifteen to twenty-three times over the
 		// same two shapes, and deriving them per question made box-box re-rotate
 		// the same six vectors ninety times.
@@ -117,7 +117,7 @@ namespace engine::physics {
 	// Half the width of a shape's shadow on `axis`.
 	//
 	// Exact for every direction, because all three shapes are centrally
-	// symmetric — see the file comment. `axis` must be unit length; nothing
+	// symmetric - see the file comment. `axis` must be unit length; nothing
 	// here normalises it, and a longer one scales the answer.
 	//
 	// **Out of line on purpose.** Inlining it into `LeastOverlap` was measured
@@ -144,7 +144,7 @@ namespace engine::physics {
 	// edge the direction strictly selects. The clipper and the depth filter
 	// throw away the points that are not really in contact, and a direction a
 	// hair off a face normal would otherwise collapse a resting contact to one
-	// point — which is the jitter the multi-point manifold exists to remove.
+	// point - which is the jitter the multi-point manifold exists to remove.
 	//
 	// @param shape     The collider to ask.
 	// @param direction A unit direction pointing out of the shape.

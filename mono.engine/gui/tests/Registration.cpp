@@ -2,6 +2,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Invariants.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/gui/Components.hpp>
@@ -15,6 +16,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.gui.registration")
+TEST_DEPENDS("engine.ecs.invariants")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
@@ -70,8 +72,8 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 	//
 	// **Forty-five**: the thirty-three of the 2D tree, `GuiService`, and the
 	// eleven of the 3D branch. The service is in this list rather than in
-	// `scene`'s because it is a `gui` class — the two modules may not link each
-	// other — and it is registered at all because it owns the selection, which
+	// `scene`'s because it is a `gui` class - the two modules may not link each
+	// other - and it is registered at all because it owns the selection, which
 	// is what finally gave `GuiObject::Selectable` a reader.
 	CHECK(GuiClassNames().size() == 45);
 }
@@ -81,7 +83,7 @@ TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]"
 
 	// `:IsA` is set inclusion over the class tree, so these are the relations a
 	// migrating script already relies on. Breaking one would not fail to
-	// compile — a query for `GuiObject` would simply stop matching.
+	// compile - a query for `GuiObject` would simply stop matching.
 	CHECK(Classes::IsA(GuiClass("TextButton"), GuiClass("GuiButton")));
 	CHECK(Classes::IsA(GuiClass("TextButton"), GuiClass("GuiObject")));
 	CHECK(Classes::IsA(GuiClass("TextButton"), GuiClass("GuiBase2d")));
@@ -218,15 +220,15 @@ TEST_CASE("writing text every frame interns nothing", "[gui][registration]") {
 	// not exotic.
 	//
 	// Counted rather than reasoned about. A thousand distinct strings through
-	// the property surface — the same path a script takes — and the registry
+	// the property surface - the same path a script takes - and the registry
 	// must not have moved at all.
 	RegisterGuiClasses();
 
 	Store store("gui_registration.owned_text");
 	const Entity label = store.CreateInstance(GuiClass("TextLabel"), "Score");
 
-	// One write first, so any interning the *path* does — the property name,
-	// the class name, a lazily built table — has already happened and is not
+	// One write first, so any interning the *path* does - the property name,
+	// the class name, a lazily built table - has already happened and is not
 	// counted against the text.
 	const std::string first = "warm";
 	REQUIRE(store.SetProperty(label, Name("Text"), &first, sizeof(first)));
@@ -250,7 +252,7 @@ TEST_CASE("writing text every frame interns nothing", "[gui][registration]") {
 TEST_CASE("an image name still interns, and should", "[gui][registration]") {
 	// **The other half of the split, pinned so it cannot drift.** An asset id
 	// is one of the bounded set of things a game shipped, so interning it is
-	// what makes it an integer comparison everywhere downstream — the same trade
+	// what makes it an integer comparison everywhere downstream - the same trade
 	// `Material` and every class name make. A change that converted every string
 	// in this module to owned storage would pass the case above and quietly cost
 	// this.
@@ -267,4 +269,17 @@ TEST_CASE("an image name still interns, and should", "[gui][registration]") {
 	REQUIRE(store.SetProperty(picture, Name("Image"), &fresh, sizeof(fresh)));
 
 	CHECK(Name::Count() > before);
+}
+
+TEST_CASE("every interface component obeys the serialisation rules", "[gui][registration]") {
+	// **Thirteen of these were wrong at once**, which is what makes the sweep
+	// worth having over a list: every one had padding under a raw writer, and
+	// four of them were demonstrably putting bytes nobody wrote into a save.
+	// None of it was visible from any single component's own test.
+	//
+	// `engine.ecs.invariants` is where the rules live and where each is proved
+	// to fire. This asks them about this module.
+	RegisterGuiComponents();
+
+	CHECK(engine::ecs::Describe(engine::ecs::AuditComponents("gui.")) == "");
 }

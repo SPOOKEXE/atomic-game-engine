@@ -3,7 +3,7 @@
 // The world's clock, as a resource.
 //
 // Time is world state rather than an argument. A system handed a delta can be
-// handed the wrong one — the frame's instead of the tick's — and the result is
+// handed the wrong one - the frame's instead of the tick's - and the result is
 // a simulation that behaves differently at 30 fps and at 300 with nothing in
 // the code looking wrong. Reading the clock from the world deletes the
 // parameter that made the mistake possible, so the two deltas are two named
@@ -35,7 +35,7 @@ namespace engine::ecs {
 		// Explicit padding, and it is load-bearing.
 		//
 		// `Tick` needs eight-byte alignment, so without this the compiler
-		// leaves four bytes of *uninitialised* padding here — and a trivially
+		// leaves four bytes of *uninitialised* padding here - and a trivially
 		// copyable component is serialised as its object representation, so
 		// those four bytes go straight into the snapshot. Two runs of the same
 		// scene then produce different files, which breaks a recording, a CI
@@ -49,7 +49,7 @@ namespace engine::ecs {
 		uint64_t Tick = 0;
 
 		// Wall seconds the frame took. What a presentation system may use, and
-		// what a simulation system must not — it varies with the display.
+		// what a simulation system must not - it varies with the display.
 		//
 		// Stays zero on a headless world, because nothing there draws.
 		float FrameDelta = 0.0f;

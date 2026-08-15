@@ -85,7 +85,7 @@ TEST_CASE("a frame is taken once", "[world]") {
 
 TEST_CASE("serials are assigned by the channel and always advance", "[world]") {
 	// Filled in here rather than by the caller, so they are monotonic whatever
-	// the producer does — and a consumer seeing a repeat can skip the work.
+	// the producer does - and a consumer seeing a repeat can skip the work.
 	ViewChannel channel(1024);
 
 	ViewHeader written = Frame(1);

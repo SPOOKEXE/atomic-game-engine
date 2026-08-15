@@ -21,7 +21,7 @@ namespace cdn {
 		//
 		// **The environment and not a platform API**, which is the portable half
 		// of the two and the one a test can override. `HOME` on Unix, `USERPROFILE`
-		// on Windows; a process with neither — a container, a service — gets the
+		// on Windows; a process with neither - a container, a service - gets the
 		// current directory rather than `/`, so the store lands somewhere writable
 		// instead of failing at the first import.
 		std::filesystem::path HomeDirectory() {
@@ -37,7 +37,7 @@ namespace cdn {
 		// One log line's separator.
 		//
 		// **A tab, so a name with a space in it survives.** Content filenames have
-		// spaces constantly — the roadmap's own seed list has several — and a
+		// spaces constantly - the roadmap's own seed list has several - and a
 		// space-separated log would split one of those into two fields the first
 		// time anybody read it back.
 		constexpr char FIELD = '\t';
@@ -114,7 +114,7 @@ namespace cdn {
 
 		// **One line, tab-separated, no header.** A format a person can read in a
 		// terminal and `cut` at, which is the whole point of it being a text log
-		// rather than a document — see the header on why nothing parses it to make
+		// rather than a document - see the header on why nothing parses it to make
 		// a decision.
 		file << entry.Seconds << FIELD << entry.Action << FIELD << entry.Subject << FIELD << entry.Hash
 			 << FIELD << entry.Bytes << '\n';
@@ -170,7 +170,7 @@ namespace cdn {
 
 		// **Read whole rather than streamed into the hasher.** `assets::Hasher`
 		// has a streaming form and this does not use it, which is the opposite of
-		// what the chunker does — and it is right here for a reason the chunker
+		// what the chunker does - and it is right here for a reason the chunker
 		// does not have: the bytes have to be *written out* as well as hashed, and
 		// the name to write them under is not known until the hash is finished. A
 		// streaming version would have to read the file twice.
@@ -181,7 +181,7 @@ namespace cdn {
 		const std::vector<char> bytes{std::istreambuf_iterator<char>(file), {}};
 
 		// **An empty file is refused here rather than three stages later.**
-		// `Publish` already skips one — "cdn: skipped {} — empty" — but by then
+		// `Publish` already skips one - "cdn: skipped {} - empty" - but by then
 		// it is in `raw/` for good, hash-named `af1349b9…` after BLAKE3's
 		// empty-input digest, and it bakes to nothing. The result is a store
 		// whose raw and baked counts differ by one for ever, with no line
@@ -190,13 +190,13 @@ namespace cdn {
 		// by hash. `DEFERRED.md` D00034 is that hunt written down.
 		//
 		// **Named, because a count cannot be subtracted from a count to get a
-		// name.** A folder import sweeps whatever is in the folder — the one
+		// name.** A folder import sweeps whatever is in the folder - the one
 		// this was found by was a `.lock` inside a Python virtualenv that came
-		// along with a model — so the message has to say which file, or it is
+		// along with a model - so the message has to say which file, or it is
 		// the same silence one stage earlier.
 		if (bytes.empty()) {
 			ENGINE_WARN(
-				"content store: refused {} — empty, and an empty file can never bake or publish",
+				"content store: refused {} - empty, and an empty file can never bake or publish",
 				source.string()
 			);
 			return std::nullopt;
@@ -217,7 +217,7 @@ namespace cdn {
 		std::error_code failure;
 		if (std::filesystem::exists(report.Stored, failure)) {
 			// **Already there, and that is a success rather than an error.**
-			// Re-importing is what a person does, and the bytes are the identity —
+			// Re-importing is what a person does, and the bytes are the identity -
 			// so the right answer is "it is already there" and not a second copy
 			// under a suffixed name.
 			report.Duplicate = true;
@@ -266,7 +266,7 @@ namespace cdn {
 			ENGINE_ERROR(
 				"content store: {} is empty and {} is not", paths.Baked.string(), paths.Raw.string()
 			);
-			ENGINE_ERROR("bake before publishing — `contentimport --publish` and the studio both do");
+			ENGINE_ERROR("bake before publishing - `contentimport --publish` and the studio both do");
 			return std::nullopt;
 		}
 
@@ -352,7 +352,7 @@ namespace cdn {
 		// separately, so the extension comes off the original path.
 		return [originals, hashes](std::string_view model, std::string_view reference, std::string &out) {
 			// The model's own original path, from its hash. A model that is not
-			// in the log — dropped into `raw/` by hand — cannot be placed, and
+			// in the log - dropped into `raw/` by hand - cannot be placed, and
 			// that is a `false` rather than a guess.
 			const std::filesystem::path modelPath(model);
 			const auto origin = originals->find(modelPath.stem().string());
@@ -362,7 +362,7 @@ namespace cdn {
 
 			// Where the reference points, in the tree the model was authored in.
 			// **`lexically_normal`, so `../shared/skin.png` is a path the log can
-			// match** — a model referring up out of its own folder is ordinary,
+			// match** - a model referring up out of its own folder is ordinary,
 			// and a literal join would produce a string no import ever wrote.
 			const std::filesystem::path wanted =
 				(std::filesystem::path(origin->second).parent_path() / std::filesystem::path(reference))
@@ -401,7 +401,7 @@ namespace cdn {
 
 		// **Recursive, because `cdn::Publish` is.** The publisher names an asset
 		// by its path relative to `raw/`, so a tree under there has always been
-		// publishable — and v0.10's material import is the first thing that
+		// publishable - and v0.10's material import is the first thing that
 		// writes one, because a material has to *name* its texture and a
 		// hash-renamed flat import gives it no name to write. A non-recursive
 		// listing showed a store of six thousand files as empty, which reads as a
@@ -420,7 +420,7 @@ namespace cdn {
 
 			// `<hash><extension>` for an import, so the stem is the hash. A file
 			// written into a subdirectory by a tool has no log line and is
-			// labelled by its path relative to `raw/` — which is also the name it
+			// labelled by its path relative to `raw/` - which is also the name it
 			// will be published under, and is the thing somebody is looking for.
 			const auto found = named.find(file.path().stem().string());
 			if (found != named.end()) {
@@ -446,7 +446,7 @@ namespace cdn {
 				return leftTime > rightTime;
 			}
 			// A tiebreak that does not depend on the filesystem's timestamp
-			// resolution, which on some of them is a whole second — so a bulk
+			// resolution, which on some of them is a whole second - so a bulk
 			// import would otherwise come back in an arbitrary order.
 			return left.Original < right.Original;
 		});
@@ -475,7 +475,7 @@ namespace cdn {
 		}
 
 		// Name order, which is what a picker wants and what a manifest already
-		// is — sorted here anyway rather than relying on it, because "the
+		// is - sorted here anyway rather than relying on it, because "the
 		// manifest happens to be sorted" is a property of the publisher rather
 		// than of the format.
 		std::sort(

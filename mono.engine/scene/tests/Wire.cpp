@@ -2,7 +2,7 @@
 //
 // `Wire.hpp` states an error in metres and an error in radians. This is the
 // half that checks them, because a stated bound nobody measures is the same
-// thing as a hope with a constant beside it — and the two failure modes it
+// thing as a hope with a constant beside it - and the two failure modes it
 // guards against pull in opposite directions: a grid quietly widened past the
 // bound, and a bound quietly widened past the grid. Every case here therefore
 // asserts both that nothing exceeds the stated figure and that something comes
@@ -66,7 +66,7 @@ namespace scene_wire_test {
 	}
 
 	// The angle between two orientations, in radians. `q` and `-q` are the same
-	// rotation, so the dot product is taken absolutely — comparing components
+	// rotation, so the dot product is taken absolutely - comparing components
 	// would report a full turn for two identical orientations.
 	float AngleBetween(const CFrame &left, const CFrame &right) {
 		const float dot = left.QuaternionX * right.QuaternionX + left.QuaternionY * right.QuaternionY +
@@ -261,7 +261,7 @@ TEST_CASE("smallest-three reconstructs a unit quaternion", "[scene][wire]") {
 TEST_CASE("two nearly equal components pick a largest and stay inside the bound", "[scene][wire]") {
 	// **The case that picks the wrong largest.** When two components are within
 	// a rounding error of each other the encoder's choice can differ from what
-	// a reader would call largest — and it does not matter, because the decoder
+	// a reader would call largest - and it does not matter, because the decoder
 	// is told which one was dropped rather than working it out. What would
 	// matter is the accuracy, so that is what is asserted.
 	const float half = 0.5f;
@@ -315,7 +315,7 @@ TEST_CASE("the sign of the dropped component does not change the rotation", "[sc
 		opposite.Frame = negated;
 
 		// Both describe the same orientation, so both must decode to the same
-		// orientation — and to the same bytes, because a hash over replicated
+		// orientation - and to the same bytes, because a hash over replicated
 		// state cannot afford two encodings of one value.
 		const CFrame first = RoundTrip(positive).Frame;
 		const CFrame second = RoundTrip(opposite).Frame;
@@ -330,7 +330,7 @@ TEST_CASE("the sign of the dropped component does not change the rotation", "[sc
 
 TEST_CASE("any four bytes decode to a unit quaternion", "[scene][wire]") {
 	// Every field of an inbound message is hostile. A word no encoder would
-	// produce — three components that do not fit inside one rotation — still
+	// produce - three components that do not fit inside one rotation - still
 	// has to come out as something every consumer downstream may treat as a
 	// rotation, rather than as a quaternion of length 1.22 that quietly scales
 	// whatever it is applied to.
@@ -398,6 +398,91 @@ TEST_CASE("a velocity error is far below the position grid within one tick", "[s
 	CHECK(travel < engine::scene::WIRE_POSITION_ERROR_METRES * 0.25f);
 }
 
+TEST_CASE("dead-reckoned error grows with time rather than with the grid", "[scene][wire]") {
+	// **The bound `D00015(c)` says nobody had measured, measured.**
+	// Interpolating between two decoded poses keeps the error inside
+	// `WIRE_POSITION_ERROR_METRES` whatever the elapsed time. *Integrating* a
+	// decoded velocity does not: the error is the pose's own plus the
+	// velocity's times the seconds since, so the bound is a function of time.
+	//
+	// Both halves are asserted, in the shape the rest of this file uses.
+	// Nothing exceeds the stated growth, and the figure genuinely grows with the
+	// elapsed time rather than sitting at the grid's own error - or the horizon
+	// below would be describing something that does not happen.
+	const float positionReach = engine::scene::WIRE_POSITION_HALF_EXTENT_METRES;
+	const float linearReach = engine::scene::WIRE_LINEAR_HALF_EXTENT_METRES_PER_SECOND;
+
+	const float elapsedSeconds[] = {0.0f, 1.0f / 60.0f, 0.1f, engine::scene::WIRE_DEAD_RECKON_SECONDS, 1.0f};
+
+	// **Summed in double, so the figure is the quantisation error and nothing
+	// else.** The same sum in float at 64 m from the origin lands on the wrong
+	// side of a rounding step often enough to exceed the bound by an ulp -
+	// 3.5 um measured, against a quantisation term four hundred times larger.
+	// That is a fact about float addition rather than about the grid, and
+	// mixing the two into one number would make neither of them checkable.
+	double previousWorst = -1.0;
+	for (const float seconds : elapsedSeconds) {
+		double worst = 0.0;
+
+		for (uint32_t step = 0; step <= 4096; step++) {
+			const float alpha = static_cast<float>(step) / 4096.0f;
+
+			Transform placed;
+			placed.Frame = CFrame(
+				Vector3{
+					-positionReach + alpha * 2.0f * positionReach,
+					positionReach * (alpha - 0.5f),
+					alpha * 7.0f
+				}
+			);
+
+			Motion moving;
+			moving.Linear = Vector3{
+				-linearReach + alpha * 2.0f * linearReach, linearReach * (0.5f - alpha), alpha * 11.0f
+			};
+
+			const Vector3 place = placed.Frame.Position;
+			const Vector3 speed = moving.Linear;
+			const Vector3 decodedPlace = RoundTrip(placed).Frame.Position;
+			const Vector3 decodedSpeed = RoundTrip(moving).Linear;
+
+			const auto driftOn = [seconds](float truth, float velocity, float held, float heldVelocity) {
+				const double guessed = static_cast<double>(held) +
+									   static_cast<double>(heldVelocity) * static_cast<double>(seconds);
+				const double exact =
+					static_cast<double>(truth) + static_cast<double>(velocity) * static_cast<double>(seconds);
+				return std::abs(guessed - exact);
+			};
+
+			worst = std::max(worst, driftOn(place.X, speed.X, decodedPlace.X, decodedSpeed.X));
+			worst = std::max(worst, driftOn(place.Y, speed.Y, decodedPlace.Y, decodedSpeed.Y));
+			worst = std::max(worst, driftOn(place.Z, speed.Z, decodedPlace.Z, decodedSpeed.Z));
+		}
+
+		const double bound = static_cast<double>(engine::scene::WIRE_POSITION_ERROR_METRES) +
+							 static_cast<double>(engine::scene::WIRE_LINEAR_ERROR_METRES_PER_SECOND) *
+								 static_cast<double>(seconds);
+
+		INFO("elapsed " << seconds << " s: worst " << worst << " m against a bound of " << bound);
+		CHECK(worst <= bound);
+
+		// Growing, and growing with the time rather than with anything else.
+		CHECK(worst > previousWorst);
+		previousWorst = worst;
+	}
+
+	// **The horizon is the equality, not a preference.** Half a step of the
+	// velocity grid over a quarter of a second is half a step of the position
+	// grid, because the step counts cancel and 64 m over 256 m/s is what is
+	// left. Exact in a float: both are a division by the same integer scaled by
+	// a power of two.
+	CHECK(
+		engine::scene::WIRE_LINEAR_ERROR_METRES_PER_SECOND * engine::scene::WIRE_DEAD_RECKON_SECONDS ==
+		engine::scene::WIRE_POSITION_ERROR_METRES
+	);
+	CHECK(engine::scene::WIRE_DEAD_RECKON_SECONDS == 0.25f);
+}
+
 TEST_CASE("a velocity outside its grid is clamped", "[scene][wire]") {
 	Motion fast;
 	fast.Linear = Vector3{9000.0f, -9000.0f, 0.0f};
@@ -427,7 +512,7 @@ TEST_CASE("the grid is checked against the world rather than assumed", "[scene][
 TEST_CASE("a position code no encoder emits still decodes inside the world", "[scene][wire]") {
 	// **The one code a symmetric grid leaves unused**, arriving from a peer.
 	// A decoder that trusted its input would put an entity a step outside the
-	// extent this module states everything is inside — small, and exactly the
+	// extent this module states everything is inside - small, and exactly the
 	// sort of small that makes a containment test somewhere else disagree with
 	// a header.
 	const engine::ecs::WireFormat wire = engine::scene::TransformWire();

@@ -3,12 +3,12 @@
 // **Until `net::LossyTransport` existed, nothing in this tree had ever lost a
 // datagram in flight.** Every transport either delivers or refuses locally, so
 // the whole of `docs/DEFERRED.md` D00011 was an argument rather than a failing
-// test — and the entry itself said the cheap thing to do first was to build a
+// test - and the entry itself said the cheap thing to do first was to build a
 // link that drops. This is what that link found.
 //
 // Same harness as `EndToEnd.cpp`: a real loopback, real framing, real budgets.
 // The only difference is that one nominated datagram is discarded on the way in,
-// which is stated rather than waited for — no clock, no percentage, no flake.
+// which is stated rather than waited for - no clock, no percentage, no flake.
 
 #include "Wire.hpp"
 
@@ -138,7 +138,7 @@ TEST_CASE("a lost value repairs itself without being told again", "[replication]
 TEST_CASE("a tick whose rows have not arrived is not acknowledged", "[replication][loss]") {
 	// **The rule that makes the repair above complete rather than half done.**
 	// A creation and the values for the entity it creates go on different
-	// channels, so the creation can be lost while the values arrive — and the
+	// channels, so the creation can be lost while the values arrive - and the
 	// values are then dropped for want of the row. Acknowledging that tick
 	// anyway told the server every value in it had landed, and the entity turned
 	// up some ticks later holding none of its components. `Applied` is
@@ -170,7 +170,7 @@ TEST_CASE("a tick whose rows have not arrived is not acknowledged", "[replicatio
 
 TEST_CASE("a forget arrives even when its tick's delta got there first", "[replication][loss]") {
 	// **Found by the sweep, and it needed no packet loss at all.** A forget was
-	// refused when its tick was not newer than the last one applied — and the
+	// refused when its tick was not newer than the last one applied - and the
 	// delta for that same tick is sent first, so any tick that both moved
 	// something and dropped something out of view had its forget discarded on
 	// arrival. The client went on drawing an entity the server had already
@@ -189,7 +189,9 @@ TEST_CASE("a forget arrives even when its tick's delta got there first", "[repli
 	REQUIRE(wire.Join());
 
 	const Entity leaving = all[2];
-	wire.Authority_.SetInterest([leaving](ClientId, Entity entity) { return entity.Id != leaving.Id; });
+	wire.Authority_.SetInterest([leaving](ClientId, Entity entity, const engine::ecs::Store &) {
+		return entity.Id != leaving.Id;
+	});
 
 	// Everything moves on the same tick the entity leaves view, so the tick
 	// carries a delta and a structural message together.
@@ -213,7 +215,9 @@ TEST_CASE("a forget whose datagram is lost still reaches the client", "[replicat
 	wire.Server.Set<Spot>(wire.Server.Create(), Spot{2.0f, 0.0f});
 	REQUIRE(wire.Join());
 
-	wire.Authority_.SetInterest([watched](ClientId, Entity entity) { return entity.Id != watched.Id; });
+	wire.Authority_.SetInterest([watched](ClientId, Entity entity, const engine::ecs::Store &) {
+		return entity.Id != watched.Id;
+	});
 
 	wire.ClientEnd->DropNext(1);
 	wire.Tick();
@@ -232,7 +236,7 @@ TEST_CASE("a value lost from a tick that took several messages is repaired", "[r
 	// **D00013, and this case was written to fail.** A tick's delta is split
 	// into as many independently applicable messages as it takes; the client
 	// used to apply whichever arrived and acknowledge the tick anyway, and the
-	// server then retired every value that tick carried — including the ones in
+	// server then retired every value that tick carried - including the ones in
 	// the message that never came. Measured here before the fix: eighteen of
 	// forty entities stranded, and still eighteen forty ticks later.
 	//
@@ -278,7 +282,7 @@ TEST_CASE("a value lost from a tick that took several messages is repaired", "[r
 
 	// **The bound, asserted rather than described: one tick.** The very next
 	// tick re-offers everything that was still unconfirmed, arrives whole, and
-	// is acknowledged — so a part lost for ever costs one tick of
+	// is acknowledged - so a part lost for ever costs one tick of
 	// acknowledgement and nothing more. Nothing waits for the datagram that
 	// never came, because nothing can: the unreliable channel does not resend.
 	wire.Tick();
@@ -305,7 +309,7 @@ TEST_CASE("a tick the budget trimmed is complete rather than short of a part", "
 	// **The case most likely to be got wrong, and the reason the final marker is
 	// authored by the sender when the tick is packed.** The per-client cap
 	// deliberately holds values back, so a marker meaning "nothing else changed"
-	// would be false on every tick of a world larger than its link — and a
+	// would be false on every tick of a world larger than its link - and a
 	// client waiting for parts that were never emitted would stop acknowledging
 	// on precisely the servers the cap exists for, then be re-snapshotted for
 	// it. What was held over was never part of this tick: it keeps its
@@ -360,8 +364,8 @@ TEST_CASE("a part lost from every tick costs the acknowledgement and nothing els
 	// not stall.** An incomplete tick is passed over rather than waited for, so
 	// twenty ticks in a row losing a part cost twenty acknowledgements and no
 	// values: everything each missing part carried is still unconfirmed and
-	// rides the next tick. Waiting instead would be a stall no resend ends —
-	// the unreliable channel does not redeliver — and the server would give up
+	// rides the next tick. Waiting instead would be a stall no resend ends -
+	// the unreliable channel does not redeliver - and the server would give up
 	// on a client whose link is merely lossy.
 	engine::replication::AuthoritySettings authority;
 	authority.ChunkBytes = 256;
@@ -388,7 +392,7 @@ TEST_CASE("a part lost from every tick costs the acknowledgement and nothing els
 	REQUIRE(wire.ClientEnd->Stats().Dropped == 20);
 	REQUIRE(wire.Replica_.Stats().Incomplete >= 15);
 
-	// Well inside `ResnapshotAfterTicks`, so the server has not given up — the
+	// Well inside `ResnapshotAfterTicks`, so the server has not given up - the
 	// client is a tick behind over and over, not adrift.
 	REQUIRE(wire.Authority_.Stats().Resnapshots == 0);
 	REQUIRE(wire.Replica_.Stats().Snapshots == 1);
@@ -409,7 +413,7 @@ TEST_CASE("a part lost from every tick costs the acknowledgement and nothing els
 TEST_CASE("a client that can never complete a tick is re-snapshotted", "[replication][loss]") {
 	// **The bound on the wait, and it is deliberately the one that already
 	// existed.** A client which cannot receive a whole tick cannot honestly
-	// acknowledge one, so `Applied` stops moving — and `ResnapshotAfterTicks`
+	// acknowledge one, so `Applied` stops moving - and `ResnapshotAfterTicks`
 	// is this module's answer to a client that cannot be caught up by deltas it
 	// never got. That is what makes the wait bounded rather than open-ended,
 	// and it is the price of never acknowledging a tick a value is missing
@@ -446,7 +450,7 @@ TEST_CASE("a client that can never complete a tick is re-snapshotted", "[replica
 	REQUIRE(restarts > 0);
 
 	// Expensive and correct, which is the trade this bound makes. The link
-	// stops losing things and the world is right — by the snapshot if not by the
+	// stops losing things and the world is right - by the snapshot if not by the
 	// deltas.
 	for (int tick = 0; tick < 40; tick++) {
 		wire.Tick();
@@ -459,7 +463,7 @@ TEST_CASE("a client that can never complete a tick is re-snapshotted", "[replica
 TEST_CASE("the snapshot buffer never holds a tick that was short of a part", "[replication][loss]") {
 	// **What `client::RecordReplicatedTick` does, in the module that owns the
 	// rule.** The buffer is fed with `Replica::Applied`, so a tick held back for
-	// want of a part produces no pose at all — which is the only honest answer:
+	// want of a part produces no pose at all - which is the only honest answer:
 	// the store at that moment holds the rows the surviving parts carried and
 	// the previous values of the rows the lost one did, and a pose recorded from
 	// it would be interpolated through and then contradicted by the repair a
@@ -477,7 +481,7 @@ TEST_CASE("the snapshot buffer never holds a tick that was short of a part", "[r
 	REQUIRE(wire.Join(1024));
 
 	// Exactly what the client's own seam does: record the applied tick, once,
-	// after every poll. `Spot` stands in for a transform — what is being
+	// after every poll. `Spot` stands in for a transform - what is being
 	// asserted is which ticks reach the buffer at all.
 	engine::replication::SnapshotBuffer buffer;
 	const auto record = [&]() {
@@ -658,7 +662,7 @@ TEST_CASE("duplicated and reordered datagrams change nothing", "[replication][lo
 TEST_CASE("an entity coming into view brings its components with it", "[replication][loss]") {
 	// **Found while mutation-testing the case above, and it needs no loss
 	// either.** A delta is built from the dirty bits, and an entity entering a
-	// client's interest has not moved — it was always there and this client
+	// client's interest has not moved - it was always there and this client
 	// could not see it. So the entity was created on the client and then held
 	// none of its components until something changed one, which for anything
 	// stationary is never.
@@ -670,7 +674,7 @@ TEST_CASE("an entity coming into view brings its components with it", "[replicat
 	wire.Server.Set<Spot>(sometimes, Spot{77.0f, 88.0f});
 
 	bool visible = false;
-	wire.Authority_.SetInterest([sometimes, &visible](ClientId, Entity entity) {
+	wire.Authority_.SetInterest([sometimes, &visible](ClientId, Entity entity, const engine::ecs::Store &) {
 		return entity.Id != sometimes.Id || visible;
 	});
 	REQUIRE(wire.Join());
@@ -691,7 +695,7 @@ TEST_CASE("an entity coming into view brings its components with it", "[replicat
 TEST_CASE("a lost destruction arrives even after later ticks have been applied", "[replication][loss]") {
 	// **A structural message carries a tick and is deliberately not judged by
 	// it.** The reliable channel resends it a hundred milliseconds later, which
-	// is six ticks of a world that has gone on moving — so by the time it lands
+	// is six ticks of a world that has gone on moving - so by the time it lands
 	// the replica has applied ticks well past the one it names. Refusing it as
 	// stale, the way a delta is rightly refused, is how a destroy never happens.
 	Wire wire;
@@ -702,7 +706,7 @@ TEST_CASE("a lost destruction arrives even after later ticks have been applied",
 	REQUIRE(wire.Join());
 
 	// The destroy goes out on a tick that also moves something, and the world
-	// keeps moving afterwards — so the replica's applied tick runs on past the
+	// keeps moving afterwards - so the replica's applied tick runs on past the
 	// one the lost message names.
 	wire.Server.Destroy(doomed);
 	wire.Server.GetMutable<Spot>(moving)->X = 1.0f;
@@ -725,7 +729,7 @@ TEST_CASE("a structural message is not an applied tick", "[replication][loss]") 
 	// A structure and the values of the same tick travel on different channels,
 	// so one can arrive without the other. Treating the structural half as
 	// "tick applied" acknowledges values that never came, and the server retires
-	// them — which strands anything that then stops moving.
+	// them - which strands anything that then stops moving.
 	Wire wire;
 	const Entity moving = wire.Server.Create();
 	wire.Server.Set<Spot>(moving, Spot{0.0f, 0.0f});
@@ -759,7 +763,7 @@ TEST_CASE("a world where only structure changes is not a client falling behind",
 	// further along. A tick that carries only a structural message produces
 	// nothing for the client to apply and therefore no new acknowledgement, so
 	// counting it as a tick that streamed leaves the server permanently
-	// convinced the client is behind — and re-snapshotting the whole world, over
+	// convinced the client is behind - and re-snapshotting the whole world, over
 	// and over, to repair a client that is in perfect agreement.
 	Wire wire;
 	const Entity first = wire.Server.Create();
@@ -770,7 +774,9 @@ TEST_CASE("a world where only structure changes is not a client falling behind",
 
 	// Out of view, which is a structural message and nothing else: the world is
 	// still, so there is no delta on that tick or any tick after it.
-	wire.Authority_.SetInterest([second](ClientId, Entity entity) { return entity.Id != second.Id; });
+	wire.Authority_.SetInterest([second](ClientId, Entity entity, const engine::ecs::Store &) {
+		return entity.Id != second.Id;
+	});
 
 	engine::replication::AuthoritySettings defaults;
 	size_t restarts = 0;
@@ -789,7 +795,7 @@ TEST_CASE("a budget holding everything back is not a client falling behind", "[r
 	// it is what the re-snapshot decision is measured against. A tick where the
 	// per-client byte budget refused every message put nothing on the wire, so
 	// moving it would leave the server certain a client that has been told
-	// nothing is a client that has fallen behind — and re-snapshotting it, which
+	// nothing is a client that has fallen behind - and re-snapshotting it, which
 	// cannot help, because the whole world is far more than the budget that just
 	// refused a single delta. `Statistics::Deferred` is the number that says
 	// what is really happening.

@@ -3,7 +3,7 @@
 // Turning what an author wrote into where it actually is.
 //
 // One pass, parent before child, writing `Resolved` per node. Everything after
-// this — the draw list, the hit test, a script asking `AbsoluteSize` — reads
+// this - the draw list, the hit test, a script asking `AbsoluteSize` - reads
 // that component with a query and nothing walks the tree a second time.
 //
 // **Why the tree is walked here and nowhere else.** A `UDim2` means nothing
@@ -17,7 +17,7 @@
 // **Text is measured with a constant advance.** `AVERAGE_ADVANCE` below is the
 // fraction of an em a glyph is assumed to occupy, and `TextScaled` shrinks the
 // size until the string fits by that estimate. The exact answer needs a glyph
-// atlas, which is a `client` thing this module may not have — and the important
+// atlas, which is a `client` thing this module may not have - and the important
 // property is not exactness but that **there is one answer**: a backend that
 // re-measured with real metrics would disagree with the hit test and with what
 // a headless test asserts. So the backend draws at `Resolved::TextSize` and
@@ -27,7 +27,7 @@
 // string.** The second half used to be a refusal, on the grounds that growing a
 // box to an estimate produces a box the text spills out of. It does not, and the
 // reason is the paragraph above: nothing downstream re-measures, so within this
-// engine `AVERAGE_ADVANCE` is not an approximation of the truth — it *is* the
+// engine `AVERAGE_ADVANCE` is not an approximation of the truth - it *is* the
 // measurement, the one answer the hit test, a headless assertion and the
 // renderer all agree on. A box grown to it fits by the same definition of
 // fitting the module uses everywhere else, and `TextScaled` on a grown axis
@@ -35,8 +35,8 @@
 // the product the growth multiplies.
 //
 // What is still true is that the estimate may be wrong about real glyphs. That
-// risk is not introduced by growing — it is the risk `TextScaled` has carried
-// since v0.8 — and closing it means metrics shared *below* L7 rather than a
+// risk is not introduced by growing - it is the risk `TextScaled` has carried
+// since v0.8 - and closing it means metrics shared *below* L7 rather than a
 // second opinion at the point of use.
 //
 // **The failure the old refusal also named is still refused, and now by
@@ -67,7 +67,7 @@ namespace engine::gui {
 	// "the window size" from somewhere global could not serve the second.
 	//
 	// **`Screen` and not `Viewport`**, because `gui::Viewport` is already the
-	// component behind `ViewportFrame` — a 3D view drawn *inside* the tree,
+	// component behind `ViewportFrame` - a 3D view drawn *inside* the tree,
 	// which is very nearly the opposite of this.
 	//
 	// @since v0.8
@@ -99,8 +99,8 @@ namespace engine::gui {
 	// The containers a `LayerCollector` may draw from, by name.
 	//
 	// **Roblox's containment rule, and it is a rule rather than a style
-	// choice.** A `ScreenGui` parented to a `Part` draws nothing — not because
-	// it is invisible but because nothing is looking at that part of the tree —
+	// choice.** A `ScreenGui` parented to a `Part` draws nothing - not because
+	// it is invisible but because nothing is looking at that part of the tree -
 	// and an engine that drew it anyway would let an author ship a game whose
 	// interface appears in the studio and not in the client, which is the worst
 	// direction for a difference like that to run.
@@ -112,7 +112,7 @@ namespace engine::gui {
 	//     the world is where that something lives.
 	//
 	// **These are `scene`'s service names, spelled again here**, because
-	// `gui/AGENTS.md` refuses an edge to `scene` — the same refusal that made
+	// `gui/AGENTS.md` refuses an edge to `scene` - the same refusal that made
 	// `SurfaceGui::Face` re-declare `NormalId`'s six members. They are exposed
 	// rather than kept in the source file so a test can pin them against the
 	// service table they are copied from, which is the arrangement that turns a
@@ -129,7 +129,7 @@ namespace engine::gui {
 	// Resolves every `LayerCollector` in the store and everything under it.
 	//
 	// Writes `Resolved` on each node reached and clears `Resolved::Rendered` on
-	// each node that is not — a disabled collector, an invisible ancestor, an
+	// each node that is not - a disabled collector, an invisible ancestor, an
 	// element parented outside any collector. Nothing is destroyed and nothing
 	// is zeroed: an element scrolled out of view keeps the rectangle it had, so
 	// the hit test does not have to tell "off screen" from "never laid out".

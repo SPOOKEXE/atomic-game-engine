@@ -76,7 +76,7 @@ namespace docgen {
 		}
 
 		// Finds where a `//` comment starts on a line, ignoring the ones that
-		// are not comments at all — inside a string, inside a character
+		// are not comments at all - inside a string, inside a character
 		// literal, inside a /* */ that opened on an earlier line.
 		//
 		// Two of those states outlive a single line, so this is a scanner over
@@ -162,7 +162,7 @@ namespace docgen {
 		}
 
 		// `<assets>/shaders/<module>/` is a path with two placeholders in it.
-		// Doxygen reads it as two HTML tags, warns, and renders `/shaders//` —
+		// Doxygen reads it as two HTML tags, warns, and renders `/shaders//` -
 		// the prose loses its meaning and the page does not say it happened.
 		//
 		// So a placeholder-shaped `<word>` is escaped on the way past. Literal
@@ -234,8 +234,8 @@ namespace docgen {
 		//
 		// **`JAVADOC_AUTOBRIEF` splits the brief at the first sentence-ending
 		// stop, and it does not care that the stop is inside emphasis.** This
-		// repository's house style is a bold *sentence* — `**Twenty-eight and
-		// not thirty-two.**` — so the split lands between the `**` and its
+		// repository's house style is a bold *sentence* - `**Twenty-eight and
+		// not thirty-two.**` - so the split lands between the `**` and its
 		// partner: the brief ends holding an unclosed emphasis and the detailed
 		// description starts with a stranded closing one. Doxygen reports `end of
 		// comment block while expecting </strong>` **against the following
@@ -250,12 +250,12 @@ namespace docgen {
 		// it in breaks one that fits on half of one.
 		//
 		// **A character moved rather than lines joined**, because the line count
-		// is this filter's load-bearing invariant — Doxygen numbers the source
+		// is this filter's load-bearing invariant - Doxygen numbers the source
 		// listing from the filtered text and the browser links from the original.
 		// This edits within a line and changes no line's existence.
 		//
 		// **An odd marker leaves the block alone.** A comment with an unpaired
-		// `**` — prose about a pointer-to-pointer, a literal asterisk pair —
+		// `**` - prose about a pointer-to-pointer, a literal asterisk pair -
 		// would otherwise have its punctuation shuffled on a boundary that is not
 		// emphasis at all.
 		void MoveSentenceStops(std::vector<std::string> &bodies, size_t first, size_t last) {
@@ -312,8 +312,8 @@ namespace docgen {
 		// The line to overwrite with `/// @file`, or NONE.
 		//
 		// Overwriting a blank line that is already there is what keeps the line
-		// count identical. There is always one beside the opening block —
-		// `#pragma once`, blank, prose — and a `///` line touching the block is
+		// count identical. There is always one beside the opening block -
+		// `#pragma once`, blank, prose - and a `///` line touching the block is
 		// part of the same comment, so the whole thing becomes the file's
 		// documentation rather than the first declaration's.
 		size_t FileCommandLine(const std::vector<Line> &lines) {
@@ -357,8 +357,8 @@ namespace docgen {
 		const size_t fileCommand = FileCommandLine(lines);
 
 		// **Where every comment starts, worked out first and once.** `Scanner`
-		// carries state across lines — a block comment and a raw string both
-		// outlive one — so it must see every line exactly once and in order.
+		// carries state across lines - a block comment and a raw string both
+		// outlive one - so it must see every line exactly once and in order.
 		// That is also why the emphasis rewrite below cannot simply ask again.
 		std::vector<size_t> comments(lines.size(), NONE);
 		{

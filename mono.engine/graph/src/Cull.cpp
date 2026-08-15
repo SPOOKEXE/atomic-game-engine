@@ -1,6 +1,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace engine::graph {
@@ -16,7 +17,7 @@ namespace engine::graph {
 
 		// Sized to the worst case once rather than grown as it fills. The worst
 		// case is "everything is visible", which is also the common case for a
-		// camera framing its own scene — so a reserve that assumed otherwise
+		// camera framing its own scene - so a reserve that assumed otherwise
 		// would reallocate on exactly the frames that matter.
 		visible.clear();
 		visible.reserve(instances.size());
@@ -40,7 +41,7 @@ namespace engine::graph {
 		//
 		// **A corner at or behind the camera's plane gives one.** Its projection
 		// is unbounded and its sign flips, so any number derived from it is
-		// noise — and a box straddling the camera is one filling the screen,
+		// noise - and a box straddling the camera is one filling the screen,
 		// which is the answer "one" already means.
 		float ScreenCoverage(const glm::mat4 &camera, const core::AABB &box) {
 			float left = 1.0f;
@@ -78,7 +79,8 @@ namespace engine::graph {
 		const glm::mat4 &cameraMatrix,
 		std::span<const SurfaceEye> surfaces,
 		std::span<bool> visible,
-		std::span<float> coverage
+		std::span<float> coverage,
+		size_t rounds
 	) {
 		ENGINE_PROFILE_CAT("graph.surface visibility", core::ProfileCategory::Render);
 
@@ -96,7 +98,7 @@ namespace engine::graph {
 		}
 
 		// The box each slot's pane occupies, unioned over every instance naming
-		// it — which is one instance in every scene anybody has built, and a
+		// it - which is one instance in every scene anybody has built, and a
 		// union rather than an assignment because nothing forbids two.
 		//
 		// **Kept between calls rather than sized per frame.** This runs once per
@@ -138,32 +140,50 @@ namespace engine::graph {
 		// **Read from a snapshot, so the answer cannot depend on the order the
 		// surfaces happen to arrive in.** Marking as it walked would let one
 		// pane's newly granted visibility grant another's within the same sweep,
-		// which is the closure this deliberately is not.
+		// and which panes got that head start would come down to the order the
+		// surfaces were gathered in.
+		//
+		// **One round per bounce the surface pass will draw.** A round is one
+		// level of surface-seen-in-surface, and running a single one - which is
+		// what this did until the mismatch below was found - culls every level
+		// past the first while the pass goes on drawing them. See `Cull.hpp`.
 		static thread_local std::vector<uint8_t> onScreen;
-		onScreen.assign(visible.begin(), visible.end());
 
-		for (const SurfaceEye &eye : surfaces) {
-			if (eye.Index < 0 || static_cast<size_t>(eye.Index) >= visible.size()) {
-				continue;
-			}
+		for (size_t round = 0; round < std::max<size_t>(rounds, 1); round++) {
+			onScreen.assign(visible.begin(), visible.end());
+			const size_t before = seen;
 
-			const auto slot = static_cast<size_t>(eye.Index);
-			if (onScreen[slot] != 0u || present[slot] == 0u) {
-				continue;
-			}
-
-			for (const SurfaceEye &other : surfaces) {
-				if (other.Index == eye.Index || other.Index < 0 ||
-					static_cast<size_t>(other.Index) >= visible.size() ||
-					onScreen[static_cast<size_t>(other.Index)] == 0u) {
+			for (const SurfaceEye &eye : surfaces) {
+				if (eye.Index < 0 || static_cast<size_t>(eye.Index) >= visible.size()) {
 					continue;
 				}
 
-				if (Frustum::FromViewProjection(other.ViewProjection).Intersects(panes[slot])) {
-					visible[slot] = true;
-					seen++;
-					break;
+				const auto slot = static_cast<size_t>(eye.Index);
+				if (onScreen[slot] != 0u || present[slot] == 0u) {
+					continue;
 				}
+
+				for (const SurfaceEye &other : surfaces) {
+					if (other.Index == eye.Index || other.Index < 0 ||
+						static_cast<size_t>(other.Index) >= visible.size() ||
+						onScreen[static_cast<size_t>(other.Index)] == 0u) {
+						continue;
+					}
+
+					if (Frustum::FromViewProjection(other.ViewProjection).Intersects(panes[slot])) {
+						visible[slot] = true;
+						seen++;
+						break;
+					}
+				}
+			}
+
+			// **Stopped when a round grants nothing**, which is what keeps asking
+			// for more rounds than the scene has depth from costing anything. It
+			// is also the termination proof: `seen` only ever rises and is bounded
+			// by the slot count, so a round that adds nothing is a fixpoint.
+			if (seen == before) {
+				break;
 			}
 		}
 
@@ -178,7 +198,7 @@ namespace engine::graph {
 	) {
 		// **The absolute half-axes summed, which is `FromOrientedBox` written for
 		// a rectangle.** Whatever way the pane is turned, its box reaches
-		// `|first| + |second|` from the centre on each world axis — and the axis
+		// `|first| + |second|` from the centre on each world axis - and the axis
 		// the rectangle has no thickness on comes out zero, which is exact rather
 		// than something to guard.
 		const core::Vector3 reach{

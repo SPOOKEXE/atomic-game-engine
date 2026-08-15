@@ -90,10 +90,10 @@ namespace engine::ui {
 
 		if (!any) {
 			// Not fatal. An editor that refused to open over a font is worse
-			// than one that opens in imgui's default — but it is worth saying
+			// than one that opens in imgui's default - but it is worth saying
 			// once, because "the text looks wrong" otherwise has no explanation
 			// anywhere.
-			ENGINE_WARN("no fonts found under {} — falling back to imgui's built-in face", root.string());
+			ENGINE_WARN("no fonts found under {} - falling back to imgui's built-in face", root.string());
 			return false;
 		}
 
@@ -133,7 +133,7 @@ namespace engine::ui {
 		}
 
 		// `LegacySize` is what the face was rasterised at, which already
-		// carries `InterfaceSettings::Scale` — so a zoom multiplies the size
+		// carries `InterfaceSettings::Scale` - so a zoom multiplies the size
 		// somebody chose rather than replacing it.
 		//
 		// A null face means the family would not load; `PushFont` reads that as

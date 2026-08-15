@@ -49,7 +49,7 @@ namespace {
 		//
 		// **Made by the fixture rather than by each case.** Containment is a
 		// rule every case is now subject to, and parenting by hand in thirty of
-		// them would be thirty chances to forget — and a forgotten one lays out
+		// them would be thirty chances to forget - and a forgotten one lays out
 		// to nothing, which reads as the case being wrong rather than the
 		// fixture being incomplete.
 		//
@@ -304,7 +304,7 @@ TEST_CASE("size limits clamp after the aspect ratio, not before", "[gui][layout]
 
 	// The ratio makes it 400x400 and the clamp cuts both to 120. Clamping
 	// first would leave 120x400 for the ratio to reshape into 120x120 as well
-	// — the ordering only shows up on a case where the two disagree, which is
+	// - the ordering only shows up on a case where the two disagree, which is
 	// why the assertion below is on the *ratio's* axis rather than on the size.
 	CHECK(world.Where(frame).AbsoluteSize.X == Approx(120.0f));
 	CHECK(world.Where(frame).AbsoluteSize.Y == Approx(120.0f));
@@ -327,7 +327,7 @@ TEST_CASE("clipping is inherited and intersected", "[gui][layout]") {
 
 	Layout(world.Data, world.Display);
 
-	// The child keeps its own rectangle — the clip is a separate fact, which is
+	// The child keeps its own rectangle - the clip is a separate fact, which is
 	// what lets a scrolling frame move content under a window.
 	CHECK(world.Where(inner).AbsoluteSize.X == Approx(500.0f));
 	CHECK(world.Where(inner).Clip.Width() == Approx(100.0f));
@@ -400,7 +400,7 @@ TEST_CASE("scaled text shrinks to fit and never reaches zero", "[gui][layout]") 
 	CHECK(where.TextSize >= 1);
 	CHECK(where.TextSize < 48);
 
-	// The authored size is untouched — a script reads back what it wrote, and
+	// The authored size is untouched - a script reads back what it wrote, and
 	// the drawn number lives on `Resolved`.
 	CHECK(world.Data.Get<Label>(label)->Size == 48);
 }
@@ -437,7 +437,7 @@ TEST_CASE("siblings with different child counts each place their own children", 
 	// measures *all* of its children before it places any, so child 0's run sits
 	// under child 1's, which sits under child 2's, and child 0 is not read back
 	// until long after the other two were written on top of it. An off-by-one in
-	// that bookkeeping does not crash and does not produce nonsense — it places
+	// that bookkeeping does not crash and does not produce nonsense - it places
 	// one container's children inside a *sibling's* rectangle, which reads as a
 	// layout bug in whatever authored the interface rather than as an engine
 	// one.
@@ -462,7 +462,7 @@ TEST_CASE("siblings with different child counts each place their own children", 
 	}
 
 	// One, two and three children respectively, each filling its parent so its
-	// resolved rectangle is its parent's — which is what makes a crossed run
+	// resolved rectangle is its parent's - which is what makes a crossed run
 	// immediately visible as the wrong X.
 	std::vector<std::vector<Entity>> children(containers.size());
 	for (size_t index = 0; index < containers.size(); index++) {
@@ -498,7 +498,7 @@ TEST_CASE("siblings with different child counts each place their own children", 
 	// across calls rather than rebuilt: a run whose offset drifted between
 	// frames would give a first frame that is right and a later one that is not.
 	//
-	// This does *not* test that the arena is released — a run left behind grows
+	// This does *not* test that the arena is released - a run left behind grows
 	// the buffer without moving any offset already recorded, so it is a memory
 	// bug with no output a test can see. That one is held by `ArenaScope` making
 	// the release a destructor instead of a statement somebody has to remember,
@@ -567,7 +567,7 @@ TEST_CASE("a screen gui under a part does not draw", "[gui][layout]") {
 	world.Data.Set(child, element);
 
 	// Zero *because* nothing under a part is reachable, not because there was
-	// nothing to place — the child above is what separates the two.
+	// nothing to place - the child above is what separates the two.
 	CHECK(Layout(world.Data, world.Display) == 0);
 	CHECK_FALSE(world.Data.Get<Resolved>(screen)->Rendered);
 	CHECK_FALSE(world.Data.Get<Resolved>(child)->Rendered);
@@ -614,7 +614,7 @@ TEST_CASE("only the world-attached collectors draw from the Workspace", "[gui][l
 	// and is not in the world at all.
 	//
 	// All three in one case, under one `Workspace`, so a change that collapsed
-	// the distinction — accepting every collector, or refusing every one —
+	// the distinction - accepting every collector, or refusing every one -
 	// fails here whichever way it went.
 	World world("gui_layout.workspace");
 
@@ -637,7 +637,7 @@ TEST_CASE("the container names are the ones scene registers", "[gui][layout]") {
 	// **The pin at this end**, and `scene/tests/Services.cpp` holds the other.
 	//
 	// These three strings are `scene`'s service names spelled again here,
-	// because `gui/AGENTS.md` refuses an edge to `scene` — the same refusal that
+	// because `gui/AGENTS.md` refuses an edge to `scene` - the same refusal that
 	// made `gui::Face` re-declare `NormalId`'s six members. A duplicated
 	// constant is only safe while something fails when the two disagree, and a
 	// rename on either side would otherwise produce an interface that silently
@@ -658,7 +658,7 @@ TEST_CASE("the container names are the ones scene registers", "[gui][layout]") {
 
 TEST_CASE("a container grows to fit the rows stacked inside it", "[gui][layout][automatic]") {
 	// The case the entry names. A menu is a frame full of buttons and its height
-	// is whatever the buttons come to — an author should not have to keep a
+	// is whatever the buttons come to - an author should not have to keep a
 	// literal in sync with how many rows there are.
 	World world("gui_layout.automatic_list");
 	const Entity screen = world.Make("ScreenGui");
@@ -682,7 +682,7 @@ TEST_CASE("a container grows to fit the rows stacked inside it", "[gui][layout][
 
 	Layout(world.Data, world.Display);
 
-	// Three thirty-pixel rows and the two gaps *between* them — not three gaps,
+	// Three thirty-pixel rows and the two gaps *between* them - not three gaps,
 	// which is the off-by-one every stack layout gets wrong once.
 	CHECK(world.Where(menu).AbsoluteSize.Y == Approx(3.0f * 30.0f + 2.0f * 8.0f));
 
@@ -728,7 +728,7 @@ TEST_CASE("an automatic container grows to the far edge of a free child", "[gui]
 	//
 	// **The near edge is deliberately ignored.** The second child hangs off the
 	// top-left at a negative offset, and the container does not move its origin
-	// to swallow it — this is a growth rule, not a reflow, and a parent that
+	// to swallow it - this is a growth rule, not a reflow, and a parent that
 	// shifted under its children would drag everything beside it.
 	World world("gui_layout.automatic_free");
 	const Entity screen = world.Make("ScreenGui");
@@ -758,7 +758,7 @@ TEST_CASE("an automatic container grows to the far edge of a free child", "[gui]
 TEST_CASE("padding is added back to what an automatic container grew to", "[gui][layout][automatic]") {
 	// **Both halves, which is what makes this more than an arithmetic check.**
 	// The padding comes off the basis the child resolves against *and* goes back
-	// onto the extent — an implementation that did one and not the other is off
+	// onto the extent - an implementation that did one and not the other is off
 	// by exactly the padding, and looks right on every case where the padding is
 	// zero.
 	World world("gui_layout.automatic_padding");
@@ -795,7 +795,7 @@ TEST_CASE("padding is added back to what an automatic container grew to", "[gui]
 
 TEST_CASE("a size limit bounds what an automatic container grows to", "[gui][layout][automatic]") {
 	// The growth happens before the constraint, so a `UISizeConstraint` on an
-	// automatic container is a ceiling on the content — which is the only
+	// automatic container is a ceiling on the content - which is the only
 	// reading under which putting both on one element means anything.
 	World world("gui_layout.automatic_limits");
 	const Entity screen = world.Make("ScreenGui");
@@ -827,7 +827,7 @@ TEST_CASE("an element that draws text grows to its string", "[gui][layout][autom
 	// It is not, and the reason is the invariant `Layout.hpp` already states:
 	// the backend draws at `Resolved::TextSize` and does not second-guess it.
 	// Nothing downstream re-measures with real metrics, so within this engine
-	// the estimate *is* the measurement — the one answer a hit test, a headless
+	// the estimate *is* the measurement - the one answer a hit test, a headless
 	// assertion and a renderer all agree on. A box grown to it fits by the same
 	// definition of fitting used everywhere else in the module.
 	//
@@ -861,7 +861,7 @@ TEST_CASE("an element that draws text grows to its string", "[gui][layout][autom
 }
 
 TEST_CASE("a grown label is one axis at a time", "[gui][layout][automatic]") {
-	// `AutomaticSize.Y` on a fixed-width label is the ordinary case — a caption
+	// `AutomaticSize.Y` on a fixed-width label is the ordinary case - a caption
 	// column whose rows are as tall as their text and as wide as the column.
 	World world("gui_layout.automatic_text_axis");
 	const Entity screen = world.Make("ScreenGui");
@@ -916,7 +916,7 @@ TEST_CASE("TextScaled on a grown label returns the size asked for", "[gui][layou
 TEST_CASE("automatic sizing nests", "[gui][layout][automatic]") {
 	// **The property that makes this a second phase rather than a special
 	// case.** The outer container's height is a function of the inner one's,
-	// which is a function of the rows — so the measure has to recurse, and an
+	// which is a function of the rows - so the measure has to recurse, and an
 	// implementation that measured only its immediate children reports the
 	// inner frame's authored zero and collapses.
 	World world("gui_layout.automatic_nested");
@@ -952,7 +952,7 @@ TEST_CASE("automatic sizing nests", "[gui][layout][automatic]") {
 
 TEST_CASE("an automatic container grows to its grid's rows", "[gui][layout][automatic]") {
 	// A grid decides both axes of every cell, so the extent is a count rather
-	// than a measurement — seven cells three to a line is three lines, the last
+	// than a measurement - seven cells three to a line is three lines, the last
 	// of them short.
 	World world("gui_layout.automatic_grid");
 	const Entity screen = world.Make("ScreenGui");
@@ -982,7 +982,7 @@ TEST_CASE("an automatic container grows to its grid's rows", "[gui][layout][auto
 
 TEST_CASE("an invisible child is not measured into its parent", "[gui][layout][automatic]") {
 	// `Element::Visible` is a branch the compile stops at, so a hidden row is
-	// not drawn — and a container that still reserved its height would leave a
+	// not drawn - and a container that still reserved its height would leave a
 	// gap where the author asked for nothing.
 	World world("gui_layout.automatic_hidden");
 	const Entity screen = world.Make("ScreenGui");

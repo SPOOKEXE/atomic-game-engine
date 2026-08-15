@@ -69,7 +69,7 @@ def cut_report(image):
 
     if control > 0:
         ratio = straddler / control
-        verdict = "cut" if ratio < 0.75 else "WHOLE — the seam is drawing twice"
+        verdict = "cut" if ratio < 0.75 else "WHOLE - the seam is drawing twice"
         print(f"    ratio     {ratio:>7.2f}  {verdict}")
 
 
@@ -89,14 +89,14 @@ def light_report(image):
     red = sum(pixel[0] for pixel in patch) / len(patch)
     print(f"    far floor  R {red:>5.1f}  B {blue:>5.1f}")
 
-    verdict = "lit through the hole" if blue > 25.0 else "DARK — no light crossed"
+    verdict = "lit through the hole" if blue > 25.0 else "DARK - no light crossed"
     print(f"    {verdict}")
 
     # And the plume, which is the other thing only a hole can explain: the
     # emitter is in the near room and every spark here arrived through the pane.
     sparks = sum(1 for pixel in image.getdata() if magenta(pixel))
     print(f"    sparks    {sparks:>7} px")
-    print(f"    {'carried through the hole' if sparks > 200 else 'NONE — particles die at the seam'}")
+    print(f"    {'carried through the hole' if sparks > 200 else 'NONE - particles die at the seam'}")
 
 
 def main(path):
@@ -114,7 +114,7 @@ def main(path):
         # their pixel counts are not a ratio of anything. What that view is for
         # is the join: one bar running into the glass and continuing inside the
         # picture, with the same colour on both sides of it.
-        print("    the join — look at it rather than counting it")
+        print("    the join - look at it rather than counting it")
 
 
 if __name__ == "__main__":

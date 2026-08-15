@@ -64,10 +64,10 @@ TEST_CASE("a thousand is grouped, and a hundred is not", "[linecount]") {
 
 TEST_CASE("a file with no lines takes no share", "[linecount]") {
 	// Zero divided by zero is where a percentage column becomes `nan%` or,
-	// worse, `0.0%` — which reads as a real measurement of a real total.
+	// worse, `0.0%` - which reads as a real measurement of a real total.
 	const std::string report = Markdown({Make("Empty.cpp", 0, 0, 0)});
 
-	REQUIRE(Contains(report, "| Code | 0 | — |"));
+	REQUIRE(Contains(report, "| Code | 0 | - |"));
 	REQUIRE(!Contains(report, "nan"));
 }
 

@@ -74,7 +74,7 @@ TEST_CASE("a selection box is the twelve edges of its adornee", "[render][adornm
 	AdornmentGeometry geometry;
 	geometry.Build(world.Data);
 
-	// Twelve edges, not six faces and not eight corners — a box drawn as lines
+	// Twelve edges, not six faces and not eight corners - a box drawn as lines
 	// has twelve, and a count that came out 8 or 24 is a table written wrong.
 	REQUIRE(geometry.Lines().size() == 12);
 
@@ -192,7 +192,7 @@ TEST_CASE("colour and depth mode travel to every line", "[render][adornmentgeome
 }
 
 TEST_CASE("an adornment outside a container draws nothing", "[render][adornmentgeometry]") {
-	// Containment is `gui::EachAdornment`'s and is not re-derived here — a
+	// Containment is `gui::EachAdornment`'s and is not re-derived here - a
 	// second answer to where an adornment may live would disagree with the
 	// first the day one was fixed. This asserts the walk is actually used.
 	World world("adornment_geometry.uncontained");

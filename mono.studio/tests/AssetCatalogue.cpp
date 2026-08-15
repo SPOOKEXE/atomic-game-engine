@@ -58,7 +58,7 @@ TEST_CASE("the engine's own assets are listed with no store at all", "[assets][c
 	const std::vector<CatalogueEntry> engine = EngineAssets();
 
 	// Every generated built-in, and the count is the enum's rather than a
-	// number typed here — a seventh shape must appear without this file
+	// number typed here - a seventh shape must appear without this file
 	// changing, which is the property that made the mesh picker's own listing
 	// worth having.
 	REQUIRE(
@@ -119,7 +119,7 @@ TEST_CASE("a tab per readable source, and none for the others", "[assets][catalo
 
 	// **A write origin is invisible here for the same reason it is invisible
 	// to a fetch.** Nothing reads from one, so a tab for it would offer names
-	// that cannot resolve — `SourceRole::Write` carries the argument.
+	// that cannot resolve - `SourceRole::Write` carries the argument.
 	Source inbox = Directory("inbox", "/nonexistent/three");
 	inbox.Role = SourceRole::Write;
 	sources.Sources.push_back(inbox);
@@ -146,7 +146,7 @@ TEST_CASE("a tab per readable source, and none for the others", "[assets][catalo
 	REQUIRE(TabTitled(tabs, "broken") == nullptr);
 
 	// The order is the priority order, with the merged and generated tabs in
-	// front — which is what makes the tab strip readable as "what answers
+	// front - which is what makes the tab strip readable as "what answers
 	// first".
 	REQUIRE(tabs.size() == 4);
 	REQUIRE(tabs[0].Origin == CatalogueOrigin::All);
@@ -173,7 +173,7 @@ TEST_CASE("the merged tab holds every other tab's rows", "[assets][catalogue]") 
 	REQUIRE(all.Origin == CatalogueOrigin::All);
 
 	// With no sources configured the merged tab is the engine's own and
-	// nothing else — which is the state a fresh install draws, and it must not
+	// nothing else - which is the state a fresh install draws, and it must not
 	// be empty. An empty first tab is what "the editor has no assets" looks
 	// like, and that has never been true.
 	REQUIRE(all.Entries.size() == EngineAssets().size());
@@ -209,7 +209,7 @@ TEST_CASE("a raw folder is listed by what it would bake to", "[assets][catalogue
 
 	// **The baked name, not the file name.** A scene written against this
 	// folder names `props/crate.atex`, and it goes on naming exactly that once
-	// the file has been imported and published — which is the whole reason a
+	// the file has been imported and published - which is the whole reason a
 	// raw folder is usable for authoring rather than only for browsing.
 	REQUIRE(Holds(tab->Entries, "props/crate.atex"));
 	REQUIRE_FALSE(Holds(tab->Entries, "props/crate.png"));
@@ -222,7 +222,7 @@ TEST_CASE("a raw folder is listed by what it would bake to", "[assets][catalogue
 		INFO(entry.Name);
 
 		// **Every row says which file it came from**, which is what the panel's
-		// per-row bake takes — a row with no source file would be a Load button
+		// per-row bake takes - a row with no source file would be a Load button
 		// with nothing to load.
 		REQUIRE_FALSE(entry.Unbaked.empty());
 		REQUIRE(entry.Root.IsZero());

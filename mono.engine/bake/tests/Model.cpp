@@ -7,7 +7,7 @@
 //   node transforms would produce a triangle lying in the wrong plane, which is
 //   invisible in a single-mesh test and is why models import on their side.
 // - **The PMX is written left-handed.** The conversion mirrors Z, and a mirror
-//   flips the winding — so if the triangle comes out facing the same way it went
+//   flips the winding - so if the triangle comes out facing the same way it went
 //   in, the reversal is missing and every model imports inside-out.
 // - **The OBJ uses negative indices.** They mean "counting back from here", and
 //   a parser that treats them as positive still produces triangles, just the
@@ -178,8 +178,8 @@ TEST_CASE("a format is recognised by signature or by name", "[bake][model]") {
 	CHECK(ModelFormatOfBytes(Bytes(GLB_TRIANGLE)) == ModelFormat::Gltf);
 	CHECK(ModelFormatOfBytes(Bytes(PMX_TRIANGLE)) == ModelFormat::Pmx);
 
-	// OBJ has no signature — it is a text file whose first line may be a
-	// comment — so the name is the only thing that can name it.
+	// OBJ has no signature - it is a text file whose first line may be a
+	// comment - so the name is the only thing that can name it.
 	CHECK(ModelFormatOfBytes(Bytes(OBJ_SQUARE)) == ModelFormat::Unknown);
 	CHECK(ModelFormatOfName("props/crate.obj") == ModelFormat::Obj);
 	CHECK(ModelFormatOfName("props/crate.OBJ") == ModelFormat::Obj);
@@ -236,8 +236,8 @@ TEST_CASE("a pmx is mirrored into a right-handed space and rewound", "[bake][mod
 
 	// **And the winding is reversed to match the mirror.** As written, corners
 	// 0-1-2 over (0,0,0), (1,0,0), (0,0,1) give a face normal of -Y. Mirroring
-	// Z alone turns that into +Y — every face of the model pointing inwards,
-	// which renders as a model you can only see from inside — so reversing the
+	// Z alone turns that into +Y - every face of the model pointing inwards,
+	// which renders as a model you can only see from inside - so reversing the
 	// corners has to put it back to -Y.
 	const std::array<float, 3> normal = FaceNormal(model.Mesh, 0);
 	CHECK(normal[1] < 0.0f);
@@ -263,7 +263,7 @@ TEST_CASE("an obj resolves negative indices from where they are", "[bake][model]
 	REQUIRE(model.Mesh.Indices.size() == 6);
 
 	// Both triangles face +Y. Read as positive indices the second one would
-	// name vertices 4, 2 and 1 — still a triangle, and the wrong one.
+	// name vertices 4, 2 and 1 - still a triangle, and the wrong one.
 	CHECK(FaceNormal(model.Mesh, 0)[1] > 0.0f);
 	CHECK(FaceNormal(model.Mesh, 1)[1] > 0.0f);
 
@@ -369,7 +369,7 @@ TEST_CASE("fitting a mesh with no extent is refused", "[bake][model]") {
 
 TEST_CASE("smoothing weights by area", "[bake][model]") {
 	// Two triangles meeting along an edge, one large and one small, at right
-	// angles. The shared vertices should lean towards the large face — a
+	// angles. The shared vertices should lean towards the large face - a
 	// face-count average would put them exactly between the two.
 	engine::assets::MeshData mesh;
 	mesh.Vertices.resize(4);

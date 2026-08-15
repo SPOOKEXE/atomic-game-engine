@@ -45,7 +45,7 @@ namespace studio {
 
 		// **Every filesystem call takes an `error_code`.** A browser is pointed
 		// at whatever somebody types, which includes paths that do not exist,
-		// paths on a device that has gone away and paths they may not read — and
+		// paths on a device that has gone away and paths they may not read - and
 		// the throwing overloads turn each of those into an exception through a
 		// draw call.
 		std::filesystem::path where = directory;
@@ -69,7 +69,7 @@ namespace studio {
 
 		where = std::filesystem::weakly_canonical(where, code);
 		if (code) {
-			// Not fatal — an uncanonicalisable path is still listable, and
+			// Not fatal - an uncanonicalisable path is still listable, and
 			// refusing here would make a symlinked folder unbrowsable.
 			code.clear();
 			where = directory;

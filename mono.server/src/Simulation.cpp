@@ -2,8 +2,10 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
@@ -37,7 +39,7 @@ namespace server {
 
 	namespace {
 		// This used to be a copy of the mixer in mono.client/src/Demo.cpp, with
-		// a comment saying so. Both are engine::core::Random now — the reason
+		// a comment saying so. Both are engine::core::Random now - the reason
 		// was always "a seeded standard generator may differ between standard
 		// libraries", which was never a client concern or a server one.
 
@@ -48,7 +50,7 @@ namespace server {
 		// resources.
 
 		// Parallel within the tick. The body reads and writes one row and
-		// nothing else, which is the whole contract — anything structural
+		// nothing else, which is the whole contract - anything structural
 		// would abort on the store's affinity check from a worker, and that is
 		// the intended outcome rather than a limitation.
 		//
@@ -66,8 +68,8 @@ namespace server {
 			// **Takes `Jobs::DEFAULT_GRAIN` deliberately, and the resemblance to
 			// `physics::INTEGRATE_GRAIN` is the trap rather than the argument.**
 			// That constant is 1024 because *its* body carries a whole `CFrame`
-			// through a quaternion product and a normalise — about forty flops
-			// and a reciprocal square root — and crosses over at 8,000 rows. This
+			// through a quaternion product and a normalise - about forty flops
+			// and a reciprocal square root - and crosses over at 8,000 rows. This
 			// body is the line below: three multiply-adds and a store, which is
 			// exactly the cheap body `engine.ecs.bench.iteration` measures at a
 			// crossover near 262,144 rows. The two load the same two components
@@ -77,7 +79,7 @@ namespace server {
 			// Borrowing 1024 would put the floor at 8192 rows, where this loop's
 			// serial cost is a couple of microseconds against a handover
 			// `engine.parallel.bench.dispatch` fits at 6.2 us to wake the pool
-			// plus 0.19 us a range — a loss bought on the strength of a
+			// plus 0.19 us a range - a loss bought on the strength of a
 			// measurement of somebody else's body, which is the mistake
 			// `Jobs::DEFAULT_GRAIN`'s own comment is about. Of the two constants
 			// the default's floor of 32,768 is the nearer, and unmeasured either
@@ -92,7 +94,7 @@ namespace server {
 			// Every position just moved, and nothing else knows. An iteration
 			// hands out a reference and the store never sees the write, so a
 			// replication delta built from the dirty bits would carry nothing at
-			// all — which is a client that joins, receives a snapshot, and then
+			// all - which is a client that joins, receives a snapshot, and then
 			// watches a frozen world. Costs nothing when nobody is observing
 			// `Transform`, which is the case whenever `--listen` was not given.
 			store.MarkAllChanged<Transform>();
@@ -101,7 +103,7 @@ namespace server {
 		void Bounce(Store &store) {
 			// Read once for the whole world rather than once per entity. This
 			// was a *component* before it was a resource, holding the same four
-			// bytes on every row — a column in the archetype and a load in this
+			// bytes on every row - a column in the archetype and a load in this
 			// loop's inner body for a number the loop already knew.
 			const float halfExtent = store.Resource<WorldBounds>()->HalfExtent;
 
@@ -110,7 +112,7 @@ namespace server {
 			// than the `CFrame` body `physics::INTEGRATE_GRAIN` was measured
 			// against, not more expensive, so borrowing that constant would
 			// dispatch this four times too early rather than correcting
-			// anything. Unmeasured in either direction —
+			// anything. Unmeasured in either direction -
 			// `engine.ecs.bench.iteration` over this body is what would say.
 			store.EachParallel<Transform, Motion>([halfExtent](Entity, Transform &transform, Motion &motion) {
 				// Reflect off each wall independently. The position is
@@ -134,7 +136,7 @@ namespace server {
 
 			// Both, and both over-report: `Transform` moved on every row anyway,
 			// and `Motion` changed only on the few rows that hit a wall. A
-			// system that could name those rows should mark those rows — the
+			// system that could name those rows should mark those rows - the
 			// cost of marking all of them is a delta carrying values that
 			// already match at the other end, which is bandwidth rather than
 			// error. Under-reporting a bounce would be a client that watches an
@@ -166,8 +168,8 @@ namespace server {
 		engine::physics::PreparePhysicsWorld(store);
 		engine::physics::RegisterPhysicsSystems(scheduler);
 
-		// Non-overwriting, so a world that authored its own vector — under
-		// water, on the moon — keeps it and a world that said nothing gets
+		// Non-overwriting, so a world that authored its own vector - under
+		// water, on the moon - keeps it and a world that said nothing gets
 		// Earth's.
 		engine::scene::PrepareGravity(store);
 		engine::scene::RegisterGravitySystem(scheduler);
@@ -181,7 +183,7 @@ namespace server {
 
 		// **Who a teleport brings in, and it must not depend on scripts.** A
 		// destination is chosen by a script in *another* world, so a world can be
-		// somebody's destination without containing a line of code — and
+		// somebody's destination without containing a line of code - and
 		// admitting used to happen inside the Luau runtime's own delivery pump.
 		// A world with no runtime took the payload into its inbox and left it
 		// there: destroyed in the world you left, never built in the world you
@@ -190,29 +192,56 @@ namespace server {
 
 		// **A server grounds, steps and poses its own characters.** Until this
 		// the three lived in `mono.client` alone, so a character on a dedicated
-		// server walked and could never jump — `Humanoid::Grounded` had no
+		// server walked and could never jump - `Humanoid::Grounded` had no
 		// writer. The input half stays out: a server has no keyboard, and what
 		// moves a client-owned character here is its submitted `Motion`.
 		engine::physics::RegisterCharacterSystems(scheduler);
+
+		// **The respawn loop, and it is here rather than in `physics` because
+		// half of it is `gui`'s.** A spawn is two things: a new body, which is
+		// `scene::UpdateRespawns`, and a fresh copy of `StarterGui` in the
+		// player's own `PlayerGui`, which is `gui::ResetPlayerGui` - and `scene`
+		// may not link `gui`, so the two meet in whoever hosts. That is the same
+		// split `ResetPlayerGui`'s own header states from the other side, and it
+		// is why the pass hands back who it spawned instead of doing it all.
+		//
+		// **`PreSimulation`, after the character link.** `LinkPlayerCharacters`
+		// is what releases a player whose model was destroyed, so running before
+		// it would measure the delay from a tick later than the death - and
+		// `RegisterCharacterSystems` above registers that one first, which is the
+		// ordering the scheduler gives between two entries only by their being
+		// in the same phase. Composed into its own entry rather than into
+		// `character.link` because it reads that system's writes and nothing
+		// else reads its own.
+		scheduler.Add("player.respawn", Phase::PreSimulation, [](Store &store) {
+			std::vector<engine::ecs::Entity> spawned;
+			if (engine::scene::UpdateRespawns(store, spawned) == 0) {
+				return;
+			}
+
+			for (const engine::ecs::Entity player : spawned) {
+				(void)engine::gui::ResetPlayerGui(store, player);
+			}
+		});
 	}
 
 	void RegisterPlaceholderComponents() {
 		// The shared set first, and under `scene`'s names rather than this
 		// program's. A client registers the same strings, which is what makes a
-		// snapshot resolve on the far side without a translation layer — there
+		// snapshot resolve on the far side without a translation layer - there
 		// used to be one, and keeping two declarations of one wire type in step
 		// by hand is what it cost.
 		engine::scene::RegisterSceneComponents();
 
 		// `PhysicsWorld` is a resource, and a resource is keyed by a component
-		// id like any other — so one never registered here is minted by the
+		// id like any other - so one never registered here is minted by the
 		// first `SetResource`, under whatever the compiler calls the type, and
 		// aborts outright once the table is sealed. Registered on every path
 		// including the placeholder's, because the cost is a hash lookup and
 		// the failure is a crash in a program that did nothing wrong.
 		engine::physics::RegisterPhysicsComponents();
 
-		// `Chatter` holds a `core::Name`, which is a process-local id — writing
+		// `Chatter` holds a `core::Name`, which is a process-local id - writing
 		// it as an object representation would restore as whatever name
 		// happened to take that id in the reading process. So it is written as
 		// text, which is the rule every name on the wire follows.
@@ -277,7 +306,7 @@ namespace server {
 
 		if (store.Time().Tick <= 1) {
 			// Takes effect at the next barrier, so nothing published this tick
-			// comes back — which is the honest answer, since the subscription
+			// comes back - which is the honest answer, since the subscription
 			// did not exist when it was sent.
 			box.Subscribe(topic);
 			return;
@@ -301,9 +330,9 @@ namespace server {
 
 		// **The world's size and the replication wire's position grid are one
 		// decision made in two files**, and this is the line that keeps them
-		// together. A world authored past the grid does not fail to replicate —
+		// together. A world authored past the grid does not fail to replicate -
 		// its entities are clamped and pile up against a wall that is not this
-		// one — so the size is checked where it is chosen rather than
+		// one - so the size is checked where it is chosen rather than
 		// discovered per entity on a client. `scene/Wire.hpp` states the grid
 		// and the error it introduces.
 		static_assert(
@@ -348,7 +377,7 @@ namespace server {
 			);
 
 			// **What a headless server is doing with a size and a colour.** It
-			// is not drawing them — this binary contains no renderer. It is
+			// is not drawing them - this binary contains no renderer. It is
 			// describing what these things *are*, which is what a client
 			// replicating this world needs in order to draw it, and what the
 			// draw list a hosted world publishes would carry. Before v0.4 a

@@ -32,7 +32,7 @@ namespace engine::effects {
 		// smoke go.
 		//
 		// **What is kept is the property that actually matters**, which is not
-		// cryptographic quality — it is that the value is a pure function of
+		// cryptographic quality - it is that the value is a pure function of
 		// `(emitter, particle index, tick)` and involves no state. So two runs of
 		// one scene emit the same particles, a recording replays, and a worker
 		// needs no generator of its own to carry between ranges. That is the same
@@ -40,7 +40,7 @@ namespace engine::effects {
 		// primitive because the cost profile is different.
 		//
 		// SplitMix64's finaliser, which is a published constant sequence rather
-		// than three numbers somebody picked — `AGENTS.md` rule 6 applies to
+		// than three numbers somebody picked - `AGENTS.md` rule 6 applies to
 		// magic constants as much as to invariants.
 		uint32_t Mix(uint64_t seed) {
 			seed += 0x9E3779B97F4A7C15ull;
@@ -88,7 +88,7 @@ namespace engine::effects {
 		// A point inside the emitter's shape, in the parent's local space.
 		//
 		// The half-extent is the parent's `Bounds`, so an emitter's volume is the
-		// part it is on — which is Roblox's arrangement and is the one that makes
+		// part it is on - which is Roblox's arrangement and is the one that makes
 		// resizing a part resize its effect without touching the emitter.
 		Vector3 SpawnPoint(const ParticleEmitter &emitter, const Vector3 &half, uint32_t id, uint32_t index) {
 			const float x = Unit(SeedOf(id, index, 1)) * 2.0f - 1.0f;
@@ -100,7 +100,7 @@ namespace engine::effects {
 			case ParticleShape::Sphere:
 				// **Normalised then scaled by a cube root, not by a uniform
 				// draw.** A radius drawn uniformly concentrates particles at the
-				// centre, because the volume at radius r grows as r-cubed — a
+				// centre, because the volume at radius r grows as r-cubed - a
 				// "sphere" of smoke that is a dense ball with a thin halo. The
 				// cube root is the inverse of that and costs one `cbrt` per
 				// spawn, which is on the spawn path and not the step path.
@@ -180,8 +180,8 @@ namespace engine::effects {
 				direction = -direction;
 			}
 
-			// The spread is two independent tilts, so a wide flat cone — a
-			// waterfall — is expressible where one angle could only give a circle.
+			// The spread is two independent tilts, so a wide flat cone - a
+			// waterfall - is expressible where one angle could only give a circle.
 			const float spreadX = emitter.SpreadAngle.X * RADIANS_PER_DEGREE;
 			const float spreadY = emitter.SpreadAngle.Y * RADIANS_PER_DEGREE;
 			if (spreadX != 0.0f || spreadY != 0.0f) {
@@ -209,7 +209,7 @@ namespace engine::effects {
 
 			// **What the texture said, when the emitter did not.** A GIF states
 			// how many of its grid's cells hold a frame and the bake carries the
-			// number through — `scene::TextureCatalogue` — so a scene pointing an
+			// number through - `scene::TextureCatalogue` - so a scene pointing an
 			// emitter at one does not have to repeat it. The alternative is a
 			// script with `FlipbookFrames = 24` in it, which is wrong the moment
 			// somebody re-exports the animation with a frame added.
@@ -236,7 +236,7 @@ namespace engine::effects {
 		// **`FlipbookMode::OneShot` ignores all three**, which is unchanged and
 		// deliberate: a one-shot sheet paces itself off the particle's lifetime,
 		// so a frame rate would be a second and contradictory way of saying how
-		// long it takes — `ParticleEmitter::FlipbookFramerate` carries that
+		// long it takes - `ParticleEmitter::FlipbookFramerate` carries that
 		// argument. The rate matters for `Loop` and `PingPong`, which is where a
 		// source's authored fps actually belongs.
 		float ResolvedRate(const ParticleEmitter &emitter, const scene::FlipbookFacts &facts) {
@@ -251,8 +251,8 @@ namespace engine::effects {
 
 		// Everything a block takes from its emitter every refresh.
 		//
-		// **One function because there are two callers that must not drift** —
-		// the block being reused and the block being created — and a field added
+		// **One function because there are two callers that must not drift** -
+		// the block being reused and the block being created - and a field added
 		// to one and not the other is a difference that only shows on the frame
 		// an emitter is first enabled.
 		void ApplyPlayback(const ecs::Store &store, const ParticleEmitter &emitter, EmitterBlock &block) {
@@ -271,7 +271,7 @@ namespace engine::effects {
 			// **What the *sheet* holds, not what the grid could.** A GIF has
 			// whatever number of frames the animation has and the grid is the next
 			// square power of two that fits, so playing every cell would spend the
-			// difference showing nothing — see `ParticleEmitter::FlipbookFrames`.
+			// difference showing nothing - see `ParticleEmitter::FlipbookFrames`.
 			const uint32_t cells = std::min<uint32_t>(block.Frames, FlipbookCells(block.Flipbook));
 			if (cells <= 1) {
 				return 0;
@@ -337,7 +337,7 @@ namespace engine::effects {
 		}
 
 		// **Integer lerp per channel, in the packed representation.** The obvious
-		// alternative is to unpack to floats, lerp, and repack — which is six
+		// alternative is to unpack to floats, lerp, and repack - which is six
 		// divides and six multiplies for a value that lands in eight bits. This is
 		// the same arithmetic in fixed point: an eight-bit blend factor, three
 		// byte lerps, no conversion in either direction.
@@ -358,7 +358,7 @@ namespace engine::effects {
 		}
 
 		// The attachment first, because an emitter on an attachment is the
-		// arrangement every authored effect uses — a rocket's exhaust hangs off a
+		// arrangement every authored effect uses - a rocket's exhaust hangs off a
 		// point on the rocket, not off the rocket's centre.
 		if (const scene::Attachment *point = store.Get<scene::Attachment>(parent)) {
 			return point->WorldFrame;
@@ -374,7 +374,7 @@ namespace engine::effects {
 		//
 		// **Two steps rather than one, because an emitter on an attachment is
 		// two parents from the part that moves.** Everywhere else in this file one
-		// step is enough — a frame and a half-extent both live on the immediate
+		// step is enough - a frame and a half-extent both live on the immediate
 		// parent, and an attachment carries its own. Motion does not: an
 		// attachment has no velocity of its own and never will, so stopping at it
 		// would mean every attachment-parented effect inherited nothing, which is
@@ -432,7 +432,7 @@ namespace engine::effects {
 		//
 		// **Exact fit and not best fit, because a block is never resized.** A
 		// best-fit split would leave a tail that only a smaller block could use,
-		// and blocks come in a handful of sizes derived from rate and lifetime —
+		// and blocks come in a handful of sizes derived from rate and lifetime -
 		// so exact fit reuses almost everything and costs a linear scan over a
 		// list that is empty in a steady scene.
 		bool Take(ParticleSystem &system, uint32_t wanted, uint32_t &first) {
@@ -455,7 +455,7 @@ namespace engine::effects {
 
 		// How many slots one emitter needs to sustain its own rate.
 		//
-		// Rate times the longest life it can draw, rounded up, plus one — the
+		// Rate times the longest life it can draw, rounded up, plus one - the
 		// plus one is what stops an emitter at exactly one particle a second with
 		// a one-second life from oscillating between zero and one slot.
 		uint32_t BlockSizeFor(const ParticleEmitter &emitter, uint32_t ceiling) {
@@ -489,7 +489,7 @@ namespace engine::effects {
 			[&](ecs::Entity entity, const ParticleEmitter &emitter, EmitterSlot &slot) {
 				// An emitter that is off and has nothing left alive gives its
 				// block back. One that is off and still has particles keeps it,
-				// because disabling must not kill what is already in the air —
+				// because disabling must not kill what is already in the air -
 				// `ParticleEmitter::Enabled` carries the argument.
 				const bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
 				if (holds) {
@@ -516,13 +516,13 @@ namespace engine::effects {
 					// the roadmap's 100,000 emitters and 500,000 particles:
 					// **522 us unconditional against 192 us gated**, taking the
 					// whole frame from 738 us to 389 us. The refresh pass was 70
-					// per cent of the frame and is now half of it — the remaining
+					// per cent of the frame and is now half of it - the remaining
 					// 192 us is the archetype walk itself and the scalar copies,
 					// which is what a walk over a hundred thousand rows costs.
 					//
 					// `ecs::ChangeChannel` is the mechanism and `Observe` in
 					// `InstallParticles` is what turns it on. What it costs is
-					// **one frame of latency on a curve edit** — a script writing
+					// **one frame of latency on a curve edit** - a script writing
 					// `emitter.Size` during `Simulation` is seen by the next
 					// frame's refresh, because `ClearChanges` runs at the phase
 					// boundary between them. That is invisible for an authored
@@ -535,7 +535,7 @@ namespace engine::effects {
 
 					// Where the emitter is now. An emitter on an `Attachment`
 					// takes the attachment's resolved world frame; one on a part
-					// takes the part's. Neither is a walk — both are one column
+					// takes the part's. Neither is a walk - both are one column
 					// read on the parent, and `ResolveAttachments` has already run.
 					block.Frame = EmitterFrame(store, entity);
 					return;
@@ -562,7 +562,7 @@ namespace engine::effects {
 				//
 				// The accumulator adds `Rate * delta` per frame, so an emitter at
 				// a low rate produces nothing for `1 / Rate` seconds after it is
-				// enabled — a fifth of a particle a second waits five seconds, and
+				// enabled - a fifth of a particle a second waits five seconds, and
 				// what an author sees is an effect that does not work. They turn
 				// the rate up, get a crowd, and never find out the first one was
 				// merely late.
@@ -611,7 +611,7 @@ namespace engine::effects {
 		// engine. `physics::INTEGRATE_GRAIN` and `client::DRAW_LIST_GRAIN` are
 		// thousands because their unit is one row of arithmetic; this loop's unit
 		// is one *emitter*, and an emitter carries as many particles as its rate
-		// and lifetime bought it — a hundred is ordinary. So sixteen blocks is
+		// and lifetime bought it - a hundred is ordinary. So sixteen blocks is
 		// somewhere between sixteen and a few thousand particles, which puts the
 		// dispatch floor in the same place their thousands do.
 		//
@@ -684,7 +684,7 @@ namespace engine::effects {
 							continue;
 						}
 
-						// Drag first, then acceleration, then position — which is
+						// Drag first, then acceleration, then position - which is
 						// semi-implicit Euler and is what `physics::Integrate`
 						// uses. Explicit Euler on a drag term diverges at large
 						// steps, and a particle system is exactly where a large
@@ -710,7 +710,7 @@ namespace engine::effects {
 						const float squash = SampleAt(block.Curves.Squash, age);
 
 						// Squash stretches one axis and shrinks the other, so the
-						// particle's area is roughly kept — a squash that only
+						// particle's area is roughly kept - a squash that only
 						// stretched would make a flattening particle grow.
 						instance.Size = PackParticleSize(
 							width * (squash < 0.0f ? 1.0f - squash : 1.0f / (1.0f + squash)),
@@ -747,8 +747,8 @@ namespace engine::effects {
 		//
 		// **Serial because it reads `ParticleEmitter`**, which is fifteen hundred
 		// bytes a row and is not in the block. Making it parallel would mean
-		// either duplicating the spawn parameters into every block — which is the
-		// kilobyte this module exists to keep out of the per-frame path — or
+		// either duplicating the spawn parameters into every block - which is the
+		// kilobyte this module exists to keep out of the per-frame path - or
 		// walking the emitter column from inside a worker, which `Store::Each`
 		// does not promise is safe.
 		//
@@ -789,7 +789,7 @@ namespace engine::effects {
 					const uint32_t row = block.First + block.Live;
 					// **A per-particle index that keeps advancing rather than the
 					// slot number**, because the slot is reused the moment a
-					// particle dies — so seeding from it would make every
+					// particle dies - so seeding from it would make every
 					// replacement particle identical to the one it replaced, and a
 					// steady emitter would settle into a repeating loop of the
 					// same few particles.

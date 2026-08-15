@@ -25,7 +25,7 @@ namespace engine::scene {
 
 		// A still image is stored rather than rejected, for `RecordMesh`'s
 		// reason: it reads back identically to "not known", both mean the same
-		// thing to a caller — there is nothing here to play — and a separate
+		// thing to a caller - there is nothing here to play - and a separate
 		// "known to be a still" state would be a distinction nothing can act on.
 		TexturesOf(store).Flipbooks[texture.Id()] = facts;
 		return true;

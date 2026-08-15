@@ -61,8 +61,8 @@ namespace studio {
 		}
 
 		// **Stable, so an empty query keeps registration order.** That order is
-		// the one the table is written in — file, then running, then editing,
-		// then panels — which is the order somebody scans a command list in, and
+		// the one the table is written in - file, then running, then editing,
+		// then panels - which is the order somebody scans a command list in, and
 		// a palette that reshuffled itself on every keystroke down to nothing
 		// would lose it.
 		std::stable_sort(scored.begin(), scored.end(), [](const auto &left, const auto &right) {

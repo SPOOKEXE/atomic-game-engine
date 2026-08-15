@@ -7,8 +7,8 @@
 #
 # **L8 is shared with `assets`, and that is confirmed rather than inherited.**
 # `v02v03v04.md` §3.1 put this module at L8 when the height was free and flags
-# that `assets` has since taken it. Sharing a height is legal — `replication`,
-# `input` and `render` already share L12 — and it is safe here because the two
+# that `assets` has since taken it. Sharing a height is legal - `replication`,
+# `input` and `render` already share L12 - and it is safe here because the two
 # are disjoint: nothing in this module depends on `assets` and nothing in
 # `assets` depends on this. Every dependency below is strictly lower (L7, L6,
 # L3, L2, L1), so the stack is still a stack. See AGENTS.md in this directory.
@@ -38,7 +38,7 @@ mono_add_library(physics
 		Engine::spatial
 
 		# L7. `Transform`, `Motion`, `Collider` and the rest. The edge goes this
-		# way and only this way — `scene/AGENTS.md` refuses a `physics` edge in
+		# way and only this way - `scene/AGENTS.md` refuses a `physics` edge in
 		# the other direction, because a component that knew about a contact
 		# list would invert the stack.
 		Engine::scene

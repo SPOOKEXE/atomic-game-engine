@@ -21,7 +21,7 @@ namespace engine::core {
 	// One named total drained from the process-wide metrics sink.
 	struct Counter {
 		// A name, interned once. Two counters are the same counter when their
-		// ids match, which is an integer compare rather than a string one —
+		// ids match, which is an integer compare rather than a string one -
 		// see core/Name.hpp for why the string is still the thing that would
 		// be serialized.
 		core::Name Name;

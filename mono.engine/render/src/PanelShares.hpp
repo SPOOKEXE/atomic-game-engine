@@ -4,7 +4,7 @@
 //
 // **Private, and a header only so that a test can look at it.** Nothing
 // outside this module draws these bars or these columns, so this is not public
-// surface — the module's own suite reaches `src/` and that is what the private
+// surface - the module's own suite reaches `src/` and that is what the private
 // include directory is for. `BusyShares` and `BusyMillisecondsOf` lived in
 // `DebugPanels.hpp` for exactly this reason and were published to get it,
 // which is the one thing the root `AGENTS.md` says not to do to make a test
@@ -19,7 +19,7 @@
 //
 // **Every function here takes the whole panel state rather than a
 // denominator.** Handed one as an argument, the arithmetic is right and the
-// caller picks the wrong number — which is precisely what happened to the
+// caller picks the wrong number - which is precisely what happened to the
 // categories tab, whose bars were a share of the whole frame while its own
 // comment and its own test both said busy. Choosing the denominator has to be
 // something these functions do, or it is something nothing checks.
@@ -41,7 +41,7 @@ namespace engine::render {
 	// columns are a pair.** `Milliseconds` alone made `Renderer::Render` read
 	// 16 ms on a vsynced frame when 15.9 of it was one child blocking on the
 	// display, and a reader going after the biggest number went after the
-	// renderer — twice, for work it was not doing. This is the half somebody
+	// renderer - twice, for work it was not doing. This is the half somebody
 	// can act on; `FrameSpan::IdleMilliseconds` is the half they cannot.
 	//
 	// Clamped at zero: the two figures come from separate accumulators and
@@ -68,7 +68,7 @@ namespace engine::render {
 	// Slots in a category-share array: one per category, then unmarked time.
 	//
 	// Unmarked time rides along rather than being a second return value
-	// because it is drawn as one more bar on the same axis — the tab's whole
+	// because it is drawn as one more bar on the same axis - the tab's whole
 	// claim is that its bars sum to the busy frame, and a figure computed
 	// somewhere else is a figure that can stop agreeing.
 	inline constexpr size_t CATEGORY_BAR_COUNT = static_cast<size_t>(core::ProfileCategory::Count) + 1;
@@ -81,7 +81,7 @@ namespace engine::render {
 	//
 	// **Busy, not the whole frame.** Category totals are self time and idle is
 	// a category of its own, so the non-idle totals plus the unmarked
-	// remainder are exactly the busy frame — the bars are a partition of it
+	// remainder are exactly the busy frame - the bars are a partition of it
 	// and read as one. Against the whole frame they are a partition of
 	// something they do not cover: with vertical sync on, fifteen of a sixteen
 	// millisecond frame are a sleep, and every bar renders at four per cent of
@@ -92,7 +92,7 @@ namespace engine::render {
 	// figure in its header instead, where it means something.
 	//
 	// Clamped to 1.0, because a `Reported` span carries time measured on
-	// another thread and is not subtracted from its parent — eight workers can
+	// another thread and is not subtracted from its parent - eight workers can
 	// honestly contribute more self time than the frame has wall clock, and a
 	// bar wider than its track draws across the game rather than off the end
 	// of the panel.

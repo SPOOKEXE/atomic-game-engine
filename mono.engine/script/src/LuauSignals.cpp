@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 
@@ -28,7 +28,8 @@ namespace engine::script {
 				return;
 			}
 
-			if (kind != SignalKind::DescendantRemoving && kind != SignalKind::PlayerRemoving) {
+			if (kind != SignalKind::DescendantRemoving && kind != SignalKind::PlayerRemoving &&
+				kind != SignalKind::CharacterRemoving) {
 				return;
 			}
 
@@ -66,6 +67,21 @@ namespace engine::script {
 				// somebody's progress on the way out needs the player still
 				// there to read, and a queue drained a tick later has nothing
 				// to hand it.
+				// **`CharacterRemoving` rides it too, and for a sharper version
+				// of the same reason.** A character dies in this engine by being
+				// destroyed, so the barrier would hand a handler a model it
+				// cannot read a property off - where here it is still whole.
+				// `PlayerLosingCharacter` is the filter and it is what makes this
+				// fire once rather than once per ancestor.
+				if (const ecs::Entity losing = PlayerLosingCharacter(*world, ancestor, leaving);
+					losing != ecs::NULL_ENTITY) {
+					PushInstanceValue(state, leaving);
+					const std::string lost = FireSignal(state, SignalKind::CharacterRemoving, losing, 1);
+					if (!lost.empty()) {
+						ENGINE_WARN("[script] a CharacterRemoving handler failed: {}", lost);
+					}
+				}
+
 				if (!IsPlayerOfService(*world, ancestor, leaving)) {
 					return;
 				}
@@ -83,8 +99,8 @@ namespace engine::script {
 		// What a signal userdata carries.
 		//
 		// Three fields and no list: the connections live in `SignalTable`, so
-		// two scripts that reached the same signal by different routes —
-		// `part.Changed` twice, say — are holding the same thing rather than two
+		// two scripts that reached the same signal by different routes -
+		// `part.Changed` twice, say - are holding the same thing rather than two
 		// objects that behave alike. A list per handle would have made
 		// `:Disconnect` on one invisible to the other.
 		struct SignalHandle {
@@ -148,7 +164,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `signal:Once(fn)` — connect, and disconnect after the first call.
+		// `signal:Once(fn)` - connect, and disconnect after the first call.
 		//
 		// Roblox's, and worth having rather than leaving to an author: written
 		// by hand it is a connection variable captured by the closure that
@@ -199,7 +215,7 @@ namespace engine::script {
 			// the calling thread until the signal next fires, and
 			// `docs/retired/SCRIPT_CONCURRENCY.md` §1 permits a resume only from
 			// something the barrier delivers. A signal fires from inside a
-			// handler pump, which is not a barrier — resuming there would put
+			// handler pump, which is not a barrier - resuming there would put
 			// one script's continuation inside another's call, at a point that
 			// depends on connection order rather than on the tick.
 			//
@@ -338,7 +354,8 @@ namespace engine::script {
 		lua_pop(state, 1);
 	}
 
-	std::string FireSignal(lua_State *state, SignalKind kind, Entity subject, int arguments) {
+	std::string
+	FireSignal(lua_State *state, SignalKind kind, Entity subject, int arguments, core::Name property) {
 		LuauContext &context = ContextOf(state);
 		const int base = lua_gettop(state) - arguments;
 
@@ -346,6 +363,12 @@ namespace engine::script {
 		std::vector<ConnectionId> spent;
 
 		context.Signals.Fire(kind, subject, [&](const Connection &connection) {
+			// An invalid filter fires everything, which is what a kind with one
+			// meaning wants; a valid one is a channel or a property name.
+			if (property.IsValid() && connection.Property != property) {
+				return;
+			}
+
 			lua_getref(state, connection.Callback);
 			for (int index = 1; index <= arguments; index++) {
 				lua_pushvalue(state, base + index);
@@ -354,7 +377,7 @@ namespace engine::script {
 			// **Every connection runs even when one raises**, and the first
 			// error is what the host hears about. A handler that threw once
 			// would otherwise silently stop everything registered after it, and
-			// the symptom — half a scene animating — points nowhere near the
+			// the symptom - half a scene animating - points nowhere near the
 			// cause.
 			if (lua_pcall(state, arguments, 0, 0) != LUA_OK) {
 				if (firstError.empty()) {

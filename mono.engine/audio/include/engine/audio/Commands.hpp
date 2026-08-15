@@ -3,7 +3,7 @@
 // How a tick tells the mixer what to do, and **when** to do it.
 //
 // This file exists because of one line in `DATATYPES_LIBRARIES.md` §11.2, which
-// marks it `!` — required rather than desirable:
+// marks it `!` - required rather than desirable:
 //
 //   *Sample-accurate scheduling. A game ticks at frame rate and audio runs at
 //   sample rate. Events scheduled on tick boundaries jitter audibly.*
@@ -24,12 +24,12 @@
 // audible. A mutex would usually be fine and would occasionally not be: the
 // producer is a tick thread that can be preempted while holding it, and the
 // consumer cannot wait. One producer and one consumer is what makes the
-// lock-free version simple enough to be obviously right — a ring, two atomic
+// lock-free version simple enough to be obviously right - a ring, two atomic
 // indices, and a slot only ever touched by one side at a time.
 //
 // **Node ids are allocated by the producer**, which is what lets creating a
 // node be a fire-and-forget command instead of a round trip. The tick asks for
-// an id, posts `AddNode` with it, and can wire it up in the same tick — before
+// an id, posts `AddNode` with it, and can wire it up in the same tick - before
 // the mixer has seen any of it.
 //
 // @tier L12 · client
@@ -115,7 +115,7 @@ namespace engine::audio {
 		// **A deadline in the past is applied at the start of the next block
 		// rather than dropped.** A tick that ran late still meant its command
 		// to happen, and dropping it would turn a frame hitch into a missing
-		// sound — which is far worse than one that is a few samples late.
+		// sound - which is far worse than one that is a few samples late.
 		uint64_t AtSample = 0;
 
 		// Which node.
@@ -158,7 +158,7 @@ namespace engine::audio {
 		//
 		// A bound rather than a growing buffer, because growing means
 		// allocating, and the producer may be doing it while the consumer has
-		// a deadline. A full queue **refuses** rather than blocking — see
+		// a deadline. A full queue **refuses** rather than blocking - see
 		// `Post`.
 		static constexpr size_t CAPACITY = 1024;
 
@@ -168,7 +168,7 @@ namespace engine::audio {
 		//
 		// What lets `AddNode` be fire-and-forget rather than a round trip: the
 		// tick names the node, posts its creation, and wires it up in the same
-		// tick — all before the mixer has seen any of it.
+		// tick - all before the mixer has seen any of it.
 		//
 		// @return A fresh id, never `NONE` and never reissued.
 		NodeId Allocate();

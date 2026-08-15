@@ -17,7 +17,7 @@
 
 TEST_SUITE_ID("cdn.origin")
 TEST_DEPENDS("cdn.gate")
-TEST_DEPENDS("cdn.groupcodec")
+TEST_DEPENDS("cdn.grouper")
 TEST_DEPENDS("cdn.preparedcache")
 TEST_DEPENDS("engine.assets.manifest")
 TEST_DEPENDS("engine.core.framegraph")
@@ -478,7 +478,7 @@ TEST_CASE(
 }
 
 // ---------------------------------------------------------------------------
-// Local first, then upstream — the cache-server deployment
+// Local first, then upstream - the cache-server deployment
 // ---------------------------------------------------------------------------
 //
 // CDN.md §6 names three sources and this is where two of them meet: an origin
@@ -765,7 +765,7 @@ TEST_CASE("where a payload came from is counted", "[cdn][origin][upstream][metri
 		return sum;
 	};
 
-	// A local hit and a forward are different costs and want different fixes —
+	// A local hit and a forward are different costs and want different fixes -
 	// one is a warm cache, the other is a network round trip per request.
 	CHECK(total("cdn.local.served") == 1.0);
 	CHECK(total("cdn.upstream.served") == 1.0);

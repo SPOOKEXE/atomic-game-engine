@@ -1,8 +1,36 @@
 #include "Tasks.hpp"
 
+#include <engine/ecs/Store.hpp>
+
 #include <algorithm>
+#include <cmath>
 
 namespace engine::script {
+
+	uint64_t TicksFor(const ecs::Store &store, double seconds) {
+		const float delta = store.Time().Delta;
+
+		// **Written as a *failed* `> 0` rather than as `<= 0`, so a NaN lands
+		// here.** Every comparison against NaN is false, so `seconds <= 0.0`
+		// let `task.wait(0/0)` through to a cast of NaN to `uint64_t`, which is
+		// undefined behaviour reachable from a line of script.
+		if (!(seconds > 0.0) || !(delta > 0.0f)) {
+			return 1;
+		}
+
+		// Capped for the other end of the same hole: a `wait` of 1e300 seconds
+		// overflows the cast as surely as a NaN does. The ceiling is a number of
+		// *ticks* nothing will ever reach - about five million years at sixty
+		// hertz - so a script asking for one is answered with "never" rather
+		// than with whatever the conversion happened to produce.
+		constexpr double NEVER = 1e16;
+
+		const double ticks = std::ceil(seconds / static_cast<double>(delta));
+		if (ticks < 1.0) {
+			return 1;
+		}
+		return static_cast<uint64_t>(std::min(ticks, NEVER));
+	}
 
 	void TaskQueue::Delay(CallbackRef thread, uint64_t resumeAt) {
 		const Wait wait{resumeAt, NextSequence++, thread};
@@ -14,7 +42,7 @@ namespace engine::script {
 		// benchmark measured 5.7 microseconds each for it.
 		//
 		// Kept ordered on insert rather than on drain so `Advance` is a walk of
-		// a prefix — sorting per beat would pay on every tick nothing resumed,
+		// a prefix - sorting per beat would pay on every tick nothing resumed,
 		// and most ticks resume nothing.
 		const auto at =
 			std::upper_bound(Waiting.begin(), Waiting.end(), wait, [](const Wait &left, const Wait &right) {
@@ -40,7 +68,7 @@ namespace engine::script {
 
 		// Taken out of the queue **before** anything runs. A resumed script may
 		// call `task.wait` again, and appending to the vector being walked would
-		// resume it a second time in the same beat — which for the common
+		// resume it a second time in the same beat - which for the common
 		// `while true do task.wait() end` is an infinite loop inside one tick.
 		const auto due = std::find_if(Waiting.begin(), Waiting.end(), [tick](const Wait &wait) {
 			return wait.ResumeAt > tick;

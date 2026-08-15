@@ -5,15 +5,15 @@
 // nothing else would notice was missing.
 //
 // The script editor and the output panel both scale their own text and both put
-// that text inside a child window — `InputTextMultiline` makes one for itself,
+// that text inside a child window - `InputTextMultiline` makes one for itself,
 // and the log draws into an explicit one. imgui's `SetWindowFontScale` is
 // per-window state: a child begins at scale 1 whatever its parent was set to,
 // so scaling the panel zoomed the frame around the code and left every glyph in
 // it alone. `ScopedFont` pushes a *size* instead, which is context state, and
 // this is the check that says so.
 //
-// An imgui context is not a device — `CreateContext` allocates a style table and
-// a font atlas description and touches no driver — so the whole thing runs here.
+// An imgui context is not a device - `CreateContext` allocates a style table and
+// a font atlas description and touches no driver - so the whole thing runs here.
 
 #include <engine/testing/Suite.hpp>
 #include <engine/ui/Fonts.hpp>
@@ -43,7 +43,7 @@ namespace {
 
 			// **No `LoadFonts`, which is deliberate.** The staged fonts may not
 			// be beside a test binary, and the face a panel asks for is allowed
-			// to be missing — so this runs the path where it is. A zoom has to
+			// to be missing - so this runs the path where it is. A zoom has to
 			// work in imgui's default face too, or an editor started from
 			// somewhere unexpected loses its zoom along with its shapes.
 			io.Fonts->AddFontDefault();

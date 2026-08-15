@@ -105,7 +105,7 @@ TEST_CASE("a locked pointer turns without a button", "[scene][controls]") {
 TEST_CASE("pitch clamps short of straight up and straight down", "[scene][controls]") {
 	// **The gimbal-lock guard.** At exactly a right angle the look direction is
 	// parallel to world up and `LookAt` cannot choose a roll, so the view spins
-	// about its own axis — which reads as the camera flipping over.
+	// about its own axis - which reads as the camera flipping over.
 	World world;
 	HoldTurn(world.Input());
 
@@ -230,7 +230,7 @@ TEST_CASE("first person puts the eye at the head and third person behind it", "[
 }
 
 TEST_CASE("a camera with no subject is left where it is", "[scene][controls]") {
-	// No subject is a free camera, which is what an editor has — moving it to
+	// No subject is a free camera, which is what an editor has - moving it to
 	// the origin would yank an author's viewpoint away.
 	World world;
 	const Entity eye = world.Store_.CreateInstance(engine::scene::CameraClass(), "Eye");
@@ -280,7 +280,7 @@ TEST_CASE("opposed keys cancel to a standstill rather than a NaN", "[scene][cont
 
 TEST_CASE("an unfocused window walks nobody", "[scene][controls]") {
 	// Alt-tabbing away while holding W must not leave a character walking for
-	// ever, and this is the second belt — the client also clears the keys, and
+	// ever, and this is the second belt - the client also clears the keys, and
 	// a recording replayed into an unfocused world should behave the same way.
 	World world;
 	const Entity character = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
@@ -306,6 +306,50 @@ TEST_CASE("a disabled humanoid is not driven", "[scene][controls]") {
 	world.Input().Down.Set(KeyCode::W, true);
 	CHECK(UpdateCharacterControl(world.Store_) == 0);
 	CHECK(world.Store_.Get<Humanoid>(character)->MoveDirection.Magnitude() == Approx(0.0f));
+}
+
+TEST_CASE("a dead humanoid keeps its momentum and is driven no further", "[scene][controls]") {
+	// **What "the body stays where it fell" has to mean when nothing ragdolls.**
+	// `StepCharacters` *replaces* horizontal velocity every tick, so a corpse it
+	// still visited would walk on at `WalkSpeed` in whatever direction its owner
+	// was last holding - for the whole of `Player.RespawnTime`, in front of
+	// everybody. The gate is on this pass rather than on the intent because this
+	// is the half that reaches a `Motion`.
+	World world;
+	const Entity character = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
+
+	Humanoid humanoid;
+	humanoid.MoveDirection = Vector3{1.0f, 0.0f, 0.0f};
+	humanoid.WalkSpeed = 16.0f;
+	world.Store_.Set(character, humanoid);
+	world.Store_.Set(character, Motion{Vector3{3.0f, -25.0f, 0.0f}, Vector3{}});
+
+	// Alive, so the step drives it - the control against which the next half
+	// means something.
+	REQUIRE(StepCharacters(world.Store_, 1.0f / 60.0f) == 1);
+	CHECK(world.Store_.Get<Motion>(character)->Linear.X == Approx(16.0f));
+
+	world.Store_.GetMutable<Humanoid>(character)->Health = 0.0f;
+	REQUIRE(engine::scene::IsDead(*world.Store_.Get<Humanoid>(character)));
+
+	world.Store_.Set(character, Motion{Vector3{3.0f, -25.0f, 0.0f}, Vector3{}});
+	CHECK(StepCharacters(world.Store_, 1.0f / 60.0f) == 0);
+
+	// Untouched in both axes: the momentum that killed it is kept and gravity
+	// is left to do the rest.
+	CHECK(world.Store_.Get<Motion>(character)->Linear.X == Approx(3.0f));
+	CHECK(world.Store_.Get<Motion>(character)->Linear.Y == Approx(-25.0f));
+
+	// **A negative and a NaN are dead too**, which is the reason `IsDead` is a
+	// function rather than `Health <= 0` written out three times: a component
+	// written straight through `Store::Set` has been through neither clamp, and
+	// written the other way round a NaN compares false against everything and
+	// the character is immortal.
+	world.Store_.GetMutable<Humanoid>(character)->Health = -1.0f;
+	CHECK(engine::scene::IsDead(*world.Store_.Get<Humanoid>(character)));
+	world.Store_.GetMutable<Humanoid>(character)->Health = std::nanf("");
+	CHECK(engine::scene::IsDead(*world.Store_.Get<Humanoid>(character)));
+	CHECK(StepCharacters(world.Store_, 1.0f / 60.0f) == 0);
 }
 
 TEST_CASE("the step replaces horizontal velocity and keeps vertical", "[scene][controls]") {
@@ -338,7 +382,7 @@ TEST_CASE("a jump needs the ground and is spent once", "[scene][controls]") {
 	world.Store_.Set(character, Motion{});
 
 	// Airborne: the request is cleared rather than held, so it does not fire
-	// the moment the character lands — which reads as input arriving late.
+	// the moment the character lands - which reads as input arriving late.
 	REQUIRE(StepCharacters(world.Store_, 1.0f / 60.0f) == 1);
 	CHECK(world.Store_.Get<Motion>(character)->Linear.Y == Approx(0.0f));
 	CHECK_FALSE(world.Store_.Get<Humanoid>(character)->JumpRequested);
@@ -362,7 +406,7 @@ TEST_CASE("a jump pressed between two ticks is latched, not lost", "[scene][cont
 	world.Store_.Set(character, Humanoid{});
 
 	// **Through `LatchPresses`, which is what a writer does.** A press only
-	// becomes a tap once the thing filling `Down` has recorded the edge — see
+	// becomes a tap once the thing filling `Down` has recorded the edge - see
 	// `InputState::Pressed`. Setting the bit alone is a frame nobody wrote.
 	world.Input().Down.Set(KeyCode::Space, true);
 	world.Input().LatchPresses();
@@ -375,4 +419,98 @@ TEST_CASE("a jump pressed between two ticks is latched, not lost", "[scene][cont
 	world.Input().LatchPresses();
 	UpdateCharacterControl(world.Store_);
 	CHECK(world.Store_.Get<Humanoid>(character)->JumpRequested);
+}
+
+TEST_CASE("an aim is the live camera's ray and the click is a latched edge", "[scene][controls][aim]") {
+	// **What a client sends and never what it hit.** `Server::ApplyInputs`
+	// states that division and this is the half that produces the ray: a client
+	// says where it was looking, the host decides what that struck.
+	World world;
+
+	// No camera, no aim - and `Aimed` is separate from `Fired` because the two
+	// fail differently. "No live camera" is a bug; "the player did not click" is
+	// a Tuesday.
+	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Aimed);
+
+	const Entity camera = world.Store_.CreateInstance(engine::scene::CameraClass(), "Camera");
+	world.Store_.Set(
+		camera, Transform{CFrame::LookAt(Vector3{0.0f, 5.0f, 10.0f}, Vector3{0.0f, 5.0f, 0.0f})}
+	);
+
+	ActiveCamera live;
+	live.Entity = camera;
+	world.Store_.SetResource(live);
+
+	const engine::scene::AimIntent aimed = engine::scene::ReadAimIntent(world.Store_);
+	REQUIRE(aimed.Aimed);
+	CHECK_FALSE(aimed.Fired);
+
+	// The ray starts at the eye and points where the eye points. **A unit
+	// direction, and not by luck**: `examples::DecodeShot` refuses anything more
+	// than a thousandth off one, so a `LookVector` that stopped being normalised
+	// would make every shot a refused payload rather than a wrong one.
+	CHECK(aimed.Ray.Origin.Z == Approx(10.0f));
+	CHECK(aimed.Ray.Direction.Z == Approx(-1.0f));
+	CHECK(aimed.Ray.Direction.Magnitude() == Approx(1.0f));
+
+	// **The camera's own frame and not the controller's angles**, which is what
+	// makes a `Scriptable` camera aim where the cutscene points rather than
+	// wherever the player last left the mouse.
+	world.Camera().Angles.Y = std::numbers::pi_v<float>;
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Ray.Direction.Z == Approx(-1.0f));
+
+	// A click that begins and ends between two ticks. **The whole point of the
+	// latch**: `WasButtonPressed` is a frame-shaped question and this is read on
+	// a tick, so the press has to survive the release.
+	world.Input().PreviousButtons = 0;
+	world.Input().Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
+	world.Input().LatchPresses();
+	world.Input().PreviousButtons = world.Input().Buttons;
+	world.Input().Buttons = 0;
+
+	CHECK_FALSE(world.Input().WasButtonPressed(MouseButton::Left));
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
+
+	// **Read twice is fired twice until a tick consumes it**, and consuming is
+	// the caller's - exactly as it is for a jump. One click must not become two
+	// shots when a host catching up runs two ticks between two frames.
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
+	world.Input().ConsumeButtonTaps();
+	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Fired);
+
+	// An unfocused window fires nothing. Alt-tabbing away mid-click must not
+	// shoot, which is the same belt `ReadMoveIntent` wears.
+	// `PreviousButtons` cleared first, because `LatchPresses` records an *edge*
+	// and the button was left down by the case above - a latch against a button
+	// that was already held records nothing, which is the rule working.
+	world.Input().PreviousButtons = 0;
+	world.Input().Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
+	world.Input().LatchPresses();
+	world.Input().Focused = false;
+	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Fired);
+	world.Input().Focused = true;
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
+}
+
+TEST_CASE("the button latch keeps InputState the size a save file expects", "[scene][controls][aim]") {
+	// **`PressedButtons` came out of `Reserved`, not off the end.** A field
+	// appended would grow the object and rewrite the layout `Column::Write`
+	// sends - `SIZE_IS_PINNED` in `Input.cpp` is the check, and this is the
+	// statement of why it matters that a *reader* can find.
+	CHECK(sizeof(InputState) == 56);
+
+	// And `ConsumeTaps` is still the whole question, so the one caller that
+	// asks it whole is not a caller that clears half.
+	InputState input;
+	input.Focused = true;
+	input.Down.Set(KeyCode::Space, true);
+	input.Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
+	input.LatchPresses();
+
+	REQUIRE(input.WasKeyTapped(KeyCode::Space));
+	REQUIRE(input.WasButtonTapped(MouseButton::Left));
+
+	input.ConsumeTaps();
+	CHECK_FALSE(input.WasKeyTapped(KeyCode::Space));
+	CHECK_FALSE(input.WasButtonTapped(MouseButton::Left));
 }

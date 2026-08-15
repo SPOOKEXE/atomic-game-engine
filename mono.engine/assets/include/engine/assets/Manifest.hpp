@@ -47,7 +47,7 @@ namespace engine::assets {
 		// **Over the chunks and nothing else**, which is what makes it an
 		// address: two builds that produce the same bytes produce the same root
 		// whatever the file was called, so dedup works across names and across
-		// versions. The name and the kind are bound to it a level up — see
+		// versions. The name and the kind are bound to it a level up - see
 		// `Manifest::Root`.
 		ContentHash Root;
 
@@ -55,14 +55,14 @@ namespace engine::assets {
 		// order means here, and reordering them would change the asset.
 		std::vector<ChunkEntry> Chunks;
 
-		// The asset's length — the sum of its chunks.
+		// The asset's length - the sum of its chunks.
 		uint64_t TotalBytes = 0;
 	};
 
 	// A delivery group: the unit that is compressed, streamed and cancelled.
 	//
 	// What goes in one is policy rather than format, and it lives with the
-	// origin — a group has to be independently useful, which is a statement
+	// origin - a group has to be independently useful, which is a statement
 	// about the game rather than about bytes. CDN.md §5.
 	struct BundleEntry {
 		// The hash tree root over Assets, in order.
@@ -107,12 +107,12 @@ namespace engine::assets {
 		static constexpr uint32_t MAGIC = 0x314D4341; // "ACM1"
 
 		// The format version. Bumped when the layout changes, and refused when
-		// unknown — a reader that guesses at a version it does not know is a
+		// unknown - a reader that guesses at a version it does not know is a
 		// reader that mis-parses attacker-controlled bytes.
 		//
 		// **2 since v0.9**, which added the asset kind and folded the
 		// descriptor table into the signed root. Nothing had yet published a
-		// version-1 manifest to disk, so the bump costs nobody a re-publish —
+		// version-1 manifest to disk, so the bump costs nobody a re-publish -
 		// which is exactly why it was worth doing now rather than after there
 		// was content in the world addressed under the old one.
 		static constexpr uint16_t VERSION = 2;
@@ -133,7 +133,7 @@ namespace engine::assets {
 		// Groups assets into one delivery bundle.
 		//
 		// Sorts the roots, computes the bundle root and totals the bytes. Roots
-		// naming no known asset are refused rather than carried — a bundle
+		// naming no known asset are refused rather than carried - a bundle
 		// pointing at content this manifest does not describe is unfetchable,
 		// and finding that out at delivery time is finding out too late.
 		//
@@ -151,7 +151,7 @@ namespace engine::assets {
 		// byte of content and none of what a byte was *called*. An origin
 		// serving a manifest with two names swapped would hand a client content
 		// that verified perfectly against the signed root and was the wrong
-		// asset — and the same would now be true of the kind, which is what a
+		// asset - and the same would now be true of the kind, which is what a
 		// client routes on. Signing the content but not the index is signing
 		// the half nobody looks up by.
 		//
@@ -161,7 +161,7 @@ namespace engine::assets {
 		// called, and what it is for.
 		//
 		// The asset root itself is untouched and still covers chunks alone,
-		// because that is what makes it an address — folding a name into it
+		// because that is what makes it an address - folding a name into it
 		// would give two identical files under two names two different roots
 		// and lose dedup across them.
 		ContentHash Root() const;
@@ -211,7 +211,7 @@ namespace engine::assets {
 		// of its own structure in one place.
 		//
 		// @param assetRoot The asset.
-		// @return The bundle, or nullptr when no bundle carries it — which is a
+		// @return The bundle, or nullptr when no bundle carries it - which is a
 		//         publisher's mistake and is worth being able to detect.
 		const BundleEntry *BundleFor(const ContentHash &assetRoot) const;
 
@@ -220,7 +220,7 @@ namespace engine::assets {
 		// **This is the group's internal layout, and it is defined by the
 		// manifest rather than written into the payload.** A bundle's bytes are
 		// its member assets concatenated in the order `BundleEntry::Assets`
-		// holds them — sorted by root — with no framing, no header and no
+		// holds them - sorted by root - with no framing, no header and no
 		// index between them.
 		//
 		// Deriving the layout instead of transmitting it is what makes it
@@ -265,7 +265,7 @@ namespace engine::assets {
 		// §1 of repo_layout.md says anyone can run one. A wrong magic, an
 		// unknown version, a count that does not match what follows, a chunk
 		// total that disagrees with its chunks, or a bundle naming an unknown
-		// asset are each a refusal — not a warning, and not a partly built
+		// asset are each a refusal - not a warning, and not a partly built
 		// object a caller might use.
 		//
 		// @param reader The bytes to parse.

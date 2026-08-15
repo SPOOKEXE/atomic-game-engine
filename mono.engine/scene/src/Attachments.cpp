@@ -12,14 +12,14 @@ namespace engine::scene {
 		// The part an attachment hangs off, or a null entity.
 		//
 		// **One step and not a walk, which is the whole of why attachments do not
-		// nest.** Following a chain would make this pass order-dependent — an
+		// nest.** Following a chain would make this pass order-dependent - an
 		// attachment resolved against another attachment's *resolved* frame reads
 		// a value that may or may not have been written yet, depending on which
 		// archetype the store visited first. `Attachments.hpp` carries the
 		// argument; this function is where the rule is actually kept.
 		//
 		// A `Transform` is the test rather than a class check, because that is
-		// what is actually needed — anything with a place in the world can carry
+		// what is actually needed - anything with a place in the world can carry
 		// an attachment, and asking `IsA("BasePart")` would refuse a `Model` root
 		// that legitimately has one.
 		const Transform *ParentPlacement(const ecs::Store &store, ecs::Entity attachment) {
@@ -34,7 +34,7 @@ namespace engine::scene {
 		//
 		// **A free function because `core::CFrame` has no `operator==`**, and
 		// giving it one is not this file's call: an equality on a rotation
-		// invites `q` and `-q` — the same orientation, opposite quaternions — to
+		// invites `q` and `-q` - the same orientation, opposite quaternions - to
 		// compare unequal, and every caller would inherit that surprise. Here
 		// the two sides are the same product of the same inputs, so bitwise is
 		// exactly the question being asked.
@@ -65,7 +65,7 @@ namespace engine::scene {
 
 		// **`Each` and not `EachBatchParallel`, and the difference is the parent
 		// lookup.** A batched walk is handed columns and no entity, so there is
-		// no handle to ask `ParentOf` about — and the parent's `Transform` lives
+		// no handle to ask `ParentOf` about - and the parent's `Transform` lives
 		// in a different archetype from the attachment's row, so the load is a
 		// random access whichever way this is written. A world with tens of
 		// thousands of attachments would want the parent's frame denormalised
@@ -80,7 +80,7 @@ namespace engine::scene {
 		// **What moved, gathered before anything is written.**
 		//
 		// This used to write straight through the reference `Each` hands out,
-		// which is a direct memory write and not a reported one — so
+		// which is a direct memory write and not a reported one - so
 		// `Attachment.WorldCFrame` and `WorldPosition` could never fire
 		// `.Changed`. A script waiting on one waited for ever while the value it
 		// was watching moved every frame, which is the worst shape a signal bug
@@ -90,7 +90,7 @@ namespace engine::scene {
 		// **Only the rows that actually moved, which is why the compare is here
 		// and not a `MarkAllChanged`.** Reporting every attachment every frame
 		// would advance the world's change counter for ever, and two gates are
-		// built on an unchanged counter meaning nothing authored has happened —
+		// built on an unchanged counter meaning nothing authored has happened -
 		// `physics`'s static broadphase and `gui`'s compile. `Store::GetUnobserved`
 		// carries that argument at length; this is the other side of it.
 		std::vector<std::pair<ecs::Entity, core::CFrame>> moved;
@@ -111,7 +111,7 @@ namespace engine::scene {
 		});
 
 		// **Through `GetMutable`, deliberately.** It is the call that reports a
-		// write, which is the whole point of this shape — see above.
+		// write, which is the whole point of this shape - see above.
 		for (const auto &[entity, world] : moved) {
 			if (Attachment *point = store.GetMutable<Attachment>(entity)) {
 				point->WorldFrame = world;

@@ -10,7 +10,7 @@ namespace engine::game {
 
 	namespace {
 		// A tag, three floats and a flag. Stated as a constant because
-		// `DecodeMoveInput` refuses anything else — see the header for why the
+		// `DecodeMoveInput` refuses anything else - see the header for why the
 		// length and not the tag alone is what separates this from a shot.
 		constexpr size_t MOVE_BYTES = 1 + 3 * sizeof(float) + 1;
 

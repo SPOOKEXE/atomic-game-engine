@@ -2,8 +2,8 @@
 
 // Hex, for the fixed-size byte arrays this module names things with.
 //
-// A content hash, a public key and a signature are the same shape — N bytes
-// written as 2N characters — and each is parsed back from text that arrived
+// A content hash, a public key and a signature are the same shape - N bytes
+// written as 2N characters - and each is parsed back from text that arrived
 // from somewhere. One codec, so there is one spelling of an address and one
 // place that refuses the others.
 //
@@ -54,7 +54,7 @@ namespace engine::assets {
 	//
 	// @param[in]  text  Exactly `Length * 2` lowercase hex characters.
 	// @param[out] value The bytes. Written as the text is walked, so a failure
-	//                   part-way leaves some of them set — parse into a local
+	//                   part-way leaves some of them set - parse into a local
 	//                   and only publish it once this has returned true.
 	// @return Whether the whole text parsed.
 	template <size_t Length> bool FromHexString(std::string_view text, std::array<uint8_t, Length> &value) {

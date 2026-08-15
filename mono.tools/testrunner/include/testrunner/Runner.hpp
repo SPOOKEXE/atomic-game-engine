@@ -7,12 +7,12 @@
 // a hash of its own source, every header that source includes, and the
 // signatures of every suite it declares a dependency on. A change at the bottom
 // of the stack therefore changes the signature of everything transitively above
-// it and of nothing else — which is what a timestamp cannot give, and what lets
+// it and of nothing else - which is what a timestamp cannot give, and what lets
 // CI and a laptop share a cache.
 //
 // Hand-declared identifiers, derived file sets. A hand-written list of files a
 // test touches goes stale silently, and a stale list means a skipped test that
-// should have run — the worst failure mode a runner has.
+// should have run - the worst failure mode a runner has.
 
 #include <filesystem>
 #include <map>
@@ -28,7 +28,7 @@ namespace testrunner {
 	struct Suite {
 		// The identifier `TEST_SUITE_ID` declares, such as `engine.ecs.store`.
 		//
-		// Hand-written, and the only hand-written thing here — a name survives a
+		// Hand-written, and the only hand-written thing here - a name survives a
 		// file being renamed or moved, which is exactly what the cache needs it
 		// to do. AGENTS.md rule 4.
 		std::string Id;
@@ -54,8 +54,8 @@ namespace testrunner {
 	// Every executable staged under `<build>/<directory>/`.
 	//
 	// Parameterised because the benchmark runner wants exactly this over
-	// `bench/`. The alternative — a second copy that walks a different
-	// directory — is the copy that would stop matching the day this one learned
+	// `bench/`. The alternative - a second copy that walks a different
+	// directory - is the copy that would stop matching the day this one learned
 	// something.
 	//
 	// @param build     A configured build directory.
@@ -104,7 +104,7 @@ namespace testrunner {
 		// What it counted then, so that a suite the cascade skipped today still
 		// has a row in test-output.md rather than a hole.
 		//
-		// These decide nothing — the runner never reads them back to choose what
+		// These decide nothing - the runner never reads them back to choose what
 		// to run. They are here because the alternative is a report that covers
 		// only the handful of suites one change happened to touch, which is the
 		// report nobody wants: the whole point is the shape of the tree.
@@ -134,7 +134,7 @@ namespace testrunner {
 		unsigned long long Microseconds = 0;
 	};
 
-	// .cache/smart-tests.txt — a text file, and actually text: one tab-separated
+	// .cache/smart-tests.txt - a text file, and actually text: one tab-separated
 	// line per suite, so that a diff of it is readable and a human can delete a
 	// line by hand.
 	std::map<std::string, CacheEntry> LoadCache(const std::filesystem::path &path);
@@ -147,7 +147,7 @@ namespace testrunner {
 	// @param path  File to write. Parent directories are created.
 	// @param cache Every suite worth remembering, not only the ones that ran.
 	// @return False if the file could not be written. The caller decides what
-	//         that is worth — a cache that failed to save costs time on the next
+	//         that is worth - a cache that failed to save costs time on the next
 	//         run and nothing else, so it is not a reason to fail the tests.
 	bool SaveCache(const std::filesystem::path &path, const std::map<std::string, CacheEntry> &cache);
 }

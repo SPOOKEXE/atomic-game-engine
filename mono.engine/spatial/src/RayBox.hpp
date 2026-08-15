@@ -35,7 +35,7 @@ namespace engine::spatial {
 	//
 	// Far below anything a unit direction can hold on all three axes at once,
 	// so a real ray never takes the parallel branch by mistake. Chosen well
-	// clear of the point where the reciprocal itself becomes infinite — a
+	// clear of the point where the reciprocal itself becomes infinite - a
 	// float smaller than about 1e-38 inverts to an infinity, and the whole
 	// point of the branch is that no infinity is ever multiplied.
 	inline constexpr float PARALLEL_EPSILON = 1e-20f;
@@ -43,7 +43,7 @@ namespace engine::spatial {
 	// One divided by a ray's direction, and which axes have no direction at all.
 	//
 	// Computed once per ray rather than once per box. A raycast tests one ray
-	// against many candidates, so this is the query's loop invariant — which is
+	// against many candidates, so this is the query's loop invariant - which is
 	// why it lives here and not on `core::Ray`, where it would be a cached
 	// field that has to be kept true.
 	struct RayReciprocal {
@@ -98,7 +98,7 @@ namespace engine::spatial {
 			if (reciprocal.Parallel[axis]) {
 				// **The branch that has to be here.** Dividing by zero gives an
 				// infinity, and the comparisons below cope with an infinity
-				// perfectly well — right up until the ray's origin sits exactly
+				// perfectly well - right up until the ray's origin sits exactly
 				// on one of the two planes. Then the numerator is zero, zero
 				// times infinity is a NaN, and a NaN compares false in both
 				// directions: the miss is not detected and neither is the hit.

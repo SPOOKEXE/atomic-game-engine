@@ -252,7 +252,7 @@ TEST_CASE("an invalid name round-trips as invalid", "[bytes]") {
 }
 
 TEST_CASE("a name interns on read when the process has not seen it", "[bytes]") {
-	// The reading process is a different one in every case that matters — a
+	// The reading process is a different one in every case that matters - a
 	// restored snapshot, a packet from a server. Nothing may assume the text
 	// was already interned.
 	ByteWriter writer;
@@ -281,6 +281,33 @@ TEST_CASE("raw blocks copy and borrow the same bytes", "[bytes]") {
 	const std::span<const std::byte> view = borrowing.ReadRawView(sizeof(source));
 	REQUIRE(view.size() == sizeof(source));
 	REQUIRE(std::memcmp(view.data(), source, sizeof(source)) == 0);
+}
+
+TEST_CASE("a refused raw read leaves the destination alone", "[bytes]") {
+	// **The contract `ReadRaw` states and the one a caller relies on without
+	// noticing.** A component is decoded straight into its own storage, so a
+	// read that copied what it had and *then* discovered it was short would
+	// leave half a value there and report failure - and a caller checking
+	// `Failed()` once at the end, which is the usage this class is shaped for,
+	// would already have a half-written object.
+	ByteWriter writer;
+	writer.WriteUInt32(0xAABB'CCDDu);
+
+	ByteReader reader(writer.Bytes());
+
+	unsigned char destination[8];
+	std::memset(destination, 0x5A, sizeof(destination));
+
+	REQUIRE_FALSE(reader.ReadRaw(destination, sizeof(destination)));
+	REQUIRE(reader.Failed());
+
+	for (const unsigned char byte : destination) {
+		CHECK(byte == 0x5A);
+	}
+
+	// And nothing was consumed either, so the four bytes that *are* there are
+	// still where a caller recovering from the refusal would look for them.
+	CHECK(reader.Position() == 0);
 }
 
 TEST_CASE("a zero-length write and read are both no-ops", "[bytes]") {
@@ -384,7 +411,7 @@ TEST_CASE("failure is sticky", "[bytes]") {
 	writer.WriteUInt32(7);
 	writer.WriteUInt32(9);
 
-	// Eight bytes wanted and eight present, so this succeeds — and reads the
+	// Eight bytes wanted and eight present, so this succeeds - and reads the
 	// two 32-bit fields as one 64-bit value, which is what a format mismatch
 	// looks like when nothing bounds-checks it into being obvious.
 	ByteReader reader = ReaderOver(writer);
@@ -485,7 +512,7 @@ TEST_CASE("a reserved writer does not reallocate under its reservation", "[bytes
 TEST_CASE("random buffers never read out of bounds", "[bytes]") {
 	// The reader's contract is that no input can make it misbehave, so hand it
 	// arbitrary bytes and an arbitrary sequence of reads. Nothing here asserts
-	// a value — the assertion is that the process survives and the failure flag
+	// a value - the assertion is that the process survives and the failure flag
 	// is consistent with how much was consumed.
 	constexpr uint32_t ITERATIONS = 2'000;
 

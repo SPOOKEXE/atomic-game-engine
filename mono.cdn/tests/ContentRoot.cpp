@@ -23,7 +23,7 @@ namespace {
 	namespace fs = std::filesystem;
 
 	// A tree on disk, removed whatever the test does. Every case here is about
-	// what the resolver does with a real filesystem underneath it — canonical(),
+	// what the resolver does with a real filesystem underneath it - canonical(),
 	// weakly_canonical() and symlink following have no in-memory equivalent to
 	// test against, and a fake one would be testing the fake.
 	struct Tree {
@@ -162,7 +162,7 @@ TEST_CASE("a symlink out of the root is refused", "[cdn][contentroot]") {
 
 	// The case the component check cannot see: every component of the name is
 	// ordinary, and the escape is on disk rather than in the string. Skipped
-	// rather than failed where the platform will not make one — Windows needs a
+	// rather than failed where the platform will not make one - Windows needs a
 	// privilege for it, and a test that fails on a permission says nothing
 	// about the resolver.
 	std::error_code failure;
@@ -189,7 +189,7 @@ TEST_CASE("a symlink staying inside the root is served", "[cdn][contentroot]") {
 
 	// The containment check is about where a name lands, not about whether a
 	// link was involved. Refusing every link would break the one deployment
-	// pattern — an atomically swapped `current` — that content delivery is for.
+	// pattern - an atomically swapped `current` - that content delivery is for.
 	const cdn::ContentRoot root = tree.Mount();
 	const auto current = root.Resolve("current.bin");
 	REQUIRE(current.has_value());

@@ -1,4 +1,4 @@
-# gui — module invariants
+# gui - module invariants
 
 L7, `shared` tier. What a 2D thing in a *game* is: the class tree, the layout
 arithmetic, the compiled draw list and the input routing. `scene` answers the
@@ -7,7 +7,7 @@ one dimension down.
 
 ## This is not `mono.engine/ui`, and the two must not converge
 
-`ui` is Dear ImGui at L12 `client` — the **editor's** toolkit, the only target
+`ui` is Dear ImGui at L12 `client` - the **editor's** toolkit, the only target
 that links imgui, and nothing a game ships touches it. This is the widget set a
 game builds its own interface out of, and it is `shared` because a server
 authors a `ScreenGui` and replicates it.
@@ -19,7 +19,7 @@ job applies hardest to the thing you look at all day.
 
 **The one thing they share is the glyph atlas**, and the edge that carries it
 runs `ui` → `gui` and never back. `ui::PaintGui` takes a `gui::DrawList` and an
-`ImDrawList` and nothing else — no store, no class table, no tree. A reviewer
+`ImDrawList` and nothing else - no store, no class table, no tree. A reviewer
 should refuse any include of an `engine/ui/` header from this module, and the
 tier check will not catch it, because a `shared` module including a `client`
 one fails at the link and not at the include.
@@ -39,11 +39,11 @@ that reason, and resolving it to a texture is the backend's job.
 ## What it deliberately does not depend on, and cannot be made to
 
 `core` and `ecs` are the whole dependency list. Both refusals below are
-`shared`-to-`shared`, so **the build cannot catch either** — by rule 6 that
+`shared`-to-`shared`, so **the build cannot catch either** - by rule 6 that
 makes them conventions, and this is where they are written down.
 
 - **`scene`.** It looks necessary twice and is not. `SurfaceGui::Face` wants
-  `NormalId`, which is a six-member enum registered by name — `gui::Face`
+  `NormalId`, which is a six-member enum registered by name - `gui::Face`
   declares the same six in the same order and `gui/tests/Enums.cpp` pins them,
   which is the arrangement `DefaultMaterial`'s "Plastic" already uses. And a
   surface gui's canvas wants the adornee's stud extent, which is `D00022`: it
@@ -64,7 +64,7 @@ hit test would disagree about where a button is, which reads as "clicking is
 off by a bit" and is close to undebuggable from the outside.
 
 **`Rendered` is cleared by a sweep and never maintained at the write.**
-Ancestry is not local — reparenting one frame moves everything beneath it — and
+Ancestry is not local - reparenting one frame moves everything beneath it - and
 the alternative is hooking `SetParent`, the explorer's drag, the loader and
 `DestroyInstance`, where missing one gives an element that draws after being
 detached. `scene::Visibility` reached the same conclusion for the same reason.
@@ -73,13 +73,13 @@ detached. `scene::Visibility` reached the same conclusion for the same reason.
 
 `Compile.hpp` carries the table. The rule it states is the load-bearing one: a
 field added to a component has to be added to the fold in `Compile.cpp`, and
-the failure if it is not is a UI one edit stale — a panel that updates on the
+the failure if it is not is a UI one edit stale - a panel that updates on the
 *next* unrelated change.
 
 That is a rule the build cannot check, so `gui/tests/Compile.cpp` checks it:
 it walks every property the class tree declares, writes each one, and asserts
 the signature moved. **A property added without a fold fails that test.** Do
-not weaken it by listing property names in the test — the walk is what makes it
+not weaken it by listing property names in the test - the walk is what makes it
 cover things nobody thought to list.
 
 The direction matters and only one way round is safe. A collision keeps a list
@@ -96,7 +96,7 @@ nothing at load time could catch it.
 worth knowing about before touching anything:
 
 - `TextYAlignment` is `Top, Center, Bottom` and `TextXAlignment` is
-  `Left, Center, Right`. Not the same order, deliberately — Roblox's numbering.
+  `Left, Center, Right`. Not the same order, deliberately - Roblox's numbering.
 - `ScrollingDirection` starts at **one**: it is a bit pair, not a counter.
   `Classes.cpp`'s `EnumOrigin` applies the offset in both directions.
 
@@ -113,7 +113,7 @@ assumes and Roblox does not have. A `ScreenGui` has no `Position` and no
 against a parent it does not have.
 
 **`Text` is declared on three classes rather than on a shared base**, because
-there is no base to put it on — `TextButton` derives from `GuiButton`,
+there is no base to put it on - `TextButton` derives from `GuiButton`,
 `TextLabel` from `GuiLabel`, `TextBox` from `GuiObject`. A synthetic
 "TextThing" base would be a class no script has heard of appearing in `:IsA`
 and in the bindings manifest, which is the worse trade.
@@ -143,7 +143,7 @@ fits against it. The exact answer needs a glyph atlas, which is `client` and
 cannot be here.
 
 **A backend must draw at `Resolved::TextSize` rather than measuring again.**
-Not because the estimate is good — because a backend with real metrics would
+Not because the estimate is good - because a backend with real metrics would
 disagree with the hit test and with what a headless test asserts, and two
 answers is the failure this module is arranged to avoid everywhere else.
 
@@ -168,6 +168,114 @@ Two rules inside it are worth keeping:
   two adjacent buttons produces an enter against state the leave is about to
   undo.
 
+## The keyboard's focus is the world's; the router only decides it
+
+`Router` holds the hover and the press privately, because nobody else reads
+where a mouse is. The focused `TextBox` is the opposite case and lives in
+`GuiServiceState::FocusedTextBox`: the scripting layer reads it for
+`UserInputService:GetFocusedTextBox` and L9 has no route to a router, so a
+handle kept beside the decision would be rule 2's second statement of one fact.
+
+That is why `Router::Update` takes a **mutable** `ecs::Store &`, and it is the
+only thing in the class that writes one. A world with no `GuiService` routes the
+pointer exactly as it did before focus existed and takes none at all - the
+honest answer rather than an oversight, since there is nowhere for the fact to
+live.
+
+Three rules inside it, none of which the build can check:
+
+- **Only a press moves it.** A hover does not take the keyboard and a release
+  does not give it back, which is what makes dragging a selection out of a box
+  and letting go somewhere else keep it focused - `InputEnded`'s rule one
+  section up, for the same interaction.
+- **A press that lands on nothing releases it**, which is Roblox's answer:
+  clicking the background is how anybody stops typing, and the alternative
+  leaves a game with no way to give the keyboard back to itself.
+- **The handle is validated on the way out, never swept.** `FocusedTextBox`
+  answers null for a box that has been destroyed, because the generation in the
+  id has moved - the same argument `Rendered` is swept for, one section up.
+  Reparenting therefore does *not* release the focus, deliberately. And a
+  destroyed box emits no `FocusReleased`: the event names an element, and
+  `Router::Forget` already states that firing at one that is gone is worse than
+  firing nothing.
+
+**A host has to install the services, and nothing in `gui` can do it for one.**
+`InstallGuiServices` is where `GuiService` comes from, `scene::InstallServices`
+cannot call it, and every function above answers "no" in a world that has
+neither. Three hosts call it: `examples::LoadScene` for every `--script` world
+in the client and the server, `studio::Editor::PrepareWorld` for every world the
+editor makes, and `client::BuildReplicatedWorld` for a replica.
+
+**A replica is completed rather than furnished, and that is what the third
+caller needs.** No `gui.` component is replicated, so a client is shown a
+`GuiService` that is a name and a class with no state on it - and `Select` and
+`Focus` both read that state and both answer `false` without it, which is a
+keyboard that never reaches a `TextBox` and nothing saying why. So
+`InstallGuiServices` adds the state to whatever service the world holds and
+mints one only where minting is legal: `ecs::Store::AdoptOnly` is the test,
+because an authoritative index minted in a replica collides with one the
+authority is handing out, and the join snapshot sweeps what it does not mention
+anyway. That is what makes it safe to call once a tick on a world filling from a
+snapshot, which is how the replica gets one at all.
+
+## Typing is `Typing.hpp`, and the text it writes is the box's own
+
+`Router` decides which box has the keyboard; `Type` decides what a keystroke
+does to it. Neither knows about the other's gesture, which is why they are two
+files: a press is routed by position and a character is not routed at all.
+
+- **`Label::Text` is the buffer.** There is no edit state anywhere - no pending
+  string, no undo stack, no "box being edited". Rule 2, and the specific bug a
+  second copy would buy is a script writing `TextBox.Text` while somebody types
+  into it and the two disagreeing until the next repaint.
+- **The caret is characters and the string is bytes, and `src/Utf8.hpp` is the
+  only place that crosses between them.** `Focus` counts to the end of the text
+  and `Type` inserts in the middle; two copies of that arithmetic would be two
+  answers to where the caret is, and both would be right for English.
+- **`Type` clamps the caret before reading it, and that is not defensive
+  programming.** `TextBox.Text` is a plain property with no setter to hook - the
+  class table writes the field - so a handler replacing the text with something
+  shorter is an ordinary event, and every offset derived from the old caret is
+  then past the end. Clamping lives at the one reader that indexes by it.
+- **Return releases a single-line box and breaks a line in a `MultiLine` one**,
+  and the release owes a `FocusReleased` the router cannot produce, because no
+  press happened. `GuiEvent::Entered` is how a script tells the two apart, and
+  the caller builds that event from `TypeResult::Released`.
+
+**A `TextBox` takes input, and that is a second class in `TakesInput` rather
+than a field.** It is not a `GuiButton` and its `Active` is false by default, so
+the pick walked past it and a click reached whatever was behind - which is what
+made focus unreachable and, before that, made a text field ignore the mouse.
+`Entry` is the test, for the reason `Element` is the `GuiObject` test below.
+
+## `ElementsAt` asks `Pick`'s question and reads the compile's answer
+
+`PlayerGui:GetGuiObjectsAtPosition` wants *everything* under a point, in paint
+order, within one container - three ways `Pick` cannot answer. It is still not a
+second traversal deciding what is on top, and the reason it does not have to be
+is `Resolved::Order`: the compile writes each element's paint position back into
+its own row, so **sorting by that descending is front to back**, and the section
+above stays true.
+
+Three things about it are decisions rather than details:
+
+- **The `Active` test is dropped and every other filter is kept.** A decorative
+  `Frame` is transparent to a *click* and is still an object under the pointer,
+  which is exactly the difference between the two questions. `Rendered`, the
+  clip and the rotation all still apply, because the answer is "what is on
+  screen here" rather than "what has a rectangle here".
+- **It is scoped to a root and the root is not optional.** `Layout` resolves
+  every collector in the world - the `StarterGui` template and every player's
+  copy - so an unscoped answer would hand one player somebody else's rectangles.
+- **`Resolved::Depth` breaks a tie and the entity id breaks that.** A world
+  nothing has compiled has every `Order` at zero, and the deeper element is
+  still the one in front; the id is last so the answer never depends on the
+  order the walk happened to visit siblings in.
+
+`Element` is what tells a `GuiObject` from a `LayerCollector` here, and no class
+lookup is needed for it - a collector has no such component, which is the same
+fact the class-tree section states from the other side.
+
 ## The hover is fed back and is one frame late, deliberately
 
 `CompileRequest::Hovered` is an *input* to the compile, and the compile is what
@@ -180,6 +288,72 @@ it appears. One frame, and the alternative is a cycle.
 **The lit colour never goes back into `Background::Color`.** A hover written
 into the component would make `BackgroundColor3` read differently depending on
 where the mouse is, which is a script bug nobody could see from the script.
+
+## `ResetPlayerGui` is one step of a pipeline this module cannot see
+
+`scene` copies four `Starter*` services into a player - two on the join, two on
+every spawn - and this is the fifth, on every spawn. It is here rather than there
+because `scene` may not link `gui`, and it stays a *function* rather than a
+system for the same reason: whoever spawns calls both halves.
+`scene::UpdateRespawns` hands back who it spawned so a host can loop over them,
+and `mono.server`'s `player.respawn` is what does.
+
+**It is not the same shape as the other four and must not be made so.**
+`scene::CloneChildrenInto` is a plain copy; this one carries the `ResetOnSpawn`
+survival rule, and a survivor of a name is what stops a player being handed two
+of a collector one of which nothing updates. `Services.hpp` states the three
+steps in order.
+
+**Three spawns, not two, is what the suite asserts**, because a reset that
+re-cloned every *other* time passes a two-spawn check - and the second player in
+`engine.gui.services` is what catches a reset reaching the template rather than
+the copy.
+
+## An interface replicates, and three components deliberately do not
+
+A server authors a `ScreenGui` and a client is shown it: that is what `shared`
+was for, and from v0.15 it is what actually happens.
+`replication::DefaultReplicatedComponents` takes the whole `gui.` prefix less
+three names, and the three are the module's own answer to what a *viewer*
+decides rather than what an author does.
+
+- **`Resolved`** is where the layout put a rectangle on *this* display. Every
+  client recomputes it from the tree it was sent, so the authority's answer is
+  right for the authority's window and wrong for everybody else's. It is
+  `scene::Rendered`'s exclusion, one dimension down.
+- **`SpatialCanvas`** is the same fact fitted to a surface by whoever holds a
+  camera.
+- **`GuiServiceState`** holds `FocusedTextBox`, and there is one row of it per
+  world. Two people typing into two boxes would be two clients writing one row -
+  so this is the one that would be *wrong* rather than merely wasteful, and it is
+  why `client::BuildReplicatedWorld` still calls `InstallGuiServices` every tick
+  to complete a service that arrives with no state on it.
+
+The hover and the press need no entry: `Router` holds them privately and they
+are not components, which is the same fact this file states one section up from
+the other side.
+
+**`Label` and `Entry` are observed rather than signed, and that is forced.** A
+signature hashes the object representation and both hold a `std::string`, whose
+object representation is a pointer - so two boxes with the same words hash
+differently and text edited inside its own capacity hashes the same.
+`replication::Authority::Resign` declines a non-trivial component outright and
+says to observe it instead.
+
+**A `TextBox`'s text is suppressed on the wire, and that is a decision about a
+person rather than about bandwidth.** `Type` writes `Label::Text` in the replica
+as somebody types, so the two ends are meant to disagree - and both the delta
+path and the anti-entropy audit would otherwise put the authority's copy back
+over a half-typed word. `Entry` is the tag that says so, because a `TextBox` is
+the only class carrying one. What it costs is that a script writing
+`TextBox.Text` after a client has joined does not reach that client;
+`replication/AGENTS.md` carries the whole argument.
+
+**The caret never crossed and that is `WriteEntries`' doing.** It writes
+`CursorPosition` and `SelectionStart` as `-1` rather than as themselves, so a
+save file cannot restore somebody mid-edit and a delta cannot move a local
+caret. Keep it that way: it is also what lets both ends of an audit hash one
+value for a box only one of them is typing into.
 
 ## Text and image names intern, and that has a stated cost
 

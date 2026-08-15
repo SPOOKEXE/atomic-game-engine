@@ -2,8 +2,8 @@
 
 // How a system talks to a bus.
 //
-// A system takes the world and nothing else — that is `ecs/AGENTS.md`'s rule
-// and it is not negotiable — so the mailbox has to be *in* the world. It is:
+// A system takes the world and nothing else - that is `ecs/AGENTS.md`'s rule
+// and it is not negotiable - so the mailbox has to be *in* the world. It is:
 // `Outbox` and `Inbox` are resources on the world's store, which means they are
 // covered by the affinity check, visible to the profiler, and carried by a
 // snapshot. Pending traffic is world state, and a crash recovery that lost it
@@ -41,7 +41,7 @@ namespace engine::world {
 	//
 	// A resource rather than a member of `World`, because a member would be
 	// exactly the "private vector for data another module reads" that
-	// `ecs/AGENTS.md` forbids — and because a snapshot has to carry it.
+	// `ecs/AGENTS.md` forbids - and because a snapshot has to carry it.
 	//
 	// @since v0.2
 	struct Outbox {
@@ -60,7 +60,7 @@ namespace engine::world {
 	// What reached this world at the last barrier.
 	//
 	// Replaced wholesale each barrier rather than appended to, so a system that
-	// forgets to drain it does not accumulate an unbounded backlog — it misses
+	// forgets to drain it does not accumulate an unbounded backlog - it misses
 	// messages, which is visible, instead of leaking, which is not.
 	//
 	// @since v0.2
@@ -93,7 +93,7 @@ namespace engine::world {
 	//
 	// Refused at the call rather than at review time, because "do not do this"
 	// is a rule somebody eventually does. A replica may still *read* its inbox
-	// — that is how it receives what the server published.
+	// - that is how it receives what the server published.
 	//
 	// @since v0.2
 	struct Replica {
@@ -136,7 +136,7 @@ namespace engine::world {
 		// Subscribes this world to a topic.
 		//
 		// Idempotent. Takes effect at the next barrier, so a message published
-		// in the same tick as the subscription is not received — which is the
+		// in the same tick as the subscription is not received - which is the
 		// honest answer, since the subscription did not exist when it was sent.
 		//
 		// @param topic The topic to subscribe to.
@@ -212,6 +212,94 @@ namespace engine::world {
 		// @return The ticket the reply will carry, or NONE when over budget.
 		Ticket Teleport(std::string_view world, std::span<const std::byte> payload);
 
+		// Opens a named channel on this world, so sends may address it.
+		//
+		// **A channel is opened by the world that receives on it**, which is what
+		// makes `NoSuchChannel` answerable at all: the bus knows what a world is
+		// listening for and can tell a sender that named something else. Nothing
+		// is delivered on a channel this was never called for.
+		//
+		// Idempotent, and it takes effect at the next barrier - so a message sent
+		// in the same tick as the open is refused, which is the honest answer
+		// since the channel did not exist when it was addressed. That is
+		// `Subscribe`'s rule, said again because it is the same one.
+		//
+		// **A ticket rather than a boolean, alone among the opens and closes on
+		// this bus, because this is the one of them an authority may refuse.**
+		// `UniverseSettings::ChannelsPerWorld` caps how many channels a world may
+		// hold, and the count lives in the router's table - a world cannot answer
+		// it from its own store without keeping a second copy of that table, and
+		// the copy would drift the first time an open was refused. So the answer
+		// is decided at the barrier and comes back the way every other barrier
+		// verdict does: a `Delivery` on this ticket, `Bus` set to `Channel`, `Key`
+		// to the channel, `Status` to `Ok` or `TooManyChannels`.
+		//
+		// A caller that ignores the reply is not left guessing silently: senders
+		// addressing the channel are refused `NoSuchChannel`. It is the same
+		// answer a channel nobody ever asked for gets, though, so the reply is
+		// the only thing that tells a refused open from a forgotten one.
+		//
+		// @param channel The channel to listen on.
+		// @return The ticket the verdict will carry, or NONE when the world is
+		//         over budget or is a replica.
+		// @since v0.17
+		Ticket OpenChannel(std::string_view channel);
+
+		// Closes a named channel on this world.
+		//
+		// Sends addressed to it afterwards are `NoSuchChannel`. Deliveries
+		// already queued for this barrier are not withdrawn: they were accepted
+		// while the channel was open, and unpicking that would make what a world
+		// received depend on what it did later in the same tick.
+		//
+		// Still a boolean where `OpenChannel` is a ticket, because a close cannot
+		// be refused by anybody: a world giving a channel up needs no permission,
+		// and closing one it never opened is a no-op rather than a failure.
+		//
+		// @param channel The channel to stop listening on.
+		// @return `false` when the world is over budget.
+		// @since v0.17
+		bool CloseChannel(std::string_view channel);
+
+		// Sends a payload to a named channel on a named world, with nobody
+		// attached.
+		//
+		// **The addressed route out of a world, which this module did not have.**
+		// `Publish` is a topic fan-out - the sender does not know or care who is
+		// listening, which is right for "the boss died" and wrong for "world B,
+		// here is the score you asked for". `Teleport` is the only other
+		// operation that names a world and it moves a *person*, so a game wanting
+		// to say something to one particular world had to either broadcast it to
+		// everybody or teleport a player carrying it.
+		//
+		// **The channel is half the address, and v0.15's cut had only the other
+		// half.** One unnamed pipe per world pair meant every receiver in the
+		// destination saw everything the pair exchanged, so two subsystems talking
+		// between the same two worlds read each other's traffic and had to tell it
+		// apart by looking inside the payload. Naming the channel puts that
+		// distinction where the bus can enforce it.
+		//
+		// **No entity crosses, exactly as with a teleport**, and for the same
+		// reason: rule 3 says nothing crossing a world boundary is a pointer, and
+		// two worlds must not have to agree on class versions to talk.
+		//
+		// **Every refusal is a `BusStatus` on the reply rather than silence.** A
+		// publish with no subscribers is a quiet afternoon; a message addressed to
+		// a name nothing answers to is a mistake the sender wants told about, and
+		// being able to tell the difference is half the reason this exists beside
+		// `Publish`. `BusStatus` carries the table of what each case answers.
+		//
+		// The delivery arrives with `Bus == BusKind::Channel`, `Key` set to the
+		// channel and `From` to the sender - a channel is the one route where
+		// answering is the point, and the destination already knows it is itself.
+		//
+		// @param world   The destination world's name.
+		// @param channel The channel on it, which that world must have opened.
+		// @param payload The bytes to send.
+		// @return The ticket the reply will carry, or NONE when over budget.
+		// @since v0.15
+		Ticket SendTo(std::string_view world, std::string_view channel, std::span<const std::byte> payload);
+
 		// Reports whether this world is a replica, and so may not write.
 		//
 		// @return `true` when bus writes are refused.
@@ -224,13 +312,18 @@ namespace engine::world {
 
 	  private:
 		// Queues an envelope, or reports that the budget is spent.
+		//
+		// `target` is the destination world and only a channel send has one, so
+		// it is last and defaulted rather than sitting beside `key` - the two are
+		// both `core::Name` and adjacent is where a positional call swaps them.
 		Ticket Post(
 			BusKind bus,
 			BusOperation operation,
 			core::Name key,
 			std::span<const std::byte> payload,
 			uint64_t version,
-			bool wantsReply
+			bool wantsReply,
+			core::Name target = {}
 		);
 
 		ecs::Store *Store_;
@@ -239,7 +332,7 @@ namespace engine::world {
 	// Registers the mailbox resource types with serialisers of their own.
 	//
 	// An outbox holds a vector and a `core::Name`, neither of which survives
-	// being written as its object representation — the vector is a pointer and
+	// being written as its object representation - the vector is a pointer and
 	// the name is a process-local id. Called once at startup by whatever builds
 	// a universe.
 	void RegisterMailboxTypes();

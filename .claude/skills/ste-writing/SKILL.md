@@ -1,11 +1,11 @@
 ---
 name: ste-writing
-description: Rewrite prose (docs, READMEs, PR descriptions, error messages, release notes, comments — never code) into ASD-STE100 Simplified Technical English to remove "AI slop". Use when asked to make writing not sound like AI, make docs clear or plain, enforce a controlled writing style, or write technical documentation that reads human. Two modes — strict (procedures/safety) and STE-flavored (general prose).
+description: Rewrite prose (docs, READMEs, PR descriptions, error messages, release notes, comments - never code) into ASD-STE100 Simplified Technical English to remove "AI slop". Use when asked to make writing not sound like AI, make docs clear or plain, enforce a controlled writing style, or write technical documentation that reads human. Two modes - strict (procedures/safety) and STE-flavored (general prose).
 ---
 
 # ste-writing
 
-Write prose in ASD-STE100 Simplified Technical English. This applies to documentation, READMEs, pull-request text, error messages, release notes, and comments. It does not apply to code, identifiers, or command syntax. It is not for marketing copy, essays, or anything that needs a voice — STE strips voice on purpose.
+Write prose in ASD-STE100 Simplified Technical English. This applies to documentation, READMEs, pull-request text, error messages, release notes, and comments. It does not apply to code, identifiers, or command syntax. It is not for marketing copy, essays, or anything that needs a voice - STE strips voice on purpose.
 
 ## Rules
 
@@ -27,7 +27,7 @@ SENTENCES
 - No contractions. Use articles: a, an, the, this, these.
 
 PUNCTUATION
-- No semicolons. Write two sentences. (Note: the em dash is not banned by STE, only the semicolon is — add "no em dash" yourself if you want it gone.)
+- No semicolons. Write two sentences. (Note: the em dash is not banned by STE, only the semicolon is - add "no em dash" yourself if you want it gone.)
 
 STRUCTURE
 - One topic per paragraph, max six sentences. For steps, use a numbered vertical list, one action per item, imperative form. Put a condition before its command.
@@ -36,8 +36,8 @@ Write only the requested text. No preamble, no summary, no closing remarks.
 
 ## Modes
 
-- **strict** — procedures, runbooks, safety text, error messages: apply every rule and both length caps.
-- **STE-flavored** — general prose (READMEs, PR descriptions, docs): apply the sentence, paragraph, active-voice, and no-phrasal-verb discipline; relax the ~900-word dictionary lockdown so the text keeps enough range to read naturally.
+- **strict** - procedures, runbooks, safety text, error messages: apply every rule and both length caps.
+- **STE-flavored** - general prose (READMEs, PR descriptions, docs): apply the sentence, paragraph, active-voice, and no-phrasal-verb discipline; relax the ~900-word dictionary lockdown so the text keeps enough range to read naturally.
 
 ## Self-lint (run before returning text)
 
@@ -48,6 +48,6 @@ Write only the requested text. No preamble, no summary, no closing remarks.
 5. Any "-ing" main verb, nominalization ("perform an analysis"), or phrasal verb ("spin up")? Replace with a plain verb.
 6. Same thing named two ways? Pick one name.
 
-The mechanical rules above are lintable and are what removes slop. Full STE also needs human judgment (the right technical noun, whether a sentence "makes good sense") — a checker cannot certify that, and slop is not about that. This skill fixes the FORM of slop. It cannot make a hollow paragraph true.
+The mechanical rules above are lintable and are what removes slop. Full STE also needs human judgment (the right technical noun, whether a sentence "makes good sense") - a checker cannot certify that, and slop is not about that. This skill fixes the FORM of slop. It cannot make a hollow paragraph true.
 
 Free official standard (do not paste it in full; it is copyrighted): https://asd-ste100.org

@@ -6,8 +6,8 @@
 
 // RIFF/WAV, parsed defensively.
 //
-// The format is a chain of length-prefixed chunks — a list of numbers telling a
-// parser how far to jump — so the whole of the safety here is that **no length
+// The format is a chain of length-prefixed chunks - a list of numbers telling a
+// parser how far to jump - so the whole of the safety here is that **no length
 // is acted on before it is checked against what actually arrived**. Every
 // refusal below returns nothing rather than a shorter sound, because a shorter
 // sound plays and a refusal does not.
@@ -79,7 +79,7 @@ namespace engine::audio {
 				const size_t at = index * bytesPerSample;
 				switch (format.BitsPerSample) {
 				case 8:
-					// Unsigned, centred on 128 — the one encoding in this
+					// Unsigned, centred on 128 - the one encoding in this
 					// format that is not signed, and forgetting it is a
 					// full-scale DC offset rather than a subtle error.
 					samples[index] = (static_cast<float>(static_cast<uint8_t>(data[at])) - 128.0f) / 128.0f;
@@ -188,7 +188,7 @@ namespace engine::audio {
 			const size_t advance = declared + (declared % 2);
 			if (advance > bytes.size() - body) {
 				// The pad byte would be past the end. The file ends here
-				// legitimately, so stop rather than refuse — what has been
+				// legitimately, so stop rather than refuse - what has been
 				// collected is checked below.
 				break;
 			}

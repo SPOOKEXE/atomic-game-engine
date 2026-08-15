@@ -10,6 +10,7 @@
 // The rest is the multiplayer case that has no other check: two players in one
 // world, and a keyboard that must reach exactly one of them.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Characters.hpp>
@@ -24,6 +25,8 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <vector>
 
 TEST_SUITE_ID("engine.scene.characters")
 TEST_DEPENDS("engine.scene.part")
@@ -57,6 +60,7 @@ using engine::scene::PlayerCharacter;
 using engine::scene::PoseCharacters;
 using engine::scene::RemoveCharacter;
 using engine::scene::SetPlayerCharacter;
+using engine::scene::TakeDamage;
 using engine::scene::Transform;
 using engine::scene::UpdateCharacterControl;
 
@@ -83,6 +87,15 @@ namespace {
 	// the contract rather than an implementation detail.
 	Entity Limb(Store &store, Entity model, std::string_view name) {
 		return store.FindFirstChild(model, name);
+	}
+
+	// How many children a container holds. `Store::HasChildren` answers whether
+	// there are any and nothing in the engine needs the number, so the walk is
+	// here rather than in a public header.
+	size_t Children(const Store &store, Entity container) {
+		size_t found = 0;
+		store.EachChild(container, [&](Entity) { found++; });
+		return found;
 	}
 }
 
@@ -154,7 +167,7 @@ TEST_CASE("limbs follow the root and nothing else does", "[scene][characters]") 
 	// Move the body, as the solver would.
 	store.Set(character->Root, Transform{CFrame(Vector3{100.0f, 20.0f, -3.0f})});
 
-	// Six limbs and the model itself — the model carries a limb row with an
+	// Six limbs and the model itself - the model carries a limb row with an
 	// identity offset so that its own placement does not stay behind.
 	CHECK(PoseCharacters(store) == 7);
 
@@ -164,7 +177,7 @@ TEST_CASE("limbs follow the root and nothing else does", "[scene][characters]") 
 	CHECK(store.Get<Transform>(model)->Frame.Position.Y == Approx(20.0f));
 
 	// A root that has gone leaves its limbs where they fell rather than
-	// collapsing them onto the origin — a pile where it died beats a pile at
+	// collapsing them onto the origin - a pile where it died beats a pile at
 	// the world centre.
 	store.DestroyInstance(character->Root);
 	CHECK(PoseCharacters(store) == 0);
@@ -351,7 +364,7 @@ TEST_CASE("a replicated assignment builds the same rig", "[scene][characters]") 
 
 	// **What a client receives: the `PlayerCharacter` row and nothing else
 	// resolved.** `Character` crosses the wire too, but the two arrive as
-	// separate component streams and the frame between them is real — and a
+	// separate component streams and the frame between them is real - and a
 	// client whose `SubmitMove` refuses on that frame sends no keys at all.
 	store.Remove<Character>(model);
 	CHECK(UpdateCharacterControl(store) == 0);
@@ -413,7 +426,7 @@ TEST_CASE("a character does not outlive the player it belongs to", "[scene][char
 	// **The direction `LinkPlayerCharacters` does not cover.** That function
 	// releases a player whose model was destroyed; this is a player destroyed
 	// under a model, and a character is a `Model` under Workspace rather than a
-	// child of the `Player` — so nothing takes it along.
+	// child of the `Player` - so nothing takes it along.
 	//
 	// Only two places ever handled it, and both by hand:
 	// `studio::PlayLink::Stop` and `TeleportService:Teleport` call
@@ -472,4 +485,440 @@ TEST_CASE("an NPC is never collected, because it never had an owner", "[scene][c
 
 	CHECK(engine::scene::ReclaimOrphanedCharacters(store) == 0);
 	CHECK(store.Alive(npc));
+}
+
+TEST_CASE("every spawn re-copies the character scripts and refills the backpack", "[scene][characters]") {
+	// **Two spawns, because one passes against code that only ever runs the
+	// pipeline once.** The whole point of the `Starter*` split is *when* each
+	// container is copied: `StarterPlayerScripts` and `StarterPack` land at the
+	// join and never again, and `StarterCharacterScripts` and `StarterGear` land
+	// on every life.
+	World world;
+	Store &store = world.Store_;
+
+	const auto plain = engine::ecs::Classes::Find(engine::core::Name("Instance"));
+	const Entity starterPlayer = store.FindFirstRoot("StarterPlayer");
+	const Entity characterScripts = store.FindFirstChild(starterPlayer, "StarterCharacterScripts");
+	const Entity playerScripts = store.FindFirstChild(starterPlayer, "StarterPlayerScripts");
+	const Entity pack = store.FindFirstRoot("StarterPack");
+	REQUIRE(characterScripts != NULL_ENTITY);
+
+	store.SetParent(store.CreateInstance(plain, "Animate"), characterScripts);
+	store.SetParent(store.CreateInstance(plain, "CameraScript"), playerScripts);
+	store.SetParent(store.CreateInstance(plain, "Sword"), pack);
+
+	const Entity player = AddPlayer(store, "Runner");
+	REQUIRE(player != NULL_ENTITY);
+
+	const Entity backpack = store.FindFirstChild(player, engine::scene::BACKPACK_NAME);
+	const Entity gear = store.FindFirstChild(player, engine::scene::STARTER_GEAR_NAME);
+	const Entity scripts = store.FindFirstChild(player, engine::scene::PLAYER_SCRIPTS_NAME);
+	REQUIRE(backpack != NULL_ENTITY);
+
+	// --- first life -------------------------------------------------------
+	const Entity firstBody = LoadCharacter(store, player);
+	REQUIRE(firstBody != NULL_ENTITY);
+	CHECK(store.FindFirstChild(firstBody, "Animate") != NULL_ENTITY);
+	CHECK(Children(store, backpack) == 1);
+	CHECK(store.FindFirstChild(backpack, "Sword") != NULL_ENTITY);
+
+	// **Gear a game grants at run time goes in `StarterGear`**, which is the
+	// container that survives - and something dropped straight into `Backpack`
+	// is the one that does not. Both are set up here and checked after the
+	// second spawn.
+	store.SetParent(store.CreateInstance(plain, "Torch"), gear);
+	store.SetParent(store.CreateInstance(plain, "Rubbish"), backpack);
+	CHECK(Children(store, backpack) == 2);
+
+	// --- second life ------------------------------------------------------
+	const Entity secondBody = LoadCharacter(store, player);
+	REQUIRE(secondBody != NULL_ENTITY);
+	CHECK(secondBody != firstBody);
+
+	// The new body has its own copy of the character script - not the old
+	// body's, which went with it.
+	const Entity animate = store.FindFirstChild(secondBody, "Animate");
+	REQUIRE(animate != NULL_ENTITY);
+	CHECK(animate != store.FindFirstChild(characterScripts, "Animate"));
+
+	// Emptied and refilled from `StarterGear`: the granted torch is there, the
+	// rubbish is not.
+	CHECK(Children(store, backpack) == 2);
+	CHECK(store.FindFirstChild(backpack, "Sword") != NULL_ENTITY);
+	CHECK(store.FindFirstChild(backpack, "Torch") != NULL_ENTITY);
+	CHECK(store.FindFirstChild(backpack, "Rubbish") == NULL_ENTITY);
+
+	// **And the join's two copies were not made again**, which is the half a
+	// one-spawn test cannot see: a second `CameraScript` would mean the client's
+	// own code ran twice, and a second `Sword` would mean gear doubling per
+	// death.
+	CHECK(Children(store, scripts) == 1);
+	CHECK(Children(store, gear) == 2);
+}
+
+TEST_CASE("a respawn waits exactly RespawnTime and then repeats", "[scene][characters]") {
+	// **Two full cycles, because one passes against a pass that fires once.**
+	// The deadline is a tick number computed from the fixed delta, so the same
+	// world respawns on the same tick whatever machine ran it.
+	World world;
+	Store &store = world.Store_;
+
+	auto *settings =
+		store.GetMutable<engine::scene::PlayersServiceComponent>(engine::scene::PlayersOf(store));
+	REQUIRE(settings != nullptr);
+	settings->RespawnTime = 0.5f;
+
+	const Entity player = AddPlayer(store, "Faller");
+	REQUIRE(player != NULL_ENTITY);
+
+	std::vector<Entity> spawned;
+
+	// **The first pass is the initial spawn**, because a player with no
+	// character and auto-loading on is a player waiting for one - which is the
+	// same rule a death goes through rather than a second one beside it.
+	const auto advance = [&](size_t ticks) {
+		size_t made = 0;
+		for (size_t index = 0; index < ticks; index++) {
+			store.AdvanceTick(1.0f / 60.0f);
+			(void)LinkPlayerCharacters(store);
+			made += engine::scene::UpdateRespawns(store, spawned);
+		}
+		return made;
+	};
+
+	// **The first pass notices and schedules; the deadline is thirty ticks
+	// after that**, because half a second at sixty hertz is thirty ticks and
+	// `ceil` is computed from the tick the wait began on. So thirty passes are
+	// not enough and the thirty-first is.
+	CHECK(advance(30) == 0);
+	CHECK(CharacterOf(store, player) == NULL_ENTITY);
+
+	REQUIRE(advance(1) == 1);
+	const Entity firstBody = CharacterOf(store, player);
+	REQUIRE(firstBody != NULL_ENTITY);
+	CHECK(spawned.size() == 1);
+	CHECK(spawned.front() == player);
+
+	// **A living player is never waiting**, so the pass is idle for as long as
+	// the body is there. A version that rescheduled would respawn somebody who
+	// had not died.
+	CHECK(advance(120) == 0);
+	CHECK(CharacterOf(store, player) == firstBody);
+
+	// --- and around again -------------------------------------------------
+	store.DestroyInstance(firstBody);
+
+	CHECK(advance(30) == 0);
+	CHECK(CharacterOf(store, player) == NULL_ENTITY);
+
+	REQUIRE(advance(1) == 1);
+	const Entity secondBody = CharacterOf(store, player);
+	REQUIRE(secondBody != NULL_ENTITY);
+	CHECK(secondBody != firstBody);
+
+	// **And the flag stops it.** A lobby sets this and spawns its occupants
+	// itself; a pass that ignored it would hand everybody a body the game then
+	// has to destroy.
+	store.GetMutable<engine::scene::PlayersServiceComponent>(engine::scene::PlayersOf(store))
+		->CharacterAutoLoads = false;
+	store.DestroyInstance(secondBody);
+	CHECK(advance(240) == 0);
+	CHECK(CharacterOf(store, player) == NULL_ENTITY);
+}
+
+TEST_CASE("a character dies at zero, waits where it fell, and is replaced", "[scene][characters]") {
+	// **`docs/retired/DEFERRED.md` D00121's whole subject.** Until v0.15 a character
+	// died by being *destroyed* and the respawn clock started from the tick a
+	// player was first seen with no model - Roblox's delay with Roblox's trigger
+	// missing. This is the trigger: health reaches zero, the body stays where it
+	// fell for `Player.RespawnTime`, and only then is it removed and replaced.
+	World world;
+	Store &store = world.Store_;
+
+	auto *settings =
+		store.GetMutable<engine::scene::PlayersServiceComponent>(engine::scene::PlayersOf(store));
+	REQUIRE(settings != nullptr);
+	settings->RespawnTime = 0.5f;
+
+	const Entity player = AddPlayer(store, "Victim");
+	const Entity body = LoadCharacter(store, player);
+	REQUIRE(body != NULL_ENTITY);
+
+	const Entity humanoid = store.Get<Character>(body)->Humanoid;
+	REQUIRE(store.Get<Humanoid>(humanoid)->Health == Approx(100.0f));
+
+	std::vector<Entity> spawned;
+	const auto advance = [&](size_t ticks) {
+		size_t made = 0;
+		for (size_t index = 0; index < ticks; index++) {
+			store.AdvanceTick(1.0f / 60.0f);
+			(void)LinkPlayerCharacters(store);
+			made += engine::scene::UpdateRespawns(store, spawned);
+		}
+		return made;
+	};
+
+	// **Three hits report nothing and the fourth reports the death.** The return
+	// is "this call killed it" rather than the health left, because that is the
+	// fact a caller cannot derive from a number it reads afterwards.
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(50.0f));
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	REQUIRE(TakeDamage(store, humanoid, 25.0f));
+
+	// **And the fifth kills nobody**, which is what makes a death happen once
+	// without a flag on the row: two hits landing in one tick would otherwise
+	// each read zero as a fresh death.
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(0.0f));
+
+	// Nothing is destroyed by dying. The body is still the player's, and a
+	// version that removed it here would be the old rule wearing a new name.
+	CHECK(store.Alive(body));
+	CHECK(CharacterOf(store, player) == body);
+
+	// **Thirty ticks of half a second is not yet half a second**, for the reason
+	// the respawn case above gives: the deadline is `ceil(seconds / delta)` from
+	// the tick the wait was noticed on, so the thirty-first is the one.
+	CHECK(advance(30) == 0);
+	CHECK(store.Alive(body));
+	CHECK(CharacterOf(store, player) == body);
+
+	REQUIRE(advance(1) == 1);
+	const Entity replacement = CharacterOf(store, player);
+	REQUIRE(replacement != NULL_ENTITY);
+	CHECK(replacement != body);
+	CHECK_FALSE(store.Alive(body));
+
+	// A new body is a whole one, which is `MakeCharacter`'s default rather than
+	// anything the respawn had to remember.
+	const Entity fresh = store.Get<Character>(replacement)->Humanoid;
+	CHECK(store.Get<Humanoid>(fresh)->Health == Approx(100.0f));
+
+	// **And a living player is still never waiting.** The branch that decides
+	// this now asks whether the body has health rather than whether it exists,
+	// so a version that got the polarity wrong would respawn everybody for ever
+	// - and this is what would catch it.
+	CHECK(advance(120) == 0);
+	CHECK(CharacterOf(store, player) == replacement);
+}
+
+TEST_CASE("a replica may not take health off anybody", "[scene][characters]") {
+	// **The authority decision, and it is one rule with two doors.**
+	// `ecs::Store::SetProperty` already refuses every property write in a
+	// replica - that is where this engine answers "who owns a row" - and
+	// `TakeDamage` makes the same refusal for the C++ door. A client holds a
+	// copy of every `scene.Humanoid` in the world, so a client allowed to
+	// subtract from one is a client deciding who died.
+	World world;
+	Store &store = world.Store_;
+
+	const Entity player = AddPlayer(store, "Owned");
+	const Entity body = LoadCharacter(store, player);
+	REQUIRE(body != NULL_ENTITY);
+	const Entity humanoid = store.Get<Character>(body)->Humanoid;
+
+	const engine::ecs::PropertyDescriptor *health = nullptr;
+	for (const auto &property : engine::ecs::Classes::Describe(engine::scene::HumanoidClass()).Properties) {
+		if (property.Name == engine::core::Name("Health")) {
+			health = &property;
+		}
+	}
+
+	// **Writable, deliberately.** Declaring it read-only would have stopped the
+	// *server* script that wants to kill somebody, which is the ordinary way a
+	// game does it - the question is who is asking, not whether the value has a
+	// meaningful assignment.
+	REQUIRE(health != nullptr);
+	REQUIRE(health->Writable);
+
+	store.SetAdoptOnly(true);
+
+	// **Lethal, so the *return* is an assertion too.** A replica allowed to run
+	// this would report the kill as well as taking the health, and a case that
+	// only ever asked for a scratch would pass on the return value whether the
+	// refusal was there or not.
+	CHECK_FALSE(TakeDamage(store, humanoid, 1000.0f));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(100.0f));
+
+	const float wanted = 1000.0f;
+	CHECK_FALSE(store.SetProperty(humanoid, *health, &wanted, sizeof(float)));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(100.0f));
+
+	// The same two calls against the authority, so the refusal above is about
+	// the world and not about the arguments.
+	store.SetAdoptOnly(false);
+	CHECK_FALSE(TakeDamage(store, humanoid, 25.0f));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(75.0f));
+	CHECK(store.SetProperty(humanoid, *health, &wanted, sizeof(float)));
+}
+
+TEST_CASE("health and its ceiling are clamped against each other", "[scene][characters]") {
+	// **What gives `MaxHealth` a reader inside the engine.** A property nothing
+	// here consults is the objection D00119 held a whole class back for, so the
+	// ceiling means something rather than only decorating whatever bar a game
+	// draws: `Health` clamps against it, and lowering it pulls the health down.
+	World world;
+	Store &store = world.Store_;
+
+	const Entity model = MakeCharacter(store, CharacterDesc{});
+	const Entity humanoid = store.Get<Character>(model)->Humanoid;
+
+	const auto property = [&](std::string_view name) {
+		const engine::ecs::PropertyDescriptor *found = nullptr;
+		for (const auto &candidate :
+			 engine::ecs::Classes::Describe(engine::scene::HumanoidClass()).Properties) {
+			if (candidate.Name == engine::core::Name(name)) {
+				found = &candidate;
+			}
+		}
+		return found;
+	};
+
+	const engine::ecs::PropertyDescriptor *health = property("Health");
+	const engine::ecs::PropertyDescriptor *ceiling = property("MaxHealth");
+	REQUIRE(health != nullptr);
+	REQUIRE(ceiling != nullptr);
+
+	// Clamped rather than refused, which is `ClampedProperty`'s own argument: a
+	// bar driven off a falling number overshoots at both ends, and a refusal
+	// would leave a character alive on the frame a game meant to kill them.
+	float wanted = 5000.0f;
+	CHECK(health->Set(store, humanoid, &wanted));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(100.0f));
+
+	wanted = -5.0f;
+	CHECK(health->Set(store, humanoid, &wanted));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(0.0f));
+	CHECK(engine::scene::IsDead(*store.Get<Humanoid>(humanoid)));
+
+	wanted = 250.0f;
+	CHECK(ceiling->Set(store, humanoid, &wanted));
+	wanted = 250.0f;
+	CHECK(health->Set(store, humanoid, &wanted));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(250.0f));
+
+	// **The ceiling takes the health down with it**, which is Roblox's rule and
+	// the only one that leaves the two numbers able to agree: without it a
+	// humanoid reports more life than it is allowed to have and nothing can say
+	// which of the two is wrong.
+	wanted = 40.0f;
+	CHECK(ceiling->Set(store, humanoid, &wanted));
+	CHECK(store.Get<Humanoid>(humanoid)->Health == Approx(40.0f));
+
+	float read = 0.0f;
+	CHECK(ceiling->Get(store, humanoid, &read));
+	CHECK(read == Approx(40.0f));
+
+	// A ceiling of zero is a thing that cannot be alive, and it falls out of the
+	// clamp rather than being a second rule.
+	wanted = 0.0f;
+	CHECK(ceiling->Set(store, humanoid, &wanted));
+	CHECK(engine::scene::IsDead(*store.Get<Humanoid>(humanoid)));
+}
+
+TEST_CASE("a wounded character comes back wounded from a file", "[scene][characters]") {
+	// **Health is on `scene.Humanoid`, which is registered with the generated
+	// serialiser** - so this is not a check that somebody wrote a field into a
+	// hand-written pair. It is a check that the two floats went into the object
+	// representation rather than off the end of it: a world saved mid-fight and
+	// reopened at full health would be a save format that quietly discards the
+	// fact the whole entry is about.
+	World world;
+	Store &store = world.Store_;
+
+	const Entity player = AddPlayer(store, "Wounded");
+	const Entity body = LoadCharacter(store, player);
+	REQUIRE(body != NULL_ENTITY);
+	const Entity humanoid = store.Get<Character>(body)->Humanoid;
+
+	REQUIRE_FALSE(TakeDamage(store, humanoid, 30.0f));
+	store.GetMutable<Humanoid>(humanoid)->MaxHealth = 120.0f;
+
+	engine::core::ByteWriter writer;
+	REQUIRE(store.Save(writer));
+
+	Store restored("characters-test.restored");
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+
+	const Humanoid *back = restored.Get<Humanoid>(humanoid);
+	REQUIRE(back != nullptr);
+	CHECK(back->Health == Approx(70.0f));
+	CHECK(back->MaxHealth == Approx(120.0f));
+	CHECK_FALSE(engine::scene::IsDead(*back));
+}
+
+TEST_CASE("a character arriving and leaving is recorded once, in order", "[scene][characters]") {
+	// **What `Player.CharacterAdded` and `CharacterRemoving` are built on, and
+	// the queue deliberately does not carry all of it.** `scene` is L7 and a
+	// signal is L9, so the transitions are written down here and whoever owns a
+	// scripting layer drains them - the same split `ecs::Store::TakeTreeChanges`
+	// is on.
+	//
+	// **A body that is *destroyed* is not this queue's to report.** Dying in this
+	// engine is being destroyed, so a queue drained a tick later would hand a
+	// handler a model it cannot read a property off - `script` fires
+	// `CharacterRemoving` from `Store::OnDescendantRemoving` instead, while the
+	// model is still whole. What is left here is the release that did not
+	// destroy, which is `player.Character = nil`.
+	World world;
+	Store &store = world.Store_;
+
+	const Entity player = AddPlayer(store, "Recorded");
+	REQUIRE(player != NULL_ENTITY);
+
+	std::vector<engine::scene::CharacterChange> changes;
+	engine::scene::TakeCharacterChanges(store, changes);
+	CHECK(changes.empty());
+
+	const Entity firstBody = LoadCharacter(store, player);
+	REQUIRE(firstBody != NULL_ENTITY);
+
+	engine::scene::TakeCharacterChanges(store, changes);
+	REQUIRE(changes.size() == 1);
+	CHECK(changes[0].Added);
+	CHECK(changes[0].Player == player);
+	CHECK(changes[0].Character == firstBody);
+
+	// **Drained, not read**, so a handler that respawns somebody records into an
+	// empty list rather than appending to the one being walked.
+	engine::scene::TakeCharacterChanges(store, changes);
+	CHECK(changes.empty());
+
+	// **A release that keeps the body is the one departure this queue carries**,
+	// and the model is deliberately still alive afterwards - Roblox's
+	// `player.Character = nil` does not destroy anything either.
+	REQUIRE(SetPlayerCharacter(store, player, NULL_ENTITY));
+	CHECK(store.Alive(firstBody));
+
+	engine::scene::TakeCharacterChanges(store, changes);
+	REQUIRE(changes.size() == 1);
+	CHECK_FALSE(changes[0].Added);
+	CHECK(changes[0].Character == firstBody);
+
+	// **A respawn over a live body records the arrival and nothing else.** The
+	// old model is destroyed, which is the hook's to report; a version that
+	// queued it as well would fire twice in the language bindings.
+	const Entity secondBody = LoadCharacter(store, player);
+	REQUIRE(secondBody != NULL_ENTITY);
+	const Entity thirdBody = LoadCharacter(store, player);
+	REQUIRE(thirdBody != NULL_ENTITY);
+	CHECK_FALSE(store.Alive(secondBody));
+
+	engine::scene::TakeCharacterChanges(store, changes);
+	REQUIRE(changes.size() == 2);
+	CHECK(changes[0].Added);
+	CHECK(changes[0].Character == secondBody);
+	CHECK(changes[1].Added);
+	CHECK(changes[1].Character == thirdBody);
+
+	// **Re-linking the body a player already holds records nothing**, which is
+	// what makes `LinkPlayerCharacters` cheap to run every tick - a version that
+	// recorded would fire `CharacterAdded` once per tick for ever.
+	CHECK(SetPlayerCharacter(store, player, thirdBody));
+	(void)LinkPlayerCharacters(store);
+	engine::scene::TakeCharacterChanges(store, changes);
+	CHECK(changes.empty());
 }

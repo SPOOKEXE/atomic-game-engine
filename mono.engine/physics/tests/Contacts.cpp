@@ -79,7 +79,7 @@ TEST_CASE("a manifold and an event name their bodies the same way round", "[phys
 
 TEST_CASE("contact types stay trivially copyable", "[physics][contacts]") {
 	// The lists are cleared and refilled every tick, and a manifold that grew a
-	// vector of points would allocate per contact per tick — the exact shape
+	// vector of points would allocate per contact per tick - the exact shape
 	// `v02v03v04.md`'s allocation table refuses. A fixed array is what makes
 	// "cleared, not freed" true of the manifold list and not only of the
 	// pointer inside it.

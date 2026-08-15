@@ -42,7 +42,7 @@ namespace {
 }
 
 TEST_CASE("every leaf proves against the root", "[assets][hashtree]") {
-	// Odd and even counts, powers of two and the awkward sizes between them —
+	// Odd and even counts, powers of two and the awkward sizes between them -
 	// promotion of the odd node out only happens at some of these, and it is
 	// the case a tree implementation gets wrong.
 	for (const size_t count : {1u, 2u, 3u, 4u, 5u, 7u, 8u, 9u, 16u, 17u, 100u, 129u}) {
@@ -68,7 +68,7 @@ TEST_CASE("a wrong leaf does not verify", "[assets][hashtree]") {
 	CHECK(HashTree::Verify(leaves[3], 3, 9, proof, tree.Root()));
 
 	// The whole point: a client holding a root will not accept bytes that do
-	// not hash into it. CDN.md §1 — a compromised origin may withhold content,
+	// not hash into it. CDN.md §1 - a compromised origin may withhold content,
 	// never substitute it.
 	CHECK_FALSE(HashTree::Verify(Leaf(999), 3, 9, proof, tree.Root()));
 	CHECK_FALSE(HashTree::Verify(leaves[4], 3, 9, proof, tree.Root()));
@@ -118,7 +118,7 @@ TEST_CASE("the leaf count is part of what the root commits to", "[assets][hashtr
 	const HashTree tree = HashTree::Build(leaves);
 
 	// Claiming a different shape fails even with a genuine leaf and a genuine
-	// path. This is what makes a subtree unusable as a whole tree — the hole
+	// path. This is what makes a subtree unusable as a whole tree - the hole
 	// that promotion of an odd node would otherwise leave open.
 	CHECK_FALSE(HashTree::Verify(leaves[0], 0, 7, tree.Proof(0), tree.Root()));
 	CHECK_FALSE(HashTree::Verify(leaves[0], 0, 9, tree.Proof(0), tree.Root()));

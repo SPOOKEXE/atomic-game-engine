@@ -1,4 +1,4 @@
-# delivery — module invariants
+# delivery - module invariants
 
 L11 `shared`. Getting content from wherever it is to whoever asked for it: the
 source list, the local cache, the group codec and the fetch path. `CDN.md` is
@@ -9,7 +9,7 @@ the design; this file is what a reviewer should refuse.
 `repo_layout.md` §5.2 files "remote fetch" under `assets` at L8. **That cannot
 be built.** Fetching needs a transport, the transport is `net` at L11, and rule
 1 says a layer may see every layer below it and none above it. `assets/AGENTS.md`
-reaches the same conclusion from the other side — *there is no network in this
+reaches the same conclusion from the other side - *there is no network in this
 module and there will not be*.
 
 So the fetch path sits above both, and `assets` stays the format. If §5.2 is
@@ -38,7 +38,7 @@ thread. There is `Pump`, and a world calls it at the barrier.
 them is a way for content to arrive at a moment scheduling decided, and the
 failure is a desync that reproduces on one machine in ten.
 
-The origin side is the opposite and is allowed to be — CDN.md §3, and the reason
+The origin side is the opposite and is allowed to be - CDN.md §3, and the reason
 is that an origin has no tick.
 
 ## The client trusts the manifest, not the origin
@@ -49,7 +49,7 @@ Three checks, in this order, and the order is not negotiable:
    else happens until this passes, because everything below is checked *against*
    the manifest and an unverified manifest checks nothing.
 2. **A group's decompressed length**, against what the signed manifest records
-   that bundle weighs. Sized from the manifest and **never** from the frame — a
+   that bundle weighs. Sized from the manifest and **never** from the frame - a
    frame header can claim any size, so believing it is a decompression bomb.
 3. **Every asset cut out of that group**, against its root.
 
@@ -66,7 +66,7 @@ is invisible until somebody is serving content the publisher did not write.
 
 An asset root is a **tree over chunk hashes**, not the digest of its content. So
 `Hasher::Of(bytes) == asset.Root` is wrong for every asset cut into more than one
-chunk and *right by coincidence* for some that were not — the worst shape a check
+chunk and *right by coincidence* for some that were not - the worst shape a check
 can have, because it passes in the small case somebody tests with.
 
 That mistake was made here once, in `ContentCache`, and it did not fail loudly:
@@ -96,7 +96,7 @@ be pointed at somebody else's bytes.
 `repo_layout.md` §11: *a client that is told to fetch from an arbitrary host is a
 request-forgery primitive.* A source list assembled from anything a server sent
 must fill in `AllowedHosts`, and the check lives with the list rather than at the
-call sites — a call site added later is a call site that forgot.
+call sites - a call site added later is a call site that forgot.
 
 Empty means no restriction, which is right for a list a person typed into their
 own preferences and wrong for one that arrived over a wire. `HostPermitted` is
@@ -112,7 +112,7 @@ configuration.
 
 `GroupCodec` and `Dictionary` moved out of `mono.cdn` at v0.9. An origin
 compresses a group and a game expands one, so a copy on each side is how a format
-acquires a dialect — which `CDN.md` §6 refuses twice for the manifest and which
+acquires a dialect - which `CDN.md` §6 refuses twice for the manifest and which
 applies identically here.
 
 **Chunks stay uncompressed at rest and compression is per group.** Not per file,
@@ -128,7 +128,7 @@ not turn it off to save four bytes a frame.
 
 The unit that travels is a **group**; the unit asked for is an **asset**. Asking
 for one asset fetches the bundle carrying it, and the other members land in the
-cache as a consequence — which is the whole of "the game progressively builds"
+cache as a consequence - which is the whole of "the game progressively builds"
 seen from this end.
 
 A bundle's payload is its member assets concatenated in `BundleEntry::Assets`
@@ -139,8 +139,8 @@ and `ChunkStore::ReadBundle` is the one producer.
 
 ## How much a frame absorbs is a decision, and it is one decision
 
-`Pump` answers in bursts — a scene naming forty meshes gets forty completions in
-the frame the origin catches up — and the expensive part is not taking them. It
+`Pump` answers in bursts - a scene naming forty meshes gets forty completions in
+the frame the origin catches up - and the expensive part is not taking them. It
 is what a caller does next: decoding an `.amesh` and uploading it to the GPU.
 A loop that drains every completed request the moment it notices them spends a
 third of a second in one frame, and an editor stops responding while somebody's
@@ -153,7 +153,7 @@ model set lands.
   them.
 - **Refused is deferred, never dropped.** The caller puts the arrival back in
   its pending list, which is already where a request that has not finished
-  waits — so nothing had to learn a new state.
+  waits - so nothing had to learn a new state.
 - **The first arrival of a frame is always admitted.** An asset larger than the
   whole allowance would otherwise be checked and deferred for ever while the
   thing it belongs to stays invisible. One long frame beats never.
@@ -169,7 +169,7 @@ rule 6 has a name for.
   a texture format and an audio format are the importer's and the subsystem's,
   and `ROADMAP.md` v0.9 carries them. A delivery layer that parsed content would
   be a second place that decides what an asset is.
-- **Issuing grants.** That is the server's — `assets::Grant` issues and
+- **Issuing grants.** That is the server's - `assets::Grant` issues and
   `cdn::Gate` opens. This module carries a token and cannot alter it.
 - **A signing key.** Verification only, which is the `shared`-tier half of the
   split `assets/AGENTS.md` records.

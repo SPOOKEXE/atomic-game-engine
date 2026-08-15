@@ -39,7 +39,7 @@ namespace engine::graph {
 
 			// **Reads checked before writes are recorded**, so a stage cannot
 			// satisfy its own read. A pass that both reads and writes one target
-			// — the transparent pass reading the depth the opaque pass wrote —
+			// - the transparent pass reading the depth the opaque pass wrote -
 			// is expressed as reading what an *earlier* stage wrote, which is
 			// exactly what makes reordering it an error rather than a silence.
 			for (const Attachment &read : stage.Reads) {
@@ -62,7 +62,7 @@ namespace engine::graph {
 
 		// **Shadows first, and that is the whole reason the order is data.** The
 		// colour pass samples the shadow map, so the map has to exist before it
-		// runs — and moving this line below the next one is not a crash on a
+		// runs - and moving this line below the next one is not a crash on a
 		// GPU, it is a frame lit by whatever was in that memory. `Validate` is
 		// what turns that into an error somebody can read.
 		//
@@ -79,7 +79,7 @@ namespace engine::graph {
 		);
 
 		// **The surface pass, between the shadow map and the screen.** A second
-		// view rendered into a texture, which a mirror samples a frame later —
+		// view rendered into a texture, which a mirror samples a frame later -
 		// so it reads the shadow map and writes a target nothing else does.
 		//
 		// Per light rather than per view for the same reason the shadow pass is:

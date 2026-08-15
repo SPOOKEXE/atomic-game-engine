@@ -92,7 +92,7 @@ TEST_CASE("the fit does not change size as the light turns", "[graph][shadow]") 
 
 	// **The matrix's own scale, not the separation of two world points.** Two
 	// points along world X foreshorten as the light turns away from them, so
-	// their clip-space distance moves even when the map does not — the first
+	// their clip-space distance moves even when the map does not - the first
 	// version of this test measured that and failed for the right reason.
 	//
 	// What is actually invariant is the extent the projection maps to the clip
@@ -117,7 +117,7 @@ TEST_CASE("the fit does not change size as the light turns", "[graph][shadow]") 
 
 TEST_CASE("a light straight down does not produce NaN", "[graph][shadow]") {
 	// The ordinary case for a sun, and the one where a naive `lookAt` has its
-	// up vector parallel to its forward — which produces a matrix full of NaN
+	// up vector parallel to its forward - which produces a matrix full of NaN
 	// rather than an error, and a scene that renders black with nothing in the
 	// log.
 	const glm::mat4 light =
@@ -165,8 +165,8 @@ TEST_CASE("the bounds of a draw list cover every instance", "[graph][shadow]") {
 }
 
 TEST_CASE("an empty draw list gives a unit box rather than an inverted one", "[graph][shadow]") {
-	// Nothing here accumulates from an empty sentinel — `AABB.hpp` says so and
-	// says why — and a light fitted to an inverted box frames nothing.
+	// Nothing here accumulates from an empty sentinel - `AABB.hpp` says so and
+	// says why - and a light fitted to an inverted box frames nothing.
 	const AABB bounds = BoundsOfAll({});
 
 	CHECK(bounds.Minimum.X <= bounds.Maximum.X);

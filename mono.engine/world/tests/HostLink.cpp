@@ -1,7 +1,7 @@
 // The protocol between a driver and a supervised host.
 //
 // Driven over a local channel rather than a real process. What a second process
-// adds — a socket, a partial write, an exec — is `parallel`'s to test and it
+// adds - a socket, a partial write, an exec - is `parallel`'s to test and it
 // does; what is left here is the protocol itself, which is the part that has to
 // be right whichever transport is underneath.
 

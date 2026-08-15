@@ -4,6 +4,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -41,7 +42,7 @@ namespace engine::script {
 			property.Name = core::Name(name);
 			// **`Name`, not `String`.** `Classes::TypeOf` maps a `core::Name`
 			// field to `PropertyType::Name`, and every caller sizes its buffer
-			// from the type — a descriptor claiming `String` is handed a
+			// from the type - a descriptor claiming `String` is handed a
 			// `std::string` and refused by the size check, silently, which is a
 			// property that reads as absent everywhere: no panel row, and
 			// nothing written to a game file.
@@ -50,7 +51,7 @@ namespace engine::script {
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Container>()});
 			property.Writes = property.Reads;
 
-			// **Not scriptable** — `LuaSourceContainer` carries the argument.
+			// **Not scriptable** - `LuaSourceContainer` carries the argument.
 			property.Scriptable = false;
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
@@ -83,7 +84,7 @@ namespace engine::script {
 			property.Name = core::Name("Source");
 			// **`Name`, not `String`.** `Classes::TypeOf` maps a `core::Name`
 			// field to `PropertyType::Name`, and every caller sizes its buffer
-			// from the type — a descriptor claiming `String` is handed a
+			// from the type - a descriptor claiming `String` is handed a
 			// `std::string` and refused by the size check, silently, which is a
 			// property that reads as absent everywhere: no panel row, and
 			// nothing written to a game file.
@@ -119,8 +120,7 @@ namespace engine::script {
 			property.Type = ecs::PropertyType::Enum;
 			property.Size = sizeof(core::Name);
 			property.EnumName = LanguageEnum();
-			property.Reads =
-				&ecs::ComponentSet::Intern({ecs::Components::Of<CodeSourceContainerSelector>()});
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<CodeSourceContainerSelector>()});
 			property.Writes = property.Reads;
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
@@ -185,14 +185,14 @@ namespace engine::script {
 		ecs::ClassId RegisterScriptClasses() {
 			// **Through `scene::PartClass` rather than registering `Instance`
 			// again.** A script is an instance, so it derives from the same root
-			// every other class does — and `Classes::Register` returning the
+			// every other class does - and `Classes::Register` returning the
 			// existing id for a repeated name would have hidden a second root
 			// rather than prevented one.
 			scene::EnsureClassTree();
 
 			// Through the one function, so a caller that registers the class
 			// tree cannot end up with a `SourceCache` the snapshot writer
-			// refuses — a resource keyed by an unregistered type is minted
+			// refuses - a resource keyed by an unregistered type is minted
 			// under the compiler's spelling and aborts once the table is
 			// sealed, which is a crash at the first world rather than at the
 			// line that caused it.
@@ -208,7 +208,7 @@ namespace engine::script {
 			// **The Luau container is in the class set and the JavaScript one is
 			// not.** A world of Luau scripts should pay for one column, not two,
 			// and `SetSourcePath` adds the other the moment a `.js` path is put
-			// on an instance — the same trade `RigidBody` makes by being absent
+			// on an instance - the same trade `RigidBody` makes by being absent
 			// from `BasePart`.
 			const std::array source{ecs::Components::Of<LuaSourceContainer>()};
 			const ecs::ClassId container = ecs::Classes::Register("LuaSourceContainer", instance, source);
@@ -237,7 +237,7 @@ namespace engine::script {
 			// **None of the three source paths is scriptable.** A script that
 			// could write another script's source is the sandbox escape that
 			// makes the step budget, the memory ceiling and the host role
-			// decorative — `LuaSourceContainer` carries the argument. The
+			// decorative - `LuaSourceContainer` carries the argument. The
 			// properties panel, a game file and the Rojo sync all still write
 			// them, because they are the author rather than the program.
 			ecs::Classes::Computed(container, SourceProperty());
@@ -247,8 +247,8 @@ namespace engine::script {
 			);
 
 			// **And the one part of it a script may set.** Which language an
-			// instance runs is a decision a game can legitimately make — a mod
-			// swapping an implementation, a test running one behaviour twice —
+			// instance runs is a decision a game can legitimately make - a mod
+			// swapping an implementation, a test running one behaviour twice -
 			// and none of it requires reading a line of anybody's source.
 			ecs::Classes::Computed(container, LanguageProperty());
 
@@ -269,10 +269,9 @@ namespace engine::script {
 
 	Language ActiveLanguageOf(const ecs::Store &store, ecs::Entity instance) {
 		// **No selector means Luau**, which is what every script in this engine
-		// was before there were two — so a world loaded from an older file runs
+		// was before there were two - so a world loaded from an older file runs
 		// exactly as it did.
-		const CodeSourceContainerSelector *selector =
-			store.Get<CodeSourceContainerSelector>(instance);
+		const CodeSourceContainerSelector *selector = store.Get<CodeSourceContainerSelector>(instance);
 		return selector != nullptr ? selector->Active : Language::Luau;
 	}
 
@@ -329,11 +328,11 @@ namespace engine::script {
 		std::vector<ecs::Entity> found;
 		// **The Luau container is what every script instance has**, whichever
 		// language it is set to run: it is in the class set, so this walk finds
-		// a JavaScript script too — and `ActiveSourceOf` is what decides what
+		// a JavaScript script too - and `ActiveSourceOf` is what decides what
 		// each one actually runs.
 		store.Each<const LuaSourceContainer>([&](ecs::Entity entity, const LuaSourceContainer &) {
 			// A disabled script is in another archetype, so this query does not
-			// visit one — but the check is here anyway, because `Each` matches
+			// visit one - but the check is here anyway, because `Each` matches
 			// on the container alone and a caller could add the tag to a row
 			// this query already found in the same tick.
 			if (store.Has<Disabled>(entity)) {
@@ -360,6 +359,31 @@ namespace engine::script {
 		std::sort(found.begin(), found.end(), [](ecs::Entity left, ecs::Entity right) {
 			return left.Id < right.Id;
 		});
+		return found;
+	}
+
+	std::vector<ecs::Entity> ClientScriptsIn(ecs::Store &store) {
+		// **The identity first, because without it the answer is "none".** A
+		// client is told which player is its own over the user channel - see
+		// `game::JoinNotice` - and until that arrives there is no "own subtree"
+		// for a script to be in. Running everything in the meantime would run
+		// another player's scripts for the few ticks before the notice lands.
+		const scene::LocalPlayer *viewer = store.Resource<scene::LocalPlayer>();
+		const ecs::Entity self = viewer != nullptr ? viewer->Instance : ecs::NULL_ENTITY;
+
+		std::vector<ecs::Entity> found;
+		for (const ecs::Entity instance : ScriptsIn(store, false, true)) {
+			// Roblox's two containers. `ReplicatedFirst` is everybody's and runs
+			// ahead of the world; a player's own subtree is theirs alone.
+			if (scene::InReplicatedFirst(store, instance)) {
+				found.push_back(instance);
+				continue;
+			}
+
+			if (self != ecs::NULL_ENTITY && scene::PlayerOwning(store, instance) == self) {
+				found.push_back(instance);
+			}
+		}
 		return found;
 	}
 

@@ -2,7 +2,7 @@
 //
 // **The half of a file browser that can be wrong without looking wrong.** Which
 // rows appear, in which order, and what happens when the path is a file, a
-// missing folder or one that cannot be read — none of that is visible in a
+// missing folder or one that cannot be read - none of that is visible in a
 // screenshot of a browser that opened successfully, and all of it decides
 // whether somebody can find their game file.
 
@@ -172,7 +172,7 @@ TEST_CASE("a listing knows its parent, and a root has none", "[studio][browse]")
 	CHECK_FALSE(listing.Parent.empty());
 
 	// At a filesystem root `parent_path()` returns the root again, so a caller
-	// comparing them itself is a caller that will forget to — hence the field.
+	// comparing them itself is a caller that will forget to - hence the field.
 	const Listing top = BrowseDirectory(tree.Root.root_path());
 	CHECK(top.Parent.empty());
 }

@@ -39,7 +39,7 @@ namespace engine::ecs {
 		// Records that one component of one row was written.
 		//
 		// The bit index is the component's position in the table's sorted set,
-		// which is the same position its column sits at — so this is an index
+		// which is the same position its column sits at - so this is an index
 		// the caller already has rather than a second lookup.
 		void MarkWritten(StoreState &state, uint32_t table, uint32_t row, ComponentId id) {
 			if (state.Watched.empty()) {
@@ -144,14 +144,14 @@ namespace engine::ecs {
 		// one**, so the table is reached the way every other resource is at this
 		// layer: by component id out of `ResourceTable`. The alternative was to
 		// hook two `Store` methods instead of one point, and the version that did
-		// that missed `DestroyInstance` — which is the bug this exists to have
+		// that missed `DestroyInstance` - which is the bug this exists to have
 		// fixed rather than a hypothetical.
 		void DropAttributes(StoreState &state, Entity entity) {
 			Column *column = state.Resources.Find(Components::Of<AttributeTable>().Index);
 			if (column == nullptr || column->Size() == 0) {
 				// **The ordinary case, and it has to cost nothing.** A world with
 				// no attributes has no table, and this runs on every destroyed row
-				// of every world — so the miss is one sorted-vector lookup over a
+				// of every world - so the miss is one sorted-vector lookup over a
 				// handful of entries and nothing else.
 				return;
 			}
@@ -176,7 +176,7 @@ namespace engine::ecs {
 		// **Attributes go with the row, because entity ids are reused.** The
 		// table is keyed by id and a freed slot is handed straight to the next
 		// `Create`, so an entry left behind surfaces as somebody else's attribute
-		// on a freshly made part — at a distance of however many entities were
+		// on a freshly made part - at a distance of however many entities were
 		// created in between, which is the worst kind of bug to find.
 		//
 		// **Here rather than in `Store::Destroy`, because that is not the only
@@ -300,7 +300,7 @@ namespace engine::ecs {
 		}
 
 		// A component with no data has no bytes to point at, but present and
-		// absent still have to be distinguishable — so a tag reports the column
+		// absent still have to be distinguishable - so a tag reports the column
 		// itself. Dereferencing it is meaningless for an empty type either way;
 		// what matters is that null means absent.
 		return column->Describe().Size == 0 ? static_cast<const void *>(column) : column->At(location->Row);
@@ -311,7 +311,7 @@ namespace engine::ecs {
 
 		// Handing out a mutable pointer counts as a write. Whether the caller
 		// used it is not knowable from here, and a change reported that did not
-		// happen costs a consumer one wasted rebuild — where a change missed
+		// happen costs a consumer one wasted rebuild - where a change missed
 		// costs it correctness.
 		if (value != nullptr && !state.Watched.empty()) {
 			const EntityId key = EntityId::Of(entity);
@@ -344,7 +344,7 @@ namespace engine::ecs {
 		if (cached != ArchetypeEdges::NO_TABLE) {
 			// Only a transition that produced a table is ever recorded, so a hit
 			// here already means the component was present and something was
-			// left over — both of the checks below have been answered once and
+			// left over - both of the checks below have been answered once and
 			// cannot have changed, because a table's set does not.
 			Relocate(state, key.Index, location, cached);
 			return;

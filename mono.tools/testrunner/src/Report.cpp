@@ -28,8 +28,8 @@ namespace testrunner {
 		}
 
 		// Anything that is not a number reads as zero rather than throwing. The
-		// caller already has a stronger signal — the totals line, and the exit
-		// status behind it — so a malformed field is not worth an exception.
+		// caller already has a stronger signal - the totals line, and the exit
+		// status behind it - so a malformed field is not worth an exception.
 		unsigned long long Number(std::string_view text) {
 			unsigned long long value = 0;
 			for (const char character : text) {
@@ -102,7 +102,7 @@ namespace testrunner {
 				return SuitesGreen == Suites;
 			}
 
-			// Whole per cent, rounded down, and never 100 unless it really is —
+			// Whole per cent, rounded down, and never 100 unless it really is -
 			// a report that rounds 999/1000 up to "100%" is a report that hides
 			// the one thing worth reading.
 			unsigned Percent() const {
@@ -192,7 +192,7 @@ namespace testrunner {
 		// does not keep. Zero would be a claim, and a false one.
 		std::string Slowest(const SuiteReport &suite) {
 			if (suite.Cases.empty()) {
-				return "—";
+				return "-";
 			}
 
 			unsigned long long worst = 0;
@@ -251,13 +251,13 @@ namespace testrunner {
 		// the question "what is the test run spending its time on" is asked at
 		// whichever level the answer happens to live at. A module can be slow
 		// because one case is pathological or because two hundred of them are
-		// ordinary, and those want different fixes — a chart that has already
+		// ordinary, and those want different fixes - a chart that has already
 		// picked a level cannot tell them apart.
 		struct Frame {
 			// What the box is: an identifier, or a test case's name.
 			std::string Label;
 
-			// Everything worth knowing about it that is not its name — what it
+			// Everything worth knowing about it that is not its name - what it
 			// cost, what it holds, whether it is red. Kept apart from the label
 			// so the hover readout can set the two in different weights.
 			std::string Detail;
@@ -319,7 +319,7 @@ namespace testrunner {
 			if (!suite.Cases.empty()) {
 				// Clamped. The two numbers come from two clocks in two
 				// processes, and an unsigned subtraction that goes negative
-				// does not report a small inconsistency — it reports half a
+				// does not report a small inconsistency - it reports half a
 				// million years.
 				const auto inside = suite.CaseMicroseconds();
 				const auto outside = suite.Microseconds > inside ? suite.Microseconds - inside : 0;
@@ -446,7 +446,7 @@ namespace testrunner {
 			// sees; the attribute is what a screen reader announces and what
 			// survives the page being saved somewhere its CSS is not.
 			page << "<div class=\"box\" style=\"background:" << colour.str() << "\" title=\""
-				 << Escape(frame.Label + " — " + detail.str()) << "\"><span>" << Escape(frame.Label)
+				 << Escape(frame.Label + " - " + detail.str()) << "\"><span>" << Escape(frame.Label)
 				 << "</span></div>";
 
 			// A sibling of the box rather than a child of it: the box clips its

@@ -25,8 +25,8 @@ namespace studio {
 		//
 		// **Not `std::hash`**, for the reason `core/Random.hpp` gives about it:
 		// the standard says nothing about what it produces, so two builds of
-		// this program may disagree. Nothing here crosses a process — the
-		// comparison is this frame against the last — but a hash whose value is
+		// this program may disagree. Nothing here crosses a process - the
+		// comparison is this frame against the last - but a hash whose value is
 		// a property of the compiler is one nobody can reason about or write a
 		// test for.
 		//
@@ -45,7 +45,7 @@ namespace studio {
 		//
 		// **Order-dependent deliberately.** Two archetypes that swap their rows
 		// hold the same instances and would flatten identically, so an
-		// order-independent fold would be the more accurate answer — and would
+		// order-independent fold would be the more accurate answer - and would
 		// also be one where two different worlds can agree by accident, since
 		// commutative folds collide far more readily. A reshuffle costs one
 		// rebuild nobody sees; a collision is a panel showing a tree that is no
@@ -88,7 +88,7 @@ namespace studio {
 		// Sorted here rather than inside the compile, because the signature has
 		// to fold in what the compile will read and the sorted form is what it
 		// reads. Hashing the caller's order instead would re-compile whenever
-		// its vector happened to shuffle — safe, but a rebuild for nothing.
+		// its vector happened to shuffle - safe, but a rebuild for nothing.
 		OpenSorted.clear();
 		OpenSorted.reserve(request.Open.size());
 		for (const Entity open : request.Open) {
@@ -104,7 +104,7 @@ namespace studio {
 		// compare against the last one.
 		// **Which world, before what is in it.** Two worlds built the same way
 		// allocate the same entity ids and hold the same names, so their
-		// contents hash identically — correct arithmetic and the wrong answer
+		// contents hash identically - correct arithmetic and the wrong answer
 		// for a view that has been pointed at the other one. The store's
 		// address is the cheapest thing that tells them apart, and folding it
 		// in costs one term rather than a branch.
@@ -190,8 +190,8 @@ namespace studio {
 		}
 
 		// **`Store::EachRoot`'s order, deliberately.** A world's roots are
-		// ordered by creation rather than by insertion — see that function for
-		// why — and a panel sorting them its own way would be a second answer
+		// ordered by creation rather than by insertion - see that function for
+		// why - and a panel sorting them its own way would be a second answer
 		// to "what order are the roots in". `Nodes` is already sorted by id, so
 		// this list came out sorted; the assertion is that it is the same key.
 		//
@@ -254,7 +254,7 @@ namespace studio {
 	void HierarchyView::Flatten(Entity root, uint16_t depth) {
 		// **An explicit stack rather than recursion.** A tree's depth is
 		// authored, so a file with ten thousand nested folders in it is a stack
-		// overflow in a function that recursed — a crash on open, from data,
+		// overflow in a function that recursed - a crash on open, from data,
 		// with nothing to point at. The store's own `DestroyInstance` recurses
 		// and inherits that; a panel that draws whatever it is handed should
 		// not.
@@ -282,7 +282,7 @@ namespace studio {
 				if (link == nullptr) {
 					// A link naming a freed row. `Store::Destroy` releases an
 					// entity without touching what points at it, so this is
-					// reachable — and the walk stops rather than stepping over
+					// reachable - and the walk stops rather than stepping over
 					// it, because the links *out of* that row went with it.
 					break;
 				}
@@ -323,7 +323,7 @@ namespace studio {
 				continue;
 			}
 
-			// Children pushed in reverse, so they pop in insertion order — the
+			// Children pushed in reverse, so they pop in insertion order - the
 			// order `EachChild` yields and the order `GetChildren()` returns.
 			// Collected first because the sibling list only runs forwards here:
 			// `PreviousSibling` is one of the two links this view does not copy,

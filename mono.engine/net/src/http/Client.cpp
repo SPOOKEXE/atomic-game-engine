@@ -17,7 +17,7 @@
 // synchronous surface has no "is it done yet" call. Re-issuing it is the
 // portable answer: the operating system answers `already_connected` once the
 // handshake landed, `already_started` while it is still going, and the real
-// failure — refused, unreachable — once it has one. The alternative,
+// failure - refused, unreachable - once it has one. The alternative,
 // `remote_endpoint`, cannot tell "still connecting" from "refused", so a
 // refused connection would sit there until an idle bound expired instead of
 // failing immediately.
@@ -61,7 +61,7 @@ namespace engine::net::http {
 
 			// Whether the request was a `Head`. Kept because a response to one
 			// carries a length and no body, and the reader cannot tell from the
-			// bytes — see `ParseResponse`.
+			// bytes - see `ParseResponse`.
 			bool BodyOmitted = false;
 
 			Response Answer;
@@ -292,7 +292,7 @@ namespace engine::net::http {
 					}
 					if (failure) {
 						// eof with a complete message already buffered is fine
-						// — the parse below decides. eof with a partial one is
+						// - the parse below decides. eof with a partial one is
 						// a truncated response, which must never read as a
 						// complete short body.
 						finished = true;

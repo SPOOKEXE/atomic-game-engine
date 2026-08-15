@@ -5,14 +5,14 @@
 // **Read out of a live VM rather than written down beside it.** Every global
 // this engine installs is one of about thirty `lua_setglobal` calls and twenty
 // five `JS_SetPropertyStr` calls spread across fifteen source files, and there
-// is no table of them anywhere — so a list here would be a fourth copy after
+// is no table of them anywhere - so a list here would be a fourth copy after
 // the two VMs and `mono.tools/bindings`' prelude strings, and the one nobody
 // would regenerate.
 //
 // This module has already paid for that mistake twice, and both are recorded
-// where they happened. `Values.cpp` carries `Magnitude` and `Unit`, which
+// where they happened. `LuauValues.cpp` carries `Magnitude` and `Unit`, which
 // `engine.d.luau` promised for two versions while the run time answered
-// "Vector3 has no member 'Unit'" — a script that typechecked clean and failed
+// "Vector3 has no member 'Unit'" - a script that typechecked clean and failed
 // anyway, invisible to `bindings-check` because it compares the declarations
 // against the *class table* and a value type's members are in neither.
 // `JsSurface.cpp` carries a hand-written `10` on a list of sixteen methods,
@@ -24,13 +24,13 @@
 // removed stops being offered in the same commit.
 //
 // **What cannot be walked is said rather than guessed, and there is one of
-// those.** A member reached through an `__index` *function* — `Vector3.Unit`,
-// `Rect.Width`, `game.Workspace`, `part.Changed` — is a string comparison
+// those.** A member reached through an `__index` *function* - `Vector3.Unit`,
+// `Rect.Width`, `game.Workspace`, `part.Changed` - is a string comparison
 // rather than an entry in a table, and nothing can enumerate a branch. Instance
 // *methods* are fine: they live in a real table, Luau's in the registry under
 // `engine.instance.methods` and JavaScript's in `__instanceMethods`, so a walk
 // finds them. Instance *signals* on the Luau side are the branch chain, so
-// `Instances.cpp` keeps a list beside it and the suite checks every entry
+// `LuauInstances.cpp` keeps a list beside it and the suite checks every entry
 // against a live VM.
 //
 // Classes, properties and enums are not here at all, because `ecs::Classes` and
@@ -53,7 +53,7 @@ namespace engine::script {
 	//
 	// **Three cases and not a type system.** A walk of a global table can tell
 	// a function from a container from a plain value, and that is genuinely
-	// everything it can tell — anything finer would be a guess dressed as a
+	// everything it can tell - anything finer would be a guess dressed as a
 	// fact.
 	//
 	// @since v0.14
@@ -64,7 +64,7 @@ namespace engine::script {
 		// Holds members worth offering after a dot. `task`, `math`, `Enum`.
 		Container,
 
-		// Anything else — a number, a string, an instance, a userdata.
+		// Anything else - a number, a string, an instance, a userdata.
 		Value,
 	};
 
@@ -75,6 +75,8 @@ namespace engine::script {
 		// The name as a script spells it.
 		std::string Name;
 
+		// What sort of thing it is, which is what the completion popup shows as
+		// an icon and sorts by before the score.
 		NameKind Kind = NameKind::Value;
 
 		// The members a dot after this name could reach, empty when there are
@@ -83,7 +85,7 @@ namespace engine::script {
 		// **The two are not distinguished, deliberately.** A table whose members
 		// come from an `__index` function and a table with nothing in it both
 		// answer nothing to a walk, and inventing a third state would mean
-		// claiming to know which — the guess this file exists to avoid.
+		// claiming to know which - the guess this file exists to avoid.
 		std::vector<std::string> Members;
 	};
 
@@ -94,8 +96,8 @@ namespace engine::script {
 		// Every global, in no particular order.
 		std::vector<VocabularyEntry> Globals;
 
-		// The methods and signals every instance carries, so that `part:` and
-		// `part.` can be answered without a class.
+		// The methods and signals every instance carries, so that a `part` followed
+		// by `:` or by a dot can be answered without a class.
 		//
 		// Properties are deliberately absent: those come from `ecs::Classes`,
 		// which knows the class an instance actually is and can therefore answer
@@ -115,16 +117,40 @@ namespace engine::script {
 
 	// Names a walk finds that an editor should not offer.
 	//
-	// Two kinds, and both would be worse than an absence. **Refusal stubs** —
-	// `wait`, `spawn`, `delay`, `loadstring`, `getfenv`, `setfenv` — exist so
+	// Two kinds, and both would be worse than an absence. **Refusal stubs** -
+	// `wait`, `spawn`, `delay`, `loadstring`, `getfenv`, `setfenv` - exist so
 	// that a script written elsewhere fails with a sentence instead of "attempt
 	// to call a nil value"; offering one is offering a name that always throws.
-	// **Internals** — JavaScript's `__instanceMethods`, Luau's `_G` — are
+	// **Internals** - JavaScript's `__instanceMethods`, Luau's `_G` - are
 	// reachable but are not surface anybody should be writing against.
 	//
 	// @param language Which VM's surface.
 	// @return The names to drop, sorted.
 	// @since v0.14
 	std::span<const std::string_view> Withheld(Language language);
+
+	// Every word a bus reply's status can be, in ordinal order, `"Unknown"` last.
+	//
+	// **`script::DescribeStatus`'s switch, read rather than transcribed.** The
+	// generated declarations carry a `BusStatus` string union, and until v0.18
+	// both of them were hand-written text in `mono.tools/bindings/app/main.cpp`
+	// with a comment asking whoever added a status to remember. Nothing in the
+	// build checked it, which is the third category rule 6 refuses: a status
+	// appended to `world::BusStatus` typechecked as an error in correct script
+	// code, and the only thing that would have said so was somebody re-reading a
+	// comment.
+	//
+	// `just bindings-check` is what closes it now - the generator builds both
+	// unions from this list, so a new status that has not reached the checked-in
+	// declarations fails the check by name.
+	//
+	// **`"Unknown"` is a real member and is last.** It is what `DescribeStatus`
+	// answers for a value it does not recognise, which a script can be handed
+	// after a version skew between two processes, so a union without it makes
+	// correct handling code a typecheck failure.
+	//
+	// @return The words, valid for the life of the program.
+	// @since v0.18
+	std::span<const std::string_view> BusStatusWords();
 
 }

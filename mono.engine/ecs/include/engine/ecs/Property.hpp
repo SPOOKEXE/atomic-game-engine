@@ -5,12 +5,12 @@
 // `Classes.hpp` describes what a property *is* and is what a consumer includes.
 // This header holds the one piece that cannot live there: the template that
 // generates a plain field's conversion, which calls `Store` and therefore needs
-// `Store.hpp` — a header that sits above `Classes.hpp` and does not include it.
+// `Store.hpp` - a header that sits above `Classes.hpp` and does not include it.
 //
 // The split is the whole reason this file exists, so it is worth stating rather
 // than leaving to be inferred: **include this to declare, include `Classes.hpp`
-// to read.** A module that only reads properties — the bindings, the manifest
-// generator, an editor — does not pull `Store.hpp` in behind them.
+// to read.** A module that only reads properties - the bindings, the manifest
+// generator, an editor - does not pull `Store.hpp` in behind them.
 //
 // @tier L3 · shared
 
@@ -68,7 +68,7 @@ namespace engine::ecs {
 
 		static_assert(
 			std::is_same_v<decltype(Low), Value> && std::is_same_v<decltype(High), Value>,
-			"the bounds must be the member's own type — an implicit conversion here would clamp "
+			"the bounds must be the member's own type - an implicit conversion here would clamp "
 			"against a range that is not the one written at the call"
 		);
 		static_assert(Low <= High, "the bounds are the wrong way round, so every write would be refused");

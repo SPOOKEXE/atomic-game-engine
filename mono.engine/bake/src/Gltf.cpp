@@ -75,7 +75,7 @@ namespace engine::bake {
 			}
 
 			// Quaternion to rotation matrix, then scale on the right so it stays
-			// a scale rather than becoming a shear — `render::ToGpu` folds a
+			// a scale rather than becoming a shear - `render::ToGpu` folds a
 			// half-extent in for the same reason and states it the same way.
 			const float x = rotation[0], y = rotation[1], z = rotation[2], w = rotation[3];
 			Matrix matrix;
@@ -100,7 +100,7 @@ namespace engine::bake {
 		// **The inverse transpose of the upper 3x3, and the reason it cannot be
 		// skipped is non-uniform scale.** A node scaled twice as wide as it is
 		// tall tilts every normal that is not on an axis, and the result is a
-		// model lit as if its surfaces faced somewhere else — which reads as a
+		// model lit as if its surfaces faced somewhere else - which reads as a
 		// lighting bug rather than as an import one. A singular matrix falls
 		// back to the identity, because a node scaled to zero has no normals
 		// worth arguing about.
@@ -472,7 +472,7 @@ namespace engine::bake {
 		}
 
 		// External buffers are refused. Following a `uri` would mean this module
-		// reading a file, and it has no filesystem by design — the seam is the
+		// reading a file, and it has no filesystem by design - the seam is the
 		// caller's.
 		if (document.contains("buffers")) {
 			for (const json &buffer : document["buffers"]) {

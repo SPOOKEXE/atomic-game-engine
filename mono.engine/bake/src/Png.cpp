@@ -93,7 +93,7 @@ namespace engine::bake {
 				const uint8_t filter = raw[start];
 				uint8_t *current = raw.data() + start + 1;
 
-				// The row above, already unfiltered — which is why this runs
+				// The row above, already unfiltered - which is why this runs
 				// top to bottom and cannot be parallelised without changing the
 				// algorithm.
 				const uint8_t *above = row == 0 ? nullptr : raw.data() + (row - 1) * stride + 1;
@@ -132,7 +132,7 @@ namespace engine::bake {
 		//
 		// **Exactly, and that is the check.** A zlib stream says nothing about
 		// how much it will produce, so the only defence against a bomb is the
-		// size the *header* implies — which is bounded because the dimensions
+		// size the *header* implies - which is bounded because the dimensions
 		// were bounded before this ran. A stream producing more or less than
 		// its own header implies is malformed whichever direction it errs in.
 		bool Inflate(
@@ -203,13 +203,13 @@ namespace engine::bake {
 
 			// The CRC covers the type and the data. Checked because this runs
 			// over files that came off somebody's disk before any content hash
-			// existed to cover them — a truncated download is otherwise a
+			// existed to cover them - a truncated download is otherwise a
 			// picture of static rather than a refusal.
 			//
 			// **Compared as numbers rather than as bytes, and that is not
 			// style.** Crypto++ writes a CRC-32 digest in host order and PNG
 			// stores it big-endian, so `CRC32::Verify` against the four bytes in
-			// the file disagrees with itself on every little-endian machine —
+			// the file disagrees with itself on every little-endian machine -
 			// which is every machine this builds on. Assembling both sides into
 			// a `uint32_t` is what makes the check about the checksum rather
 			// than about the byte order.

@@ -35,7 +35,7 @@ TEST_CASE("Only names one layer and All names every one", "[layermask]") {
 
 TEST_CASE("a layer index past the last one is empty rather than undefined", "[layermask]") {
 	// Shifting a 32-bit value by 32 is undefined behaviour, and which answer a
-	// compiler produces for it changes with the optimisation level — so the
+	// compiler produces for it changes with the optimisation level - so the
 	// dev build and the release build would disagree about what a bad index
 	// means.
 	REQUIRE(LayerMask::Only(LayerMask::LAYER_COUNT) == LayerMask::None());

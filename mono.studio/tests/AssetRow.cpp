@@ -2,7 +2,7 @@
 //
 // **This suite exists because the editor aborted and no test could have said
 // so.** `mono.studio/AGENTS.md` records that most of this program needs a
-// window, a device and an imgui frame — and two of those three are not true.
+// window, a device and an imgui frame - and two of those three are not true.
 // `engine.ui.theme` already makes the point in one line: *an imgui context is
 // not a device*. `ImGui::CreateContext` allocates a style table and a font atlas
 // description and touches no driver, so a frame can be submitted, a mouse can be
@@ -14,7 +14,7 @@
 //     Code uses SetCursorPos()/SetCursorScreenPos() to extend window/parent
 //     boundaries. Please submit an item e.g. Dummy() afterwards.
 //
-// That is an `IM_ASSERT` inside `EndChild`, so it is not a drawing glitch — the
+// That is an `IM_ASSERT` inside `EndChild`, so it is not a drawing glitch - the
 // process ends. The first case below is the detector for it, and it is written
 // to *fail on the old code* rather than merely to pass on the new: a check that
 // has never seen the fault it is for is a check nobody knows works.
@@ -54,13 +54,13 @@ namespace {
 	// case would inherit it and fail for a reason that is not its own.
 	//
 	// No backends, so `NewFrame` is given what a platform backend would have
-	// supplied — a display size and a built font atlas. A zero-sized display
+	// supplied - a display size and a built font atlas. A zero-sized display
 	// clips every window to nothing, which would make every hit test miss and
 	// every case pass for the wrong reason.
 	class Context {
 	  public:
 		// @param assertOnError Whether imgui's own `IM_ASSERT_USER_ERROR` fires.
-		//        **Off for the one case that provokes an error on purpose** —
+		//        **Off for the one case that provokes an error on purpose** -
 		//        the assert calls `abort()`, which ends the test binary instead
 		//        of failing a case, so the detector could not otherwise be run
 		//        against the fault it detects. Everything else leaves it on, so
@@ -155,7 +155,7 @@ TEST_CASE("the old row shape leaves a cursor imgui aborts on", "[studio][assetro
 	// sequence the asset picker had: a selectable, a rewind to draw over it, and
 	// a final rewind to place the next row that nothing submits an item after.
 	// It is kept as a case rather than described in a comment because a check
-	// that has never seen its fault is a check nobody knows works — and the
+	// that has never seen its fault is a check nobody knows works - and the
 	// whole point of this suite is that this shape reached a release.
 	Context context(false);
 
@@ -204,7 +204,7 @@ TEST_CASE("a row that paints nothing still reserves its height", "[studio][asset
 	// The picture and the label are painted rather than submitted, so the row's
 	// height comes from the selectable alone. A row that measured its contents
 	// would collapse to a line of text the moment a thumbnail was missing, and
-	// the list would reflow as previews arrived — `DrawPreview`'s own rule about
+	// the list would reflow as previews arrived - `DrawPreview`'s own rule about
 	// a list nobody can click in.
 	Context context;
 
@@ -250,8 +250,8 @@ TEST_CASE("a click on a row chooses it", "[studio][assetrow]") {
 
 TEST_CASE("a click on the picture is a click on the row", "[studio][assetrow]") {
 	// **A property worth pinning, and pointedly not a bug that was fixed.** The
-	// first version of `AssetRow.hpp` claimed the picture — an item submitted
-	// over the selectable — was stealing the click, which is why a picker
+	// first version of `AssetRow.hpp` claimed the picture - an item submitted
+	// over the selectable - was stealing the click, which is why a picker
 	// "didn't select". It was not: the case below this one drives the same click
 	// through the old shape and it lands. The crash was the whole of the bug.
 	//
@@ -292,7 +292,7 @@ TEST_CASE("the old row shape did deliver its clicks", "[studio][assetrow]") {
 	// **Written to refute a diagnosis, and kept because it did.** "Selection
 	// doesn't work" and "an item over a selectable steals its hover" is a
 	// plausible pair, and acting on it would have been a fix for a fault that
-	// was not there — `AGENTS.md`: do not fix what you have not reproduced.
+	// was not there - `AGENTS.md`: do not fix what you have not reproduced.
 	//
 	// Overlapping items are still gone, for the reasons `AssetRow.hpp` gives:
 	// one copy of the row's geometry, one item per row. Neither is this.
@@ -414,7 +414,7 @@ TEST_CASE("a child full of rows closes without tripping imgui", "[studio][assetr
 	// **The picker's own shape, with imgui's assert left on.** Every case above
 	// reads `DC.IsSetPos` directly, which is precise and is not the thing that
 	// actually happened: what happened is that `EndChild` called `abort()`. This
-	// runs the real check by running the real code — a scrolling child, a run of
+	// runs the real check by running the real code - a scrolling child, a run of
 	// rows, and an `EndChild` that is allowed to assert. If it ever does, this
 	// case ends the binary, which is exactly as loud as the editor was.
 	Context context;
@@ -444,7 +444,7 @@ TEST_CASE("a child full of rows closes without tripping imgui", "[studio][assetr
 TEST_CASE("a tile that rewinds inside a group is closed by the group", "[studio][assetrow]") {
 	// **The gallery has the row's old shape and does not crash, and this is
 	// why.** Its trailing `SetCursorPos` sits immediately before `EndGroup`, and
-	// `EndGroup` calls `ItemSize` — so the flag is cleared by the group rather
+	// `EndGroup` calls `ItemSize` - so the flag is cleared by the group rather
 	// than by an item the author remembered to add.
 	//
 	// It is checked rather than reasoned about because the two are one edit
@@ -471,7 +471,7 @@ TEST_CASE("a tile that rewinds inside a group is closed by the group", "[studio]
 TEST_CASE("a long list only submits the rows on screen", "[studio][assetrow]") {
 	// **Three bugs came from one missing clipper**, and this is the check that
 	// would have caught all of them. The asset picker listed every texture in
-	// the store — 1,637 of them — and submitted a `Selectable` and asked for a
+	// the store - 1,637 of them - and submitted a `Selectable` and asked for a
 	// thumbnail for each, every frame the modal was open. That is a visible
 	// stall; worse, `Editor::ThumbnailFor` queues what it is asked for against a
 	// 256-entry cache, so asking for 1,637 a frame evicted each picture long

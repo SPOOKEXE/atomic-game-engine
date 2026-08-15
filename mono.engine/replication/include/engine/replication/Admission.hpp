@@ -56,7 +56,7 @@ namespace engine::replication {
 		// The cookie the server issued.
 		//
 		// **An HMAC over the peer's address and its hello, keyed by a rotating
-		// secret** — which is what makes the challenge cost no state: the server
+		// secret** - which is what makes the challenge cost no state: the server
 		// remembers nothing about who it has challenged, and an answer carrying
 		// a cookie it did not mint verifies against nothing.
 		std::array<std::byte, net::Cookie::COOKIE_BYTES> Cookie{};
@@ -89,7 +89,7 @@ namespace engine::replication {
 		// Where the server's send counter starts.
 		//
 		// Sent rather than assumed zero so the two ends agree on the nonce
-		// sequence from the first sealed packet — a counter that disagreed would
+		// sequence from the first sealed packet - a counter that disagreed would
 		// decrypt as garbage rather than as an error.
 		uint64_t Counter = 0;
 

@@ -2,7 +2,7 @@
 
 // The mixer's data model: nodes, wires, and the order they run in.
 //
-// `core-features.md` asks for "an audio pipeline (DAW-like), node system —
+// `core-features.md` asks for "an audio pipeline (DAW-like), node system -
 // inputs/outputs/processors". This is that, and the three words are the node
 // kinds: a `Player` is an input, a `Fader`, `Emitter` and `Bus` are processors,
 // and an `Output` is where it all lands.
@@ -12,8 +12,8 @@
 // eventually. But §16 decision 12 states the losing condition and the ordering
 // with it: *build `mono.engine/graph/` against render only, and do not claim it
 // is general until the physics graph is the second user.* Today `graph` holds
-// the description of a frame and none of the execution — no nodes, no compiler,
-// no executor — so routing audio through it would mean building that runtime
+// the description of a frame and none of the execution - no nodes, no compiler,
+// no executor - so routing audio through it would mean building that runtime
 // against a second consumer before it exists for the first. This graph is small
 // and this file says plainly what it will be folded into.
 //
@@ -23,8 +23,8 @@
 //
 // **Cycles are refused at the wire rather than detected at the mix.** A
 // feedback loop in an audio graph is not a subtle bug: it is either an infinite
-// recursion on the device thread — which is a crash inside a callback with a
-// hard deadline — or unbounded gain, which is the loudest possible failure. The
+// recursion on the device thread - which is a crash inside a callback with a
+// hard deadline - or unbounded gain, which is the loudest possible failure. The
 // check is a walk at connect time, and connecting is not on the audio path.
 //
 // **Everything here is plain data with no thread of its own.** The mixer owns
@@ -62,7 +62,7 @@ namespace engine::audio {
 		Player,
 
 		// **Processor**. A gain, and the one place a level is set. Separate
-		// from `Player` so that several players can share a fader — which is
+		// from `Player` so that several players can share a fader - which is
 		// what a bus fader *is*, and building it as a node rather than a
 		// property is the difference between a mixer and a list of sounds.
 		Fader,
@@ -154,7 +154,7 @@ namespace engine::audio {
 
 		// Whether this node produces or passes anything at all.
 		//
-		// A muted node still runs its inputs — a muted sound still advances,
+		// A muted node still runs its inputs - a muted sound still advances,
 		// so unmuting does not resume something from where it was minutes ago.
 		bool Muted = false;
 
@@ -181,7 +181,7 @@ namespace engine::audio {
 	// Where the listener is and which way it faces. One per graph.
 	//
 	// Named a *pose* rather than a `Listener` so the graph's accessor can be
-	// called `Listener()` without an elaborated type specifier at every use —
+	// called `Listener()` without an elaborated type specifier at every use -
 	// a member function and a type of one name compiles and reads badly.
 	//
 	// @since v0.9
@@ -229,7 +229,7 @@ namespace engine::audio {
 		// The output node's id, reserved.
 		//
 		// **One id space, shared with `CommandQueue::Allocate`.** A graph mints
-		// ids and so does the queue, and they name nodes in the same graph — so
+		// ids and so does the queue, and they name nodes in the same graph - so
 		// the output has a fixed value and the queue starts above it. Without
 		// that they collide on the very first allocation, and the symptom is a
 		// player silently adopted as the output and then refused a wire to
@@ -249,7 +249,7 @@ namespace engine::audio {
 
 		// Adds a node.
 		//
-		// @param kind What it does. `Output` is refused — a graph has exactly
+		// @param kind What it does. `Output` is refused - a graph has exactly
 		//        one and it is made by the constructor, because two outputs is
 		//        a graph with no answer to "what does the device play".
 		// @return The node, or an invalid id when the kind is refused or the
@@ -261,10 +261,10 @@ namespace engine::audio {
 		// **What makes creating a node fire-and-forget across the thread
 		// boundary.** `CommandQueue::Allocate` hands the tick an id, the tick
 		// posts `AddNode` with it and wires it up in the same tick, and the
-		// mixer adopts it later — so there is no round trip and no moment where
+		// mixer adopts it later - so there is no round trip and no moment where
 		// the tick knows about a node the graph does not.
 		//
-		// There is one id space and the output's is reserved — see `OUTPUT_ID`.
+		// There is one id space and the output's is reserved - see `OUTPUT_ID`.
 		// Adopting an id a graph already issued is refused rather than silently
 		// aliasing it.
 		//
@@ -303,7 +303,7 @@ namespace engine::audio {
 		// unbounded gain, and both are worse than a wire that did not connect.
 		//
 		// Connecting a pair that is already connected is a no-op that answers
-		// true — a caller rebuilding a routing should not have to diff it.
+		// true - a caller rebuilding a routing should not have to diff it.
 		//
 		// @param from The source.
 		// @param to The target.
@@ -347,7 +347,7 @@ namespace engine::audio {
 		//
 		// **Recomputed only when the topology changed**, because a mixer asks
 		// for it every block and the answer only moves when somebody wires
-		// something. Parameter changes — a gain, a cursor — do not invalidate
+		// something. Parameter changes - a gain, a cursor - do not invalidate
 		// it, which is the common case by a wide margin.
 		//
 		// @return The order. Nodes that reach no output are still in it: a

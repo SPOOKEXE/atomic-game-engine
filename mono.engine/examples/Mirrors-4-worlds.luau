@@ -1,7 +1,7 @@
 --!strict
 -- Four worlds, four view producers, one composited frame.
 --
--- `Mirrors-1-world.luau` proves the *rendering* path inside one world — shadows,
+-- `Mirrors-1-world.luau` proves the *rendering* path inside one world - shadows,
 -- surface cameras, panes that show them. This proves the **view** path between
 -- worlds: four independent simulations, each publishing to its own
 -- `world::ViewChannel`, drawn side by side by one compositor.
@@ -14,8 +14,8 @@
 -- them. Each gets its own store, its own clock, its own runtime and its own view
 -- channel; nothing is shared, which is what makes them separable at all.
 --
--- So the script has to ask. `game.JobId` is the world's name — `client.world`,
--- `client.world.1`, and so on — and the trailing number is this scene's index.
+-- So the script has to ask. `game.JobId` is the world's name - `client.world`,
+-- `client.world.1`, and so on - and the trailing number is this scene's index.
 -- Roblox's `JobId` identifies the server instance a script is standing on, and
 -- a world here *is* that instance, so the mapping is the one `game` and
 -- `workspace` already use rather than a new idea.
@@ -29,7 +29,7 @@
 -- Two of anything is the count at which a placement bug still looks like
 -- correct behaviour. Two rooms side by side are symmetric: swap them, mirror the
 -- spacing, get the sign of the offset wrong, and the frame is still two rooms
--- side by side. Four with **distinct, ordered identities** cannot do that — the
+-- side by side. Four with **distinct, ordered identities** cannot do that - the
 -- palette below runs warm to cool left to right, so a wrong order reads
 -- immediately as a wrong order rather than as a scene.
 --
@@ -46,7 +46,7 @@
 -- a view and knows nothing about who composites it.
 --
 -- The rooms are deliberately small. `Mirrors-1-world.luau` is the scene to read
--- for what a mirror *is* — this one is four of a simpler thing, because what is
+-- for what a mirror *is* - this one is four of a simpler thing, because what is
 -- under test is the arrangement rather than the room.
 
 local RunService = game:GetService("RunService")
@@ -56,7 +56,7 @@ local RunService = game:GetService("RunService")
 -- The trailing number of the world's name, or zero when it has none.
 --
 -- **Zero for a name with no suffix**, because the first world is called
--- `client.world` rather than `client.world.0` — see `Client::BuildDemoWorlds`,
+-- `client.world` rather than `client.world.0` - see `Client::BuildDemoWorlds`,
 -- which keeps the original name so nothing that referred to it has to learn a
 -- new one. A script that assumed a suffix would fail on exactly one of the four.
 local function worldIndex(): number
@@ -101,7 +101,7 @@ local WALL_OFFSET = PLATE_HALF + WALL_THICKNESS / 2
 local CASTER_SPREAD = 9
 
 -- Where the viewer stands in *this* world's coordinates. Every world uses the
--- same eye, and the compositor is what moves the views apart — which is the
+-- same eye, and the compositor is what moves the views apart - which is the
 -- property under test: a world does not know where its image will be drawn.
 local EYE = Vector3.new(0, 6, 16)
 local EYE_FOV = 60
@@ -123,7 +123,7 @@ floor.Parent = workspace
 
 -- **One mirrored wall rather than four.** Four walls each reflecting the other
 -- three is `Mirrors-1-world.luau`'s subject and costs four surface targets per
--- world — sixteen across this scene, which is a texture budget rather than a
+-- world - sixteen across this scene, which is a texture budget rather than a
 -- demonstration. One north wall shows that a surface camera works inside a
 -- world the compositor is also reading, which is the thing four worlds put in
 -- doubt.
@@ -229,7 +229,7 @@ workspace.CurrentCamera = view
 -- --- what moves ---------------------------------------------------------------
 
 -- **Each world runs at its own rate.** The bob is scaled by the world index, so
--- the four views are visibly out of step with each other — which is what proves
+-- the four views are visibly out of step with each other - which is what proves
 -- they are four simulations rather than one image drawn four times. Identical
 -- motion in four boxes is the failure mode a still screenshot cannot rule out.
 local RATE = 0.7 + INDEX * 0.25

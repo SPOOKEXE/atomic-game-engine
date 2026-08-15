@@ -29,7 +29,7 @@ namespace engine::audio {
 		}
 
 		// The slot is filled *before* the index is released. A consumer that
-		// acquires the new index therefore sees a complete command — which is
+		// acquires the new index therefore sees a complete command - which is
 		// the whole of why this is safe without a lock.
 		Slots[write & MASK] = command;
 		Write.store(write + 1, std::memory_order_release);
@@ -46,7 +46,7 @@ namespace engine::audio {
 			into.push_back(std::move(slot));
 			// The `SoundRef` in the slot is moved out rather than copied, so
 			// the ring does not keep a sound alive after it has been handed
-			// over — a queue holding the last reference to every sound ever
+			// over - a queue holding the last reference to every sound ever
 			// played is a leak that looks like a cache.
 			slot = Command{};
 

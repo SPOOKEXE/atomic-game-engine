@@ -23,7 +23,7 @@ namespace engine::physics {
 		// One collider's placed shape, or nothing when the row has gone.
 		//
 		// A pair is a snapshot of the world as the broad phase saw it, and a
-		// row can be destroyed between the two steps — deferred structural
+		// row can be destroyed between the two steps - deferred structural
 		// changes land at the end of an `Each`, not at the end of the phase. A
 		// missing component is therefore an ordinary outcome and not a
 		// diagnostic.
@@ -53,7 +53,7 @@ namespace engine::physics {
 			return;
 		}
 
-		// Cleared, never freed — the allocation table names these two lists
+		// Cleared, never freed - the allocation table names these two lists
 		// beside the pair list, and this is the step that owns clearing them.
 		// The event list is cleared here rather than in `Publish` so that a
 		// world whose narrow phase ran and whose solver did not cannot hand a
@@ -63,7 +63,7 @@ namespace engine::physics {
 		PipelineInternals::Events(*world).clear();
 
 		// **Serial, and measured rather than assumed.** A pair function is pure
-		// — it reads two placed shapes and writes one manifold — so splitting
+		// - it reads two placed shapes and writes one manifold - so splitting
 		// the pair list across workers gives bit-for-bit the same answer, and
 		// the obvious thing to do is dispatch it. Measured on a twenty-four
 		// thread machine it was **twice as slow**: writing a slot per candidate
@@ -74,7 +74,7 @@ namespace engine::physics {
 		// evidence.
 		//
 		// The pair list is sorted, so every pair that names the same first
-		// collider arrives in one run — a body against the six things around it
+		// collider arrives in one run - a body against the six things around it
 		// is one lookup rather than six. `BroadPhase` sorts for determinism and
 		// this is the second thing that sort buys. The second side varies within
 		// a run and is resolved each time.

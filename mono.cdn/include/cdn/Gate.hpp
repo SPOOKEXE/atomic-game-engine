@@ -3,7 +3,7 @@
 // The only decision the origin makes about who may have what.
 //
 // It is a small decision on purpose. **The server decides; the origin checks a
-// token and serves** — CDN.md §4. Everything about *who* is the server's: the
+// token and serves** - CDN.md §4. Everything about *who* is the server's: the
 // session, the player, what they have loaded, what they are entitled to. This
 // class knows none of it and must never learn it.
 //
@@ -12,7 +12,7 @@
 // a session to a person, and there is nowhere for it to look one up.
 //
 // An origin that grows an account table is a second authority, and two
-// authorities that can disagree eventually do — usually under load, which is
+// authorities that can disagree eventually do - usually under load, which is
 // when it is hardest to see.
 //
 // @tier shared
@@ -39,7 +39,7 @@ namespace cdn {
 		//
 		// Three checks, in this order and no other: the MAC, the expiry, then
 		// the scope. The MAC is first because nothing in a token means anything
-		// until it has been verified — acting on an unverified field, even to
+		// until it has been verified - acting on an unverified field, even to
 		// reject it, is how a parser becomes the attack surface the MAC was
 		// meant to remove.
 		//
@@ -49,7 +49,7 @@ namespace cdn {
 		//
 		// @param token The bytes the client presented.
 		// @param bundleRoot The bundle being requested, by content hash. There
-		//        is no overload taking a path, and there must not be — a hash
+		//        is no overload taking a path, and there must not be - a hash
 		//        cannot be walked.
 		// @param nowSeconds The current time, on the clock shared with the
 		//        server. Passed in rather than read here, so the origin holds no

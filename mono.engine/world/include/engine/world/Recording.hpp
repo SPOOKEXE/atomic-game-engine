@@ -9,7 +9,7 @@
 // log rather than a reconstruction.
 //
 // It also costs almost nothing to build, because both halves already existed
-// for another reason — the snapshot for restarting a crashed world, the ordered
+// for another reason - the snapshot for restarting a crashed world, the ordered
 // traffic for making the barrier deterministic. Replay is what those two turn
 // into when you keep them.
 //
@@ -122,7 +122,7 @@ namespace engine::world {
 		//
 		// **A snapshot carries state, never code.** Systems are C++ callables,
 		// so a restored world has storage and no behaviour until somebody
-		// registers them again — exactly as a respawned host does by running
+		// registers them again - exactly as a respawned host does by running
 		// the same program. `configure` is called once per restored world for
 		// that, and taking it as a parameter is what stops it being forgotten:
 		// the failure otherwise is a world that ticks and does nothing, which
@@ -164,8 +164,8 @@ namespace engine::world {
 		// The frame time the last `Step` used.
 		//
 		// A recording decides its own frame times, so a process recording *what
-		// it replays* — which is how the replay path is checked against the
-		// original — has to capture with the recorded delta rather than one it
+		// it replays* - which is how the replay path is checked against the
+		// original - has to capture with the recorded delta rather than one it
 		// measured. Zero before the first step.
 		//
 		// @return The last replayed barrier's frame seconds.

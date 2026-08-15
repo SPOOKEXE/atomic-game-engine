@@ -1,7 +1,7 @@
 // What the broad phase costs per 1000 colliders.
 //
 // `v02v03v04.md` §3.6 asks for the figure and `spatial/benchmarks/HashGrid.cpp`
-// holds the half of it that belongs to the index — the rebuild alone, over bare
+// holds the half of it that belongs to the index - the rebuild alone, over bare
 // proxies. This is the other half: what a *world* pays, which is the pass that
 // derives every world box from a `Transform` and a `Collider`, the rebuild, and
 // then the pair walk over it.
@@ -13,7 +13,7 @@
 // The scene is a slab rather than a cube: colliders spread wide on X and Z and
 // thin on Y, which is what a world of rooms and floors looks like and is the
 // case a uniform grid is either good or bad at. The static/dynamic split is
-// four to one, because most of a world does not move — and the whole reason
+// four to one, because most of a world does not move - and the whole reason
 // there are two indexes is that the static four fifths are not re-measured.
 //
 // What it measured, in the `bench` preset, on a 24-thread machine. The figures
@@ -32,10 +32,10 @@
 //
 // Per thousand colliders the total is 16 us at 1000, 58 us at 4000 and 172 us
 // at 16000. That climbs because the scene volume is fixed, so the *density*
-// rises with the count and the pair walk is quadratic in it — a bigger world
+// rises with the count and the pair walk is quadratic in it - a bigger world
 // with the same spacing would not.
 //
-// ## Cell size, at three densities — v0.11
+// ## Cell size, at three densities - v0.11
 //
 // The note that stood here said this scene would prefer 8 m to the 4 m
 // `spatial` chose, and stopped, because one scene at one density is not a
@@ -47,7 +47,7 @@
 // | 4000 | 517 us | 231 us | **179 us** | 208 us |
 // | 16000 | 4443 us | 2651 us | **2544 us** | |
 //
-// **Eight metres wins at every density, and the minimum is bracketed** — 16 m
+// **Eight metres wins at every density, and the minimum is bracketed** - 16 m
 // is worse than 8 m at 4000, so these rows are not still walking down a curve.
 // Against the 4 m default that is 17% at a thousand colliders, 23% at four
 // thousand and 4% at sixteen.
@@ -58,10 +58,10 @@
 // is fastest at 4 m and costs 42% more at 8 m, and a short raycast is fastest
 // at 4 m too. Only the rebuild and long raycasts want bigger cells. So 4 m is
 // right for the query shapes `spatial` chose it against, 8 m is right for a
-// pair walk, and no single number is right for both — which is precisely why
+// pair walk, and no single number is right for both - which is precisely why
 // `PreparePhysicsWorld` takes one.
 //
-// ## The world measures itself — v0.12
+// ## The world measures itself - v0.12
 //
 // The note that stood here said "the number to pass is 8 m, and there is
 // nowhere to pass it from". There is now: a world prepared with no cell size
@@ -75,13 +75,13 @@
 // | 16000 | 2.59 ms | 2.46 ms | **2.49 ms** |
 //
 // **It lands on the hand-picked row at every density**, which is the assertion
-// these three exist to make — 22% off the default at four thousand colliders,
+// these three exist to make - 22% off the default at four thousand colliders,
 // 17% at a thousand, 4% at sixteen. The heuristic is twice the mean widest axis
 // quantised to a power of two, and this scene's median collider is two metres
 // across, so it chooses 8 m for the reason a person would have.
 //
 // **An author who names a size still gets it.** `PreparePhysicsWorld(store,
-// 4.0f)` is configured and never re-measured — which is what the fixed rows
+// 4.0f)` is configured and never re-measured - which is what the fixed rows
 // above still are, and why they are still here to be compared against.
 
 #include <engine/core/Random.hpp>
@@ -127,7 +127,7 @@ namespace broadphase_bench {
 	constexpr float SCENE_HALF_HEIGHT = 8.0f;
 
 	// Half the median collider's edge, so the median collider is two metres
-	// across — the same scene `spatial/benchmarks/HashGrid.cpp` measures the
+	// across - the same scene `spatial/benchmarks/HashGrid.cpp` measures the
 	// index against, so the two suites are readable side by side.
 	constexpr float MEDIAN_EXTENT = 1.0f;
 
@@ -137,7 +137,7 @@ namespace broadphase_bench {
 	// A world of `count` colliders, built once and reused.
 	//
 	// Deterministic through `core::Random`, which is indexed rather than
-	// streamed — so two runs measure the same scene and a difference between
+	// streamed - so two runs measure the same scene and a difference between
 	// them is the code. Lazily rather than at static-initialisation time,
 	// because a store binds its owning thread on construction.
 	Store &WorldOf(size_t count, float cellSize) {
@@ -251,7 +251,7 @@ BENCH("Pairs only · 4000 colliders, 4m cells", 50) {
 // --- what the static index is worth ------------------------------------------
 //
 // The same scene with the static set marked dirty every tick, which is what a
-// single index would cost — every anchored collider re-measured and re-hashed
+// single index would cost - every anchored collider re-measured and re-hashed
 // for a world that did not move. The gap between this and "Sync only" above is
 // the whole justification for the second grid.
 
@@ -281,7 +281,7 @@ BENCH("Sync + pairs · 4000 colliders, 2m cells", 50) {
 }
 
 // **The row the three above exist to be compared against.** A world prepared
-// with no cell size measures one from its own colliders — `SuggestCellSize` —
+// with no cell size measures one from its own colliders - `SuggestCellSize` -
 // and this is what that costs against the hand-picked numbers beside it. If it
 // does not land on the 8 m row, the heuristic is wrong for the scene the rest of
 // this file measures, and that is the thing worth failing on.
@@ -325,7 +325,7 @@ BENCH("Sync + pairs · 4000 colliders, 8m cells", 50) {
 //
 // **The measurement the note above asked for and did not have.** The rows at
 // 4000 said this scene would prefer 8 m to the 4 m `spatial` chose, and stopped
-// there — one scene at one density is not a reason to move a default another
+// there - one scene at one density is not a reason to move a default another
 // module measured. So the same ladder is run at a quarter of the count and at
 // four times it.
 //

@@ -4,7 +4,7 @@
 //
 // **It draws nothing.** It is here rather than in the panel that shows it
 // because a caller who wants a frame rate should not have to include a
-// flamegraph renderer to get one — and the client, which holds one of these as
+// flamegraph renderer to get one - and the client, which holds one of these as
 // a member, was doing exactly that.
 //
 // The window is a ring of deltas with running sums, so recording a frame is
@@ -28,7 +28,7 @@ namespace engine::render {
 	// the whole window to answer it. At a few hundred frames a second a twenty
 	// second window is tens of thousands of samples, so four questions was four
 	// passes over a quarter of a megabyte, every frame, to draw seven lines of
-	// text — and it cost more than the scene did.
+	// text - and it cost more than the scene did.
 	//
 	// @client
 	struct FrameSummary {
@@ -85,7 +85,7 @@ namespace engine::render {
 		float Current() const;
 
 		// Over the window. Minimum FPS is the worst frame, which is the one
-		// that matters — an average of 144 with a floor of 12 is not a smooth
+		// that matters - an average of 144 with a floor of 12 is not a smooth
 		// game.
 		float Minimum() const;
 
@@ -117,7 +117,7 @@ namespace engine::render {
 		// A ring over a flat vector, not a deque.
 		//
 		// The access pattern is one push and a few pops from the front per
-		// frame, which is what a deque is for — but the *reads* are full walks
+		// frame, which is what a deque is for - but the *reads* are full walks
 		// of tens of thousands of samples, and a deque walks them through a
 		// table of chunk pointers. A ring over contiguous storage is the same
 		// O(1) at both ends and a straight line to read, which is the operation
@@ -131,7 +131,7 @@ namespace engine::render {
 		// Index of the oldest sample. Ring is empty until the first Record.
 		size_t Head = 0;
 
-		// Live samples, which is not Ring.size() — that is the capacity.
+		// Live samples, which is not Ring.size() - that is the capacity.
 		size_t Count = 0;
 
 		// Running totals, maintained as samples arrive and leave.
@@ -158,7 +158,7 @@ namespace engine::render {
 		// nothing cheaper than another look can say what the next one is.
 		//
 		// The worst frame in twenty seconds ages out about once every twenty
-		// seconds, so this is rare — and in the pathological case where it is
+		// seconds, so this is rare - and in the pathological case where it is
 		// every frame, the cost is the walk this replaced. Never worse.
 		mutable bool ExtremesStale = false;
 

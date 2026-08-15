@@ -25,7 +25,7 @@ namespace {
 	// engine has a few, and a file full of code that no count includes is worse
 	// than one counted under a heading somebody disagrees with.
 	//
-	// Anything else — CMake, GLSL, markdown — is a different language with
+	// Anything else - CMake, GLSL, markdown - is a different language with
 	// different comment rules, and counting it with C++ rules would produce a
 	// number that looks right.
 	bool IsSource(const fs::path &path) {
@@ -66,8 +66,8 @@ namespace {
 	//
 	// The dot rule is the one that matters. `.cache/build/<preset>/` holds
 	// generated headers and a configured vendor tree, so a walk of the
-	// repository root without it counts the build twice over — once as sources
-	// and once as whatever CMake copied — and the number moves depending on
+	// repository root without it counts the build twice over - once as sources
+	// and once as whatever CMake copied - and the number moves depending on
 	// which presets happen to be configured on the machine.
 	bool SkipDirectory(const fs::path &path) {
 		const std::string name = path.filename().string();
@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
 
 	// **Excluded unless asked for.** A walk of the repository root that
 	// includes mono.vendor is SDL, imgui, Tracy, Crypto++ and shaderc, which
-	// together are an order of magnitude more code than the engine — so the
+	// together are an order of magnitude more code than the engine - so the
 	// default report would answer a question about somebody else's project and
 	// look exactly like the one that was wanted.
 	std::vector<std::string> excludes;
@@ -134,7 +134,7 @@ int main(int argc, char **argv) {
 		std::error_code error;
 
 		if (!fs::exists(path, error)) {
-			std::cerr << "linecount: no such path — " << root << "\n";
+			std::cerr << "linecount: no such path - " << root << "\n";
 			return 1;
 		}
 
@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
 			// count of everything else.
 			fs::recursive_directory_iterator walk(path, fs::directory_options::skip_permission_denied, error);
 			if (error) {
-				std::cerr << "linecount: cannot read " << root << " — " << error.message() << "\n";
+				std::cerr << "linecount: cannot read " << root << " - " << error.message() << "\n";
 				return 1;
 			}
 			for (auto entry = walk; entry != fs::recursive_directory_iterator(); entry.increment(error)) {

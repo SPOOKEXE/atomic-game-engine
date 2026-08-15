@@ -4,23 +4,23 @@
 //
 // **What this is for is making the cdn the default rather than a flag.** Before
 // it, content only existed if somebody ran `assetc`, then `cdn --publish`, then
-// passed `--cdn dir:...` to the client — three steps and a path, every time, on
+// passed `--cdn dir:...` to the client - three steps and a path, every time, on
 // every machine. A test that wanted a texture had to do all three. So this is the
 // well-known place: `~/Documents/atomic-game-engine/cdn`, with two folders under
 // it, and every program looks there when nobody has said otherwise.
 //
 // ## The two folders, and why the split
 //
-// - **`raw/`** — what a person put in. A `.png`, a `.gltf`, a `.wav`, under its
+// - **`raw/`** - what a person put in. A `.png`, a `.gltf`, a `.wav`, under its
 //   own name. This is the half a human reads and drags files into.
-// - **`baked/`** — the same content in the formats a runtime reads: `.atex`,
+// - **`baked/`** - the same content in the formats a runtime reads: `.atex`,
 //   `.amesh`, `.amat`. What a publisher publishes.
-// - **`processed/`** — what the engine reads: chunks, groups, a manifest.
+// - **`processed/`** - what the engine reads: chunks, groups, a manifest.
 //   Content-addressed, so a name here is a hash and nothing else.
 //
 // **`baked/` arrived at v0.10 and its absence was a four-version bug, not a
 // simplification.** `PublishLocal` published `raw/` directly, so every PNG
-// somebody imported through the assets panel reached a client as a PNG — and
+// somebody imported through the assets panel reached a client as a PNG - and
 // `assets::Texture::Read` refuses one, because `Texture.hpp`'s whole argument is
 // that a runtime does not decode. The symptom was that nothing worked and
 // nothing said why: an `ImageLabel` drew its missing-image marker, a part's
@@ -29,7 +29,7 @@
 // read none of them.
 //
 // **Nothing here bakes, and that is deliberate.** `mono.cdn`'s link row is the
-// point of this member — `AGENTS.md` — and a baker is `Engine::bake`'s image and
+// point of this member - `AGENTS.md` - and a baker is `Engine::bake`'s image and
 // model decoders, which is exactly the interpretation an origin must not do. So
 // this module owns the *path* and publishes whatever is in it; filling it is the
 // job of something that already links a baker, which today is `contentimport`
@@ -43,14 +43,14 @@
 //
 // **`ImportFile` is flat; `raw/` is not required to be.** `Publish` has always
 // walked it recursively and named each asset by its path relative to the root, so
-// a tool writing a tree there was always publishable — and v0.10's material
+// a tool writing a tree there was always publishable - and v0.10's material
 // import is the first thing that does, because a material has to *name* its
 // texture and a hash rename gives it no name to write. `RawContents` was not
 // recursive and showed such a store as empty; it is now. What the paragraph below
 // is about is what a *person* drags in.
 //
 // **Flat, for now, and `ROADMAP.md` says so in as many words.** A tree under
-// `raw/` is what an author eventually wants — `characters/`, `props/` — and it is
+// `raw/` is what an author eventually wants - `characters/`, `props/` - and it is
 // a decision about how a manifest name is built, which is worth making once the
 // assets manager exists to show the tree. Flat until then, and the log is what
 // makes a flat folder navigable.
@@ -106,13 +106,13 @@ namespace cdn {
 	//
 	// `~/Documents/atomic-game-engine/cdn` on every platform, because that is
 	// what the roadmap names. **Not a platform-idiomatic data directory**, which
-	// would be `~/.local/share` on Linux and `%APPDATA%` on Windows — and that is
+	// would be `~/.local/share` on Linux and `%APPDATA%` on Windows - and that is
 	// a deliberate choice rather than an oversight: this folder is one a *person*
 	// drags files into, and a hidden per-platform data directory is exactly where
 	// somebody cannot find it.
 	//
 	// **The home directory is read from the environment and not assumed.** A
-	// process with no `HOME` — a container, a service — falls back to the current
+	// process with no `HOME` - a container, a service - falls back to the current
 	// directory rather than to `/`, so a store is created somewhere writable
 	// rather than failing at the first import.
 	//
@@ -123,7 +123,7 @@ namespace cdn {
 	//
 	// **For tests, and for a machine with content on another disk.** Every
 	// function here takes paths rather than finding them, so the default is one
-	// caller's choice rather than a global — which is what lets a suite build a
+	// caller's choice rather than a global - which is what lets a suite build a
 	// store in a temporary directory without touching the developer's own.
 	//
 	// @param root Where the store lives.
@@ -167,7 +167,7 @@ namespace cdn {
 	// Appends one line to the log.
 	//
 	// **Appends and never rewrites**, so two programs writing at once interleave
-	// lines rather than losing each other's — which is the whole reason this is a
+	// lines rather than losing each other's - which is the whole reason this is a
 	// text log rather than a document. It is not a database and must not become
 	// one: the moment something *reads* it to make a decision, the folder has
 	// stopped being the index.
@@ -205,7 +205,7 @@ namespace cdn {
 		// same file twice is what a person does and the right answer is "it is
 		// already there". What it is *not* is a rename: two files with the same
 		// bytes and different names are one file in `raw/`, under whichever name
-		// arrived first — see `ImportFile` for why.
+		// arrived first - see `ImportFile` for why.
 		bool Duplicate = false;
 	};
 
@@ -219,13 +219,13 @@ namespace cdn {
 	//
 	// **The original name is not kept on disk and is kept in the log.** A flat
 	// folder of original names collides the first time two projects both have a
-	// `diffuse.png`, and resolving that means either a tree — which the roadmap
-	// defers — or a suffix, which is a worse hash. The log is where "this came
+	// `diffuse.png`, and resolving that means either a tree - which the roadmap
+	// defers - or a suffix, which is a worse hash. The log is where "this came
 	// from `~/art/fox/diffuse.png`" lives.
 	//
 	// **An empty file is refused, by name.** It can never bake and never
 	// publish, so accepting one puts a file in `raw/` that nothing downstream
-	// will ever account for — and since both halves report counts rather than
+	// will ever account for - and since both halves report counts rather than
 	// names, the only trace is that two totals differ by one. See the refusal in
 	// the source for the hunt that cost.
 	//
@@ -240,7 +240,7 @@ namespace cdn {
 	// Publishes everything in `baked/` into `processed/`.
 	//
 	// **`baked/` and not `raw/`, which is the correction v0.10 made.** A raw
-	// tree published straight through hands a client bytes no runtime reads —
+	// tree published straight through hands a client bytes no runtime reads -
 	// see the header. Whatever filled `baked/` decides what is in it; this
 	// publishes a directory it did not create.
 	//
@@ -251,7 +251,7 @@ namespace cdn {
 	//
 	// A thin wrapper over `cdn::Publish` that supplies the two paths and writes
 	// the log line. **The signing key is the caller's**, because a store on disk
-	// has no business holding one — `assets::Signature` is the whole reason a
+	// has no business holding one - `assets::Signature` is the whole reason a
 	// manifest is trustworthy and a key beside the content it signs is a key that
 	// signs anything anybody drops there.
 	//
@@ -278,7 +278,7 @@ namespace cdn {
 		// the file name when the log does not say.
 		//
 		// **The log is used to label and never to enumerate.** The folder is
-		// the index — this header opens by saying so — and `raw/` holds hashes,
+		// the index - this header opens by saying so - and `raw/` holds hashes,
 		// so the only thing that can answer "what was this called" is the log.
 		// A listing built *from* the log would show rows for files that are no
 		// longer there and miss ones dropped in by hand.
@@ -291,8 +291,8 @@ namespace cdn {
 	// Where a named asset's bytes are on this machine.
 	//
 	// **`baked/` first, then `raw/`, and the order is the whole of it.** A
-	// *published* name is a path under `baked/` — that is what `PublishLocal`
-	// walks — and a name a raw listing produced is a path under `raw/`. Both
+	// *published* name is a path under `baked/` - that is what `PublishLocal`
+	// walks - and a name a raw listing produced is a path under `raw/`. Both
 	// reach an editor wanting to show somebody a picture of an asset, and both
 	// are just names by then.
 	//
@@ -306,14 +306,14 @@ namespace cdn {
 	//
 	// @param paths The store.
 	// @param name  The asset's name, as a manifest or a raw listing gives it.
-	// @return The file, or an empty path when neither folder has it — which is
+	// @return The file, or an empty path when neither folder has it - which is
 	//         the honest answer for something published from another machine.
 	// @since v0.10
 	std::filesystem::path FindInStore(const LocalPaths &paths, std::string_view name);
 
 	// The signing identity a local store uses when nobody supplies one.
 	//
-	// **A constant, in the source, and it is not a secret — that is the point.**
+	// **A constant, in the source, and it is not a secret - that is the point.**
 	// A signature answers "did the publisher I trust produce this", and for a
 	// store on somebody's own disk, serving their own editor, the answer is
 	// always yes and the key was pure friction: `assetc`, `cdn --publish` and
@@ -325,7 +325,7 @@ namespace cdn {
 	// development identity for the well-known local store and nothing else. A
 	// deployment supplies its own with `--signing-key` and `--publisher-key`,
 	// which still work exactly as they did, and `cdn --publish` still *requires*
-	// one — an origin serving other machines must not have a default identity
+	// one - an origin serving other machines must not have a default identity
 	// that everybody knows.
 	//
 	// @return The seed. Its public half is `DevelopmentPublisher()`.
@@ -340,7 +340,7 @@ namespace cdn {
 
 	// What is actually in `raw/`, newest first.
 	//
-	// **The folder, labelled by the log** — see `RawEntry::Original`. Newest
+	// **The folder, labelled by the log** - see `RawEntry::Original`. Newest
 	// first because somebody looking at this has just added something.
 	//
 	// @param paths The store.
@@ -354,7 +354,7 @@ namespace cdn {
 	// names its sheets as `tex/体.png`, relative to the folder it was authored
 	// in. `ImportFile` renames every file to `<hash><extension>` in one flat
 	// directory, so once a model and its sheets are in `raw/` nothing on disk
-	// records that they belong together — and a bake over that folder joins the
+	// records that they belong together - and a bake over that folder joins the
 	// reference lexically into `tex/体.atex`, a name no manifest carries. The
 	// model publishes, arrives, draws, and has no textures.
 	//
@@ -368,14 +368,14 @@ namespace cdn {
 	//                             → raw/<sheet hash>.png
 	//
 	// **It is a labelling use of the log, which is the only kind this header
-	// permits** — see `RawEntry::Original`. The folder is still the index: a
+	// permits** - see `RawEntry::Original`. The folder is still the index: a
 	// reference the log cannot place simply is not resolved, and the bake says so
 	// rather than emitting a name that resolves to nothing.
 	//
 	// @param paths The store.
 	// @return A resolver shaped for `assetc::Settings::ResolveTexture`, which
 	//         answers with a name relative to `raw/`. It captures a snapshot of
-	//         the log taken now — a store being written to while it bakes is not
+	//         the log taken now - a store being written to while it bakes is not
 	//         a case this tries to be live for.
 	// @since v0.10
 	std::function<bool(std::string_view model, std::string_view reference, std::string &out)>
@@ -385,7 +385,7 @@ namespace cdn {
 	//
 	// @since v0.10
 	struct PublishedEntry {
-		// The name a game author writes, extension included — exactly the
+		// The name a game author writes, extension included - exactly the
 		// string an emitter's `Texture` or a part's `Mesh` takes. AGENTS.md
 		// rule 4: this is the thing that crosses, and there is no table
 		// anywhere mapping it to anything.
@@ -407,7 +407,7 @@ namespace cdn {
 	//
 	// **The signature is read and not checked.** This is the store on this
 	// machine being shown to the person who owns it, not an origin's manifest
-	// being trusted — `delivery::AssetClient` is where verification belongs and
+	// being trusted - `delivery::AssetClient` is where verification belongs and
 	// it stays the only place, because two verifiers are two opinions.
 	//
 	// @param paths The store.

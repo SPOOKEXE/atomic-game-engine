@@ -8,7 +8,7 @@
 //
 // Anything that has to survive a save file, a wire format, a manifest or a
 // rename of the file it was declared in is identified by its **string**. A
-// number derived from declaration order is not stable — reorder two
+// number derived from declaration order is not stable - reorder two
 // add_subdirectory lines, or load two scripts in the other order, and every
 // saved reference now points somewhere else, silently.
 //
@@ -52,8 +52,8 @@ namespace engine::core {
 		// Creates an invalid name.
 		constexpr Name() = default;
 
-		// Interns. Cheap to repeat — the second call for the same text is a
-		// hash lookup — but not free, so do it once and keep the result rather
+		// Interns. Cheap to repeat - the second call for the same text is a
+		// hash lookup - but not free, so do it once and keep the result rather
 		// than constructing from a literal inside a loop.
 		explicit Name(std::string_view text);
 
@@ -89,7 +89,7 @@ namespace engine::core {
 		}
 
 		// The string this was interned from. Stable for the life of the
-		// process — the storage never moves and entries are never removed.
+		// process - the storage never moves and entries are never removed.
 		// Empty for an invalid Name.
 		//
 		// This is the serialization and diagnostic path, not a hot one.

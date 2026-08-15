@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Part.hpp>
@@ -29,7 +29,7 @@ namespace engine::script {
 			// `workspace.CurrentCamera` is never nil because the client makes
 			// one; here a headless world genuinely has none, and inventing a row
 			// so a property has something to point at would put a phantom camera
-			// in every server world — the same mistake `workspace` avoids by not
+			// in every server world - the same mistake `workspace` avoids by not
 			// being an instance.
 			lua_pushnil(state);
 			return;
@@ -51,8 +51,8 @@ namespace engine::script {
 			// at a row it is about to destroy.
 			scene::ActiveCamera active;
 			if (const auto *existing = store.Resource<scene::ActiveCamera>(); existing != nullptr) {
-				// The aspect ratio is the *consumer's*, not the camera's — a
-				// window wrote it — so it survives a camera change. Clearing it
+				// The aspect ratio is the *consumer's*, not the camera's - a
+				// window wrote it - so it survives a camera change. Clearing it
 				// would make the next resolved frame use a ratio of one and
 				// stretch every view until whatever owns the window wrote again.
 				active = *existing;
@@ -65,7 +65,7 @@ namespace engine::script {
 		const Entity camera = CameraEntity(state, index);
 
 		// Refused when the instance carries no `Camera`, rather than accepted
-		// and quietly ignored by `ResolveActiveCamera` — which leaves the
+		// and quietly ignored by `ResolveActiveCamera` - which leaves the
 		// matrices exactly as they were, so the symptom would be a view that
 		// stopped following anything with nothing reporting why.
 		if (store.Get<scene::Camera>(camera) == nullptr) {

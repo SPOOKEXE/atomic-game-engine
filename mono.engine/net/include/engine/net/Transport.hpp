@@ -4,7 +4,7 @@
 //
 // A transport carries whole datagrams between endpoints. That is all it does. It
 // holds no connection state, knows no `ConnectionId`, and has no opinion about
-// what a payload means — `Link` owns the lifecycle and says what *should* be
+// what a payload means - `Link` owns the lifecycle and says what *should* be
 // sent, this puts it on the wire and reports what arrived. Keeping the two apart
 // is what makes the lifecycle testable without a socket, and it is why a
 // transport can be swapped without touching a line of the state machine.
@@ -12,8 +12,8 @@
 // **A caller cannot tell which implementation it holds**, exactly as with
 // `parallel::Channel`. The loopback and the UDP socket answer the same calls
 // with the same statuses, so `repo_layout.md` §16.6 is honest: single-player
-// rides the loopback through **real encoding** — the same `Packet::Write`, the
-// same bytes, the same `Packet::Read` — rather than through a shortcut that
+// rides the loopback through **real encoding** - the same `Packet::Write`, the
+// same bytes, the same `Packet::Read` - rather than through a shortcut that
 // skips framing. A path only one configuration exercises is a path that breaks
 // in the other one.
 //
@@ -24,12 +24,12 @@
 // arrive, and a caller drains it in a loop until it does.
 //
 // **Delivery is not promised and no status implies it was.** `Ok` means the
-// datagram left, not that it arrived — this is UDP underneath and the whole
+// datagram left, not that it arrived - this is UDP underneath and the whole
 // design above it assumes loss. So a datagram sent to an endpoint nobody is
 // listening on is `Ok` on both implementations: the loopback drops it exactly as
 // the socket would, because a loopback that reported a delivery failure would
 // let single-player code branch on something the real network never says.
-// `Unreachable` is the different case — an endpoint that cannot be addressed
+// `Unreachable` is the different case - an endpoint that cannot be addressed
 // from here at all, which is a caller's mistake rather than a lost packet.
 //
 // **Every inbound datagram is hostile and an unknown sender is normal.** A port
@@ -84,11 +84,11 @@ namespace engine::net {
 		Closed,
 
 		// The datagram is larger than the maximum. Refused whole rather than
-		// fragmented — a fragmented datagram is lost entirely when any one
+		// fragmented - a fragmented datagram is lost entirely when any one
 		// fragment is, which multiplies the loss rate this design assumes small.
 		TooLarge,
 
-		// The endpoint cannot be addressed from here — no address, or the wrong
+		// The endpoint cannot be addressed from here - no address, or the wrong
 		// family for this socket. A caller's mistake, not a lost packet.
 		Unreachable,
 	};
@@ -201,7 +201,7 @@ namespace engine::net {
 		//
 		// **The loopback honours it too, and that is the point.** A datagram
 		// sent to the broadcast address on a loopback network reaches every
-		// other end attached to it — which makes LAN discovery a path a suite
+		// other end attached to it - which makes LAN discovery a path a suite
 		// exercises with real encoding and no socket, exactly as §16.6 has
 		// single-player ride the loopback rather than a shortcut. A discovery
 		// protocol that could only be tested against a live subnet is one that
@@ -213,7 +213,7 @@ namespace engine::net {
 		// Whether several ends on this machine may bind the same port.
 		//
 		// For the well-known port a discovery listener sits on: two programs on
-		// one machine — a client and the studio, two clients under test — both
+		// one machine - a client and the studio, two clients under test - both
 		// have to hear the same announcements, and without this the second one
 		// to start simply fails to bind and silently discovers nothing.
 		//
@@ -226,8 +226,8 @@ namespace engine::net {
 	// Builds a loopback network with `peerCount` ends attached to it.
 	//
 	// **A routed network rather than a wired-up pair, and deliberately.** A pair
-	// would make the destination argument a no-op — whatever you addressed, the
-	// bytes would go to the one other end — and the two paths a socket has that a
+	// would make the destination argument a no-op - whatever you addressed, the
+	// bytes would go to the one other end - and the two paths a socket has that a
 	// pair cannot express are exactly the two this layer must get right: a
 	// datagram from a sender this end has never heard of, and a datagram
 	// addressed to somewhere nobody is listening. With routing, both are the same

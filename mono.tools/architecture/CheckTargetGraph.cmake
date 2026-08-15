@@ -1,6 +1,6 @@
 # The architecture test: the real CMake target graph against the expectation.
 #
-# Run as a script — `cmake -DGRAPH=... -DEXPECTED=... -P CheckTargetGraph.cmake` —
+# Run as a script - `cmake -DGRAPH=... -DEXPECTED=... -P CheckTargetGraph.cmake` -
 # so it needs nothing built. CMake rather than a compiled tool because the input
 # is CMake's own output, and CMake already has a JSON reader.
 #
@@ -68,7 +68,7 @@ function(_json_links json section key out)
 endfunction()
 
 # An entry with no `requires` is unconditional. One with it is expected exactly
-# when its option is on — so both "this was deleted" and "this is in a build
+# when its option is on - so both "this was deleted" and "this is in a build
 # that was configured without it" stay detectable.
 function(_is_built key out)
 	string(JSON option ERROR_VARIABLE error GET "${MONO_EXPECTED}" ${ARGV2} ${key} requires)
@@ -122,7 +122,7 @@ function(_compare_section label section)
 	foreach(key IN LISTS actual_keys)
 		list(FIND expected_keys "${key}" known)
 		if(known LESS 0)
-			_fail("${label} '${key}' exists in the build and not in the expectation. Add it — a new ${label} is an architectural change.")
+			_fail("${label} '${key}' exists in the build and not in the expectation. Add it - a new ${label} is an architectural change.")
 		endif()
 	endforeach()
 
@@ -146,4 +146,4 @@ _json_keys("${MONO_GRAPH}" modules module_keys)
 _json_keys("${MONO_GRAPH}" programs program_keys)
 list(LENGTH module_keys module_count)
 list(LENGTH program_keys program_count)
-message(STATUS "architecture ok — ${module_count} module(s), ${program_count} program(s)")
+message(STATUS "architecture ok - ${module_count} module(s), ${program_count} program(s)")

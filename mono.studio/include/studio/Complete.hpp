@@ -5,7 +5,7 @@
 // **Free functions over text, because this is the half that can be silently
 // wrong.** A completion list that quietly offers nothing looks exactly like an
 // engine with no API, and one that offers a name the VM does not have is worse
-// than offering nothing at all — an author picks it out of a list, writes it,
+// than offering nothing at all - an author picks it out of a list, writes it,
 // and finds out at run time in whatever scene reaches that line first. Both
 // failures need a window, a device and an imgui frame to see, and neither needs
 // one to happen. `mono.studio/AGENTS.md` names `MatchesQuery` and `DiffText`
@@ -13,16 +13,34 @@
 //
 // **Nothing here is a parser.** `ScanBackwards` walks left from the caret over
 // identifier characters, dots and colons and stops at the first thing that is
-// neither. That resolves `part.`, `Enum.Material.` and `Instance.new("` — which
-// is most of what an author is doing when they want a list — and it resolves
-// nothing about `f().` on purpose. A real parse would need the language's
+// neither. That resolves a caret sitting after the dot in `part` or
+// `Enum.Material`, and after the opening quote of an `Instance.new` call -
+// what an author is doing when they want a list - and it resolves nothing about
+// a call like `f()` on purpose. A real parse would need the language's
 // grammar twice over, and this file covers two languages.
 //
-// **There is no type inference, and the limit is worth stating out loud.** A
-// local declared `local p = Instance.new("Part")` is resolved, because the class
-// is written on the line. A local from `part:FindFirstChild("X")` is not, and
-// after it `p.` offers the union of every scriptable property rather than
-// `BasePart`'s. The union is a longer list, never a wrong one.
+// **There is no type inference. There is assignment following, which is a
+// smaller thing, and the boundary between them is the point.** A local is
+// resolved when the buffer *says* what it holds: `Instance.new("Part")`,
+// `game:GetService("Lighting")` and `FindFirstChildOfClass("Part")` write the
+// class as a literal, `:Clone()` carries its receiver's class because a clone of
+// a `Part` is a `Part`, and `local same = part` is the same local under another
+// name. Only the **last** assignment before the caret counts: a local set from
+// `Instance.new` and then from something unreadable is not a `Part` any more.
+//
+// Everything else answers nothing and falls back to the union of every
+// scriptable property - a longer list, never a wrong one. `FindFirstChild` and
+// `WaitForChild` are the ones worth naming, because following them to their
+// receiver is the obvious next step and it is wrong: a child of a `Model` is not
+// a `Model`, so that narrowing would offer `Model`'s properties for a `Part`.
+//
+// **Which is why every row says whose property it is.** A narrowed row's detail
+// reads `bool on Part` and a union row's reads `bool on some class`: the first
+// claims "this class has this" and the second says "one of these classes has
+// this", and an author who cannot tell those apart is the failure this feature
+// was allowed to have. The marker goes in `Completion::Detail` because that is
+// what the popup already draws, so the distinction survives without the drawing
+// code having to be told about it.
 //
 // Where the names come from is the point, and none of it is written down here:
 // classes, properties and enums are read live from `ecs::Classes` and
@@ -80,10 +98,20 @@ namespace studio {
 		// What replaces the prefix under the caret.
 		std::string Text;
 
-		// The dimmed hint on the right: a property's type, a class's parent,
-		// what a global is. Empty when the name says everything.
+		// The dimmed hint on the right: a property's type and whose it is, a
+		// class's parent, what a global is. Empty when the name says
+		// everything.
+		//
+		// A property's detail names the class it is being claimed for -
+		// `bool on Part` - or says `bool on some class` when the list is the
+		// union, which is the only thing distinguishing a narrowed list from a
+		// broad one on screen.
 		std::string Detail;
 
+		// Which list this row came out of - a class, a property, an enum, a
+		// keyword, a global or a local. The popup groups by it, so a row whose
+		// kind is wrong is a row filed under the wrong heading rather than a
+		// missing one.
 		CompletionKind Kind = CompletionKind::Local;
 
 		// From `FuzzyMatch`, so the popup ranks the way the explorer, the
@@ -103,12 +131,12 @@ namespace studio {
 		// after a dot, which is the common case and not an error.
 		std::string_view Prefix;
 
-		// The expression the separator hangs off — `part` in `part.Anch`,
+		// The expression the separator hangs off - `part` in `part.Anch`,
 		// `Enum.Material` in `Enum.Material.Pl`. Empty when there is no
 		// separator, or when what precedes it is not a plain dotted chain.
 		std::string_view Subject;
 
-		// `.`, `:`, or `\0` when the prefix stands alone.
+		// A dot, a colon, or `\0` when the prefix stands alone.
 		//
 		// The two are kept apart rather than folded together because Luau uses
 		// them for different things: `part:Destroy()` passes the instance and
@@ -120,7 +148,7 @@ namespace studio {
 		bool InString = false;
 
 		// The dotted name being called, when the caret is inside its first
-		// string argument — `Instance.new`, `game:GetService`, `IsA`. This is
+		// string argument - `Instance.new`, `game:GetService`, `IsA`. This is
 		// what turns a quote into a list of class names.
 		std::string_view Call;
 	};
@@ -137,6 +165,11 @@ namespace studio {
 	//
 	// @since v0.14
 	struct CompletionSources {
+		// Which language's keywords and globals to offer.
+		//
+		// **The script's own, not the editor's.** A `.luau` and a `.js` in one
+		// game are completed against different vocabularies, and
+		// `CodeSourceContainerSelector` is what decides which this is.
 		engine::script::Language Language = engine::script::Language::Luau;
 
 		// The globals and instance members of a VM of that language, or null
@@ -144,9 +177,9 @@ namespace studio {
 		// it: classes, properties, enums and keywords still come through.
 		const engine::script::ScriptSurface *Surface = nullptr;
 
-		// The names of instances beside this script, for `script.Parent.` and
-		// `workspace.`. Gathered by the panel, because reading them means being
-		// inside `Universe::Enter` and this function is not.
+		// The names of instances beside this script, for a caret after
+		// `script.Parent` or `workspace`. Gathered by the panel, because reading
+		// them means being inside `Universe::Enter` and this function is not.
 		std::span<const std::string> Children;
 	};
 
@@ -169,9 +202,9 @@ namespace studio {
 	// place; `mono.tools/bindings` says copying that list into a second place is
 	// how the two would disagree later. So the explorer and this call here.
 	//
-	// Everything under `Instance`, minus the services — a world has exactly one
+	// Everything under `Instance`, minus the services - a world has exactly one
 	// of each and `scene::InstallServices` puts it there, so offering one is
-	// offering a second that nothing resolves — and minus the abstract bases,
+	// offering a second that nothing resolves - and minus the abstract bases,
 	// which the run time would happily mint into rows nothing knows how to draw.
 	//
 	// @return The class ids, in registration order.

@@ -7,8 +7,8 @@
 // are more survivable. A world that aborts on an affinity violation takes down
 // one host rather than the server.
 //
-// **Grouping is the whole policy.** Soft faults — a system throwing, a script
-// erroring, a budget overrun — are quarantined per world by `World::Tick` and
+// **Grouping is the whole policy.** Soft faults - a system throwing, a script
+// erroring, a budget overrun - are quarantined per world by `World::Tick` and
 // never need a process. A hard fault takes the address space, and nothing
 // inside a process can arrange otherwise. So the only question a supervisor
 // answers is *who shares an address space with whom*, and a world that cannot
@@ -16,7 +16,7 @@
 //
 // **What restarting means.** A host that dies is respawned and its worlds are
 // restored from their last snapshot. That is exact rather than approximate
-// because a world is deterministic given its state and its inbox — the same
+// because a world is deterministic given its state and its inbox - the same
 // property that makes a recording a faithful log. A host that keeps dying is
 // held down rather than restarted forever, because a crash loop that looks
 // alive on every dashboard is worse than one that stops.
@@ -26,7 +26,7 @@
 // heartbeat arriving on the link is the same event as one reported by hand, so
 // nothing downstream distinguishes an in-process host from a real one. The
 // traffic a host's worlds posted arrives the same way and is handed to the
-// driver's barrier as though those worlds were local — which is the whole
+// driver's barrier as though those worlds were local - which is the whole
 // claim: where a world runs is a deployment decision, not a design one.
 //
 // @tier L4 · shared
@@ -77,7 +77,7 @@ namespace engine::world {
 		// How many `Shared` worlds may sit in one host.
 		//
 		// Several rather than one, because a process per subarea does not scale
-		// to hundreds of them — and soft faults are quarantined per world
+		// to hundreds of them - and soft faults are quarantined per world
 		// whatever the grouping.
 		uint32_t WorldsPerHost = 8;
 
@@ -147,7 +147,7 @@ namespace engine::world {
 		//
 		// Measured in the host and sent, because a driver cannot time another
 		// address space. This is the latest figure received, so it is one
-		// barrier behind — which is worth far more than the nothing a driver
+		// barrier behind - which is worth far more than the nothing a driver
 		// could otherwise say about where a host's time goes.
 		float Milliseconds = 0.0f;
 
@@ -215,7 +215,7 @@ namespace engine::world {
 
 		// Gives a host a link, in place of the one a spawn would have made.
 		//
-		// For an injected launcher — a test, or an in-process host — so that
+		// For an injected launcher - a test, or an in-process host - so that
 		// the protocol can be exercised without a second process. The default
 		// launcher calls this itself.
 		//
@@ -240,7 +240,7 @@ namespace engine::world {
 		// The bus traffic hosts have handed over since it was last taken.
 		//
 		// Each envelope carries the host that sent it, not just the world it
-		// claims to come from — the router's check is *this host holds that
+		// claims to come from - the router's check is *this host holds that
 		// world*, and it cannot be made against a field the sender wrote.
 		//
 		// @return The traffic, in arrival order.
@@ -296,7 +296,7 @@ namespace engine::world {
 		// Called by `Pump` when a heartbeat arrives, and callable directly for
 		// a host with no link of its own. The supervisor has no clock of its
 		// own beyond the one it is given, so time is passed in rather than
-		// read — which is what lets a test drive a five-second deadline in a
+		// read - which is what lets a test drive a five-second deadline in a
 		// microsecond, and what keeps a wall clock out of anything that has to
 		// be reproducible.
 		//

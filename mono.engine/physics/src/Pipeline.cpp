@@ -37,7 +37,7 @@ namespace engine::physics {
 				// alone no longer says.** A measured world's cell size is
 				// derived from its colliders exactly as the grids are, so
 				// restoring it as though an author had named it would pin a
-				// world to the scale it happened to have when it was saved —
+				// world to the scale it happened to have when it was saved -
 				// and it would never measure again.
 				writer.WriteBool(worlds[index].CellSizeMeasured());
 			}
@@ -49,7 +49,7 @@ namespace engine::physics {
 				const float cellSize = reader.ReadFloat();
 				const bool measured = reader.ReadBool();
 
-				// A fresh world, which leaves the static index marked stale — so
+				// A fresh world, which leaves the static index marked stale - so
 				// the first `SyncBroadphase` after a load rebuilds it rather than
 				// querying a grid that describes the world the snapshot was
 				// taken from.
@@ -68,7 +68,7 @@ namespace engine::physics {
 		// carry `scene`'s explicit names. Registering them here first is
 		// idempotent, and it is what keeps a caller that only prepared physics
 		// from minting `engine::scene::Transform` under the compiler's spelling
-		// of it — a snapshot that loads, and is wrong.
+		// of it - a snapshot that loads, and is wrong.
 		scene::RegisterSceneComponents();
 
 		// The name comes from `WorldResource.hpp` rather than from a literal
@@ -90,7 +90,7 @@ namespace engine::physics {
 		// archetype that has somewhere to put the bits.
 		//
 		// Without these two, `Store::Changed` is always false and
-		// `SyncBroadphase` would decide the static geometry never moved — an
+		// `SyncBroadphase` would decide the static geometry never moved - an
 		// index describing where the world used to be, and no diagnostic.
 		store.Observe<scene::Transform>();
 		store.Observe<scene::Collider>();
@@ -99,7 +99,7 @@ namespace engine::physics {
 	void RegisterPhysicsSystems(ecs::Scheduler &scheduler) {
 		// One system per phase rather than one per step. `ecs::Scheduler` gives
 		// no ordering between two systems in one phase, and `SyncBroadphase`
-		// reading what `IntegrateMotion` just wrote is a hard dependency — so
+		// reading what `IntegrateMotion` just wrote is a hard dependency - so
 		// the order is composition, which the contract supports, and not
 		// registration order, which it does not. Each step opens its own
 		// profiler span, so the overlay still separates them.

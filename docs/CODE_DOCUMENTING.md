@@ -7,7 +7,7 @@ what to document, and no marker to remember.
 This file is the part that is not automatic: where a comment goes, what the
 tags do, and the handful of things that will bite you.
 
-[`CODE_FORMAT.md`](CODE_FORMAT.md) covers *when* a comment is worth writing —
+[`CODE_FORMAT.md`](CODE_FORMAT.md) covers *when* a comment is worth writing -
 comment the decision, not the mechanics. That still applies. Nothing here asks
 you to write more comments; it says where the ones you write end up.
 
@@ -72,7 +72,7 @@ namespace engine::core {
 ```
 
 A trailing comment becomes `///<` rather than `///` because `///` would bind to
-the *next* member — the page would put "70 degrees" against `NearPlane` and read
+the *next* member - the page would put "70 degrees" against `NearPlane` and read
 as though it belonged there.
 
 ---
@@ -85,8 +85,8 @@ exactly one class and the prose is obviously about it.
 
 `Name.hpp` opens with twenty-five lines explaining interning, stable ids and why
 serializing `Id()` defeats the point. All of it lands on the *file* page. The
-`engine::core::Name` class page — the one people reach from search and from the
-sidebar — has an empty description.
+`engine::core::Name` class page - the one people reach from search and from the
+sidebar - has an empty description.
 
 So give the type its own comment, even a short one:
 
@@ -119,8 +119,8 @@ listings and the rest becomes the detail on the page. Write the first sentence
 to survive on its own:
 
 ```cpp
-// Interns. Cheap to repeat — the second call for the same text is a hash
-// lookup — but not free, so do it once and keep the result rather than
+// Interns. Cheap to repeat - the second call for the same text is a hash
+// lookup - but not free, so do it once and keep the result rather than
 // constructing from a literal inside a loop.
 explicit Name(std::string_view text);
 ```
@@ -142,7 +142,7 @@ work as a summary. Reach for it rarely.
 
 ## Markdown
 
-Markdown works everywhere, and it is how to format prose — not HTML.
+Markdown works everywhere, and it is how to format prose - not HTML.
 
 ```cpp
 // Interns once and hands back a dense counter.
@@ -188,7 +188,7 @@ Everything below is verified against this repository's configuration.
 | `@note` | an aside worth a callout box |
 | `@warning` | the thing that will cost somebody an afternoon |
 | `@see Other` | a pointer to the related thing |
-| `@since v0.2` | the version it arrived in — the versions in `ROADMAP.md` |
+| `@since v0.2` | the version it arrived in - the versions in `ROADMAP.md` |
 | `@deprecated` | say what to use instead, in the same sentence |
 | `@code` / `@endcode` | a fenced, highlighted, copyable example |
 | `@ref Thing` | an explicit link where autolinking will not fire |
@@ -207,7 +207,7 @@ static Name Reserve(std::string_view text, uint32_t id);
 ```
 
 **`@param` is all or nothing.** Documenting one argument and not the rest is a
-warning, and `just docs-check` fails on it. Documenting none is fine — a
+warning, and `just docs-check` fails on it. Documenting none is fine - a
 parameter whose name and type say everything does not need a line repeating
 them. This is deliberate: half-documented is worse than undocumented, because it
 reads as complete.
@@ -225,7 +225,7 @@ parameter and an in-out parameter look identical at the call site.
 ### The rest of what works here
 
 Less common, and all of them checked against this configuration rather than
-assumed — the probe that produced these rows is in the note at the end.
+assumed - the probe that produced these rows is in the note at the end.
 
 | Tag | For |
 |---|---|
@@ -242,7 +242,7 @@ assumed — the probe that produced these rows is in the note at the end.
 `@todo` and `@bug` are worth knowing apart from the `// TODO(v0.5): ...` markers
 already in the tree. Those are notes to whoever opens the file; these are index
 pages somebody can read without opening anything. A deferred *decision* belongs
-in [`DEFERRED.md`](DEFERRED.md) — `@todo` is for the small outstanding job that
+in [`DEFERRED.md`](DEFERRED.md) - `@todo` is for the small outstanding job that
 does not need an entry there.
 
 Grouping is the one to reach for deliberately rather than often. The site is
@@ -262,14 +262,14 @@ Vector3 LocalToWorld(const CFrame &frame, Vector3 point);
 
 ### Tags this repository does not use
 
-Not because they are broken — they work — but because something else here
+Not because they are broken - they work - but because something else here
 already does the job, and two records of one fact disagree eventually.
 
 | Tag | Instead |
 |---|---|
 | `@author`, `@date` | `git log` and `git blame`, which cannot go stale |
 | `@copyright`, `@license` | `LICENSE`, once, for the whole repository |
-| `@class`, `@struct`, `@fn` | nothing — the comment already sits above the thing it documents, and these only exist for comments that do not |
+| `@class`, `@struct`, `@fn` | nothing - the comment already sits above the thing it documents, and these only exist for comments that do not |
 | `@mainpage` | `USE_MDFILE_AS_MAINPAGE`, which makes README.md the front page |
 | `@page` | a markdown file under `docs/`. Every one already becomes a page |
 | `@tableofcontents` | nothing. It only has an effect inside a `@page` or `@mainpage` body, so it does nothing in a header comment |
@@ -297,8 +297,8 @@ into its own index page, so "what is client-only?" is a page rather than a grep.
 // @tier L12 · client
 ```
 
-This replaces the three spellings currently in the tree — `L3 ·`,
-`L12 [client] ·`, `L1.` — with one that is also a link. The tier itself is enforced
+This replaces the three spellings currently in the tree - `L3 ·`,
+`L12 [client] ·`, `L1.` - with one that is also a link. The tier itself is enforced
 by `mono_check_all_tiers`; the tag is how it reaches the page.
 
 `@client` and `@server` carry their own sentence already, so they take no
@@ -324,7 +324,7 @@ no markup at all:
 ```
 
 `Name`, `engine::core::Name` and `Reserve()` all link. Use `@ref` only when
-autolinking will not fire — usually a markdown page linking into the API.
+autolinking will not fire - usually a markdown page linking into the API.
 
 Linking to another document is an ordinary markdown link, and it works both on
 GitHub and on the generated site:
@@ -339,7 +339,7 @@ See [RUNNING.md](../RUNNING.md) and [the tier rule](#the-layer-stack-is-not-nego
 
 **Angle-bracket placeholders are escaped.** `<assets>/shaders/<module>/` is a
 path with two placeholders in it, and Doxygen would read both as HTML tags,
-warn, and render `/shaders//` — losing the meaning without saying it had. Write
+warn, and render `/shaders//` - losing the meaning without saying it had. Write
 the path normally:
 
 ```cpp
@@ -364,7 +364,7 @@ through untouched, so a header that wants to be explicit can be.
 **A type with no comment of its own gets an empty page.** The section above; it
 is the most common gap in the engine today.
 
-**One comment documents one declaration — the next one.** A block written above
+**One comment documents one declaration - the next one.** A block written above
 two related lines documents the first and leaves the second bare, which is easy
 to miss precisely because the pair reads as one idea:
 
@@ -385,7 +385,7 @@ documenting nothing.
 **Documenting some arguments and not others fails.** All or nothing.
 
 **A comment inside a function body is not documentation.** Doxygen does not read
-function bodies. That is fine — those comments are for the reader of the code,
+function bodies. That is fine - those comments are for the reader of the code,
 which is the point of most of them.
 
 **`src/` is invisible.** A comment on a private header documents nothing on the
@@ -404,7 +404,7 @@ and `just clean` deletes it.
 // One clock, many tick rates.
 //
 // The engine runs several loops at different rates against the same wall
-// clock, and every one of them has to agree on what "now" is — otherwise a
+// clock, and every one of them has to agree on what "now" is - otherwise a
 // recorded run does not replay.
 //
 // @tier L1 · shared
@@ -464,7 +464,7 @@ just docs-check    # fail on gaps and on malformed comments
   needs, switches off the undocumented warning and reports nothing about having
   done so.
 
-Both must be clean. This is `AGENTS.md` rule 6 applied to documentation — a rule
+Both must be clean. This is `AGENTS.md` rule 6 applied to documentation - a rule
 the build does not check is documentation, and "public headers are documented"
 is a rule.
 
@@ -472,13 +472,13 @@ is a rule.
 public header carries a comment, and no comment in the tree is malformed.
 
 It was 263 gaps when this file was first written, and the last 56 of them were
-the two programs and the test runner — `Demo.hpp` (14), `Server.hpp` (10),
+the two programs and the test runner - `Demo.hpp` (14), `Server.hpp` (10),
 `Client.hpp` (9), `Runner.hpp` (8), `Sha256.hpp` (7), `Simulation.hpp` (5) and
 `Process.hpp` (3). Almost all were fields: a struct whose *type* had prose and
 whose members had none, which is the shape the section above warns about.
 
 Keep it at zero. A check that has been failing for a while stops being read, and
-takes the real failures down with it — which is exactly what happened here. The
+takes the real failures down with it - which is exactly what happened here. The
 site pass was failing on a warning that looked like it came from README.md, and
 because the site pass runs first, the coverage pass behind it had never run at
 all. Nobody had seen the gap count because nothing had ever printed one.
@@ -499,7 +499,7 @@ including why the line count is an invariant and why it is scoped to `*.hpp`.
 
 Doxygen has several hundred commands and this file lists the ones that are
 useful here. Before adding a row to those tables, run the tag rather than
-trusting a web page about a different project's configuration — `ALIASES`,
+trusting a web page about a different project's configuration - `ALIASES`,
 `JAVADOC_AUTOBRIEF` and the filter all change what a comment means.
 
 Two commands answer it. The first shows what the filter hands Doxygen:
@@ -511,7 +511,7 @@ just build docgen
 
 The second runs the real configuration over a scratch header and reports what
 Doxygen made of it. Point `INPUT` somewhere outside the repository so the probe
-never reaches the site, and turn the main page off with it — README.md is no
+never reaches the site, and turn the main page off with it - README.md is no
 longer in `INPUT` at that point, and a main page naming a file Doxygen was not
 given is a warning of its own:
 
@@ -528,7 +528,7 @@ doxygen /tmp/probe/Doxyfile && cat /tmp/probe/out/warnings.txt
 ```
 
 An empty `warnings.txt` means the tag parsed. That is not the same as the tag
-doing something, so check for the page it should have produced —
+doing something, so check for the page it should have produced -
 `/tmp/probe/out/html/todo.html` for `@todo`, `group__*.html` for a group. A tag
 Doxygen does not recognise is silently rendered as text, which is the failure
 mode worth catching: it looks fine in the source and reads as prose on the page.

@@ -8,7 +8,7 @@
 // because the ECS is storage and does not know what a Transform is and `scene`
 // at L7 did not exist. It does now, both programs register the same set under
 // the same names, and that is what lets a snapshot cross to a client with no
-// translation layer — `mono.client/include/client/Replicated.hpp` used to be
+// translation layer - `mono.client/include/client/Replicated.hpp` used to be
 // that layer and is not any more.
 //
 // Still deliberately not shared with `mono.client`. A client-tier header is
@@ -45,8 +45,8 @@ namespace server {
 
 	// What a chattering world has heard.
 	//
-	// A resource rather than a log line, so a test — or a person with a
-	// debugger — can ask a world what reached it without parsing output.
+	// A resource rather than a log line, so a test - or a person with a
+	// debugger - can ask a world what reached it without parsing output.
 	//
 	// @since v0.2
 	struct Heard {
@@ -60,7 +60,7 @@ namespace server {
 	// Registers the `scene` component set and this program's two placeholders,
 	// under explicit names.
 	//
-	// Called before anything else, on every path — including a replay, which
+	// Called before anything else, on every path - including a replay, which
 	// loads a snapshot naming these types before any world has been built. A
 	// process that had not registered them would resolve every name to nothing
 	// and refuse the snapshot.
@@ -86,7 +86,7 @@ namespace server {
 	// compared.
 	void BuildPlaceholderWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, uint32_t count);
 
-	// Gives a hosted world physics and weight — the server's half of what
+	// Gives a hosted world physics and weight - the server's half of what
 	// `studio::Editor::PrepareWorld` does, less the presentation this binary
 	// has no renderer for.
 	//
@@ -96,7 +96,7 @@ namespace server {
 	// body and resolved no contact: a part dropped in a hosted world hung in
 	// the air, and every client watching it agreed, because they were watching
 	// an authority that was not simulating. It is also the precondition for
-	// anything to *own* a simulation — an owner of nothing is a field.
+	// anything to *own* a simulation - an owner of nothing is a field.
 	//
 	// Both halves, for the reason the studio takes both: `physics` has no
 	// gravity of its own by design, so the pipeline alone integrates every
@@ -104,7 +104,7 @@ namespace server {
 	// answer and this is the host applying it.
 	//
 	// Call it once per world. `Scheduler::Add` takes a name and does not
-	// deduplicate, so a world prepared twice integrates twice per tick — which
+	// deduplicate, so a world prepared twice integrates twice per tick - which
 	// is a world running at double gravity rather than an error anybody sees.
 	//
 	// @since v0.13

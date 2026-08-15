@@ -41,7 +41,7 @@ namespace serialisation_bench {
 	// Fields per record, and the shape of one.
 	//
 	// A component row in a snapshot is a handful of scalars and occasionally a
-	// name — not a single scalar and not a megabyte. Benchmarking one
+	// name - not a single scalar and not a megabyte. Benchmarking one
 	// `WriteUInt32` in a loop would measure the call and miss the thing that
 	// actually costs: the buffer growth and the branch per field.
 	constexpr size_t RECORDS = 20'000;
@@ -64,7 +64,7 @@ namespace serialisation_bench {
 
 	// Strings of the length a property name or a short field actually is.
 	//
-	// Length drives both the memcpy and, for `ReadName`, the hash — so a pool of
+	// Length drives both the memcpy and, for `ReadName`, the hash - so a pool of
 	// one-character strings would report a number no call site sees.
 	const std::vector<std::string> &Strings() {
 		static const std::vector<std::string> strings = [] {
@@ -248,7 +248,7 @@ BENCH("write · 20k names", RECORDS) {
 BENCH("read · 20k names", RECORDS) {
 	// **The expensive half of the format, and the one a snapshot pays per
 	// field.** Reading a name is a bounds-checked length, a view, and then a
-	// registry lookup that hashes the whole string — so this row should sit far
+	// registry lookup that hashes the whole string - so this row should sit far
 	// above `read · 20k strings`, and how far above is what a caller saves by
 	// interning field names once at load instead of per message.
 	const std::vector<std::byte> &buffer = StringBuffer();
@@ -283,7 +283,7 @@ BENCH("read · 1 MiB raw block, copied", 1) {
 }
 
 BENCH("read · 1 MiB raw block, borrowed", 1) {
-	// No copy at all — a bounds check and a span. Against the row above, this is
+	// No copy at all - a bounds check and a span. Against the row above, this is
 	// what a caller saves by borrowing a component column instead of copying it,
 	// and it should be very nearly free.
 	const std::vector<std::byte> &block = Block();
@@ -304,7 +304,7 @@ BENCH("read · 20k refused reads on a truncated buffer", RECORDS) {
 	// **What rejecting a corrupt buffer costs**, which is the number that says
 	// whether a malformed packet is cheaper or dearer to handle than a valid
 	// one. The failure flag is sticky, so every read after the first is supposed
-	// to return immediately without touching the buffer — if this row is not
+	// to return immediately without touching the buffer - if this row is not
 	// comfortably *faster* than `read · 20k mixed-scalar records`, the sticky
 	// flag is not short-circuiting and a truncated packet costs a peer more than
 	// a real one does.

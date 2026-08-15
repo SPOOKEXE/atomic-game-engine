@@ -20,7 +20,7 @@ namespace process_test {
 	// This test binary, used as its own child.
 	//
 	// Spawning a system tool would make these cases depend on what is installed
-	// and where — `/bin/true` is not a path on Windows and not guaranteed on a
+	// and where - `/bin/true` is not a path on Windows and not guaranteed on a
 	// container. The one executable certain to exist is the one running.
 	std::filesystem::path Self() {
 		// Paths::Base() is already the directory this binary sits in.
@@ -185,7 +185,7 @@ TEST_CASE("a destroyed handle does not leave an orphan", "[process]") {
 	}
 
 	// The destructor killed and reaped it. Confirmed by the process id no
-	// longer being ours to signal — a second handle cannot reach it.
+	// longer being ours to signal - a second handle cannot reach it.
 	Process stranger;
 	REQUIRE_FALSE(stranger.Kill());
 	REQUIRE(id != 0);
@@ -218,7 +218,7 @@ TEST_CASE("workers are divided between hosts rather than duplicated", "[process]
 	const unsigned alone = WorkersPerHost(1);
 	REQUIRE(alone == cores - 1);
 
-	// More hosts, fewer workers each — and never more in total than the machine
+	// More hosts, fewer workers each - and never more in total than the machine
 	// has, which is the whole property.
 	unsigned previous = alone;
 	for (unsigned hosts = 2; hosts <= 16; hosts++) {

@@ -3,7 +3,7 @@
 // What a store has published, as opposed to what this world has loaded.
 //
 // **These are two different questions and only one of them had an answer.**
-// `MeshCatalogue` holds what arrived — the meshes something named, fetched and
+// `MeshCatalogue` holds what arrived - the meshes something named, fetched and
 // registered. Since v0.10 nothing is fetched by kind, so that set is exactly
 // what has already been asked for, and a scene reading it can never be the thing
 // that asks. `MeshGrid.luau` ran into that head on: it laid out whatever
@@ -24,7 +24,7 @@
 // world can now find out what there is to name.
 //
 // That is different from asking by kind in the way that matters. Asking by kind
-// pulled every bundle in the store through one synchronous `Pump` — 6.9 GB on
+// pulled every bundle in the store through one synchronous `Pump` - 6.9 GB on
 // this repository's own store, `client/ContentDemand.hpp` has the numbers. This
 // hands over a few hundred *strings*, and a scene decides how many of them to
 // use. `MeshGrid.luau` uses twelve.
@@ -32,7 +32,7 @@
 // ## Why names and not entries
 //
 // `assets::AssetKind` lives in `engine/assets` and this module depends on `core`,
-// `ecs` and `spatial` — see `scene/AGENTS.md`, that list is not growing. So the
+// `ecs` and `spatial` - see `scene/AGENTS.md`, that list is not growing. So the
 // filtering by kind happens in whoever read the manifest, and what crosses into
 // the world is the same thing that crosses everywhere else in this engine: a
 // name. `MeshCatalogue` makes the identical trade for the identical reason,
@@ -77,7 +77,7 @@ namespace engine::scene {
 	// The world's published catalogue, creating an empty one if it has none.
 	//
 	// **`RegisterSceneComponents` must have run first**, as it must before any
-	// resource here is set — `MeshesOf` carries the whole argument, including why
+	// resource here is set - `MeshesOf` carries the whole argument, including why
 	// getting it wrong passes most runs.
 	//
 	// @param store The world.
@@ -93,7 +93,7 @@ namespace engine::scene {
 	//
 	// @param store  The world.
 	// @param meshes The published mesh names. Invalid ones are dropped rather
-	//        than stored — a name a scene cannot use is a row it would try to
+	//        than stored - a name a scene cannot use is a row it would try to
 	//        fetch and never resolve.
 	// @return How many were kept.
 	size_t RecordPublishedMeshes(ecs::Store &store, const std::vector<core::Name> &meshes);
@@ -102,7 +102,7 @@ namespace engine::scene {
 	//
 	// **The `const` reader, so a script binding can use it**: it never creates
 	// the resource. A world with none answers empty rather than acquiring one
-	// from inside a read — `TrianglesOf`'s reason, and the same trap.
+	// from inside a read - `TrianglesOf`'s reason, and the same trap.
 	//
 	// @param store The world.
 	// @param out   Appended to, so a caller can gather several worlds.

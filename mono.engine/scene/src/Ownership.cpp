@@ -26,17 +26,17 @@ namespace engine::scene {
 			return true;
 		}
 
-		// **Nothing to simulate, nothing to own.** An anchored part carries no
-		// `RigidBody` — anchored decides presence rather than setting a flag —
-		// and neither does a `Folder` or a service. See the header.
-		if (store.Get<RigidBody>(instance) == nullptr) {
+		// **Nothing to simulate, nothing to own.** An anchored part carries the
+		// `Anchored` tag - anchored decides presence rather than setting a flag
+		// - and a `Folder` or a service has no body either. See the header.
+		if (store.Has<Anchored>(instance)) {
 			return false;
 		}
 
 		// **Checked, because the failure is otherwise silent and permanent.**
-		// Handing a body to a `Folder` writes a row nothing will ever reclaim —
+		// Handing a body to a `Folder` writes a row nothing will ever reclaim -
 		// the reclaim below only fires for an owner that *was* alive and stopped
-		// being — so a scene would carry a body owned by something that cannot
+		// being - so a scene would carry a body owned by something that cannot
 		// own it for the rest of the session.
 		if (!store.Alive(player) || !ecs::Classes::IsA(store.ClassOf(player), PlayerClass())) {
 			return false;
@@ -59,10 +59,10 @@ namespace engine::scene {
 		// today.
 		std::vector<ecs::Entity> abandoned;
 		store.Each<const NetworkOwner>([&store, &abandoned](ecs::Entity entity, const NetworkOwner &owner) {
-			// The owner has gone, or the body has. Anchoring removes the
-			// `RigidBody`, which leaves an owner authorised to write the
+			// The owner has gone, or the body has. Anchoring adds the
+			// `Anchored` tag, which leaves an owner authorised to write the
 			// transform of something the world has just declared immovable.
-			if (!store.Alive(owner.Player) || store.Get<RigidBody>(entity) == nullptr) {
+			if (!store.Alive(owner.Player) || store.Has<Anchored>(entity)) {
 				abandoned.push_back(entity);
 			}
 		});

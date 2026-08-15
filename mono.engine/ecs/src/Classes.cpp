@@ -45,7 +45,7 @@ namespace engine::ecs {
 		struct Table {
 			// **A shared mutex, and the asymmetry is the whole reason.** This
 			// table is written during startup and read on every property access
-			// for the rest of the process — `Store::GetProperty` and
+			// for the rest of the process - `Store::GetProperty` and
 			// `SetProperty` both go through `Describe`, and a script animating a
 			// scene does that hundreds of times a frame.
 			//
@@ -55,7 +55,7 @@ namespace engine::ecs {
 			// touches. Nothing about a read needs that: the merged list a reader
 			// walks is not being written while it walks.
 			//
-			// The one wrinkle is that `Describe` is not a pure read — it merges
+			// The one wrinkle is that `Describe` is not a pure read - it merges
 			// lazily. That is handled where it is: a shared lock first, and the
 			// unique one taken only on the rare pass that actually has merging
 			// to do. See `Describe`.
@@ -207,14 +207,14 @@ namespace engine::ecs {
 		// **Resolved once, here, because this is the only way a descriptor gets
 		// into the table.** `Property`, `ClampedProperty` and `Computed` all
 		// funnel through `Declare`, so filling it here means no caller can
-		// produce one without it — which is what lets a binding compare against
+		// produce one without it - which is what lets a binding compare against
 		// it without checking whether it is set.
 		PropertyDescriptor resolved = descriptor;
 		resolved.Spelling = resolved.Name.Text();
 
 		// Redeclaring a name on the same class replaces it. Redeclaring one a
 		// base already has is also a replacement, but that happens in the
-		// merge — this list is only what *this* class said.
+		// merge - this list is only what *this* class said.
 		const auto existing = std::find_if(
 			entry.Declared.begin(), entry.Declared.end(), [&resolved](const PropertyDescriptor &property) {
 				return property.Name == resolved.Name;
@@ -265,7 +265,7 @@ namespace engine::ecs {
 		auto &table = Get();
 
 		// **Two passes, and the second one almost never runs.** This is the
-		// hottest read in the engine — every `Store::GetProperty` and
+		// hottest read in the engine - every `Store::GetProperty` and
 		// `SetProperty` goes through it, so a script animating two hundred parts
 		// arrives here hundreds of times a frame, from as many threads as there
 		// are worlds ticking.
@@ -295,7 +295,7 @@ namespace engine::ecs {
 		// Stale, so the merge has to happen and it is a write. **Re-checked
 		// under the exclusive lock rather than assumed**, because the shared
 		// lock was dropped to take this one and another thread may have merged
-		// the same entry in between — `Remerge` already returns early on that,
+		// the same entry in between - `Remerge` already returns early on that,
 		// which is what makes the double check free rather than a second copy of
 		// the condition.
 		std::unique_lock lock(table.Guard);

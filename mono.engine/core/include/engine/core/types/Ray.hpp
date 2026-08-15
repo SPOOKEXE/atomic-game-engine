@@ -8,8 +8,8 @@
 // reports every distance at half its true value, and that error grows with how
 // wrong the caller was instead of failing where the mistake was made.
 //
-// **`RayHit` has no suite of its own, deliberately.** It carries no behaviour —
-// it is the shape a query fills in — so it is covered by the suites of the
+// **`RayHit` has no suite of its own, deliberately.** It carries no behaviour -
+// it is the shape a query fills in - so it is covered by the suites of the
 // queries that produce it. That is the same exception the root `AGENTS.md`
 // already names for `Entity.hpp`, and it is written down here so the gap reads
 // as a decision rather than an oversight. `Ray` does have one, because
@@ -17,7 +17,7 @@
 //
 // Absent on purpose: no `FromPoints`, no maximum distance on the ray, and no
 // cached reciprocal direction. The first two are one line of the caller's own
-// arithmetic. The third belongs to the slab test that consumes it — one ray is
+// arithmetic. The third belongs to the slab test that consumes it - one ray is
 // tested against many boxes, so the reciprocal is a loop invariant of the query
 // and not a property of the ray.
 //
@@ -33,7 +33,7 @@ namespace engine::core {
 	//
 	// `Direction` must have length one. A default-constructed ray has no
 	// direction at all and hits nothing, which mirrors `Vector3::Unit`
-	// returning `Zero` for a zero vector — saying "there is no direction" beats
+	// returning `Zero` for a zero vector - saying "there is no direction" beats
 	// a NaN that surfaces three subsystems away.
 	//
 	// @since v0.4
@@ -75,7 +75,7 @@ namespace engine::core {
 	//
 	// There is no validity flag, because a query that found nothing returns no
 	// hit rather than a hit that says it is not one. A flag makes the caller's
-	// mistake — reading the position out of a miss — compile and produce a
+	// mistake - reading the position out of a miss - compile and produce a
 	// plausible number.
 	//
 	// @since v0.4

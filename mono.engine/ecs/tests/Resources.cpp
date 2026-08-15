@@ -2,8 +2,8 @@
 //
 // The property most of these are about is separation. A resource is reachable
 // by name and unreachable by query, and a component is the other way round. If
-// that ever stops being true the failure is silent — a loop quietly gains a row
-// that is not an entity — so it is asserted rather than documented.
+// that ever stops being true the failure is silent - a loop quietly gains a row
+// that is not an entity - so it is asserted rather than documented.
 
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -119,7 +119,7 @@ TEST_CASE("a resource is not visited by a query for the same type", "[resources]
 	});
 
 	// One entity has a Position. The world also has one, and it is not an
-	// entity — so a loop over positions sees exactly the entity's.
+	// entity - so a loop over positions sees exactly the entity's.
 	REQUIRE(visited == 1);
 	REQUIRE(sum == Approx(1.0f));
 }

@@ -83,7 +83,7 @@ TEST_CASE("a draw instance is built from scene components without conversion", "
 	// **Every field named, because `-Werror=missing-field-initializers` is on
 	// under the `ci` preset.** A partial aggregate initialiser is silently fine
 	// under `dev` and fatal there, which is exactly what happened when v0.9
-	// widened this type — so the fields are spelled out rather than trailing
+	// widened this type - so the fields are spelled out rather than trailing
 	// off and relying on the defaults.
 	DrawInstance instance;
 	instance.Frame = transform.Frame;
@@ -101,7 +101,7 @@ TEST_CASE("a draw instance is built from scene components without conversion", "
 
 TEST_CASE("an opaque list keeps the order the world produced", "[scene][drawinstance]") {
 	// The cheap case, and the common one. A scene with no transparency must
-	// come out of this exactly as it went in — that is what makes a recording
+	// come out of this exactly as it went in - that is what makes a recording
 	// of one replay, and it means the cost is one pass and no comparisons.
 	std::vector<DrawInstance> instances(5);
 	for (size_t index = 0; index < instances.size(); index++) {
@@ -118,7 +118,7 @@ TEST_CASE("an opaque list keeps the order the world produced", "[scene][drawinst
 TEST_CASE("transparent instances move to the back, farthest first", "[scene][drawinstance]") {
 	// A blended fragment mixes with what is already in the target, so a near
 	// pane drawn before a far one blends the far one *into* a pixel that should
-	// have hidden it — a window that looks right from one side of the room and
+	// have hidden it - a window that looks right from one side of the room and
 	// wrong from the other.
 	std::vector<DrawInstance> instances(4);
 	instances[0].Frame = CFrame{Vector3{1.0f, 0.0f, 0.0f}};
@@ -163,7 +163,7 @@ TEST_CASE("the order depends on where the camera is", "[scene][drawinstance]") {
 
 TEST_CASE("equal distances keep world order, so a recording replays", "[scene][drawinstance]") {
 	// An unstable sort would swap them from frame to frame as the comparison
-	// fell either way — a determinism failure arriving through a renderer.
+	// fell either way - a determinism failure arriving through a renderer.
 	std::vector<DrawInstance> instances(3);
 	for (auto &instance : instances) {
 		instance.Frame = CFrame{Vector3{3.0f, 0.0f, 0.0f}};
@@ -250,7 +250,7 @@ TEST_CASE("casters move to the front and keep world order", "[scene][drawinstanc
 	CHECK(engine::scene::PartitionCasters(instances, order) == 3);
 
 	// **Stable on both sides.** The casters keep the order the world produced
-	// them in and so do the ones left behind — an unstable partition would
+	// them in and so do the ones left behind - an unstable partition would
 	// shuffle them from frame to frame as the comparison fell either way, which
 	// is a determinism failure arriving through a renderer.
 	CHECK(order == std::vector<uint32_t>{1, 3, 4, 0, 2});
@@ -271,7 +271,7 @@ TEST_CASE("an empty range partitions to nothing", "[scene][drawinstance]") {
 // That distinction is the whole value of the test. Every field of `ScenePlan`
 // becomes a `first_instance` and a count on a draw call, and those are the part
 // of a render pass that is easy to get wrong by one and impossible to see in a
-// screenshot — a shadow range short by one loses a caster somewhere off screen
+// screenshot - a shadow range short by one loses a caster somewhere off screen
 // and the frame still looks right. A test that recomputed the offsets would
 // only check that the author of the test agreed with themselves.
 TEST_CASE("the scene plan divides a view into the runs its passes draw", "[scene][drawinstance]") {
@@ -280,7 +280,7 @@ TEST_CASE("the scene plan divides a view into the runs its passes draw", "[scene
 	// 0: plain opaque caster
 	// 1: opaque, does not cast
 	// 2: mirror, casts
-	// 3: transparent — never reaches the shadow pass whatever it says
+	// 3: transparent - never reaches the shadow pass whatever it says
 	// 4: plain opaque caster
 	// 5: mirror, does not cast
 	instances[0].CastShadow = true;
@@ -328,7 +328,7 @@ TEST_CASE("the scene plan divides a view into the runs its passes draw", "[scene
 }
 
 // A scene with nothing in it, and a scene with nothing opaque in it. Both reach
-// the renderer — a world of glass is a world somebody will build — and both
+// the renderer - a world of glass is a world somebody will build - and both
 // would divide by the wrong count if the plan were derived rather than
 // returned.
 TEST_CASE("a scene plan copes with nothing to draw", "[scene][drawinstance]") {
@@ -362,7 +362,7 @@ TEST_CASE("a scene plan copes with nothing to draw", "[scene][drawinstance]") {
 // **A texture per mirror means a draw per mirror, and a draw is an offset and a
 // count.** Until v0.8 every pane sampled one target, so "the mirrors" was a
 // single range and a single sampler binding. `SurfaceRun` is what replaced that,
-// and it is only worth anything if each index really is contiguous — a run that
+// and it is only worth anything if each index really is contiguous - a run that
 // overlapped another would bind one surface's texture and draw another's panes,
 // which is a mirror showing the wrong room and impossible to read off a
 // screenshot.
@@ -417,7 +417,7 @@ TEST_CASE("mirrors are grouped by the surface they show", "[scene][drawinstance]
 }
 
 // **The casters moved, and the plan says where.** They used to be one range
-// contiguous from `Reflected` — the shadow pass drew it with a single call — and
+// contiguous from `Reflected` - the shadow pass drew it with a single call - and
 // grouping by index took that away, because one run cannot be both grouped by
 // surface and split by caster. They are partitioned inside each group now, and a
 // shadow pass that still assumed the old single range would silently stop
@@ -455,8 +455,8 @@ TEST_CASE("shadow casters are partitioned inside each surface run", "[scene][dra
 }
 
 // An index past the cap is dropped rather than written past the end of the
-// array. A scene may name any number it likes — `BasePart::Surface` takes an
-// `int32_t` from a script — and the arrays this indexes are sized by the
+// array. A scene may name any number it likes - `BasePart::Surface` takes an
+// `int32_t` from a script - and the arrays this indexes are sized by the
 // renderer's texture budget, not by what a script can express.
 TEST_CASE("a surface index past the cap is dropped", "[scene][drawinstance]") {
 	std::vector<DrawInstance> instances(2);
@@ -466,7 +466,7 @@ TEST_CASE("a surface index past the cap is dropped", "[scene][drawinstance]") {
 	std::vector<uint32_t> order;
 	const ScenePlan plan = OrderScene(instances, Vector3::Zero, order);
 
-	// Both are still mirrors by the partition — it tests `Surface >= 0` — so the
+	// Both are still mirrors by the partition - it tests `Surface >= 0` - so the
 	// dropped one occupies a slot in the run and simply belongs to no group.
 	CHECK(plan.Surfaces == 2);
 	CHECK(plan.Runs[0].OpaqueCount == 1);
@@ -475,7 +475,7 @@ TEST_CASE("a surface index past the cap is dropped", "[scene][drawinstance]") {
 TEST_CASE("a signature is stable for a list that has not changed", "[scene][drawinstance]") {
 	// **The property the whole thing rests on.** `render::Renderer` skips a
 	// surface pass when this number matches the one its texture was drawn with,
-	// so a signature that drifted on its own would not fail — it would silently
+	// so a signature that drifted on its own would not fail - it would silently
 	// render every mirror every frame and look exactly like no optimisation at
 	// all.
 	std::vector<DrawInstance> instances(3);
@@ -503,9 +503,9 @@ TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]
 	// This case has been three things. It began as the assertion that a
 	// signature must *not* move with the row's trailing padding, because
 	// depending on padding is depending on nothing. `Movable` then took that
-	// byte and it asserted the opposite. `Movable` is gone — what may be copied
+	// byte and it asserted the opposite. `Movable` is gone - what may be copied
 	// through a hole is what fits through it, which is arithmetic rather than a
-	// flag — and the seam plane is what occupies the question now.
+	// flag - and the seam plane is what occupies the question now.
 	DrawInstance instance;
 	instance.Frame = CFrame(Vector3(3.0f, 1.0f, -2.0f));
 	instance.Mesh = Name("drawinstance_test.Wall");
@@ -529,14 +529,14 @@ TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]
 	// fact agree with the field-wise one on every list anybody can build right
 	// now. That is a property of the current field order, not a guarantee: one
 	// `double`, one pointer or one reordering opens a hole, and a byte reader
-	// would then be folding in whatever the draw list's allocation last held —
+	// would then be folding in whatever the draw list's allocation last held -
 	// never matching, so every surface renders every frame and the skip silently
 	// stops working. The signature is field-wise and cannot develop that; this
 	// assert is here so the next person to widen the type is told which
 	// assumption they just changed.
 	//
 	// **It survived the seam fields**, which is the case worth recording: the
-	// single-byte fields — `Surface`, `CastShadow`, `Alpha` — sit inside one
+	// single-byte fields - `Surface`, `CastShadow`, `Alpha` - sit inside one
 	// four-byte word, so a four-aligned `Vector3` lands immediately after them
 	// and opens nothing. A fourth byte-sized field would still fit; a fifth is
 	// what would widen the row.
@@ -550,7 +550,7 @@ TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]
 TEST_CASE("every field a surface can see moves the signature", "[scene][drawinstance]") {
 	// **One case per field, because the failure is per field.** A signature
 	// that missed `Tint` would hold a mirror's image through a recolour, and
-	// nothing else in the frame would look wrong — the pane would simply keep
+	// nothing else in the frame would look wrong - the pane would simply keep
 	// reflecting the old colour until something unrelated moved.
 	const DrawInstance base;
 	const uint64_t unchanged = engine::scene::SignatureOf(std::span(&base, 1));
@@ -571,7 +571,7 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
 
 	// A rotation with the same position, because the quaternion is four floats
-	// that a position-only hash would miss entirely — and a mirror on a
+	// that a position-only hash would miss entirely - and a mirror on a
 	// turntable is exactly the case that would expose it.
 	CHECK(moved([](DrawInstance &i) { i.Frame = CFrame::Angles(0.0f, 1.0f, 0.0f); }) != unchanged);
 }
@@ -603,7 +603,7 @@ TEST_CASE("a signature depends on how many instances there are and their order",
 }
 
 TEST_CASE("mixing folds a value in without discarding what came before", "[scene][drawinstance]") {
-	// The renderer adds its own terms — a projection matrix, an opacity — on top
+	// The renderer adds its own terms - a projection matrix, an opacity - on top
 	// of the list's signature, so this has to be a fold rather than a reset.
 	const uint64_t base = engine::scene::SignatureOf({});
 
@@ -632,7 +632,7 @@ TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstanc
 	std::vector<DrawInstance> instances(3);
 	instances[0].Mesh = loaded;
 
-	// **No mesh named at all — an ordinary `Part`.** This one is kept, because
+	// **No mesh named at all - an ordinary `Part`.** This one is kept, because
 	// the renderer's default cube is what a part *is* rather than a stand-in for
 	// something that has not arrived.
 	instances[1].Mesh = engine::core::Name{};
@@ -648,8 +648,8 @@ TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstanc
 	CHECK(drawable[0].Mesh == loaded);
 	CHECK_FALSE(drawable[1].Mesh.IsValid());
 
-	// **The distinction is the whole point.** A version that dropped both — or
-	// kept both — would pass a test that only counted, so this asserts which two
+	// **The distinction is the whole point.** A version that dropped both - or
+	// kept both - would pass a test that only counted, so this asserts which two
 	// survived and that the absent one is not among them.
 	for (const DrawInstance &instance : drawable) {
 		CHECK(instance.Mesh != missing);
@@ -666,7 +666,7 @@ TEST_CASE("a mesh arriving makes its parts appear without anything else changing
 
 	std::vector<DrawInstance> drawable;
 
-	// Before the content lands, nothing naming it draws — which is what makes a
+	// Before the content lands, nothing naming it draws - which is what makes a
 	// half-loaded scene read as "still loading" rather than as a field of cubes.
 	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return false; }, drawable);
 	CHECK(drawable.empty());
@@ -678,12 +678,12 @@ TEST_CASE("a mesh arriving makes its parts appear without anything else changing
 
 TEST_CASE("filtering keeps its buffer across calls", "[scene][drawinstance]") {
 	// **Cleared and refilled rather than rebuilt**, because this runs once a
-	// frame over every drawable in the world — the rule every buffer in the
+	// frame over every drawable in the world - the rule every buffer in the
 	// render path follows.
 	std::vector<DrawInstance> instances(64);
 	for (DrawInstance &instance : instances) {
 		// **Named, because an unnamed one is kept whatever the residency
-		// answer** — the fixture has to be able to empty out for the capacity
+		// answer** - the fixture has to be able to empty out for the capacity
 		// check below to mean anything.
 		instance.Mesh = engine::core::Name("tree.amesh");
 	}

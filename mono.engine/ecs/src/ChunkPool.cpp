@@ -52,7 +52,7 @@ namespace engine::ecs {
 		//
 		// **And never destroyed, which is the part that is not decoration.** The
 		// pool is constructed on the first chunk anybody asks for, which is
-		// *later* than the static that owns the store doing the asking — so
+		// *later* than the static that owns the store doing the asking - so
 		// reverse destruction order tears the pool down first and every column
 		// destroyed after it releases into freed memory. That is a
 		// use-after-free at exit, it depends on which static was touched first,

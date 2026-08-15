@@ -37,7 +37,7 @@ TEST_CASE("a fresh world starts with the static index stale", "[physics][physics
 	// The first `SyncBroadphase` has to build the static index, and it has
 	// nothing to compare against to work that out. Starting clean would leave a
 	// world whose anchored geometry is in no index at all until something
-	// happened to change — a floor nothing collides with, and no diagnostic.
+	// happened to change - a floor nothing collides with, and no diagnostic.
 	const PhysicsWorld world;
 
 	CHECK(world.StaticDirty());
@@ -81,7 +81,7 @@ TEST_CASE("marking the static set dirty is sticky until something clears it", "[
 
 TEST_CASE("a fresh world has no bodies and nothing asleep", "[physics][physicsworld]") {
 	// This case replaces the one that used to say nothing produced a manifold
-	// or an event. Something does now — `NarrowPhase` and `Publish` — so the
+	// or an event. Something does now - `NarrowPhase` and `Publish` - so the
 	// warning it carried would be false, and a stale warning is worse than
 	// none. What is still worth pinning is the *starting* state: a world that
 	// has not ticked reports no contacts because it has not looked, and a

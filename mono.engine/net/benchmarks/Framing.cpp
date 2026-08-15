@@ -53,7 +53,7 @@ namespace framing_bench {
 	//
 	// Benchmarking an empty payload would measure the header and call it
 	// framing. Most packets a game sends are at or near the MTU by
-	// construction — the snapshot writer fills them — so full size is the
+	// construction - the snapshot writer fills them - so full size is the
 	// typical case rather than the worst one.
 	const std::vector<std::byte> &Payload() {
 		static const std::vector<std::byte> payload = [] {
@@ -89,7 +89,7 @@ namespace framing_bench {
 		return datagram;
 	}
 
-	// The same datagram with one byte of the magic changed — the cheapest
+	// The same datagram with one byte of the magic changed - the cheapest
 	// possible refusal, and the one a port scanner produces.
 	const std::vector<std::byte> &WrongMagic() {
 		static const std::vector<std::byte> wrong = [] {
@@ -112,7 +112,7 @@ namespace framing_bench {
 		static const std::vector<std::byte> lying = [] {
 			ByteWriter writer;
 			Packet::WriteHeader(writer, HeaderAt(1234), Packet::MAXIMUM_PAYLOAD_BYTES);
-			// Header only — the length field says a full payload follows and
+			// Header only - the length field says a full payload follows and
 			// there is not one byte of it.
 			const std::span<const std::byte> bytes = writer.Bytes();
 			return std::vector<std::byte>(bytes.begin(), bytes.end());
@@ -150,7 +150,7 @@ BENCH("Write · 10k full-size packets", PACKETS) {
 BENCH("Write · 10k empty packets", PACKETS) {
 	// A packet carrying only an acknowledgement, which is how a quiet
 	// connection stays alive. Against the row above, the difference is the
-	// payload copy and everything else is the header — so this row is the
+	// payload copy and everything else is the header - so this row is the
 	// per-packet fixed cost and that one is the fixed cost plus the bytes.
 	ByteWriter &writer = Reused();
 	for (size_t index = 0; index < PACKETS; index++) {
@@ -215,7 +215,7 @@ BENCH("IsNewer · 100k", 100'000) {
 // **Every row here must be no dearer than `Read · 10k well-formed packets`.**
 // That is the whole invariant: an attacker choosing the cheapest datagram to
 // send should not be choosing the most expensive one to parse. Read each
-// refusal against the success above and against the others — a refusal that
+// refusal against the success above and against the others - a refusal that
 // stands out is a refusal doing work before it decided to refuse.
 
 BENCH("Read · 10k datagrams with the wrong magic", PACKETS) {
@@ -273,7 +273,7 @@ BENCH("inbound second · 6000 packets peeked then read", 6000) {
 	// **100 players at 60 Hz, framed the way the server actually frames them**:
 	// peek to route, then read. One iteration is one packet, so the figure is
 	// what one core spends per packet on framing alone before a byte has been
-	// decrypted or applied — and six thousand times it is the share of a second
+	// decrypted or applied - and six thousand times it is the share of a second
 	// this layer takes at that population.
 	const std::vector<std::byte> &datagram = Datagram();
 	size_t bytes = 0;

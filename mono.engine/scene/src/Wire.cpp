@@ -48,7 +48,7 @@ namespace engine::scene {
 		//
 		// **The scaling is done in double, and that is worth a line.** A
 		// coordinate near the far edge times the scale is a number around
-		// 32768, where a float's spacing is a quarter of a code — so a float
+		// 32768, where a float's spacing is a quarter of a code - so a float
 		// multiply here rounds to the wrong code often enough to push the worst
 		// case measurably past half a step, and the stated bound would have
 		// needed an apology in it. The decode stays in float, because that is
@@ -78,7 +78,7 @@ namespace engine::scene {
 		// the other three.
 		//
 		// The largest is dropped because it is the one whose recovery from unit
-		// length is best conditioned — it is at least a half, so the division
+		// length is best conditioned - it is at least a half, so the division
 		// that recovers it cannot amplify the other three's error. Ties go to
 		// the lowest index, which is arbitrary and, more importantly, the same
 		// arbitrary answer every time: two runs of one server must produce the
@@ -98,7 +98,7 @@ namespace engine::scene {
 			// **q and -q are the same rotation**, so the whole quaternion is
 			// negated when the dropped component is negative. That is what lets
 			// the dropped one be recovered as a positive square root and its
-			// sign never be sent — the bit the two-bit index is paid for with.
+			// sign never be sent - the bit the two-bit index is paid for with.
 			const float sign = components[largest] < 0.0f ? -1.0f : 1.0f;
 
 			uint32_t packed = largest << (32u - 2u);
@@ -122,8 +122,8 @@ namespace engine::scene {
 		// billion words that could arrive.
 		//
 		// The normalise at the end is not tidying. `1 - s` is clamped at zero,
-		// so a word no encoder would have produced — three components that do
-		// not fit inside one rotation — still decodes to something, and without
+		// so a word no encoder would have produced - three components that do
+		// not fit inside one rotation - still decodes to something, and without
 		// the normalise that something is a quaternion of length up to 1.23
 		// that every consumer downstream would treat as a rotation. The length
 		// is provably at least one, so there is no zero to guard.

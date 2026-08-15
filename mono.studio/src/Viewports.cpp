@@ -10,7 +10,7 @@ namespace studio {
 			return NO_VIEWPORT;
 		}
 
-		// Already on screen, main panel first — it is the one somebody means by
+		// Already on screen, main panel first - it is the one somebody means by
 		// "the view" when the world is the scene they are editing.
 		if (mainOpen && mainWorld == world) {
 			return 0;

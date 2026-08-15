@@ -14,14 +14,14 @@ namespace engine::audio {
 		// **Scratch is sized to the largest block the mixer will ever be asked
 		// for, and a segment is usually far shorter than that.** A command with a
 		// deadline inside the block splits it, and every piece re-renders every
-		// node — so a node touching all 512 frames when the segment is eight of
+		// node - so a node touching all 512 frames when the segment is eight of
 		// them does sixty-four times the memory traffic the audio needs.
 		//
 		// That was measurable and large: `engine.audio.bench.mixing` reported 64
 		// voices at 102 microseconds with no commands and 693 with sixty-four of
 		// them, against a block deadline of 10.67 milliseconds. The work scaled
 		// with the number of splits rather than with the number of frames, which
-		// is the wrong axis entirely — the audio in a split block is exactly the
+		// is the wrong axis entirely - the audio in a split block is exactly the
 		// audio in an unsplit one.
 		//
 		// Nothing reads past `frames`: `MixSegment` copies that many and the
@@ -342,7 +342,7 @@ namespace engine::audio {
 				// something this queue does not promise.
 				offset = ahead >= frames ? frames : static_cast<size_t>(ahead);
 			}
-			// A deadline in the past lands at offset zero — applied at the
+			// A deadline in the past lands at offset zero - applied at the
 			// start of the next block rather than dropped. A tick that ran late
 			// still meant its command to happen.
 			Schedule.push_back(Due{.What = command, .Offset = offset});

@@ -90,10 +90,23 @@ namespace unified {
 			[&](Entity candidate,
 				const Transform &,
 				const engine::scene::Bounds &,
-				const engine::scene::Visual &) {
+				const engine::scene::Visual &visual) {
 				if (found) {
 					return;
 				}
+
+				// **The same skip `CollectReplicated` makes, and leaving it out
+				// was silently wrong.** This walk exists to turn an entity into
+				// its ordinal in the draw list, which means it has to match the
+				// walk that *built* the list row for row. That one drops an
+				// invisible instance; this one counted it, so one hidden part
+				// anywhere ahead of the subject shifted every ordinal after it
+				// and this reported a different entity's position - as a plain
+				// number, with nothing to say it was the wrong entity's.
+				if (!visual.Visible) {
+					return;
+				}
+
 				if (candidate == entity) {
 					found = true;
 					return;

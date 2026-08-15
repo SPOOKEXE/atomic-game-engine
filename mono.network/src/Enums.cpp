@@ -1,7 +1,7 @@
 #include <network/Enums.hpp>
 
 // The names, and nothing else. One file so that adding a value to any of the
-// three lists is a compiler warning in exactly one place — every switch here is
+// three lists is a compiler warning in exactly one place - every switch here is
 // unlabelled by default on purpose.
 
 namespace network {

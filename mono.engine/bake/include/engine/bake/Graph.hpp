@@ -6,7 +6,7 @@
 // **The vocabulary is `Engine::bakegraph`'s and the runtime is this.** `NodeKind`
 // and `NodeId` moved out at v0.13 so that `Engine::game` can read a pipeline
 // document without linking the PNG, JPEG, glTF and PMX readers this module
-// carries — `D00102`. What is left here is everything that touches a payload:
+// carries - `D00102`. What is left here is everything that touches a payload:
 // the importers, the evaluator and the exports.
 // @tier L9 · shared
 
@@ -53,7 +53,7 @@ namespace engine::bake {
 		// The payload itself, in whichever form the last node left it.
 		//
 		// **Every form rather than a variant**, so a node reads the one it
-		// understands and passes the rest through untouched — which is what lets
+		// understands and passes the rest through untouched - which is what lets
 		// a chain mix a decoder, a resize and a writer without each knowing what
 		// the others produce.
 		//@{
@@ -71,7 +71,7 @@ namespace engine::bake {
 		std::string Name;
 
 		// What it is, so a publisher can route it without re-deriving the kind
-		// from the name — which `assets::AssetKind` says is a decision taken in
+		// from the name - which `assets::AssetKind` says is a decision taken in
 		// exactly one place.
 		assets::AssetKind Kind = assets::AssetKind::Unknown;
 
@@ -90,8 +90,8 @@ namespace engine::bake {
 	  public:
 		// The most nodes one graph may hold.
 		//
-		// A bound so that a generated graph — one node per file in a directory
-		// somebody uploaded — cannot become an unbounded allocation. Four
+		// A bound so that a generated graph - one node per file in a directory
+		// somebody uploaded - cannot become an unbounded allocation. Four
 		// thousand is far past any hand-built pipeline and is roughly a large
 		// asset directory's worth of three-node chains.
 		static constexpr uint32_t MAXIMUM_NODES = 4096;
@@ -136,10 +136,29 @@ namespace engine::bake {
 		// @return The node, or an invalid id.
 		NodeId AddResize(uint32_t width, uint32_t height);
 
+		// Adds a `Rasterize` node.
+		//
+		// **The size is here rather than in a `Resize` after an `Import`,
+		// because a vector drawing has no size to import at.** Rasterising at
+		// the target and rasterising large then box-filtering down are different
+		// pictures - the second's edges belong to the resampler - so the target
+		// is stated where the drawing is first given pixels.
+		//
+		// Zero on both axes means the size the document itself declares, which
+		// is the only size an SVG can be said to have. One zero and one number
+		// is refused at evaluation: an aspect this file guessed would be a
+		// number nobody wrote.
+		//
+		// @param width  The target width in pixels.
+		// @param height The target height in pixels.
+		// @return The node, or an invalid id.
+		// @since v0.14
+		NodeId AddRasterize(uint32_t width, uint32_t height);
+
 		// Restates an imported flipbook's frame rate.
 		//
 		// **A node rather than a mutation on the way past**, because everything
-		// else that changes a payload is one — and the graph's whole property is
+		// else that changes a payload is one - and the graph's whole property is
 		// that what a bake did is the list of nodes it ran. A rate rewritten by
 		// the caller between `Run` calls would be a step nothing records.
 		//

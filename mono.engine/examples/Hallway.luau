@@ -10,8 +10,8 @@
 -- So there are two walks, and they are the same two sentences everybody uses to
 -- describe non-Euclidean space:
 --
---   * **Small outside, long inside.** Walk into the short corridor — a box you
---     can see both ends of at once — and come out thirty-two studs later at the
+--   * **Small outside, long inside.** Walk into the short corridor - a box you
+--     can see both ends of at once - and come out thirty-two studs later at the
 --     far end of the long one.
 --   * **Long outside, small inside.** Walk into the long corridor, which you can
 --     see stretching away, and come out of its far end after four studs.
@@ -23,7 +23,7 @@
 -- ## The one authoring rule, and it is the only thing to get right
 --
 -- A pane's `Face` names its front, and the map through a hole carries **the
--- front hemisphere of one pane to the front hemisphere of the far one** — a
+-- front hemisphere of one pane to the front hemisphere of the far one** - a
 -- traveller who walks in from the side a pane faces arrives on the side the
 -- destination faces. So the rule reads:
 --
@@ -33,8 +33,8 @@
 -- That is why the four mouths below are not all turned the same way. The long
 -- corridor's mouths face **out**, because that is where you walk in from; the
 -- short corridor's mouths face **in**, because inside it is where you arrive.
--- Turn one of them round and nothing complains — the pane renders, the camera is
--- placed, the frustum fits — and the hole shows the empty plain behind the far
+-- Turn one of them round and nothing complains - the pane renders, the camera is
+-- placed, the frustum fits - and the hole shows the empty plain behind the far
 -- mouth instead of the corridor. `PortalProbe.luau` records the same trap.
 --
 -- **`Face` is resolved on the destination too**, from the source portal's own
@@ -122,8 +122,8 @@ corridor("Short", SHORT_X, SHORT / 2)
 --
 -- **`CanCollide = false` authored here rather than left to `OpenPortals`.** A
 -- pane is an ordinary part and an ordinary part is a wall, so anything that
--- loads this scene without running the portal systems — the studio's edit view,
--- a tool reading the world — would otherwise park a walker on the glass.
+-- loads this scene without running the portal systems - the studio's edit view,
+-- a tool reading the world - would otherwise park a walker on the glass.
 --
 -- `turned` is the whole aim: `Front` is local -Z, so an unrotated mouth faces
 -- -Z and a mouth turned half a lap faces +Z.
@@ -190,8 +190,8 @@ block("ShortPost", Vector3.new(1, 6, 1), Vector3.new(SHORT_X - 6, 3, SHORT / 2 +
 -- --- light ----------------------------------------------------------------
 --
 -- **A lamp is the only light a scene can add.** A world's `Lighting` service
--- round-trips and nothing reads it — `scene::LightingServiceComponent` says so
--- — so every lit thing here hangs under a `PointLight`, and `opaque.frag`'s
+-- round-trips and nothing reads it - `scene::LightingServiceComponent` says so
+-- - so every lit thing here hangs under a `PointLight`, and `opaque.frag`'s
 -- falloff is a windowed inverse square. `Brightness = 1` against `1 / (1 + d²)`
 -- is invisible at any distance a corridor has; two orders up is what reads as a
 -- lamp across a room.
@@ -208,7 +208,7 @@ local function lamp(name: string, at: Vector3, range: number)
 end
 
 -- **Evenly down the long corridor and once in the short one**, so neither walk
--- ends in a dark stretch — a corridor you cannot see the end of is a corridor
+-- ends in a dark stretch - a corridor you cannot see the end of is a corridor
 -- whose length you cannot judge, which is the whole demonstration.
 for index = 0, 3 do
 	local z = -LONG / 2 + 4 + index * ((LONG - 8) / 3)
@@ -226,7 +226,7 @@ lamp("PlainLampSouth", Vector3.new(0, 14, -20), 90)
 --
 -- Between the two, facing them both. The name is the contract: `scene::FindSpawn`
 -- looks for exactly this under `Workspace`, and a world without one spawns
--- everybody at the origin — which here is inside neither corridor and on the
+-- everybody at the origin - which here is inside neither corridor and on the
 -- wrong side of both.
 block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 26), FLOOR)
 
@@ -235,12 +235,12 @@ block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 26), FLOOR)
 -- **Off by default, because this scene is meant to be walked.** A
 -- `workspace.CurrentCamera` overrides the character's, so setting one
 -- unconditionally would make the demo a video. `VIEW` below names a
--- viewpoint for a headless capture — which is how a change to the portal pass
+-- viewpoint for a headless capture - which is how a change to the portal pass
 -- gets looked at without a display.
 local viewpoint: CFrame? = nil
 
 -- **A line this file rewrites rather than a global.** `_G` is readonly in the
--- script sandbox, so nothing outside a scene can set one — the capture scripts
+-- script sandbox, so nothing outside a scene can set one - the capture scripts
 -- copy the file and substitute the line below, which is the only mechanism that
 -- actually works from a shell.
 local VIEW = "short"

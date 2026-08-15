@@ -88,7 +88,7 @@ TEST_CASE("a row dials the address the datagram came from", "[network][directory
 	beacon.Pump(0.0);
 	REQUIRE(table.Observe(*ends[1], 0.0) == 1);
 
-	// The host announced 0.0.0.0:7777 — every interface, which is a promise
+	// The host announced 0.0.0.0:7777 - every interface, which is a promise
 	// about nothing in particular. What it is dialed on is the address the
 	// announcement arrived over, with the port it advertised.
 	const Endpoint dial = table.Listings()[0].Dial();
@@ -154,7 +154,7 @@ TEST_CASE("a session that stops announcing is forgotten", "[network][directory]"
 	table.Observe(*ends[1], 0.0);
 	REQUIRE(table.Listings().size() == 1);
 
-	// Still there while it is announcing, several intervals in — which is the
+	// Still there while it is announcing, several intervals in - which is the
 	// half that matters, because a browser whose rows flicker is one nobody can
 	// click.
 	for (double now = 1.0; now <= 20.0; now += 1.0) {

@@ -59,7 +59,7 @@ namespace {
 	// The pool, started and joined around the case that needs one.
 	//
 	// Left running, its workers are still parked when the process tears its
-	// statics down and the binary never exits — which reads as a hung test
+	// statics down and the binary never exits - which reads as a hung test
 	// rather than as a missing `Stop`.
 	struct Pool {
 		explicit Pool(unsigned workers) {
@@ -91,10 +91,46 @@ TEST_CASE("a velocity moves a transform by the fixed tick", "[physics][integrate
 	CHECK(position.Z == Approx(-6.0f * TICK));
 }
 
+TEST_CASE("the system and the free function are one implementation", "[physics][integrate]") {
+	// **The claim `Advanced` is published on.** A replica placing a body the
+	// authority has stopped describing calls the free function; a tick calls the
+	// system; and a client integrating different arithmetic from the server is a
+	// disagreement that only ever surfaces as drift. So the two are asserted to
+	// agree bit for bit rather than approximately - they are the same code, and
+	// the day they are not this is what says so.
+	Store store = MakeStore("integrate.shared");
+	const Vector3 linear{3.0f, -1.5f, 0.25f};
+	const Vector3 angular{0.4f, -2.0f, 1.25f};
+
+	const CFrame start =
+		CFrame(Vector3{1.0f, 2.0f, 3.0f}, engine::core::CFrame::Angles(0.3f, 0.9f, -0.2f).Rotation());
+	const Entity entity = Moving(store, start.Position, linear, angular);
+	store.GetMutable<Transform>(entity)->Frame = start;
+
+	store.AdvanceTick(TICK);
+	IntegrateMotion(store);
+
+	const CFrame &stepped = store.Get<Transform>(entity)->Frame;
+	const CFrame direct = engine::physics::Advanced(start, linear, angular, TICK);
+
+	CHECK(stepped.Position.X == direct.Position.X);
+	CHECK(stepped.Position.Y == direct.Position.Y);
+	CHECK(stepped.Position.Z == direct.Position.Z);
+	CHECK(stepped.QuaternionX == direct.QuaternionX);
+	CHECK(stepped.QuaternionY == direct.QuaternionY);
+	CHECK(stepped.QuaternionZ == direct.QuaternionZ);
+	CHECK(stepped.QuaternionW == direct.QuaternionW);
+
+	// And it moved at all, or the equality above would hold with both halves
+	// doing nothing.
+	CHECK(direct.Position.X == Approx(start.Position.X + linear.X * TICK));
+	CHECK(QuaternionLength(direct) == Approx(1.0f));
+}
+
 TEST_CASE("integration never loads a mass", "[physics][integrate]") {
 	// The whole reason `Motion` and `RigidBody` are separate components. A
 	// platform, a projectile and a demo cube all move and none of them has a
-	// mass, so an entity with no `RigidBody` has to be integrated — and adding
+	// mass, so an entity with no `RigidBody` has to be integrated - and adding
 	// `RigidBody` to the query would silently stop moving all three.
 	Store store = MakeStore("integrate.massless");
 	const Entity entity = Moving(store, Vector3::Zero, Vector3{1.0f, 0.0f, 0.0f}, Vector3::Zero);
@@ -175,7 +211,7 @@ TEST_CASE("zero entities does nothing and never wakes the pool", "[physics][inte
 	// happen rather than about two zeroes.
 	//
 	// `Jobs::For` returns before touching the timing when the count is zero, so
-	// what this catches is a dispatch with real work in it — a scratch pass
+	// what this catches is a dispatch with real work in it - a scratch pass
 	// over `CountMatching`, say, or a fixed-size loop that runs whether or not
 	// there is anything to integrate.
 	volatile uint64_t sink = 0;
@@ -205,7 +241,7 @@ TEST_CASE("two runs of one scene integrate to identical bytes", "[physics][integ
 	// Same binary, same platform, same result. The parallel path partitions
 	// rows within a table and each range writes only its own rows, so a run
 	// that happened to be split differently across workers must still produce
-	// the same floats — which is what makes a recorded run replay.
+	// the same floats - which is what makes a recorded run replay.
 	const auto run = [](const char *name) {
 		Store store = MakeStore(name);
 		for (uint32_t index = 0; index < 200; index++) {

@@ -2,7 +2,7 @@
 //
 // **The failure this exists to prevent is silent and looks like nothing.** A
 // flipbook whose frame count nobody carried plays some prefix of its animation
-// and stops — which is indistinguishable, on screen, from a shorter animation.
+// and stops - which is indistinguishable, on screen, from a shorter animation.
 // `fox_dance.gif` has forty-eight frames and the scene that used it said
 // twenty-four, so half the dance never played and no test, log line or warning
 // said a word.
@@ -32,7 +32,7 @@ namespace {
 	// **Registered before the store exists**, for `MeshCatalogue`'s reason in
 	// full: `TexturesOf` sets a resource, `SetResource` keys on a component id,
 	// and an id minted before the explicit registration lands takes the
-	// compiler's spelling of the type — which aborts the process the moment
+	// compiler's spelling of the type - which aborts the process the moment
 	// `RegisterSceneComponents` gets there, at a call site with nothing to do
 	// with this one. It is order-dependent, so a suite that gets it wrong
 	// passes most runs.
@@ -76,7 +76,7 @@ TEST_CASE("an unknown texture answers zeroes rather than guessing", "[scene][tex
 
 TEST_CASE("the reader never creates the resource", "[scene][texturecatalogue]") {
 	// **This is what a system's refresh pass calls**, and a read that acquired
-	// the resource would be a structural change from inside iteration — on the
+	// the resource would be a structural change from inside iteration - on the
 	// first frame, on every emitter in the scene.
 	Store store = Fresh("texturecatalogue.readonly");
 

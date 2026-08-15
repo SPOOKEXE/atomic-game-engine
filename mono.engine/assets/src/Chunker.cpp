@@ -9,7 +9,7 @@ namespace engine::assets {
 
 	namespace {
 		// SplitMix64. Used only to generate the gear table below, never at run
-		// time — it is here so that 256 frozen constants can be read as an
+		// time - it is here so that 256 frozen constants can be read as an
 		// algorithm and a seed rather than as a wall of hex nobody can check.
 		constexpr uint64_t SplitMix64(uint64_t &state) {
 			state += 0x9E3779B97F4A7C15ull;
@@ -52,7 +52,7 @@ namespace engine::assets {
 		//
 		// **The bits are spread rather than contiguous, and taken from the top.**
 		// With `hash = (hash << 1) + Gear[byte]`, bit *n* of the hash has been
-		// shifted through *n* times and therefore mixes *n* bytes of history —
+		// shifted through *n* times and therefore mixes *n* bytes of history -
 		// so the low bits depend on almost nothing and a mask taking them would
 		// cut on a far shorter window than its bit count implies. Adjacent bits
 		// are also correlated, one being the previous byte's shifted neighbour,
@@ -91,13 +91,13 @@ namespace engine::assets {
 
 	Chunker::Chunker(ChunkLimits limits) : Envelope(limits.IsValid() ? limits : ChunkLimits{}) {
 		// Normalised chunking, from FastCDC. One mask produces a size
-		// distribution far wider than its average suggests — a geometric one,
+		// distribution far wider than its average suggests - a geometric one,
 		// so short chunks are the most likely single outcome even when the mean
 		// is 64 KiB. Two masks pull it in: below the target, a *stricter* mask
 		// makes an early cut less likely; above it, a *looser* one makes a late
 		// cut more likely. The average is unchanged and the spread is much
 		// tighter, which is what makes a group's compressed size predictable
-		// enough to bound — CDN.md §5.
+		// enough to bound - CDN.md §5.
 		const int target = ClampBits(BitsForSize(Envelope.TargetBytes));
 		StrictMask = SpreadMask(ClampBits(target + 2));
 		LooseMask = SpreadMask(ClampBits(target - 2));
@@ -119,7 +119,7 @@ namespace engine::assets {
 		// The window has to have run over the bytes before the minimum for the
 		// hash at the minimum to mean anything, so it is fed before the minimum
 		// and only *tested* from the minimum onward. Skipping the warm-up
-		// entirely — which some implementations do for speed — makes the
+		// entirely - which some implementations do for speed - makes the
 		// boundary depend on where the previous chunk happened to end, and
 		// boundaries that depend on history do not dedup.
 		//
@@ -128,8 +128,8 @@ namespace engine::assets {
 		// 64-bit shift register: a byte at position *p* contributes
 		// `GEAR[b] << (index - p)`, so once `index - p` reaches 64 its
 		// contribution has been shifted out entirely and the hash cannot depend
-		// on it. The table's own comment already says this — "the hash after any
-		// point depends on the last 64 bytes" — it simply was not being used.
+		// on it. The table's own comment already says this - "the hash after any
+		// point depends on the last 64 bytes" - it simply was not being used.
 		//
 		// So warming from `minimum - 64` produces a **bit-identical** hash at
 		// every tested position, and therefore bit-identical boundaries, the
@@ -164,7 +164,7 @@ namespace engine::assets {
 			}
 		}
 
-		// No boundary the content asked for. Cut anyway — a chunk nothing
+		// No boundary the content asked for. Cut anyway - a chunk nothing
 		// bounds is a chunk nothing can stream, cache or bound a group by.
 		return maximum;
 	}

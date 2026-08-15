@@ -1,22 +1,22 @@
 // Finding instances by what they *are* rather than by what they are called.
 //
 // **This panel names no property, and that is the whole point.** The properties
-// panel is generic because `PropertyDescriptor` is data — a name, a type, and a
-// getter — and the Luau binding is generic for the same reason. A search built
+// panel is generic because `PropertyDescriptor` is data - a name, a type, and a
+// getter - and the Luau binding is generic for the same reason. A search built
 // on the same three things inherits the same property: a component declared by
 // any module tomorrow is searchable today, with nothing here changing.
 //
 // The alternative, and the reason this is worth stating: a search with a
 // hand-written list of searchable fields is a list that goes stale the first
-// time somebody adds a property and forgets it, and the failure is silent — the
+// time somebody adds a property and forgets it, and the failure is silent - the
 // instance simply does not turn up.
 //
 // **Matching is over `FormatValue`, which is what makes one predicate work for
 // every type.** `game::Values.hpp` already renders any property to text for the
 // properties panel and the `.agame` writer; comparing against that string means
 // `Transparency` `0.5`, `AlphaMode` `Clip` and `Anchored` `true` are all the
-// same operation. Exact comparison goes the other way — `ParseValue` into the
-// property's own type and `ValuesEqual` — so "0.5" does not match "0.50001"
+// same operation. Exact comparison goes the other way - `ParseValue` into the
+// property's own type and `ValuesEqual` - so "0.5" does not match "0.50001"
 // when somebody asks for exactness.
 
 #include <engine/ecs/Classes.hpp>
@@ -83,7 +83,7 @@ namespace studio {
 	) {
 		const engine::ecs::ClassId id = store.ClassOf(instance);
 		if (!id.IsValid()) {
-			// Not an instance — an entity some module keeps for its own storage.
+			// Not an instance - an entity some module keeps for its own storage.
 			// The explorer does not show these and neither does this.
 			return false;
 		}
@@ -118,7 +118,7 @@ namespace studio {
 
 			PropertyValue value;
 			if (!engine::game::ReadProperty(store, instance, descriptor, value)) {
-				// The instance does not carry what this getter reads — an
+				// The instance does not carry what this getter reads - an
 				// unanchored part asked for a `RigidBody` field. Not a match and
 				// not an error.
 				continue;
@@ -165,7 +165,7 @@ namespace studio {
 		// **Bounded, and it says so when it stops.** A predicate that matches
 		// everything in a large place would otherwise build a list nobody can
 		// scroll and cost a frame doing it. Truncation is reported rather than
-		// silent — a result list that quietly stops is one somebody trusts to be
+		// silent - a result list that quietly stops is one somebody trusts to be
 		// complete.
 		FindTruncated = false;
 
@@ -210,13 +210,13 @@ namespace studio {
 		bool changed = false;
 
 		ImGui::SetNextItemWidth(-1.0f);
-		changed |= TextField("##find-class", Find.Class, "class — Part, BasePart, Script");
+		changed |= TextField("##find-class", Find.Class, "class - Part, BasePart, Script");
 
 		ImGui::SetNextItemWidth(-1.0f);
 		changed |= TextField("##find-name", Find.Name, "name contains");
 
 		ImGui::SetNextItemWidth(-1.0f);
-		changed |= TextField("##find-property", Find.Property, "property — Transparency, Anchored");
+		changed |= TextField("##find-property", Find.Property, "property - Transparency, Anchored");
 
 		ImGui::SetNextItemWidth(-1.0f);
 		changed |= TextField("##find-value", Find.Value, "value contains");
@@ -237,7 +237,7 @@ namespace studio {
 		}
 
 		// **Every frame while the panel is open, not only on change.** A search
-		// is a view of the world and the world moves — a result list that went
+		// is a view of the world and the world moves - a result list that went
 		// stale the moment a script deleted something would be a list of dead
 		// handles, which is the exact thing `AGENTS.md` says a panel must not
 		// cache.

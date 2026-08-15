@@ -1,8 +1,8 @@
 // The operator table, and the join that stops it drifting from `Keybinds`.
 //
 // **The case that matters most in this file is the dullest one.** `Operators.hpp`
-// accepts two tables joined by an enum — the binding table in `Keybinds.cpp` and
-// the operator registrations in `Palette.cpp` — on the explicit condition that
+// accepts two tables joined by an enum - the binding table in `Keybinds.cpp` and
+// the operator registrations in `Palette.cpp` - on the explicit condition that
 // the join is *checked* rather than trusted. "Every action has exactly one
 // operator" is that check, and without it a command added to one table and not
 // the other is missing from the palette with nothing reporting it.
@@ -139,7 +139,7 @@ TEST_CASE("the palette filters and ranks the way every other filter does", "[stu
 
 	REQUIRE(found.size() == 2);
 
-	// An exact name outranks one that merely contains it — the rule
+	// An exact name outranks one that merely contains it - the rule
 	// `Widgets.cpp` already establishes and which this reuses rather than
 	// reinvents.
 	CHECK(found[0]->Id == Action::Save);
@@ -161,7 +161,7 @@ TEST_CASE("an unavailable operator still appears in the palette", "[studio][oper
 TEST_CASE("every action is namable and takes one operator", "[studio][operators]") {
 	// **Read what this does and does not cover before trusting it.** It builds
 	// a synthetic operator per keybind row and checks that the table accepts
-	// exactly one of each — so it covers `Keybinds`' table being complete and
+	// exactly one of each - so it covers `Keybinds`' table being complete and
 	// `OperatorTable::Add` refusing a duplicate.
 	//
 	// It does **not** reach `Editor::RegisterOperators`, which is the list in
@@ -173,7 +173,7 @@ TEST_CASE("every action is namable and takes one operator", "[studio][operators]
 	// That leaves the gap `Operators.hpp` says this suite closes: an `Action`
 	// with a binding and no `Operators.Add` is a command with a key, no palette
 	// entry and no behaviour, and nothing here goes red. Closing it needs the
-	// registration list reachable without an `Editor` — see the review note on
+	// registration list reachable without an `Editor` - see the review note on
 	// splitting the descriptors from the closures.
 	OperatorTable table;
 	int runs = 0;
@@ -184,7 +184,7 @@ TEST_CASE("every action is namable and takes one operator", "[studio][operators]
 	for (const studio::Keybind &binding : bindings) {
 		INFO("binding " << binding.Id);
 
-		// Every action must be namable — the binding table is the list of what
+		// Every action must be namable - the binding table is the list of what
 		// exists, and an action missing from it has no id, no name and no scope.
 		CHECK_FALSE(std::string_view(binding.Id).empty());
 		CHECK_FALSE(std::string_view(binding.Name).empty());

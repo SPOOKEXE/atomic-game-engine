@@ -29,7 +29,7 @@
 //
 // A source that fails any of them is passed over and the next one is tried.
 // That is what makes a compromised or stale origin able to withhold content and
-// unable to substitute it — CDN.md §1.
+// unable to substitute it - CDN.md §1.
 
 namespace engine::delivery {
 	namespace {
@@ -81,7 +81,7 @@ namespace engine::delivery {
 						if (!resolved.Store) {
 							// Reported once, at start-up, rather than as a
 							// stream of individually plausible missing assets
-							// at request rate — `ContentRoot::Mount`'s rule.
+							// at request rate - `ContentRoot::Mount`'s rule.
 							ENGINE_WARN(
 								"delivery: source '{}' is not a content store at {}",
 								source.Name,
@@ -98,7 +98,7 @@ namespace engine::delivery {
 							// name has to be resolved by whoever wrote the
 							// configuration.
 							ENGINE_WARN(
-								"delivery: source '{}' is not an address — {} (a host name needs resolving "
+								"delivery: source '{}' is not an address - {} (a host name needs resolving "
 								"before it gets here)",
 								source.Name,
 								source.Location
@@ -146,7 +146,7 @@ namespace engine::delivery {
 				std::vector<RequestId> issued;
 				if (!Known) {
 					// Empty means "not yet" rather than "none". A caller that
-					// wants every texture asks again once Ready — which is the
+					// wants every texture asks again once Ready - which is the
 					// honest answer, since the kinds live in the manifest.
 					return issued;
 				}
@@ -267,7 +267,7 @@ namespace engine::delivery {
 				size_t SourceIndex = 0;
 
 				// `FetchId::NONE` until one is in flight, like every other
-				// member here — `BundleJob{.Bundle = ...}` is how one is made,
+				// member here - `BundleJob{.Bundle = ...}` is how one is made,
 				// so a member with no default is a member left uninitialised.
 				net::http::FetchId Fetch{};
 				bool Active = false;
@@ -358,7 +358,7 @@ namespace engine::delivery {
 			//
 			// **From the same source the manifest came from**, not from the
 			// first source in the list. A dictionary is half of a prepared
-			// group's cache key — `cdn::PreparedCache` — so one origin's
+			// group's cache key - `cdn::PreparedCache` - so one origin's
 			// dictionary against another's groups produces bytes that will not
 			// decode, and the failure would look like content corruption.
 			//
@@ -402,7 +402,7 @@ namespace engine::delivery {
 						// `Dictionary::Load` refuses anything without a trained
 						// dictionary's magic. Serving something else where one
 						// was expected is a misconfigured origin, and carrying
-						// on without it would cost ratio silently — so it is
+						// on without it would cost ratio silently - so it is
 						// said once rather than absorbed.
 						ENGINE_WARN(
 							"delivery: '{}' served bytes that are not a trained dictionary",
@@ -432,7 +432,7 @@ namespace engine::delivery {
 			bool Accepts(const assets::Manifest &manifest, const assets::SignatureBytes &signature) const {
 				// The root covers the descriptor table as well as the bundles,
 				// so this one check binds the content, its names and its kinds
-				// together — see `Manifest::Root`.
+				// together - see `Manifest::Root`.
 				return assets::VerifyManifestRoot(manifest.Root(), signature, Config.Publisher);
 			}
 
@@ -455,7 +455,7 @@ namespace engine::delivery {
 				Known = std::move(manifest);
 				CatalogueSource = index;
 				ENGINE_INFO(
-					"delivery: catalogue from '{}' — {} assets, {} bundles",
+					"delivery: catalogue from '{}' - {} assets, {} bundles",
 					Sources[index].Descriptor.Name,
 					Known->Assets().size(),
 					Known->Bundles().size()
@@ -560,7 +560,7 @@ namespace engine::delivery {
 
 					if (source.Store) {
 						// A local store has no wire, so there is nothing to
-						// compress and no group to expand — the chunks are read
+						// compress and no group to expand - the chunks are read
 						// and the assets fall out of them. Same manifest, same
 						// verification, no transport.
 						const assets::BundleEntry *const bundle = FindBundle(job.Bundle);

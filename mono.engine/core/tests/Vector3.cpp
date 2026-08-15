@@ -14,7 +14,7 @@ TEST_CASE("multiplication is component-wise, not a dot product", "[vector3]") {
 	const Vector3 b{5.0f, 6.0f, 7.0f};
 
 	// Matching Roblox. The dot product is spelled Dot for exactly this reason,
-	// and getting them confused is silent — both compile and both return.
+	// and getting them confused is silent - both compile and both return.
 	REQUIRE((a * b) == Vector3{10.0f, 18.0f, 28.0f});
 	REQUIRE(a.Dot(b) == Approx(56.0f));
 }

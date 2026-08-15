@@ -12,8 +12,8 @@
 namespace engine::physics {
 
 	namespace {
-		// A candidate axis shorter than this is a degenerate cross product —
-		// two parallel edges — and normalising it would turn float noise into a
+		// A candidate axis shorter than this is a degenerate cross product -
+		// two parallel edges - and normalising it would turn float noise into a
 		// direction. Skipping it is correct rather than approximate: the axis
 		// it stands for does not exist for that configuration, and the
 		// parallel case is covered by the face axes instead.
@@ -34,7 +34,7 @@ namespace engine::physics {
 
 		// Below this two centres are on top of each other and there is no
 		// direction to separate along. Every pair falls back to world up, which
-		// is arbitrary and has to be *deterministic* — an arbitrary direction
+		// is arbitrary and has to be *deterministic* - an arbitrary direction
 		// derived from whatever was in memory is a scene that behaves
 		// differently on the second run.
 		constexpr float DEGENERATE_EPSILON = 1.0e-12f;
@@ -83,7 +83,7 @@ namespace engine::physics {
 		// module.
 		//
 		// The normal reverses and every point moves from one surface to the
-		// other along it — `pointOnB = pointOnA - normal * penetration` — so a
+		// other along it - `pointOnB = pointOnA - normal * penetration` - so a
 		// flipped solution still describes its points as lying on the second
 		// body, which is what `ContactManifold` promises its reader.
 		ContactSolution Flipped(const ContactSolution &solution) {
@@ -207,7 +207,7 @@ namespace engine::physics {
 			const float distance = std::sqrt(distanceSquared);
 			const core::Vector3 normal = distance > DEGENERATE_EPSILON ? offset / distance : FALLBACK_NORMAL;
 
-			// The point is on the sphere, which is the second shape — the
+			// The point is on the sphere, which is the second shape - the
 			// convention, and the reason it is not the box's surface point that
 			// was just computed.
 			return SinglePoint(
@@ -301,7 +301,7 @@ namespace engine::physics {
 		// Exact, and analytic in the cylinder's own axes: clamp along the
 		// barrel, clamp across it, and the result is the nearest point of the
 		// cylinder to the sphere's centre. There is no axis set here and no
-		// approximation — a sphere is one number from its centre, so the
+		// approximation - a sphere is one number from its centre, so the
 		// closest-point answer *is* the minimum-penetration answer.
 		const core::Vector3 local = ToLocalPoint(second.Frame, first.Frame.Position);
 		const float across = std::sqrt(local.X * local.X + local.Z * local.Z);
@@ -371,7 +371,7 @@ namespace engine::physics {
 
 		// **Two barrels crossed.** Degenerate exactly when the axes are
 		// parallel, at which point the cross product removes itself and the
-		// radial axis below is the one that answers — that is the parallel-axis
+		// radial axis below is the one that answers - that is the parallel-axis
 		// case, handled by construction rather than by an epsilon somewhere
 		// downstream.
 		axes[count++] = AxisCandidate{firstAxis.Cross(secondAxis), false};
@@ -422,7 +422,7 @@ namespace engine::physics {
 		const ShapeInstance &high = ordered ? second : first;
 
 		// Six arms for six unordered pairs. The nested-switch form would need
-		// nine, three of which the ordering above makes unreachable — and an
+		// nine, three of which the ordering above makes unreachable - and an
 		// unreachable arm returning "not touching" is a pair that reports no
 		// contact and looks like a decision.
 		ContactSolution solution;

@@ -2,12 +2,12 @@
 //
 // **Real transports and real encoding throughout.** The loopback carries the
 // bytes, `replication::Listener` and `Connector` carry the session, and what
-// crosses is what `EncodeEdits` wrote — so what this suite exercises is the
+// crosses is what `EncodeEdits` wrote - so what this suite exercises is the
 // path a second machine takes, minus the machine.
 //
 // The case worth reading first is the last one: an instance created by one
 // editor, then edited and deleted by the other. That is the whole feature, and
-// it only works if the identity survives a rebuild at both ends — which is why
+// it only works if the identity survives a rebuild at both ends - which is why
 // nothing but a path crosses.
 
 #include <engine/ecs/Classes.hpp>
@@ -248,7 +248,7 @@ TEST_CASE("a path names an instance the same way in two editors", "[studio][edit
 
 	// **And this is why only the path may cross.** Two logs number their
 	// instances independently and both start at one, so the *same* `EditId`
-	// names two different instances in two editors — the collision is not a
+	// names two different instances in two editors - the collision is not a
 	// remote possibility, it is what happens immediately. The handles coincide
 	// for the same reason, which is why a handle is not an identity either.
 	CHECK(first.Log.Track(first.Scene, part) == second.Log.Track(second.Scene, theirPart));
@@ -449,7 +449,7 @@ TEST_CASE("a cancelled recording never reaches anybody", "[studio][editstream]")
 	session.Settle();
 
 	// The rollback already put everything back, so there is nothing for a peer
-	// to apply — and telling them would be telling them about a state that
+	// to apply - and telling them would be telling them about a state that
 	// never existed anywhere.
 	CHECK(session.HostStream->Counters().Sent == 0);
 	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 0);
@@ -502,7 +502,7 @@ TEST_CASE("one editor creates and the other edits it", "[studio][editstream]") {
 
 	const Entity mine = session.Host.Insert(session.Host.Workspace(), "Shared");
 	// Creating holds what was made, so let the host's hold lapse before the
-	// guest starts — this case is about two people sharing a document, not
+	// guest starts - this case is about two people sharing a document, not
 	// about contention, which `a hold covers the subtree` covers. In steps,
 	// because a link has an idle timeout as well as a hold.
 	for (double elapsed = 0.0; elapsed < 20.0; elapsed += 0.5) {
@@ -574,7 +574,7 @@ TEST_CASE("rubbish on the link is counted and ignored", "[studio][editstream]") 
 	Session session;
 	REQUIRE(session.Connect());
 
-	// Straight down the user channel, bypassing the encoder — which is what a
+	// Straight down the user channel, bypassing the encoder - which is what a
 	// peer running a different build, or somebody probing, produces.
 	const std::vector<std::byte> rubbish(64, std::byte{0xAB});
 	REQUIRE(session.GuestStream->Connected());
@@ -616,7 +616,7 @@ TEST_CASE("an unpublished waypoint is one nobody sent", "[studio][editstream]") 
 //
 // Two guests and a host, which is the smallest arrangement in which "somebody
 // else is working there" means anything. What is checked is that the refusal
-// happens at the *host* — a guest deciding for itself would be two answers to
+// happens at the *host* - a guest deciding for itself would be two answers to
 // one question, and the two would differ exactly when it mattered.
 
 namespace {
@@ -719,7 +719,7 @@ TEST_CASE("two editors on one model take turns and both land", "[studio][editstr
 	CHECK(crowd.SecondStream->Backlog() == 0);
 
 	// One of them was second, and whichever it was, everybody agrees on the
-	// result — which is the property the ordering buys.
+	// result - which is the property the ordering buys.
 	const float settled = crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Contested"}));
 	CHECK((settled == 5.0f || settled == 9.0f));
 	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Contested"})) == settled);
@@ -742,7 +742,7 @@ TEST_CASE("a queued edit is not a lost edit", "[studio][editstream]") {
 	for (int step = 2; step <= 5; ++step) {
 		crowd.Second.Resize(crowd.Second.Find({"Workspace", "Busy"}), static_cast<float>(step));
 	}
-	// Long enough that a lost grant is asked for again — the retry is a second.
+	// Long enough that a lost grant is asked for again - the retry is a second.
 	crowd.Settle(200);
 
 	CHECK(crowd.SecondStream->Counters().Sent == 4);
@@ -766,7 +766,7 @@ TEST_CASE("a turn covers the subtree, so a model and its parts are one queue", "
 
 	// One editor takes the model while the other takes a part inside it. A turn
 	// over a model that let somebody else edit its children would order
-	// nothing — moving a model moves its children.
+	// nothing - moving a model moves its children.
 	crowd.First.Resize(crowd.First.Find({"Workspace", "Model"}), 4.0f);
 	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Model", "Part"}), 8.0f);
 	crowd.Settle(40);

@@ -4,7 +4,7 @@
 //
 // **The tree decides what renders, and before this nothing did.** Every query
 // that built a draw list matched on `<Transform, PreviousTransform, Bounds,
-// Visual>` — a *component* test — so an entity was drawn because of what it was
+// Visual>` - a *component* test - so an entity was drawn because of what it was
 // made of and never because of where it sat. A part in `ReplicatedStorage`, a
 // template under `StarterGui`, an orphan a script had created and not yet
 // parented: all of them were complete parts by that test, and all of them were
@@ -21,7 +21,7 @@
 // twice over.
 //
 // The first reason is mechanical. `client::CollectInstances` runs
-// `EachBatchParallel` and writes `out[first + row]` — each worker is told where
+// `EachBatchParallel` and writes `out[first + row]` - each worker is told where
 // its slice lands so no two touch the same bytes and no atomic is needed.
 // A `continue` inside that loop leaves holes in the output and makes the
 // returned count a lie; compacting instead would need a parallel prefix sum
@@ -31,7 +31,7 @@
 // The second is the ECS's own argument, made in `ecs/AGENTS.md` and again by
 // `RigidBody`: **componentise what you iterate.** An anchored part carries no
 // `Motion`, so it lands in a different archetype and the dynamic queries never
-// visit it — which beats testing a boolean per row per tick. This is the same
+// visit it - which beats testing a boolean per row per tick. This is the same
 // shape. A hidden part carries no `Rendered`, so the draw query never visits
 // it, and the cost of a scene where nine tenths of the content is in storage is
 // the tenth that is on screen.
@@ -44,15 +44,15 @@
 // a game file loading, `InstallServices`, `DestroyInstance` taking a subtree,
 // and any C++ that reparents directly. Missing one gives a part that is in
 // `Workspace` and invisible, or worse a part that was deleted from it and still
-// draws — and the symptom appears in the renderer, a very long way from the
+// draws - and the symptom appears in the renderer, a very long way from the
 // reparent that caused it.
 //
 // Worse, ancestry is not local: parenting one model moves every part beneath
 // it, so even a complete set of hooks has to walk a subtree.
 //
 // So this walks instead, once per tick, and is correct regardless of who moved
-// what. It is O(descendants of Workspace) plus O(currently rendered) — both
-// linear in the size of the scene, neither allocating after the first call —
+// what. It is O(descendants of Workspace) plus O(currently rendered) - both
+// linear in the size of the scene, neither allocating after the first call -
 // and it is behind a profile scope rather than an assurance, because this
 // codebase's habit is to make a cost measurable rather than argue about it.
 //
@@ -64,8 +64,8 @@
 // **It is the one thing in `PreRender` that is structural**, and that deserves
 // naming rather than hiding: adding or removing a component moves the row to
 // another archetype, and `PreRender` runs at the display's rate rather than the
-// tick's. Two things make it safe. Nothing in the simulation reads `Rendered` —
-// it exists to be a term in the draw query and for nothing else — so a row
+// tick's. Two things make it safe. Nothing in the simulation reads `Rendered` -
+// it exists to be a term in the draw query and for nothing else - so a row
 // changing table cannot change what a tick computes. And every host derives it
 // the same way from the same tree, so two runs of one scene still agree, which
 // is what `just determinism` actually compares.
@@ -74,7 +74,7 @@
 // reason that is easy to miss until something is broken by it: **a world can
 // present without ticking.** The studio suspends a world and edits it, so a
 // gate maintained by the simulation would leave a part dragged into `Workspace`
-// invisible until somebody pressed play — and any future host that calls
+// invisible until somebody pressed play - and any future host that calls
 // `Present` without `Tick` would render an empty scene with nothing to say why.
 // A phase that only works for worlds that tick is a trap laid for the next
 // caller.
@@ -89,7 +89,7 @@
 // processes' directories.
 //
 // A replica does not need one either. The authority replicates what is in its
-// own scene, so the wire has already applied this filter — and
+// own scene, so the wire has already applied this filter - and
 // `client::CollectReplicated` honours `Visual::Visible` directly, because that
 // one does arrive.
 //
@@ -111,13 +111,13 @@ namespace engine::scene {
 	// **Maintained, never authored.** Nothing outside `SyncRendered` may add,
 	// remove or write one: it is a derived fact about the tree, and a second
 	// writer would be a second opinion about what is on screen. It is
-	// deliberately absent from every class's component set for the same reason —
+	// deliberately absent from every class's component set for the same reason -
 	// `Instance.new` must not mint a part that is already claiming to be drawn.
 	//
 	// **Nothing may observe one either, and that is load-bearing rather than
 	// incidental.** `SyncRendered` writes the mark through
 	// `Store::GetUnobserved`, which deliberately does not advance
-	// `Store::ChangeVersion` — safe only because this rule means there is no
+	// `Store::ChangeVersion` - safe only because this rule means there is no
 	// second party whose change could be lost by the write going unreported.
 	// A caller that starts observing `Rendered` has to send that line back to
 	// `Store::GetMutable` in the same change.
@@ -131,7 +131,7 @@ namespace engine::scene {
 		// between passes**.
 		//
 		// Mark-and-sweep, and the alternative was a `std::set` of every entity
-		// the walk visited — allocated, hashed and thrown away once per tick.
+		// the walk visited - allocated, hashed and thrown away once per tick.
 		// This is a byte in a row the sweep is already touching.
 		//
 		// **A mark and not a monotonic stamp, because this component reaches a
@@ -151,8 +151,8 @@ namespace engine::scene {
 	// What the tree looked like the last time the walk ran.
 	//
 	// The walk is O(descendants of `Workspace`) and each node costs three or
-	// four *random-access* lookups — `EachChild` through a `std::function`,
-	// `Get<Visual>`, then the tag — each one an alive check, a directory
+	// four *random-access* lookups - `EachChild` through a `std::function`,
+	// `Get<Visual>`, then the tag - each one an alive check, a directory
 	// locate and a binary search over an archetype's id list. At ~300 nodes
 	// that measured 0.037 ms, the largest single item in `PreRender`, and it
 	// was paid in full on every frame of a scene where nothing had moved.
@@ -190,14 +190,14 @@ namespace engine::scene {
 	// ## Why a resource and not a static
 	//
 	// Two worlds exist and a world is ticked by whichever worker claimed it,
-	// so a `thread_local` would let two worlds share one stamp — the same
+	// so a `thread_local` would let two worlds share one stamp - the same
 	// argument `Visibility.cpp` makes about the walk's stack, except that this
 	// one carries meaning between calls and would therefore be wrong rather
 	// than merely shared.
 	//
 	// **Registered under an explicit name**, in `RegisterSceneComponents`,
 	// because a resource is keyed by a component id and an unregistered type
-	// gets one minted from the compiler's spelling — which `Store::Save` then
+	// gets one minted from the compiler's spelling - which `Store::Save` then
 	// refuses, taking out every snapshot of every world that has one.
 	// `client::DrawList` learned that the expensive way.
 	//
@@ -207,7 +207,7 @@ namespace engine::scene {
 		//
 		// **Serialised as zero, deliberately.** A world restored from a
 		// snapshot would otherwise carry a stamp that still matches a tree the
-		// walk has never actually been run against in this store — the rows
+		// walk has never actually been run against in this store - the rows
 		// are there, the tag is not necessarily right for them, and the sync it
 		// needs would be skipped. A loaded game would render wrong, once, in a
 		// way nothing else would explain. See `RegisterSceneComponents`, which
@@ -242,7 +242,7 @@ namespace engine::scene {
 	// investigates, not a scene that draws its own storage.
 	//
 	// Structural changes made from here are deferred by the store when it is
-	// called from inside iteration, exactly as any other `Set` or `Remove` is —
+	// called from inside iteration, exactly as any other `Set` or `Remove` is -
 	// but it is meant to be called between systems, where they apply at once.
 	//
 	// **Idempotence is what makes the early-out safe rather than merely
@@ -254,7 +254,7 @@ namespace engine::scene {
 	//
 	// **It still runs for a world that is not ticking.** The early-out is a
 	// function of the tree rather than of the clock, so a suspended world an
-	// author drags a part into syncs on the very next `PreRender` — which is
+	// author drags a part into syncs on the very next `PreRender` - which is
 	// the property `## Where it runs` above exists to protect.
 	//
 	// @param store The world to bring in step. Gains a `RenderedSignature`

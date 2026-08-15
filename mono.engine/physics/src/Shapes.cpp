@@ -42,7 +42,7 @@ namespace engine::physics {
 			// Support of a cylinder along a unit world axis `e`, with barrel
 			// axis `a`: halfHeight * |a . e| + radius * sqrt(1 - (a . e)^2).
 			// The second term is the radius of the disc *projected* onto `e`,
-			// and it is what makes this tighter than the box bound — a cylinder
+			// and it is what makes this tighter than the box bound - a cylinder
 			// standing upright bounds to exactly its own radius on X and Z,
 			// where the box bound would agree only because the box happens to
 			// be axis-aligned too.

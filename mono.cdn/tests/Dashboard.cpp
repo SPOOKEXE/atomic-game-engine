@@ -65,7 +65,7 @@ namespace {
 		}
 	};
 
-	// A chunk of a stated length. The bytes are never read here — the manifest
+	// A chunk of a stated length. The bytes are never read here - the manifest
 	// records the length and the dashboard adds those up.
 	ChunkEntry Sized(std::string_view name, uint32_t bytes) {
 		ChunkEntry entry;
@@ -160,7 +160,7 @@ TEST_CASE("the breakdown is per kind and covers only the kinds present", "[cdn][
 	const Dashboard board(publication, StoreFootprint{}, "test");
 
 	const std::string text = Text(board);
-	// Two meshes at 10 KB together, one texture, one sound — and no row for a
+	// Two meshes at 10 KB together, one texture, one sound - and no row for a
 	// kind this content does not have, because the breakdown is built from the
 	// manifest rather than from a second list of every kind there is.
 	CHECK(text.find("mesh") != std::string::npos);
@@ -245,7 +245,7 @@ TEST_CASE("a rate is not published until its window has run", "[cdn][dashboard]"
 
 	// Ten milliseconds apart is the serving loop's own cadence. A rate taken
 	// over one of those swings by a factor of a hundred between redraws, which
-	// is why the window exists — but the traffic is still recorded.
+	// is why the window exists - but the traffic is still recorded.
 	counters.SentBytes = 64 * 1024;
 	board.Sample(counters, CacheUsage{}, 10);
 

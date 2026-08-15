@@ -2,7 +2,7 @@
 //
 // **Reachable headlessly because the decision has no imgui in it.** The picker
 // is a modal; what can be *wrong* is the table saying `Mesh` names a mesh and
-// `Name` does not — and a table that answered `Unknown` for a real content
+// `Name` does not - and a table that answered `Unknown` for a real content
 // property is a text field where a picker should be, which nothing fails on and
 // nobody notices until they mistype a mesh name.
 //
@@ -27,16 +27,16 @@ TEST_CASE("the properties that name content are the ones that get a picker", "[s
 	// for.** `Visual::Mesh` is bound as `BasePart.Mesh` *and* as
 	// `MeshPart.MeshId`; `SurfaceAppearance::ColourMap` as `BasePart.ColorMap`
 	// *and* as `MeshPart.TextureID`. The first version of the table had one of
-	// each pair, so selecting a `MeshPart` — the whole reason the picker
-	// exists — showed a plain text field on the two names it actually
+	// each pair, so selecting a `MeshPart` - the whole reason the picker
+	// exists - showed a plain text field on the two names it actually
 	// displays. An alias is a row, because a person picks whichever name their
 	// class shows them.
 	CHECK(ContentKindOfProperty("MeshId") == AssetKind::Mesh);
 	CHECK(ContentKindOfProperty("TextureID") == AssetKind::Texture);
 
 	// **The aliases are gone with the properties they named.** `BasePart.Mesh`
-	// and `BasePart.ColorMap` were removed at v0.10 — geometry from a file is
-	// not something a plain `Part` has — so a row for either would be a picker
+	// and `BasePart.ColorMap` were removed at v0.10 - geometry from a file is
+	// not something a plain `Part` has - so a row for either would be a picker
 	// offered on a property no class declares.
 	CHECK(ContentKindOfProperty("Mesh") == AssetKind::Unknown);
 	CHECK(ContentKindOfProperty("ColorMap") == AssetKind::Unknown);
@@ -52,7 +52,7 @@ TEST_CASE("the properties that name content are the ones that get a picker", "[s
 	// The `Material` instance's one property. **`MaterialId` and not
 	// `Material`**, which is the row below's other half: the class is called
 	// `Material` and a property of the same name would read as a
-	// self-reference, so this tree spells an asset name `<Thing>Id` — `MeshId`,
+	// self-reference, so this tree spells an asset name `<Thing>Id` - `MeshId`,
 	// `SoundId`.
 	CHECK(ContentKindOfProperty("MaterialId") == AssetKind::Material);
 }
@@ -74,7 +74,7 @@ TEST_CASE("an ordinary property gets no picker", "[studio][assets]") {
 
 TEST_CASE("the match is exact and not a prefix", "[studio][assets]") {
 	// **`Beam.TextureSpeed` and `Beam.TextureLength` are numbers**, and a
-	// prefix match would have put a texture picker on both — which would be a
+	// prefix match would have put a texture picker on both - which would be a
 	// modal that cannot write the property it was opened for.
 	CHECK(ContentKindOfProperty("TextureSpeed") == AssetKind::Unknown);
 	CHECK(ContentKindOfProperty("TextureLength") == AssetKind::Unknown);
@@ -83,7 +83,7 @@ TEST_CASE("the match is exact and not a prefix", "[studio][assets]") {
 	CHECK(ContentKindOfProperty("ImageRectSize") == AssetKind::Unknown);
 
 	// And it is case-sensitive, matching how `PropertyDescriptor::Spelling`
-	// stores it — a lookup that lowercased would match a property nobody
+	// stores it - a lookup that lowercased would match a property nobody
 	// declared.
 	CHECK(ContentKindOfProperty("mesh") == AssetKind::Unknown);
 }

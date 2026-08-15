@@ -10,8 +10,8 @@
 // The message set, and both ends of it, in one file.
 //
 // **One file on purpose.** A wire format written in two places is a format that
-// grows a dialect — one side gains a field, the other keeps reading the old
-// shape — and the failure is invisible until two builds meet. The point and the
+// grows a dialect - one side gains a field, the other keeps reading the old
+// shape - and the failure is invisible until two builds meet. The point and the
 // client are small enough that keeping them together costs nothing and removes
 // the only way this could drift.
 
@@ -19,7 +19,7 @@ namespace network {
 
 	namespace {
 		// The frame's magic. `ATN1` is a packet, `ATNA` is an advert, and this
-		// is `ATNR` — three formats and three first words, which is what lets a
+		// is `ATNR` - three formats and three first words, which is what lets a
 		// program share one socket between them. See `IsRendezvousMessage`.
 		constexpr uint32_t RENDEZVOUS_MAGIC = 0x524E5441; // "ATNR"
 
@@ -87,7 +87,7 @@ namespace network {
 			return static_cast<MessageKind>(kind);
 		}
 
-		// A length-prefixed block of opaque bytes — an advert, repeated
+		// A length-prefixed block of opaque bytes - an advert, repeated
 		// unchanged so that a point neither re-encodes one nor invalidates a
 		// tag it cannot verify.
 		void WriteBlock(engine::core::ByteWriter &writer, std::span<const std::byte> bytes) {
@@ -123,7 +123,7 @@ namespace network {
 		// one meeting opens the next one between the same two peers, and the
 		// key would be proving possession of a recording rather than of a
 		// secret. A zero nonce is what a machine with no entropy gets, and it
-		// is still better than a counter — it fails closed against everything
+		// is still better than a counter - it fails closed against everything
 		// except a replay, where a counter fails open against a guess.
 		std::array<std::byte, MEETING_NONCE_BYTES> DrawNonce() {
 			std::array<std::byte, MEETING_NONCE_BYTES> nonce{};
@@ -323,7 +323,7 @@ namespace network {
 
 		std::vector<std::byte> datagram(writer.Bytes().begin(), writer.Bytes().end());
 		if (key != nullptr) {
-			// Over everything before it, which includes the nonce — so a poke
+			// Over everything before it, which includes the nonce - so a poke
 			// recorded from one meeting proves nothing about the next.
 			const std::array<std::byte, SessionKey::TAG_BYTES> tag = key->Tag(datagram);
 			datagram.insert(datagram.end(), tag.begin(), tag.end());
@@ -365,7 +365,7 @@ namespace network {
 		}
 
 		// The host's side of any punch it was told about. Expired ones are
-		// dropped rather than poked for ever — a guest that gave up leaves a
+		// dropped rather than poked for ever - a guest that gave up leaves a
 		// host poking an address nobody is listening on.
 		for (Introduction &meeting : Introductions) {
 			if (nowSeconds >= meeting.RepeatDueAt && nowSeconds < meeting.ExpiresAtSeconds) {
@@ -431,8 +431,8 @@ namespace network {
 
 				// Decoded against no keys: a browse reply lists public
 				// sessions, and a private one is never in it. A caller holding
-				// a key still verifies it — through `Directory`, which holds
-				// them — when the same session is heard on the subnet.
+				// a key still verifies it - through `Directory`, which holds
+				// them - when the same session is heard on the subnet.
 				const std::optional<DecodedAdvert> decoded = Decode(block, {});
 				if (!decoded) {
 					Tally.Malformed++;
@@ -529,7 +529,7 @@ namespace network {
 				guesting ? (ReachKey ? &*ReachKey : nullptr) : (HostKey ? &*HostKey : nullptr);
 			if (key != nullptr && !key->Admits(covered, tag)) {
 				// A poke that cannot prove it holds the key is dropped. This is
-				// possession plus return routability and nothing more — the
+				// possession plus return routability and nothing more - the
 				// connection made over this address authenticates on its own
 				// terms, one layer up.
 				Tally.Refused++;
@@ -630,7 +630,7 @@ namespace network {
 				}
 
 				// Decoded against no keys, because a point holds none and must
-				// not — see the header. What it needs out of an advert is the
+				// not - see the header. What it needs out of an advert is the
 				// id, the purpose and whether it is private; the bytes are kept
 				// as they arrived so a browse reply repeats them unchanged.
 				const std::optional<DecodedAdvert> decoded = Decode(block, {});
@@ -662,7 +662,7 @@ namespace network {
 				engine::core::ByteWriter writer;
 				WriteHeader(writer, MessageKind::Enrolled);
 				WriteSessionId(writer, held->Session);
-				// The address the registration arrived from — the reflexive
+				// The address the registration arrived from - the reflexive
 				// one. A host that finds this equal to its own local address is
 				// a host with nothing in front of it, and a guest can dial it
 				// without a punch.
@@ -789,7 +789,7 @@ namespace network {
 			case MessageKind::Unknown:
 			case MessageKind::Poke:
 				// A client's messages, arriving at a point. Counted rather than
-				// answered — a point that replied to a reply is a reflector.
+				// answered - a point that replied to a reply is a reflector.
 				Tally.Malformed++;
 				continue;
 			}

@@ -1,11 +1,11 @@
 // Replaying a document into a graph.
 //
 // **All of it headless, which is the point of the design.** `Build` takes a
-// `SourceResolver`, so the one place a filesystem would enter is a callback —
+// `SourceResolver`, so the one place a filesystem would enter is a callback -
 // and every case below hands it a map. `bake` touches no disk and this file
 // does not make it start.
 //
-// The format itself — recording, writing and reading back — is
+// The format itself - recording, writing and reading back - is
 // `Engine::bakegraph`'s and is tested there. What is here is the half that
 // needs an importer.
 
@@ -104,7 +104,7 @@ TEST_CASE("a document builds the graph it describes", "[bake]") {
 	REQUIRE(Build(document, graph, ResolverOver(files), offender) == DocumentStatus::Ok);
 	CHECK(offender.empty());
 
-	// It runs, which is the only claim worth making about a built graph — that
+	// It runs, which is the only claim worth making about a built graph - that
 	// it is a pipeline rather than a set of disconnected nodes.
 	std::string failure;
 	REQUIRE(graph.Run(failure));
@@ -228,3 +228,54 @@ TEST_CASE("a document with no source builds without a resolver", "[bake]") {
 }
 
 // --- the text format ---------------------------------------------------------
+
+TEST_CASE("a rasterize operation replays with its size", "[bake]") {
+	// **The arm a compiler cannot check**: `Build` switches on the operation
+	// kind, and a kind wired to the wrong `Graph::Add` would still compile and
+	// would bake a drawing at somebody else's numbers.
+	constexpr std::string_view DRAWING =
+		R"(<svg width="4" height="4"><rect width="4" height="4" fill="white"/></svg>)";
+
+	std::map<std::string, std::vector<std::byte>> files;
+	files["icons/leaf.svg"] = std::vector<std::byte>(
+		reinterpret_cast<const std::byte *>(DRAWING.data()),
+		reinterpret_cast<const std::byte *>(DRAWING.data()) + DRAWING.size()
+	);
+
+	Operation source;
+	source.Kind = OperationKind::AddSource;
+	source.Text = "icons/leaf.svg";
+
+	Operation rasterize;
+	rasterize.Kind = OperationKind::AddRasterize;
+	rasterize.Width = 12;
+	rasterize.Height = 12;
+
+	Document document;
+	document.Record(std::move(source));
+	document.Record(std::move(rasterize));
+	document.Record(WriteNode("icons/leaf.atex"));
+	document.Record(Wire(1, 2));
+	document.Record(Wire(2, 3));
+
+	Graph graph;
+	std::string offender;
+	REQUIRE(Build(document, graph, ResolverOver(files), offender) == DocumentStatus::Ok);
+
+	std::string failure;
+	REQUIRE(graph.Run(failure));
+	REQUIRE(graph.Baked().size() == 1);
+
+	// Through the text format as well, because that is the shape a saved
+	// pipeline arrives in - and a size written and not parsed is invisible until
+	// somebody reloads the one pipeline that uses it.
+	Document reloaded;
+	REQUIRE(Read(Write(document), reloaded, offender) == DocumentStatus::Ok);
+	CHECK(Write(reloaded) == Write(document));
+
+	Graph rebuilt;
+	REQUIRE(Build(reloaded, rebuilt, ResolverOver(files), offender) == DocumentStatus::Ok);
+	REQUIRE(rebuilt.Run(failure));
+	CHECK(rebuilt.Baked().size() == 1);
+	CHECK(rebuilt.Baked()[0].Bytes == graph.Baked()[0].Bytes);
+}

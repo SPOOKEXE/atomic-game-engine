@@ -103,7 +103,7 @@ TEST_CASE("freeing twice is a no-op", "[ecs]") {
 	set.Free(index);
 	set.Free(index);
 
-	// One entry on the free list, not two — otherwise the next two allocations
+	// One entry on the free list, not two - otherwise the next two allocations
 	// would hand the same index out twice.
 	REQUIRE(set.LiveCount() == 0);
 	const uint32_t first = set.Allocate();
@@ -163,7 +163,7 @@ TEST_CASE("indices past the first page work", "[ecs]") {
 
 	// Three pages' worth, so the paging maths is exercised at both boundaries
 	// rather than only within the first block. The first page is deliberately
-	// smaller than the rest, so the two boundaries are at different strides —
+	// smaller than the rest, so the two boundaries are at different strides -
 	// which is exactly the arithmetic worth testing.
 	const uint32_t count = SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE * 2 + 5;
 	for (uint32_t index = 0; index < count; index++) {
@@ -185,7 +185,7 @@ TEST_CASE("indices past the first page work", "[ecs]") {
 
 TEST_CASE("every index in the first three pages is its own slot", "[ecs]") {
 	// Two page sizes make the index arithmetic a branch plus a subtraction, and
-	// an off-by-one there aliases two indices onto one slot — which shows up as
+	// an off-by-one there aliases two indices onto one slot - which shows up as
 	// two entities sharing a location rather than as a crash. Writing a distinct
 	// value through every index and reading them all back catches that
 	// wherever it is, rather than only at the boundaries somebody thought of.
@@ -238,7 +238,7 @@ TEST_CASE("clear frees everything without reviving old handles", "[ecs]") {
 	REQUIRE(set.LiveCount() == 0);
 	REQUIRE(set.Capacity() == 0);
 
-	// The index counter restarts, so the same indices come back — and every
+	// The index counter restarts, so the same indices come back - and every
 	// handle taken before the clear must still be dead against them.
 	const uint32_t reissued = set.Allocate();
 	REQUIRE(reissued == 0);
@@ -336,7 +336,7 @@ TEST_CASE("a freed predicted index comes back predicted", "[ecs]") {
 	SparseSet set;
 
 	// A third that stays live, so the region's page is not released underneath
-	// the reuse this case is about — a region with nothing live in it gives its
+	// the reuse this case is about - a region with nothing live in it gives its
 	// page back and its free list stops naming anything, which the case below
 	// covers.
 	const uint32_t held = set.Allocate(EntityRange::Predicted);
@@ -357,7 +357,7 @@ TEST_CASE("a freed predicted index comes back predicted", "[ecs]") {
 TEST_CASE("a region that empties gives its pages back and still keeps handles dead", "[ecs]") {
 	// **The directory's own leftover**, and the hazard that comes with taking
 	// it. A world that grew to a hundred thousand entities and dropped back to a
-	// hundred used to hold every page it ever touched — measured at 204 KB of
+	// hundred used to hold every page it ever touched - measured at 204 KB of
 	// directory for a hundred live entities, which is most of what a settled
 	// world costs once the columns stop holding their peak.
 	//
@@ -429,7 +429,7 @@ TEST_CASE("a page still holding one live index is kept", "[ecs]") {
 TEST_CASE("a store that predicts nothing pays nothing for the predicted region", "[ecs]") {
 	// **The entry fee, per region.** A page is allocated whole on the first
 	// index that needs it, so a second region that is never used must allocate
-	// no page at all — otherwise every world in a thousand-world host would pay
+	// no page at all - otherwise every world in a thousand-world host would pay
 	// the predicted range's entry fee for a feature only a client uses.
 	SparseSet set;
 	for (uint32_t index = 0; index < 100; index++) {
@@ -439,15 +439,15 @@ TEST_CASE("a store that predicts nothing pays nothing for the predicted region",
 	REQUIRE(set.ResidentSlots(EntityRange::Predicted) == 0);
 
 	// And the moment one is minted, it costs exactly one page, and that page is
-	// the small one — 8 KB rather than the 64 KB entry fee the first-page rule
+	// the small one - 8 KB rather than the 64 KB entry fee the first-page rule
 	// exists to have removed.
 	set.Allocate(EntityRange::Predicted);
 	REQUIRE(set.ResidentSlots(EntityRange::Predicted) == SparseSet::FIRST_PAGE_SIZE);
 }
 
 TEST_CASE("the small first page survives in both regions", "[ecs]") {
-	// The measurement behind `FIRST_PAGE_SIZE` — 72.7 MB down to 16.7 MB across
-	// a thousand small worlds — is a property of the first page being 512 slots
+	// The measurement behind `FIRST_PAGE_SIZE` - 72.7 MB down to 16.7 MB across
+	// a thousand small worlds - is a property of the first page being 512 slots
 	// and not 4096. A second region must not reintroduce the fee it removed, so
 	// this pins the boundary on both sides: the first page ends at
 	// FIRST_PAGE_SIZE, and the one after it is a full page.
@@ -481,7 +481,7 @@ TEST_CASE("the small first page survives in both regions", "[ecs]") {
 TEST_CASE("every index across a predicted page boundary is its own slot", "[ecs]") {
 	// The same aliasing check the authoritative region gets, because the
 	// predicted region's arithmetic is the authoritative one plus a subtraction
-	// — and an off-by-one in that subtraction puts two entities in one slot
+	// - and an off-by-one in that subtraction puts two entities in one slot
 	// rather than crashing.
 	SparseSet set;
 
@@ -502,7 +502,7 @@ TEST_CASE("every index across a predicted page boundary is its own slot", "[ecs]
 
 TEST_CASE("an exhausted range refuses rather than wrapping into the other", "[ecs]") {
 	// Wrapping would put a predicted entity on top of an index the authority can
-	// mint — the exact collision the split exists to prevent — at the one moment
+	// mint - the exact collision the split exists to prevent - at the one moment
 	// nobody is watching. So exhaustion is a refusal, and it says which value
 	// means refused.
 	//
@@ -512,7 +512,7 @@ TEST_CASE("an exhausted range refuses rather than wrapping into the other", "[ec
 	SparseSet full;
 
 	// Timed, and the only timed assertion here. **`FinishRestore` has to cost
-	// what the directory holds, not what it claims** — it rebuilds a free list
+	// what the directory holds, not what it claims** - it rebuilds a free list
 	// by walking the range, and walking two billion slots that no page covers
 	// takes tens of seconds. There is no *wrong answer* to catch: the walk skips
 	// the missing slots either way, so cost is the whole difference and a clock
@@ -606,7 +606,7 @@ TEST_CASE("clear empties both regions", "[ecs]") {
 
 TEST_CASE("live indices are never handed out twice", "[ecs]") {
 	// The property everything else rests on. A random interleaving of allocate
-	// and free, checked against a plain model — `core::Random` so a failure
+	// and free, checked against a plain model - `core::Random` so a failure
 	// reproduces from the seed on any machine.
 	SparseSet set;
 	std::set<uint32_t> live;

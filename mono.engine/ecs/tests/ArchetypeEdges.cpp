@@ -87,7 +87,7 @@ TEST_CASE("a moved epoch wipes what was recorded under the old one", "[ecs]") {
 	edges.RecordAddition(0, 1, flag, 2);
 	REQUIRE(edges.Count() == 1);
 
-	// Not a stale answer — a wrong one. Observing a component changes which
+	// Not a stale answer - a wrong one. Observing a component changes which
 	// tables carry DirtyBits, so the destination recorded before it is a table
 	// that no longer tracks changes.
 	REQUIRE(edges.Added(1, 1, flag) == ArchetypeEdges::NO_TABLE);
@@ -173,7 +173,7 @@ TEST_CASE("toggling many times keeps the values it carried", "[ecs]") {
 	}
 
 	// The components that were only ever along for the ride came through every
-	// move intact — including the one that is not trivially copyable.
+	// move intact - including the one that is not trivially copyable.
 	REQUIRE(store.Get<Place>(entity)->X == 3.0f);
 	REQUIRE(store.Get<Label>(entity)->Text == "kept");
 }
@@ -183,7 +183,7 @@ TEST_CASE("toggling many times keeps the values it carried", "[ecs]") {
 // **This is the case the cache could get silently wrong.** Observing a component
 // gives its tables a DirtyBits column, so the table a transition should reach
 // changes. An edge recorded before the `Observe` names a table with no bits, and
-// a row sent there would be written without anything recording the write — a
+// a row sent there would be written without anything recording the write - a
 // change that never fires, rather than a crash.
 
 TEST_CASE("observing after a transition invalidates the edge", "[ecs]") {
@@ -210,13 +210,13 @@ TEST_CASE("observing after a transition invalidates the edge", "[ecs]") {
 	REQUIRE(reported[0].Id == first.Id);
 }
 
-// A removal edge, by contrast, **cannot** go stale — and the reason is worth
+// A removal edge, by contrast, **cannot** go stale - and the reason is worth
 // writing down, because "invalidate both directions" looks like the obviously
 // symmetric thing to test and one half of it would be a test that cannot fail.
 //
 // A removal's destination set is a subset of its source set. So if observing a
 // component changes the destination, that component is in the source too, and
-// `ObserveRaw` migrates every table holding it — which gives the source a new
+// `ObserveRaw` migrates every table holding it - which gives the source a new
 // table index. The old index is not merely stale, it is unreachable: `TableFor`
 // now resolves that set through `Tracked` to the new table, so nothing ever
 // enters the old one again and no edge hanging off it is ever consulted.

@@ -8,7 +8,7 @@
 //     // Delayed so that running the cursor down a list doesn't flash thumbnails.
 //
 // Without it, dragging the cursor down a list of three hundred rows opens and
-// closes three hundred previews — which is not merely ugly here, because opening
+// closes three hundred previews - which is not merely ugly here, because opening
 // one *decodes a mesh and uploads it*. The delay is what turns a hover preview
 // from a strobe into a thing you point at.
 //
@@ -53,8 +53,8 @@ namespace studio {
 	void Editor::HoverPreview(const std::string &name, engine::assets::AssetKind kind) {
 		if (!ImGui::IsItemHovered()) {
 			// **Only the row under the cursor clears it, and only if it is the
-			// row that set it.** A list clears the hover once, after the loop —
-			// see `EndHoverPreview` — because every row calling this would have
+			// row that set it.** A list clears the hover once, after the loop -
+			// see `EndHoverPreview` - because every row calling this would have
 			// each one cancelling the next.
 			return;
 		}
@@ -77,7 +77,7 @@ namespace studio {
 		if (HoverCandidate != HoverPending) {
 			// **A different row: the clock restarts and nothing is showing.**
 			// This is the token from the reference, expressed as state rather
-			// than as a deferred callback — the effect is the same and there is
+			// than as a deferred callback - the effect is the same and there is
 			// no closure to outlive the row it was made for.
 			HoverPending = HoverCandidate;
 			HoverElapsed = 0.0;
@@ -113,7 +113,7 @@ namespace studio {
 		const float width = side;
 		const float height = side + caption;
 
-		// Flip rather than overflow, so it stays readable near an edge — the
+		// Flip rather than overflow, so it stays readable near an edge - the
 		// reference's rule, unchanged.
 		const float right = main->WorkPos.x + main->WorkSize.x;
 		const float bottom = main->WorkPos.y + main->WorkSize.y;
@@ -143,9 +143,9 @@ namespace studio {
 		// for the same reason: a `.amat` is a reference and has no picture of its
 		// own, so a thumbnail of one resolves to `Unavailable` and draws a dash
 		// for ever. What it wants is the engine's sphere wearing it, which is a
-		// render — the same slot, the same rotation, the same turntable.
+		// render - the same slot, the same rotation, the same turntable.
 		if (PreviewIsRendered(HoverKind)) {
-			// **A mesh is a render and not a bitmap** — `MeshPreview.cpp`
+			// **A mesh is a render and not a bitmap** - `MeshPreview.cpp`
 			// carries why. Loading is idempotent and cached, so calling it every
 			// frame the preview is open costs a hash lookup.
 			state = LoadPreviewMesh(HoverShowing);
@@ -179,7 +179,7 @@ namespace studio {
 
 		if (state != PreviewState::Ready) {
 			// **A sentence, and a different one per reason.** One blank square
-			// for four situations is what this replaces — `Preview.hpp` opens
+			// for four situations is what this replaces - `Preview.hpp` opens
 			// with the argument.
 			const ImVec2 corner = ImGui::GetCursorScreenPos();
 			ImGui::Dummy(ImVec2(picture, picture));

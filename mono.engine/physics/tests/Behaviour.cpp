@@ -23,8 +23,8 @@
 //
 // One suite for the behavioural cases `v02v03v04.md` §3.7 names, rather than
 // one case each bolted onto the suite of whichever header happened to be
-// involved. Every one of them spans the whole pipeline — integrate, index,
-// pair, intersect, solve, publish — so attaching them to `NarrowPhase.hpp` or
+// involved. Every one of them spans the whole pipeline - integrate, index,
+// pair, intersect, solve, publish - so attaching them to `NarrowPhase.hpp` or
 // `Solver.hpp` would make either suite fail for a reason that is not about the
 // header it is named after.
 //
@@ -50,6 +50,7 @@ using engine::ecs::Store;
 using engine::physics::PhysicsWorld;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::RegisterPhysicsSystems;
+using engine::scene::Anchored;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
@@ -68,8 +69,8 @@ namespace {
 	//
 	// **Not part of this module**, and the omission is deliberate rather than
 	// unfinished: `v02v03v04.md` §3.5 has no gravity row, `scene::RigidBody`
-	// has no gravity scale, and a world with no down — an orbital simulation, a
-	// top-down game — should not have to switch one off. A scene that wants
+	// has no gravity scale, and a world with no down - an orbital simulation, a
+	// top-down game - should not have to switch one off. A scene that wants
 	// weight adds it, which is exactly what a host would do.
 	//
 	// `PreSimulation` rather than `Simulation`, because a system sharing a
@@ -102,9 +103,14 @@ namespace {
 		collider.Extent = part.Extent;
 		store.Set<Collider>(entity, collider);
 
-		if (!part.Anchored) {
+		// On both, anchored or not: `RigidBody` is what the part weighs and the
+		// `Anchored` tag is whether the world may move it. See `scene::Anchored`.
+		store.Set<RigidBody>(entity, RigidBody{});
+
+		if (part.Anchored) {
+			store.Set<Anchored>(entity, Anchored{});
+		} else {
 			store.Set<Motion>(entity, Motion{});
-			store.Set<RigidBody>(entity, RigidBody{});
 		}
 		return entity;
 	}
@@ -161,11 +167,11 @@ TEST_CASE("a dropped box comes to rest and stays at rest", "[physics][behaviour]
 
 	// On the floor, whose top face is at zero, so a half-metre box rests with
 	// its centre at a half metre. The tolerance is the solver's steady-state
-	// overlap and nothing more — a millimetre and a half.
+	// overlap and nothing more - a millimetre and a half.
 	CHECK(HeightOf(store, crate) == Approx(0.5f).margin(0.005));
 	CHECK(TiltOf(store, crate) == Approx(0.0f).margin(0.01));
 
-	// Asleep, so it is not merely still — it has stopped costing anything.
+	// Asleep, so it is not merely still - it has stopped costing anything.
 	CHECK(store.Resource<PhysicsWorld>()->Sleeping(crate));
 
 	// And it stays there. Ten more seconds of gravity move it by nothing at
@@ -248,7 +254,7 @@ TEST_CASE("a cylinder rests on its side without sinking", "[physics][behaviour]"
 
 TEST_CASE("a stack of boxes does not drift", "[physics][behaviour]") {
 	// Four boxes and a floor. Each contact has to hold the weight of everything
-	// above it, which is what the warm start is for — without last tick's
+	// above it, which is what the warm start is for - without last tick's
 	// impulses to start from, sixteen sweeps do not reach the bottom of a stack
 	// and it sinks a little further every tick.
 	Store store("behaviour.stack");
@@ -290,7 +296,7 @@ namespace {
 	// for `ticks` at `delta` and snapshotted.
 	//
 	// **Big enough that a parallel solver would be caught.** An earlier version
-	// of this scene held four bodies, which is a dozen contact rows — under the
+	// of this scene held four bodies, which is a dozen contact rows - under the
 	// count at which `Jobs::For` bothers to dispatch, so a solver made parallel
 	// ran inline, stayed serial and stayed deterministic. The case passed and
 	// proved nothing. Six columns of three, plus their neighbours, is a few
@@ -341,7 +347,7 @@ namespace {
 }
 
 TEST_CASE("two runs of one scene agree byte for byte", "[physics][behaviour]") {
-	// Same binary, same platform, same result — `v02v03v04.md` §2.4 and §3.5.
+	// Same binary, same platform, same result - `v02v03v04.md` §2.4 and §3.5.
 	// A snapshot rather than a field comparison, because a snapshot is what
 	// `just determinism` compares and it also catches a component whose padding
 	// reached the file uninitialised.
@@ -358,8 +364,8 @@ TEST_CASE("two runs of one scene agree byte for byte", "[physics][behaviour]") {
 
 TEST_CASE("the same scene is reproducible at 30 and at 240 hertz", "[physics][behaviour]") {
 	// **What "agrees at 30 and 240 hertz" can mean and what it cannot.** A
-	// fixed-step integrator taking a different step lands somewhere different —
-	// that is arithmetic, not a bug — so the property held here is the one that
+	// fixed-step integrator taking a different step lands somewhere different -
+	// that is arithmetic, not a bug - so the property held here is the one that
 	// matters for a recording: at each rate, two runs of one scene are
 	// identical, and both settle into the same resting state.
 	const std::vector<std::byte> slowFirst = RunScene("behaviour.rate.slow", THIRTY_HERTZ, 90);
@@ -392,8 +398,8 @@ TEST_CASE("the same scene is reproducible at 30 and at 240 hertz", "[physics][be
 }
 
 TEST_CASE("two worlds ticked in parallel equal two ticked serially", "[physics][behaviour]") {
-	// Worlds never collide with each other — a portal is a message, not a
-	// contact — so physics across worlds is embarrassingly parallel and needs
+	// Worlds never collide with each other - a portal is a message, not a
+	// contact - so physics across worlds is embarrassingly parallel and needs
 	// no concurrency story of its own. What would break that is shared state:
 	// a module-scope scratch buffer, a static, a cache keyed by anything but
 	// the world. This is the case that finds one.
@@ -436,7 +442,7 @@ TEST_CASE("a custom density is the mass the solver uses", "[physics][behaviour]"
 	// one would pass with the density thrown away. What mass decides is how
 	// much of a shove survives a collision: an inelastic hit leaves the pair
 	// moving at `m1 v / (m1 + m2)`, so the same shove into a heavier target
-	// leaves a slower pair — and the two runs below differ in nothing except
+	// leaves a slower pair - and the two runs below differ in nothing except
 	// the target's density.
 	const auto shove = [](bool dense) {
 		Store store(dense ? "physics_test.density.heavy" : "physics_test.density.light");
@@ -470,7 +476,7 @@ TEST_CASE("a custom density is the mass the solver uses", "[physics][behaviour]"
 	const float heavy = shove(true);
 
 	// The lighter target is carried away faster than the heavier one. Both are
-	// moving — a target that never moved would mean the impact never happened
+	// moving - a target that never moved would mean the impact never happened
 	// and the comparison would be between two zeros.
 	INFO("light " << light << " heavy " << heavy);
 	CHECK(light > 0.1f);
@@ -478,7 +484,7 @@ TEST_CASE("a custom density is the mass the solver uses", "[physics][behaviour]"
 	CHECK(heavy < light * 0.6f);
 
 	// And the mass a properties panel would show is the one the density
-	// implies — one cubic metre at eight kilograms a metre.
+	// implies - one cubic metre at eight kilograms a metre.
 	// The mass rule on its own, with no classes registered: `Place` builds the
 	// three components by hand, which is all `MassOf` reads.
 	Store store("physics_test.density.mass");
@@ -517,7 +523,7 @@ TEST_CASE("a custom elasticity makes a part bounce", "[physics][behaviour]") {
 	// Long enough to hit, and short enough that the bounce has not been
 	// re-absorbed. The comparison is between the two rather than against a
 	// number, because what is under test is that the override reached the
-	// solver — not what a particular restitution integrates to.
+	// solver - not what a particular restitution integrates to.
 	float highest = 0.0f;
 	bool landed = false;
 	for (int tick = 0; tick < 120; tick++) {

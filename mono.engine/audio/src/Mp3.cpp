@@ -3,7 +3,7 @@
 
 // **`MINIMP3_FLOAT_OUTPUT` before the header, and it is not a preference.**
 // Without it the decoder synthesises to `int16_t` and every sample would then
-// be divided back into a float here — a round trip through sixteen bits that
+// be divided back into a float here - a round trip through sixteen bits that
 // costs a pass over the whole track and loses the headroom `Sample.hpp` exists
 // to keep. minimp3's own float path is the same code with the last conversion
 // removed.
@@ -74,7 +74,7 @@ namespace engine::audio {
 		//
 		// **Skipped rather than scanned past.** A tag holding cover art holds a
 		// JPEG, a JPEG is arbitrary bytes, and arbitrary bytes contain frame
-		// syncs — so a decoder that hunted for its first frame through one
+		// syncs - so a decoder that hunted for its first frame through one
 		// would sometimes start decoding an image. Every field here is bounded
 		// against what actually arrived before it is used.
 		size_t Id3v2Bytes(std::span<const std::byte> bytes) {
@@ -106,7 +106,7 @@ namespace engine::audio {
 				total += ID3V2_HEADER_BYTES;
 			}
 			// A tag claiming to run past the end of what arrived skips
-			// everything, which leaves nothing to decode — the honest outcome
+			// everything, which leaves nothing to decode - the honest outcome
 			// for a file that is a truncated tag and no audio.
 			return std::min(total, bytes.size());
 		}
@@ -145,7 +145,7 @@ namespace engine::audio {
 		mp3dec_init(&decoder);
 
 		// One frame's worth, reused. The decoder writes at most this per call
-		// and the figure is the library's own — sizing it from anything else
+		// and the figure is the library's own - sizing it from anything else
 		// would be a buffer overrun the day a layer II file arrives.
 		std::array<float, MINIMP3_MAX_SAMPLES_PER_FRAME> frame{};
 
@@ -174,7 +174,7 @@ namespace engine::audio {
 			at += static_cast<size_t>(info.frame_bytes);
 
 			if (decoded == 0) {
-				// A region the decoder skipped — junk, or the first frame of a
+				// A region the decoder skipped - junk, or the first frame of a
 				// stream it is still syncing to.
 				continue;
 			}
@@ -192,7 +192,7 @@ namespace engine::audio {
 				// resampling inside the decode loop; ignoring it means writing
 				// mono frames into a stereo buffer and shifting every channel
 				// after them. Refusing is the only one that cannot be quietly
-				// wrong — `Mp3.hpp` carries the argument.
+				// wrong - `Mp3.hpp` carries the argument.
 				return refuse();
 			}
 

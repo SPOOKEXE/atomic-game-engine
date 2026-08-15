@@ -2,7 +2,7 @@
 //
 // The claim under test throughout: **a world's bus behaviour does not depend on
 // which process holds it.** Every case is built so that the same thing is done
-// twice — once entirely locally, once with one side in a host — and the two are
+// twice - once entirely locally, once with one side in a host - and the two are
 // required to agree.
 //
 // No process is spawned. The hosts are local channels standing in for one,
@@ -68,7 +68,7 @@ namespace driver_test {
 
 	// A driver whose hosts are local channels rather than processes.
 	//
-	// The launcher succeeds without spawning, and a link is attached by hand —
+	// The launcher succeeds without spawning, and a link is attached by hand -
 	// which is exactly the seam `Supervisor::Attach` exists for, and the reason
 	// the transport is injectable at all.
 	struct Rig {
@@ -457,7 +457,7 @@ TEST_CASE("a delivery for a host that died is counted rather than swallowed", "[
 
 TEST_CASE("a universe with remote worlds round-trips through a snapshot", "[world]") {
 	// Without the host on the record, a restored driver would bring every
-	// remote world back as a local one — empty, ticking, and answering for a
+	// remote world back as a local one - empty, ticking, and answering for a
 	// world still running somewhere else.
 	Rig rig({Named("held.elsewhere")});
 	rig.Machine->Worlds().Create(Named("held.here"));

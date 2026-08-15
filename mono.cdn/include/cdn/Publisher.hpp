@@ -11,7 +11,7 @@
 //
 // 1. **Walk and chunk.** Every file under the content directory becomes an
 //    asset, cut into content-defined chunks and written into the store. Dedup
-//    falls out for free — two files sharing bytes share chunks, and the second
+//    falls out for free - two files sharing bytes share chunks, and the second
 //    write is a no-op.
 // 2. **Name and classify.** `KindOfName` decides what each asset is, once,
 //    here. Nothing downstream re-derives it.
@@ -30,7 +30,7 @@
 // something an origin does when it starts.
 //
 // **Affinity is derived from the directory a file sits in.** A group has to be
-// independently useful — CDN.md §5 — and without an authoring tool to declare
+// independently useful - CDN.md §5 - and without an authoring tool to declare
 // what belongs with what, the directory is the best available statement of it:
 // somebody who put a mesh and its textures in one folder was saying they go
 // together. Stated plainly because it is a heuristic standing in for a decision
@@ -40,6 +40,7 @@
 
 #include <engine/assets/Chunker.hpp>
 #include <engine/assets/ContentHash.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Signature.hpp>
 
 #include <cdn/Grouper.hpp>
@@ -63,13 +64,31 @@ namespace cdn {
 		// Whether to train a compression dictionary over the content.
 		//
 		// On by default. Zstd refuses when it has too little to learn from, and
-		// that refusal is passed through rather than papered over — a
+		// that refusal is passed through rather than papered over - a
 		// dictionary trained on too little costs bytes on every fetch and buys
 		// nothing.
 		bool TrainDictionary = true;
 
 		// The largest dictionary to produce.
 		size_t DictionaryBytes = 110 * 1024;
+
+		// Which content forms may enter the publication.
+		//
+		// **The origin's only honest gate, and the reason there is no
+		// serve-time one.** Step 2 above is where a name is real; after it
+		// there are only hashes, and a hash cannot be walked back to an
+		// extension. So a form refused here never becomes a chunk, never
+		// appears in the manifest and is never served - where a serve-time
+		// check would be looking at a hash that has already been decided.
+		//
+		// **Defaulted from the process's own settings**, so an origin is gated
+		// by one line here rather than by every caller of `Publish` remembering
+		// to fill it. A program that never declared the flags gets everything,
+		// which is what this engine did before they existed.
+		//
+		// @since v0.15
+		engine::assets::ContentPolicy Content =
+			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Publish);
 	};
 
 	// What a publish produced.
@@ -103,6 +122,15 @@ namespace cdn {
 		// Whether a dictionary was trained. False is ordinary on small content.
 		bool DictionaryTrained = false;
 
+		// Files `PublishSettings::Content` refused.
+		//
+		// **Reported for `Oversized`'s reason**: a publish that quietly produced
+		// fewer assets than the directory holds is a client fetching a name that
+		// is not there, and the first anyone hears of it is a missing texture.
+		//
+		// @since v0.15
+		size_t Refused = 0;
+
 		// The signed manifest root.
 		engine::assets::ContentHash Root;
 	};
@@ -111,7 +139,7 @@ namespace cdn {
 	//
 	// The store is left ready to serve: chunks, a signed manifest and a
 	// dictionary if one was trained. An existing store is added to rather than
-	// replaced, which is what makes republishing cheap — unchanged content is
+	// replaced, which is what makes republishing cheap - unchanged content is
 	// already there and every write of it is a no-op.
 	//
 	// @param contentDirectory The files to publish. Walked recursively; names

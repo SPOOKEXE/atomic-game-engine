@@ -3,7 +3,7 @@
 // The client half of a Play run, in the editor's own process.
 //
 // **`RunMode::Play` has claimed since v0.7 to be "both halves in one process,
-// the arrangement `HostRole::OfBoth` describes" — and until this it was one
+// the arrangement `HostRole::OfBoth` describes" - and until this it was one
 // half wearing both hats.** The world ticked with `IsServer()` and `IsClient()`
 // both true, which is what a single-player process looks like from a script; but
 // there was no replica anywhere, so nothing a client would actually *see* was
@@ -13,7 +13,7 @@
 //
 // This is the other half: an `Authority` over the world being played and a
 // `Replica` of it in a second world, with **nothing in between them**. No
-// datagram, no header, no cipher, no window — the bytes the authority produced
+// datagram, no header, no cipher, no window - the bytes the authority produced
 // are the bytes the replica reads, in the order they were produced. That is
 // `mono.unified_server_client`'s arrangement exactly, and it is deliberately the
 // same one: a second way to stand the two halves up in one process would be a
@@ -24,7 +24,7 @@
 // A viewport per world already exists, so the cheap-looking answer is to point
 // the second viewport at the same world and call one of them "the client". That
 // is a picture of the same rows drawn twice. **The whole value of this panel is
-// the difference between the two** — a part that moved on the server and has not
+// the difference between the two** - a part that moved on the server and has not
 // arrived, a colour that never crossed because nothing marked it dirty, a
 // creation the client has not been told about. Two views of one store cannot
 // show any of that, because there is only one answer in the process.
@@ -43,7 +43,7 @@
 //
 // **Not authored content.** The replica world is created when Play starts and
 // destroyed when Stop does. It is never written to a game file, never renamed,
-// never edited and never idle-closed — see `Editor::IsReplicaWorld`.
+// never edited and never idle-closed - see `Editor::IsReplicaWorld`.
 //
 // @tier L12 · client
 
@@ -77,7 +77,7 @@ namespace studio {
 		// **Zero is not "never joined", and reading it that way is a mistake
 		// this file made first.** A run publishes before its world has ticked,
 		// so the join snapshot is stamped tick 0 and a world that has not
-		// changed since leaves this at zero for ever — which is correct, and is
+		// changed since leaves this at zero for ever - which is correct, and is
 		// what a scene with no systems in it looks like. `ClientEntities` is the
 		// field that answers whether anything arrived; this one answers when.
 		uint64_t Applied = 0;
@@ -128,8 +128,8 @@ namespace studio {
 		// Creates the replica world beside `authority` and admits a client.
 		//
 		// The new world takes the authority's name with a suffix, is marked as a
-		// replica in both of the ways v0.6 settled — `world::Replica` for the
-		// buses and `Store::SetAdoptOnly` for the storage — and gets the
+		// replica in both of the ways v0.6 settled - `world::Replica` for the
+		// buses and `Store::SetAdoptOnly` for the storage - and gets the
 		// client's presentation seam so that it has a draw list to publish.
 		//
 		// @param universe  The editor's universe. Gains one world.
@@ -141,7 +141,7 @@ namespace studio {
 		// @param error     Filled when this returns false.
 		// @param label     What to call this client, appended to the authority's
 		//        name. **A world's name is its identity to the whole universe**
-		//        — rule 4 — so two clients that took one name would be two
+		//        - rule 4 - so two clients that took one name would be two
 		//        worlds nothing could tell apart, in a panel or in a recording.
 		// @return `false` when the replica world could not be created.
 		// @param adopt     A `Player` already in `authority` to take over rather
@@ -163,7 +163,7 @@ namespace studio {
 		// **A teleport is not instant and cannot be**, which is what this
 		// counts. The departure destroys the player during a tick; the envelope
 		// is routed at that tick's barrier; the destination admits the arrival
-		// when *its* script heartbeat next pumps its inbox — so there is a
+		// when *its* script heartbeat next pumps its inbox - so there is a
 		// window, at least one tick wide, where the player is in neither world.
 		// An editor that declared the client lost on the first frame of that
 		// window would kill every teleport it followed, which is exactly what it
@@ -178,7 +178,7 @@ namespace studio {
 		//
 		// **A name and not a handle, because a teleport does not move one.**
 		// Nothing crosses a world boundary but bytes, so the player in the
-		// destination is a different entity that happens to be the same person —
+		// destination is a different entity that happens to be the same person -
 		// and the only thing the two share is what they are called. `Editor::
 		// FollowTeleports` is the one reader.
 		const std::string &PlayerName() const {
@@ -188,7 +188,7 @@ namespace studio {
 		// Publishes this tick, hands the messages over, and acknowledges.
 		//
 		// **Called after `Universe::Tick` and before the next one**, which is the
-		// only window where the dirty bits describe the tick that just ran — a
+		// only window where the dirty bits describe the tick that just ran - a
 		// world clears them at the *start* of a tick, so reading them later is
 		// how a tick's worth of movement goes missing. `mono.server` says the
 		// same thing at its own publish and for the same reason.
@@ -228,7 +228,7 @@ namespace studio {
 		//
 		// **The authority's handle, and a replica's handle for the same thing.**
 		// A replica applies structure with the entity ids it was sent, so the
-		// two ends agree on numbering by construction — `game::JoinNotice` says
+		// two ends agree on numbering by construction - `game::JoinNotice` says
 		// the same about a real wire, and it is what lets one handle be looked
 		// up in either store.
 		//

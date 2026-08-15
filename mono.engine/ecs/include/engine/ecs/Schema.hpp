@@ -8,8 +8,8 @@
 // with a `Current` and a `Max` has no `T`, and there is no build step between
 // writing that line and the world having to store it.
 //
-// So a schema is the same descriptor built the other way round — from a list of
-// named fields and their `PropertyType`s — and everything downstream is
+// So a schema is the same descriptor built the other way round - from a list of
+// named fields and their `PropertyType`s - and everything downstream is
 // unchanged. The id is a `ComponentId` from the same counter, the storage is a
 // `Column` like any other, `Store::SetComponent` writes it, a query matches it,
 // and a snapshot carries it. **Nothing in the storage learns that a component
@@ -22,7 +22,7 @@
 // set lay it out identically whatever order they named them in. That is not
 // tidiness: the caller is usually a script, a Luau table iterates in hash order,
 // and a layout that followed the caller would differ between two runs of one
-// file — which is a snapshot from one process that another cannot read.
+// file - which is a snapshot from one process that another cannot read.
 //
 // **Padding is zeroed rather than left alone.** `TypeDescriptor`'s own warning
 // says a snapshotted component must have none, because uninitialised padding
@@ -33,7 +33,7 @@
 //
 // **Serialisation is field by field and never the object representation.** A
 // `Name` field holds a process-local id, and `Name.hpp` says never to serialize
-// one — so the raw path `DescribeType` would have installed is exactly the bug
+// one - so the raw path `DescribeType` would have installed is exactly the bug
 // that header warns about. Going through the fields costs a loop in a path that
 // runs at save time, and it is the only form that is correct for every field
 // type at once.
@@ -59,7 +59,7 @@ namespace engine::ecs {
 		// The field's name, as a script spells it.
 		std::string_view Name;
 
-		// What the field holds. `PropertyType::Opaque` is refused — a field
+		// What the field holds. `PropertyType::Opaque` is refused - a field
 		// nothing can read or write is a column of bytes with no author.
 		PropertyType Type = PropertyType::Opaque;
 
@@ -134,7 +134,7 @@ namespace engine::ecs {
 		//
 		// **The form a binding should call.** Interning a key taken off a script
 		// takes the name registry's lock and adds a hash, which is the
-		// measurement `PropertyDescriptor::Spelling` records — and a field access
+		// measurement `PropertyDescriptor::Spelling` records - and a field access
 		// is at least as hot as a property access.
 		//
 		// @param field The field's name, as the caller spells it.
@@ -182,7 +182,7 @@ namespace engine::ecs {
 		// Why a registration was refused.
 		//
 		// Returned rather than aborted, which is the one place this diverges
-		// from `Components::Of<T>()` — and the divergence is the caller.
+		// from `Components::Of<T>()` - and the divergence is the caller.
 		// `Of<T>()` aborts because a C++ type that reached a sealed table has
 		// nobody to tell; a schema's caller is a script, an editor or a game
 		// file, and every one of those can be handed an error and carry on.
@@ -192,7 +192,7 @@ namespace engine::ecs {
 			// Registered, or already registered with exactly this field set.
 			Ok,
 
-			// A field named a type the storage cannot hold — `Opaque`, or a
+			// A field named a type the storage cannot hold - `Opaque`, or a
 			// spelling nothing maps.
 			BadField,
 
@@ -200,7 +200,7 @@ namespace engine::ecs {
 			DuplicateField,
 
 			// The name is already registered, and by something with a different
-			// field set — or by a C++ type, which is the same collision.
+			// field set - or by a C++ type, which is the same collision.
 			Conflict,
 
 			// The component table is closed. Registering now would take an id
@@ -228,7 +228,7 @@ namespace engine::ecs {
 			// Whether this registration created the component rather than
 			// agreeing with one already there.
 			//
-			// Not an error either way — two scripts may both declare that
+			// Not an error either way - two scripts may both declare that
 			// `Health` has a `Current` and a `Max`, and the second is agreeing.
 			// Reported because a caller building an editor list wants to know.
 			bool Created = false;
@@ -275,7 +275,7 @@ namespace engine::ecs {
 		// Forgets every described component.
 		//
 		// **For tests, and for a host tearing one universe down before building
-		// another.** It does not unregister anything from `Components` — an id,
+		// another.** It does not unregister anything from `Components` - an id,
 		// once minted, means that type for the life of the process, which is the
 		// property the whole table rests on. What it releases is the *schemas*,
 		// so a second registration under a name this one used is a fresh
@@ -289,7 +289,7 @@ namespace engine::ecs {
 		//
 		// **One vocabulary for both script runtimes, the manifest and any game
 		// file**, rather than a table per caller that drifts. The engine's own
-		// spellings — the ones `Describe(PropertyType)` hands back — are
+		// spellings - the ones `Describe(PropertyType)` hands back - are
 		// accepted, and so are the three a script author would reach for first:
 		// `number`, `boolean` and `string`.
 		//

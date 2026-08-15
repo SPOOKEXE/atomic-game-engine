@@ -23,7 +23,7 @@ namespace engine::physics {
 				return;
 			}
 
-			// The body is not always the row — `scene::Humanoid::RootPart`
+			// The body is not always the row - `scene::Humanoid::RootPart`
 			// carries the argument, and `scene::StepCharacters` resolves it the
 			// same way. Casting from the humanoid instance instead would be
 			// casting from a row with no place in the world.
@@ -41,9 +41,9 @@ namespace engine::physics {
 
 			// **The body is skipped by the query and not by testing the
 			// answer**, and that correction is what makes a character rig
-			// grounded at all. The ray starts *inside* the feet on purpose — a
+			// grounded at all. The ray starts *inside* the feet on purpose - a
 			// ray that begins exactly on a face is a coin flip about whether it
-			// hits it, and the coin lands differently on two machines — so with
+			// hits it, and the coin lands differently on two machines - so with
 			// a root collider the full height of the character, the nearest hit
 			// is always the character. Comparing `hit->Owner != body`
 			// afterwards then reads "not grounded" while it is standing on a
@@ -54,7 +54,7 @@ namespace engine::physics {
 			// **Through any pane in the way, which is what keeps a body in the
 			// seam standing on something.** A pane is a hole and a character may
 			// be halfway through one, so the floor under its feet is the far
-			// room's for as long as the near room's stops at the doorway — and a
+			// room's for as long as the near room's stops at the doorway - and a
 			// ray that stopped at the glass reported "not grounded" for a
 			// character everybody can see standing on a floor. What that looks
 			// like is falling out of the world in the one metre where you should
@@ -101,14 +101,14 @@ namespace engine::physics {
 			// The second is the case that has no other answer. A sleeping body
 			// carries no `scene::Motion` and is therefore never integrated, so a
 			// character whose floor is deleted, or who is nudged off a ledge by
-			// something that does not touch it, hangs in the air for ever —
+			// something that does not touch it, hangs in the air for ever -
 			// `physics`' own wake pass only fires on a *contact*, and there is
 			// no contact when the support simply stops existing.
 			//
 			// **Not "always awake", which is the other way this could have
 			// gone.** A component that kept every character in the dynamic set
 			// would put every idle player through the integrator and the broad
-			// phase every tick, for ever, to hold still — and standing still is
+			// phase every tick, for ever, to hold still - and standing still is
 			// what players spend most of a session doing. Sleeping exists for
 			// exactly that body. These two conditions are what it costs to keep
 			// it.
@@ -124,7 +124,7 @@ namespace engine::physics {
 
 			// **And the component back, because that is what waking *is* in this
 			// ECS.** `physics::Publish` takes `scene::Motion` away when a body
-			// sleeps — the archetype move is the mechanism, not a flag — so a
+			// sleeps - the archetype move is the mechanism, not a flag - so a
 			// body without one is a body `IntegrateMotion` never visits and
 			// `scene::StepCharacters` has nothing to write into.
 			//
@@ -133,7 +133,7 @@ namespace engine::physics {
 			// component is an archetype move, and an archetype move under an
 			// `Each` is the iteration invalidating itself. A rig keeps its
 			// humanoid and its body on different rows so the two archetypes are
-			// usually different and it usually got away with it — usually is not
+			// usually different and it usually got away with it - usually is not
 			// a guarantee, and a scripted character carries both on one row,
 			// where they are the same archetype and it never was.
 			if (!store.Has<scene::Motion>(body)) {
@@ -166,7 +166,7 @@ namespace engine::physics {
 			// job.** `LinkPlayerCharacters` releases a player whose model was
 			// destroyed; this destroys a model whose player was. A character is
 			// a `Model` under Workspace rather than a child of the `Player`, so
-			// nothing collects it — and the two places that remembered to call
+			// nothing collects it - and the two places that remembered to call
 			// `RemoveCharacter` by hand were the only reason it ever happened.
 			//
 			// Composed rather than a second `Add`, for the reason
@@ -178,8 +178,8 @@ namespace engine::physics {
 		});
 
 		// **Wake, ground and step are one system, and that is the whole fix.**
-		// They were two — the first two here and `character.step` in
-		// `Phase::Simulation` — and `RegisterPhysicsSystems` says in as many
+		// They were two - the first two here and `character.step` in
+		// `Phase::Simulation` - and `RegisterPhysicsSystems` says in as many
 		// words why that could not work: *"`ecs::Scheduler` gives no ordering
 		// between two systems in one phase"*. `physics.simulation` is in
 		// `Simulation` too and is registered first by every host, so
@@ -191,7 +191,7 @@ namespace engine::physics {
 		// character that does not move at all is the other end: a character
 		// standing still is a body the solver rests, `physics::Publish` takes
 		// `scene::Motion` away from a resting body, and it did so at the end of
-		// the same tick — before anything had integrated the velocity. The next
+		// the same tick - before anything had integrated the velocity. The next
 		// tick `WakeMovingCharacters` handed back a *zero* `Motion`,
 		// `StepCharacters` wrote the walk speed into it again, and the cycle
 		// repeated for as long as the key was held: `scene::Motion` appearing
@@ -200,7 +200,7 @@ namespace engine::physics {
 		// never went anywhere.
 		//
 		// Composed rather than ordered by registration, which is the same
-		// decision `physics.contacts` makes for the same reason — the contract
+		// decision `physics.contacts` makes for the same reason - the contract
 		// supports composition and does not support registration order. The
 		// chain is: link the rig, wake the body so it *has* a `Motion`, ask what
 		// is under it, then write the velocity. `Simulation` then integrates
@@ -210,7 +210,7 @@ namespace engine::physics {
 			(void)GroundCharacters(store);
 
 			// **Still against the fixed tick**, which is all
-			// `scene::StepCharacters` ever asked for — `PreSimulation` runs once
+			// `scene::StepCharacters` ever asked for - `PreSimulation` runs once
 			// per tick exactly as `Simulation` does, so moving it here costs the
 			// determinism nothing and buys the ordering everything.
 			(void)scene::StepCharacters(store, static_cast<float>(store.Time().Delta));
@@ -219,23 +219,23 @@ namespace engine::physics {
 		// **In `PreRender`, beside `ResolveAttachments`, and on whatever machine
 		// draws.** A limb's place is derived from a root the solver moved this
 		// tick on a server and that interpolation moved this *frame* on a
-		// client — posing in the simulation would leave a client's limbs a frame
+		// client - posing in the simulation would leave a client's limbs a frame
 		// behind their own body, which reads as a character sliding out of its
 		// own arms.
 		// **After the solver, because what is tested is where the tick ended.**
 		// A crossing is the segment between where a body started the tick and
-		// where it finished it — `scene::CrossPortals` says why a position test
-		// alone misses at walking speed — so this has to run once the body has
+		// where it finished it - `scene::CrossPortals` says why a position test
+		// alone misses at walking speed - so this has to run once the body has
 		// actually been moved.
 		// **Before the solver, because it decides what the solver does.** A
 		// portal's pane is an ordinary part and an ordinary part collides, so
-		// a character walked into the picture and stopped there — and
+		// a character walked into the picture and stopped there - and
 		// `character.portal` below, which tests whether a body's step *crossed*
 		// the plane, could never fire for a body the solver had parked on it.
 		//
 		// **Its own entry rather than composed, and the phase is what makes
 		// that safe.** Nothing else in `PreSimulation` reads `Collider::Trigger`
-		// — physics reads it in `Simulation` and `PostSimulation` — so the
+		// - physics reads it in `Simulation` and `PostSimulation` - so the
 		// ordering the scheduler does not give is ordering nothing here needs.
 		// The composition argument below applies to systems that read each
 		// other's writes within a phase, and this reads nobody's.
@@ -258,7 +258,7 @@ namespace engine::physics {
 		});
 
 		// **After the crossing**, so a body that walked through this tick is
-		// already on the far side when its proxies go — and unconditionally, or a
+		// already on the far side when its proxies go - and unconditionally, or a
 		// proxy outlives the seam that explains it and becomes a wall nobody can
 		// see.
 		scheduler.Add("portal.retire", ecs::Phase::PostSimulation, [](ecs::Store &store) {

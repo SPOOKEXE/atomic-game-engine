@@ -69,13 +69,13 @@ namespace engine::effects {
 		// seven copies of the same thirty lines differing only in a member pointer
 		// is the duplication `AGENTS.md` calls the most expensive kind of debt.
 		// What is given up is that `Reads` and `Writes` no longer name a component
-		// per property in readable text — they are the same component for all
+		// per property in readable text - they are the same component for all
 		// seven, which is the fact that makes the template safe.
 		//
 		// **The enum's name arrives as a second template argument and not as a
 		// parameter**, and that is forced rather than stylistic:
 		// `PropertyDescriptor::Get` and `Set` are raw function pointers, so the
-		// generated conversions have to be captureless — the same constraint that
+		// generated conversions have to be captureless - the same constraint that
 		// makes `Classes::Property` take its member as a template argument. A
 		// pointer to the interning accessor is a compile-time constant, so it
 		// bakes into the generated function and the descriptor stays a pointer.
@@ -125,7 +125,7 @@ namespace engine::effects {
 		// How many of the grid's cells hold a frame, as a number a script writes.
 		//
 		// **A conversion, because `uint8_t` is not a `PropertyType`.** The storage
-		// is one byte — the ceiling is 64 and it fits the padding after the flags —
+		// is one byte - the ceiling is 64 and it fits the padding after the flags -
 		// and `Classes::TypeOf` has cases for 32- and 64-bit integers and none for
 		// a byte, so a generated property over this field is `Opaque` and its
 		// setter refuses every write. That is not a compile error and not a load
@@ -137,7 +137,7 @@ namespace engine::effects {
 		// property is a conversion, and this is one.
 		//
 		// **Clamped rather than refused**, which is `ClampedProperty`'s own
-		// argument — a count has an obvious nearest meaning outside its range, and
+		// argument - a count has an obvious nearest meaning outside its range, and
 		// a scene computing one off a decoded frame count should be corrected
 		// rather than stopped.
 		PropertyDescriptor FlipbookFramesProperty() {
@@ -183,8 +183,8 @@ namespace engine::effects {
 			const ecs::ClassId instance = ecs::Classes::RegisterInstanceRoot();
 
 			// The member lists, registered once so a script setting one is checked
-			// against them. Order is the storage — every one of these is stored as
-			// its ordinal in a trivially-copied component — so a member may be
+			// against them. Order is the storage - every one of these is stored as
+			// its ordinal in a trivially-copied component - so a member may be
 			// appended and never reordered.
 			ecs::EnumTable::Register(
 				OrientationEnum().Text(),
@@ -213,7 +213,7 @@ namespace engine::effects {
 			// **`EmitterSlot` is in the class set and carries no property**, which
 			// is the arrangement that lets `RefreshEmitters` write a block index
 			// without ever adding a component during iteration. A structural change
-			// inside the walk would move the row out from under it —
+			// inside the walk would move the row out from under it -
 			// `AnchoredProperty` is the same hazard declared rather than avoided.
 			const std::array emitterSet{
 				ecs::Components::Of<ParticleEmitter>(), ecs::Components::Of<EmitterSlot>()

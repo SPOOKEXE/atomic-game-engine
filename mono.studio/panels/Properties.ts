@@ -2,7 +2,7 @@
 //
 // **This is the point of the whole 2D branch and it is deliberately the last
 // step.** `mono.studio` keeps Dear ImGui until the engine's own tree can draw a
-// property grid — because an editor half on each is two widget sets, and the
+// property grid - because an editor half on each is two widget sets, and the
 // rule against two ways to do one job applies hardest to the thing you look at
 // all day. So this is not a replacement for the imgui panels; it is the proof
 // that the tree can carry one, which is what has to be true before any of them
@@ -13,16 +13,16 @@
 // responding to a click. Every one of those is a piece that had no caller until
 // now:
 //
-//   - `UIListLayout` stacking rows, and `UIPadding` insetting them — the layout
+//   - `UIListLayout` stacking rows, and `UIPadding` insetting them - the layout
 //     pass, which until this had only the example scene exercising it;
 //   - `ScrollingFrame`, so a grid longer than its panel is reachable;
 //   - `.Activated` on a row, which is `gui::Router`'s events reaching a script
-//     through `script::Signals` — the join this version added;
+//     through `script::Signals` - the join this version added;
 //   - `StarterGui` containment, because a `ScreenGui` parented anywhere else
 //     draws nothing.
 //
 // **React is not here and does not have to be.** The roadmap leaves the
-// reconciler open — `react-lua` or a hand-written one are both reasonable — and
+// reconciler open - `react-lua` or a hand-written one are both reasonable - and
 // this file is what that decision would be made *against*: a reconciler's job
 // is to produce this tree from a description, so the tree has to be known to
 // work first. Building it imperatively is how you find out.
@@ -64,7 +64,7 @@ const screen = Instance.new("ScreenGui");
 screen.Name = "PropertiesPanel";
 
 // **Parented into `StarterGui`, which is what makes it draw at all.** A
-// `ScreenGui` is only laid out under `StarterGui` or a player's `PlayerGui` —
+// `ScreenGui` is only laid out under `StarterGui` or a player's `PlayerGui` -
 // Roblox's containment rule, which `gui::Layout` enforces since v0.8.
 screen.Parent = StarterGui;
 
@@ -125,7 +125,7 @@ let selected: TextButton | null = null;
 
 function makeRow(row: Row, order: number): TextButton {
 	// **A `TextButton` rather than a `Frame`, because a row is clickable.** A
-	// plain frame is decoration and the click goes through it — which is
+	// plain frame is decoration and the click goes through it - which is
 	// `gui::Router`'s rule and exactly right for a background, and exactly wrong
 	// for a row somebody is trying to select.
 	const item = Instance.new("TextButton");

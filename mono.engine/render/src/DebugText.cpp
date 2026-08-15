@@ -3,7 +3,7 @@
 // The table is the bulk of this file and is meant to be read as a picture: each
 // glyph is five rows of three bits, most significant bit on the left, so the
 // literals below look like the letter they draw. That is the whole reason it is
-// written in binary and the whole reason it wants a file to itself — a table
+// written in binary and the whole reason it wants a file to itself - a table
 // laid out to be recognised at a glance stops being recognisable the moment it
 // is wedged between two unrelated functions.
 
@@ -112,7 +112,7 @@ namespace engine::render {
 		// **Clamped the same way `Draw` clamps, because the three have to agree.**
 		// `Draw` has always drawn a scale below one at scale one; these two
 		// multiplied it raw. So a zero scale measured every panel at zero width
-		// and then drew full-size text into it — a panel with its background
+		// and then drew full-size text into it - a panel with its background
 		// missing and its text running off the side, from a number nothing
 		// rejected. `DebugPanelData::Scale` is a public `int` and nothing bounds
 		// it, so the disagreement was reachable from outside the module.
@@ -147,7 +147,7 @@ namespace engine::render {
 			// Clipped once for the whole string rather than once per run.
 			//
 			// A line of forty-odd characters is five glyph rows of up to two
-			// runs each — hundreds of runs two or three pixels wide. Deciding
+			// runs each - hundreds of runs two or three pixels wide. Deciding
 			// separately for each one whether it is on screen costs more than
 			// drawing it, and the answer is the same for all of them almost
 			// every time: a debug panel is drawn inside the window it is

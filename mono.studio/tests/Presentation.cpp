@@ -9,8 +9,8 @@
 // eight lines of arithmetic in `Editor::PresentWorld` that no test could reach.
 //
 // So the arithmetic moved into `studio/Presentation.hpp` and this is it under
-// test, in both directions: the predicate on its own, and the whole chain —
-// world, part, property write, present, draw list — through the same
+// test, in both directions: the predicate on its own, and the whole chain -
+// world, part, property write, present, draw list - through the same
 // `client::InstallPresentation` the editor installs.
 
 #include <engine/ecs/Scheduler.hpp>
@@ -47,7 +47,7 @@ namespace {
 	// A world with the editor's presentation seam installed and one part in it.
 	//
 	// The part is created with no transform written, exactly as the editor's
-	// "insert a Part" does — which is what makes its `PreviousTransform` the
+	// "insert a Part" does - which is what makes its `PreviousTransform` the
 	// identity and the origin the wrong answer this file is about.
 	WorldId Scene(Universe &universe, std::string_view name) {
 		engine::scene::RegisterSceneClasses();
@@ -107,7 +107,7 @@ TEST_CASE("a world being ticked keeps its accumulator", "[studio][presentation]"
 	CHECK(PresentationAlpha(true, WorldState::Active, MIDWAY) == MIDWAY);
 
 	// **`Idle` ticks, slowly**, and the version of this that spelled the
-	// predicate as `state == Active` answered one for it — stepped motion in a
+	// predicate as `state == Active` answered one for it - stepped motion in a
 	// world that was simulating perfectly well. `engine::world::Ticks` is what
 	// stopped that being a guess each caller makes.
 	CHECK(PresentationAlpha(true, WorldState::Idle, MIDWAY) == MIDWAY);
@@ -138,14 +138,14 @@ TEST_CASE("a part moved in Edit mode is drawn where it was moved to", "[studio][
 
 // **The failure, asserted rather than described.** A never-advanced accumulator
 // is zero, zero means "draw the previous frame", and in a world nothing ticks
-// the previous frame is however the part was last *drawn* — which is not where
+// the previous frame is however the part was last *drawn* - which is not where
 // the editor has since dragged it to. Without this case the one above passes
 // for a `PresentationAlpha` that always returns one, and there would be nothing
 // to say *why* it must.
 //
 // **It used to assert the origin, and that was the same bug seen one step
 // earlier.** A part the editor had just made was drawn interpolating from the
-// identity, because nothing had ever written its `PreviousTransform` — so the
+// identity, because nothing had ever written its `PreviousTransform` - so the
 // stale frame and the origin were the same place and this case could not tell
 // them apart. `scene::SyncRendered` now seeds the previous frame of a row the
 // moment it is first drawn (a thing that has just appeared did not come from

@@ -1,8 +1,11 @@
 #include <engine/bakegraph/Document.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
+#include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace engine::bake {
@@ -20,17 +23,6 @@ namespace engine::bake {
 			return kind != OperationKind::Connect;
 		}
 
-		// Whether a node kind carries no parameter, and so may travel as a bare
-		// `AddNode`.
-		//
-		// **A closed list rather than the complement of the parameterised
-		// ones.** A node kind added to `Graph` later arrives here as "not
-		// allowed" and has to be thought about, rather than silently becoming
-		// legal with its parameter dropped.
-		bool IsBare(NodeKind kind) {
-			return IsBareNode(kind);
-		}
-
 		// The text spelling of a bare node kind.
 		std::string_view NodeText(NodeKind kind) {
 			switch (kind) {
@@ -40,6 +32,8 @@ namespace engine::bake {
 				return "smooth";
 			case NodeKind::Opaque:
 				return "opaque";
+			case NodeKind::Mipmap:
+				return "mipmap";
 			default:
 				return "";
 			}
@@ -56,6 +50,10 @@ namespace engine::bake {
 			}
 			if (text == "opaque") {
 				kind = NodeKind::Opaque;
+				return true;
+			}
+			if (text == "mipmap") {
+				kind = NodeKind::Mipmap;
 				return true;
 			}
 			return false;
@@ -185,7 +183,7 @@ namespace engine::bake {
 
 		// **Written through `std::to_chars`, which round trips.** The shortest
 		// text that reads back as the same float, so a scale of a third saved
-		// and reloaded is bit-identical rather than nearly so — and a bake is
+		// and reloaded is bit-identical rather than nearly so - and a bake is
 		// supposed to be reproducible.
 		void AppendFloat(std::string &out, float value) {
 			std::array<char, 32> buffer{};
@@ -208,6 +206,8 @@ namespace engine::bake {
 			return "scale";
 		case OperationKind::AddResize:
 			return "resize";
+		case OperationKind::AddRasterize:
+			return "rasterize";
 		case OperationKind::AddRetime:
 			return "retime";
 		case OperationKind::AddWrite:
@@ -260,83 +260,66 @@ namespace engine::bake {
 		Edits.clear();
 	}
 
-	std::string Write(const Document &document) {
-		std::string out;
-		out += HEADER;
-		out.push_back('\n');
+	namespace {
+		// One operation per line, and the only place a line is spelled.
+		//
+		// **Shared by the one-document format and the set**, which is what makes
+		// the first a strict substring of the second. Two spellings of an
+		// operation is the drift `IsBareNode` was made public to prevent, one
+		// level up.
+		void AppendOperations(std::string &out, const Document &document) {
+			for (const Operation &operation : document.Operations()) {
+				out += Describe(operation.Kind);
 
-		for (const Operation &operation : document.Operations()) {
-			out += Describe(operation.Kind);
+				switch (operation.Kind) {
+				case OperationKind::AddSource:
+				case OperationKind::AddBuiltin:
+				case OperationKind::AddWrite:
+					out.push_back(' ');
+					AppendQuoted(out, operation.Text);
+					break;
+				case OperationKind::AddNode:
+					out.push_back(' ');
+					out += NodeText(operation.Node);
+					break;
+				case OperationKind::AddFit:
+				case OperationKind::AddRetime:
+					out.push_back(' ');
+					AppendFloat(out, operation.Number);
+					break;
+				case OperationKind::AddScale:
+					out.push_back(' ');
+					AppendFloat(out, operation.Amount.X);
+					out.push_back(' ');
+					AppendFloat(out, operation.Amount.Y);
+					out.push_back(' ');
+					AppendFloat(out, operation.Amount.Z);
+					break;
+				case OperationKind::AddResize:
+				case OperationKind::AddRasterize:
+					out += ' ' + std::to_string(operation.Width) + ' ' + std::to_string(operation.Height);
+					break;
+				case OperationKind::Connect:
+					out += ' ' + std::to_string(operation.From) + ' ' + std::to_string(operation.To);
+					break;
+				}
 
-			switch (operation.Kind) {
-			case OperationKind::AddSource:
-			case OperationKind::AddBuiltin:
-			case OperationKind::AddWrite:
-				out.push_back(' ');
-				AppendQuoted(out, operation.Text);
-				break;
-			case OperationKind::AddNode:
-				out.push_back(' ');
-				out += NodeText(operation.Node);
-				break;
-			case OperationKind::AddFit:
-			case OperationKind::AddRetime:
-				out.push_back(' ');
-				AppendFloat(out, operation.Number);
-				break;
-			case OperationKind::AddScale:
-				out.push_back(' ');
-				AppendFloat(out, operation.Amount.X);
-				out.push_back(' ');
-				AppendFloat(out, operation.Amount.Y);
-				out.push_back(' ');
-				AppendFloat(out, operation.Amount.Z);
-				break;
-			case OperationKind::AddResize:
-				out += ' ' + std::to_string(operation.Width) + ' ' + std::to_string(operation.Height);
-				break;
-			case OperationKind::Connect:
-				out += ' ' + std::to_string(operation.From) + ' ' + std::to_string(operation.To);
-				break;
+				out.push_back('\n');
 			}
-
-			out.push_back('\n');
 		}
 
-		return out;
-	}
-
-	DocumentStatus Read(std::string_view text, Document &document, std::string &offender) {
-		document.Clear();
-
-		const auto nextLine = [&text]() -> std::string_view {
-			const size_t end = text.find('\n');
-			std::string_view line = text.substr(0, end);
-			text.remove_prefix(end == std::string_view::npos ? text.size() : end + 1);
-
-			// Tolerated so a document written on one platform reads on another;
-			// nothing here ever writes one.
-			if (!line.empty() && line.back() == '\r') {
-				line.remove_suffix(1);
-			}
-			return line;
-		};
-
-		if (text.empty() || nextLine() != HEADER) {
-			offender = std::string(HEADER);
-			return DocumentStatus::Malformed;
-		}
-
-		while (!text.empty()) {
-			const std::string_view whole = nextLine();
-			if (whole.empty()) {
-				continue;
-			}
-
+		// One operation from one line, and the only place a line is read.
+		//
+		// **A node kind this build does not have lands here as `false`**, which
+		// is the whole of the unknown-kind story: `NodeFromText` knows a closed
+		// list, so `node bevel` from a newer editor is refused exactly as a
+		// misspelling is. The caller decides what a refusal costs - and for a
+		// world document that is the pipeline rather than the world.
+		//
+		// @return `false` when the line is not an operation.
+		bool ParseOperation(std::string_view whole, Operation &operation) {
 			std::string_view line = whole;
 			const std::string_view word = TakeWord(line);
-
-			Operation operation;
 			bool parsed = true;
 
 			if (word == "source" || word == "builtin" || word == "write") {
@@ -354,8 +337,8 @@ namespace engine::bake {
 				operation.Kind = OperationKind::AddScale;
 				parsed = TakeFloat(line, operation.Amount.X) && TakeFloat(line, operation.Amount.Y) &&
 						 TakeFloat(line, operation.Amount.Z);
-			} else if (word == "resize") {
-				operation.Kind = OperationKind::AddResize;
+			} else if (word == "resize" || word == "rasterize") {
+				operation.Kind = word == "resize" ? OperationKind::AddResize : OperationKind::AddRasterize;
 				parsed = TakeUnsigned(line, operation.Width) && TakeUnsigned(line, operation.Height);
 			} else if (word == "connect") {
 				operation.Kind = OperationKind::Connect;
@@ -368,11 +351,57 @@ namespace engine::bake {
 			// with a fourth number on a `resize` is somebody's misunderstanding
 			// of the format, and accepting it silently would bake something
 			// other than what they wrote.
-			if (parsed && !TakeWord(line).empty()) {
-				parsed = false;
+			return parsed && TakeWord(line).empty();
+		}
+
+		// Hands back one line at a time, consuming `text` as it goes.
+		//
+		// A `\r` is tolerated so a document written on one platform reads on
+		// another; nothing here ever writes one.
+		std::string_view NextLine(std::string_view &text) {
+			const size_t end = text.find('\n');
+			std::string_view line = text.substr(0, end);
+			text.remove_prefix(end == std::string_view::npos ? text.size() : end + 1);
+
+			if (!line.empty() && line.back() == '\r') {
+				line.remove_suffix(1);
+			}
+			return line;
+		}
+
+		// The header, or `Malformed` naming it.
+		bool TakeHeader(std::string_view &text, std::string &offender) {
+			if (text.empty() || NextLine(text) != HEADER) {
+				offender = std::string(HEADER);
+				return false;
+			}
+			return true;
+		}
+	}
+
+	std::string Write(const Document &document) {
+		std::string out;
+		out += HEADER;
+		out.push_back('\n');
+		AppendOperations(out, document);
+		return out;
+	}
+
+	DocumentStatus Read(std::string_view text, Document &document, std::string &offender) {
+		document.Clear();
+
+		if (!TakeHeader(text, offender)) {
+			return DocumentStatus::Malformed;
+		}
+
+		while (!text.empty()) {
+			const std::string_view whole = NextLine(text);
+			if (whole.empty()) {
+				continue;
 			}
 
-			if (!parsed) {
+			Operation operation;
+			if (!ParseOperation(whole, operation)) {
 				offender = std::string(whole);
 				return DocumentStatus::Malformed;
 			}
@@ -383,7 +412,125 @@ namespace engine::bake {
 		return DocumentStatus::Ok;
 	}
 
+	bool PipelineSet::Set(core::Name name, Document document) {
+		if (!name.IsValid() || name.Text().empty()) {
+			return false;
+		}
+
+		for (size_t index = 0; index < Order.size(); ++index) {
+			if (Order[index] == name) {
+				Documents[index] = std::move(document);
+				return true;
+			}
+		}
+
+		// Sorted on insert rather than on the way out, so `Names` stays a span
+		// and the two vectors are never out of step for a reader.
+		const auto at =
+			std::lower_bound(Order.begin(), Order.end(), name, [](core::Name left, core::Name right) {
+				return left.Text() < right.Text();
+			});
+		const size_t index = static_cast<size_t>(at - Order.begin());
+		Order.insert(at, name);
+		Documents.insert(Documents.begin() + static_cast<ptrdiff_t>(index), std::move(document));
+		return true;
+	}
+
+	const Document *PipelineSet::Find(core::Name name) const {
+		for (size_t index = 0; index < Order.size(); ++index) {
+			if (Order[index] == name) {
+				return &Documents[index];
+			}
+		}
+		return nullptr;
+	}
+
+	bool PipelineSet::Remove(core::Name name) {
+		for (size_t index = 0; index < Order.size(); ++index) {
+			if (Order[index] != name) {
+				continue;
+			}
+			Order.erase(Order.begin() + static_cast<ptrdiff_t>(index));
+			Documents.erase(Documents.begin() + static_cast<ptrdiff_t>(index));
+			return true;
+		}
+		return false;
+	}
+
+	void PipelineSet::Clear() {
+		Order.clear();
+		Documents.clear();
+	}
+
+	std::string Write(const PipelineSet &set) {
+		std::string out;
+		out += HEADER;
+		out.push_back('\n');
+
+		for (const core::Name name : set.Names()) {
+			out += "pipeline ";
+			AppendQuoted(out, name.Text());
+			out.push_back('\n');
+			AppendOperations(out, *set.Find(name));
+		}
+
+		return out;
+	}
+
+	DocumentStatus Read(std::string_view text, PipelineSet &set, std::string &offender) {
+		set.Clear();
+
+		if (!TakeHeader(text, offender)) {
+			return DocumentStatus::Malformed;
+		}
+
+		core::Name open;
+		Document document;
+
+		const auto flush = [&set, &open, &document]() {
+			if (open.IsValid()) {
+				set.Set(open, std::move(document));
+			}
+			document.Clear();
+		};
+
+		while (!text.empty()) {
+			const std::string_view whole = NextLine(text);
+			if (whole.empty()) {
+				continue;
+			}
+
+			std::string_view line = whole;
+			if (TakeWord(line) == "pipeline") {
+				std::string name;
+				if (!TakeQuoted(line, name) || !TakeWord(line).empty() || name.empty()) {
+					offender = std::string(whole);
+					return DocumentStatus::Malformed;
+				}
+
+				flush();
+				open = core::Name(name);
+				continue;
+			}
+
+			// An operation belonging to no pipeline. Refused rather than
+			// collected into an unnamed one, because a document this cannot
+			// name is a document it cannot write back.
+			Operation operation;
+			if (!open.IsValid() || !ParseOperation(whole, operation)) {
+				offender = std::string(whole);
+				return DocumentStatus::Malformed;
+			}
+
+			document.Record(std::move(operation));
+		}
+
+		flush();
+		return DocumentStatus::Ok;
+	}
+
 	bool IsBareNode(NodeKind kind) {
-		return kind == NodeKind::Import || kind == NodeKind::Smooth || kind == NodeKind::Opaque;
+		return kind == NodeKind::Import || kind == NodeKind::Smooth || kind == NodeKind::Opaque ||
+			   kind == NodeKind::Mipmap;
 	}
 }

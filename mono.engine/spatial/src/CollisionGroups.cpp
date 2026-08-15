@@ -10,14 +10,14 @@ namespace engine::spatial {
 			std::mutex Guard;
 
 			// Index to name. Position in this vector *is* the layer index, which
-			// is why nothing is ever removed — an erase would renumber every
+			// is why nothing is ever removed - an erase would renumber every
 			// group above it and silently rewrite every `Collider::Layer` in
 			// every world that had already been built.
 			std::vector<core::Name> Groups;
 
 			// One mask per group: which groups it collides with. The matrix is
 			// held twice, once from each side, because that is what
-			// `LayerMask::Overlaps` reads — and `SetCollidable` writing both is
+			// `LayerMask::Overlaps` reads - and `SetCollidable` writing both is
 			// what keeps the two halves in step.
 			std::vector<LayerMask> Matrix;
 

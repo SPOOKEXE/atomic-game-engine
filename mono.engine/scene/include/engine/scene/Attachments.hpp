@@ -4,7 +4,7 @@
 //
 // **One flat pass, and that is the whole point of the design.** `scene`'s
 // standing rule is that every transform is world space and nothing propagates
-// it — `Components.hpp` opens with it — and an attachment is the one thing that
+// it - `Components.hpp` opens with it - and an attachment is the one thing that
 // has to be relative to something. The resolution is kept to a single loop over
 // a single component type rather than becoming a transform hierarchy: an
 // attachment's parent is a part, a part's transform is already world space, and
@@ -13,7 +13,7 @@
 //
 // **Attachments do not nest, and that is enforced rather than assumed.** An
 // `Attachment` parented to another `Attachment` resolves against the *part* it
-// eventually sits under, not against its immediate parent's resolved frame —
+// eventually sits under, not against its immediate parent's resolved frame -
 // because resolving against a resolved value is what makes a pass order-
 // dependent, and an order-dependent pass over an archetype walk is a pass whose
 // answer depends on which rows moved last. Roblox does not nest them either.
@@ -40,8 +40,8 @@ namespace engine::scene {
 	// **Runs in `PreRender` beside the other presentation-derived passes**, not
 	// in the simulation: what reads a world frame is a beam, a trail and a
 	// particle emitter, all of which are drawn rather than simulated. A caller
-	// that needs an attachment's world frame *during* the tick — a weld, a
-	// constraint — is asking for something this pass does not promise, and should
+	// that needs an attachment's world frame *during* the tick - a weld, a
+	// constraint - is asking for something this pass does not promise, and should
 	// say so rather than moving this one earlier.
 	//
 	// An attachment whose parent is not a `BasePart`, or has no parent at all,

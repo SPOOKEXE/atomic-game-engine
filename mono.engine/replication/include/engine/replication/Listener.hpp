@@ -24,7 +24,7 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct ListenerSettings {
-		// The link's own settings — framing, timeouts and per-tick budgets.
+		// The link's own settings - framing, timeouts and per-tick budgets.
 		SessionSettings Session;
 
 		// How the world is streamed once a client is in.
@@ -78,8 +78,8 @@ namespace engine::replication {
 		//
 		// **A connected, admitted, encrypted, reliable link is expensive to
 		// build and this module already has one.** A caller that needs to carry
-		// something else between the same two ends — a game's remote call, the
-		// studio's edit stream — should widen this rather than stand up a
+		// something else between the same two ends - a game's remote call, the
+		// studio's edit stream - should widen this rather than stand up a
 		// fourth session type beside it, which is the mistake this pair exists
 		// to prevent.
 		//
@@ -91,7 +91,7 @@ namespace engine::replication {
 		// @param client     Who to send it to.
 		// @param message    The payload.
 		// @param nowSeconds The current time.
-		// @return `false` for an unknown client, or when the link refused it —
+		// @return `false` for an unknown client, or when the link refused it -
 		//         over budget, closed, or not yet admitted. A caller that has to
 		//         know whether it landed reads this.
 		// @since v0.13
@@ -127,7 +127,7 @@ namespace engine::replication {
 		// other socket gets that socket through and leaves this one exactly as
 		// unreachable as it was. So a server that wants to be reachable
 		// peer-to-peer has to run its rendezvous traffic over the port its
-		// clients will connect to — which means something has to arrive here
+		// clients will connect to - which means something has to arrive here
 		// and not be a `net::Packet`.
 		//
 		// **Routing is by magic and is safe rather than lucky.**
@@ -161,7 +161,7 @@ namespace engine::replication {
 		//
 		// **Withholds world state; it does not refuse admission.** A claim
 		// arrives after the handshake, so there is nothing to check at the door
-		// — `Publish` is where this is enforced, and an unidentified peer holds
+		// - `Publish` is where this is enforced, and an unidentified peer holds
 		// a session that receives nothing until it identifies or times out.
 		//
 		// @param required Whether a claim is mandatory.
@@ -200,7 +200,7 @@ namespace engine::replication {
 		// Until v0.13 the only flush was inside `Publish`, which was true of
 		// every caller: a server publishes every tick. A listener carrying
 		// nothing but user messages does not, and without this its
-		// acknowledgements never leave — so the far side's reliable window
+		// acknowledgements never leave - so the far side's reliable window
 		// fills, its payloads are resent until the resend limit, and a link
 		// that is working perfectly gives up.
 		//
@@ -223,7 +223,7 @@ namespace engine::replication {
 			// What they sent, in the order they sent it.
 			//
 			// **A span into the listener's own storage and not a copy**, so it
-			// is valid until the next pump — a caller that kept it across one
+			// is valid until the next pump - a caller that kept it across one
 			// would be reading inputs that have since been retired.
 			std::span<const Input> Inputs;
 		};
@@ -250,8 +250,8 @@ namespace engine::replication {
 		// Hears about a client that has just been let in.
 		//
 		// **The hook a host needs in order to have players at all.** Who is in a
-		// game is the host's business — `scene::AddPlayer` says so in as many
-		// words — so this module admits a connection and says who it was rather
+		// game is the host's business - `scene::AddPlayer` says so in as many
+		// words - so this module admits a connection and says who it was rather
 		// than inventing an occupant for a world it cannot see.
 		//
 		// Called from `Poll`, on the thread that called it, after the welcome
@@ -304,7 +304,7 @@ namespace engine::replication {
 			// `Admitted` is somebody knocking rather than a server in trouble.
 			uint64_t Challenged = 0;
 
-			// Datagrams refused before they became anything — a wrong magic, an
+			// Datagrams refused before they became anything - a wrong magic, an
 			// unknown version, a channel outside the enum.
 			uint64_t Refused = 0;
 

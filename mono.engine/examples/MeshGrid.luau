@@ -3,13 +3,13 @@
 --
 -- `Meshes.luau` proves one glTF and one PMX arrive and draw. This is the wider
 -- check: every mesh the store published *and* every mesh the engine ships, laid
--- out so a single frame says which of them made it. **A grid is the point** — a
+-- out so a single frame says which of them made it. **A grid is the point** - a
 -- mesh that failed to resolve draws as `MeshTable`'s fallback cube, so a cube
 -- standing in a cell where a character should be is a name that did not match,
 -- and it is obvious at a glance rather than after a log hunt.
 --
 -- Each model turns on its own pedestal, because a still frame hides the half of
--- a mesh facing away — and a reversed winding is exactly the bug that looks
+-- a mesh facing away - and a reversed winding is exactly the bug that looks
 -- fine from the front.
 --
 -- ## What it is checking
@@ -17,12 +17,12 @@
 -- The plate mixes two sources on purpose, and the mix is what makes one frame
 -- diagnostic rather than decorative:
 --
---   * **The engine's own six** — `engine.Cube` and its siblings, generated in
+--   * **The engine's own six** - `engine.Cube` and its siblings, generated in
 --     process by `assets::MakeBuiltin`. They cannot fail to resolve, so a cell
 --     of theirs drawing wrong is a renderer fault and never a content one. They
 --     are the control.
 --   * **Whatever the store published**, which on this repository is a glTF fox
---     and six MikuMikuDance characters — PMX, with real texture sheets,
+--     and six MikuMikuDance characters - PMX, with real texture sheets,
 --     non-ASCII file names and per-submesh materials. If those draw textured
 --     then `bake::ReadPmx`, the UTF-16 path decoding, the texture rewriting in
 --     `assetc`, the manifest, the signature, the bundle fetch and `TextureTable`
@@ -31,7 +31,7 @@
 -- **The mirror across the back is doing the same job from the other side.** It
 -- shows every model's far face at the same time as the camera shows the near
 -- one, so a winding fault is visible without waiting for a turntable to come
--- round — and it puts the whole grid through `SurfaceCamera`'s path, so a frame
+-- round - and it puts the whole grid through `SurfaceCamera`'s path, so a frame
 -- where the grid is right and the reflection is wrong says the fault is in
 -- surface rendering rather than in content.
 --
@@ -62,7 +62,7 @@
 -- **It used to hold nine string literals, and on any store but the one it was
 -- written against every single cell drew a cube.** Nothing warned: an
 -- unregistered mesh falls back to a cube, which is also what a mesh that has
--- not streamed in yet looks like — so a scene that had never worked and a scene
+-- not streamed in yet looks like - so a scene that had never worked and a scene
 -- that was still loading were the same picture.
 --
 -- Then it named nothing at all and took whatever `ContentService:GetMeshes()`
@@ -74,25 +74,25 @@
 -- **So it does both, and the split is the whole idea an id is for.**
 --
 --   * `BUILTIN` below is six ids the engine resolves with no store, no manifest
---     and no delivery client — `assets::MakeBuiltin` generates them and
+--     and no delivery client - `assets::MakeBuiltin` generates them and
 --     `MeshTable::Initialise` registers them before the first frame. Naming them
 --     is safe *because* they cannot be missing, which is exactly what the nine
 --     literals were not.
 --   * everything else comes from `ContentService:GetPublishedMeshes()`, which
---     reports what the *store* published — the signed manifest, verified before
+--     reports what the *store* published - the signed manifest, verified before
 --     anything could be fetched. On this repository's own store those ids are 64
---     hex characters and an extension — the content hash — and a cell drawn from
+--     hex characters and an extension - the content hash - and a cell drawn from
 --     one is proof the whole pipeline ran.
 --
 -- **Naming one is what fetches it, and that is the point rather than a side
--- effect.** Content arrives because a world names it — `client/ContentDemand.hpp`
+-- effect.** Content arrives because a world names it - `client/ContentDemand.hpp`
 -- carries why asking by kind had to stop, and the 6.9 GB it used to pull through
 -- one synchronous function. So this reads a few hundred *strings*, picks at most
 -- `CELLS` of them, and sets a `MeshId`; the next content pump fetches exactly
 -- those. The plate is the demand.
 --
 -- It used to read `GetMeshes()` instead, which reports what this world has
--- already loaded — and since nothing else in a fresh place names an import, that
+-- already loaded - and since nothing else in a fresh place names an import, that
 -- list was the six built-ins forever. A scene that only reads what arrived can
 -- never be the thing that asks.
 --
@@ -102,8 +102,8 @@
 -- broken.
 --
 -- **Built as content arrives rather than at startup.** Delivery is asynchronous
--- — a fetch spans frames and `AGENTS.md` rule 5 forbids it becoming visible
--- mid-tick — so at the moment this chunk runs the catalogue holds the built-ins
+-- - a fetch spans frames and `AGENTS.md` rule 5 forbids it becoming visible
+-- mid-tick - so at the moment this chunk runs the catalogue holds the built-ins
 -- and nothing else. The grid therefore grows on `Heartbeat` as meshes land.
 
 local RunService = game:GetService("RunService")
@@ -111,7 +111,7 @@ local RunService = game:GetService("RunService")
 -- The ids that need no store.
 --
 -- **Written out rather than asked for, because there is no service that lists
--- them** — and because a default scene should say in one place what it is made
+-- them** - and because a default scene should say in one place what it is made
 -- of. These are the same strings `MeshPart.MeshId` takes from the studio's mesh
 -- picker, which offers them at the top of the list for this reason.
 local BUILTIN: { string } = {
@@ -127,7 +127,7 @@ local COLUMNS = 3
 local SPACING = 7
 
 -- How tall a model stands, in metres. **This is metres only because the bake
--- was `--model-size 1`** — see the header. `assetc` fitted every import's
+-- was `--model-size 1`** - see the header. `assetc` fitted every import's
 -- longest axis to one and centred it, so this number scales a unit mesh the
 -- same way it scales a built-in cube, and a 2M-triangle wizard ends up the same
 -- height as a low-poly fox.
@@ -156,7 +156,7 @@ floor.Parent = workspace
 
 -- Where a cell's centre sits, centred on the origin rather than growing out of
 -- one corner. Rows advance into +Z and the camera stands at +Z, so `MODELS[1]`
--- is the *back* left cell and the last entry is front right — worth knowing
+-- is the *back* left cell and the last entry is front right - worth knowing
 -- when a particular model is the one being checked.
 local function cellPosition(index: number): Vector3
 	local column = (index - 1) % COLUMNS
@@ -179,7 +179,7 @@ local placedCount = 0
 -- A label for a cell, from the name the publisher gave it.
 --
 -- **The file name and its extension**, because that is the only thing this
--- knows about a mesh — and it is genuinely useful: `.amesh` is baked geometry
+-- knows about a mesh - and it is genuinely useful: `.amesh` is baked geometry
 -- and anything else is a source format that got published raw, which is a
 -- content-pipeline mistake worth being able to see from the scene.
 local function labelFor(mesh: string): string
@@ -205,7 +205,7 @@ local function buildCell(mesh: string)
 
 	-- **The one string that has to match, and it came from the engine.** This
 	-- is a name `ContentService` reported, so it is by construction a mesh this
-	-- world holds — which is the whole difference between this file and the
+	-- world holds - which is the whole difference between this file and the
 	-- version that carried literals.
 	part.MeshId = mesh
 
@@ -213,18 +213,18 @@ local function buildCell(mesh: string)
 
 	-- **Both halves named, and that is the point of this line.** A `MeshPart`
 	-- that sets only `MeshId` shows whatever each of its submeshes recorded at
-	-- bake time — which works, and which leaves an author no handle on it: the
+	-- bake time - which works, and which leaves an author no handle on it: the
 	-- sheet names live inside the mesh file, so there is nothing to read and
 	-- nothing to put back.
 	--
 	-- `ContentService:GetMeshTextures` is that handle. It answers what the
 	-- geometry is wearing, in submesh order, and setting `TextureID` to one of
-	-- them makes the pairing explicit — the same picture, said out loud. From
+	-- them makes the pairing explicit - the same picture, said out loud. From
 	-- there swapping an outfit is assigning a different name, which is exactly
 	-- what `swatches` below does.
 	--
 	-- **A whole-instance override, not a per-submesh one.** `TextureID` replaces
-	-- the sheet for *every* run in the mesh — Roblox's rule and this engine's —
+	-- the sheet for *every* run in the mesh - Roblox's rule and this engine's -
 	-- so a twenty-submesh character given one sheet wears that sheet all over.
 	-- That is why this takes the first only when there is exactly one: naming
 	-- the first of six would be a deliberate mistake dressed up as a default.
@@ -256,7 +256,7 @@ end
 --
 -- **Re-applied whenever the set grows, and that is deliberate.**
 -- `ContentService` sorts, so the final layout is a function of the names alone
--- and is the same on every run — but a mesh arriving mid-load may sort *before*
+-- and is the same on every run - but a mesh arriving mid-load may sort *before*
 -- ones already on the plate, so the cells shuffle while content streams and
 -- settle once it stops. The alternative, placing by arrival order, would be
 -- stable on screen and different every run.
@@ -272,7 +272,7 @@ local function layout(names: { string })
 end
 
 -- **The swap row: one mesh, several sheets.** Whatever the cells above are
--- wearing, this row proves the two halves are independent — every cube here has
+-- wearing, this row proves the two halves are independent - every cube here has
 -- the same `MeshId` and a different `TextureID`, so the only thing that differs
 -- between them is a string. Change that string and you have changed the outfit.
 --
@@ -300,7 +300,7 @@ local function dressSwatches()
 		end
 	end
 
-	-- Sorted, so the row is the same on every run for a given store — the same
+	-- Sorted, so the row is the same on every run for a given store - the same
 	-- rule the plate's own layout follows.
 	table.sort(sheets)
 
@@ -328,7 +328,7 @@ local function dressSwatches()
 
 		-- **Said out loud, because the whole row is one claim.** Printing the
 		-- pairing is what lets somebody check from the log that a cube is
-		-- wearing a character's sheet rather than its own — which is the thing
+		-- wearing a character's sheet rather than its own - which is the thing
 		-- being demonstrated and is otherwise a judgement about pixels.
 		print(`mesh grid: swatch {slot} is engine.Cube wearing {sheets[slot]}`)
 	end
@@ -343,13 +343,13 @@ end
 -- **The distinction it exists to prove is the timing one.** Until `D00107` the
 -- cells wore that same checkerboard for the frames their sheets took to arrive,
 -- so a load looked like a plate full of mistakes and a real misspelling was
--- invisible among them. The marker means *nothing is coming* now — so this part
+-- invisible among them. The marker means *nothing is coming* now - so this part
 -- is purple immediately, the cells never are, and the difference is visible
 -- without reading a log.
 --
 -- A built-in mesh rather than an imported one, deliberately: the point is the
 -- texture, and geometry that also had to arrive would confuse which half is
--- being shown. It is also why this cell needs no content at all — it draws the
+-- being shown. It is also why this cell needs no content at all - it draws the
 -- same on a machine with no `--cdn`.
 local absent = Instance.new("MeshPart")
 absent.Name = "MissingTexture"
@@ -428,7 +428,7 @@ view.Parent = workspace
 -- **Parenting a camera is not aiming with it, and forgetting this line is
 -- invisible.** A world holds as many cameras as it likes and `ActiveCamera`
 -- names the live one, so a `Camera` that is only parented is a row nothing
--- reads. The client then keeps its own placeholder and orbits it — which
+-- reads. The client then keeps its own placeholder and orbits it - which
 -- renders a perfectly good picture from the wrong place, so the scene looks
 -- built and merely badly framed rather than broken.
 workspace.CurrentCamera = view
@@ -452,13 +452,13 @@ local known = -1
 --
 -- **The built-ins lead and are not sorted in with the rest.** `GetMeshes` sorts,
 -- so the content half has a layout that is a function of the names alone and is
--- the same on every run — but the six that are always there should be the six
+-- the same on every run - but the six that are always there should be the six
 -- leftmost cells whatever a store happens to hold, or adding one asset would
 -- reshuffle the part of the plate that never changes.
 -- **Imports first, built-ins after, and the order decides what gets dropped.**
 -- The plate holds `CELLS`; anything past that is reported and left off. Putting
 -- the built-ins last means a full store spends its cells on the models somebody
--- imported and a bare one still shows six primitives — where built-ins-first
+-- imported and a bare one still shows six primitives - where built-ins-first
 -- filled half the plate with cubes and cylinders and pushed the characters off
 -- the end, which is a demo of the wrong thing.
 --
@@ -471,7 +471,7 @@ local function everyMesh(): { string }
 	for _, mesh in ipairs(ContentService:GetPublishedMeshes()) do
 		-- **Skipped rather than placed twice.** A built-in is not published and
 		-- should not come back from this, but a store is free to hold a file
-		-- called anything — and a cell built twice is a mesh that turns in two
+		-- called anything - and a cell built twice is a mesh that turns in two
 		-- places and a plate one short.
 		if not table.find(BUILTIN, mesh) then
 			table.insert(ids, mesh)
@@ -490,7 +490,7 @@ end
 RunService.Heartbeat:Connect(function()
 	-- **Outside the early return below.** The swatches depend on the meshes\'
 	-- sheets rather than on how many meshes there are, and both arrive over
-	-- several frames — so a row built only when the *count* changes is a row
+	-- several frames - so a row built only when the *count* changes is a row
 	-- built on one frame and never corrected. It returns immediately once it is
 	-- full.
 	dressSwatches()
@@ -524,8 +524,8 @@ RunService.Heartbeat:Connect(function()
 	-- somebody looking for a content bug that is not one, and saying nothing
 	-- would leave a plate of primitives looking like a plate of failed imports.
 	text.Text = if placedCount == 0
-		then "no meshes in this world — run with --cdn"
-		elseif imported == 0 then `{placedCount} built-in mesh(es) — publish content for more`
+		then "no meshes in this world - run with --cdn"
+		elseif imported == 0 then `{placedCount} built-in mesh(es) - publish content for more`
 		else `{placedCount} mesh(es), {imported} imported`
 
 	print(`mesh grid: {placedCount} mesh(es) placed`)
@@ -550,7 +550,7 @@ print(`mesh grid: waiting for content, {COLUMNS}x{ROWS} plate ready`)
 --
 -- **Waits for the answer rather than reading it once.** Content arrives over a
 -- network, so a count read on the first frame is a count read before the
--- manifest has been verified — every cell would report zero and the report
+-- manifest has been verified - every cell would report zero and the report
 -- would be about timing rather than about content. This settles when every cell
 -- has resolved, and gives up after `REPORT_TIMEOUT` so a run with no `--cdn`
 -- still says what it found instead of staying silent.
@@ -587,7 +587,7 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	-- **Nothing missing is no longer enough to report, and that is a bug this
 	-- change introduced.** The grid used to hold every cell from the first
 	-- frame, so "none are missing" meant "all of them arrived". Now the cells
-	-- appear as content does — so on the frame the built-in meshes resolve,
+	-- appear as content does - so on the frame the built-in meshes resolve,
 	-- nothing is missing because nothing else exists yet, and the report fired
 	-- before a single import had landed. It said `0 unresolved` and was
 	-- describing six primitives.

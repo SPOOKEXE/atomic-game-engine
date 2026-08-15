@@ -71,7 +71,7 @@ namespace engine::delivery {
 		// **Lowercased and then checked, not repaired.** `cdn::Service` takes a
 		// dot and up to fifteen lowercase alphanumerics and refuses everything
 		// else, so anything outside that is dropped here rather than sent to be
-		// refused — a `.PNG` becomes `.png`, and a `.tar.gz` loses nothing
+		// refused - a `.PNG` becomes `.png`, and a `.tar.gz` loses nothing
 		// because `extension()` already returned only `.gz`.
 		std::string AcceptableSuffix(const std::filesystem::path &file) {
 			std::string suffix = file.extension().string();
@@ -164,7 +164,7 @@ namespace engine::delivery {
 				size_t finished = 0;
 
 				// A directory destination completes inside this call, so the
-				// loop runs until nothing more can be started or collected —
+				// loop runs until nothing more can be started or collected -
 				// otherwise a hundred files to a local store would take a
 				// hundred frames to copy.
 				while (Start()) {
@@ -223,7 +223,7 @@ namespace engine::delivery {
 				// **One job in flight, and the probe is why.** Overlapping two
 				// jobs lets both `HEAD`s go out before either `PUT` lands, so
 				// two files with identical bytes each probe "not here" and each
-				// send a body — the origin dedupes them correctly and the
+				// send a body - the origin dedupes them correctly and the
 				// uploader reports two stores, which is a lie about what
 				// crossed the wire.
 				//
@@ -267,7 +267,7 @@ namespace engine::delivery {
 				request.Verb = verb;
 
 				// **The target is the hash re-rendered from the parsed value**,
-				// which is also what the origin builds its filename from — so
+				// which is also what the origin builds its filename from - so
 				// the name a file lands under is decided by its bytes at both
 				// ends and by nothing either side typed.
 				request.Target = "/ingest/" + job.Content->Root.ToHex();
@@ -314,7 +314,7 @@ namespace engine::delivery {
 						// **`404` here is ambiguous on purpose, at the far
 						// end.** An origin that does not accept writes answers
 						// the ingest route as though it were not there, so a
-						// missing file and a read-only origin look the same —
+						// missing file and a read-only origin look the same -
 						// see `cdn::Service::IngestOf`. The `PUT` resolves it:
 						// a genuine miss stores, a read-only origin refuses
 						// again and is reported as refused.
@@ -339,7 +339,7 @@ namespace engine::delivery {
 
 				if (response->Code == http::Status::Forbidden || response->Code == http::Status::NotFound) {
 					Tally.Refused++;
-					Report(job, "refused — this origin does not accept this key", false);
+					Report(job, "refused - this origin does not accept this key", false);
 					return true;
 				}
 
@@ -419,7 +419,7 @@ namespace engine::delivery {
 			std::vector<Job> InFlight;
 			std::vector<UploadOutcome> Finished;
 
-			// Jobs that completed without ever being in flight — a directory
+			// Jobs that completed without ever being in flight - a directory
 			// copy, or a submit that was refused a slot. Counted into the
 			// return of the `Pump` that produced them.
 			size_t Immediate = 0;
@@ -442,7 +442,7 @@ namespace engine::delivery {
 					// reason is `AssetClient`'s unchanged: resolving one blocks
 					// on a network service.
 					ENGINE_WARN(
-						"delivery: write source '{}' is not an address — {} (a host name needs resolving "
+						"delivery: write source '{}' is not an address - {} (a host name needs resolving "
 						"before it gets here)",
 						source.Name,
 						source.Location

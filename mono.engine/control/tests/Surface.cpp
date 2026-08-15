@@ -6,7 +6,7 @@
 // required and a handler that does not check it. Calling the lambda directly
 // would test the body and skip all of that.
 //
-// The module had no suite until v0.12, which is a gap rather than a convention —
+// The module had no suite until v0.12, which is a gap rather than a convention -
 // `AGENTS.md` says so in those words. These cases open with the storage tools
 // this version added, and cover the shared table around them.
 
@@ -67,8 +67,8 @@ namespace {
 
 	// A tool's payload, parsed back out of the text block it travels in.
 	//
-	// **Text rather than structured content is the surface's own decision** —
-	// see `Surface.cpp` — so a test reading a result has to undo it, and this is
+	// **Text rather than structured content is the surface's own decision** -
+	// see `Surface.cpp` - so a test reading a result has to undo it, and this is
 	// the one place that knows how.
 	json Called(Surface &surface, const std::string &tool, const json &arguments, bool &failed) {
 		const json reply = Ask(surface, "tools/call", json{{"name", tool}, {"arguments", arguments}});
@@ -122,7 +122,7 @@ TEST_CASE("the handshake reports the program and its tools", "[control]") {
 	REQUIRE(listed["result"].contains("tools"));
 	CHECK(listed["result"]["tools"].size() == surface.Count());
 
-	// Every listed tool is callable and every callable tool is listed — one
+	// Every listed tool is callable and every callable tool is listed - one
 	// table read twice is the whole reason this is a registry.
 	CHECK(surface.Registered().size() == surface.Count());
 	for (const Tool &tool : surface.Registered()) {

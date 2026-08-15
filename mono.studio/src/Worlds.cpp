@@ -27,7 +27,7 @@ namespace studio {
 		// **Before `Begin`, and it is the only place it can go.**
 		// `SetNextWindowFocus` applies to the next window submitted, and
 		// focusing a window that shares a dock node with another is what selects
-		// its tab — which is the whole point here: the Worlds panel is docked
+		// its tab - which is the whole point here: the Worlds panel is docked
 		// beside the Explorer and a new game wants it in front. See
 		// `FocusWorlds`.
 		if (FocusWorlds > 0) {
@@ -48,7 +48,7 @@ namespace studio {
 		// step.
 		// **Structural changes need every scene stopped, not just one.** New and
 		// Import add worlds to a universe that a running scene's snapshot does
-		// not know about — see `WorldRun`.
+		// not know about - see `WorldRun`.
 		const bool editing = !AnyRunning();
 
 		ImGui::BeginDisabled(!editing);
@@ -93,7 +93,7 @@ namespace studio {
 
 		// **Inside `Begin`, so the rows are separable from the window.** The
 		// panel measured 24 us in a real frame while the same widgets in a
-		// benchmark measured 4 — and the question that gap asks is whether the
+		// benchmark measured 4 - and the question that gap asks is whether the
 		// cost is what the panel draws or what it costs to *be* the panel.
 		ENGINE_PROFILE("world rows");
 
@@ -102,7 +102,7 @@ namespace studio {
 			// It exists only between Play and Stop, it is never written to a
 			// game file, and every authoring action this panel offers is one the
 			// editor should not make about somebody's screen. It was listed here
-			// anyway — greyed, with a tooltip — which made the Worlds panel the
+			// anyway - greyed, with a tooltip - which made the Worlds panel the
 			// only way back to a client's viewport and, by omission, said there
 			// was no way back to the *server's*. Both are rows in Live Instances
 			// now. See `src/Instances.cpp`.
@@ -159,13 +159,13 @@ namespace studio {
 			// --- what it is doing ----------------------------------------------
 			//
 			// **State rather than tick rate.** A world's configured rate is a
-			// `WorldSettings` field and `Universe` does not hand those back —
+			// `WorldSettings` field and `Universe` does not hand those back -
 			// which is the right shape, because the interesting question about a
 			// scene is what it is doing rather than what it was asked for.
 
 			// **Two different claims, and both belong here.** The run state is
-			// what the author did — Play, Run, paused, or editing. The world
-			// state is what the universe is doing with it — active, suspended,
+			// what the author did - Play, Run, paused, or editing. The world
+			// state is what the universe is doing with it - active, suspended,
 			// faulted. They disagree exactly when something interesting has
 			// happened, and a panel showing only one of them cannot say why a
 			// scene stopped moving. See `Editor::WorldRun`.
@@ -188,7 +188,7 @@ namespace studio {
 			if (Universe->IsRemote(world)) {
 				// A world held by a host has no store here, so counting its
 				// instances is not this process's to do. Said, rather than shown
-				// as zero — which would read as an empty scene.
+				// as zero - which would read as an empty scene.
 				ImGui::TextUnformatted("-");
 			} else {
 				ImGui::Text("%zu", InstanceCountOf(world));
@@ -216,12 +216,12 @@ namespace studio {
 
 	void Editor::DrawWorldActions(WorldId world) {
 		// **This scene's state, not the program's.** Renaming a world rebuilds
-		// it, which a *running* world cannot survive — but a world sitting in
+		// it, which a *running* world cannot survive - but a world sitting in
 		// edit beside one that runs is renameable, and that is the whole point
 		// of scenes running independently. See `WorldRun`.
 		// **A client view is not a scene, so nothing that authors one applies to
 		// it.** It exists between Play and Stop, its rows are somebody else's,
-		// and it is never written to a game file — so renaming, duplicating,
+		// and it is never written to a game file - so renaming, duplicating,
 		// exporting, removing and running it are all offers the editor should
 		// not make. Stop is what takes it away, and Stop belongs to the world it
 		// is a view of.
@@ -296,7 +296,7 @@ namespace studio {
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Rename...", nullptr, false, editing && local)) {
-			// Queued, because the prompt has to outlive this popup — a modal
+			// Queued, because the prompt has to outlive this popup - a modal
 			// opened from inside one closes with it.
 			RenamingWorld = world;
 			NameBuffer = std::string(Label(Universe->NameOf(world)));
@@ -335,8 +335,8 @@ namespace studio {
 		}
 
 		// **Woken before anything is sent to it.** A teleport addressed to a
-		// suspended world routes and is delivered — the directory still knows
-		// the world exists — and then sits in an inbox nothing drains, because
+		// suspended world routes and is delivered - the directory still knows
+		// the world exists - and then sits in an inbox nothing drains, because
 		// a suspended world does not tick. The arrival would happen whenever
 		// somebody happened to resume it, which is not arrival.
 		if (Universe->StateOf(target) == engine::world::WorldState::Suspended) {
@@ -354,7 +354,7 @@ namespace studio {
 
 		if (from.IsValid() && from != target) {
 			// The world being left starts its clock now. It is not closed here
-			// — somebody may teleport straight back, and a world that shut the
+			// - somebody may teleport straight back, and a world that shut the
 			// moment its last occupant stepped out would spend its life
 			// starting and stopping.
 			Touch(from);
@@ -393,7 +393,7 @@ namespace studio {
 			}
 
 			// **What this host knows, handed to the policy that both hosts
-			// share.** The decision itself is `world::DecideLifecycle` — see
+			// share.** The decision itself is `world::DecideLifecycle` - see
 			// `Lifecycle.hpp` and `DEFERRED.md` D00017: an editor that closes a
 			// world and a server that does not would be one policy written
 			// twice, and the copy nobody compares is the one that drifts.
@@ -404,7 +404,7 @@ namespace studio {
 
 			// **Worlds still ticking, not worlds that exist.** `Count()`
 			// includes suspended ones, so deriving this from it suspended a
-			// whole universe one world at a time — each the "last" only after
+			// whole universe one world at a time - each the "last" only after
 			// the rest had already gone, which is exactly what this refusal is
 			// named to prevent. `CountInState` is the fact it is about.
 			inputs.LastWorld = Universe->CountInState(engine::world::WorldState::Active) <= 1;
@@ -412,7 +412,7 @@ namespace studio {
 			// **A suspended world's inbox is the one queue nothing drains**,
 			// which is exactly what makes this reliable rather than a poll that
 			// races the tick. Read only while suspended, because a running
-			// world replaces its inbox every barrier — so the same read on an
+			// world replaces its inbox every barrier - so the same read on an
 			// active world would be a coin toss about when the frame landed.
 			//
 			// **Read before the run-scope refusal below, and that ordering is
@@ -428,15 +428,15 @@ namespace studio {
 
 			// **A scoped run's suspended worlds are not the lifecycle's to
 			// wake.** Occupancy says an empty world should idle and a visited
-			// one should resume — but a world outside the run scope is empty
+			// one should resume - but a world outside the run scope is empty
 			// *because* it was deliberately stopped, and resuming it would
 			// restart the scene the author chose not to run. See `WorldRun`.
 			//
 			// **Unless something has arrived for it, which is not the same
 			// thing at all.** A teleport destroys the player in the world they
-			// left *before* the destination has admitted them —
+			// left *before* the destination has admitted them -
 			// `TeleportService:Teleport` says why it must, and
-			// `PlaygroundPad.luau` says what it costs — so an arrival sitting in
+			// `PlaygroundPad.luau` says what it costs - so an arrival sitting in
 			// a closed world's inbox is a player who no longer exists anywhere.
 			// Refusing to wake that world does not leave the scene unstarted; it
 			// strands somebody in it, and `Editor::FollowTeleports` then spends
@@ -455,7 +455,7 @@ namespace studio {
 			//
 			// **The second viewport counts, and forgetting it was a bug this
 			// caught.** With two panels open on two worlds, the one that was
-			// not the active scene was closed under the panel showing it —
+			// not the active scene was closed under the panel showing it -
 			// which looks exactly like the second viewport being broken.
 			//
 			// **This is the half that stays here**, because "somebody is looking
@@ -473,7 +473,7 @@ namespace studio {
 			// answers above are all "somebody is here"; a world of NPCs on a
 			// route has nobody here and plenty going on. `scene::AwakeWorld` is
 			// how a script says so, and the server asks the same question in
-			// `Server::UpdateWorldLifecycle` — one component, two hosts, so a
+			// `Server::UpdateWorldLifecycle` - one component, two hosts, so a
 			// world that stays up in Play stays up when it is hosted.
 			if (!inputs.Occupied) {
 				Universe->Enter(world, [&inputs](Store &store) {
@@ -483,7 +483,7 @@ namespace studio {
 
 			// **Only a running world has an idle clock, and only it needs one.**
 			// Doing this for a suspended world would make waking it wait for a
-			// `Lives` entry it has no use for — one frame of delay on a teleport,
+			// `Lives` entry it has no use for - one frame of delay on a teleport,
 			// on the first pass after the world was seen.
 			if (inputs.State == engine::world::WorldState::Active) {
 				const auto found = std::find_if(Lives.begin(), Lives.end(), [world](const WorldLife &life) {
@@ -505,7 +505,7 @@ namespace studio {
 				Universe->SetState(world, engine::world::WorldState::Active);
 				Touch(world);
 				Say("opened '" + std::string(Label(Universe->NameOf(world))) +
-					"' — something arrived for it");
+					"' - something arrived for it");
 				continue;
 			}
 
@@ -525,7 +525,7 @@ namespace studio {
 			// reads as a world that closed for no reason.
 			char elapsed[32];
 			std::snprintf(elapsed, sizeof(elapsed), "%.4g", static_cast<double>(IdleCloseSeconds));
-			Say("closed '" + std::string(Label(Universe->NameOf(world))) + "' — empty for " + elapsed + "s");
+			Say("closed '" + std::string(Label(Universe->NameOf(world))) + "' - empty for " + elapsed + "s");
 		}
 	}
 
@@ -533,7 +533,7 @@ namespace studio {
 		// **Cached, because the honest version is a scan of every entity in the
 		// world and this panel draws sixty times a second.** A world of a
 		// hundred thousand parts would spend a frame counting them for a number
-		// nobody reads that fast — so it is recounted on a clock, which is the
+		// nobody reads that fast - so it is recounted on a clock, which is the
 		// trade `client::Client` already makes for the debug panels and for the
 		// same reason: a person cannot read a number that changes a thousand
 		// times a second.
@@ -548,7 +548,7 @@ namespace studio {
 
 		// **A span, because a periodic full scan is exactly the kind of cost
 		// that hides in a mean.** It runs twice a second rather than every
-		// frame, so it shows up as a spike in a panel that is otherwise flat —
+		// frame, so it shows up as a spike in a panel that is otherwise flat -
 		// which is unreadable without a name on it.
 		ENGINE_PROFILE("count instances");
 
@@ -556,8 +556,8 @@ namespace studio {
 		Universe->Enter(world, [&counted](Store &store) {
 			store.EachEntity([&](engine::ecs::Entity entity) {
 				// Instances, not entities. A world holds rows that are not
-				// instances — the camera the client installs, a predicted entity
-				// — and counting those would report a number the explorer does
+				// instances - the camera the client installs, a predicted entity
+				// - and counting those would report a number the explorer does
 				// not show.
 				if (store.ClassOf(entity).IsValid()) {
 					counted++;
@@ -706,7 +706,7 @@ namespace studio {
 		// **A world is renamed by being written out and read back, and the
 		// reason is rule 4.** A world's name is what a bus envelope, a
 		// subscription and a teleport all carry, so `world::Universe` has no
-		// rename and should not grow one — a live world renamed underneath its
+		// rename and should not grow one - a live world renamed underneath its
 		// pending traffic is stranded, and nothing would report it.
 		//
 		// In Edit mode there is no traffic: nothing ticks and no script has
@@ -715,7 +715,7 @@ namespace studio {
 		// while a game is running.
 		//
 		// **The handle survives.** `Universe::Adopt` reuses the hole a destroyed
-		// world leaves, so recreating immediately takes the same slot — the
+		// world leaves, so recreating immediately takes the same slot - the
 		// scene keeps its `WorldId` and its place in the list, which is what
 		// stops a rename from quietly reordering the save file.
 		std::string error;

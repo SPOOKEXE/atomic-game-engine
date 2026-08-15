@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <type_traits>
 
@@ -36,7 +37,7 @@ namespace engine::ecs {
 	// A dense process-local handle for one registered component type.
 	//
 	// Assigned in registration order, so two runs of the same binary that
-	// register the same types in the same order agree — which is what lets an
+	// register the same types in the same order agree - which is what lets an
 	// archetype be identified by a sorted list of these rather than by names.
 	// Registration order is fixed by doing it at startup; see Components.
 	//
@@ -107,7 +108,7 @@ namespace engine::ecs {
 	// `replication` keeps by component name. The registration that installs it
 	// is the same one that names the type, so a server and a client cannot
 	// disagree about a component's wire form without disagreeing about the
-	// component — and a receiver decoding ten bytes as twenty-eight is not a
+	// component - and a receiver decoding ten bytes as twenty-eight is not a
 	// failure worth making a caller's discipline.
 	//
 	// @since v0.5
@@ -146,7 +147,7 @@ namespace engine::ecs {
 		// format carries; the id is not.
 		core::Name Name;
 
-		// sizeof(T). Zero for a tag — a type with no data, which costs a column
+		// sizeof(T). Zero for a tag - a type with no data, which costs a column
 		// of nothing and exists only to be matched by a query.
 		uint32_t Size = 0;
 
@@ -155,14 +156,14 @@ namespace engine::ecs {
 
 		// Whether this component holds bytes at all.
 		//
-		// Derived rather than declared — a type with no members is a tag — but
+		// Derived rather than declared - a type with no members is a tag - but
 		// named, so a caller asks what a component is instead of inferring it
 		// from a size of zero and getting the inference wrong somewhere.
 		ComponentKind Kind = ComponentKind::Data;
 
 		// Whether the bytes may be copied, moved and abandoned directly.
 		//
-		// True for almost every component — a transform, a velocity, an id.
+		// True for almost every component - a transform, a velocity, an id.
 		// When it is true the four lifetime hooks below still work but nothing
 		// has to call them, and the storage takes the memcpy path.
 		bool Trivial = false;
@@ -172,6 +173,27 @@ namespace engine::ecs {
 		// False means the type has no serialisation and a snapshot containing
 		// it will refuse rather than write bytes that cannot be read back.
 		bool Serialisable = false;
+
+		// Whether Write is the object representation rather than a caller's.
+		//
+		// The distinction the two warnings on `DescribeType` are about: a raw
+		// writer copies whatever bytes the type occupies, so its padding and
+		// any process-local id inside it reach the file. A caller's writer goes
+		// field by field and neither can. `Padded` below is only a defect for a
+		// type where this is true, which is why both are recorded rather than
+		// just the second.
+		//
+		// @since v0.15
+		bool RawSerialisation = false;
+
+		// Whether the type has bytes no member occupies.
+		//
+		// Derived at registration by `HasPadding`, so it costs one probe per
+		// type per process and nothing afterwards. Meaningless for a type that
+		// is not trivially copyable, which is left `false`.
+		//
+		// @since v0.15
+		bool Padded = false;
 
 		// Default-constructs `count` values at `destination`.
 		void (*DefaultConstruct)(void *destination, size_t count) = nullptr;
@@ -191,7 +213,7 @@ namespace engine::ecs {
 
 		// Reads `count` already-constructed values from `reader`. Null unless
 		// Serialisable. A short or corrupt buffer leaves the reader failed and
-		// the values unspecified but valid — never a partial object.
+		// the values unspecified but valid - never a partial object.
 		void (*Read)(core::ByteReader &reader, void *destination, size_t count) = nullptr;
 
 		// The compact form this type crosses a replication wire in, if it has
@@ -211,8 +233,8 @@ namespace engine::ecs {
 	//
 	// - It is **stable within one build** and may differ between compilers, so
 	//   it satisfies same-binary determinism and nothing wider.
-	// - Anything whose name has to survive a compiler change — a component in a
-	//   save file or on a wire — should be registered explicitly instead.
+	// - Anything whose name has to survive a compiler change - a component in a
+	//   save file or on a wire - should be registered explicitly instead.
 	//
 	// @return The spelled-out type name, without a trailing null.
 	template <class T> constexpr std::string_view TypeNameOf() {
@@ -236,8 +258,8 @@ namespace engine::ecs {
 
 		const size_t from = start + opening.size();
 
-		// GCC spells the whole substitution list — `[with T = X; std::string_view
-		// = ...]` — so the name ends at the first semicolon, not at the closing
+		// GCC spells the whole substitution list - `[with T = X; std::string_view
+		// = ...]` - so the name ends at the first semicolon, not at the closing
 		// bracket. Taking the bracket produced names like
 		// `Position; std::string_view = std::basic_string_view<char>`, which are
 		// still unique per type and so still *worked*, but are unreadable in a
@@ -254,6 +276,72 @@ namespace engine::ecs {
 		return signature.substr(from, to - from);
 	}
 
+	// Whether `T` occupies bytes none of its members do.
+	//
+	// **The check that turns `DescribeType`'s second warning into something the
+	// build enforces**, and it exists because padding is invisible to every
+	// other tool the storage has. `sizeof(T)` does not say where the members
+	// are, and a value's bytes do not either: value-initialisation zeroes
+	// padding, so two default-constructed values agree whether or not there is
+	// any. Only the compiler knows the layout.
+	//
+	// So the compiler is asked directly. `__builtin_clear_padding` is the hook
+	// C++20 added for `bit_cast` and atomics: it zeroes a value's padding and
+	// leaves every member alone. Filling the object representation with a probe
+	// byte first and clearing afterwards makes the padding the only thing that
+	// changed, so a byte that is no longer the probe is a byte no member owns.
+	//
+	// Writing arbitrary bytes over a live value is what makes this defined
+	// rather than a reinterpreted buffer: `T` is trivially copyable here, so its
+	// object representation is a caller's to write, and its destructor is
+	// trivial.
+	//
+	// Reports `false` on a toolchain without the builtin. That is the honest
+	// answer for a compiler that cannot be asked, and `AuditComponents` says so
+	// out loud rather than reporting a clean sweep it did not perform.
+	//
+	// @return `true` when at least one byte of `T` belongs to no member.
+	// @since v0.15
+	template <class T> bool HasPadding() {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_clear_padding)
+		if constexpr (std::is_trivially_copyable_v<T> && !std::is_empty_v<T> &&
+					  std::is_default_constructible_v<T>) {
+			// Any value works. 0xA5 rather than 0xFF or 0x00 so that a member
+			// the clear happens to leave at its own limit is not mistaken for
+			// one the clear touched.
+			constexpr unsigned char PROBE = 0xA5;
+
+			T value{};
+			std::memset(static_cast<void *>(&value), PROBE, sizeof(T));
+			__builtin_clear_padding(&value);
+
+			unsigned char bytes[sizeof(T)];
+			std::memcpy(bytes, static_cast<const void *>(&value), sizeof(T));
+			for (size_t index = 0; index < sizeof(T); index++) {
+				if (bytes[index] != PROBE) {
+					return true;
+				}
+			}
+		}
+#endif
+#endif
+		return false;
+	}
+
+	// Whether this build can answer `HasPadding` at all.
+	//
+	// @return `true` when the toolchain has `__builtin_clear_padding`.
+	// @since v0.15
+	constexpr bool PaddingIsDetectable() {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_clear_padding)
+		return true;
+#endif
+#endif
+		return false;
+	}
+
 	// Builds the descriptor for a concrete type.
 	//
 	// Every hook is generated here, where `T` is still known. Serialisation is
@@ -261,14 +349,14 @@ namespace engine::ecs {
 	// copyable type.
 	//
 	// @warning A trivially copyable component containing a `core::Name` gets
-	//          raw serialisation that writes the name's **id** — a
-	//          process-local counter — which `Name.hpp` says never to
+	//          raw serialisation that writes the name's **id** - a
+	//          process-local counter - which `Name.hpp` says never to
 	//          serialize. Such a type must be registered with an explicit
 	//          writer and reader instead.
 	//
 	// @warning **A component that is snapshotted must have no padding.** Raw
 	//          serialisation writes the object representation, padding
-	//          included, and padding is never initialised — so two runs of one
+	//          included, and padding is never initialised - so two runs of one
 	//          scene produce different bytes and every comparison of two worlds
 	//          becomes unreliable. Order the members widest-first, or add an
 	//          explicit `Reserved` field, as `WorldTime` does. `just
@@ -283,6 +371,8 @@ namespace engine::ecs {
 		descriptor.Alignment = static_cast<uint32_t>(alignof(T));
 		descriptor.Trivial = std::is_trivially_copyable_v<T> && std::is_trivially_destructible_v<T>;
 		descriptor.Serialisable = std::is_trivially_copyable_v<T> && !std::is_empty_v<T>;
+		descriptor.RawSerialisation = descriptor.Serialisable;
+		descriptor.Padded = HasPadding<T>();
 
 		descriptor.DefaultConstruct = [](void *destination, size_t count) {
 			auto *values = static_cast<T *>(destination);

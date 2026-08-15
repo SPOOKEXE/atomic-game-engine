@@ -2,8 +2,8 @@
 // chosen name where the half-typed one was.
 //
 // **This is the part that was not obviously possible.** `ScriptEditor.cpp`
-// refuses `ImGuiInputTextState` — a private layout whose fields move between
-// imgui releases — and that refusal is why the script editor has Replace All and
+// refuses `ImGuiInputTextState` - a private layout whose fields move between
+// imgui releases - and that refusal is why the script editor has Replace All and
 // no Find Next. A completion popup needs the same two facts that refusal denies,
 // so the whole feature rests on `ImGuiInputTextCallbackData` being a different
 // kind of thing: documented members, reached through a flag imgui offers for the
@@ -12,7 +12,7 @@
 // It rests on that being true *of the vendored imgui*, which is what this file
 // checks. If a future bump changes when `CallbackAlways` fires or what
 // `InsertChars` does to the caret, the popup would stop placing itself or start
-// mangling text — and both would look like a bug in the editor rather than in a
+// mangling text - and both would look like a bug in the editor rather than in a
 // dependency.
 //
 // `mono.studio/AGENTS.md` says to reach for the imgui-context harness before
@@ -67,7 +67,7 @@ namespace {
 	};
 
 	// Submits one frame containing the field, focusing it on the first so that
-	// it becomes active — `CallbackAlways` only fires for an active field, which
+	// it becomes active - `CallbackAlways` only fires for an active field, which
 	// is the behaviour the popup depends on and therefore the behaviour worth
 	// pinning.
 	void Frame(std::string &text, CodeEdit &edit, const bool focus) {
@@ -102,7 +102,7 @@ namespace {
 	// Types into an active field, one character per frame.
 	//
 	// **Typed rather than assigned, because focusing a field from code leaves
-	// the caret at zero** — which these cases found rather than assumed. A case
+	// the caret at zero** - which these cases found rather than assumed. A case
 	// that pre-filled the string and expected the caret at the end would be
 	// testing a position no author ever produces.
 	void Type(std::string &text, CodeEdit &edit, const std::string_view keys) {
@@ -124,7 +124,7 @@ TEST_CASE("an active code field reports its caret", "[studio][codefield]") {
 	Type(text, edit, "local part");
 
 	// The caret tracks what was typed, which is the fact the popup places
-	// itself against. **Focusing from code leaves it at zero** — so a caret that
+	// itself against. **Focusing from code leaves it at zero** - so a caret that
 	// merely stayed in range would prove nothing, and this pins that it moves.
 	CHECK(edit.Caret == static_cast<int>(text.size()));
 	CHECK(text == "local part");

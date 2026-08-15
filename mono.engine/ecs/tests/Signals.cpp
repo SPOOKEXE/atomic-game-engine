@@ -93,7 +93,7 @@ TEST_CASE("a flush with nothing changed fires nothing", "[ecs]") {
 	store.Set<Health>(entity, Health{1});
 	REQUIRE(store.FlushSignals() == 1);
 
-	// Bits are not cleared by firing — a replication delta and a render
+	// Bits are not cleared by firing - a replication delta and a render
 	// invalidation read the same bits, and one consumer clearing them out from
 	// under another is the bug that shape avoids. So this fires again until
 	// something clears.
@@ -281,7 +281,7 @@ TEST_CASE("a store with no listeners costs a flush nothing", "[ecs]") {
 
 TEST_CASE("signals do not survive a snapshot, and say so by being absent", "[ecs]") {
 	// A snapshot carries state, never code. A restored world has storage and no
-	// behaviour until somebody registers it again — the same rule a replayed
+	// behaviour until somebody registers it again - the same rule a replayed
 	// universe follows, and the reason `Replayer::Restore` demands a configure
 	// callback.
 	Store store("signals");
@@ -296,4 +296,33 @@ TEST_CASE("signals do not survive a snapshot, and say so by being absent", "[ecs
 	REQUIRE(restored.Load(reader));
 
 	REQUIRE(restored.Listeners() == 0);
+}
+
+TEST_CASE("observing a tag reports the change rather than crashing", "[ecs]") {
+	// **A tag has no column, so the change machinery has no bytes to hand
+	// over** - and the walk indexed the column directory anyway, which is null
+	// for a component with no data. It segfaulted rather than reporting a
+	// change with no value.
+	//
+	// Nothing observed a tag until a property named one among the components it
+	// reads, which `scene::Anchored` does: `.Changed` on `Mass` has to fire when
+	// a part is anchored, and anchored is a tag. The crash landed three modules
+	// away in a JavaScript test, which is what an unchecked null in a shared
+	// walk looks like from the outside.
+	struct Flagged {};
+
+	Store store("signals.tag");
+	store.Observe<Flagged>();
+
+	const Entity entity = store.Create();
+	store.Set(entity, Flagged{});
+
+	CHECK(store.Changed<Flagged>(entity));
+
+	// And the boundary walk that reads those bits runs over it without
+	// touching the column that is not there.
+	store.FlushSignals();
+	store.ClearChanges();
+
+	CHECK_FALSE(store.Changed<Flagged>(entity));
 }

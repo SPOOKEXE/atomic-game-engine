@@ -15,7 +15,7 @@ namespace testrunner {
 		// the empty message rather than repeat the answer. Hex() is documented
 		// as idempotent and tests/Sha256.cpp checks it, so the result is kept
 		// here and Final() is reached exactly once. Empty means "not yet
-		// finalised" — a hex digest is always sixty-four characters.
+		// finalised" - a hex digest is always sixty-four characters.
 		std::string Digest;
 	};
 
@@ -45,7 +45,7 @@ namespace testrunner {
 			Self->Hash.Final(digest);
 
 			// false is `uppercase`. The default is uppercase hex, and every
-			// cache key ever written by this tool is lowercase — getting this
+			// cache key ever written by this tool is lowercase - getting this
 			// wrong would invalidate every entry rather than fail a build.
 			CryptoPP::ArraySource(
 				digest,

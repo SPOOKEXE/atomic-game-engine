@@ -10,7 +10,7 @@
 // The layout, and the one thing about it that is load-bearing: **the live
 // section has a fixed line count**. It is rewritten on every sample, and a
 // section that grew a row when a counter became interesting would move
-// everything below it — so an operator reading the asset list would find it
+// everything below it - so an operator reading the asset list would find it
 // sliding under the cursor for reasons nothing on screen explains.
 
 namespace cdn {
@@ -42,7 +42,7 @@ namespace cdn {
 		}
 
 		// Right-aligns into a column, and lets an over-long value push the
-		// column rather than being cut — a truncated size is a wrong size.
+		// column rather than being cut - a truncated size is a wrong size.
 		std::string Right(std::string_view value, size_t columns) {
 			if (value.size() >= columns) {
 				return std::string(value);
@@ -190,7 +190,7 @@ namespace cdn {
 			largest.push_back(&asset);
 		}
 		// Largest first, and ties broken by name so two runs over one manifest
-		// produce one ordering — the same reason `Grouper` sorts the way it
+		// produce one ordering - the same reason `Grouper` sorts the way it
 		// does.
 		std::sort(largest.begin(), largest.end(), [](const AssetEntry *left, const AssetEntry *right) {
 			if (left->TotalBytes != right->TotalBytes) {
@@ -294,7 +294,7 @@ namespace cdn {
 
 		Live.clear();
 		Live.push_back(
-			Heading("atomic — content origin · " + (Listening.empty() ? "not listening" : Listening))
+			Heading("atomic - content origin · " + (Listening.empty() ? "not listening" : Listening))
 		);
 		Live.push_back(Blank());
 

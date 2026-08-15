@@ -4,7 +4,7 @@
 // encoder rather than by this module. That is the whole point of them: a
 // round-trip against our own writer would agree with itself about a filter
 // convention we had got backwards, and the failure mode this code has is
-// exactly that — a PNG that decodes without error into a picture of static.
+// exactly that - a PNG that decodes without error into a picture of static.
 //
 // The RGBA fixture uses the Sub and Paeth filters deliberately. Filter zero is
 // the one a hand-written test reaches for and the one that exercises none of
@@ -30,7 +30,6 @@ using engine::assets::TextureFormat;
 using engine::bake::ImageFormat;
 using engine::bake::ImageFormatOfBytes;
 using engine::bake::ReadImage;
-using engine::bake::ResizeImage;
 
 namespace {
 	constexpr std::array<uint8_t, 77> PNG_RGB{
@@ -281,7 +280,7 @@ namespace {
 	// The smallest GIF that decodes to something checkable.
 	//
 	// Two pixels wide, one tall, two colours, one frame. Written byte by byte
-	// because that *is* the format — a helper that assembled it would be a second
+	// because that *is* the format - a helper that assembled it would be a second
 	// encoder to trust.
 	std::vector<std::byte> TinyGif() {
 		const std::vector<uint8_t> bytes{
@@ -324,7 +323,7 @@ namespace {
 			// terminator.
 			//
 			// **The bytes are the codes clear(4), 0, 1, end(5) packed LSB-first at
-			// three bits each**, which comes out as 0x44 0x0A — and getting that
+			// three bits each**, which comes out as 0x44 0x0A - and getting that
 			// wrong by one byte is exactly the mistake this test exists to catch,
 			// because a decoder that reads a shifted stream produces plausible
 			// garbage rather than an error.
@@ -348,7 +347,7 @@ namespace {
 
 	// A GIF of `delays.size()` frames, each 2x1, with the delay each one names.
 	//
-	// **Built byte by byte for `TinyGif`'s reason** — the format is the thing
+	// **Built byte by byte for `TinyGif`'s reason** - the format is the thing
 	// under test, so a helper that assembled it through a library would be a
 	// second encoder to trust. This is that GIF with a graphic control block in
 	// front of every frame, which is where a delay lives.
@@ -421,7 +420,7 @@ TEST_CASE("the format is sniffed from the bytes", "[bake][image]") {
 	//
 	// **This example used to be `GIF8`**, back when a GIF was something this did
 	// not read. v0.10 added one, so the stand-in for "not an image" moved to a
-	// format that is still genuinely unsupported — WebP's `RIFF....WEBP`. That is
+	// format that is still genuinely unsupported - WebP's `RIFF....WEBP`. That is
 	// the ordinary way this assertion ages: every format added takes one candidate
 	// off the list, and the test says so rather than being quietly weakened to
 	// checking nothing.
@@ -562,42 +561,6 @@ TEST_CASE("a twenty-four bit bitmap is opaque", "[bake][image]") {
 	}
 }
 
-TEST_CASE("a box filter averages rather than samples", "[bake][image]") {
-	const TextureData source = Decoded(BMP_BOTTOM_UP);
-
-	TextureData half;
-	REQUIRE(ResizeImage(source, 1, 1, half));
-	CHECK(half.Width == 1);
-	CHECK(half.Height == 1);
-
-	// The mean of red, green, blue and yellow. A nearest sample would give one
-	// of the four corners, which is what aliases into speckle at distance.
-	CHECK(
-		At(half, 0, 0) == Pixel{(255 + 0 + 0 + 255) / 4, (0 + 255 + 0 + 255) / 4, (0 + 0 + 255 + 0) / 4, 255}
-	);
-}
-
-TEST_CASE("resizing to nothing is refused", "[bake][image]") {
-	const TextureData source = Decoded(BMP_BOTTOM_UP);
-	TextureData out;
-
-	CHECK_FALSE(ResizeImage(source, 0, 1, out));
-	CHECK_FALSE(ResizeImage(source, 1, 0, out));
-	CHECK_FALSE(ResizeImage(source, 100000, 1, out));
-	CHECK_FALSE(ResizeImage(TextureData{}, 1, 1, out));
-}
-
-TEST_CASE("an upscale duplicates rather than inventing detail", "[bake][image]") {
-	const TextureData source = Decoded(BMP_BOTTOM_UP);
-
-	TextureData bigger;
-	REQUIRE(ResizeImage(source, 4, 4, bigger));
-
-	CHECK(At(bigger, 0, 0) == Pixel{255, 0, 0, 255});
-	CHECK(At(bigger, 1, 0) == Pixel{255, 0, 0, 255});
-	CHECK(At(bigger, 3, 3) == Pixel{255, 255, 0, 255});
-}
-
 TEST_CASE("a 4:4:4 jpeg decodes to within the transform's own rounding", "[bake][image]") {
 	const TextureData image = Decoded(JPEG_444);
 
@@ -605,7 +568,7 @@ TEST_CASE("a 4:4:4 jpeg decodes to within the transform's own rounding", "[bake]
 	CHECK(image.Height == 16);
 
 	// The expected values are libjpeg's, through Pillow, and the tolerance is
-	// three levels — which is what an inverse DCT done in floats differs from
+	// three levels - which is what an inverse DCT done in floats differs from
 	// one done in fixed point by. A wider tolerance here would stop catching
 	// the thing worth catching: a chroma plane sampled the wrong way, which is
 	// tens of levels out on exactly these edges.
@@ -701,7 +664,7 @@ TEST_CASE("a GIF is recognised by its signature", "[bake]") {
 	REQUIRE(engine::bake::ImageFormatOfBytes(gif) == engine::bake::ImageFormat::Gif);
 	REQUIRE(engine::bake::Describe(engine::bake::ImageFormat::Gif) == "gif");
 
-	// GIF87a too — the version changes nothing this decoder does.
+	// GIF87a too - the version changes nothing this decoder does.
 	std::vector<std::byte> older = gif;
 	older[4] = static_cast<std::byte>('7');
 	REQUIRE(engine::bake::ImageFormatOfBytes(older) == engine::bake::ImageFormat::Gif);
@@ -733,7 +696,7 @@ TEST_CASE("a truncated GIF is refused rather than clamped", "[bake]") {
 	const std::vector<std::byte> whole = TinyGif();
 
 	// **Every prefix**, because a length running past the end is the failure mode
-	// a length-prefixed format read off disk actually has — `assets::Wav`'s rule,
+	// a length-prefixed format read off disk actually has - `assets::Wav`'s rule,
 	// and the reason it is a refusal and never a clamp: a clamp turns a truncated
 	// file into a shorter animation that plays.
 	for (size_t length = 1; length < whole.size(); length++) {
@@ -743,7 +706,7 @@ TEST_CASE("a truncated GIF is refused rather than clamped", "[bake]") {
 		const std::span<const std::byte> prefix(whole.data(), length);
 		if (engine::bake::ReadImage(prefix, texture, failure)) {
 			// A prefix that happens to be a complete GIF minus its trailer is
-			// legitimately decodable — an encoder that omitted the end code is
+			// legitimately decodable - an encoder that omitted the end code is
 			// common. What must never happen is a *silent* wrong size.
 			REQUIRE(texture.Width == 2);
 			REQUIRE(texture.Height == 1);
@@ -757,7 +720,7 @@ TEST_CASE("a truncated GIF is refused rather than clamped", "[bake]") {
 //
 // **The three fields that turn a sheet of pixels into an animation.** A 4x4
 // flipbook and a 4x4 tile atlas are the same image, so the grid, the frame count
-// and the rate are the whole of what tells anything how to play one — and
+// and the rate are the whole of what tells anything how to play one - and
 // without them every scene using a GIF has to state numbers the file already
 // holds.
 
@@ -768,8 +731,8 @@ TEST_CASE("a still image carries no flipbook", "[bake]") {
 	REQUIRE(engine::bake::ReadImage(TinyGif(), texture, failure));
 
 	// One frame is a still. **A zero side and a zero frame count mean the same
-	// thing as an unregistered texture on purpose** — neither is something to
-	// play — which is why a one-frame GIF is not dressed up as a 1x1 animation.
+	// thing as an unregistered texture on purpose** - neither is something to
+	// play - which is why a one-frame GIF is not dressed up as a 1x1 animation.
 	CHECK(texture.FlipbookSide == 1);
 	CHECK(texture.FlipbookFrames == 1);
 	CHECK_FALSE(texture.FlipbookFrameRate == 0.0f);
@@ -795,7 +758,7 @@ TEST_CASE("a GIF's delays become one frame rate", "[bake]") {
 TEST_CASE("frames with different delays average to one rate", "[bake]") {
 	// **A real approximation, stated rather than hidden.** GIF permits a delay
 	// per frame and a flipbook has one rate by construction, so a sheet cannot
-	// hold both — the total duration over the frame count is what a single rate
+	// hold both - the total duration over the frame count is what a single rate
 	// can honestly be. `fox_dance.gif` is exactly this case: forty-eight frames
 	// alternating four and five hundredths, two seconds, 24fps.
 	engine::assets::TextureData texture;
@@ -811,7 +774,7 @@ TEST_CASE("frames with different delays average to one rate", "[bake]") {
 TEST_CASE("a delay of zero is read the way every browser reads it", "[bake]") {
 	// **The de-facto rule and not the specification's.** GIF says zero is "no
 	// delay"; every browser since Netscape has read 0 and 1 as 100ms, so an
-	// encoder emitting zero expected 10fps — and taking it literally would
+	// encoder emitting zero expected 10fps - and taking it literally would
 	// divide by zero.
 	engine::assets::TextureData texture;
 	std::string failure;
@@ -823,22 +786,292 @@ TEST_CASE("a delay of zero is read the way every browser reads it", "[bake]") {
 	CHECK(texture.FlipbookFrameRate == Catch::Approx(10.0f));
 }
 
-TEST_CASE("a resize keeps the flipbook it was given", "[bake]") {
-	// **The failure this pins would have looked like a broken decoder.** A GIF
-	// larger than `--max-texture` goes through a resize on its way to disk, and
-	// a resize that dropped these three fields would turn every big imported
-	// animation back into an anonymous atlas — with the decoder working
-	// perfectly the whole time.
-	engine::assets::TextureData source;
+// --- SVG, added at v0.14 ------------------------------------------------------
+//
+// **The subset is the assertion.** A rasteriser for part of a document format is
+// only honest if the part it does not do is refused by name, so half of what is
+// below checks that a refusal happened *and says which feature caused it* - a
+// message naming `<text>` is a file somebody can fix, and a blank icon is a bug
+// report about the renderer.
+
+namespace {
+	std::span<const std::byte> Markup(std::string_view text) {
+		return {reinterpret_cast<const std::byte *>(text.data()), text.size()};
+	}
+
+	TextureData Drawn(std::string_view markup, uint32_t width, uint32_t height) {
+		TextureData image;
+		std::string failure;
+		REQUIRE(engine::bake::RasterizeSvg(Markup(markup), width, height, image, failure));
+		CHECK(failure.empty());
+		REQUIRE(image.IsValid());
+		return image;
+	}
+
+	// The refusal's reason, so a case can assert what it names.
+	std::string Refused(std::string_view markup) {
+		TextureData image;
+		std::string failure;
+		REQUIRE_FALSE(engine::bake::RasterizeSvg(Markup(markup), 8, 8, image, failure));
+		REQUIRE_FALSE(failure.empty());
+
+		// Left alone on failure, which is what lets a caller keep whatever it
+		// had - the rule every other decoder here follows.
+		CHECK(image.Pixels.empty());
+		return failure;
+	}
+
+	bool Mentions(const std::string &failure, std::string_view word) {
+		INFO("failure was: " << failure);
+		return failure.find(word) != std::string::npos;
+	}
+}
+
+TEST_CASE("an svg is identified by its name, because it has no signature", "[bake][image]") {
+	constexpr std::string_view DRAWING = R"(<svg width="4" height="4"/>)";
+
+	// **The one format here the bytes cannot identify.** A `<svg` prefix is a
+	// claim over text rather than a signature, and the byte sniff deliberately
+	// does not make it - a text sniff would take whatever XML-shaped format this
+	// module reads next.
+	CHECK(engine::bake::ImageFormatOfBytes(Markup(DRAWING)) == ImageFormat::Unknown);
+	CHECK(engine::bake::ImageFormatOfName("icons/close.svg") == ImageFormat::Svg);
+	CHECK(engine::bake::ImageFormatOfName("icons/CLOSE.SVG") == ImageFormat::Svg);
+	CHECK(engine::bake::ImageFormatOfName("icons/close.png") == ImageFormat::Png);
+	CHECK(engine::bake::ImageFormatOfName("svg/close") == ImageFormat::Unknown);
+	CHECK(engine::bake::Describe(ImageFormat::Svg) == "svg");
+
+	// And `ReadImage` refuses it rather than inventing a size, which is the
+	// whole reason there is a second entry point.
+	TextureData image;
 	std::string failure;
-	REQUIRE(engine::bake::ReadImage(AnimatedGif({4, 4, 4}), source, failure));
-	REQUIRE(source.FlipbookFrames == 3);
+	CHECK_FALSE(ReadImage(Markup(DRAWING), image, failure));
+	CHECK_FALSE(failure.empty());
+}
 
-	engine::assets::TextureData smaller;
-	REQUIRE(engine::bake::ResizeImage(source, 2, 2, smaller));
+TEST_CASE("an svg rasterises to the pixels it describes", "[bake][image]") {
+	// A rectangle over the top half, and a half-covered row under it. The
+	// half-covered row is the assertion that matters: coverage across a pixel is
+	// exact in x and four-sampled in y, so a shape ending at 1.5 leaves row one
+	// at exactly half alpha rather than on or off.
+	const TextureData image =
+		Drawn(R"(<svg width="4" height="4"><rect width="4" height="1.5" fill="#ff0000"/></svg>)", 0, 0);
 
-	CHECK(smaller.Width == 2);
-	CHECK(smaller.FlipbookSide == source.FlipbookSide);
-	CHECK(smaller.FlipbookFrames == 3);
-	CHECK(smaller.FlipbookFrameRate == source.FlipbookFrameRate);
+	CHECK(image.Width == 4);
+	CHECK(image.Height == 4);
+	CHECK(image.Format == TextureFormat::RGBA8);
+
+	CHECK(At(image, 0, 0) == Pixel{255, 0, 0, 255});
+	CHECK(At(image, 3, 0) == Pixel{255, 0, 0, 255});
+	CHECK(At(image, 0, 1) == Pixel{255, 0, 0, 128});
+	CHECK(At(image, 0, 2) == Pixel{0, 0, 0, 0});
+
+	// **The same drawing at a different size is the same drawing, drawn
+	// again**, which is what makes the raster target a parameter rather than a
+	// resize afterwards: at 8x8 the shape ends on a pixel boundary, so the row
+	// that was half covered at 4x4 is now a full one and there is no soft edge
+	// anywhere. Rasterising at 4x4 and scaling up could not produce that.
+	const TextureData larger =
+		Drawn(R"(<svg width="4" height="4"><rect width="4" height="1.5" fill="#ff0000"/></svg>)", 8, 8);
+	CHECK(larger.Width == 8);
+	CHECK(At(larger, 0, 2) == Pixel{255, 0, 0, 255});
+	CHECK(At(larger, 0, 3) == Pixel{0, 0, 0, 0});
+}
+
+TEST_CASE("the shapes, the paint and the transforms all draw", "[bake][image]") {
+	// A path of M, H, V and Z over the top half. Byte for byte the rectangle
+	// above, which is the point: two spellings of one shape have to rasterise
+	// the same or one of the two parsers is wrong.
+	const TextureData path =
+		Drawn(R"(<svg width="4" height="4"><path d="M0 0 H4 V2 H0 Z" fill="red"/></svg>)", 4, 4);
+	const TextureData rectangle =
+		Drawn(R"(<svg width="4" height="4"><rect width="4" height="2" fill="#F00"/></svg>)", 4, 4);
+	CHECK(path.Pixels == rectangle.Pixels);
+
+	// A stroke is an outline filled once rather than a quad composited per
+	// segment - a two-wide line centred on y=2 covers rows one and two.
+	const TextureData stroked = Drawn(
+		R"(<svg width="4" height="4"><line x1="0" y1="2" x2="4" y2="2" stroke="blue" stroke-width="2"/></svg>)",
+		4,
+		4
+	);
+	CHECK(At(stroked, 1, 0) == Pixel{0, 0, 0, 0});
+	CHECK(At(stroked, 1, 1) == Pixel{0, 0, 255, 255});
+	CHECK(At(stroked, 1, 2) == Pixel{0, 0, 255, 255});
+	CHECK(At(stroked, 1, 3) == Pixel{0, 0, 0, 0});
+
+	// A group's transform composes onto its children, and `fill-opacity` is a
+	// per-shape alpha rather than the group opacity that would need a layer.
+	const TextureData grouped = Drawn(
+		R"svg(<svg width="4" height="4"><g transform="translate(2,0) scale(1,2)" fill="#00ff00">)svg"
+		R"svg(<rect width="2" height="1" fill-opacity="0.5"/></g></svg>)svg",
+		4,
+		4
+	);
+	CHECK(At(grouped, 0, 0) == Pixel{0, 0, 0, 0});
+	CHECK(At(grouped, 2, 0) == Pixel{0, 255, 0, 128});
+	CHECK(At(grouped, 3, 1) == Pixel{0, 255, 0, 128});
+	CHECK(At(grouped, 3, 2) == Pixel{0, 0, 0, 0});
+
+	// A viewBox is fitted uniformly and centred, which is what
+	// `preserveAspectRatio` defaults to. Stretching to fill instead would draw
+	// every mismatched drawing differently from every other renderer.
+	const TextureData fitted =
+		Drawn(R"(<svg viewBox="0 0 2 2"><rect width="2" height="2" fill="white"/></svg>)", 8, 4);
+	CHECK(At(fitted, 0, 0) == Pixel{0, 0, 0, 0});
+	CHECK(At(fitted, 3, 1) == Pixel{255, 255, 255, 255});
+	CHECK(At(fitted, 7, 1) == Pixel{0, 0, 0, 0});
+}
+
+TEST_CASE("an svg's document type declaration is refused outright", "[bake][image]") {
+	// **The billion laughs**, which is what an XML reader has instead of a
+	// decompression bomb: a kilobyte of declarations that expands into gigabytes
+	// while it is being parsed. There is no bound that makes this safe and
+	// nothing a drawing needs it for, so the declaration itself is the refusal.
+	const std::string bomb =
+		R"(<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 ")"
+		R"(&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">]><svg width="8" height="8">)"
+		R"(<text>&lol2;</text></svg>)";
+	CHECK(Mentions(Refused(bomb), "DOCTYPE"));
+	CHECK(Mentions(Refused(bomb), "ENTITY"));
+
+	// An external entity is the same declaration and the same refusal - and it
+	// is a file read, which is the thing this whole module is arranged never to
+	// do.
+	const std::string external =
+		R"(<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg width="8" height="8"/>)";
+	CHECK(Mentions(Refused(external), "DOCTYPE"));
+
+	// A reference to an entity nobody could have declared is refused too, so the
+	// two halves cannot disagree.
+	CHECK(Mentions(
+		Refused(R"(<svg width="8" height="8" fill="&payload;"><rect width="8" height="8"/></svg>)"), "payload"
+	));
+
+	// **A CDATA section is the one `<!` that is character data**, and it is
+	// skipped rather than refused since the scanner became `bake`'s own
+	// `Xml.hpp` at v0.15 and `core::xml` at `D00128` - `.rbxmx` needs it,
+	// because a CDATA section is how Roblox writes a script's source. Nothing
+	// inside one is markup, so the rectangle below is text and the picture is
+	// empty.
+	const TextureData hidden =
+		Drawn(R"(<svg width="2" height="2"><![CDATA[<rect width="2" height="2" fill="red"/>]]></svg>)", 0, 0);
+	CHECK(At(hidden, 0, 0) == Pixel{0, 0, 0, 0});
+
+	// **And the sweep reaches inside that section, which is where this
+	// rasteriser's policy and `.rbxmx`'s deliberately part company.** This
+	// format never unescapes - an attribute value is used exactly as written -
+	// so there is no point at which a reference would otherwise be met and a
+	// sweep over the whole document is the only place left to refuse one. A
+	// model takes the other route because a model's CDATA is a script, and
+	// `core/Xml.hpp` says what breaks if the two are collapsed into one policy.
+	// This case goes red the moment somebody gives this format `.rbxmx`'s.
+	CHECK(Mentions(
+		Refused(R"(<svg width="8" height="8"><![CDATA[&payload;]]><rect width="8" height="8"/></svg>)"),
+		"payload"
+	));
+}
+
+TEST_CASE("everything outside the svg subset is refused by name", "[bake][image]") {
+	const auto refusal = [](std::string_view body) {
+		return Refused(R"(<svg width="8" height="8">)" + std::string(body) + "</svg>");
+	};
+
+	// Text needs fonts and shaping; an image or a use needs a reference graph.
+	CHECK(Mentions(refusal("<text x='0' y='4'>hello</text>"), "text"));
+	CHECK(Mentions(refusal("<image href='other.png'/>"), "image"));
+	CHECK(Mentions(refusal("<use href='#thing'/>"), "use"));
+
+	// A paint server is a second renderer, and it is named whichever way it
+	// arrives - as the element that defines it or as the reference that uses it.
+	CHECK(Mentions(refusal("<linearGradient id='g'/>"), "linearGradient"));
+	CHECK(Mentions(refusal("<rect width='8' height='8' fill='url(#g)'/>"), "gradients"));
+
+	// Filters, masks and group opacity all need an offscreen layer.
+	CHECK(Mentions(refusal("<rect width='8' height='8' filter='url(#blur)'/>"), "filter"));
+	CHECK(Mentions(refusal("<rect width='8' height='8' opacity='0.5'/>"), "opacity"));
+	CHECK(Mentions(refusal("<g clip-path='url(#c)'><rect width='8' height='8'/></g>"), "clip-path"));
+
+	// A style attribute is CSS, and reading `fill` from attributes while
+	// ignoring it would draw the wrong colour and say nothing.
+	CHECK(Mentions(refusal("<rect width='8' height='8' style='fill:red'/>"), "style"));
+
+	// The path commands that are not lines or cubics, and the transforms that
+	// are not a translate or a scale.
+	CHECK(Mentions(refusal("<path d='M0 0 A4 4 0 0 1 8 8'/>"), "'A'"));
+	CHECK(Mentions(refusal("<path d='M0 0 Q4 4 8 0'/>"), "'Q'"));
+	CHECK(Mentions(refusal("<g transform='rotate(45)'><rect width='8' height='8'/></g>"), "rotate"));
+	CHECK(Mentions(refusal("<g transform='matrix(1 0 0 1 0 0)'/>"), "matrix"));
+
+	// Rounded corners are elliptical arcs, and a colour this does not know is
+	// named rather than silently drawn black.
+	CHECK(Mentions(refusal("<rect width='8' height='8' rx='2'/>"), "rx"));
+	CHECK(Mentions(refusal("<rect width='8' height='8' fill='rebeccapurple'/>"), "rebeccapurple"));
+
+	// A unit needs a context - a font, a viewport or a DPI - that a rasteriser
+	// working from bytes alone does not have.
+	CHECK(Mentions(refusal("<rect width='2em' height='8'/>"), "em"));
+
+	// And a document that says nothing about its own coordinates cannot be
+	// drawn at all, whatever size is asked for.
+	CHECK(Mentions(
+		Refused(R"(<svg><rect width="8" height="8"/></svg>)"), "neither a width and height nor a viewBox"
+	));
+}
+
+TEST_CASE("every count an svg states is bounded before it is used", "[bake][image]") {
+	// Nesting, which is the cheapest of these to write and the one that would
+	// otherwise be recursion depth.
+	std::string nested = R"(<svg width="8" height="8">)";
+	for (int depth = 0; depth < 64; depth++) {
+		nested += "<g>";
+	}
+	nested += "<rect width='8' height='8'/>";
+	CHECK(Mentions(Refused(nested), "nested"));
+
+	// Element count, which is what stops a megabyte of `<rect/>` from being a
+	// megabyte of work.
+	std::string many = R"(<svg width="8" height="8">)";
+	for (int element = 0; element < 5000; element++) {
+		many += "<rect width='1' height='1'/>";
+	}
+	CHECK(Mentions(Refused(many), "elements"));
+
+	// The raster target, which is the one count that is the caller's rather than
+	// the file's. Both axes or neither: a single axis would mean this file
+	// inventing an aspect ratio nobody wrote.
+	TextureData image;
+	std::string failure;
+	constexpr std::string_view DRAWING = R"(<svg width="8" height="8"/>)";
+
+	CHECK_FALSE(engine::bake::RasterizeSvg(Markup(DRAWING), 64, 0, image, failure));
+	CHECK(Mentions(failure, "both axes"));
+	CHECK_FALSE(
+		engine::bake::RasterizeSvg(
+			Markup(DRAWING), engine::assets::Texture::MAXIMUM_DIMENSION + 1, 64, image, failure
+		)
+	);
+	CHECK(Mentions(failure, "on an axis"));
+	CHECK_FALSE(engine::bake::RasterizeSvg(Markup(DRAWING), 8192, 8192, image, failure));
+	CHECK(Mentions(failure, "pixels"));
+
+	// **The work, which none of the counts above implies.** One polygon is one
+	// element, and ten thousand points is a fraction of the point budget - but
+	// every one of its edges crosses every scanline of a large canvas, which is
+	// eighty million crossings to compute and sort. The fill is therefore
+	// budgeted in its own unit and **charged before it is done**, so this
+	// refusal costs nothing rather than costing the thing it is refusing.
+	std::string zigzag = R"(<svg width="2048" height="2048"><polygon fill="red" points=")";
+	for (int point = 0; point < 10000; point++) {
+		zigzag += std::to_string(point % 2048) + "," + (point % 2 == 0 ? "0 " : "2047 ");
+	}
+	zigzag += R"("/></svg>)";
+
+	CHECK_FALSE(engine::bake::RasterizeSvg(Markup(zigzag), 2048, 2048, image, failure));
+	CHECK(Mentions(failure, "fill work"));
+
+	// A drawing that is only markup still produces an image - an empty canvas
+	// is a real answer, and it is transparent rather than black.
+	const TextureData empty = Drawn(R"(<svg width="2" height="2"><title>nothing</title></svg>)", 0, 0);
+	CHECK(At(empty, 0, 0) == Pixel{0, 0, 0, 0});
 }

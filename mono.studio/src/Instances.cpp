@@ -3,8 +3,8 @@
 // **A run is not a scene, and the Worlds panel was being asked to be both.** A
 // universe holds authored scenes; a run holds a server and the clients admitted
 // to it, and a client's replica world exists only between Play and Stop. Listing
-// the two together meant a client view could be reopened — it had a row like any
-// other world — while the *server's* view could not, because the server is not a
+// the two together meant a client view could be reopened - it had a row like any
+// other world - while the *server's* view could not, because the server is not a
 // separate world at all: it is the scene, and closing the panel that showed it
 // left nothing in any list to press.
 //
@@ -51,7 +51,7 @@ namespace studio {
 		}
 
 		// **Which panel is `ChooseViewportFor`'s to decide**, in a header a test
-		// can reach — the three ways that choice can be wrong all look like
+		// can reach - the three ways that choice can be wrong all look like
 		// something else from here. What is left is the half that needs an
 		// editor: opening the panel, pointing it at the world, bringing it
 		// forward. A vector per press rather than a member, because this is a
@@ -66,7 +66,7 @@ namespace studio {
 
 		if (decided == 0) {
 			// The main panel. It follows the active scene, so there is nothing
-			// to pin — only to reopen, which is what a closed one needs.
+			// to pin - only to reopen, which is what a closed one needs.
 			ShowViewport = true;
 			ImGui::SetWindowFocus(ViewportTitle(0));
 			return 0;
@@ -93,7 +93,7 @@ namespace studio {
 		view->Open = true;
 
 		// Where the main camera is, so a view that has not received anything yet
-		// opens looking at the same thing rather than at the origin —
+		// opens looking at the same thing rather than at the origin -
 		// `Editor::Initialise` gives the argument at length.
 		view->Frame = CameraFrame;
 		view->Yaw = CameraYaw;
@@ -109,7 +109,7 @@ namespace studio {
 			return;
 		}
 
-		// Before `Begin`, which is the only place it can go — see `FocusWorlds`
+		// Before `Begin`, which is the only place it can go - see `FocusWorlds`
 		// for why focusing selects the tab this panel shares with the Worlds one.
 		if (FocusInstances > 0) {
 			FocusInstances--;

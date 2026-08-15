@@ -72,7 +72,7 @@ namespace engine::core {
 			std::map<std::string, uint32_t, std::less<>> HistoryNameIds;
 
 			// This frame's worst reading per span, indexed by name id, plus
-			// which ids the frame touched — so it clears in the size of the
+			// which ids the frame touched - so it clears in the size of the
 			// frame rather than the size of the table. Seen is its own flag
 			// rather than a nonzero reading: a span can genuinely take 0.00 ms
 			// and still have run.
@@ -113,7 +113,7 @@ namespace engine::core {
 			//
 			// The cost is that a name's ring is allocated again on the first
 			// collected frame of the next session, which is the same frame that
-			// takes the window's own storage — one hitch, at the moment
+			// takes the window's own storage - one hitch, at the moment
 			// somebody opened a profiler, rather than a quota that never comes
 			// back.
 			state.HistoryNames.clear();
@@ -289,7 +289,7 @@ namespace engine::core {
 			// than on the first frame it collects.
 			//
 			// Twenty thousand frames is not a large allocation, but it was
-			// happening inside `EndFrame` — so the first frame anybody watched
+			// happening inside `EndFrame` - so the first frame anybody watched
 			// was the one frame in the session that paid for it, and the panel
 			// opened onto a spike it had caused. Opening a profiler is a
 			// keypress and is allowed to cost something; the frame after it is
@@ -402,7 +402,7 @@ namespace engine::core {
 				// A reported child is time from another thread or another
 				// process. Subtracting it would give a parent a negative self
 				// time as soon as the work it dispatched outran the wall clock
-				// it waited for — which is the normal case for anything
+				// it waited for - which is the normal case for anything
 				// parallel, not an edge one.
 				if (candidate.Depth == span.Depth + 1 && !candidate.Reported) {
 					children += candidate.Milliseconds;
@@ -414,7 +414,7 @@ namespace engine::core {
 		// Idle inside: what part of each span's inclusive time was waiting.
 		//
 		// Here rather than in the overlay because two consumers need it and one
-		// of them is `RecordHistory` below — an RMAX taken from wall time and a
+		// of them is `RecordHistory` below - an RMAX taken from wall time and a
 		// share taken from busy time are two numbers on one row that disagree,
 		// which is exactly the confusion this was added to end.
 		AccumulateIdleMilliseconds(state.Building);
@@ -431,7 +431,7 @@ namespace engine::core {
 		//
 		// Every other number here is the self time of something somebody named.
 		// This is the self time of the frame, and it is the one nobody was going
-		// to notice was missing — a panel that lists 0.3 ms of spans under a
+		// to notice was missing - a panel that lists 0.3 ms of spans under a
 		// heading that says 1.1 ms is not reporting 0.3 ms of work, it is
 		// failing to report 0.8 ms of it.
 		//
@@ -692,7 +692,7 @@ namespace engine::core {
 		}
 
 		// Deeper than the budget, or out of buffer. The depth still has to move
-		// so the matching close moves it back — otherwise every sibling after a
+		// so the matching close moves it back - otherwise every sibling after a
 		// dropped span is recorded one level too deep.
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
 			state.DroppedThisFrame++;
@@ -707,7 +707,7 @@ namespace engine::core {
 		const size_t index = state.Building.size();
 		// Named rather than positional. This was seven bare values in
 		// declaration order, and adding `IdleMilliseconds` in the middle of the
-		// struct silently handed a `ProfileCategory` to a float — caught by the
+		// struct silently handed a `ProfileCategory` to a float - caught by the
 		// compiler here, and only because the types happened not to convert.
 		// The next field added between two floats would not be.
 		state.Building.push_back(
@@ -734,7 +734,7 @@ namespace engine::core {
 
 		auto &state = Get();
 		// Before the DEPTH_ONLY return, not after. A scope past the budget still
-		// moved the depth, so its close has to move it back — otherwise every
+		// moved the depth, so its close has to move it back - otherwise every
 		// sibling after it is recorded several levels too deep.
 		if (state.Depth > 0) {
 			state.Depth--;
@@ -746,7 +746,7 @@ namespace engine::core {
 
 		if (state.Open.empty() || state.Open.back() != index) {
 			// Closed out of order, which is possible only by constructing a
-			// scope on the heap — made hard on purpose by the deleted copy and
+			// scope on the heap - made hard on purpose by the deleted copy and
 			// move.
 			return;
 		}
@@ -773,7 +773,7 @@ namespace engine::core {
 			return;
 		}
 
-		// Nothing to say yet — the caller looks a name up only when something is
+		// Nothing to say yet - the caller looks a name up only when something is
 		// listening, and that is decided one frame and acted on the next.
 		if (name.empty()) {
 			Index = Push(fallback, category);
@@ -805,7 +805,7 @@ namespace engine::core {
 		}
 
 		// Ignored rather than clamped. A negative duration means the producer
-		// measured wrongly — two clocks, or a start it never set — and folding
+		// measured wrongly - two clocks, or a start it never set - and folding
 		// it to zero would put a plausible bar on the graph instead of a
 		// missing one.
 		if (!(milliseconds >= 0.0f)) {

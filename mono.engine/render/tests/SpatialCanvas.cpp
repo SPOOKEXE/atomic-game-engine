@@ -8,7 +8,7 @@
 // The cases below are arranged around the thing that makes this more than a
 // multiplication: **absence has to mean something**. A collector nothing can
 // measure must end up with no component at all, so `gui::CanvasFor` falls back
-// to the authored size — and one that stops being measurable must *lose* the
+// to the authored size - and one that stops being measurable must *lose* the
 // component rather than keep a stale one.
 
 #include <engine/ecs/Classes.hpp>
@@ -74,7 +74,7 @@ namespace {
 			return made;
 		}
 
-		// A camera at `position` looking wherever — only the distance is read.
+		// A camera at `position` looking wherever - only the distance is read.
 		void Camera(const Vector3 &position, float fieldOfViewRadians) {
 			const Entity eye = Data.CreateInstance(engine::scene::PartClass(), "Camera");
 			Data.SetParent(eye, Workspace);
@@ -97,7 +97,7 @@ TEST_CASE("a surface gui in pixels-per-stud is sized by its adornee", "[render][
 	// The multiplication the entry named. A four-by-three part at fifty pixels
 	// per stud is a two-hundred-by-one-fifty canvas, and everything inside it
 	// then lays out against a rectangle whose aspect matches the face it is
-	// projected onto — which is the whole reason the mode exists.
+	// projected onto - which is the whole reason the mode exists.
 	World world("render_canvas.perstud");
 
 	const Entity part = world.Part(Vector3{0.0f, 0.0f, 0.0f}, Vector3{2.0f, 1.5f, 0.5f});
@@ -120,7 +120,7 @@ TEST_CASE("a surface gui in pixels-per-stud is sized by its adornee", "[render][
 TEST_CASE("which face a surface gui is on decides which two studs it spans", "[render][canvas]") {
 	// **A part with three different extents, so no two faces agree.** A face is
 	// named by the axis it points along and spans the other two, which is easy
-	// to write one axis out — and the symptom is a sign that reads sideways
+	// to write one axis out - and the symptom is a sign that reads sideways
 	// rather than anything that looks like an arithmetic mistake.
 	World world("render_canvas.faces");
 
@@ -153,7 +153,7 @@ TEST_CASE("which face a surface gui is on decides which two studs it spans", "[r
 TEST_CASE("a fixed-size surface gui is left alone", "[render][canvas]") {
 	// **No component, rather than a component holding the authored number.** If
 	// this wrote the fallback back into the slot, "has a resolved canvas" would
-	// stop distinguishing anything — and the layout would be reading a value
+	// stop distinguishing anything - and the layout would be reading a value
 	// that looked measured and was not.
 	World world("render_canvas.fixed");
 
@@ -197,8 +197,8 @@ TEST_CASE("a surface gui on something with no bounds resolves nothing", "[render
 
 TEST_CASE("a resolved canvas is dropped when it stops being resolvable", "[render][canvas]") {
 	// **The case that is easy to leave out and expensive to leave out.** A
-	// canvas nobody refreshed keeps working — it keeps the size the last frame
-	// that could measure it wrote — so the failure surfaces long after the
+	// canvas nobody refreshed keeps working - it keeps the size the last frame
+	// that could measure it wrote - so the failure surfaces long after the
 	// change that caused it, on whatever frame somebody notices the sign is the
 	// wrong shape.
 	World world("render_canvas.stale");
@@ -227,7 +227,7 @@ TEST_CASE("a billboard's scale is studs against the viewport", "[render][canvas]
 	//
 	// The numbers are chosen so the conversion is exact rather than approximate.
 	// A ninety-degree vertical field of view has `tan(fov/2) = 1`, so at ten
-	// studs the viewport spans twenty studs — and a nine-hundred-pixel viewport
+	// studs the viewport spans twenty studs - and a nine-hundred-pixel viewport
 	// is therefore forty-five pixels to the stud.
 	World world("render_canvas.billboard");
 
@@ -281,7 +281,7 @@ TEST_CASE("a billboard shrinks with distance", "[render][canvas]") {
 TEST_CASE("a billboard in a world with no camera keeps its offset", "[render][canvas]") {
 	// A headless world, a world being loaded, a world in a test. There is no
 	// distance to measure a stud against, so the authored pixels are the answer
-	// — which is exactly the behaviour `gui::CanvasFor` had before this existed.
+	// - which is exactly the behaviour `gui::CanvasFor` had before this existed.
 	World world("render_canvas.nocamera");
 
 	const Entity part = world.Part(Vector3{0.0f, 0.0f, 10.0f}, Vector3{0.5f, 0.5f, 0.5f});

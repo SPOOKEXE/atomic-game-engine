@@ -1,8 +1,8 @@
 // Everything a JavaScript author reaches for once the property surface exists.
 //
 // **The second consumer for every binding, which is the point of having two
-// VMs.** `JsBindings.cpp` is the property surface — `Instance.new`, accessors,
-// `Enum`, `workspace` — and this is signals, the instance methods, `task`, the
+// VMs.** `JsBindings.cpp` is the property surface - `Instance.new`, accessors,
+// `Enum`, `workspace` - and this is signals, the instance methods, `task`, the
 // datatype vocabulary, the clock and the store services. Split because the two
 // halves are reviewed differently and one file would have been four thousand
 // lines.
@@ -17,7 +17,7 @@
 //
 // **A suspended script is a `Promise`, not a coroutine.** Luau has coroutines
 // and JavaScript does not; what JavaScript has is `await`, and a promise
-// resolved by the host at a barrier is exactly the same contract —
+// resolved by the host at a barrier is exactly the same contract -
 // `docs/retired/SCRIPT_CONCURRENCY.md` §1's "a script may only resume from something
 // the barrier delivers in a deterministic order". `JS_ExecutePendingJob` is what
 // makes that true rather than aspirational: the host drives the microtask
@@ -39,10 +39,7 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Awake.hpp>
-#include <engine/scene/Ownership.hpp>
-#include <engine/scene/Services.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -123,7 +120,7 @@ namespace engine::script {
 
 		// What a signal object carries: which signal, and whose.
 		//
-		// Three fields and no list — the connections live in `SignalTable`, so
+		// Three fields and no list - the connections live in `SignalTable`, so
 		// two scripts that reached the same signal by different routes hold the
 		// same thing rather than two objects that behave alike.
 		struct SignalPayload {
@@ -165,8 +162,8 @@ namespace engine::script {
 				return;
 			}
 
-			const bool removing =
-				kind == SignalKind::DescendantRemoving || kind == SignalKind::PlayerRemoving;
+			const bool removing = kind == SignalKind::DescendantRemoving ||
+								  kind == SignalKind::PlayerRemoving || kind == SignalKind::CharacterRemoving;
 			if (!removing || bound.RemovingHooked) {
 				return;
 			}
@@ -184,6 +181,19 @@ namespace engine::script {
 					FireJsSignal(context, SignalKind::DescendantRemoving, ancestor, 1, &subject);
 				if (!failed.empty()) {
 					ENGINE_WARN("[script] a DescendantRemoving handler failed: {}", failed);
+				}
+
+				// The Luau side's reason, unchanged: a character dies by being
+				// destroyed, so the barrier would hand a handler a model it
+				// cannot read a property off. `PlayerLosingCharacter` is what
+				// makes this fire once rather than once per ancestor.
+				if (const Entity losing = PlayerLosingCharacter(*world, ancestor, leaving);
+					losing != ecs::NULL_ENTITY) {
+					const std::string lost =
+						FireJsSignal(context, SignalKind::CharacterRemoving, losing, 1, &subject);
+					if (!lost.empty()) {
+						ENGINE_WARN("[script] a CharacterRemoving handler failed: {}", lost);
+					}
 				}
 
 				// The Luau side's reason, unchanged: `PlayerRemoving` rides
@@ -285,379 +295,23 @@ namespace engine::script {
 			);
 		}
 
-		// --- instance methods ------------------------------------------------
+		// --- the instance signals, and the methods that are no longer here ------
 		//
-		// Every one of these is a call `Store` already had and a script could
-		// not spell. They sit on a **shared prototype behind every class
-		// prototype**, so a scene of five hundred parts holds one copy rather
-		// than five hundred.
+		// **Twenty `JSCFunction`s stood here until v0.18 and every one of them had
+		// a Luau twin.** They are `ScriptMethods.cpp`'s and `GuiMethods.cpp`'s
+		// rows now, installed through `InstallJsNeutralMethods`, so what is left
+		// in this file is the half a language genuinely decides: the signal
+		// getters below, the codec bridge and the datatype vocabulary.
+		//
+		// A getter still checks its own receiver where a method no longer does -
+		// `NeutralJsMethod` does that once for every row, and there is no
+		// equivalent trampoline for a `JS_CGETSET_DEF`.
 
 		Entity SelfEntity(JSContext *context, JSValueConst self) {
 			return JsEntityOf(context, self);
 		}
 
-		JSValue InstanceIsA(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY || argc < 1) {
-				return JS_ThrowTypeError(context, "IsA needs a class name");
-			}
-
-			const char *className = JS_ToCString(context, argv[0]);
-			if (className == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			const ecs::ClassId wanted = ecs::Classes::Find(Name(className));
-			JS_FreeCString(context, className);
-
-			// False rather than a throw for an unregistered class, matching
-			// Roblox: a script testing for a class this game does not register
-			// is asking a question with a correct answer, and it is "no".
-			if (!wanted.IsValid()) {
-				return JS_NewBool(context, 0);
-			}
-			return JS_NewBool(context, ecs::Classes::IsA(JsOf(context).World->ClassOf(instance), wanted));
-		}
-
-		// Forgets every listener on an instance and on everything under it, so a
-		// `.Changed` connection on a destroyed row does not fire against a dead
-		// handle forever.
-		void ForgetInstance(JSContext *context, Entity instance) {
-			JsContext &bound = JsOf(context);
-
-			ForgetSubtree(
-				*bound.World, bound.Signals, bound.Changes, instance, [context](CallbackRef reference) {
-					Release(context, reference);
-				}
-			);
-		}
-
-		JSValue InstanceDestroy(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-
-			JsContext &bound = JsOf(context);
-
-			// The whole subtree — `DestroyInstance` takes every descendant, so a
-			// listener anywhere under here would survive the row it was watching.
-			ForgetInstance(context, instance);
-
-			bound.World->DestroyInstance(instance);
-			return JS_UNDEFINED;
-		}
-
-		JSValue InstanceClone(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-			return MakeJsInstance(context, JsOf(context).World->CloneInstance(instance));
-		}
-
-		JSValue InstanceGetChildren(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-
-			JSValue array = JS_NewArray(context);
-			uint32_t index = 0;
-			JsOf(context).World->EachChild(instance, [&](Entity child) {
-				JS_SetPropertyUint32(context, array, index++, MakeJsInstance(context, child));
-			});
-			return array;
-		}
-
-		JSValue InstanceGetDescendants(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-
-			Store &store = *JsOf(context).World;
-			JSValue array = JS_NewArray(context);
-			uint32_t written = 0;
-
-			EachDescendant(store, instance, [&](Entity descendant) {
-				JS_SetPropertyUint32(context, array, written++, MakeJsInstance(context, descendant));
-			});
-			return array;
-		}
-
-		JSValue InstanceFindFirstChild(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY || argc < 1) {
-				return JS_ThrowTypeError(context, "FindFirstChild needs a name");
-			}
-
-			const char *name = JS_ToCString(context, argv[0]);
-			if (name == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			// **The second argument, which Luau's copy of this also ignored.**
-			// `FindFirstChild("Humanoid", true)` answered the non-recursive
-			// question and said nothing about it.
-			const bool recursive = argc > 1 && JS_ToBool(context, argv[1]) > 0;
-
-			const Entity found = JsOf(context).World->FindFirstChild(instance, name, recursive);
-			JS_FreeCString(context, name);
-
-			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
-		}
-
-		// The class named by an argument, or an invalid id.
-		ecs::ClassId JsClassArgument(JSContext *context, JSValueConst value) {
-			const char *name = JS_ToCString(context, value);
-			if (name == nullptr) {
-				return ecs::ClassId{};
-			}
-
-			const ecs::ClassId klass = ecs::Classes::Find(core::Name(name));
-			JS_FreeCString(context, name);
-			return klass;
-		}
-
-		// The four class-keyed lookups, which differ only in which one they call.
-		//
-		// **One function and a selector rather than four near-copies**, because
-		// the argument handling is the half that goes wrong — a `JS_FreeCString`
-		// missed on one path is a leak nobody sees — and four copies of it is
-		// four places to miss it.
-		enum class JsLookup { ChildOfClass, ChildWhichIsA, AncestorOfClass, AncestorWhichIsA };
-
-		template <JsLookup Kind>
-		JSValue InstanceClassLookup(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY || argc < 1) {
-				return JS_ThrowTypeError(context, "this needs a class name");
-			}
-
-			const ecs::ClassId klass = JsClassArgument(context, argv[0]);
-			Store &store = *JsOf(context).World;
-
-			Entity found = ecs::NULL_ENTITY;
-			if constexpr (Kind == JsLookup::ChildOfClass) {
-				found = store.FindFirstChildOfClass(instance, klass);
-			} else if constexpr (Kind == JsLookup::ChildWhichIsA) {
-				const bool recursive = argc > 1 && JS_ToBool(context, argv[1]) > 0;
-				found = store.FindFirstChildWhichIsA(instance, klass, recursive);
-			} else if constexpr (Kind == JsLookup::AncestorOfClass) {
-				found = store.FindFirstAncestorOfClass(instance, klass);
-			} else {
-				found = store.FindFirstAncestorWhichIsA(instance, klass);
-			}
-
-			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
-		}
-
-		JSValue
-		InstanceFindFirstAncestor(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY || argc < 1) {
-				return JS_ThrowTypeError(context, "FindFirstAncestor needs a name");
-			}
-
-			const char *name = JS_ToCString(context, argv[0]);
-			if (name == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			const Entity found = JsOf(context).World->FindFirstAncestor(instance, name);
-			JS_FreeCString(context, name);
-
-			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
-		}
-
-		JSValue InstanceGetFullName(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "GetFullName needs an instance");
-			}
-
-			const std::string full = JsOf(context).World->GetFullName(instance);
-			return JS_NewStringLen(context, full.data(), full.size());
-		}
-
-		JSValue InstanceIsDescendantOf(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY || argc < 1) {
-				return JS_ThrowTypeError(context, "IsDescendantOf needs an instance");
-			}
-
-			JsContext &bound = JsOf(context);
-
-			// No case for the workspace any more, and losing it is the point:
-			// this used to be true for every live instance in the world, because
-			// the world was every root's ancestor. It is now the real subtree
-			// question — the same one the render gate asks — so a script and the
-			// renderer cannot disagree about whether something is in the scene.
-			return JS_NewBool(context, bound.World->IsDescendantOf(instance, JsEntityOf(context, argv[0])));
-		}
-
-		// The other half of the Luau pair in `Instances.cpp`, spelled the way
-		// this language spells it: `null` rather than `nil`, and a missing
-		// argument means the same thing as passing it.
-		JSValue InstanceSetNetworkOwner(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-
-			// **The absent cases are named rather than derived.** `JsEntityOf`
-			// answers a null entity for *anything* that is not an instance, so
-			// letting it decide would turn `SetNetworkOwner(5)` into a silent
-			// hand-back to the server — the failure this whole method exists to
-			// make visible.
-			const bool toTheServer = argc < 1 || JS_IsNull(argv[0]) != 0 || JS_IsUndefined(argv[0]) != 0;
-			const Entity player = toTheServer ? ecs::NULL_ENTITY : JsEntityOf(context, argv[0]);
-
-			if (!toTheServer && player == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(
-					context, "SetNetworkOwner needs a Player or null, and an unanchored part to hand over"
-				);
-			}
-
-			if (!scene::SetNetworkOwner(*JsOf(context).World, instance, player)) {
-				return JS_ThrowTypeError(
-					context, "SetNetworkOwner needs a Player or null, and an unanchored part to hand over"
-				);
-			}
-			return JS_UNDEFINED;
-		}
-
-		JSValue InstanceKeepWorldAwake(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-
-			// **The reason is required.** A world that will not sleep costs a
-			// machine until somebody finds what is holding it up, and the answer
-			// should be a sentence — see `scene/Awake.hpp`.
-			if (argc < 1) {
-				return JS_ThrowTypeError(context, "KeepWorldAwake needs a reason");
-			}
-			const char *reason = JS_ToCString(context, argv[0]);
-			if (reason == nullptr) {
-				return JS_ThrowTypeError(context, "KeepWorldAwake needs a reason");
-			}
-
-			const bool held = scene::KeepWorldAwake(*JsOf(context).World, instance, core::Name(reason));
-			JS_FreeCString(context, reason);
-			if (!held) {
-				return JS_ThrowTypeError(context, "KeepWorldAwake needs a live instance");
-			}
-			return JS_UNDEFINED;
-		}
-
-		JSValue InstanceLetWorldSleep(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-			scene::LetWorldSleep(*JsOf(context).World, instance);
-			return JS_UNDEFINED;
-		}
-
-		JSValue InstanceIsKeepingWorldAwake(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-			return JS_NewBool(context, scene::HoldsWorldAwake(*JsOf(context).World, instance) ? 1 : 0);
-		}
-
-		JSValue InstanceGetNetworkOwner(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-
-			const Entity owner = scene::NetworkOwnerOf(*JsOf(context).World, instance);
-			return owner == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, owner);
-		}
-
-		// The Luau half's twin: the `Player` children of the receiver, which on
-		// `Players` is the answer and on anything else is an empty array.
-		JSValue InstanceGetPlayers(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-
-			JsContext &bound = JsOf(context);
-			JSValue array = JS_NewArray(context);
-			uint32_t index = 0;
-			bound.World->EachChild(instance, [&](Entity child) {
-				if (!ecs::Classes::IsA(bound.World->ClassOf(child), scene::PlayerClass())) {
-					return;
-				}
-				JS_SetPropertyUint32(context, array, index++, MakeJsInstance(context, child));
-			});
-			return array;
-		}
-
-		JSValue InstanceClearAllChildren(JSContext *context, JSValueConst self, int, JSValueConst *) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "not an instance");
-			}
-
-			JsContext &bound = JsOf(context);
-
-			// Collected first: `DestroyInstance` unlinks from the sibling list
-			// the walk is standing in, so destroying inside `EachChild` would
-			// visit whatever moved into the slot — or nothing.
-			std::vector<Entity> children;
-			bound.World->EachChild(instance, [&](Entity child) { children.push_back(child); });
-
-			for (const Entity child : children) {
-				ForgetInstance(context, child);
-				bound.World->DestroyInstance(child);
-			}
-			return JS_UNDEFINED;
-		}
-
-		JSValue
-		InstancePropertyChangedSignal(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			const Entity instance = SelfEntity(context, self);
-			if (instance == ecs::NULL_ENTITY || argc < 1) {
-				return JS_ThrowTypeError(context, "GetPropertyChangedSignal needs a name");
-			}
-
-			const char *field = JS_ToCString(context, argv[0]);
-			if (field == nullptr) {
-				return JS_EXCEPTION;
-			}
-
-			// Refused for a property that does not exist, which is the one place
-			// a typo in a signal name is still catchable: a signal that silently
-			// never fired would be indistinguishable from a value that never
-			// changed.
-			bool known = false;
-			for (const ecs::PropertyDescriptor &property : JsOf(context).World->PropertiesOf(instance)) {
-				if (property.Name == Name(field)) {
-					known = true;
-					break;
-				}
-			}
-
-			if (!known) {
-				JSValue error =
-					JS_ThrowTypeError(context, "'%s' is not a valid member of this instance", field);
-				JS_FreeCString(context, field);
-				return error;
-			}
-
-			JSValue signal = MakeJsSignal(context, SignalKind::PropertyChanged, instance, Name(field));
-			JS_FreeCString(context, field);
-			return signal;
-		}
-
-		// `instance.Changed` — a getter, because it takes no arguments and
+		// `instance.Changed` - a getter, because it takes no arguments and
 		// Roblox spells it as a property.
 		JSValue InstanceChanged(JSContext *context, JSValueConst self) {
 			const Entity instance = SelfEntity(context, self);
@@ -693,8 +347,8 @@ namespace engine::script {
 		//
 		// `JS_NewPromiseCapability` hands back the promise and the two functions
 		// that settle it. The resolver is retained through the same `CallbackRef`
-		// machinery a connection uses, so `TaskQueue` — which knows nothing about
-		// JavaScript — can name it.
+		// machinery a connection uses, so `TaskQueue` - which knows nothing about
+		// JavaScript - can name it.
 		JSValue MakePendingPromise(JSContext *context, CallbackRef &resolver) {
 			JSValue settle[2];
 			JSValue promise = JS_NewPromiseCapability(context, settle);
@@ -708,25 +362,9 @@ namespace engine::script {
 			return promise;
 		}
 
-		// How many ticks a duration in seconds rounds to.
-		//
-		// **Up, and never to zero**, for the reason the Luau side gives:
-		// `task.wait(0)` resumes on the next tick rather than inside this one,
-		// and a wait that resumed in the same beat would make a loop over it an
-		// infinite loop inside one tick.
-		uint64_t TicksFor(const JsContext &bound, double seconds) {
-			const float delta = bound.World->Time().Delta;
-			if (seconds <= 0.0 || delta <= 0.0f) {
-				return 1;
-			}
-
-			const double ticks = std::ceil(seconds / static_cast<double>(delta));
-			return ticks < 1.0 ? 1 : static_cast<uint64_t>(ticks);
-		}
-
 		JSValue TaskWait(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			JsContext &bound = JsOf(context);
-			const uint64_t ticks = TicksFor(bound, Number(context, argc, argv, 0, 0.0));
+			const uint64_t ticks = TicksFor(*bound.World, Number(context, argc, argv, 0, 0.0));
 
 			CallbackRef resolver = 0;
 			JSValue promise = MakePendingPromise(context, resolver);
@@ -771,14 +409,14 @@ namespace engine::script {
 			}
 
 			JsContext &bound = JsOf(context);
-			const uint64_t ticks = TicksFor(bound, Number(context, argc, argv, 0, 0.0));
+			const uint64_t ticks = TicksFor(*bound.World, Number(context, argc, argv, 0, 0.0));
 
 			const CallbackRef reference = Retain(context, argv[1]);
 			bound.Tasks.Delay(reference, bound.World->Time().Tick + ticks);
 			return JS_NewInt32(context, reference);
 		}
 
-		// `task.cancel(handle)` — the integer `task.delay` returned.
+		// `task.cancel(handle)` - the integer `task.delay` returned.
 		//
 		// **A number rather than a thread object**, because JavaScript has no
 		// thread to hand back. Luau returns the coroutine; here the handle is
@@ -842,7 +480,7 @@ namespace engine::script {
 
 		// --- typeOf and warn -------------------------------------------------
 
-		// `typeOf(value)` — **not `typeof`**, which is a JavaScript keyword and
+		// `typeOf(value)` - **not `typeof`**, which is a JavaScript keyword and
 		// cannot be rebound. Luau's is an ordinary global reading a `__type`
 		// metafield; this is a function, and the difference is the language's.
 		JSValue TypeOf(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
@@ -916,23 +554,6 @@ namespace engine::script {
 			return JS_UNDEFINED;
 		}
 
-		// --- RunService ------------------------------------------------------
-
-		JSValue IsServer(JSContext *context, JSValueConst, int, JSValueConst *) {
-			return JS_NewBool(context, JsOf(context).Role.Server);
-		}
-
-		JSValue IsClient(JSContext *context, JSValueConst, int, JSValueConst *) {
-			return JS_NewBool(context, JsOf(context).Role.Client);
-		}
-
-		JSValue IsStudio(JSContext *context, JSValueConst, int, JSValueConst *) {
-			return JS_NewBool(context, JsOf(context).Role.Studio);
-		}
-
-		JSValue IsReplica(JSContext *context, JSValueConst, int, JSValueConst *) {
-			return JS_NewBool(context, JsOf(context).World->AdoptOnly());
-		}
 	}
 
 	// --- the codec bridge, in full -------------------------------------------
@@ -1008,7 +629,7 @@ namespace engine::script {
 			// **Depth is how a cycle is caught here**, rather than a visited
 			// set as on the Luau side. QuickJS has no cheap identity map for
 			// objects reachable from C, and a cyclic object cannot nest past the
-			// limit without hitting it first — so the refusal arrives, with a
+			// limit without hitting it first - so the refusal arrives, with a
 			// less specific name than `Cyclic`. Stated rather than hidden: the
 			// status a script sees for a self-referencing object is `TooDeep`.
 			why = CodecStatus::TooDeep;
@@ -1065,7 +686,7 @@ namespace engine::script {
 		if (JS_IsFunction(context, value)) {
 			// A function, an instance, or anything holding a pointer. **An
 			// `Entity` is meaningless outside this world**, so a reference must
-			// cross as whatever the game uses to name things — rule 3, as a
+			// cross as whatever the game uses to name things - rule 3, as a
 			// refusal an author can read.
 			why = CodecStatus::Unsupported;
 			return false;
@@ -1123,21 +744,28 @@ namespace engine::script {
 
 	// --- the pumps ------------------------------------------------------------
 
-	std::string
-	FireJsSignal(JSContext *context, SignalKind kind, Entity subject, int count, JSValueConst *arguments) {
+	std::string FireJsSignal(
+		JSContext *context, SignalKind kind, Entity subject, int count, JSValueConst *arguments, Name property
+	) {
 		JsContext &bound = JsOf(context);
 
 		std::string firstError;
 		std::vector<ConnectionId> spent;
 
 		bound.Signals.Fire(kind, subject, [&](const Connection &connection) {
+			// An invalid filter fires everything, which is what a kind with one
+			// meaning wants; a valid one is a channel or a property name.
+			if (property.IsValid() && connection.Property != property) {
+				return;
+			}
+
 			JSValue result =
 				JS_Call(context, Held(context, connection.Callback), JS_UNDEFINED, count, arguments);
 
 			// **Every connection runs even when one throws**, and the first
 			// error is what the host hears about. A handler that threw once
 			// would otherwise silently stop everything registered after it, and
-			// the symptom — half a scene animating — points nowhere near the
+			// the symptom - half a scene animating - points nowhere near the
 			// cause.
 			if (JS_IsException(result)) {
 				const std::string message = ExceptionOf(context, "a connection failed");
@@ -1179,7 +807,7 @@ namespace engine::script {
 			}
 
 			// `GetPropertyChangedSignal` takes no argument and fires only for
-			// its own name, which is Roblox's split and the reason it exists —
+			// its own name, which is Roblox's split and the reason it exists -
 			// a handler that cares about one property should not be called for
 			// every other one and made to filter.
 			bound.Signals.Fire(SignalKind::PropertyChanged, instance, [&](const Connection &connection) {
@@ -1210,7 +838,7 @@ namespace engine::script {
 		}
 
 		// **Taken, not read.** A handler may reparent something, and a swap
-		// leaves the store's list empty before the first one runs — so the move
+		// leaves the store's list empty before the first one runs - so the move
 		// it makes belongs to the next delivery instead of being appended to
 		// the list being walked.
 		std::vector<ecs::TreeChange> changes;
@@ -1227,7 +855,7 @@ namespace engine::script {
 		};
 
 		// One argument for three of the four signals, freed once per use rather
-		// than once per fire — `MakeJsInstance` mints an object per call, and
+		// than once per fire - `MakeJsInstance` mints an object per call, and
 		// leaking one per reparent is a leak per reparent.
 		const auto fire = [&](SignalKind kind, Entity subject, Entity argument) {
 			JSValue value = MakeJsInstance(context, argument);
@@ -1251,7 +879,7 @@ namespace engine::script {
 				}
 
 				// `DescendantAdded` is every ancestor's, not just the new
-				// parent's — that is the whole difference between it and
+				// parent's - that is the whole difference between it and
 				// `ChildAdded`.
 				for (Entity above = change.To; above != ecs::NULL_ENTITY;
 					 above = bound.World->ParentOf(above)) {
@@ -1277,6 +905,91 @@ namespace engine::script {
 			bound.World->EachDescendant(change.Instance, ancestry);
 		}
 
+		return firstError;
+	}
+
+	std::string PumpJsChildWaiters(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		if (bound.Waiters.Empty()) {
+			return {};
+		}
+
+		std::vector<ChildWaiters::Resumption> ready;
+		bound.Waiters.Advance(*bound.World, bound.World->Time().Tick, ready);
+
+		std::string firstError;
+		for (const ChildWaiters::Resumption &resumption : ready) {
+			const auto waiting = bound.AwaitedChildren.find(resumption.Waiter);
+			if (waiting == bound.AwaitedChildren.end()) {
+				continue;
+			}
+
+			const CallbackRef resolver = waiting->second;
+			bound.AwaitedChildren.erase(waiting);
+
+			// **`null` and not `undefined` for a wait that ran out**, which is
+			// what every other lookup on this surface answers with - see
+			// `ReturnInstance`. A promise resolving to `undefined` would read as
+			// one nobody gave a value to.
+			JSValue child =
+				resumption.Child == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, resumption.Child);
+
+			// **Taken off the context whether or not it is reported**, which is
+			// what `ExceptionOf` does: a pending exception left there would
+			// surface in whatever this VM did next, a long way from the resume
+			// that threw.
+			JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &child);
+			if (JS_IsException(result)) {
+				const std::string message = ExceptionOf(context, "a resumed WaitForChild failed");
+				if (firstError.empty()) {
+					firstError = message;
+				}
+			}
+
+			JS_FreeValue(context, result);
+			JS_FreeValue(context, child);
+			Release(context, resolver);
+		}
+
+		return firstError;
+	}
+
+	std::string PumpJsCharacters(JSContext *context) {
+		JsContext &bound = JsOf(context);
+
+		std::vector<scene::CharacterChange> changes;
+		scene::TakeCharacterChanges(*bound.World, changes);
+		if (changes.empty()) {
+			return {};
+		}
+
+		std::string firstError;
+		for (const scene::CharacterChange &change : changes) {
+			// **A model that has gone is not reported here**, which is the Luau
+			// pump's rule and the reason the two halves are disjoint: a
+			// destroyed body already fired `CharacterRemoving` synchronously
+			// with the instance still readable.
+			if (!bound.World->Alive(change.Character)) {
+				continue;
+			}
+
+			// Freed per fire, for `PumpJsTree`'s reason: `MakeJsInstance` mints
+			// an object per call, and leaking one per respawn is a leak per
+			// respawn.
+			JSValue value = MakeJsInstance(context, change.Character);
+			const std::string failed = FireJsSignal(
+				context,
+				change.Added ? SignalKind::CharacterAdded : SignalKind::CharacterRemoving,
+				change.Player,
+				1,
+				&value
+			);
+			JS_FreeValue(context, value);
+
+			if (firstError.empty() && !failed.empty()) {
+				firstError = failed;
+			}
+		}
 		return firstError;
 	}
 
@@ -1332,6 +1045,19 @@ namespace engine::script {
 			case gui::EventKind::Activated:
 				note(FireJsSignal(context, SignalKind::GuiActivated, event.Instance, 0, nullptr));
 				break;
+
+			case gui::EventKind::Focused:
+				note(FireJsSignal(context, SignalKind::GuiFocused, event.Instance, 0, nullptr));
+				break;
+
+			case gui::EventKind::FocusReleased: {
+				// The Luau pump's `enterPressed`, off the event for the reason
+				// `SignalKind::GuiFocusLost` gives.
+				JSValue entered = JS_NewBool(context, event.Entered ? 1 : 0);
+				note(FireJsSignal(context, SignalKind::GuiFocusLost, event.Instance, 1, &entered));
+				JS_FreeValue(context, entered);
+				break;
+			}
 			}
 		}
 
@@ -1371,7 +1097,7 @@ namespace engine::script {
 			Release(context, reference);
 		};
 
-		// Delayed work first, then deferred — the same order the Luau side
+		// Delayed work first, then deferred - the same order the Luau side
 		// uses, so a world scripted in either language sees one sequence.
 		bound.Tasks.Advance(bound.World->Time().Tick, resume);
 		bound.Tasks.DrainDeferred(resume);
@@ -1425,27 +1151,6 @@ namespace engine::script {
 
 		JSValue methods = JS_NewObject(context);
 		static const JSCFunctionListEntry entries[] = {
-			JS_CFUNC_DEF("IsA", 1, InstanceIsA),
-			JS_CFUNC_DEF("Destroy", 0, InstanceDestroy),
-			JS_CFUNC_DEF("Clone", 0, InstanceClone),
-			JS_CFUNC_DEF("GetChildren", 0, InstanceGetChildren),
-			JS_CFUNC_DEF("GetDescendants", 0, InstanceGetDescendants),
-			JS_CFUNC_DEF("FindFirstChild", 1, InstanceFindFirstChild),
-			JS_CFUNC_DEF("FindFirstChildOfClass", 1, InstanceClassLookup<JsLookup::ChildOfClass>),
-			JS_CFUNC_DEF("FindFirstChildWhichIsA", 1, InstanceClassLookup<JsLookup::ChildWhichIsA>),
-			JS_CFUNC_DEF("FindFirstAncestor", 1, InstanceFindFirstAncestor),
-			JS_CFUNC_DEF("FindFirstAncestorOfClass", 1, InstanceClassLookup<JsLookup::AncestorOfClass>),
-			JS_CFUNC_DEF("FindFirstAncestorWhichIsA", 1, InstanceClassLookup<JsLookup::AncestorWhichIsA>),
-			JS_CFUNC_DEF("GetFullName", 0, InstanceGetFullName),
-			JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
-			JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
-			JS_CFUNC_DEF("GetPlayers", 0, InstanceGetPlayers),
-			JS_CFUNC_DEF("KeepWorldAwake", 1, InstanceKeepWorldAwake),
-			JS_CFUNC_DEF("LetWorldSleep", 0, InstanceLetWorldSleep),
-			JS_CFUNC_DEF("IsKeepingWorldAwake", 0, InstanceIsKeepingWorldAwake),
-			JS_CFUNC_DEF("SetNetworkOwner", 1, InstanceSetNetworkOwner),
-			JS_CFUNC_DEF("GetNetworkOwner", 0, InstanceGetNetworkOwner),
-			JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),
 			JS_CGETSET_DEF("Changed", InstanceChanged, nullptr),
 			JS_CGETSET_DEF("ChildAdded", InstanceTreeSignal<SignalKind::ChildAdded>, nullptr),
 			JS_CGETSET_DEF("ChildRemoved", InstanceTreeSignal<SignalKind::ChildRemoved>, nullptr),
@@ -1454,25 +1159,56 @@ namespace engine::script {
 			JS_CGETSET_DEF("AncestryChanged", InstanceTreeSignal<SignalKind::AncestryChanged>, nullptr),
 			JS_CGETSET_DEF("PlayerAdded", InstanceTreeSignal<SignalKind::PlayerAdded>, nullptr),
 			JS_CGETSET_DEF("PlayerRemoving", InstanceTreeSignal<SignalKind::PlayerRemoving>, nullptr),
+			JS_CGETSET_DEF("CharacterAdded", InstanceTreeSignal<SignalKind::CharacterAdded>, nullptr),
+			JS_CGETSET_DEF("CharacterRemoving", InstanceTreeSignal<SignalKind::CharacterRemoving>, nullptr),
 
 			// The 2D tree's input. Same template, because a gui signal is a
-			// handle onto `SignalTable` exactly as a tree signal is — what
+			// handle onto `SignalTable` exactly as a tree signal is - what
 			// differs is only who records it, and that is the pump's business
 			// rather than this getter's.
 			JS_CGETSET_DEF("Activated", InstanceTreeSignal<SignalKind::GuiActivated>, nullptr),
+
+			// **Roblox's second name for the same event, and one kind under
+			// both.** `MouseButton1Click` is what a `GuiButton` carries there
+			// and what most scripts connect to; this router produces exactly one
+			// primary button, so the two questions have one answer. A second
+			// `SignalKind` would be a second list for one event and whichever
+			// name the pump did not know would never fire. `LuauInstances.cpp` says
+			// the same from the Luau side, including why `InputChanged` is not
+			// here.
+			JS_CGETSET_DEF("MouseButton1Click", InstanceTreeSignal<SignalKind::GuiActivated>, nullptr),
+
 			JS_CGETSET_DEF("InputBegan", InstanceTreeSignal<SignalKind::GuiInputBegan>, nullptr),
 			JS_CGETSET_DEF("InputEnded", InstanceTreeSignal<SignalKind::GuiInputEnded>, nullptr),
 			JS_CGETSET_DEF("MouseEnter", InstanceTreeSignal<SignalKind::GuiMouseEnter>, nullptr),
 			JS_CGETSET_DEF("MouseLeave", InstanceTreeSignal<SignalKind::GuiMouseLeave>, nullptr),
 			JS_CGETSET_DEF("MouseMoved", InstanceTreeSignal<SignalKind::GuiMouseMoved>, nullptr),
+
+			// A `TextBox`'s pair. On every instance and inert anywhere else, for
+			// the reason the six above are - `LuauInstances.cpp` says the same
+			// from the other VM.
+			JS_CGETSET_DEF("Focused", InstanceTreeSignal<SignalKind::GuiFocused>, nullptr),
+			JS_CGETSET_DEF("FocusLost", InstanceTreeSignal<SignalKind::GuiFocusLost>, nullptr),
 		};
 		// **`std::size`, not a number somebody has to remember.** This read
-		// `10` while the list held sixteen, so the last six — including
-		// `IsDescendantOf`, `GetPropertyChangedSignal` and `Changed` — were
+		// `10` while the list held sixteen, so the last six - including
+		// `IsDescendantOf`, `GetPropertyChangedSignal` and `Changed` - were
 		// simply not installed. Nothing warned: a method that is not there
 		// is `undefined`, and `undefined` only fails at the call site, in
 		// whatever script reaches it first.
+		//
+		// The list is signals only now, and the scar is worth keeping because the
+		// list can grow again: a getter added below without this being a `size_t`
+		// of the array would fail exactly the same way.
 		JS_SetPropertyFunctionList(context, methods, entries, static_cast<int>(std::size(entries)));
+
+		// **Every method, written once for both languages.** There is no
+		// hand-written JavaScript instance method left - the twenty that stood
+		// beside this list until v0.18 are rows in `ScriptMethods.cpp` and
+		// `GuiMethods.cpp` and land here through one trampoline. A row added there
+		// is reachable from both VMs in the same commit, which is what the drift
+		// above cost when it was two lists. See `ScriptCall.hpp`.
+		InstallJsNeutralMethods(context, methods);
 
 		// Held in the context so `PrototypeFor` can put every class
 		// prototype behind it, and so it is freed with everything else.
@@ -1548,36 +1284,34 @@ namespace engine::script {
 		JS_SetPropertyStr(context, global, "typeOf", JS_NewCFunction(context, TypeOf, "typeOf", 1));
 		JS_SetPropertyStr(context, global, "warn", JS_NewCFunction(context, Warn, "warn", 1));
 
-		// --- RunService gains its predicates and a real Heartbeat signal ---
-		{
-			JSValue service = JS_GetPropertyStr(context, global, "RunService");
-			if (JS_IsObject(service)) {
-				JS_SetPropertyStr(
-					context,
-					service,
-					"Heartbeat",
-					MakeJsSignal(context, SignalKind::Heartbeat, ecs::NULL_ENTITY)
-				);
-				JS_SetPropertyStr(
-					context, service, "IsServer", JS_NewCFunction(context, IsServer, "IsServer", 0)
-				);
-				JS_SetPropertyStr(
-					context, service, "IsClient", JS_NewCFunction(context, IsClient, "IsClient", 0)
-				);
-				JS_SetPropertyStr(
-					context, service, "IsStudio", JS_NewCFunction(context, IsStudio, "IsStudio", 0)
-				);
-				JS_SetPropertyStr(
-					context, service, "IsReplica", JS_NewCFunction(context, IsReplica, "IsReplica", 0)
-				);
-			}
-			JS_FreeValue(context, service);
-		}
-
 		InstallJsDatatypes(context, global);
-		InstallJsServices(context, global);
 
-		// After `InstallJsInstanceMethods`, which `OpenJsBindings` ran — this
+		// **Before the services, because one of them produces it.** A bound
+		// action's handler is handed an `InputObject`, and a class registered
+		// after the service that hands one over would be a class id of zero at
+		// the first press - the same ordering `LuauRuntime` keeps for the Luau
+		// metatable, and `UserInputService`'s three input signals hand one over too.
+		InstallJsInputObject(context);
+
+		// **Beside it and for its reason**: `TweenService.Create` hands back a
+		// `Tween`, and a class registered after the service that answers with one
+		// would be a class id of zero at the first call.
+		OpenJsTweenHandle(context);
+
+		// **The services, from the catalogue.** `ServiceCatalogue.hpp` carries
+		// the argument: which services exist is one fact and it was two lists,
+		// so Luau bound nine and this language bound five with nothing in the
+		// build to say so.
+		//
+		// **Here rather than in `OpenJsBindings`, because this is the later of
+		// the two halves and every class a service hands back is registered by
+		// now.** No service is installed anywhere else: since v0.16 every one of
+		// them is a `ServiceSurface` the catalogue builds, and this walk is the
+		// only place this language builds one.
+		InstallJsServices(context, global, ServiceAvailability::Always);
+		InstallJsServices(context, global, ServiceAvailability::Studio);
+
+		// After `InstallJsInstanceMethods`, which `OpenJsBindings` ran - this
 		// adds the component half of the ECS surface to the table it built.
 		InstallJsEcs(context, global);
 

@@ -45,7 +45,7 @@ namespace engine::replication {
 			}
 
 			if (!assets::VerifySessionTranscript(peer->Transcript, claim.Signature, claim.Key)) {
-				ENGINE_WARN("replication: a client's identity claim did not verify — dropping it.");
+				ENGINE_WARN("replication: a client's identity claim did not verify - dropping it.");
 				Stats_.Refused++;
 				return false;
 			}
@@ -306,7 +306,7 @@ namespace engine::replication {
 
 	void Listener::Drop(size_t index) {
 		// **Before the handle is retired**, so a host can still use it to find
-		// whatever it hung off this client — the `Player` instance, most
+		// whatever it hung off this client - the `Player` instance, most
 		// obviously, which has to be destroyed rather than leaked.
 		if (Dropped_) {
 			Dropped_(Peers[index].Client);
@@ -365,7 +365,7 @@ namespace engine::replication {
 			for (const std::vector<std::byte> &message : peer->Wire->Inbound()) {
 				// **Routed before the authority sees it.** A user message is
 				// not this module's, and handing one to `Authority::Receive`
-				// parses fine and then falls off the end of its switch — so the
+				// parses fine and then falls off the end of its switch - so the
 				// message would look delivered while a refusal counter an
 				// operator reads climbed.
 				if (PeekMessageKind(message) == MessageKind::User) {
@@ -400,6 +400,18 @@ namespace engine::replication {
 			peer.Wire->Link().Advance(nowSeconds);
 			peer.Wire->Link().ResetBudget();
 
+			// **Right after `ResetBudget`, because that is where the link
+			// decides the number.** The allowance is a function of one tick's
+			// worth of observation, and reading it anywhere else in the tick
+			// reads whatever is left of it rather than what it was.
+			//
+			// No reordering was needed to make this current: `Advance` runs
+			// after `Publish`, so what the next `Publish` reads is the allowance
+			// this tick's observations produced. See `Authority::SetAllowance`.
+			Authority_.SetAllowance(
+				peer.Client, static_cast<size_t>(peer.Wire->Link().Stats().SendAllowanceBytes)
+			);
+
 			if (peer.Wire->Link().State() == net::ConnectionState::Disconnected) {
 				Drop(index - 1);
 			}
@@ -411,7 +423,7 @@ namespace engine::replication {
 
 		for (Peer &peer : Peers) {
 			// **The identity gate, and it is here rather than in `Accept`.** A
-			// claim arrives *after* admission — `SetIdentityCheck` is what fills
+			// claim arrives *after* admission - `SetIdentityCheck` is what fills
 			// `Peer::Identity`, and it runs on a message the client sends once
 			// the session exists. Refusing at admission would refuse everybody,
 			// because nobody has proved anything yet at that point.

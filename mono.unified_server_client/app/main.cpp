@@ -3,12 +3,15 @@
 //
 // The output is one line per tick and a summary, both meant to be read by a
 // person looking for the stage that lost the world. The columns are the four
-// stages in order — produced, sent, applied, drawn — so the first one that goes
+// stages in order - produced, sent, applied, drawn - so the first one that goes
 // wrong is the first one whose column stops making sense.
 
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Config.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/parallel/Settings.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
@@ -55,10 +58,17 @@ namespace {
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("unified");
 
+	// **The engine's settings and no `unified.*` table.** This is a diagnostic
+	// harness whose every option describes one run - how many ticks, which
+	// ordinals to drop - and a run's shape is not a deployment's decision.
+	engine::core::Config::DeclareEngineFlags();
+	engine::parallel::DeclareFlags();
+
 	engine::core::Arguments arguments(
 		"unified_server_client",
-		"atomic — a server and a client in one process, with no network between them."
+		"atomic - a server and a client in one process, with no network between them."
 	);
+	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("verbose", "Log at trace level");
 	arguments.Flag(
@@ -87,13 +97,14 @@ int main(int argc, char **argv) {
 
 	// **Before anything starts a world or a job.** The flag is read on every
 	// dispatch, so setting it late would leave the frames before it with the
-	// shape it exists to remove — and those are the frames somebody was
+	// shape it exists to remove - and those are the frames somebody was
 	// watching while the program came up.
 	//
 	// It makes the program slower on purpose. See `parallel::SetForceSerialCompute`:
 	// this is a measurement instrument, and the number it produces is a serial
 	// cost rather than a verdict on the parallel one.
 	if (arguments.Has("force-serial-compute")) {
+		engine::core::Flags::Set("engine.serial-compute", "true", engine::core::FlagSource::CommandLine);
 		engine::parallel::SetForceSerialCompute(true);
 		ENGINE_INFO("serial compute forced: every dispatch runs on its caller's thread");
 	}
@@ -101,6 +112,17 @@ int main(int argc, char **argv) {
 	if (arguments.Has("verbose")) {
 		engine::core::Log::SetLevel(engine::core::LogLevel::Trace);
 	}
+
+	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
+	if (!configured.Ok) {
+		std::fprintf(stderr, "%s\n", configured.Error.c_str());
+		return 2;
+	}
+	if (engine::core::Config::ListingWanted(arguments)) {
+		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
+		return 0;
+	}
+	engine::parallel::ApplyFlags();
 
 	unified::Settings settings;
 	settings.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", settings.Entities));
@@ -135,7 +157,7 @@ int main(int argc, char **argv) {
 	if (!harness.Join()) {
 		// **The first thing this program is for.** A join that never completes
 		// with no network in the way is a snapshot the replica refused, and the
-		// replica's own counters say which kind — not a lost datagram, because
+		// replica's own counters say which kind - not a lost datagram, because
 		// there are none.
 		ENGINE_ERROR(
 			"the client never joined: {} snapshot(s), {} malformed, {} stale",

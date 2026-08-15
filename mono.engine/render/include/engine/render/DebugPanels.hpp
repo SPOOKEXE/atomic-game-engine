@@ -2,15 +2,15 @@
 
 // The three in-game debug panels.
 //
-//   F3 — the statistics counter: FPS now, and the shape of the last twenty
+//   F3 - the statistics counter: FPS now, and the shape of the last twenty
 //        seconds. A number that only shows the current frame hides exactly the
 //        thing worth seeing, which is the occasional 40 ms one.
 //
-//   F4 — the network panel: what is crossing the link, what it costs per
+//   F4 - the network panel: what is crossing the link, what it costs per
 //        second, and how far behind the world being drawn is. Only when there
-//        is a link — see `NetworkStatistics::Connected`.
+//        is a link - see `NetworkStatistics::Connected`.
 //
-//   F5 — the frame graph: last frame's scope tree as a flamegraph, plus
+//   F5 - the frame graph: last frame's scope tree as a flamegraph, plus
 //        per-category totals, per-system costs and the metrics counters.
 //
 // All three draw into an OverlayImage and know nothing about the GPU.
@@ -72,7 +72,7 @@ namespace engine::render {
 	// **Rates are per second and are the caller's to measure, not this
 	// module's.** Everything `net` counts is cumulative over a connection's
 	// life, and a panel that divided a lifetime total by a lifetime would show
-	// a number that stops moving after a minute — the figure worth reading is
+	// a number that stops moving after a minute - the figure worth reading is
 	// over the last second or so, and only the caller knows when it last
 	// sampled. `DebugPanels` reads no clock, which is what keeps it drawable
 	// from a test.
@@ -84,7 +84,7 @@ namespace engine::render {
 		//
 		// **False switches the panel off rather than drawing zeroes.** A client
 		// with no `--connect` has no network to show, and a panel of zeroes
-		// reads as a link that is up and idle — which is a different and much
+		// reads as a link that is up and idle - which is a different and much
 		// more alarming thing than a client that was never asked to connect.
 		bool Connected = false;
 
@@ -134,7 +134,7 @@ namespace engine::render {
 
 		// Ticks per second the replica is actually receiving.
 		//
-		// Measured from the stream rather than configured — the server's rate
+		// Measured from the stream rather than configured - the server's rate
 		// is not on the wire and the two programs do not share a default, so
 		// this is the only figure that is about the authority rather than about
 		// what this process was told. `replication::SnapshotBuffer`.
@@ -150,7 +150,7 @@ namespace engine::render {
 		// Deltas applied.
 		uint64_t Deltas = 0;
 
-		// Structural messages applied — creations, destroys and forgets.
+		// Structural messages applied - creations, destroys and forgets.
 		uint64_t Structures = 0;
 
 		// Messages refused as malformed.
@@ -205,7 +205,7 @@ namespace engine::render {
 		// **Asking for it is not enough.** It is drawn only when
 		// `Network.Connected` is also true, so a build with no replication in
 		// it cannot be made to show an empty one. `DrawDebugPanels` enforces
-		// that rather than trusting the caller — the whole reason the panel
+		// that rather than trusting the caller - the whole reason the panel
 		// exists is to answer "is anything crossing", and a panel of zeroes
 		// answers it wrongly.
 		bool ShowNetwork = false;
@@ -223,7 +223,7 @@ namespace engine::render {
 		bool TracyAttached = false;
 
 		// How deep the flamegraph goes. A span below it is not drawn and its
-		// nearest visible ancestor is marked with a "+" instead — a hidden
+		// nearest visible ancestor is marked with a "+" instead - a hidden
 		// subtree that leaves no trace makes a parent look like a leaf, and
 		// "collect-instances 8 ms" means two different things depending on
 		// whether that is all of it.
@@ -243,7 +243,7 @@ namespace engine::render {
 
 		// How much of that frame ran inside no span. Drawn as a row of its own
 		// and as a bar of its own, so the rows a person reads add up to the
-		// heading above them — see core::FrameGraph::UnmarkedMilliseconds.
+		// heading above them - see core::FrameGraph::UnmarkedMilliseconds.
 		float UnmarkedMilliseconds = 0.0f;
 
 		// How much of that frame was spent waiting rather than working.
@@ -251,7 +251,7 @@ namespace engine::render {
 		// Subtracted from the frame to get the figure the SHARE column is a
 		// share of. With vertical sync on, fifteen of a sixteen millisecond
 		// frame are a sleep, and a share of the whole frame would report every
-		// span that did something as one per cent of it — a panel on which
+		// span that did something as one per cent of it - a panel on which
 		// nothing is ever worth optimising.
 		float IdleMilliseconds = 0.0f;
 
@@ -307,15 +307,15 @@ namespace engine::render {
 		int Scale = 2;
 	};
 
-	// The share arithmetic these panels are drawn from — `BusyShares`,
-	// `BusyMillisecondsOf`, `CategoryShares` — is in `src/PanelShares.hpp`.
+	// The share arithmetic these panels are drawn from - `BusyShares`,
+	// `BusyMillisecondsOf`, `CategoryShares` - is in `src/PanelShares.hpp`.
 	//
 	// It was here, published so that the suite could reach it, which is the
 	// one thing the root `AGENTS.md` names: do not widen a public header to
 	// make a test easier. Nothing outside this module ever called any of it.
 
 	// Clears the image and draws whatever is switched on. Draws nothing, and
-	// leaves the image clean, when both panels are off — which is what lets the
+	// leaves the image clean, when both panels are off - which is what lets the
 	// renderer skip the upload.
 	//
 	// An empty image, such as one for a minimised window, is cleared safely and

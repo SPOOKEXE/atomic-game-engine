@@ -2,10 +2,10 @@
 //
 // **Two failures, and neither said anything.** The client asked for every
 // texture in the catalogue, `render::TextureTable` spent its 512 MB ceiling in
-// manifest order, and the remaining 1,463 uploads were refused — so a part
+// manifest order, and the remaining 1,463 uploads were refused - so a part
 // naming a texture drew untextured and the only trace was a warning per refusal
 // in a log nobody reads. And it asked for every mesh and material by kind, which
-// — because the unit that travels is a *bundle* — asks for essentially every
+// - because the unit that travels is a *bundle* - asks for essentially every
 // bundle in the store, decompressed synchronously on the calling thread. On this
 // repository's own store that is 6.9 GB on the frame the editor opens, which is
 // what "the studio freezes when I open it" was.
@@ -108,7 +108,7 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 
 TEST_CASE("a world names nothing it does not use", "[client][contentdemand]") {
 	// **The property the whole change rests on.** A store of two thousand assets
-	// and a scene that uses three must ask for three — anything else is the
+	// and a scene that uses three must ask for three - anything else is the
 	// by-kind fetch wearing a different hat, and the unit that travels is a
 	// bundle.
 	Store store = Fresh("contentdemand.bounded");
@@ -148,7 +148,7 @@ TEST_CASE("a world naming nothing asks for nothing", "[client][contentdemand]") 
 TEST_CASE("a material's texture is collected once it has resolved", "[client][contentdemand]") {
 	// **The indirection that let materials stay out of the demand path.** A
 	// material reaches a part through `ResolveMaterials`, which writes its
-	// texture into that part's `SurfaceAppearance::ColourMap` — a field this
+	// texture into that part's `SurfaceAppearance::ColourMap` - a field this
 	// already reads. So nothing here knows what a material is, and fetching a
 	// material's sheet on arrival is what had to be *removed*: every material in
 	// a catalogue arrives whether anything uses it or not, so doing it there was

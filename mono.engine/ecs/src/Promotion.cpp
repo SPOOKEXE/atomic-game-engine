@@ -74,7 +74,7 @@ namespace engine::ecs {
 		if (state.DeferDepth > 0) {
 			// Refused rather than deferred. The row keeps its place and its
 			// contents, but the id array a running `Each` is holding a pointer
-			// into would change underneath it — so the loop would hand a body
+			// into would change underneath it - so the loop would hand a body
 			// the new handle for rows it had already visited under the old one.
 			ENGINE_ERROR("store '{}': cannot promote from inside an iteration.", world);
 			return false;

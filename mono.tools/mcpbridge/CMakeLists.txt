@@ -2,7 +2,7 @@
 #
 # **A byte pump with no opinions**, which is why it links `core` for argument
 # parsing and asio for a socket and nothing else. It does not link the studio,
-# does not parse JSON, and has no idea what a world is — the whole protocol
+# does not parse JSON, and has no idea what a world is - the whole protocol
 # lives in `mono.studio`, and this exists because MCP clients speak stdio to a
 # subprocess while the editor is a window that outlives them.
 #

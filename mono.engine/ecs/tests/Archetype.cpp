@@ -60,8 +60,8 @@ namespace archetype_test {
 	};
 
 	// Registered explicitly rather than by the compiler's spelling. Two
-	// anonymous-namespace types in different test files spell identically —
-	// `{anonymous}::Label` — and the registry now aborts on that collision
+	// anonymous-namespace types in different test files spell identically -
+	// `{anonymous}::Label` - and the registry now aborts on that collision
 	// rather than letting one run with the other's destructor.
 	ComponentId L() {
 		static const ComponentId id = Components::Register<Label>("test.archetype.label");
@@ -130,7 +130,7 @@ TEST_CASE("an empty set is a table of entities and no columns", "[ecs]") {
 }
 
 TEST_CASE("removal reports which entity moved", "[ecs]") {
-	// The store cannot work this out afterwards — the entity that moved has a
+	// The store cannot work this out afterwards - the entity that moved has a
 	// directory entry still pointing at its old row, and nothing else knows.
 	Archetype table(ComponentSet::Intern({P()}));
 
@@ -354,7 +354,7 @@ TEST_CASE("a column position is the same for every table sharing a set", "[ecs]"
 TEST_CASE("a table reads its columns in the writer's order", "[ecs][archetype]") {
 	// **The cross-process case, reproduced in one.** `Write` emits columns in
 	// its own set order, which is ascending by *its* component ids, and
-	// `ComponentSet::Intern` sorts by the reading process's — so a server whose
+	// `ComponentSet::Intern` sorts by the reading process's - so a server whose
 	// `ecs.Hierarchy` is registered last and a client whose `ecs.Hierarchy` is
 	// id 2 hold the same set in two different column orders.
 	//
@@ -378,7 +378,7 @@ TEST_CASE("a table reads its columns in the writer's order", "[ecs][archetype]")
 	engine::core::ByteWriter writer;
 	REQUIRE(source.Write(writer));
 
-	// The reader's table holds the same set — interning guarantees the same
+	// The reader's table holds the same set - interning guarantees the same
 	// column order here, so the *reversed* order below stands in for a process
 	// whose ids ran the other way.
 	Archetype restored(ComponentSet::Intern({place, health}));
@@ -390,7 +390,7 @@ TEST_CASE("a table reads its columns in the writer's order", "[ecs][archetype]")
 
 	// And the same bytes read against the wrong order do not quietly succeed:
 	// `Place` is four bytes and `Health` is four, so this is the narrow case
-	// that *would* have loaded silently wrong before — the values swap.
+	// that *would* have loaded silently wrong before - the values swap.
 	std::vector<ComponentId> reversed(order.rbegin(), order.rend());
 	Archetype confused(ComponentSet::Intern({place, health}));
 	engine::core::ByteReader again(writer.Bytes());

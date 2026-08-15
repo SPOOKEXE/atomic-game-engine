@@ -2,7 +2,7 @@
 
 **The completion checklist.** Work through this before opening a pull request,
 and again when reviewing one. `CONTRIBUTING.md` points here rather than keeping
-a second copy — one checklist, in one place, or the two drift and nobody knows
+a second copy - one checklist, in one place, or the two drift and nobody knows
 which is current.
 
 Written as questions rather than rules, because the useful version of most of
@@ -21,7 +21,7 @@ what it could not verify rather than skipping it quietly.
 None of this needs judgement, so none of it is worth a reviewer's attention.
 Get it green first.
 
-- [ ] **`just format`** — and check whether it changed anything. A
+- [ ] **`just format`** - and check whether it changed anything. A
       formatting-only diff mixed into a behavioural change is what makes a
       review hard to read.
 
@@ -31,10 +31,10 @@ Get it green first.
 - [ ] **Both presets configure and build.** `dev` builds everything; `server`
       builds with no client at all. A `client`-tier dependency that a `shared`
       module picked up by accident only fails in the second one.
-- [ ] **Every test passes, in both.** `ctest`, not `just test` — the cache is
+- [ ] **Every test passes, in both.** `ctest`, not `just test` - the cache is
       an optimisation for the inner loop, not something a pull request should
       rely on.
-- [ ] **`just check-server-is-headless`** — fails if the staged `server/`
+- [ ] **`just check-server-is-headless`** - fails if the staged `server/`
       directory has grown a `shaders/` folder.
 - [ ] **The `ci` preset builds.** That is `dev` with warnings fatal.
 
@@ -73,7 +73,7 @@ cmake --preset ci && cmake --build .cache/build/ci -j
       deliberate widening, not a convenience.
 - [ ] **Is anything identified by a number that leaves the process?** A
       component id, an enum value, an asset key. If it reaches a file, a wire
-      format or a manifest, the string is the contract — `core::Name` interns
+      format or a manifest, the string is the contract - `core::Name` interns
       it, and `Id()` is session-local.
 - [ ] **Is a new leaf library in `mono.engine/` when it depends on nothing?**
       Only once there are three of them; one leaf is a module.
@@ -119,7 +119,7 @@ cmake --preset ci && cmake --build .cache/build/ci -j
       notice.
 - [ ] **Is instrumentation itself in the measurement?** A reserve, a
       reallocation or a log line inside the timed region distorts what it
-      reports. A diagnostic helper called from a system counts — `CountMatching`
+      reports. A diagnostic helper called from a system counts - `CountMatching`
       once built a query per call and was the most expensive thing in the
       server's tick. It caches its query now, but the shape recurs: a helper
       that is cheap to call once is not automatically cheap to call per tick.
@@ -139,7 +139,7 @@ cmake --preset ci && cmake --build .cache/build/ci -j
 - [ ] **Is the interesting case covered, or only the easy one?** Empty, one,
       many, wrong.
 - [ ] **Is every code path you added reachable from a test?** Not line
-      coverage as a number — the branches. An error path with no test is an
+      coverage as a number - the branches. An error path with no test is an
       error path that has never run.
 - [ ] **Does the file have a `TEST_SUITE_ID`?** The runner cannot see it
       otherwise, and it will be silently skipped.
@@ -167,18 +167,18 @@ The questions that have no build step behind them. They are last because they
 are the easiest to skip and the most expensive to leave, and a reviewer will ask
 them whether or not you did.
 
-- [ ] **Can you improve it further?** Not "is it finished" — is there a version
+- [ ] **Can you improve it further?** Not "is it finished" - is there a version
       of this you would rather maintain. Ask it once, honestly, before you stop.
       The answer is often no, and asking still costs a minute.
 - [ ] **Is anything named generically?** `data`, `info`, `manager`, `handler`,
       `value`, `temp`, `result`, `process`, `util`. A name that would fit
       anywhere describes nothing. `deltaSeconds`, not `dt`; `instanceCount`, not
-      `n`; and units in the name where there are units — `FrameMilliseconds`,
+      `n`; and units in the name where there are units - `FrameMilliseconds`,
       `StartNanoseconds`. A number whose unit you have to look up will
       eventually be added to one in a different unit.
 - [ ] **Is there dead code to remove?** An unreachable branch, a parameter
       nobody passes, a function with no callers, a commented-out block, an
-      option that does nothing. Delete it — git has it. Dead code is read as
+      option that does nothing. Delete it - git has it. Dead code is read as
       live by everybody who comes after you, including the next model.
 - [ ] **Should this file be more than one file?** If you cannot say what a file
       is *for* in one sentence, it is doing two jobs. The same applies to a
@@ -197,7 +197,7 @@ Specific, and all of them appear in code that compiles and passes:
 - [ ] `new`/`delete` where a value, a `unique_ptr` or a container works.
 - [ ] Owning raw pointers. A raw pointer is a non-owning observer; anything
       else says so in the type.
-- [ ] A reference or `string_view` outliving what it points at — returning one
+- [ ] A reference or `string_view` outliving what it points at - returning one
       to a local, or storing one whose owner is a temporary. `FrameSpan::Name`
       is a `string_view` and only ever a literal *because* of this.
 - [ ] Passing a large type by value in a hot path, or by `const&` when it is
@@ -206,7 +206,7 @@ Specific, and all of them appear in code that compiles and passes:
 - [ ] Signed/unsigned comparison, narrowing without a cast, or `int` where the
       value is an index into something that could exceed 2^31.
 - [ ] A `static` non-trivial global. Initialisation order across translation
-      units is unspecified — use a function-local static, which is also
+      units is unspecified - use a function-local static, which is also
       thread-safe on first use.
 - [ ] A `#include` in a public header that only the `.cpp` needs. Forward
       declare instead; `Renderer.hpp` names `struct SDL_Window;` for this
@@ -214,7 +214,7 @@ Specific, and all of them appear in code that compiles and passes:
 - [ ] A macro where a `constexpr`, an `inline` function or a template works.
       The profiling macros exist because they need `__LINE__` and a scope; that
       is the bar.
-- [ ] Undefined behaviour you are relying on because it happens to work — signed
+- [ ] Undefined behaviour you are relying on because it happens to work - signed
       overflow, strict aliasing, reading an uninitialised value, out-of-bounds
       by one. "It works on this compiler" means the optimiser has not yet
       noticed.
@@ -222,13 +222,13 @@ Specific, and all of them appear in code that compiles and passes:
 ### Negative general practices
 
 - [ ] A magic number with no name and no comment saying where it came from.
-- [ ] An error swallowed — a return value ignored, a failure logged and then
+- [ ] An error swallowed - a return value ignored, a failure logged and then
       continued past as though it had not happened.
 - [ ] A `TODO` with no version or owner. `TODO(v0.5):` is a plan; `TODO:` is a
       wish.
 - [ ] A comment that restates the line instead of explaining the decision.
 - [ ] Copy-paste with one thing changed, where the difference should have been
-      a parameter — or worse, where it should not have been copied at all.
+      a parameter - or worse, where it should not have been copied at all.
 - [ ] A test written after the fact that passes whether or not the code is
       right.
 
@@ -249,10 +249,10 @@ Specific, and all of them appear in code that compiles and passes:
 - [ ] **Does the pull request say what you did not do?** A change that names
       its own gaps is easier to trust than one that mentions none.
 - [ ] **Are the numbers attributed?** A frame time is meaningless without the
-      preset it came from — `dev` builds first-party code at `-O0` on purpose,
+      preset it came from - `dev` builds first-party code at `-O0` on purpose,
       and the gap to `release` is over an order of magnitude.
 - [ ] **Is anything reported as passing that was not actually run?** If a step
-      could not run — no GPU, a missing tool — say that. A confident wrong
+      could not run - no GPU, a missing tool - say that. A confident wrong
       report is the most expensive thing this checklist exists to prevent.
 
 ---
@@ -260,6 +260,6 @@ Specific, and all of them appear in code that compiles and passes:
 ## The one that matters most
 
 **Would you be able to explain this change, out loud, to somebody who has not
-read it?** If the honest answer is no — because it was generated, or copied, or
-arrived at by trying things until the tests passed — it is not ready, whatever
+read it?** If the honest answer is no - because it was generated, or copied, or
+arrived at by trying things until the tests passed - it is not ready, whatever
 the tests say.

@@ -242,7 +242,7 @@ TEST_CASE("a truncated file is refused", "[audio][wav]") {
 	const std::vector<std::byte> whole = builder.Build();
 
 	// Cut at every length short of the whole. None of them may produce a
-	// buffer, and none may read out of bounds — which is what the sanitiser
+	// buffer, and none may read out of bounds - which is what the sanitiser
 	// build is for.
 	for (size_t length = 0; length < whole.size(); ++length) {
 		const std::vector<std::byte> partial(whole.begin(), whole.begin() + static_cast<ptrdiff_t>(length));
@@ -390,7 +390,7 @@ TEST_CASE("a chunk header split across the end of the file stops the walk", "[au
 	WavBuilder::PutTag(file, "LIST");
 
 	// The data already parsed, so this decodes what it has rather than
-	// refusing — a trailing scrap is not a reason to drop a valid sound.
+	// refusing - a trailing scrap is not a reason to drop a valid sound.
 	const auto decoded = DecodeWav(file);
 	REQUIRE(decoded.has_value());
 	CHECK(decoded->Frames() == 2);

@@ -90,7 +90,7 @@ TEST_CASE("an imported file is named by its own hash", "[cdn]") {
 	REQUIRE_FALSE(report->Duplicate);
 	REQUIRE(std::filesystem::exists(report->Stored));
 
-	// `<hash><extension>` — the hash is what makes the two folders line up, and
+	// `<hash><extension>` - the hash is what makes the two folders line up, and
 	// the extension is what keeps the folder readable.
 	REQUIRE(report->Stored.filename().string() == report->Hash + ".png");
 	REQUIRE(report->Hash.size() == 64);
@@ -104,7 +104,7 @@ TEST_CASE("an imported file is named by its own hash", "[cdn]") {
 
 	// **Two files with the same bytes and different names are one file.** That
 	// is what content addressing means and it is worth pinning, because the
-	// alternative — a suffix — would be a worse hash.
+	// alternative - a suffix - would be a worse hash.
 	const std::filesystem::path twin = WriteFile(scratch.Path / "incoming" / "other.png", "pixels");
 	const auto copy = cdn::ImportFile(paths, twin, 1002);
 	REQUIRE(copy.has_value());
@@ -184,8 +184,8 @@ TEST_CASE("publishing the baked folder fills the processed one", "[cdn]") {
 	REQUIRE(cdn::ImportFile(paths, WriteFile(scratch.Path / "in" / "b.txt", "beta"), 2).has_value());
 
 	// **`baked/` is what gets published, and nothing here fills it.** A baker is
-	// `Engine::bake`'s decoders and this module must not link one — `AGENTS.md`
-	// — so the suite plays the part `contentimport` and the studio play, which
+	// `Engine::bake`'s decoders and this module must not link one - `AGENTS.md`
+	// - so the suite plays the part `contentimport` and the studio play, which
 	// is to put the runtime forms there. Copying is enough: what is *in* them is
 	// the baker's problem and not this module's.
 	REQUIRE(cdn::EnsureLocalStore(paths));
@@ -193,7 +193,7 @@ TEST_CASE("publishing the baked folder fills the processed one", "[cdn]") {
 	WriteFile(paths.Baked / "b.txt", "beta");
 
 	// **The key is the caller's**, because a store on disk has no business
-	// holding one — a key beside the content it signs is a key that signs
+	// holding one - a key beside the content it signs is a key that signs
 	// anything anybody drops there.
 	std::array<std::byte, 32> seed{};
 	seed.fill(std::byte{7});
@@ -207,7 +207,7 @@ TEST_CASE("publishing the baked folder fills the processed one", "[cdn]") {
 	REQUIRE_FALSE(std::filesystem::is_empty(paths.Processed));
 
 	// The publish is logged beside the imports, with the manifest root as its
-	// hash — which is what makes "which publish is this store" answerable.
+	// hash - which is what makes "which publish is this store" answerable.
 	const std::vector<cdn::LogEntry> entries = cdn::ReadLog(paths);
 	REQUIRE(entries.size() == 3);
 	REQUIRE(entries[2].Action == "publish");
@@ -217,7 +217,7 @@ TEST_CASE("publishing the baked folder fills the processed one", "[cdn]") {
 // --- listing the store, added at v0.10 ----------------------------------------
 //
 // **What the assets panel and the mesh picker both read.** The panel used to
-// list the *log*, whose subjects are the paths files came from — so most of what
+// list the *log*, whose subjects are the paths files came from - so most of what
 // it showed was somewhere else on the disk and some of it no longer existed.
 // These two are the store describing itself.
 
@@ -260,14 +260,14 @@ TEST_CASE("a file dropped into raw by hand is still listed", "[cdn]") {
 	const std::vector<cdn::RawEntry> raw = cdn::RawContents(paths);
 	REQUIRE(raw.size() == 1);
 
-	// With no log line, the file name is the best label there is — and it is
+	// With no log line, the file name is the best label there is - and it is
 	// the honest one rather than a blank.
 	CHECK(raw[0].Original == "deadbeef.png");
 }
 
 TEST_CASE("a tree under raw is listed and labelled by its path", "[cdn]") {
 	// **`cdn::Publish` walks `raw/` recursively and names by relative path**, so
-	// a tree there has always been publishable — and v0.10's material import is
+	// a tree there has always been publishable - and v0.10's material import is
 	// the first thing that writes one, because a material has to *name* its
 	// texture and `ImportFile`'s hash rename gives it no name to write. The
 	// listing was not recursive, so a store full of materials read as empty.
@@ -282,7 +282,7 @@ TEST_CASE("a tree under raw is listed and labelled by its path", "[cdn]") {
 	REQUIRE(raw.size() == 2);
 
 	// **The path relative to `raw/`, not the file name**, because that is what
-	// the publisher will call it — and two materials in different source folders
+	// the publisher will call it - and two materials in different source folders
 	// routinely share a leaf.
 	std::vector<std::string> names;
 	for (const cdn::RawEntry &entry : raw) {
@@ -307,7 +307,7 @@ TEST_CASE("publishing an unbaked store is refused rather than emptied", "[cdn]")
 	// **A wholly empty store is refused too, and by something else.** The guard
 	// above only fires when `raw/` has content; a store with neither is stopped
 	// one layer down by `cdn::Publish`, which refuses a publication with nothing
-	// in it — `AGENTS.md`: "a null publish is refused", because an origin with
+	// in it - `AGENTS.md`: "a null publish is refused", because an origin with
 	// nothing to serve should refuse requests rather than serve nothing. Checked
 	// here so the two refusals are not confused for one.
 	const Scratch fresh("unbaked-empty");
@@ -321,7 +321,7 @@ TEST_CASE("an asset is found in baked before raw", "[cdn]") {
 	// content.** Every preview in the editor read `raw/<name>`, with a comment
 	// saying that held because the publisher walked `raw/`. The day it walked
 	// `baked/`, every published name resolved to a file that was not there and
-	// each one quietly became "no local pixels" — a store full of assets showing
+	// each one quietly became "no local pixels" - a store full of assets showing
 	// a grid of empty boxes, with nothing logged and nothing to grep for.
 	const Scratch scratch("find");
 	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
@@ -335,7 +335,7 @@ TEST_CASE("an asset is found in baked before raw", "[cdn]") {
 	CHECK(cdn::FindInStore(paths, "sheet.atex") == paths.Baked / "sheet.atex");
 
 	// A raw listing's name is a path under `raw/`, and both reach the same
-	// caller — a picker showing either half.
+	// caller - a picker showing either half.
 	CHECK(cdn::FindInStore(paths, "sheet.png") == paths.Raw / "sheet.png");
 
 	// **`baked/` wins when both have the name**, because that is the one a
@@ -345,7 +345,7 @@ TEST_CASE("an asset is found in baked before raw", "[cdn]") {
 	WriteFile(paths.Baked / "both.atex", "fresh");
 	CHECK(cdn::FindInStore(paths, "both.atex") == paths.Baked / "both.atex");
 
-	// Nothing anywhere is an empty path rather than a plausible one — the honest
+	// Nothing anywhere is an empty path rather than a plausible one - the honest
 	// answer for an asset published from another machine.
 	CHECK(cdn::FindInStore(paths, "absent.atex").empty());
 	CHECK(cdn::FindInStore(paths, "").empty());
@@ -400,7 +400,7 @@ TEST_CASE("the published listing gives the names and kinds a scene writes", "[cd
 	const std::vector<cdn::PublishedEntry> published = cdn::PublishedContents(paths);
 	REQUIRE(published.size() == 3);
 
-	// **Name order**, which is what a picker wants — and sorted here rather
+	// **Name order**, which is what a picker wants - and sorted here rather
 	// than relied upon, because the manifest happening to be sorted is a
 	// property of the publisher and not of the format.
 	CHECK(published[0].Name == "grass.atex");
@@ -420,7 +420,7 @@ TEST_CASE("the published listing gives the names and kinds a scene writes", "[cd
 
 TEST_CASE("a model's texture is followed through the import log", "[cdn]") {
 	// **The link importing destroys, put back.** A `.pmx` names its sheets
-	// relative to the folder it was authored in — `tex/skin.png` — and
+	// relative to the folder it was authored in - `tex/skin.png` - and
 	// `ImportFile` renames every file to `<hash><extension>` in one flat
 	// directory. After that the folder cannot say that a particular `<hash>.png`
 	// is the model's `tex/skin.png`, so a bake joins the reference lexically,
@@ -451,7 +451,7 @@ TEST_CASE("a model's texture is followed through the import log", "[cdn]") {
 	const std::string stored = modelReport->Stored.filename().string();
 
 	// **The extension comes from the original**, so the answer names a file that
-	// is actually in `raw/` — `BakedName` is applied by the caller and turns this
+	// is actually in `raw/` - `BakedName` is applied by the caller and turns this
 	// into the `.atex` the manifest carries.
 	std::string out;
 	REQUIRE(resolve(stored, "tex/skin.png", out));
@@ -461,8 +461,8 @@ TEST_CASE("a model's texture is followed through the import log", "[cdn]") {
 	REQUIRE(resolve(stored, "tex/hair.png", out));
 	CHECK(out == hairReport->Hash + ".png");
 
-	// **A reference up and out of the model's own folder is ordinary** — shared
-	// sheets live one level up all the time — so the join is normalised rather
+	// **A reference up and out of the model's own folder is ordinary** - shared
+	// sheets live one level up all the time - so the join is normalised rather
 	// than taken literally. `character/tex/../tex/skin.png` is `tex/skin.png`.
 	REQUIRE(resolve(stored, "tex/../tex/skin.png", out));
 	CHECK(out == skinReport->Hash + ".png");
@@ -487,7 +487,7 @@ TEST_CASE("an unresolvable texture is refused rather than guessed", "[cdn]") {
 	// The sheet was never imported, so nothing can place it.
 	CHECK_FALSE(resolve(imported->Stored.filename().string(), "tex/skin.png", out));
 
-	// And a model that is not in the log at all — dropped into `raw/` by hand —
+	// And a model that is not in the log at all - dropped into `raw/` by hand -
 	// cannot be placed either. That is a `false` rather than a guess: the folder
 	// is the index, and the log only ever labels.
 	CHECK_FALSE(resolve("deadbeef.pmx", "tex/skin.png", out));
@@ -501,7 +501,7 @@ TEST_CASE("an empty file is refused rather than stored", "[cdn]") {
 
 	// **The whole of D00034 in one case.** An empty file hashes to BLAKE3's
 	// empty-input digest, writes a zero-byte `raw/` entry, and bakes to nothing
-	// — so the store's raw and baked counts differ by one for ever with no line
+	// - so the store's raw and baked counts differ by one for ever with no line
 	// anywhere naming it. This repository's own store carried exactly that for a
 	// version: a `.lock` from inside a Python virtualenv, swept along by a
 	// folder import of a model.

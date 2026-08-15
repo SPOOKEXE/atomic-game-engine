@@ -131,8 +131,8 @@ TEST_CASE("a tagged advert authenticates only under the key that made it", "[net
 	CHECK(decoded->Authenticated);
 	CHECK(decoded->Session.Admits == Access::Private);
 
-	// A browser holding the wrong key still sees the session — it has to, or
-	// the person about to be given the key never learns it exists — and does
+	// A browser holding the wrong key still sees the session - it has to, or
+	// the person about to be given the key never learns it exists - and does
 	// not believe it.
 	std::vector<SessionKey> wrong;
 	wrong.push_back(Key("not the passphrase"));
@@ -165,7 +165,7 @@ TEST_CASE("a tag commits to every field of the advert", "[network][advert]") {
 	std::vector<SessionKey> holding;
 	holding.push_back(Key("the passphrase"));
 
-	// Flip a byte in the middle of the body — the player count, as it happens.
+	// Flip a byte in the middle of the body - the player count, as it happens.
 	// Whatever it lands on, the tag stops verifying, which is the property that
 	// makes an announcement worth trusting at all.
 	for (size_t index = 8; index + SessionKey::TAG_BYTES < datagram.size(); index += 7) {
@@ -191,7 +191,7 @@ TEST_CASE("hostile bytes are refused whole", "[network][advert]") {
 	}
 
 	// A wrong magic, which is what every other datagram on the discovery port
-	// is — including this module's own rendezvous messages.
+	// is - including this module's own rendezvous messages.
 	std::vector<std::byte> foreign = good;
 	foreign[0] = static_cast<std::byte>(0x00);
 	CHECK_FALSE(network::Decode(foreign, {}).has_value());

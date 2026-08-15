@@ -27,7 +27,7 @@ namespace engine::render {
 	}
 
 	void OverlayImage::Clear() {
-		// Clearing a clean image is nothing — the buffer is already zero — and
+		// Clearing a clean image is nothing - the buffer is already zero - and
 		// it must stay nothing, because the region below is what still has to
 		// reach the GPU.
 		//
@@ -44,7 +44,7 @@ namespace engine::render {
 		//
 		// **Painted means the dirty rectangle *or* the last uploaded one, and
 		// getting that wrong is what stopped the panels clearing.** The obvious
-		// invariant — everything outside the dirty rectangle is zero — is false,
+		// invariant - everything outside the dirty rectangle is zero - is false,
 		// and `MarkUploaded` is why: it empties the dirty rectangle without
 		// touching a pixel, which is correct, because at that moment the image
 		// and the texture agree and neither is wrong. So on the next frame the
@@ -60,7 +60,7 @@ namespace engine::render {
 		//
 		// The old shape zeroed the entire image. On a 4K display that is
 		// thirty-three megabytes of memory traffic per frame to erase two
-		// panels that cover a fraction of it — and it is why the panels
+		// panels that cover a fraction of it - and it is why the panels
 		// measured fifteen times slower at 4K than at 1080p for four times the
 		// pixels. The union is still bounded by what has been drawn rather than
 		// by the size of the display it is drawn on, so that saving stands.
@@ -93,7 +93,7 @@ namespace engine::render {
 		}
 
 		// The uploaded region is left exactly as it was. It records what the GPU
-		// is *showing*, and clearing this image does not change that — the
+		// is *showing*, and clearing this image does not change that - the
 		// texture goes on holding the last picture sent to it until an upload
 		// covering those pixels says otherwise, which is what UploadRegion is
 		// for. Anything this image had painted and not yet sent never reached
@@ -232,7 +232,7 @@ namespace engine::render {
 		// An opaque source is a store, not a blend. Every glyph in the debug
 		// panels is drawn at full alpha, and the general path below spends four
 		// multiplies and four divides per pixel arriving at the source colour it
-		// started with — `(c * 255 + 0 + 127) / 255` is `c` for every c in 0..255,
+		// started with - `(c * 255 + 0 + 127) / 255` is `c` for every c in 0..255,
 		// exactly, so this is the same bytes by a shorter route.
 		if (alpha == 255) {
 			for (int row = top; row < bottom; row++) {
@@ -269,7 +269,7 @@ namespace engine::render {
 				// **The same rounding as the three above, and that is the whole
 				// point of writing it in this shape.** Alpha used to be
 				// `source + pixel[3] * inverse / 255`, which truncates where the
-				// colours round — so the two could land a step apart and produce
+				// colours round - so the two could land a step apart and produce
 				// a channel larger than the alpha carrying it. Premultiplied
 				// storage has no such pixel: `(R=100, A=100)` under red at alpha
 				// 128 came out `R=178, A=177`, which the GPU's

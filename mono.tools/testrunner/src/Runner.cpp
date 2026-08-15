@@ -47,8 +47,8 @@ namespace testrunner {
 
 		// The module a suite belongs to, or empty when it does not sit in one.
 		//
-		// Every library in this repository is `<area>/{src,include,tests}` —
-		// `mono_add_library` requires it — so the directory holding the `tests`
+		// Every library in this repository is `<area>/{src,include,tests}` -
+		// `mono_add_library` requires it - so the directory holding the `tests`
 		// folder a suite's source is under is the module it tests.
 		fs::path ModuleOf(const fs::path &source) {
 			for (fs::path directory = source.parent_path(); directory.has_relative_path();
@@ -64,8 +64,8 @@ namespace testrunner {
 		//
 		// **This is the half a header closure cannot see, and without it the
 		// cascade was blind to the thing it is asked about most.** A suite is
-		// signed over its own translation unit's `.d` closure — the test file
-		// and the headers it includes — and a module's `src/*.cpp` is in no
+		// signed over its own translation unit's `.d` closure - the test file
+		// and the headers it includes - and a module's `src/*.cpp` is in no
 		// test's closure, because a test includes the header and links the
 		// object. So editing an implementation and nothing else moved no
 		// signature at all: `just test` re-ran nothing, and the one thing it is
@@ -76,7 +76,7 @@ namespace testrunner {
 		// process per binary and a walk of every vendor source in the graph;
 		// this is a `readdir` of two directories, and the cost of it being
 		// coarse is a suite that occasionally re-runs when a sibling file it
-		// does not use changed. Over-running is the safe direction — the whole
+		// does not use changed. Over-running is the safe direction - the whole
 		// point of the tool is that under-running is silent.
 		//
 		// Cross-module reach is `TEST_DEPENDS`, and it works now for the same
@@ -312,7 +312,7 @@ namespace testrunner {
 			const auto closure = closures.find(suite.Source);
 			std::vector<std::string> digests;
 			if (closure == closures.end()) {
-				// No dependency data for this translation unit — a fresh build
+				// No dependency data for this translation unit - a fresh build
 				// tree, or a generator that is not Ninja. Falling back to the
 				// source alone under-covers, so it is reported.
 				warnings.push_back("no header closure for '" + id + "'; hashing its source only");

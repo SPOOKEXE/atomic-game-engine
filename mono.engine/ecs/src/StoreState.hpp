@@ -4,7 +4,7 @@
 // that move rows around inside it.
 //
 // Private, because it is the layout. `Store`'s public header promises what a
-// world can do; this is how, and it is expected to change — see `ecs/AGENTS.md`
+// world can do; this is how, and it is expected to change - see `ecs/AGENTS.md`
 // on everything public here being a migration cost.
 //
 // The primitives at the bottom are free functions rather than members of
@@ -32,6 +32,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace engine::ecs {
@@ -43,7 +44,7 @@ namespace engine::ecs {
 	// Kept here rather than on `Entity`, which says so itself: reading the
 	// layout from outside the store is how code starts depending on it. The
 	// generation is in the high bits and starts at one, so no live entity is
-	// ever all-zero — which is the null handle.
+	// ever all-zero - which is the null handle.
 	struct EntityId {
 		// The index into the directory.
 		uint32_t Index = 0;
@@ -128,8 +129,8 @@ namespace engine::ecs {
 	// A world's resources, keyed by component id.
 	//
 	// **A sorted vector rather than a hash map.** A world holds a handful of
-	// resources and reads several of them on every tick and every barrier —
-	// the clock, the outbox, the inbox, the budget — so this is one of the
+	// resources and reads several of them on every tick and every barrier -
+	// the clock, the outbox, the inbox, the budget - so this is one of the
 	// hottest lookups in the engine. Hashing a four-byte key to find one of
 	// five entries costs more than a binary search over five, and a node-based
 	// map also charges a world one allocation per resource where this charges
@@ -137,7 +138,7 @@ namespace engine::ecs {
 	// that matter.
 	//
 	// Kept sorted by id so the search is a `lower_bound` and so iteration is in
-	// a defined order — which a snapshot needs, though it sorts by name rather
+	// a defined order - which a snapshot needs, though it sorts by name rather
 	// than by id for a reason of its own.
 	//
 	// @since v0.2
@@ -249,7 +250,7 @@ namespace engine::ecs {
 			uint32_t Table = 0;
 
 			// Where each term's column sits in that table, in the *caller's*
-			// term order rather than sorted order — so the iteration code can
+			// term order rather than sorted order - so the iteration code can
 			// index it directly by parameter position.
 			std::vector<size_t> Positions;
 		};
@@ -265,7 +266,7 @@ namespace engine::ecs {
 	// Everything one world owns.
 	struct StoreState {
 		// The tables. A deque so that a reference to one survives another being
-		// created — a query plan holds indices, but the flush path holds
+		// created - a query plan holds indices, but the flush path holds
 		// references across an append.
 		std::deque<Archetype> Tables;
 
@@ -296,14 +297,14 @@ namespace engine::ecs {
 		//
 		// **The one signal in the engine that is not deferred, and the only one
 		// that cannot be.** Its whole contract is that the handler is called
-		// while the thing is still there — which a queue drained at the next
+		// while the thing is still there - which a queue drained at the next
 		// barrier cannot offer, because by then it has gone.
 		std::function<void(Entity, Entity)> BeforeRemoving;
 
 		// Whether a removal is already being announced.
 		//
 		// A handler may destroy or reparent something, and `DestroyInstance`
-		// unparents every row on its way out — so without this the announcement
+		// unparents every row on its way out - so without this the announcement
 		// of one removal would announce the removals it causes, and a handler
 		// that moved what it was told about would not stop.
 		bool Removing = false;
@@ -316,7 +317,7 @@ namespace engine::ecs {
 		// World-scoped values, one per type.
 		//
 		// A map of single-row columns rather than a row on a hidden entity.
-		// That is what makes a resource structurally invisible to a query —
+		// That is what makes a resource structurally invisible to a query -
 		// with a hidden entity it was invisible only because somebody
 		// remembered to disable it.
 		ResourceTable Resources;
@@ -336,13 +337,23 @@ namespace engine::ecs {
 		// So a refusal is reported once rather than once per attempt.
 		bool WarnedAboutMinting = false;
 
+		// Instances an author may not destroy or reparent. See
+		// `Store::Protect`.
+		//
+		// **Keyed on the whole handle rather than the index**, so a protected
+		// entity that is destroyed by the engine and whose slot is reused does
+		// not leave the next occupant protected. A set rather than a column:
+		// there are nine of these in a world and a column would put a byte on
+		// every archetype that holds one.
+		std::unordered_set<uint64_t> Protected;
+
 		// Component types whose writes are recorded, and the coarse counter a
 		// batch write still moves.
 		//
 		// **Only ever changed through `WatchComponent`**, which bumps the epoch
 		// beside it. Observing a component changes which tables carry a
 		// `DirtyBits` column and therefore where a transition should land, so a
-		// cached archetype edge taken before it is not merely stale — it points
+		// cached archetype edge taken before it is not merely stale - it points
 		// at a table that does not track changes, and a write through it would
 		// go unreported. The epoch is what `ArchetypeEdges` checks.
 		std::vector<ComponentId> Watched;
@@ -355,7 +366,7 @@ namespace engine::ecs {
 			ComponentId Subject;
 
 			// What `Connection` names, so a disconnect is a search for a number
-			// rather than for a callable — two `std::function`s are not
+			// rather than for a callable - two `std::function`s are not
 			// comparable and never will be.
 			uint64_t Id = 0;
 
@@ -381,8 +392,8 @@ namespace engine::ecs {
 	};
 
 	// None of what follows checks thread affinity. That belongs at the call the
-	// caller actually made — `Store::DestroyInstance` is one abort site, not one
-	// per row it touches — and a check inside a primitive would be able to fire
+	// caller actually made - `Store::DestroyInstance` is one abort site, not one
+	// per row it touches - and a check inside a primitive would be able to fire
 	// from the middle of a half-applied structural change.
 
 	// The table for a set, creating it when this world has not needed one.
@@ -397,7 +408,7 @@ namespace engine::ecs {
 	//
 	// The only way `Watched` is added to. A second one would eventually be a
 	// second one that forgot the epoch, and the symptom of that is a change
-	// nothing reports rather than a crash — see the note on `Watched` itself.
+	// nothing reports rather than a crash - see the note on `Watched` itself.
 	//
 	// @param state The world to observe in.
 	// @param id    The component whose writes to record.

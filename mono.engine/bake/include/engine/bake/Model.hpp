@@ -36,7 +36,7 @@ namespace engine::bake {
 		// nothing. Unique within one import.
 		std::string Name;
 
-		// The image file, still in whatever format it was embedded as — PNG or
+		// The image file, still in whatever format it was embedded as - PNG or
 		// JPEG in practice. Undecoded on purpose: `ReadImage` is the one place
 		// that decides what an image is.
 		std::vector<std::byte> Bytes;
@@ -62,7 +62,7 @@ namespace engine::bake {
 
 	// Identifies a format from the leading bytes.
 	//
-	// **OBJ is never the answer**, because it has no signature — it is a text
+	// **OBJ is never the answer**, because it has no signature - it is a text
 	// file whose first line may be a comment. `ModelFormatOfName` is what
 	// recognises one, and that asymmetry is stated rather than papered over
 	// with a heuristic that would misfire on a stray text file.
@@ -106,12 +106,12 @@ namespace engine::bake {
 	//
 	// **The step that makes an imported model usable at all.** A PMX character
 	// is about twenty units tall, a glTF one is about two, and an OBJ is
-	// whatever its author's grid was — so a scene that placed them together
+	// whatever its author's grid was - so a scene that placed them together
 	// would have one filling the sky. Fitting is uniform, so nothing is
 	// stretched, and the recentre is what makes a part's `CFrame` mean the
 	// middle of the thing rather than wherever its author left the origin.
 	//
-	// A degenerate mesh — every vertex at one point — is left alone rather than
+	// A degenerate mesh - every vertex at one point - is left alone rather than
 	// scaled by infinity.
 	//
 	// @param mesh The mesh, changed in place. Bounds are recomputed.
@@ -124,7 +124,7 @@ namespace engine::bake {
 	//
 	// **Area-weighted rather than face-count-weighted**, because a fan of
 	// slivers at one corner would otherwise outvote the two large faces the
-	// corner actually belongs to — which shows up as a dark crease along an
+	// corner actually belongs to - which shows up as a dark crease along an
 	// edge that should be flat.
 	//
 	// Only useful for a model that arrived without normals, or one whose

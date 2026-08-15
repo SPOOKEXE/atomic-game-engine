@@ -103,7 +103,7 @@ namespace studio {
 			// **A name is required and the rest is not.** Everything else has a
 			// sensible default; a plugin with no name is a row in a list nobody
 			// can identify, and a list of "(unnamed)" is worse than a refusal.
-			error = "no 'name' — this is not a plugin manifest";
+			error = "no 'name' - this is not a plugin manifest";
 			return false;
 		}
 
@@ -147,7 +147,7 @@ namespace studio {
 		}
 
 		// Sorted, because a directory walk is not ordered and plugins run in
-		// this order — one may build on what another left in the world.
+		// this order - one may build on what another left in the world.
 		std::sort(folders.begin(), folders.end());
 
 		for (const std::filesystem::path &folder : folders) {
@@ -218,7 +218,7 @@ namespace studio {
 
 			// **A runtime each**, so one plugin cannot see another's globals or
 			// spend another's step budget. The role says this is a studio, which
-			// is what `RunService:IsStudio()` reads — a plugin is not a game
+			// is what `RunService:IsStudio()` reads - a plugin is not a game
 			// server and should not think it is.
 			engine::script::RuntimeLimits limits;
 			limits.Role.Server = false;
@@ -232,7 +232,7 @@ namespace studio {
 			}
 
 			// **Before the entry script**, because a plugin's top level is where
-			// it creates its toolbar — a host set afterwards would be a global
+			// it creates its toolbar - a host set afterwards would be a global
 			// the chunk had already failed to find.
 			//
 			// The surface holds a reference to `plugin`, so it is stored beside
@@ -369,7 +369,7 @@ namespace studio {
 		// micro-optimisation: a tag written every frame moves
 		// `Store::ChangeVersion` every frame, and `physics::SyncBroadphase`
 		// reads that counter to decide whether static geometry moved. Publishing
-		// unconditionally would rebuild the static index every tick, forever —
+		// unconditionally would rebuild the static index every tick, forever -
 		// the exact failure `physics/AGENTS.md` names.
 		if (wanted == PublishedSelection) {
 			return;
@@ -467,14 +467,14 @@ namespace studio {
 
 				// **The plugin's name in the id and not in the title.** Two
 				// plugins may both call a panel "Settings", and ImGui keys a
-				// window on its whole label — so the id suffix keeps them apart
+				// window on its whole label - so the id suffix keeps them apart
 				// without putting a prefix in front of what a person reads.
 				const std::string label =
 					widget.Title + "###plugin." + plugin.Manifest.Name + "." + widget.Title;
 
 				// **Around `Begin` and `End`, not inside them.** A window's
 				// background is read at `Begin`, so colours pushed within the
-				// window would tint everything in it except the window itself —
+				// window would tint everything in it except the window itself -
 				// which reads as a bug in the theme rather than as a widget that
 				// was coloured wrong. Same bracket the editor's own panels get
 				// from `Editor::Skinned`.
@@ -491,7 +491,7 @@ namespace studio {
 	void Editor::DrawPluginTools() {
 		// **Reload first, and always present.** It is the one control that is
 		// useful when *nothing* is running, which is exactly when somebody is on
-		// this tab — a plugin they have just written and just fixed.
+		// this tab - a plugin they have just written and just fixed.
 		if (ImGui::Button("Reload", ImVec2(84.0f, 0.0f))) {
 			LoadPlugins();
 		}
@@ -511,7 +511,7 @@ namespace studio {
 		for (LoadedPlugin &plugin : Plugins) {
 			// **A stopped plugin's toolbar is not drawn.** Its buttons call
 			// handlers in a runtime that has been torn down, and a button that
-			// looks live and cannot run is worse than one that is not there —
+			// looks live and cannot run is worse than one that is not there -
 			// the Manage panel is where a stopped plugin is explained.
 			if (!plugin.Running) {
 				continue;
@@ -574,8 +574,8 @@ namespace studio {
 		ImGui::TextDisabled("|");
 		ImGui::SameLine();
 		ImGui::TextDisabled(
-			Plugins.empty() ? "no plugins installed — Manage says where they go"
-							: "nothing installed a toolbar — Manage says what is running"
+			Plugins.empty() ? "no plugins installed - Manage says where they go"
+							: "nothing installed a toolbar - Manage says what is running"
 		);
 	}
 
@@ -603,7 +603,7 @@ namespace studio {
 		// **The toolbars are not here any more; they are the ribbon's Plugins
 		// tab.** A toolbar button is pressed while working and this panel is
 		// opened when something is wrong, so the two belong in different places
-		// — and drawing them in both would be two sets of the same buttons that
+		// - and drawing them in both would be two sets of the same buttons that
 		// could disagree about which is active. `DrawPluginTools` is the one.
 
 		if (Plugins.empty()) {
@@ -611,7 +611,7 @@ namespace studio {
 			ImGui::TextWrapped(
 				"A plugin is a folder holding a plugin.json and a script. It runs "
 				"against the scene you are editing, with the same surface a game "
-				"script gets — including World, the ECS underneath."
+				"script gets - including World, the ECS underneath."
 			);
 			ImGui::End();
 			return;
@@ -661,7 +661,7 @@ namespace studio {
 				} else if (!plugin.Manifest.Description.empty()) {
 					ImGui::TextWrapped("%s", plugin.Manifest.Description.c_str());
 				} else {
-					ImGui::TextDisabled("—");
+					ImGui::TextDisabled("-");
 				}
 			}
 			ImGui::EndTable();
@@ -675,7 +675,7 @@ namespace studio {
 	// **One watcher on the log, fanned out here.** `CommandLog` has a single
 	// seam because a log that knew what a plugin was would be a log that knows
 	// what an editor is. Deciding who hears about a waypoint is this class's
-	// job: the plugins, and — when one is open — the team-create edit stream.
+	// job: the plugins, and - when one is open - the team-create edit stream.
 	//
 	// **Every running plugin hears every event, including its own.** Roblox does
 	// the same, and the alternative needs the log to record which plugin made a
@@ -717,7 +717,7 @@ namespace studio {
 		};
 
 		watcher.RecordingFinished = [this](const Recording &recording, FinishOperation operation) {
-			// Name, displayName, identifier, operation — Roblox's order. The
+			// Name, displayName, identifier, operation - Roblox's order. The
 			// operation crosses as its member's name, which is how an
 			// `EnumItem` crosses in the other direction too.
 			const engine::script::HostValue arguments[] = {

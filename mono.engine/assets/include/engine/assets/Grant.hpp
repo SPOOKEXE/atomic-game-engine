@@ -3,7 +3,7 @@
 // Who is allowed to fetch what, and who decides.
 //
 // **The server decides. The origin checks a token and serves.** Two jobs, two
-// programs — CDN.md §4. The server is the only thing that knows the session, the
+// programs - CDN.md §4. The server is the only thing that knows the session, the
 // player, what they have loaded and what they are entitled to; the origin knows
 // none of it and must not learn it. An origin with a player database is a second
 // authority, and two authorities that can disagree eventually do.
@@ -16,7 +16,7 @@
 //
 // - **A MAC rather than a signature.** The origin verifies one per request, and
 //   HMAC-SHA256 is cheap. Ed25519 verification per request would put an
-//   asymmetric operation on the hot path to buy nothing — the server and the
+//   asymmetric operation on the hot path to buy nothing - the server and the
 //   origin are one trust domain. The asymmetric signature is on the *manifest*,
 //   where the trust boundary actually is. Signature.hpp.
 // - **A grant names content hashes, never paths.** A path has to be re-checked
@@ -50,7 +50,7 @@ namespace engine::assets {
 	// The secret a server and its origin share.
 	//
 	// Never sent to a client. Wipes itself on destruction, for the reason
-	// SigningKey does — the floor rather than the ceiling, and a deployment that
+	// SigningKey does - the floor rather than the ceiling, and a deployment that
 	// cares about swap files and core dumps has more to do.
 	class GrantKey {
 	  public:
@@ -123,7 +123,7 @@ namespace engine::assets {
 	// A scope and the MAC that makes it unforgeable.
 	//
 	// Issued by a server, carried by a client, opened by an origin. The client
-	// can read it — none of it is secret — and cannot change a byte of it.
+	// can read it - none of it is secret - and cannot change a byte of it.
 	class Grant {
 	  public:
 		// The token's magic, so a wrong blob fails at its first four bytes.
@@ -133,7 +133,7 @@ namespace engine::assets {
 		// is: a reader that guesses at a version mis-parses hostile bytes.
 		static constexpr uint16_t VERSION = 1;
 
-		// MAC length. The full HMAC-SHA256 output, untruncated — truncation
+		// MAC length. The full HMAC-SHA256 output, untruncated - truncation
 		// saves 16 bytes on a token that is already dwarfed by its bundle list.
 		static constexpr size_t MAC_BYTES = 32;
 
@@ -154,7 +154,7 @@ namespace engine::assets {
 		//
 		// **The MAC is checked before anything in the scope is believed**, and
 		// in constant time. Reading a field out of an unverified token and
-		// acting on it — even to reject it — is how a parser becomes the attack
+		// acting on it - even to reject it - is how a parser becomes the attack
 		// surface the MAC was supposed to remove.
 		//
 		// @param token The bytes a client presented.
@@ -184,7 +184,7 @@ namespace engine::assets {
 		// Whether this grant has expired at `nowSeconds`.
 		//
 		// Asked again after Open because a long-lived connection outlives the
-		// check that admitted it — a stream that started inside the window must
+		// check that admitted it - a stream that started inside the window must
 		// not run indefinitely outside it.
 		//
 		// @param nowSeconds The current time.

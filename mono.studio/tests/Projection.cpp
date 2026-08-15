@@ -2,7 +2,7 @@
 // can reach.
 //
 // **`Projection.hpp` names two traps and this file exists to catch them.** Both
-// are the same shape — an error small enough to look like something else:
+// are the same shape - an error small enough to look like something else:
 //
 //   - projecting the overlay with the *current* camera instead of the one that
 //     made the displayed texture, which looks correct until you move, and
@@ -13,8 +13,8 @@
 // Neither shows up in a screenshot of a stationary camera, which is exactly why
 // they belong here rather than in a look at the studio.
 //
-// The matrices below are built with `scene::ResolveCamera` — the same call the
-// renderer makes — rather than hand-written, because a test against a
+// The matrices below are built with `scene::ResolveCamera` - the same call the
+// renderer makes - rather than hand-written, because a test against a
 // hand-written projection proves the test's arithmetic and not the engine's.
 
 #include <engine/scene/ActiveCamera.hpp>
@@ -79,7 +79,7 @@ TEST_CASE("a point straight ahead lands in the middle of the image", "[studio][p
 
 TEST_CASE("the image rect is what panel space maps onto, not the panel", "[studio][projection]") {
 	// **The trap.** The same camera, the same world point, drawn into a
-	// sub-rect that starts 60 across and 25 down — the projected point has to
+	// sub-rect that starts 60 across and 25 down - the projected point has to
 	// move by exactly that, and a mapping written against the panel does not
 	// move at all.
 	const PanelProjection panel = Panel(Vector3{}, glm::vec2(60.0f, 25.0f));
@@ -100,7 +100,7 @@ TEST_CASE("up in the world is up the panel", "[studio][projection]") {
 	REQUIRE(panel.WorldToPanel(Vector3{0.0f, 1.0f, -10.0f}, high));
 
 	// A panel counts downwards from its top edge and NDC counts upwards from
-	// the centre, so a sign error here is a world drawn upside down — which is
+	// the centre, so a sign error here is a world drawn upside down - which is
 	// obvious in a screenshot and completely invisible in a projected point.
 	CHECK(high.y < low.y);
 	CHECK_THAT(high.x, WithinAbs(low.x, PIXEL));
@@ -190,7 +190,7 @@ TEST_CASE("projecting a point and raying its pixel finds that point again", "[st
 
 TEST_CASE("the aspect ratio is honoured rather than assumed square", "[studio][projection]") {
 	// A wide panel and a tall one, each offset by the same world angle. If the
-	// aspect ratio were dropped, the two would agree — and a world stretched
+	// aspect ratio were dropped, the two would agree - and a world stretched
 	// sideways is the single most common way to get this wrong.
 	const PanelProjection wide = Panel(Vector3{}, glm::vec2(0.0f, 0.0f), glm::vec2(1000.0f, 250.0f));
 	const PanelProjection tall = Panel(Vector3{}, glm::vec2(0.0f, 0.0f), glm::vec2(250.0f, 1000.0f));
@@ -251,7 +251,7 @@ TEST_CASE("a segment crossing behind the camera is clipped, not dropped", "[stud
 	CHECK_THAT(a.x, WithinAbs(front.x, PIXEL));
 	CHECK_THAT(a.y, WithinAbs(front.y, PIXEL));
 
-	// Finite, and within a sane multiple of the panel — the mirrored-ghost bug
+	// Finite, and within a sane multiple of the panel - the mirrored-ghost bug
 	// produces coordinates in the millions and imgui rasterises them as a
 	// stripe across the whole viewport.
 	CHECK(std::isfinite(b.x));
@@ -275,7 +275,7 @@ TEST_CASE("clipping is symmetric in the order the endpoints are given", "[studio
 
 	// **Sub-pixel rather than `TIGHT`.** A clipped endpoint near the near plane
 	// lands thousands of pixels outside the panel, and at that magnitude a
-	// float carries about a hundredth of a pixel of precision — so interpolating
+	// float carries about a hundredth of a pixel of precision - so interpolating
 	// from either end agrees to far less than a pixel and not to 1e-3 absolute.
 	// Asserting the tighter bound would be asserting that floats are exact.
 	CHECK_THAT(a.x, WithinAbs(rb.x, PIXEL));
@@ -304,7 +304,7 @@ TEST_CASE("a point beside the drawn world is not over it", "[studio][projection]
 	CHECK(panel.ContainsPanel(glm::vec2(460.0f, 225.0f)));
 	CHECK(panel.ContainsPanel(glm::vec2(860.0f, 425.0f)));
 
-	// Inside the panel, outside the rect the world was drawn into — which is
+	// Inside the panel, outside the rect the world was drawn into - which is
 	// the region a click must not be treated as pointing at the world.
 	CHECK_FALSE(panel.ContainsPanel(glm::vec2(59.0f, 200.0f)));
 	CHECK_FALSE(panel.ContainsPanel(glm::vec2(861.0f, 200.0f)));
@@ -342,7 +342,7 @@ TEST_CASE("an offset cursor reads an offset distance along the axis", "[studio][
 TEST_CASE("an axis pointing at the eye is refused rather than flung", "[studio][projection]") {
 	// The axis is the ray. Every cursor position maps to a wildly different
 	// distance, and a gizmo that kept dragging here throws the selection off
-	// into the distance — which is the failure this refusal exists to stop.
+	// into the distance - which is the failure this refusal exists to stop.
 	const Ray ray(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, -1.0f});
 
 	float along = 0.0f;
@@ -435,7 +435,7 @@ TEST_CASE("a box reaches to its corner along a slope's normal", "[studio][projec
 
 TEST_CASE("aligning to a surface keeps the facing it can", "[studio][projection]") {
 	// **The handedness is the whole risk here.** `LookVector` is `-Z`, so the
-	// basis's third column is the back — building it the other way round mirrors
+	// basis's third column is the back - building it the other way round mirrors
 	// every part that is dropped, which reads as the model being wrong rather
 	// than the maths, and is invisible on anything symmetrical.
 	const CFrame flat;
@@ -446,7 +446,7 @@ TEST_CASE("aligning to a surface keeps the facing it can", "[studio][projection]
 	CHECK_THAT(same.LookVector().Z, WithinAbs(-1.0f, 0.0005f));
 
 	// A wall facing +X: up becomes +X, and the old facing survives as far as it
-	// can — it was already perpendicular to the new up, so it survives intact.
+	// can - it was already perpendicular to the new up, so it survives intact.
 	const CFrame wall(Vector3{}, studio::AlignedTo(flat, Vector3::XAxis));
 	CHECK_THAT(wall.UpVector().X, WithinAbs(1.0f, 0.0005f));
 	CHECK_THAT(wall.LookVector().Z, WithinAbs(-1.0f, 0.0005f));
@@ -460,7 +460,7 @@ TEST_CASE("aligning to a surface keeps the facing it can", "[studio][projection]
 	CHECK_THAT(crossed.Z, WithinAbs(back.Z, 0.0005f));
 
 	// A part looking straight down at a floor has a facing that says nothing
-	// about the floor's plane, so its right-hand side is used instead — and the
+	// about the floor's plane, so its right-hand side is used instead - and the
 	// answer is still a rotation rather than a degenerate basis.
 	const CFrame looking(Vector3{}, glm::angleAxis(1.5707963f, glm::vec3(1.0f, 0.0f, 0.0f)));
 	const CFrame onFloor(Vector3{}, studio::AlignedTo(looking, Vector3::YAxis));

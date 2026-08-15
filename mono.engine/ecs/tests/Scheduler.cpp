@@ -52,7 +52,7 @@ TEST_CASE("phases run in order regardless of registration order", "[scheduler]")
 // reason. That was true and undeclared, which made it a trap: a reader was told
 // the order they could see meant nothing.
 //
-// Registered in a deliberately unhelpful order — reverse alphabetical, so a
+// Registered in a deliberately unhelpful order - reverse alphabetical, so a
 // scheduler that sorted by name would come out the other way round and a
 // scheduler that grouped by phase alone could come out either.
 TEST_CASE("systems in one phase run in the order they were added", "[scheduler]") {

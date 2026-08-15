@@ -8,11 +8,11 @@ namespace engine::graph {
 		// One plane from a row combination, normalised.
 		//
 		// The normalisation divides all four components by the normal's length,
-		// which is what turns the algebraic inequality into a metric one — so
+		// which is what turns the algebraic inequality into a metric one - so
 		// `SignedDistance` reports metres rather than an arbitrary scale.
 		//
-		// A degenerate row — a projection with a zero field of view, or an
-		// identity matrix where two rows cancel — would divide by zero. Left as
+		// A degenerate row - a projection with a zero field of view, or an
+		// identity matrix where two rows cancel - would divide by zero. Left as
 		// the zero plane instead, which accepts everything: the conservative
 		// direction, and the one that shows up as "culling did nothing" rather
 		// than as a world full of holes.
@@ -66,7 +66,7 @@ namespace engine::graph {
 		for (const Plane &plane : Planes) {
 			// The **positive vertex**: the corner furthest along the inward
 			// normal. If even that corner is outside, every corner is, and the
-			// box is rejected — which is what makes this test never reject
+			// box is rejected - which is what makes this test never reject
 			// something visible.
 			const core::Vector3 furthest{
 				plane.Normal.X >= 0.0f ? box.Maximum.X : box.Minimum.X,

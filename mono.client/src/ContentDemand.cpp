@@ -19,9 +19,9 @@ namespace client {
 
 	void CollectWantedContent(engine::ecs::Store &store, std::vector<engine::core::Name> &out) {
 		// **`Each` over seven component types rather than one batched walk.**
-		// This runs on the content pump and not in the frame — it answers "is
+		// This runs on the content pump and not in the frame - it answers "is
 		// there anything new to ask for", which changes when a scene is authored
-		// or streamed rather than every tick — so the constant factor is not
+		// or streamed rather than every tick - so the constant factor is not
 		// where the cost is. `client::CollectInstances` is the loop that needed
 		// the batched form and it is a different loop.
 		store.Each<engine::scene::Visual>([&out](engine::ecs::Entity, engine::scene::Visual &visual) {
@@ -41,7 +41,7 @@ namespace client {
 				// **Every map a part names, not just its colour.** A normal map
 				// nothing asked for is a texture that never arrives, and the
 				// G-buffer then samples the default for a material that has one
-				// — which looks like the map being wrong rather than missing.
+				// - which looks like the map being wrong rather than missing.
 				Want(out, appearance.ColourMap);
 				Want(out, appearance.NormalMap);
 				Want(out, appearance.RoughnessMap);

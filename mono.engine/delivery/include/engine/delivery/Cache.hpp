@@ -9,7 +9,7 @@
 //
 // **Addressed by asset root, and by nothing else.** A cache keyed on a name
 // would go stale the moment content changed under that name, and would need an
-// invalidation mechanism — which is precisely the subsystem CDN.md §2 says
+// invalidation mechanism - which is precisely the subsystem CDN.md §2 says
 // falls out of the hash tree instead of being built. A content address cannot
 // go stale: different content is a different key, so a new build populates new
 // entries and the old ones age out.
@@ -17,14 +17,14 @@
 // **Bytes are re-verified on read, and that is deliberate even though it costs
 // a hash.** A cache lives in a directory a user, another program or a failing
 // disk can write to, so trusting it is trusting the least protected thing in
-// the delivery path. The alternative — verify on write only — means a single
+// the delivery path. The alternative - verify on write only - means a single
 // flipped bit becomes permanently cached corruption that reproduces on one
 // machine and nowhere else, which is among the worst bugs to be handed. BLAKE3
 // runs at gigabytes a second; the disk read this is paired with does not.
 //
 // **Every call takes the manifest's entry rather than a bare hash**, and that
 // is not convenience. An asset root is a tree over chunk hashes, so verifying
-// bytes against it needs the chunk list — `assets::VerifyAsset`. A cache that
+// bytes against it needs the chunk list - `assets::VerifyAsset`. A cache that
 // took a hash alone could only compare `Hasher::Of(bytes)` against the root,
 // which is wrong for every asset cut into more than one chunk and right by
 // coincidence for some that were not. Taking the entry makes the correct check
@@ -56,7 +56,7 @@ namespace engine::delivery {
 		//
 		// @param directory Where to keep content. Created if missing.
 		// @param capacityBytes What it may hold before evicting.
-		// @return The cache, or nothing when the directory could not be made —
+		// @return The cache, or nothing when the directory could not be made -
 		//         which is an ordinary outcome on a read-only install, and a
 		//         client runs without a cache rather than refusing to start.
 		static std::optional<ContentCache>
@@ -83,7 +83,7 @@ namespace engine::delivery {
 		//
 		// @param asset The manifest's entry.
 		// @param bytes The content.
-		// @return Whether it was stored. False for a verification failure —
+		// @return Whether it was stored. False for a verification failure -
 		//         which is a caller bug rather than a cache failure, since
 		//         everything reaching here should already have been verified
 		//         against the manifest.
@@ -92,7 +92,7 @@ namespace engine::delivery {
 		// Whether an asset is present, without reading or verifying it.
 		//
 		// For a diagnostic or a progress readout. Deciding whether to fetch
-		// from this would be a check-then-act race with eviction — call `Find`.
+		// from this would be a check-then-act race with eviction - call `Find`.
 		//
 		// @param root The asset root.
 		// @return Whether a file is there.

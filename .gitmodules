@@ -4,10 +4,31 @@
 ; shallow = true keeps `just setup` to a single commit per vendor. The exact
 ; commit is still pinned by the superproject, so a clone is reproducible.
 
+; The window, the input and the GPU abstraction. Pinned to the `release-3.4.14`
+; tag rather than to the head of its branch, because the version is a number
+; documents quote and a branch head is not one.
+;
+; **Moved 3.2.31 to 3.4.14 at v0.15, and nothing in this repository changed with
+; it.** All 219 SDL symbols the engine names still exist - checked against the
+; 3.4 headers rather than by building and hoping - so the bump is additive. What
+; it buys is `SDL_GetGPUDeviceProperties` (device and driver name, version and
+; info, for a probe that currently has none) and the GPU device-creation feature
+; toggles that let a device be made on hardware missing clip distance, depth
+; clamping or anisotropy.
+;
+; **It does not buy a GPU timestamp query, and that was checked rather than
+; hoped for**: 3.4.14's `SDL_gpu.h` still has no timestamp, no query pool and no
+; `SDL_GPUQuery`. `docs/DEFERRED.md` D00046 is blocked on exactly that and is
+; unmoved by this.
+;
+; One new configure warning comes with it and it is honest: 3.4 warns when
+; `libdecor-0` is absent, which 3.2 checked for silently. Wayland window
+; decorations on GNOME and Weston want it; an X11 session does not care. Install
+; `libdecor-0-dev` to silence it rather than turning the feature off.
 [submodule "mono.vendor/sdl"]
 	path = mono.vendor/sdl
 	url = https://github.com/libsdl-org/SDL.git
-	branch = release-3.2.x
+	branch = release-3.4.x
 	shallow = true
 [submodule "mono.vendor/glm"]
 	path = mono.vendor/glm
@@ -43,7 +64,7 @@
 
 ; The docking branch, not master. repo_layout.md §8 has mono.studio doing
 ; "editor shell · docking · inspectors", and master has neither docking nor
-; viewports. It is a long-lived feature branch, which is fine — the superproject
+; viewports. It is a long-lived feature branch, which is fine - the superproject
 ; pins the commit either way.
 [submodule "mono.vendor/imgui"]
 	path = mono.vendor/imgui
@@ -52,7 +73,7 @@
 	shallow = true
 
 ; Standalone asio, not Boost.Asio. The headers are under asio/include and there
-; is no CMakeLists — MonoVendor.cmake declares the target.
+; is no CMakeLists - MonoVendor.cmake declares the target.
 [submodule "mono.vendor/asio"]
 	path = mono.vendor/asio
 	url = https://github.com/chriskohlhoff/asio.git
@@ -65,19 +86,19 @@
 ; Crypto++ is two submodules, and that is the whole story of this entry.
 ;
 ; weidai11/cryptopp ships GNUmakefile and GNUmakefile-cross and no CMakeLists at
-; all — not an awkward one, none. That is normally the cue to declare the target
+; all - not an awkward one, none. That is normally the cue to declare the target
 ; in MonoVendor.cmake the way asio and imgui are, but those are one INTERFACE
 ; library and six source files. Crypto++ is 202 translation units whose compile
-; flags are chosen per file and per ISA — rijndael_simd.cpp wants -msse4.1
+; flags are chosen per file and per ISA - rijndael_simd.cpp wants -msse4.1
 ; -maes, gcm_simd.cpp -mssse3 -mpclmul, chacha_avx.cpp -mavx2, with separate
-; matrices again for ARMv7 NEON, ARMv8 crypto extensions and POWER8 — and whose
+; matrices again for ARMv7 NEON, ARMv8 crypto extensions and POWER8 - and whose
 ; first three objects must link in the order cryptlib, cpu, integer for static
 ; initialisation to be correct (GNUmakefile:1187). Upstream picks the flags by
 ; compiling probe programs from TestPrograms/.
 ;
 ; So the build system is vendored rather than reimplemented. Hand-porting it
 ; would be ~250 lines of our build logic shadowing their makefile, drifting
-; silently at the first bump — the same failure mode AGENTS.md forbids for
+; silently at the first bump - the same failure mode AGENTS.md forbids for
 ; source files, for the same reason.
 [submodule "mono.vendor/cryptopp"]
 	path = mono.vendor/cryptopp
@@ -90,7 +111,7 @@
 ; MonoVendor.cmake points its CRYPTOPP_SOURCES at the sibling submodule above.
 ; That setting is what stops it running FetchContent against github during
 ; configure, and dropping it would make a build need the network and stop being
-; reproducible — it is the one line in the block that is load-bearing.
+; reproducible - it is the one line in the block that is load-bearing.
 ;
 ; The two move together. cryptopp-cmake carries an explicit source list in
 ; cryptopp/sources.cmake rather than a glob, so a Crypto++ bump that adds or
@@ -98,7 +119,7 @@
 ; loses a file. Bump both or neither, and re-run the file-list comparison
 ; recorded in THIRD_PARTY_NOTICES.md.
 ;
-; master on both, because neither publishes a release branch — the same
+; master on both, because neither publishes a release branch - the same
 ; situation as glm above, and the superproject pins the SHA regardless.
 [submodule "mono.vendor/cryptopp-cmake"]
 	path = mono.vendor/cryptopp-cmake
@@ -122,22 +143,26 @@
 ; declarations and those are written against a value model rather than in the
 ; abstract.
 ;
-; master, because Luau tags releases rather than publishing a release branch —
+; master, because Luau tags releases rather than publishing a release branch -
 ; the same situation as glm and the cryptopp pair above, and the superproject
 ; pins the SHA regardless.
 ;
-; **Held at 0.731 deliberately, and this is the one submodule that is not simply
-; "as new as possible".** It is pinned to the same commit as
+; **Held at luau-lsp's revision deliberately, and this is the one submodule that
+; is not simply "as new as possible".** It is pinned to the same commit as
 ; `mono.vendor/luau-lsp/luau`, so the language server in an editor and
 ; `mono.tools/scriptcheck` in `just typecheck` type-check against one Luau and
 ; cannot disagree about the language.
 ;
-; **What holds it there is luau-lsp, not us.** 0.732 removed the
-; `ConstraintSolver::reportError` overloads that luau-lsp calls in
-; `src/platform/roblox/RobloxLuauExt.cpp` — sixteen call sites — so the newest
-; Luau both trees compile against is 0.731. `just luau-lsp` asserts the two match
-; rather than trusting this comment, and `docs/DEFERRED.md` D00019 carries the
-; reopen trigger: bump both the day luau-lsp syncs past 0.732.
+; **What sets the number is luau-lsp, not us.** It is `fd83819b`, one commit
+; before the 0.734 tag, which is what luau-lsp `d5df9af` - "Sync to upstream Luau
+; 0.733" - pins. `just luau-lsp` asserts the two match rather than trusting this
+; comment, and `docs/DEFERRED.md` D00019 carries the reopen trigger: bump both
+; the day luau-lsp syncs again.
+;
+; It was 0.731 from v0.7 to v0.15, held there because 0.732 removed the
+; `ConstraintSolver::reportError` overloads luau-lsp called in
+; `src/platform/roblox/RobloxLuauExt.cpp`. Upstream did that work, so the ceiling
+; that argument describes is gone rather than raised.
 [submodule "mono.vendor/luau"]
 	path = mono.vendor/luau
 	url = https://github.com/luau-lang/luau.git
@@ -152,7 +177,7 @@
 ; either way, and the licence file still carries Bellard's copyright.
 ;
 ; What made it the choice over the other embeddable engines is in
-; MonoVendor.cmake, and it is not size — it is that the *host* drives the
+; MonoVendor.cmake, and it is not size - it is that the *host* drives the
 ; microtask queue, the collector and the interrupt, so a JS script can live
 ; inside a deterministic tick.
 [submodule "mono.vendor/quickjs"]
@@ -169,24 +194,36 @@
 ; **It brings its own Luau, and that is the reason it is built in a tree of its
 ; own rather than added to ours.** Its CMakeLists does `add_subdirectory(luau)`
 ; against a submodule pinned to its own commit, which declares `Luau.Ast`,
-; `Luau.Analysis` and `Luau.VM` — the same target names `mono.vendor/luau`
+; `Luau.Analysis` and `Luau.VM` - the same target names `mono.vendor/luau`
 ; already gives us. Adding it to this build fails at configure time with "another
 ; target with the same name already exists", and there is no flag that makes it
 ; consume an existing Luau.
 ;
 ; **The two Luaus are pinned to the same commit**, so the editor and
 ; `just typecheck` type-check against one language rather than two. That is a
-; constraint on `mono.vendor/luau` as much as on this one — see its entry — and
+; constraint on `mono.vendor/luau` as much as on this one - see its entry - and
 ; `just luau-lsp` asserts it instead of trusting either comment.
 ;
-; The ceiling is luau-lsp's: Luau 0.732 removed the `ConstraintSolver::reportError`
-; overloads it calls in `src/platform/roblox/RobloxLuauExt.cpp`, so 0.731 is the
-; newest both trees build against. `docs/DEFERRED.md` D00019 holds the reopen
-; trigger.
+; The revision is luau-lsp's: whatever its nested `luau` pins is what both trees
+; build against, because it is the tree that cannot follow upstream freely. That
+; was 0.731 for eight versions - 0.732 removed the
+; `ConstraintSolver::reportError` overloads it calls in
+; `src/platform/roblox/RobloxLuauExt.cpp` - and `d5df9af` is upstream doing that
+; work. `docs/DEFERRED.md` D00019 holds the reopen trigger.
 ;
 ; Pinned to a commit on `main` rather than to the 1.69.0 tag, because that tag
 ; carries an older Luau still: matching the engine matters more here than
 ; matching a release number.
+;
+; **It is also the one vendor that is patched, and the patch never touches this
+; working tree.** `scripts/vendor-tree.sh` archives the commit pinned here into
+; `.cache/vendor/luau-lsp` and applies `mono.vendor/patches/luau-lsp/*.patch`
+; there; the submodule stays exactly as cloned, so a superproject `git status` is
+; clean and a `git submodule update` has nothing to revert. It was applied here
+; once, and a permanently modified submodule in every status - one `git commit
+; -a` away from a pointer nobody meant to move - is why it is not any more.
+; `mono.vendor/AGENTS.md` argues the shape and says why it does not generalise
+; to a vendor the engine links.
 [submodule "mono.vendor/luau-lsp"]
 	path = mono.vendor/luau-lsp
 	url = https://github.com/JohnnyMorganz/luau-lsp.git
@@ -195,7 +232,7 @@
 
 ; JSON, for the one place this engine speaks it: the control server in
 ; `mono.studio` answers Model Context Protocol, which is JSON-RPC 2.0 over a
-; socket. Nothing else here parses JSON — a `.agame` is XML, a snapshot is
+; socket. Nothing else here parses JSON - a `.agame` is XML, a snapshot is
 ; binary, and the bindings manifest is written with an ostringstream and never
 ; read back by us.
 ;
@@ -204,7 +241,7 @@
 ; format, so a 300-line JSON parser would be in keeping. It is not worth it
 ; here: JSON's edge cases are string escapes, surrogate pairs and number
 ; formats, and a parser that is subtly wrong about any of them breaks a
-; protocol rather than a feature — silently, at the far end, in a client that
+; protocol rather than a feature - silently, at the far end, in a client that
 ; is not ours.
 ;
 ; Header-only, so `MonoVendor.cmake` declares an INTERFACE target the way it
@@ -216,12 +253,12 @@
 	shallow = true
 ; MP3 decoding, for `Engine::audio`. Two headers and no build system.
 ;
-; `master` rather than a release branch because upstream cuts none — there is no
+; `master` rather than a release branch because upstream cuts none - there is no
 ; tag in the repository and the last commit is from 2022. That is a finished
 ; decoder rather than an abandoned one: MP3 has not changed since 1993. The
 ; superproject pins the SHA either way, so a clone is still reproducible.
 ;
-; CC0-1.0, which is why this was addable at all — `mono.vendor/AGENTS.md` asks
+; CC0-1.0, which is why this was addable at all - `mono.vendor/AGENTS.md` asks
 ; for the licence check before the submodule, and a codec is where that question
 ; usually ends the conversation.
 [submodule "mono.vendor/minimp3"]
@@ -233,3 +270,57 @@
 	path = mono.vendor/tomlplusplus
 	url = https://github.com/marzer/tomlplusplus.git
 	branch = master
+; The node graph, and the one vendor here that is ours. `mono.studio` grew a
+; second implementation of this design at v0.14 for the Demo Nodes panel;
+; `docs/DEFERRED.md` D00113 said what to do about it and this is that - the
+; editor's copy went upstream and comes back as a dependency, so the render
+; pipeline editor and `Engine::bakegraph`'s pipeline documents extend one
+; library rather than starting a third.
+;
+; MIT, which `mono.vendor/AGENTS.md` asks about before anything else.
+;
+; **The library is under `cpp/`, and there is a JavaScript sibling beside it.**
+; `MonoVendor.cmake` names the sources it wants; nothing here builds the page.
+;
+; It ships a CMakeLists and we do not use it, which is the unusual call for a
+; vendor with one. `MonoVendor.cmake` has the reason: upstream compiles its own
+; copy of Dear ImGui, and a second imgui in this build is a duplicate-symbol
+; link error rather than a slow build.
+;
+; main, because upstream cuts no release branch - glm's situation, and the
+; superproject pins the SHA regardless.
+[submodule "mono.vendor/nodegraph"]
+	path = mono.vendor/nodegraph
+	url = https://github.com/SPOOKEXE/node-graph-template.git
+	branch = main
+	shallow = true
+; SPIR-V to MSL, and it is the other half of shaderc rather than a second
+; compiler. glslc turns this engine's GLSL into SPIR-V and SDL's Metal backend
+; takes MSL or a metallib and never SPIR-V, so without a translator a macOS
+; client has nothing to hand `SDL_CreateGPUShader`. `docs/DEFERRED.md` D00001 is
+; the argument; what belongs here is why it is a submodule and which branch.
+;
+; Apache-2.0, checked before the clone as `mono.vendor/AGENTS.md` asks. The same
+; licence shaderc and SPIRV-Tools are already under, so it adds a notice row and
+; no new obligation.
+;
+; **A release branch rather than `main`, which is the first pin here that could
+; have one.** Khronos cuts `vulkan-sdk-<version>` off main for each SDK release
+; and then leaves it alone, so it is a branch in SDL's sense - a line that gets
+; fixes and not features. `main` moves with every merged pull request.
+;
+; **It is needed in two places, and that is why it is a normal submodule rather
+; than a build-time-only tool.** `mono.tools/shadercross` translates the built-in
+; shaders during the build, and `render::ShaderCompiler` translates
+; runtime-authored ones inside the shipped client - a `ShaderScript` does not
+; exist at build time, so a build-time-only translator would leave every one of
+; them broken on the platform.
+;
+; It brings no third-party tree of its own: `spirv.hpp` and `GLSL.std.450.h` are
+; checked into the repository, so unlike shaderc there is nothing for `just
+; setup` to sync afterwards.
+[submodule "mono.vendor/spirv-cross"]
+	path = mono.vendor/spirv-cross
+	url = https://github.com/KhronosGroup/SPIRV-Cross.git
+	branch = vulkan-sdk-1.4.357
+	shallow = true

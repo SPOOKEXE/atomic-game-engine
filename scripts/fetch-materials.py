@@ -3,7 +3,7 @@
 
 **A script rather than a tool, and it stops at the source art.** What this
 produces is PNGs and a `.mat` beside them, written into the content store's
-`raw/` — which is what `raw/` is for, and what `contentimport --publish` bakes.
+`raw/` - which is what `raw/` is for, and what `contentimport --publish` bakes.
 It does not bake and does not publish, because each of those already has one
 implementation and a downloader that grew a second would be the format-dialect
 mistake `AGENTS.md` names. Two steps:
@@ -15,14 +15,14 @@ mistake `AGENTS.md` names. Two steps:
 
 ## The three sources
 
-All three are CC0 — public domain, no attribution required — which is the only
+All three are CC0 - public domain, no attribution required - which is the only
 reason this script exists in this repository at all. `THIRD_PARTY_NOTICES.md`
 carries the entry anyway, because "no attribution required" is a licence term
 and not a reason to leave the provenance of six gigabytes unrecorded.
 
-- **ambientCG** — a JSON API, one zip per material.
-- **Poly Haven** — a JSON API, one URL per map, no zip.
-- **cgbookcase** — no API. The index page is server-rendered and lists every
+- **ambientCG** - a JSON API, one zip per material.
+- **Poly Haven** - a JSON API, one URL per map, no zip.
+- **cgbookcase** - no API. The index page is server-rendered and lists every
   material, and each detail page carries the archive's name; the archive itself
   is at a CDN host the page's own script builds a URL for.
 
@@ -43,14 +43,14 @@ One directory per source, flat inside it:
     materials/ambientcg/Bricks075A_Height.png
 
 **The map suffixes are normalised and the three sources disagree about all of
-them** — `Color`/`BaseColor`/`Diffuse`, `NormalGL`/`nor_gl`/`Normal`. A `.mat`
+them** - `Color`/`BaseColor`/`Diffuse`, `NormalGL`/`nor_gl`/`Normal`. A `.mat`
 naming whichever spelling its source happened to use would make the material
 format's reference depend on where the pixels came from, which is a dialect in
 the one place this engine has been careful not to grow one.
 
 **All five maps are named by the `.mat`**, since v0.11. Only `Color` was, on the
 rule that a key nothing read would be half a feature somebody would reasonably
-assume worked — the other four sat beside it as ordinary textures, published and
+assume worked - the other four sat beside it as ordinary textures, published and
 fetchable and waiting for a pass. v0.11's G-buffer samples normal, roughness and
 occlusion, so they are named. `height` is named and not yet sampled, which is
 the one exception: parallax needs a loop the G-buffer pass does not have, and a
@@ -91,15 +91,15 @@ USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Ge
 COLOR, NORMAL, ROUGHNESS, AO, HEIGHT = "Color", "Normal", "Roughness", "AO", "Height"
 
 # **Emissive has no entry here and that is deliberate.** The three sources
-# publish it for almost nothing — what glows is a decision about an object
-# rather than a property of a substance — so a fetcher that looked for one would
+# publish it for almost nothing - what glows is a decision about an object
+# rather than a property of a substance - so a fetcher that looked for one would
 # be scanning every archive for a file that is essentially never there. A
 # material that has one names it by hand; `assetc` reads the key either way.
 
 # What each map is called by the `.mat`, in the order the file lists them.
 #
 # **`ao` and not `occlusion`**, matching the suffix the sources use and the
-# spelling `assetc` accepts as an alias — a key that had to be spelled the long
+# spelling `assetc` accepts as an alias - a key that had to be spelled the long
 # way while every file beside it said `AO` is a trap for whoever hand-edits one.
 MAT_KEYS = {
     COLOR: "color",
@@ -158,7 +158,7 @@ class Material:
         # would be one nobody could tell from a finished one.
         mat = directory / f"{self.name}.mat"
         lines = [
-            "# atomic material — see engine/assets/Material.hpp\n",
+            "# atomic material - see engine/assets/Material.hpp\n",
             "# Paths are relative to this file; assetc rewrites them to baked names.\n",
         ]
         for role, key in MAT_KEYS.items():
@@ -175,7 +175,7 @@ def unpack_zip(payload: bytes, roles: dict[str, str], material: Material) -> Non
     """Pulls the named members out of an archive under their engine roles.
 
     `roles` maps a lowercase substring of a member name to a role. First match
-    wins, so the more specific patterns must come first in the dict — which is
+    wins, so the more specific patterns must come first in the dict - which is
     why `normalgl` precedes `normal` in every caller.
     """
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
@@ -307,7 +307,7 @@ def cgbookcase_one(slug: str, resolution: str) -> Material:
 
     # The download button is a link to a thanks page carrying the archive name
     # in `t` and the material's own name in `u`. Both are wanted: `u` is what
-    # the maps inside are prefixed with, and it is not derivable from the slug —
+    # the maps inside are prefixed with, and it is not derivable from the slug -
     # `asphalt-01` is `Asphalt01`.
     match = re.search(r'href="/textures/thanks\?t=([^"&]+)&(?:amp;)?r=(\d)&(?:amp;)?u=([^"&]+)"', detail)
     if not match:
@@ -315,7 +315,7 @@ def cgbookcase_one(slug: str, resolution: str) -> Material:
 
     archive, name = urllib.parse.unquote(match.group(1)), urllib.parse.unquote(match.group(3))
 
-    # The site names archives by resolution — `Asphalt01_MR_4K.zip`. The link on
+    # The site names archives by resolution - `Asphalt01_MR_4K.zip`. The link on
     # the page is whichever the button defaults to, so the wanted one is that
     # name with the resolution swapped.
     archive = re.sub(r"_(\d+K)\.zip$", f"_{resolution}.zip", archive)
@@ -339,7 +339,7 @@ def run_source(source: str, count: int, resolution: str, root: Path, workers: in
     log(f"[{source}] listing…")
     try:
         ids = lister(count)
-    except Exception as failure:  # noqa: BLE001 — one dead source must not stop the others
+    except Exception as failure:  # noqa: BLE001 - one dead source must not stop the others
         log(f"[{source}] could not list: {failure}")
         return 0, 0, 0
 
@@ -358,7 +358,7 @@ def run_source(source: str, count: int, resolution: str, root: Path, workers: in
 
         # **A material with no colour map is not written at all.** Every other
         # key is written only when its map was fetched, so an absent normal map
-        # is simply an unnamed one — but a material with no colour at all is not
+        # is simply an unnamed one - but a material with no colour at all is not
         # a material anybody can look at, and publishing it would draw the
         # default and give no clue why.
         if COLOR not in material.maps:
@@ -374,7 +374,7 @@ def run_source(source: str, count: int, resolution: str, root: Path, workers: in
             else:
                 done += 1
                 written += bytes_written
-                log(f"[{source}] {asset_id} — {bytes_written / 1_000_000:.1f} MB")
+                log(f"[{source}] {asset_id} - {bytes_written / 1_000_000:.1f} MB")
 
     return done, skipped, written
 
@@ -430,6 +430,6 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        # Resumable by construction — say so rather than printing a traceback.
+        # Resumable by construction - say so rather than printing a traceback.
         log("\ninterrupted; re-run to carry on where this stopped")
         sys.exit(130)

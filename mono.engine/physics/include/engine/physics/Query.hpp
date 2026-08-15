@@ -7,7 +7,7 @@
 // answers against the sphere, the cylinder or the rotated box inside them, and
 // calls `spatial`'s to find the candidates it then tests exactly. Both header
 // comments say which they are, because reaching for the wrong one does not fail
-// to compile and does not obviously fail at runtime — it returns an answer that
+// to compile and does not obviously fail at runtime - it returns an answer that
 // is a box away from the right one.
 //
 // **The storage is the caller's**, exactly as it is in `spatial::Query.hpp`,
@@ -64,14 +64,14 @@ namespace engine::physics {
 	// The grid walk writes into a stack buffer this size, which is what keeps
 	// these queries allocation-free and safe to run from several threads. A
 	// query that finds more says so through `QueryResult::Overflowed` rather
-	// than quietly answering from a prefix — a truncated overlap read as "and
+	// than quietly answering from a prefix - a truncated overlap read as "and
 	// nothing more" is a contact that never happens.
 	inline constexpr size_t QUERY_CANDIDATE_LIMIT = 256;
 
 	// One collider a query found.
 	//
 	// An `ecs::Entity` rather than the `uint64_t` a `core::RayHit` carries.
-	// `spatial` cannot name an entity — it is L6 and the ECS is L3 above it —
+	// `spatial` cannot name an entity - it is L6 and the ECS is L3 above it -
 	// so its hits carry whatever number the caller put into the index, which
 	// for these two grids is an array subscript and not an entity at all.
 	// Handing that number back as an id would be plausible and wrong.
@@ -98,7 +98,7 @@ namespace engine::physics {
 	// Candidates come from both indexes and are then tested against the exact
 	// shape: a rotated box through its own inverse transform, a sphere and a
 	// cylinder analytically. **That inverse is the thing this function exists
-	// for** — every axis-aligned test in the engine passes whether or not it is
+	// for** - every axis-aligned test in the engine passes whether or not it is
 	// right, which is why `v02v03v04.md` §3.7 names a raycast against a rotated
 	// box as one of the behavioural tests.
 	//
@@ -113,10 +113,10 @@ namespace engine::physics {
 	//                    entity. **The caster itself, which is the only thing
 	//                    this is for and is why it is one entity rather than a
 	//                    list.** A character asking what is under its feet has
-	//                    to start the ray inside its own capsule — a ray that
+	//                    to start the ray inside its own capsule - a ray that
 	//                    begins exactly on a face is a coin flip about whether
 	//                    it hits it, and the coin lands differently on two
-	//                    machines — so the nearest hit is always itself and the
+	//                    machines - so the nearest hit is always itself and the
 	//                    floor is never reached. Comparing the *result* against
 	//                    the caster cannot fix that: the answer has already
 	//                    been thrown away.
@@ -138,8 +138,8 @@ namespace engine::physics {
 	// The same, carrying on out of the far side of any portal in the way.
 	//
 	// **A body standing in a seam is standing on two floors, and one ray only
-	// ever found one of them.** A pane is a hole — `scene::OpenPortals` takes
-	// its collider out of the solver so a body can be inside it — so a character
+	// ever found one of them.** A pane is a hole - `scene::OpenPortals` takes
+	// its collider out of the solver so a body can be inside it - so a character
 	// halfway through has its feet over the near room's floor for as long as its
 	// centre is on the near side, and over nothing at all the moment the near
 	// room's floor stops at the doorway. `GroundCharacters` then reports "not
@@ -162,7 +162,7 @@ namespace engine::physics {
 	// caster is already inside.
 	//
 	// **Cross-world panes are not followed.** Their far side is another store,
-	// which this query may not reach — rule 3 — so a ray meeting one stops as it
+	// which this query may not reach - rule 3 - so a ray meeting one stops as it
 	// always did.
 	//
 	// @param store       The world to ask.
@@ -221,7 +221,7 @@ namespace engine::physics {
 	//
 	// **Conservative, and it says so rather than pretending to a time of
 	// impact.** The volume tested is the box swept by the moving shape's own
-	// world bound, and every candidate's exact shape is intersected with it —
+	// world bound, and every candidate's exact shape is intersected with it -
 	// so nothing on the path is ever missed, and a shape whose bound is much
 	// larger than itself, a thin cylinder lying diagonally for instance, can
 	// report a collider it would have passed beside.

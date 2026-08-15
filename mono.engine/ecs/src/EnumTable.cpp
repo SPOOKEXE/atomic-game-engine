@@ -13,7 +13,7 @@ namespace engine::ecs {
 		//
 		// The spans handed out have to stay valid for the life of the process,
 		// so the vectors backing them live in a deque that never moves an
-		// element — the same arrangement `Classes` uses and for the same reason.
+		// element - the same arrangement `Classes` uses and for the same reason.
 		struct Entry {
 			core::Name Name;
 			std::vector<core::Name> Members;
@@ -105,7 +105,7 @@ namespace engine::ecs {
 		if (entry == nullptr || ordinal >= entry->Members.size()) {
 			// An invalid `Name` rather than the first member. A stored ordinal
 			// past the end means the component holds a value nothing registered
-			// — reading it back as `Right` would make a corrupt row look like a
+			// - reading it back as `Right` would make a corrupt row look like a
 			// deliberate one.
 			return core::Name{};
 		}

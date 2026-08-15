@@ -10,8 +10,8 @@
 // Baseline JPEG.
 //
 // **Baseline only, and progressive is refused by name.** A progressive file is
-// a different decoder — the coefficients arrive across several scans and are
-// refined rather than being complete after one — and half-reading one produces
+// a different decoder - the coefficients arrive across several scans and are
+// refined rather than being complete after one - and half-reading one produces
 // a recognisable, blurred, wrong picture. That is the failure mode this file
 // refuses to have, for `Png.cpp`'s reason about interlacing.
 //
@@ -216,7 +216,7 @@ namespace engine::bake {
 		// Brings one component's plane up to the image's resolution.
 		//
 		// **Triangle-filtered on any axis that is subsampled by exactly two,
-		// and nearest everywhere else — which is what libjpeg does, and
+		// and nearest everywhere else - which is what libjpeg does, and
 		// matching libjpeg is the whole requirement.** The first version of
 		// this sampled nearest on every axis with a comment claiming that was
 		// what every other decoder produces. It is not: measured against

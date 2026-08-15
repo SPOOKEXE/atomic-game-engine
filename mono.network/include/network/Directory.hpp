@@ -5,8 +5,8 @@
 // **This is the unified part.** A session heard broadcasting on the subnet, one
 // listed by a rendezvous point, and one somebody typed into a config file are
 // three rows in one table, differing in a `Reach` and in nothing else. Whatever
-// consumes this — a server browser, a content source list, the studio's team
-// panel — walks one container and never learns which of the three it is looking
+// consumes this - a server browser, a content source list, the studio's team
+// panel - walks one container and never learns which of the three it is looking
 // at unless it wants to show a person.
 //
 // The alternative is three lists, three orderings and three sets of expiry
@@ -17,12 +17,12 @@
 // **Not a connection, and it opens none.** What comes out of here is an
 // `engine::net::Endpoint`, which is what `replication::Connector` takes, what a
 // `delivery::Source` names and what an `http::Client` dials. Everything after
-// that address is somebody else's module — see `mono.network/CMakeLists.txt`
+// that address is somebody else's module - see `mono.network/CMakeLists.txt`
 // for why that seam is where it is.
 //
 // **Not a trust boundary.** A listing says a datagram claiming these things
 // arrived from that address. `Listing::Joinable` is a *filter for a user
-// interface* — it hides rows a person cannot use — and never the check that a
+// interface* - it hides rows a person cannot use - and never the check that a
 // peer is who it says. That check happens after a connection exists, against a
 // pinned identity, and one layer up.
 //
@@ -31,7 +31,7 @@
 // An open UDP port receives whatever is sent to it, so a table that grew with
 // what arrived would be a table a stranger fills for the cost of one datagram
 // each. `MaximumListings` caps it; past the cap a *new* session is dropped and
-// counted, and an existing one still refreshes — which is the right way round,
+// counted, and an existing one still refreshes - which is the right way round,
 // because the sessions somebody is already looking at should not vanish
 // because somebody else started flooding.
 //
@@ -66,7 +66,7 @@ namespace network {
 		//
 		// For a `Lan` row this is the host's address on the subnet the datagram
 		// crossed, which is the one address known to work between these two
-		// machines — see `Dial`. For a row that was offered rather than heard,
+		// machines - see `Dial`. For a row that was offered rather than heard,
 		// it is whatever the offerer supplied, and may be invalid.
 		engine::net::Endpoint From;
 
@@ -78,7 +78,7 @@ namespace network {
 		// **The source address with the advertised port, not the advertised
 		// address**, whenever the source is a real one. A host binds `0.0.0.0`
 		// and genuinely does not know which of its addresses this particular
-		// client can route to — a machine with a VPN, a container bridge and a
+		// client can route to - a machine with a VPN, a container bridge and a
 		// wireless interface has three plausible answers and announcing any one
 		// of them is a coin flip. The address the datagram *came from* needs no
 		// guess: something already travelled over it in the direction that
@@ -114,8 +114,8 @@ namespace network {
 		// number are dropped and counted.
 		//
 		// **Dropped rather than listed as incompatible.** A row a person cannot
-		// join and cannot fix is noise, and the case it would help with — "why
-		// can I not see my friend" — is answered by the counter, which is where
+		// join and cannot fix is noise, and the case it would help with - "why
+		// can I not see my friend" - is answered by the counter, which is where
 		// somebody debugging looks.
 		uint32_t Protocol = 0;
 
@@ -152,7 +152,7 @@ namespace network {
 
 		// Private sessions listed without a key to verify them.
 		//
-		// **Listed, not refused** — see the file header. The counter exists
+		// **Listed, not refused** - see the file header. The counter exists
 		// because "I can see it but cannot join it" and "I cannot see it" are
 		// different problems and a person will report both as the same
 		// sentence.
@@ -202,7 +202,7 @@ namespace network {
 		// Lists a session that was not heard on the subnet.
 		//
 		// The way a rendezvous point's reply and a config file's row enter the
-		// same table as a broadcast. The advert is taken as given — a caller
+		// same table as a broadcast. The advert is taken as given - a caller
 		// that decoded it from a wire has already checked it, and a caller that
 		// built it from a config file is the local operator.
 		//

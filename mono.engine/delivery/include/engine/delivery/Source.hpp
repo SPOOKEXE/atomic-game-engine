@@ -39,7 +39,7 @@ namespace engine::delivery {
 	//
 	// **This is the whole of "one server takes the writes, another serves the
 	// reads".** A deployment that splits them does not need two source lists
-	// and two orderings — it needs one list where each entry says which
+	// and two orderings - it needs one list where each entry says which
 	// direction it participates in, because the ordering somebody wants is the
 	// same ordering in both directions: nearest first.
 	//
@@ -50,14 +50,14 @@ namespace engine::delivery {
 	// side of the engine knowing it is one machine.
 	//
 	// **Replication between them is not this engine's.** A write origin that
-	// mirrors to a read origin does it by whatever the operator already uses —
+	// mirrors to a read origin does it by whatever the operator already uses -
 	// a shared volume, rsync, the storage layer. Nothing here waits for it, and
 	// nothing here reports on it: content uploaded a moment ago is fetchable
 	// when the read side has it and the publisher has signed a manifest naming
 	// it, and no sooner.
 	//
 	// **A closed list whose ordinal is written to a preferences file**, so an
-	// entry may be added at the end and never reordered — `SourceKind`'s rule.
+	// entry may be added at the end and never reordered - `SourceKind`'s rule.
 	//
 	// @since v0.10
 	enum class SourceRole : uint8_t {
@@ -108,7 +108,7 @@ namespace engine::delivery {
 		// The shared secret an upload sends as `x-atomic-ingest`.
 		//
 		// **Only ever read on a source this list writes to**, and empty on
-		// every read source. An origin refuses an upload without it — see
+		// every read source. An origin refuses an upload without it - see
 		// `cdn::IngestSettings`, which also carries why a secret is enough here
 		// and what it does not buy.
 		//
@@ -168,7 +168,7 @@ namespace engine::delivery {
 		// Returns enabled and valid **readable** sources in priority order.
 		//
 		// A `SourceRole::Write` entry is not in this list, which is what keeps
-		// a write origin invisible to a fetch — see `SourceRole::Write`.
+		// a write origin invisible to a fetch - see `SourceRole::Write`.
 		std::vector<Source> Usable() const;
 
 		// Returns enabled and valid **writable** sources in priority order.

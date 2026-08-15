@@ -48,7 +48,7 @@ namespace {
 	// A universe with one furnished world, as the editor makes them.
 	//
 	// `InstallServices` runs because an author's instance is parented into
-	// `Workspace` and a world without one has nowhere to put anything — the same
+	// `Workspace` and a world without one has nowhere to put anything - the same
 	// call `Editor::AddWorld` makes, for the same reason.
 	struct Fixture {
 		Universe Worlds;
@@ -96,7 +96,7 @@ namespace {
 		}
 
 		// Destroys an instance and records it, the way `Editor::DeleteSelection`
-		// does — the record first, because after the destroy there is nothing
+		// does - the record first, because after the destroy there is nothing
 		// left to photograph.
 		void Destroy(Entity instance, const std::string &what) {
 			Worlds.Enter(Scene, [&](Store &store) {
@@ -122,7 +122,7 @@ namespace {
 			return count;
 		}
 
-		// The first child of a parent, which is how a rebuilt root is reached —
+		// The first child of a parent, which is how a rebuilt root is reached -
 		// the handle it had before the rebuild is not the handle it has now.
 		Entity FirstChild(Entity parent) {
 			Entity first = NULL_ENTITY;
@@ -225,7 +225,7 @@ TEST_CASE("redoing an insert brings it back under the same parent", "[studio][co
 	REQUIRE(fixture.Log.Redo());
 
 	// **The count, not the handle.** A rebuild produces a new entity, which is
-	// the whole reason the log does not hold one — asserting the old handle came
+	// the whole reason the log does not hold one - asserting the old handle came
 	// back would be asserting something the design says is impossible.
 	CHECK(fixture.ChildCount(workspace) == 1);
 	CHECK_FALSE(fixture.Alive(part));
@@ -267,7 +267,7 @@ TEST_CASE("the id survives a rebuild, so a second undo still finds its subject",
 	// **A stale handle, not a null one, and that is the contract.** The log
 	// unbinds an id only when it performs the destroy itself; a caller that
 	// records and then destroys leaves the id pointing at a dead handle. That is
-	// safe rather than sloppy — an entity carries a generation, so a recycled
+	// safe rather than sloppy - an entity carries a generation, so a recycled
 	// index does not answer `Alive`, and every apply path asks.
 	REQUIRE_FALSE(fixture.Alive(fixture.Log.Resolve(id)));
 
@@ -373,7 +373,7 @@ TEST_CASE("the log is bounded and drops from the far end", "[studio][commands]")
 
 	CHECK(fixture.Log.Depth() == CommandLog::DEPTH);
 
-	// The most recent is still the one undo reaches first — dropping from the
+	// The most recent is still the one undo reaches first - dropping from the
 	// wrong end would silently reverse the order of history.
 	CHECK(fixture.Log.NextUndo() == "Insert Part" + std::to_string(CommandLog::DEPTH + 19));
 }
@@ -431,7 +431,7 @@ TEST_CASE("forgetting a scene drops its commands and leaves the others", "[studi
 	Fixture fixture;
 
 	// A second scene, because the whole point of `Forget` is that it is not
-	// `Clear` — stopping a run in one world must not throw away the history of
+	// `Clear` - stopping a run in one world must not throw away the history of
 	// another that was edited throughout and never ran.
 	engine::world::WorldSettings other;
 	other.Name = Name("Other");
@@ -485,8 +485,8 @@ TEST_CASE("forgetting a scene nothing was recorded in changes nothing", "[studio
 }
 
 TEST_CASE("the history reads oldest first, and the last entry is what undo reverses", "[studio][commands]") {
-	// **What the History panel walks.** The stacks are stored as stacks — the
-	// back is the top — and a history list reads downwards in the order things
+	// **What the History panel walks.** The stacks are stored as stacks - the
+	// back is the top - and a history list reads downwards in the order things
 	// happened. Getting that backwards would put the newest edit at the top of
 	// the list, which nothing in an editor does, so the order is pinned here
 	// rather than left to whoever draws it.
@@ -500,7 +500,7 @@ TEST_CASE("the history reads oldest first, and the last entry is what undo rever
 	CHECK(fixture.Log.Redoable().empty());
 
 	// The back is the one `Undo` takes next, and it is the same string the Edit
-	// menu shows — so the panel's "you are here" row and the menu agree.
+	// menu shows - so the panel's "you are here" row and the menu agree.
 	CHECK(fixture.Log.Undoable().back().Description == fixture.Log.NextUndo());
 
 	REQUIRE(fixture.Log.Undo());
@@ -623,7 +623,7 @@ TEST_CASE("appending folds a recording into the step before it", "[studio][comma
 	REQUIRE(fixture.ChildCount(workspace) == 3);
 	CHECK(fixture.Log.Depth() == 3);
 
-	// One undo, because the recording was folded into the waypoint before it —
+	// One undo, because the recording was folded into the waypoint before it -
 	// which is what a drag that resumes should feel like.
 	REQUIRE(fixture.Log.Undo());
 	CHECK(fixture.ChildCount(workspace) == 0);
@@ -703,7 +703,7 @@ TEST_CASE("a disabled log records nothing and forgets what it had", "[studio][co
 	fixture.Log.SetEnabled(false);
 	CHECK_FALSE(fixture.Log.Enabled());
 
-	// Cleared, and it does not repopulate when it comes back — a log that kept
+	// Cleared, and it does not repopulate when it comes back - a log that kept
 	// its stacks across a period it was told not to watch would offer to undo
 	// across edits it never saw.
 	CHECK_FALSE(fixture.Log.CanUndo());
@@ -787,7 +787,7 @@ TEST_CASE("a cancelled recording is never published", "[studio][commands]") {
 	REQUIRE(fixture.Log.FinishRecording({}, studio::FinishOperation::Cancel));
 
 	// The rollback already put everything back, so there is nothing for a peer
-	// to apply — and telling them would be telling them about a state that
+	// to apply - and telling them would be telling them about a state that
 	// never existed anywhere.
 	CHECK(commits == 0);
 	CHECK(fixture.ChildCount(workspace) == 0);

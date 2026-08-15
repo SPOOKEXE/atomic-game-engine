@@ -87,7 +87,7 @@ namespace engine::replication {
 			// **The rate window closes on a tick boundary, and both halves of it
 			// move here.** Seconds accumulate every frame and ticks only arrive
 			// four times as rarely, so a ratio taken part way through a tick is
-			// systematically low — enough to read a steady 60 Hz stream as 56 and
+			// systematically low - enough to read a steady 60 Hz stream as 56 and
 			// draw the world in slow motion for it.
 			if (Newest_ != 0) {
 				// Counted as the ticks that passed rather than as arrivals: a
@@ -168,7 +168,7 @@ namespace engine::replication {
 		// it jumps by one the instant a tick lands and falls back by one over the
 		// period before the next. A correction that fired inside that swing would
 		// be chasing the staircase rather than the drift, and the world would
-		// speed up and slow down once per tick — which is the judder this class
+		// speed up and slow down once per tick - which is the judder this class
 		// exists to remove, rebuilt out of the cure.
 		double rate = 1.0;
 		if (behind > Settings_.DelayTicks + 1.0) {
@@ -183,14 +183,34 @@ namespace engine::replication {
 
 		RenderTicks += frameSeconds * MeasuredTickRate() * rate;
 
-		// **No extrapolation.** Past the newest sample there is nothing to
-		// interpolate toward; guessing produces a pose the server never sent and
-		// then a snap when the next tick disagrees with the guess. The clock
-		// stops, the world holds, and the counter says so — a stated behaviour
-		// rather than an invented one.
+		// **The clock still stops at the newest sample, and that is D00010
+		// unchanged.** Past it there is nothing to interpolate toward, so a
+		// render position beyond it would be asking `Sample` to invent a pose
+		// out of two it does not have.
+		//
+		// **What is recorded instead is how much it could not spend**, which is
+		// the one thing a caller needs to place a body that carries its own
+		// derivative. A guess made from a velocity the authority sent is a
+		// different object from a guess made from nothing: see
+		// `DeadReckonSeconds` for who may act on it, and `replication/AGENTS.md`
+		// for why those are not the same decision.
 		if (RenderTicks > newest) {
+			const double overshootTicks = RenderTicks - newest;
 			RenderTicks = newest;
 			Stats_.Stalls++;
+
+			// Capped, not accumulated without bound: past the horizon the
+			// integrated error exceeds the error in the pose it was integrated
+			// from. A tick rate of zero divides to an infinity the cap absorbs.
+			Reckoned = std::min(Reckoned + overshootTicks / MeasuredTickRate(), Settings_.ExtrapolateSeconds);
+		} else if (Reckoned > 0.0) {
+			// Given back over time rather than dropped. The offset is a
+			// function of this number, so easing it to zero is the correction.
+			Reckoned = std::max(Reckoned - frameSeconds * Settings_.UnwindFraction, 0.0);
+		}
+
+		if (Reckoned > 0.0) {
+			Stats_.Extrapolated++;
 		}
 	}
 
@@ -267,6 +287,7 @@ namespace engine::replication {
 		RenderTicks = 0.0;
 		Newest_ = 0;
 		Started = false;
+		Reckoned = 0.0;
 		ObservedTicks = 0.0;
 		ObservedSeconds = 0.0;
 		Elapsed = 0.0;

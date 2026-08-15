@@ -10,10 +10,10 @@
 //
 // | Stream | Announce | Rendezvous | Access |
 // |---|---|---|---|
-// | LAN | yes | — | public |
-// | Peer-to-peer | — | yes | public |
+// | LAN | yes | - | public |
+// | Peer-to-peer | - | yes | public |
 // | Private network | either | either | private, key required |
-// | Public distribution | — | yes | public, on an address people are given |
+// | Public distribution | - | yes | public, on an address people are given |
 //
 // That table is the whole feature, and it is a table rather than four code
 // paths because the origin cannot tell the difference. A stream that changed
@@ -22,7 +22,7 @@
 //
 // ## Why the origin can host the meeting place
 //
-// `network::RendezvousPoint` is not a program of its own — it holds an id, an
+// `network::RendezvousPoint` is not a program of its own - it holds an id, an
 // address and a timestamp, and it needs to be somewhere already reachable. An
 // origin is exactly that: a machine an operator has already put on an address
 // and already opened a port on. So `--rendezvous-listen` runs one here rather
@@ -70,14 +70,14 @@ namespace cdn {
 		// find and verify this origin; the origin still checks a `cdn::Gate`
 		// grant before serving a bundle. Two different questions with two
 		// different answers, and collapsing them would make the key that finds
-		// a stream also the key that draws from it — which is not what an
+		// a stream also the key that draws from it - which is not what an
 		// operator metering bandwidth wants.
 		std::string Secret;
 
 		// What to call this stream. Empty uses a placeholder.
 		std::string Name;
 
-		// What to show underneath the name — the publication being served.
+		// What to show underneath the name - the publication being served.
 		std::string Detail;
 
 		// The HTTP port clients fetch from. **The one that was bound**, not the
@@ -95,7 +95,7 @@ namespace cdn {
 		//
 		// @param settings What to offer, and how.
 		// @param[out] error Filled when this returns null.
-		// @return The stream, or null when a setting is not usable — a secret
+		// @return The stream, or null when a setting is not usable - a secret
 		//         that is neither hex nor words, a rendezvous port already
 		//         held. A subnet that will not carry a broadcast is not one of
 		//         those: it is recorded and the rest runs.
@@ -184,7 +184,7 @@ namespace cdn {
 	// **The reason this lives in `mono.cdn` rather than in `mono.network`**: it
 	// is the one place that knows a content origin's endpoint is an HTTP one
 	// and that the thing to turn it into is a `delivery::Source`. The discovery
-	// module deliberately knows neither — it would have to link `delivery` to
+	// module deliberately knows neither - it would have to link `delivery` to
 	// find out, and then a LAN game would be carrying a content-delivery
 	// dependency.
 	//
@@ -217,7 +217,7 @@ namespace cdn {
 
 		// Every stream found, as sources a delivery client can be given.
 		//
-		// **In `Reach` order — nearest first — which is the order
+		// **In `Reach` order - nearest first - which is the order
 		// `delivery::AssetClient` walks and therefore the order that means
 		// "local first, then the origin next door, then the one across the
 		// internet".** A list in any other order would be a preference nobody
@@ -237,7 +237,7 @@ namespace cdn {
 		// Everything seen, and the way a caller adds a row of its own.
 		//
 		// A stream from a config file is the same kind of thing as one heard on
-		// the subnet — `network::Directory::Offer` is how it says so — and a
+		// the subnet - `network::Directory::Offer` is how it says so - and a
 		// finder that could only be fed by a socket would need a second list
 		// beside it for the origins somebody typed.
 		//

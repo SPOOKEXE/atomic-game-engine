@@ -14,12 +14,12 @@
 //   pointed the other way. The *emitter* is the entity and the particles are
 //   pooled.
 // - **A particle is not a `scene::DrawInstance`.** That type is eighty bytes and
-//   carries two `core::Name`s, a full `CFrame` and an `AlphaMode` — none of which
+//   carries two `core::Name`s, a full `CFrame` and an `AlphaMode` - none of which
 //   varies between two particles from one emitter. Half a million of them is
 //   forty megabytes written per frame to say the same thing repeatedly.
 // - **A particle does not read its emitter's curves directly.** A
 //   `core::NumberSequence` is 248 bytes and a `core::ColorSequence` is 408, so
-//   the four an emitter carries are about a kilobyte — and evaluating one is a
+//   the four an emitter carries are about a kilobyte - and evaluating one is a
 //   scan over its keypoints. `ParticleSystem.hpp` samples them into a fixed
 //   sixteen-entry table once per emitter per change, and the step reads that.
 //
@@ -32,7 +32,7 @@
 // `scene::SurfaceAppearance` states is what keeps that honest: a field that
 // nothing reads is a field an author would reasonably assume worked. Every
 // member below is consumed by `StepParticles` or by the render pass. What Roblox
-// has and this does not — particle collision, `WindAffectsDrag` — is absent
+// has and this does not - particle collision, `WindAffectsDrag` - is absent
 // rather than declared and ignored, and `docs/` says so.
 //
 // @tier L8 · shared
@@ -52,14 +52,14 @@ namespace engine::effects {
 	// How a particle is turned to face the viewer.
 	//
 	// **A closed list whose ordinals are the storage**, so a member may be
-	// appended and never reordered — `scene::NormalId`'s rule, and for the same
+	// appended and never reordered - `scene::NormalId`'s rule, and for the same
 	// reason: this is stored as its ordinal in a trivially-copied component, so
 	// the number is the format.
 	//
 	// @since v0.10
 	enum class ParticleOrientation : uint8_t {
 		// The quad always faces the camera, spun by the particle's own rotation.
-		// The ordinary case and the cheapest — two camera axes and a rotation.
+		// The ordinary case and the cheapest - two camera axes and a rotation.
 		FacingCamera = 0,
 
 		// Faces the camera but keeps world up as the quad's up, so a column of
@@ -121,7 +121,7 @@ namespace engine::effects {
 	//
 	// **The grid is square and a power of two on each side**, which is Roblox's
 	// set and is also what makes the cell arithmetic two shifts rather than two
-	// divides — the flipbook is evaluated per particle per frame, so the
+	// divides - the flipbook is evaluated per particle per frame, so the
 	// difference is half a million divides.
 	//
 	// @since v0.10
@@ -178,7 +178,7 @@ namespace engine::effects {
 		PingPong = 2,
 
 		// Each particle holds one cell, chosen by its own seed. What a sheet of
-		// *variations* is for rather than a sheet of *frames* — a page of eight
+		// *variations* is for rather than a sheet of *frames* - a page of eight
 		// different leaves, not one leaf turning.
 		Random = 3,
 	};
@@ -188,7 +188,7 @@ namespace engine::effects {
 	// **Big, and deliberately so.** At roughly a kilobyte and a half this is the
 	// widest component in the engine by an order of magnitude, and the reason it
 	// is acceptable is that **nothing on the per-frame path reads it**. The step
-	// reads a sampled table — see `ParticleSystem.hpp` — and this is touched when
+	// reads a sampled table - see `ParticleSystem.hpp` - and this is touched when
 	// a particle is *born* and when the sampled table is rebuilt, which is when a
 	// property changes.
 	//
@@ -250,8 +250,8 @@ namespace engine::effects {
 		// say how long it takes.
 		//
 		// **Zero means "ask the texture, then fall back to twelve".** An
-		// imported animation states its own rate — a GIF has a delay per frame,
-		// and `scene::TextureCatalogue` carries what those average to — so a
+		// imported animation states its own rate - a GIF has a delay per frame,
+		// and `scene::TextureCatalogue` carries what those average to - so a
 		// scene pointing an emitter at one should not have to repeat a number
 		// the file already holds. An author who sets this means it and wins;
 		// `ResolvedRate` in `ParticleSystem.cpp` is the order.
@@ -276,7 +276,7 @@ namespace engine::effects {
 		//
 		// A name, for `scene::Visual::Mesh`'s reason: a texture reference has to
 		// survive a save file and a wire. An invalid name draws an untextured
-		// quad, which is a visible flat square rather than nothing — the missing
+		// quad, which is a visible flat square rather than nothing - the missing
 		// texture rule.
 		core::Name Texture;
 
@@ -345,19 +345,19 @@ namespace engine::effects {
 		// **Not Roblox's, and a real GIF is why it exists.** Roblox's flipbooks
 		// are authored sheets that fill their grid, so the cell count and the
 		// frame count are the same number there. A GIF has whatever number of
-		// frames the animation has — `fox_dance.gif` has 24 — and the grid is the
+		// frames the animation has - `fox_dance.gif` has 24 - and the grid is the
 		// next square power of two that fits, which is 8x8. Playing all 64 cells
 		// would spend five eighths of every particle's life showing nothing, and
 		// the symptom is an effect that flashes on and vanishes rather than one
 		// that animates.
 		//
 		// **Zero means "ask the texture, then the whole grid"**, so an authored
-		// sheet needs nothing said, an imported one needs nothing said either —
+		// sheet needs nothing said, an imported one needs nothing said either -
 		// the bake put the number on the texture and `scene::TextureCatalogue`
-		// carries it — and only a scene that knows better than both has to
+		// carries it - and only a scene that knows better than both has to
 		// speak.
 		//
-		// A `uint8_t` because the ceiling is 64 — the widest grid this engine
+		// A `uint8_t` because the ceiling is 64 - the widest grid this engine
 		// draws. It sits here rather than beside `Flipbook` because it fits the
 		// padding after the flags, which is what named padding is for.
 		uint8_t FlipbookFrames = 0;
@@ -370,7 +370,7 @@ namespace engine::effects {
 		// **Off by default, and the default matters more here than usual.** A
 		// locked particle is one whose position is recomputed from the parent
 		// every frame, so a trail of smoke behind a moving rocket becomes a rigid
-		// column stuck to it — which is right for an engine glow and wrong for
+		// column stuck to it - which is right for an engine glow and wrong for
 		// almost everything else.
 		bool LockedToPart = false;
 
@@ -387,8 +387,8 @@ namespace engine::effects {
 		//
 		// **Not a Roblox property, and it is here because it is the one thing
 		// their `LightEmission` conflates.** Additive blending is
-		// order-independent — which is why every particle system in the world
-		// offers it — so an additive emitter's particles need no back-to-front
+		// order-independent - which is why every particle system in the world
+		// offers it - so an additive emitter's particles need no back-to-front
 		// sort at all. At half a million particles that is the difference between
 		// a sort and no sort, and it is far too large a difference to leave
 		// implied by a float.
@@ -398,8 +398,8 @@ namespace engine::effects {
 	// One particle, in the layout a vertex shader reads.
 	//
 	// **Twenty-eight bytes, and every field is one that varies between two
-	// particles of one emitter.** Anything shared — the texture, the blend mode,
-	// the orientation rule — is on the emitter and reached through `Slot`, which
+	// particles of one emitter.** Anything shared - the texture, the blend mode,
+	// the orientation rule - is on the emitter and reached through `Slot`, which
 	// is what keeps this small enough to write half a million of per frame.
 	//
 	// Trivially copyable and flat, for `scene::DrawInstance`'s reason: the day a
@@ -426,7 +426,7 @@ namespace engine::effects {
 		// Its spin about the view axis, and its flipbook cell.
 		//
 		// Rotation in the low sixteen bits as a turn over 65,536, which is a
-		// hundredth of a degree — finer than a screen can show. The cell in the
+		// hundredth of a degree - finer than a screen can show. The cell in the
 		// high sixteen, which is sixty-four values used out of the range.
 		uint32_t RotationAndCell = 0;
 
@@ -445,13 +445,13 @@ namespace engine::effects {
 		// orientation rule, Z offset and light response are all per emitter, and
 		// this is how a particle names them without carrying them. Sixteen bits
 		// caps a world at 65,536 live emitters, which is under the roadmap's
-		// hundred thousand — `ParticleSystem.hpp` says what happens at the cap and
+		// hundred thousand - `ParticleSystem.hpp` says what happens at the cap and
 		// why the number is what it is.
 		uint16_t Slot = 0;
 
 		// Explicit padding, so the object representation carries no uninitialised
 		// bytes into a recording. Two bytes, which is the type's alignment tail
-		// rather than an interior hole — and it is the only slack there is, so the
+		// rather than an interior hole - and it is the only slack there is, so the
 		// next field anybody wants here costs four bytes across half a million
 		// particles rather than none.
 		uint16_t Reserved = 0;
@@ -459,8 +459,8 @@ namespace engine::effects {
 
 	// **Twenty-eight and not thirty-two, which is worth pinning rather than
 	// leaving to whatever the compiler laid out.** Rounding up to thirty-two was
-	// considered — it is the friendlier stride for a GPU fetch and it would leave
-	// four bytes of room — and the arithmetic settles it: four bytes across half a
+	// considered - it is the friendlier stride for a GPU fetch and it would leave
+	// four bytes of room - and the arithmetic settles it: four bytes across half a
 	// million particles is two megabytes uploaded every frame to carry nothing.
 	// Twenty-eight is four-byte aligned, which is all a vertex attribute stream
 	// asks for.
@@ -492,7 +492,7 @@ namespace engine::effects {
 	// The largest particle this packing can describe, in metres.
 	//
 	// Sixty-four, and a particle asked to be larger is clamped rather than
-	// wrapped — a wrapped size is a sixty-five-metre puff of smoke drawn one
+	// wrapped - a wrapped size is a sixty-five-metre puff of smoke drawn one
 	// millimetre across, which reads as a particle that vanished.
 	inline constexpr float MAX_PARTICLE_SIZE = 64.0f;
 }

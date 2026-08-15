@@ -16,7 +16,7 @@ mono_add_library(render
 		# `render::ParticleBatch` carries a span of `effects::ParticleInstance`,
 		# which is the whole point of the type: the particle stream crosses from
 		# simulation to presentation without being copied or converted. That makes
-		# it a public dependency in the same way `assets` is — the payload type has
+		# it a public dependency in the same way `assets` is - the payload type has
 		# to propagate to whoever fills a batch.
 		#
 		# L8 is below L12 and `effects` is `shared`, so the edge goes downward and
@@ -34,6 +34,16 @@ mono_add_library(render
 		# that owns it would build, link, stage nothing and fail at pipeline
 		# creation on a machine where a full build had not happened to run first.
 		Engine::resources
+
+		# SPIR-V to MSL, for the half a build step cannot do.
+		#
+		# **A module rather than a function in here, because there are two
+		# callers.** `mono.tools/shadercross` translates the built-in shaders
+		# during the build and this translates a `ShaderScript` while the engine
+		# runs; one implementation is what stops the two from disagreeing about
+		# which texture is `[[texture(0)]]`, which on macOS is a surface sampling
+		# somebody else's map and on Linux is nothing at all.
+		Engine::msl
 
 	# Keep GPU and shader compiler types private to implementation files.
 	VENDOR SDL3::SDL3 shaderc

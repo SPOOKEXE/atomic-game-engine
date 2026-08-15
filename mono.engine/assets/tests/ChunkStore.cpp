@@ -127,7 +127,7 @@ TEST_CASE("writing a chunk twice is a no-op that succeeds", "[assets][chunkstore
 
 TEST_CASE("a corrupted chunk fails to read rather than being handed over", "[assets][chunkstore]") {
 	// The name *is* the hash, so this catches a corrupt disk, a partial write
-	// and a tampered store with one check — and says which chunk, where the
+	// and a tampered store with one check - and says which chunk, where the
 	// asset root would only say that the asset was wrong.
 	Tree tree;
 	ChunkStore store = tree.Store();
@@ -144,7 +144,7 @@ TEST_CASE("a corrupted chunk fails to read rather than being handed over", "[ass
 	}
 
 	CHECK_FALSE(store.Read(hash).has_value());
-	// Still "present" — Contains asks about a file and Read asks about bytes.
+	// Still "present" - Contains asks about a file and Read asks about bytes.
 	CHECK(store.Contains(hash));
 }
 
@@ -222,7 +222,7 @@ TEST_CASE("a bundle payload is its members concatenated in member order", "[asse
 
 TEST_CASE("the manifest is published with its signature in front", "[assets][chunkstore]") {
 	// Signature first, so a reader knows what to verify before it has parsed
-	// anything — the arrangement Grant::Open exists to enforce at its own layer.
+	// anything - the arrangement Grant::Open exists to enforce at its own layer.
 	Tree tree;
 	ChunkStore store = tree.Store();
 	Manifest manifest;

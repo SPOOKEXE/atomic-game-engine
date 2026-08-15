@@ -34,7 +34,7 @@ namespace engine::replication {
 		// @since v0.9
 		const assets::SigningKey *ClientIdentity = nullptr;
 
-		// The link's own settings — framing, timeouts and per-tick budgets.
+		// The link's own settings - framing, timeouts and per-tick budgets.
 		SessionSettings Session;
 
 		// How much unacknowledged input this client keeps for replay.
@@ -87,7 +87,7 @@ namespace engine::replication {
 		// input is what the player *did* and the server decides what it means;
 		// this is what the client says the world *is*, for the part of it the
 		// server handed over. So the server checks the sender's right to say it
-		// and drops what it does not own — `Authority::SetOwnership` carries the
+		// and drops what it does not own - `Authority::SetOwnership` carries the
 		// policy, including the half deliberately left to the host.
 		//
 		// Nothing is predicted or replayed here: an owned entity is simulated by
@@ -110,7 +110,7 @@ namespace engine::replication {
 
 		// Sends a message this module does not read.
 		//
-		// `Listener::SendTo`'s twin — see the note there on why widening this
+		// `Listener::SendTo`'s twin - see the note there on why widening this
 		// pair beats standing up a fourth session type.
 		//
 		// @param message    The payload.
@@ -157,6 +157,31 @@ namespace engine::replication {
 			return Replica_.Joined();
 		}
 
+		// Whether what the server put ahead of the world has arrived.
+		//
+		// True while `Joined` is still false is the window a loading screen
+		// belongs in. See `Replica::Prefaced`.
+		//
+		// @return `true` once the preface has been applied.
+		// @since v0.15
+		bool Prefaced() const {
+			return Replica_.Prefaced();
+		}
+
+		// Called the moment the preface lands, with the replicated store.
+		//
+		// **`Prefaced()` says it happened; this says when.** A single `Poll`
+		// drains the socket and applies every message that was in it, so the
+		// preface and the world behind it commonly arrive in one call and the
+		// window between them is not visible to anything reading state between
+		// polls. Whoever raises a loading screen wants this rather than the flag.
+		//
+		// @param callback What to run, or `{}` to stop listening.
+		// @since v0.15
+		void OnPreface(std::function<void(ecs::Store &)> callback) {
+			Replica_.OnPreface(std::move(callback));
+		}
+
 		// The last tick applied in full.
 		//
 		// @return The tick, or zero before joining.
@@ -198,7 +223,7 @@ namespace engine::replication {
 			//
 			// **Every field of an inbound message is hostile**, so a refusal here
 			// is the ordinary outcome of a hostile or corrupt packet rather than
-			// a fault to investigate — it is the count *rising steadily* that
+			// a fault to investigate - it is the count *rising steadily* that
 			// says something.
 			uint64_t Refused = 0;
 

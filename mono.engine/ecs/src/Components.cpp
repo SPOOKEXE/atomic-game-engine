@@ -12,7 +12,7 @@ namespace engine::ecs {
 		// What a name resolves to, and which C++ type claimed it.
 		//
 		// The owner is the address of that type's slot, which is a distinct
-		// static per type — so comparing it is an exact answer to "is this the
+		// static per type - so comparing it is an exact answer to "is this the
 		// same type", where comparing size and alignment is only a guess.
 		//
 		// The case that made this necessary: two types declared in anonymous
@@ -31,7 +31,7 @@ namespace engine::ecs {
 			// A deque rather than a vector because Describe hands back a
 			// reference and registration continues afterwards. A vector would
 			// reallocate and turn every descriptor anyone was holding into a
-			// dangling pointer, at a moment — startup — when nothing is looking
+			// dangling pointer, at a moment - startup - when nothing is looking
 			// for that kind of bug.
 			std::deque<TypeDescriptor> Descriptors;
 			std::unordered_map<uint32_t, Entry> ByName;
@@ -41,7 +41,7 @@ namespace engine::ecs {
 		// Never destroyed, deliberately.
 		//
 		// A `Column` reaches its descriptor to destroy its rows, and a store held
-		// in a static outlives this registry under reverse destruction order —
+		// in a static outlives this registry under reverse destruction order -
 		// the registry is built on the first *registration*, which happens after
 		// whatever static owns the store was constructed. The result is a
 		// destructor reading a freed `std::deque` and calling whatever the bytes
@@ -90,7 +90,7 @@ namespace engine::ecs {
 		if (found != registry.ByName.end()) {
 			// Two different types under one name. Aborting rather than
 			// tolerating it, because the alternative is that one of them runs
-			// with the other's constructor, destructor and serialiser — which
+			// with the other's constructor, destructor and serialiser - which
 			// presents as a leak, a double free, or a snapshot whose columns
 			// line up by name and hold something else.
 			//
@@ -100,7 +100,7 @@ namespace engine::ecs {
 			if (found->second.Owner != &slot) {
 				ENGINE_ERROR(
 					"component '{}' is already registered by a different type. Two "
-					"types cannot share a name — register at least one of them "
+					"types cannot share a name - register at least one of them "
 					"explicitly, under a name of its own.",
 					name.Text()
 				);

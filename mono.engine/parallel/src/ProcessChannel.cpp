@@ -2,7 +2,7 @@
 //
 // `ChannelEnd` is a handle number, a single owner and a close. None of that
 // differs between platforms once `platform::SocketClose` exists, so it lives
-// here rather than once per platform — the platform files are left with the
+// here rather than once per platform - the platform files are left with the
 // part that genuinely differs, which is how a connected pair is made and how a
 // child finds the end it was given.
 

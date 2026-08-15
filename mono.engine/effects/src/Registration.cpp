@@ -20,7 +20,7 @@ namespace engine::effects {
 		using ecs::PropertyKind;
 		using ecs::PropertyType;
 
-		// `ParticleEmitter` holds a `core::Name` — its texture — so it is written
+		// `ParticleEmitter` holds a `core::Name` - its texture - so it is written
 		// with an explicit pair that writes the name as text. The raw object
 		// representation would write the name's process-local id, which restores
 		// in another process as whatever string happened to take that number.
@@ -189,7 +189,7 @@ namespace engine::effects {
 		}
 
 		// The pool is derived state and its serialisation says so by writing
-		// nothing — `client::DrawList`'s argument, applied to something far bigger.
+		// nothing - `client::DrawList`'s argument, applied to something far bigger.
 		//
 		// A world's particles are its emitters plus one frame of simulation, and
 		// writing half a million of them into every save file would be storing an
@@ -210,7 +210,7 @@ namespace engine::effects {
 		}
 
 		// A slot is a position in one process's pool. Restoring it would point an
-		// emitter at whatever block took that number — rule 4's hazard, so nothing
+		// emitter at whatever block took that number - rule 4's hazard, so nothing
 		// crosses and the reader clears.
 		void WriteSlots(core::ByteWriter &, const void *, size_t) {}
 
@@ -234,7 +234,7 @@ namespace engine::effects {
 		// **The ribbon buffer, and forgetting it was caught by a snapshot test
 		// rather than by a compiler.** `Store::Save` refuses a resource with no
 		// serialisation instead of writing bytes it cannot read back, so a world
-		// with a `RibbonBuffer` in it simply would not save — which is what
+		// with a `RibbonBuffer` in it simply would not save - which is what
 		// `client/tests/Presentation.cpp` reported, in exactly the words
 		// `client::DrawList`'s own comment predicts for this mistake.
 		//

@@ -3,8 +3,8 @@
 // The pool half a million particles live in, and the two passes that move them.
 //
 // **A resource, because there is one of it per world**, which is `ecs/AGENTS.md`'s
-// rule applied to the largest piece of state the engine has. The alternative — a
-// particle buffer per emitter — is a hundred thousand allocations and a hundred
+// rule applied to the largest piece of state the engine has. The alternative - a
+// particle buffer per emitter - is a hundred thousand allocations and a hundred
 // thousand pointer chases to reach one particle, which is the arrangement the
 // roadmap's target rules out before anything else.
 //
@@ -13,11 +13,11 @@
 // A particle is described by three separate things and they are read by three
 // different loops, so they are three arrays rather than one array of structs:
 //
-// - **`ParticleInstance`** — what a GPU reads. Written by the step, read by the
+// - **`ParticleInstance`** - what a GPU reads. Written by the step, read by the
 //   upload, never read by the simulation.
-// - **`ParticleState`** — what the step reads and writes. Velocity, age,
+// - **`ParticleState`** - what the step reads and writes. Velocity, age,
 //   lifetime, seed. Never touched by the upload.
-// - **`EmitterBlock`** — what an emitter contributes, sampled small. One per live
+// - **`EmitterBlock`** - what an emitter contributes, sampled small. One per live
 //   emitter, not one per particle.
 //
 // The instance array and the state array are indexed identically, so a particle
@@ -37,21 +37,21 @@
 // atomic per particle. A block-local swap touches only that block's memory, which
 // means `Jobs::For` can hand one worker a range of blocks and no two workers ever
 // write the same byte. No atomics, no locks, and the output is in the same order
-// every frame — so a recorded run replays, which is rule 5.
+// every frame - so a recorded run replays, which is rule 5.
 //
 // ## The sampled curves
 //
 // `ParticleEmitter` carries four curves totalling about a kilobyte, and
 // evaluating one is a scan over its keypoints. At half a million particles a
 // frame that is half a million scans over data that has not changed. So each
-// block holds a **sixteen-entry sampled table** — `ParticleCurves`, 256 bytes —
+// block holds a **sixteen-entry sampled table** - `ParticleCurves`, 256 bytes -
 // rebuilt when the emitter's column version moves and read by the step as an
 // index and a lerp.
 //
 // **Sixteen samples is a visible-quality decision and it is stated as one.** A
 // curve that ramps over a whole lifetime is smooth at sixteen; one authored with
-// a hard step in it — two keypoints at the same time, which `Sequence.hpp` says
-// is how an edge is written — lands the edge on the nearest sixteenth of the
+// a hard step in it - two keypoints at the same time, which `Sequence.hpp` says
+// is how an edge is written - lands the edge on the nearest sixteenth of the
 // life. That is up to about three per cent of a lifetime late, which at a
 // five-second particle is 150 ms. Noticeable for a deliberate flash and invisible
 // for everything else. The fix, when somebody needs it, is a per-emitter sample
@@ -85,7 +85,7 @@ namespace engine::effects {
 	//
 	// **65,535, which is below `ROADMAP.md`'s hundred thousand, and that is a
 	// deliberate limit rather than an oversight.** `ParticleInstance::Slot` is
-	// sixteen bits because thirty-two would make the instance thirty-six bytes —
+	// sixteen bits because thirty-two would make the instance thirty-six bytes -
 	// four more across half a million particles is two megabytes a frame of extra
 	// upload to address emitters that are not on screen.
 	//
@@ -93,7 +93,7 @@ namespace engine::effects {
 	// *existing*, and a world may hold any number: an emitter without a block
 	// emits nothing and costs one skipped row. Blocks are handed out to the
 	// emitters that are enabled and in view, so the cap is on how many are
-	// *emitting at once* — and a scene with sixty-five thousand of those has half
+	// *emitting at once* - and a scene with sixty-five thousand of those has half
 	// a million particles before it runs out, which is the other limit.
 	//
 	// **Running out is logged once and then silent**, because a message per
@@ -107,7 +107,7 @@ namespace engine::effects {
 	// One emitter's curves, sampled flat.
 	//
 	// **256 bytes, against about a kilobyte for the four sequences it comes
-	// from**, and the saving is not the point — the point is that reading it is an
+	// from**, and the saving is not the point - the point is that reading it is an
 	// index rather than a scan. The step does this four times per particle per
 	// frame.
 	//
@@ -116,7 +116,7 @@ namespace engine::effects {
 		// Width in metres at each sixteenth of a life.
 		float Size[CURVE_SAMPLES] = {};
 
-		// Alpha — one minus transparency — at each. **Stored as opacity rather
+		// Alpha - one minus transparency - at each. **Stored as opacity rather
 		// than as transparency**, because that is what the packed colour needs and
 		// the flip belongs where the table is built rather than in a loop that
 		// runs half a million times.
@@ -151,7 +151,7 @@ namespace engine::effects {
 	//
 	// **A separate function rather than a template, because the interpolation is
 	// not the same operation.** These are three eight-bit channels in one word,
-	// so blending them means unpacking, lerping and repacking — and doing that
+	// so blending them means unpacking, lerping and repacking - and doing that
 	// through a generic `SampleAt` would mean either a float table (four times
 	// the size, which is what packing avoided) or a specialisation that shares no
 	// line with the original.
@@ -166,8 +166,8 @@ namespace engine::effects {
 	// **A component and not a map**, because finding an emitter's block happens
 	// once per emitter per frame in two passes, and a hash lookup at a hundred
 	// thousand rows is a hundred thousand cache misses to answer what a column
-	// read answers for free. `ecs/AGENTS.md`'s rule — componentise what you
-	// iterate — with the iteration named.
+	// read answers for free. `ecs/AGENTS.md`'s rule - componentise what you
+	// iterate - with the iteration named.
 	//
 	// **Not in the `ParticleEmitter` class's authored set by accident**: it is in
 	// it deliberately, so `Instance.new("ParticleEmitter")` has one and the
@@ -179,7 +179,7 @@ namespace engine::effects {
 	struct EmitterSlot {
 		// Which block, or `NO_SLOT` when this emitter has none.
 		//
-		// **Not serialised as a meaningful value** — see `Registration.cpp`. A
+		// **Not serialised as a meaningful value** - see `Registration.cpp`. A
 		// block index is a position in one process's pool, which is rule 4's
 		// hazard exactly: restoring it would point an emitter at whatever block
 		// happened to take that number.
@@ -193,7 +193,7 @@ namespace engine::effects {
 	//
 	// **One column read and never a walk.** An emitter parented to an
 	// `Attachment` takes that attachment's resolved world frame, and one parented
-	// to a part takes the part's `Transform` — both of which are already there by
+	// to a part takes the part's `Transform` - both of which are already there by
 	// the time this runs, because `ResolveAttachments` is registered ahead of it.
 	// An emitter parented to neither emits from the origin, which is visible and
 	// therefore better than emitting nothing.
@@ -208,7 +208,7 @@ namespace engine::effects {
 	// The parent part's `Bounds`, which is Roblox's arrangement: resizing a part
 	// resizes its effect without touching the emitter. An emitter on an
 	// attachment or on nothing spawns from a point, which is a zero half-extent
-	// rather than a default box — a default would make every attachment-parented
+	// rather than a default box - a default would make every attachment-parented
 	// effect a metre wide for reasons nobody authored.
 	//
 	// @param store   The world.
@@ -252,7 +252,7 @@ namespace engine::effects {
 		//
 		// **The seed's index, and it must not be the slot number.** A slot is
 		// reused the instant a particle dies, so seeding from it makes every
-		// replacement identical to what it replaced — a steady emitter settles
+		// replacement identical to what it replaced - a steady emitter settles
 		// into a loop of the same handful of particles within one lifetime, which
 		// reads as a stuttering effect rather than as a seeding mistake. A
 		// monotonic counter gives every particle its own draw.
@@ -284,7 +284,7 @@ namespace engine::effects {
 		FlipbookMode FlipbookPlayback = FlipbookMode::OneShot;
 		//@}
 
-		// How many cells hold a frame, resolved from the emitter — never zero.
+		// How many cells hold a frame, resolved from the emitter - never zero.
 		//
 		// **Resolved here rather than left as the emitter's zero-means-all**, so
 		// the step never has to ask which meaning it is looking at.
@@ -298,7 +298,7 @@ namespace engine::effects {
 		// **Named `Reserved` and it is not padding**, which is worth saying
 		// because every other `Reserved` in the engine is. `RefreshEmitters`
 		// clears this over every block, lets the emitter walk set it, and frees
-		// whatever is still clear — which is how a block belonging to a destroyed
+		// whatever is still clear - which is how a block belonging to a destroyed
 		// emitter is reclaimed without keeping a second list of live owners.
 		uint8_t Reserved = 0;
 
@@ -346,7 +346,7 @@ namespace engine::effects {
 		//
 		// **Turns and not degrees, and resolved at spawn rather than each step.**
 		// The packed rotation is a turn over 65,536, so keeping the speed in the
-		// same unit makes the integration one multiply-add with no conversion —
+		// same unit makes the integration one multiply-add with no conversion -
 		// and the alternative, redrawing it from the seed every frame, is a hash
 		// per particle per frame to reproduce a number that never changes.
 		float Spin = 0.0f;
@@ -410,7 +410,7 @@ namespace engine::effects {
 		// **Fixed at install time rather than grown on demand**, and the reason is
 		// the same one that made blocks contiguous: growing the pool reallocates
 		// under every block's indices, so it would have to happen between frames
-		// with nothing running — which is exactly when nobody knows how much is
+		// with nothing running - which is exactly when nobody knows how much is
 		// needed. A pool that is full drops spawns and says so.
 		uint32_t Capacity = 0;
 
@@ -459,7 +459,7 @@ namespace engine::effects {
 	//
 	// **The loop the whole module is shaped around.** Parallel over blocks, no
 	// atomics, no allocation, and the output order is a function of the block
-	// order — which is a function of the emitter column's order, which is stable
+	// order - which is a function of the emitter column's order, which is stable
 	// within a tick. So two runs of one scene produce the same stream, which is
 	// what rule 5 asks of anything inside a tick.
 	//

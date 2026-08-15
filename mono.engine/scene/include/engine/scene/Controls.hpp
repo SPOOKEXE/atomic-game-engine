@@ -5,7 +5,7 @@
 // **The arithmetic is here and the events are not**, which is the same split
 // `replication::DistancePriority` makes and for the same reason: `input` is
 // `client` tier, so a camera that consumed SDL events would be a camera only a
-// client could have — and the studio, a replay and a headless test all need one.
+// client could have - and the studio, a replay and a headless test all need one.
 // So the client writes `scene::InputState` and this reads it, which makes every
 // line below runnable in a suite.
 //
@@ -17,6 +17,7 @@
 // @tier L7 · shared
 
 #include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -57,7 +58,7 @@ namespace engine::scene {
 		//
 		// **What `workspace.CurrentCamera.CFrame = ...` needs to survive**: a
 		// cutscene that set the camera every frame would otherwise fight this
-		// controller, and the one that ran last would win — the bug
+		// controller, and the one that ran last would win - the bug
 		// `client::BuildScriptedWorld` already records for `MoveCamera`.
 		Scriptable = 3,
 	};
@@ -77,7 +78,7 @@ namespace engine::scene {
 		//
 		// **Kept here rather than derived from the camera's `CFrame`.** A
 		// `CFrame` is a quaternion and reading pitch back out of one is
-		// ambiguous at the poles — so the authoritative angles are these, and the
+		// ambiguous at the poles - so the authoritative angles are these, and the
 		// frame is what they produce. That is also what makes the pitch clamp
 		// below possible at all.
 		core::Vector2 Angles;
@@ -88,7 +89,7 @@ namespace engine::scene {
 		// The closest it may come.
 		//
 		// **Zero, and reaching it is what switches to first person.** Roblox does
-		// the same, and the alternative — a separate key for first person — makes
+		// the same, and the alternative - a separate key for first person - makes
 		// the transition a jump rather than the continuous thing a player expects.
 		float MinimumDistance = 0.0f;
 
@@ -137,15 +138,28 @@ namespace engine::scene {
 		bool Enabled = true;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[2] = {};
+		//
+		// **Six rather than two**, because `Subject` is eight-byte aligned and
+		// so the whole struct is: two left four bytes the compiler filled and
+		// nobody initialised, and those four went into every save and every
+		// delta. `engine.ecs.invariants` is what says so now, and
+		// `engine.scene.registration` is what asks it about this module.
+		uint8_t Reserved[6] = {};
 	};
 
 	// What makes a part a character somebody drives.
 	//
 	// **Deliberately small.** `ROADMAP.md` says "basic character controls" and the
 	// instruction beside it says to spend the time on the particles instead, so
-	// this is a capsule, a speed, a jump and whether the ground is under it —
-	// and not a state machine, an animator, a ladder or a swim.
+	// this is a capsule, a speed, a jump, a life and whether the ground is under
+	// it - and not a state machine, an animator, a ladder or a swim.
+	//
+	// **The life arrived at v0.15 and it is what "dead" means.** Until then a
+	// character died by being destroyed and `UpdateRespawns` measured the delay
+	// from the tick a player was first seen with no body, which is Roblox's
+	// *delay* with Roblox's *trigger* missing. `scene::TakeDamage` and
+	// `scene::IsDead` are the two functions that gap needed;
+	// `Characters.hpp` carries what happens at zero.
 	//
 	// @since v0.10
 	struct Humanoid {
@@ -154,7 +168,7 @@ namespace engine::scene {
 		//
 		// **Roblox puts a `Humanoid` beside the parts rather than on one**, so
 		// the thing that holds the walk speed and the thing the solver pushes
-		// are two different rows — see `Characters.hpp`. A null handle means the
+		// are two different rows - see `Characters.hpp`. A null handle means the
 		// older arrangement, where a single part carries both, and that is what
 		// every scripted NPC in the repository and every case in
 		// `tests/Controls.cpp` still is.
@@ -174,7 +188,7 @@ namespace engine::scene {
 		// How fast it walks, in metres per second.
 		//
 		// **Roblox's number is 16 and it is 16 *studs*.** A stud is about 0.28 m,
-		// so the same feel in this engine's units is nearer 4.5 — see `JumpSpeed`
+		// so the same feel in this engine's units is nearer 4.5 - see `JumpSpeed`
 		// below for why the two are stated together and why the figure here is
 		// not simply converted. Left where a run of the examples put it, because
 		// what a character *feels* like is an authoring decision and not a units
@@ -185,8 +199,8 @@ namespace engine::scene {
 		//
 		// **50 was Roblox's `JumpPower`, and Roblox's gravity is 196.2.** That
 		// pairing gives a jump about 6 studs high. `scene::Gravity` deliberately
-		// does *not* copy 196.2 — this engine measures a part sized `2` as two
-		// metres, so it uses Earth's 9.81 and says so at length — and 50 m/s
+		// does *not* copy 196.2 - this engine measures a part sized `2` as two
+		// metres, so it uses Earth's 9.81 and says so at length - and 50 m/s
 		// against 9.81 m/s² is an apex of a hundred and thirty metres, reached
 		// five seconds after take-off.
 		//
@@ -216,13 +230,30 @@ namespace engine::scene {
 		// tolerance is what turns that into walking.
 		float GroundTolerance = 0.15f;
 
+		// How much life is left. Zero is dead.
+		//
+		// **The authority's number, and a client's is a copy of it.**
+		// `scene.Humanoid` replicates by the ordinary `scene.` prefix rule, so a
+		// client reads this off its own store to draw a bar - and
+		// `ecs::Store::SetProperty` refuses a write in a replica, which is where
+		// this engine already answers "who owns a row" for every property there
+		// is. `scene::TakeDamage` makes the same refusal for the C++ door, so
+		// there is one answer rather than a script rule and a code rule.
+		float Health = 100.0f;
+
+		// The ceiling `Health` is clamped against.
+		//
+		// Roblox's hundred, so a game that sets neither gets a bar that starts
+		// full and a hit that means a readable fraction of it.
+		float MaxHealth = 100.0f;
+
 		// Whether something is under it, as of the last step.
 		bool Grounded = false;
 
 		// Whether it has been told to jump. Cleared once the jump is applied.
 		//
 		// **A request rather than an act**, because the tick that reads input and
-		// the tick that moves a body are not the same one — a controller that
+		// the tick that moves a body are not the same one - a controller that
 		// applied the impulse where the key was read would apply it outside the
 		// physics step.
 		bool JumpRequested = false;
@@ -231,8 +262,30 @@ namespace engine::scene {
 		bool Enabled = true;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved = 0;
+		//
+		// **Five bytes rather than one, and that is what the two health floats
+		// paid for.** An `ecs::Entity` aligns to eight, so this object rounds up
+		// to a multiple of eight whatever is in it - and at one byte the round-up
+		// was four *unnamed* bytes on the end, which a snapshot writes and nobody
+		// initialises. Widening the named run to reach the boundary exactly is
+		// how the rest of this module states the same rule, and `just
+		// determinism` is what checks it: two runs of one scene writing
+		// different bytes is what uninitialised padding looks like from outside.
+		uint8_t Reserved[5] = {};
 	};
+
+	// Whether a humanoid has run out of life.
+	//
+	// **One spelling of the comparison, because three passes ask it.**
+	// `StepCharacters` refuses to drive a dead body, `UpdateRespawns` starts the
+	// respawn clock from it and `TakeDamage` uses it to make a death happen once
+	// - and `<= 0` written out three times is three chances for one of them to
+	// become `< 0` and quietly stop agreeing with the other two.
+	//
+	// @param humanoid The row to ask about.
+	// @return `true` when `Health` has reached zero.
+	// @since v0.15
+	bool IsDead(const Humanoid &humanoid);
 
 	// Turns this frame's input into camera angles and a zoom distance.
 	//
@@ -266,7 +319,7 @@ namespace engine::scene {
 	//
 	// What it fixes is unmistakable when it is missing: you walk forward through
 	// a hole whose pair turns a corner, and on the far side the view is still
-	// pointing the way you came in — ninety degrees off your own body, facing a
+	// pointing the way you came in - ninety degrees off your own body, facing a
 	// wall, with W walking you sideways because `ReadMoveIntent` is relative to
 	// this yaw.
 	//
@@ -312,8 +365,8 @@ namespace engine::scene {
 	//
 	// **Split out of `UpdateCharacterControl` because a connected client needs
 	// the intent without the application.** A client does not simulate its own
-	// character — the host does, and the client sends what it wants through
-	// `game::MoveInput` — so the arithmetic that turns W into "away from the
+	// character - the host does, and the client sends what it wants through
+	// `game::MoveInput` - so the arithmetic that turns W into "away from the
 	// camera" has to be reachable on its own. The alternative was a second copy
 	// of it in `mono.client`, which is where the diagonal-speed bug would come
 	// back.
@@ -324,6 +377,54 @@ namespace engine::scene {
 	// @return The intent. Zero direction and no jump when the window is not
 	//         focused or the world has no `InputState`.
 	MoveIntent ReadMoveIntent(const ecs::Store &store);
+
+	// What the player is aiming at, and whether they asked to act on it.
+	//
+	// @since v0.15
+	struct AimIntent {
+		// Where the eye is and which way it is pointing, in world space.
+		core::Ray Ray;
+
+		// Whether the primary button went down since a tick last consumed the
+		// edges.
+		//
+		// **A tap and not a hold**, which is `MoveIntent::Jump`'s distinction
+		// and matters more here: a hold would fire once per tick for as long as
+		// the button is down, and a client cannot be trusted with the rate.
+		bool Fired = false;
+
+		// Whether there was a camera to aim from at all.
+		//
+		// **Separate from `Fired`, because they fail differently.** A world with
+		// no live camera and a player who did not click both produce "no shot",
+		// and only one of them is a bug.
+		bool Aimed = false;
+	};
+
+	// Reads the live camera and the pointer into an aim, and applies it to
+	// nothing.
+	//
+	// **Here rather than in `mono.client`, for `ReadMoveIntent`'s reason.** A
+	// client sends where it aimed and never what it hit - `Server::ApplyInputs`
+	// states that division - so the arithmetic that turns a camera into a ray
+	// has to be reachable without the thing that acts on it. The studio's
+	// `PlayLink` needs the same ray with no socket in the middle, and two
+	// copies of "which way is the player looking" is the shape that drifts and
+	// drifts first in the editor.
+	//
+	// **The ray is the camera's and not the character's.** A shot starts at the
+	// eye because that is what the player aimed with; a game that wants it to
+	// start at a muzzle offsets it, and it is the *direction* that must not be
+	// re-derived.
+	//
+	// Const, because it writes nothing at all. The consuming of the tap is the
+	// caller's, through `InputState::ConsumeTaps`, exactly as it is for a jump.
+	//
+	// @param store The world.
+	// @return The aim. `Aimed` is false when there is no live camera or no
+	//         `InputState`, and `Fired` is false whenever the window is not
+	//         focused.
+	AimIntent ReadAimIntent(const ecs::Store &store);
 
 	// Turns this frame's input into a `Humanoid::MoveDirection`.
 	//
@@ -340,7 +441,14 @@ namespace engine::scene {
 	//
 	// **In the simulation and against the fixed tick**, because it writes a
 	// `Motion` the physics step integrates. `UpdateCharacterControl` may run in
-	// either phase — it only writes an intent — but this must not.
+	// either phase - it only writes an intent - but this must not.
+	//
+	// **A dead humanoid is skipped, which is what makes a body stay where it
+	// fell.** Roblox leaves the corpse for `Player.RespawnTime` and then replaces
+	// it; the gate is here rather than on the intent because this is the half
+	// that reaches a `Motion` - a dead character keeps whatever momentum killed
+	// it and then falls, instead of walking on with the last direction its owner
+	// pressed.
 	//
 	// **Ground detection is a downward ray and the query is the caller's.** This
 	// module may not link `physics`, so `Grounded` is read rather than computed:
@@ -356,7 +464,7 @@ namespace engine::scene {
 	// The `Humanoid` class id, registering the scene tree on first call.
 	//
 	// The third of the tree's class accessors, beside `scene::PartClass` and
-	// `scene::CameraClass` — it lives here rather than in `Part.hpp` because a
+	// `scene::CameraClass` - it lives here rather than in `Part.hpp` because a
 	// humanoid is the thing this file steers, and `StepCharacters` is the
 	// reason the class exists at all.
 	//

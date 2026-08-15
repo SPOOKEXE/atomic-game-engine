@@ -41,7 +41,7 @@ namespace {
 	//
 	// **Small enough that a long ramp stays inside full scale.** The obvious
 	// version stores the frame index itself, and every sample past the first
-	// then hits the output clipper — so the test reads 1.0 for ever and looks
+	// then hits the output clipper - so the test reads 1.0 for ever and looks
 	// like a cursor that stopped advancing.
 	constexpr float RAMP_STEP = 1.0f / 4096.0f;
 
@@ -64,7 +64,7 @@ namespace {
 	// Commands, built rather than brace-initialised.
 	//
 	// C++ requires designated initialisers in declaration order, and a `Command`
-	// declares `AtSample` before `Target` — so `{.Target = ..., .AtSample = ...}`
+	// declares `AtSample` before `Target` - so `{.Target = ..., .AtSample = ...}`
 	// does not compile and the order that does read backwards. These name what
 	// they do and leave the rest defaulted.
 	Command Act(CommandKind kind, NodeId target, uint64_t at = 0) {
@@ -509,7 +509,7 @@ TEST_CASE("the mix is clipped exactly once, at the end", "[audio][mixer]") {
 
 	const MixReport report = mixer.Render(out);
 	CHECK(report.Clipped);
-	// The meter reads what the graph produced — 2.0 — rather than what
+	// The meter reads what the graph produced - 2.0 - rather than what
 	// survived. Measured after clipping it would read exactly 1.0 for ever,
 	// which is the number that hides the problem.
 	CHECK(report.Peak == 2.0f);

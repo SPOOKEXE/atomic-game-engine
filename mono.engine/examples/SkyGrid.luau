@@ -1,7 +1,7 @@
 --!strict
 -- A skygrid: a lattice of blocks in an empty sky, and nothing underneath.
 --
--- `Mirrors-1-world.luau` proves the rendering path — shadows, a surface camera,
+-- `Mirrors-1-world.luau` proves the rendering path - shadows, a surface camera,
 -- a texture sampled back. This proves the **other** thing a viewport has to
 -- survive: a world made of many small separate objects with sky visible between
 -- every one of them, rather than a few large ones over a floor.
@@ -24,7 +24,7 @@
 -- ## What it is not
 --
 -- There is no terrain, no collision and nothing to stand on. The blocks are
--- anchored and stay where they are put — this is a thing to look at and to
+-- anchored and stay where they are put - this is a thing to look at and to
 -- measure a frame against, not a place to walk around in.
 
 local RunService = game:GetService("RunService")
@@ -94,7 +94,7 @@ for column = 0, COLUMNS - 1 do
 end
 
 -- The camera the scene is watched through. Below and outside the lattice,
--- looking up its diagonal — the angle where the three axes are all foreshortened
+-- looking up its diagonal - the angle where the three axes are all foreshortened
 -- differently, so a projection error shows up as a bend rather than hiding
 -- along one of them.
 local view = Instance.new("Camera")
@@ -108,7 +108,7 @@ view.Parent = workspace
 workspace.CurrentCamera = view
 
 -- **A slow drift rather than a spin.** The point of the motion is that the
--- frame is not identical twice in a row — a still scene lets a driver reuse
+-- frame is not identical twice in a row - a still scene lets a driver reuse
 -- everything and reports a frame time nobody will ever see. Small enough that
 -- the lattice still reads as a lattice.
 local DRIFT = 0.55

@@ -4,7 +4,7 @@
 // Two things are under test here and they fail differently. The **early-out**
 // fails silently: a signature that misses a term leaves a hidden part drawing
 // or a new part invisible, on one frame, with nothing in the renderer to say
-// why — so every case below that toggles one thing and asserts the tag moved is
+// why - so every case below that toggles one thing and asserts the tag moved is
 // a term of the fold, and deleting one of those terms should turn a case red
 // rather than merely make a benchmark faster. The **non-marking write** fails
 // loudly but a long way away: `Rendered` written through `GetMutable` advances
@@ -115,8 +115,8 @@ TEST_CASE("a steady tree takes the early-out", "[scene][visibility]") {
 
 	// **Deliberately doing the one thing `Visibility.hpp` forbids**, because it
 	// is the only way to observe from outside whether the walk ran. Nothing in
-	// the signature covers `Rendered` — it is the walk's output, not its input
-	// — so if the tag is still gone after another sync, the walk was skipped.
+	// the signature covers `Rendered` - it is the walk's output, not its input
+	// - so if the tag is still gone after another sync, the walk was skipped.
 	store.Remove<Rendered>(part);
 	CHECK(SyncRendered(store) == 0);
 	CHECK_FALSE(store.Has<Rendered>(part));
@@ -235,7 +235,7 @@ TEST_CASE("destroying a part re-syncs", "[scene][visibility]") {
 	REQUIRE(SyncRendered(store) == 2);
 
 	// A destroyed instance leaves the `Hierarchy` pass whether or not the links
-	// around it were tidied, so the count alone would catch this — and
+	// around it were tidied, so the count alone would catch this - and
 	// `DestroyInstance` unparents on its way out, so the parent's links move
 	// too.
 	store.DestroyInstance(gone);
@@ -355,14 +355,14 @@ TEST_CASE("the signature never crosses a snapshot alive", "[scene][visibility]")
 
 // **The flash, asserted.** `client::BuildDrawList` draws
 // `PreviousTransform.NLerp(Transform, alpha)`, so a row whose previous frame is
-// the identity is drawn sliding in from the origin — which is what every block
+// the identity is drawn sliding in from the origin - which is what every block
 // `examples/Slide.luau` spawns did, for the five frames between being parented
 // and the next tick's `capture-previous`.
 //
 // The rule this checks is narrow on purpose: a row that was **not drawn last
 // frame** did not travel from anywhere, so the frame it is interpolated from is
 // where it is. A row that was already drawn keeps its history, because that
-// history *is* the motion — clearing it on every write is the fix that was tried
+// history *is* the motion - clearing it on every write is the fix that was tried
 // first and it turns every scripted animation into stepped motion at the tick
 // rate.
 TEST_CASE("a row drawn for the first time is not interpolated from the origin", "[scene][visibility]") {
@@ -381,8 +381,7 @@ TEST_CASE("a row drawn for the first time is not interpolated from the origin", 
 	placed.Frame = engine::core::CFrame(engine::core::Vector3{40.0f, 9.0f, -3.0f});
 	store.Set(part, placed);
 
-	const engine::scene::PreviousTransform *before =
-		store.Get<engine::scene::PreviousTransform>(part);
+	const engine::scene::PreviousTransform *before = store.Get<engine::scene::PreviousTransform>(part);
 	REQUIRE(before != nullptr);
 	CHECK(before->Frame.Position.X == 0.0f);
 
@@ -390,8 +389,7 @@ TEST_CASE("a row drawn for the first time is not interpolated from the origin", 
 	REQUIRE(store.SetParent(part, workspace));
 	CHECK(SyncRendered(store) == 1);
 
-	const engine::scene::PreviousTransform *after =
-		store.Get<engine::scene::PreviousTransform>(part);
+	const engine::scene::PreviousTransform *after = store.Get<engine::scene::PreviousTransform>(part);
 	REQUIRE(after != nullptr);
 	CHECK(after->Frame.Position.X == 40.0f);
 	CHECK(after->Frame.Position.Y == 9.0f);
@@ -417,8 +415,7 @@ TEST_CASE("a row already on screen keeps the frame it came from", "[scene][visib
 	// **Still the old frame**, which is what buys smooth motion between ticks.
 	// If this ever reads 5, the seeding above has stopped asking whether the row
 	// is new and every animation in the engine is stepping at the tick rate.
-	const engine::scene::PreviousTransform *previous =
-		store.Get<engine::scene::PreviousTransform>(part);
+	const engine::scene::PreviousTransform *previous = store.Get<engine::scene::PreviousTransform>(part);
 	REQUIRE(previous != nullptr);
 	CHECK(previous->Frame.Position.X == 0.0f);
 }
@@ -442,10 +439,9 @@ TEST_CASE("a part shown again after being moved while hidden does not slide", "[
 	visibility_test::SetVisible(store, part, true);
 	CHECK(SyncRendered(store) == 1);
 
-	// It did not travel a hundred studs — nobody was watching, and drawing the
+	// It did not travel a hundred studs - nobody was watching, and drawing the
 	// journey is inventing motion that never happened.
-	const engine::scene::PreviousTransform *previous =
-		store.Get<engine::scene::PreviousTransform>(part);
+	const engine::scene::PreviousTransform *previous = store.Get<engine::scene::PreviousTransform>(part);
 	REQUIRE(previous != nullptr);
 	CHECK(previous->Frame.Position.Y == 100.0f);
 }

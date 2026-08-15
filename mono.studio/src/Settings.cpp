@@ -12,7 +12,7 @@ namespace studio {
 
 	// The same string `Interface.cpp` docks and focuses. Declared here rather
 	// than shared through a header because two translation units naming one
-	// window is exactly the drift `###` is guarding against — so it is written
+	// window is exactly the drift `###` is guarding against - so it is written
 	// once in each and checked by the panel appearing where it was left.
 	static constexpr const char *PREFERENCES = "Preferences###Studio Settings";
 
@@ -24,8 +24,8 @@ namespace studio {
 		// **The point of a theme picker is to show the theme.** A list of seven
 		// words makes somebody try all seven to find out what "Shadow" is; a
 		// row of colours answers it before they click. The swatch has to be
-		// drawn because imgui's style holds one palette at a time — the live
-		// one — so the other six exist only as numbers until something paints
+		// drawn because imgui's style holds one palette at a time - the live
+		// one - so the other six exist only as numbers until something paints
 		// them.
 		void Swatch(const engine::ui::PaletteSample &sample, float size) {
 			ImDrawList *draw = ImGui::GetWindowDrawList();
@@ -57,7 +57,7 @@ namespace studio {
 		//
 		// **The picker always shows a colour, and the label says whose it is.**
 		// A row that was blank until somebody chose something would make the
-		// seven defaults invisible — and the first thing anybody wants when
+		// seven defaults invisible - and the first thing anybody wants when
 		// recolouring is the colour they are departing from, to nudge it.
 		//
 		// @param colours  The set being edited.
@@ -126,7 +126,7 @@ namespace studio {
 
 		// **The lifecycle is a policy, so it has a switch.** A universe of
 		// subareas cannot tick all of them, which is what closing empty worlds
-		// is for — but an author debugging a world that keeps closing under
+		// is for - but an author debugging a world that keeps closing under
 		// them needs to be able to stop it happening rather than work out why.
 		ImGui::Checkbox("Close empty worlds automatically", &AutoManageWorlds);
 
@@ -148,7 +148,7 @@ namespace studio {
 
 		// **The slider stops where the policy does.** `DecideLifecycle` clamps
 		// to ten minutes, so a control offering thirty would be offering a
-		// number that is silently ignored — which reads as the setting being
+		// number that is silently ignored - which reads as the setting being
 		// broken rather than as the ceiling being deliberate.
 		constexpr float MAXIMUM_MINUTES =
 			static_cast<float>(engine::world::MAXIMUM_IDLE_LIMIT_SECONDS) / 60.0f;
@@ -161,7 +161,7 @@ namespace studio {
 		ImGui::EndDisabled();
 
 		if (IdleSleepMode == engine::world::IdleSleep::Never) {
-			ImGui::TextDisabled("every world keeps ticking, so NPCs and clocks keep running —");
+			ImGui::TextDisabled("every world keeps ticking, so NPCs and clocks keep running -");
 			ImGui::TextDisabled("and every world keeps costing what it costs");
 		} else {
 			ImGui::TextDisabled("a world with no player and nobody looking at it stops ticking;");
@@ -190,7 +190,7 @@ namespace studio {
 			} else {
 				// **Put back rather than left lying.** A checkbox that stays
 				// ticked while the device ignored it is a control reporting a
-				// state the program is not in — and the driver refusing is an
+				// state the program is not in - and the driver refusing is an
 				// ordinary outcome rather than a fault.
 				VerticalSync = !VerticalSync;
 				Say("this device will not change vertical sync", engine::core::LogLevel::Warning);
@@ -270,7 +270,7 @@ namespace studio {
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
 			engine::ui::ApplyEditorTheme(Settings.Scale);
 			Say("interface scale is now " + std::to_string(Settings.Scale) +
-				"x — restart to rasterise the fonts at it");
+				"x - restart to rasterise the fonts at it");
 		}
 	}
 
@@ -282,14 +282,14 @@ namespace studio {
 		// an accent, because only the accent is pinned. Without the sentence,
 		// the first person to override a colour and then switch theme reads it
 		// as a bug.
-		ImGui::TextDisabled("chosen over whichever theme is selected — the rest still follows it");
+		ImGui::TextDisabled("chosen over whichever theme is selected - the rest still follows it");
 		ImGui::Spacing();
 
 		engine::ui::ThemeColours chosen = engine::ui::GlobalColours();
 		const engine::ui::Palette palette = engine::ui::CurrentPalette();
 
 		// **Both colour sections are the same seven rows in one window**, so
-		// `ColourRow`'s own id — the colour it edits — repeats between them.
+		// `ColourRow`'s own id - the colour it edits - repeats between them.
 		// imgui keys a widget on the whole stack, and two swatches sharing an id
 		// is two swatches that drag each other. The scope is pushed here rather
 		// than inside `ColourRow` because the row cannot know which section it
@@ -315,7 +315,7 @@ namespace studio {
 		}
 
 		if (changed) {
-			// Restyles and persists in one call, like `SetPalette` — see its
+			// Restyles and persists in one call, like `SetPalette` - see its
 			// note for why neither is left to the caller.
 			engine::ui::SetGlobalColours(chosen);
 		}
@@ -376,8 +376,8 @@ namespace studio {
 		for (size_t index = 0; index < engine::ui::THEME_COLOUR_COUNT; index++) {
 			const auto which = static_cast<engine::ui::ThemeColour>(index);
 
-			// The colour it inherits is the *live* one — the palette with the
-			// editor's overrides already on it — because that is what this
+			// The colour it inherits is the *live* one - the palette with the
+			// editor's overrides already on it - because that is what this
 			// panel is actually drawn in today.
 			changed |= ColourRow(chosen, which, engine::ui::ColourOf(which));
 		}
@@ -412,7 +412,7 @@ namespace studio {
 	void Editor::DrawKeybindSettings() {
 		// **The table is the source of truth, not a picture of one.**
 		// `DrawShortcuts` reads exactly these rows, so a key changed here is
-		// changed everywhere — including the labels in the menus, which ask the
+		// changed everywhere - including the labels in the menus, which ask the
 		// same table what to print. A settings page that listed keys some other
 		// code had hard-coded would be a page that lies the first time somebody
 		// edits one of them.
@@ -479,7 +479,7 @@ namespace studio {
 						if (holder != Action::Count) {
 							for (const Keybind &other : Keybinds::All()) {
 								if (other.Bound == holder) {
-									said += " — taken from " + std::string(other.Name);
+									said += " - taken from " + std::string(other.Name);
 									break;
 								}
 							}
@@ -554,14 +554,14 @@ namespace studio {
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 
 		// Said out loud rather than discovered. See `Keybinds::Set`.
-		ImGui::TextUnformatted("not saved yet — bindings last for this run");
+		ImGui::TextUnformatted("not saved yet - bindings last for this run");
 		ImGui::PopStyleColor();
 	}
 
 	void Editor::DrawContentSettings() {
 		// **The order is the feature.** Nothing in the engine implements
 		// "local cache first, then the origin next door, then the one across
-		// the internet" — that is what a list in this order *means* to
+		// the internet" - that is what a list in this order *means* to
 		// `delivery::AssetClient`, which walks it and stops at the first source
 		// that answers. So the page is a reorderable list, and the arrows are
 		// the policy editor.
@@ -574,7 +574,7 @@ namespace studio {
 		// a read walks this list skipping the write-only rows and stops at the
 		// first that answers, and an upload walks it skipping the read-only
 		// rows and sends to *every* one. Two lists would be two orderings that
-		// drift, and what somebody wants in both directions is the same thing —
+		// drift, and what somebody wants in both directions is the same thing -
 		// nearest first.
 		ImGui::TextDisabled("a write origin is never fetched from, and a read origin is never uploaded to");
 
@@ -600,7 +600,7 @@ namespace studio {
 				// **The id is pinned to the row, not to the text.** A widget's
 				// id comes from its label, so a field whose label changed as
 				// somebody typed into it would become a different widget and
-				// drop keyboard focus after one character — the lesson the
+				// drop keyboard focus after one character - the lesson the
 				// script editor's tabs already carry.
 				ImGui::PushID(static_cast<int>(index));
 				ImGui::TableNextRow();
@@ -632,7 +632,7 @@ namespace studio {
 					ImGui::SetTooltip(
 						"both: fetched from and uploaded to\n"
 						"read: fetched from only\n"
-						"write: uploaded to only — never consulted for a fetch, because it\n"
+						"write: uploaded to only - never consulted for a fetch, because it\n"
 						"holds content no signed manifest describes yet"
 					);
 				}
@@ -647,7 +647,7 @@ namespace studio {
 				if (!source.IsValid() && ImGui::IsItemHovered()) {
 					ImGui::SetTooltip(
 						source.Kind == engine::delivery::SourceKind::Http
-							? "an address and a port, as 127.0.0.1:9080 — a host name has to be resolved first"
+							? "an address and a port, as 127.0.0.1:9080 - a host name has to be resolved first"
 							: "a directory holding a published content store"
 					);
 				}
@@ -663,7 +663,7 @@ namespace studio {
 				if (needsKey) {
 					ImGui::SetNextItemWidth(-FLT_MIN);
 
-					// **Masked, but saved** — unlike the signing seed on the
+					// **Masked, but saved** - unlike the signing seed on the
 					// Assets panel, which is asked for every time and never
 					// kept. `ContentSources.hpp` carries why those two differ:
 					// an ingest key buys disk, a signing seed buys trust.
@@ -674,7 +674,7 @@ namespace studio {
 						);
 					}
 				} else {
-					ImGui::TextDisabled("—");
+					ImGui::TextDisabled("-");
 				}
 
 				ImGui::TableNextColumn();
@@ -743,7 +743,7 @@ namespace studio {
 		if (Content.PublisherKey.empty()) {
 			ImGui::TextColored(
 				ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
-				"no publisher key — nothing will be fetched, because nothing could be verified"
+				"no publisher key - nothing will be fetched, because nothing could be verified"
 			);
 		} else if (!engine::assets::PublicKey::FromHex(Content.PublisherKey)) {
 			ImGui::TextDisabled("64 lowercase hex characters; `cdn --publish` prints it");
@@ -754,7 +754,7 @@ namespace studio {
 		// **Not origins, and the page has to say why.** Everything above is a
 		// place content is *fetched* from, and a fetch is only ever of something
 		// a signed manifest names. A folder of PNGs has neither, so these are
-		// baked by this editor for this editor — `ContentSources::RawFolders`
+		// baked by this editor for this editor - `ContentSources::RawFolders`
 		// carries the argument, and the assets panel repeats it on the tab.
 		ImGui::TextDisabled("art folders this editor bakes from directly; nothing here reaches a client");
 
@@ -808,7 +808,7 @@ namespace studio {
 		if (changed) {
 			// Saved as it is edited rather than behind an Apply button. There
 			// is nothing here that is only valid as a set, so a half-finished
-			// list is a half-finished list either way — and an editor that lost
+			// list is a half-finished list either way - and an editor that lost
 			// a typed address on exit is worse than one that saved it.
 			Content.Save(ContentSourcesPath);
 
@@ -820,7 +820,7 @@ namespace studio {
 			// Rebuilt on every keystroke, which sounds wasteful and is not:
 			// building a client resolves addresses and opens a cache, and both
 			// are cheap next to the fetch nothing has asked for yet. The
-			// alternative — rebuilding when the field loses focus — makes the
+			// alternative - rebuilding when the field loses focus - makes the
 			// Network panel disagree with this one for as long as a cursor sits
 			// in a field.
 			RebuildContentClients();

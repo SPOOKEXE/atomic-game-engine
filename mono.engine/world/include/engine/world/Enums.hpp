@@ -2,8 +2,8 @@
 
 // The named states a universe talks in.
 //
-// Every one of these crosses a boundary — a supervisor reads a world's state, a
-// deployment picks an isolation, a host is configured with an execution mode —
+// Every one of these crosses a boundary - a supervisor reads a world's state, a
+// deployment picks an isolation, a host is configured with an execution mode -
 // so each is a type rather than a bool or an int that loses its meaning at the
 // first hop.
 //
@@ -24,7 +24,7 @@ namespace engine::world {
 		Active,
 
 		// Ticking at a reduced rate. A subarea with nobody in it still has to
-		// advance — crops grow, timers expire — but not sixty times a second.
+		// advance - crops grow, timers expire - but not sixty times a second.
 		Idle,
 
 		// Not ticking at all, and costing nothing but its storage. The whole
@@ -39,7 +39,7 @@ namespace engine::world {
 		// Held by a supervised host, not by this process.
 		//
 		// The driver keeps a record of it so that the buses, the directory and
-		// the recording still know the world exists — a topic it subscribed to
+		// the recording still know the world exists - a topic it subscribed to
 		// and a teleport addressed to it are the driver's to route. What the
 		// driver does *not* have is its storage, so it never ticks it and never
 		// reads its store.
@@ -69,7 +69,7 @@ namespace engine::world {
 
 	// How a host spends its worker pool.
 	//
-	// The switch changes no result — it decides where parallelism is taken, not
+	// The switch changes no result - it decides where parallelism is taken, not
 	// what is computed. A test asserts that, because a tuning knob that quietly
 	// changed behaviour would be a semantic pretending to be a setting.
 	//
@@ -110,7 +110,7 @@ namespace engine::world {
 	//
 	// **Two states tick and three do not, and the count is the reason this is a
 	// function.** Callers wrote `state == WorldState::Active` because that is
-	// the state they had in mind, and an `Idle` world — which ticks, slowly —
+	// the state they had in mind, and an `Idle` world - which ticks, slowly -
 	// then answered "no". A caller deriving how far between two ticks to draw
 	// got the wrong answer for a world that was simulating perfectly well.
 	//

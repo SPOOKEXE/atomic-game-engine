@@ -4,9 +4,16 @@
 -- **This is the parity check, and it is the reason the port is credible.**
 -- `MagicCore` and `TerrainCore` came from a Rojo project with 183 data tests
 -- that ran in Studio. Those tests came across with the libraries and are run
--- here, unmodified apart from one line: `WaitForChild` does not exist in this
--- engine, so `Run.luau` uses `FindFirstChild`. Everything else — the harness,
--- every spec, the inventory guard — is the file that shipped.
+-- here, unmodified apart from one line: `Run.luau` uses `FindFirstChild` where
+-- the Roblox original used `WaitForChild`. Everything else - the harness, every
+-- spec, the inventory guard - is the file that shipped.
+--
+-- **That line stays changed now the engine has a `WaitForChild`**, and `Run.luau`
+-- says why: the tree is fully mounted before any script runs, a wait suspends
+-- until a barrier, and there is no beat inside a scene load - so waiting would
+-- suspend this chunk and the 215 specs would silently never run. The engine's
+-- form also takes a required timeout, so the line could not have gone back
+-- verbatim in any case.
 --
 -- The count is 215 now. **The 183 are still the parity check and the 32 since
 -- are not**: those cover `Noise`'s simplex, Worley and derivative samplers and
@@ -24,7 +31,7 @@
 -- The `live` suite, which built real `ParticleEmitter`, `Beam`, `Trail`,
 -- `PointLight` and `Attachment` instances and asserted the particle-tail release
 -- deadline. This engine has none of those classes, so the suite was **dropped
--- rather than stubbed** — a mock that asserted against a fake emitter would
+-- rather than stubbed** - a mock that asserted against a fake emitter would
 -- report a pass for a pipeline that does not exist, which is worse than an
 -- honest gap. `MagicRuntime` is absent for the same reason.
 --
@@ -35,7 +42,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local MagicCore = ReplicatedStorage:FindFirstChild("MagicCore")
-assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted — is assets/lib staged?")
+assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted - is assets/lib staged?")
 
 local TerrainCore = ReplicatedStorage:FindFirstChild("TerrainCore")
 assert(TerrainCore ~= nil, "ReplicatedStorage.TerrainCore was not mounted")

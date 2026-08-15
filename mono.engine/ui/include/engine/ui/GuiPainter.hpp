@@ -9,7 +9,7 @@
 // the engine's own widget tree compiles to a flat list at L7, and this draws
 // that list through the atlas that already exists.
 //
-// It takes a `gui::DrawList` and an `ImDrawList` and nothing else — no store,
+// It takes a `gui::DrawList` and an `ImDrawList` and nothing else - no store,
 // no class table, no tree. That is what makes it replaceable: the batched quad
 // pipeline the v0.8 plan describes is a *second consumer of the same list*, not
 // a second compile, so neither backend can drift from the other about where an
@@ -18,7 +18,7 @@
 // ## What a shipped client can and cannot do with this today
 //
 // Stated plainly because it decides where this is useful. `mono.client` does
-// **not** link this module, deliberately — `Interface.hpp` gives the reason: a
+// **not** link this module, deliberately - `Interface.hpp` gives the reason: a
 // shipped game draws no editor panels and should not carry imgui's atlas,
 // pipelines and shaders to never use them. So this paints a game's UI inside
 // the *studio*, which is where the v0.8 plan's next step lives, and a shipped
@@ -67,7 +67,7 @@ namespace engine::ui {
 			//
 			// **The whole image for anything that is not a sheet**, so a caller
 			// applies it unconditionally. A `.gif` bakes to an ordinary texture
-			// carrying a grid of frames — `render::FlipbookCell` — and only the
+			// carrying a grid of frames - `render::FlipbookCell` - and only the
 			// thing that uploaded it knows the grid is there, which is why this
 			// comes back with the handle rather than being asked for separately.
 			//@{
@@ -87,7 +87,7 @@ namespace engine::ui {
 		// Where canvas (0, 0) sits, in imgui's screen coordinates.
 		//
 		// A `ScreenGui` compiled against a viewport panel is laid out from the
-		// panel's own origin, so the offset is where that panel is — which is
+		// panel's own origin, so the offset is where that panel is - which is
 		// why this is a parameter rather than assumed to be the window corner.
 		ImVec2 Origin{0.0f, 0.0f};
 
@@ -102,8 +102,8 @@ namespace engine::ui {
 	// Draws every command in `list` into `into`.
 	//
 	// **Does not open or close a window and does not touch imgui state beyond
-	// the draw list.** A caller decides where the pixels go — the background
-	// draw list for a full-screen overlay, a window's own for a panel — which
+	// the draw list.** A caller decides where the pixels go - the background
+	// draw list for a full-screen overlay, a window's own for a panel - which
 	// is the difference between a painter and a panel.
 	//
 	// Clip rectangles are pushed and popped per command, so the list may be

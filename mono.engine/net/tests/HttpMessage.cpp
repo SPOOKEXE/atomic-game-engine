@@ -185,7 +185,7 @@ TEST_CASE("a PUT carries its body", "[http]") {
 
 TEST_CASE("a PUT is incomplete until its whole body has arrived", "[http]") {
 	// The ordinary state of a large upload halfway across a socket, and not an
-	// error — the server keeps reading rather than closing.
+	// error - the server keeps reading rather than closing.
 	Request request;
 	CHECK(
 		Parse("PUT /ingest/ab12 HTTP/1.1\r\ncontent-length: 5\r\n\r\nhel", request) == ParseResult::Incomplete
@@ -195,7 +195,7 @@ TEST_CASE("a PUT is incomplete until its whole body has arrived", "[http]") {
 
 TEST_CASE("a PUT with no content-length is refused", "[http]") {
 	// `transfer-encoding` is refused outright, so a PUT without a length has no
-	// framing at all — and guessing "empty" would silently store nothing.
+	// framing at all - and guessing "empty" would silently store nothing.
 	Request request;
 	CHECK(Parse("PUT /ingest/ab12 HTTP/1.1\r\nhost: origin\r\n\r\n", request) == ParseResult::Malformed);
 }

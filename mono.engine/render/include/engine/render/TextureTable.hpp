@@ -28,7 +28,7 @@ namespace engine::render {
 		// The one it named. It is here.
 		Named,
 
-		// The default material — white plastic. What a drawable that named
+		// The default material - white plastic. What a drawable that named
 		// nothing gets, and **what one whose sheet is still on its way gets
 		// too**.
 		Default,
@@ -41,18 +41,18 @@ namespace engine::render {
 	//
 	// **A free function rather than three lines inside the draw loop**, because
 	// the rule is the whole of `D00107` and it is the one part of that entry a
-	// test can reach — the loop around it needs a device, a frame and content in
+	// test can reach - the loop around it needs a device, a frame and content in
 	// flight. A rule nothing can assert is a rule that drifts back.
 	//
 	// **The middle case is what the entry was about.** A texture still streaming
 	// and one that will never arrive used to be the same answer, so an imported
-	// model wore the marker for the frames its sheets took to land — a purple
+	// model wore the marker for the frames its sheets took to land - a purple
 	// shimmer across a scene load, indistinguishable from a misspelling. Now the
 	// marker means *nothing is coming*, which is the only meaning that is
 	// useful, and a sheet in flight looks like an untextured part until it lands.
 	//
-	// **No timer, deliberately.** A grace period — "draw the default for the
-	// first N frames after a name is asked for" — hides a genuinely missing
+	// **No timer, deliberately.** A grace period - "draw the default for the
+	// first N frames after a name is asked for" - hides a genuinely missing
 	// texture for exactly as long as it hides a streaming one, and with a byte
 	// budget in the path there is no N right for both a small scene and a large
 	// one.
@@ -119,7 +119,7 @@ namespace engine::render {
 		//
 		// **Ownership transfers, which is the whole contract.** The table
 		// releases it on `Drop`, on replacement and on `Shutdown`, exactly as it
-		// does for one it uploaded — so a caller that also released it would be
+		// does for one it uploaded - so a caller that also released it would be
 		// a double free, and one that kept using the handle after a `Drop` would
 		// be reading freed device memory. Hand it over and forget it.
 		//
@@ -130,7 +130,7 @@ namespace engine::render {
 		// @param bytes   What it cost in device memory, counted against
 		//                `MAXIMUM_BYTES` like any upload. A caller that guessed
 		//                low would let the ceiling be walked past.
-		// @return `false` for an invalid name, a null texture or a full table —
+		// @return `false` for an invalid name, a null texture or a full table -
 		//         and on `false` the caller still owns it.
 		// @since v0.10
 		bool
@@ -191,11 +191,11 @@ namespace engine::render {
 		// **The fact the renderer was missing, and only a host can supply it.**
 		// This table knows what it holds; what is in flight belongs to the
 		// content pump, which is a layer this module must not reach up into. So
-		// the pump tells it, on both edges — see `StopExpecting`.
+		// the pump tells it, on both edges - see `StopExpecting`.
 		//
 		// Idempotent, and it says nothing about the *kind* of the content: a
 		// host asking for a mesh marks that name too, which costs a set entry
-		// and is honest — "something is coming for this name" is exactly what
+		// and is honest - "something is coming for this name" is exactly what
 		// the draw loop wants to know.
 		//
 		// @param name What was asked for.
@@ -246,7 +246,7 @@ namespace engine::render {
 		// Where this texture's current cell sits, for a sheet that animates.
 		//
 		// **The identity for anything that is not a sheet**, so a caller applies
-		// the transform unconditionally — `render::FlipbookCell` carries why
+		// the transform unconditionally - `render::FlipbookCell` carries why
 		// that shape rather than a cell index.
 		//
 		// @param name    The texture.
@@ -288,7 +288,7 @@ namespace engine::render {
 		// One registered texture and what it cost.
 		//
 		// **The size is held per texture rather than only summed**, which it was
-		// not before `Drop` existed — and the sum was wrong because of it:
+		// not before `Drop` existed - and the sum was wrong because of it:
 		// replacing a texture under a name added the new size and never
 		// subtracted the old, so a session that re-registered content drifted
 		// upward until `MAXIMUM_BYTES` refused an upload that would have fit.
@@ -298,8 +298,8 @@ namespace engine::render {
 			size_t Bytes = 0;
 
 			// **What was uploaded, because a caller cannot ask the device.** A
-			// nine-sliced or tiled `ImageLabel` is laid out in *source* pixels —
-			// `gui::DrawCommand`'s slice insets are in them — so a painter
+			// nine-sliced or tiled `ImageLabel` is laid out in *source* pixels -
+			// `gui::DrawCommand`'s slice insets are in them - so a painter
 			// resolving a name to a handle needs the dimensions with it or it
 			// draws every slice at the wrong scale.
 			uint32_t Width = 0;
@@ -307,7 +307,7 @@ namespace engine::render {
 
 			// **The sheet layout, kept because the pass that plays it has only a
 			// name.** A GIF bakes to an ordinary texture carrying its grid,
-			// frame count and rate — `assets::TextureData` — and every one of
+			// frame count and rate - `assets::TextureData` - and every one of
 			// those was thrown away on upload, so nothing downstream could tell
 			// an animation from a tile atlas. They are three bytes an entry.
 			uint8_t FlipbookSide = 0;
@@ -321,6 +321,11 @@ namespace engine::render {
 		// a create-transfer-copy-submit sequence is two chances to get the row
 		// pitch wrong and only one of them under test.
 		//
+		// Every level the image carries is uploaded. A texture baked without a
+		// chain gets one level and draws exactly as it did before - **this never
+		// builds levels of its own**, because the box filter that would do it
+		// lives in `Engine::bake`, which nothing a shipped game links may link.
+		//
 		// @param image  The pixels. Assumed valid; callers check.
 		// @param label  What to name in a log line if it fails.
 		// @param bytes  Set to what the upload cost in device memory.
@@ -333,7 +338,7 @@ namespace engine::render {
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUSampler *SharedSampler = nullptr;
 
-		// The default, outside `Textures` on purpose — see `Default()`. Its
+		// The default, outside `Textures` on purpose - see `Default()`. Its
 		// bytes are not counted against `MAXIMUM_BYTES`: it is sixteen kilobytes
 		// the engine always holds, and a ceiling that content can spend should
 		// not shrink by a constant nobody can see.

@@ -12,7 +12,7 @@ namespace engine::render {
 	// **A surface camera is fitted to its pane, so its texture maps one to one
 	// onto the pane's screen footprint.** A pane covering half the screen
 	// therefore wants half the screen's pixels, and handing it a fixed size
-	// whatever it covers is what makes a portal go coarse as you walk up to it —
+	// whatever it covers is what makes a portal go coarse as you walk up to it -
 	// the texels are all there, they are just spread over a rectangle several
 	// times larger than the one they were authored for.
 	//
@@ -22,8 +22,8 @@ namespace engine::render {
 	// distinct sizes over the whole approach, and the step is where the
 	// hysteresis below sits.
 	//
-	// **It only grows.** The authored size is the floor — a scene that asked for
-	// a large mirror keeps it — and the screen is the ceiling, because nothing is
+	// **It only grows.** The authored size is the floor - a scene that asked for
+	// a large mirror keeps it - and the screen is the ceiling, because nothing is
 	// served by rendering more texels than the pane can occupy.
 	//
 	// **In a header of its own so a suite can reach it**, which is the whole
@@ -59,12 +59,12 @@ namespace engine::render {
 		// down against half of that same number puts both thresholds on one
 		// point, because a step is a factor of two and half of what is held is
 		// exactly what the step below provides. That is a hysteresis one texel
-		// wide — which is none.
+		// wide - which is none.
 		//
 		// What it cost: a viewer standing near a pane, breathing on it, crossing
 		// that single point every other frame. 32 reallocations in 60 frames from
 		// a coverage wobble of 0.0008, each one releasing three render targets,
-		// creating three more and clearing the slot's `Ready` — so the pane spent
+		// creating three more and clearing the slot's `Ready` - so the pane spent
 		// those frames re-rendering from nothing, and showed its own flat tint on
 		// any frame that re-render did not complete. The report was "a gray flash
 		// a bunch when i walk around".

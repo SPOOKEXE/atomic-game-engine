@@ -4,16 +4,16 @@
 //
 // **A GIF has been an ordinary texture since v0.10 and nothing played it.**
 // `bake::ReadGif` lays the frames out as a square power-of-two grid and
-// `assets::TextureData` carries the grid, the frame count and the rate — so the
+// `assets::TextureData` carries the grid, the frame count and the rate - so the
 // pixels, the layout and the timing all arrived, and every pass sampled cell
 // zero. A `.gif` on a part or an `ImageLabel` was a still of its first frame,
 // which reads as the decoder having dropped the animation rather than as
 // nothing advancing it.
 //
 // This is the half that advances it, and it is arithmetic rather than a system:
-// three passes need the same answer — the opaque pass for a part, the interface
+// three passes need the same answer - the opaque pass for a part, the interface
 // pass for an `ImageLabel`, and the studio's imgui painter for the same label in
-// a viewport panel — and three copies of a modulo would be three chances to
+// a viewport panel - and three copies of a modulo would be three chances to
 // disagree about whether a sheet loops on the frame count or the cell count.
 //
 // **The particle path is deliberately not a caller.** An emitter's flipbook is
@@ -55,8 +55,8 @@ namespace engine::render {
 	// Which frame is showing at `seconds`.
 	//
 	// **Wrapped on the frame count and not on the grid.** A 24-frame GIF lands
-	// in an 8x8 with forty cells empty — `bake/Gif.cpp` says why the grid is
-	// square and a power of two — and a player that walked all sixty-four would
+	// in an 8x8 with forty cells empty - `bake/Gif.cpp` says why the grid is
+	// square and a power of two - and a player that walked all sixty-four would
 	// spend five eighths of every loop showing nothing.
 	//
 	// @param frames  How many cells hold a frame. Zero is a still image.
@@ -80,7 +80,7 @@ namespace engine::render {
 	// What a sheet that states no rate is played at.
 	//
 	// Ten a second, which is what `bake::ReadGif` already treats a zero or
-	// one-hundredth delay as — the de-facto browser rule since Netscape. Spelled
+	// one-hundredth delay as - the de-facto browser rule since Netscape. Spelled
 	// here as well so a hand-drawn sheet and a GIF with no delays play the same.
 	inline constexpr float DEFAULT_RATE = 10.0f;
 }

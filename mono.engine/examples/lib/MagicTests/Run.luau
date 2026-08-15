@@ -20,10 +20,15 @@ local EXPECTED_DATA_TEST_COUNT = 215
 
 local Run = {}
 
--- `FindFirstChild` rather than Roblox's `WaitForChild`, which this engine does
--- not have. Nothing here is streamed in: `MountModuleTree` builds the whole tree
--- before any script runs, so a missing child is a staging bug and waiting for it
--- would only turn a clear failure into a hang.
+-- `FindFirstChild` rather than Roblox's `WaitForChild`, and it stays that way now
+-- the engine has one. Nothing here is streamed in: `MountModuleTree` builds the
+-- whole tree before any script runs, so a missing child is a staging bug and
+-- waiting for it would turn a clear failure into a slow one.
+--
+-- **A wait would also take the suite with it.** This chunk runs the 215 specs
+-- inline during one `LoadScene`; `WaitForChild` suspends until a *barrier*, and
+-- there is no beat inside a scene load - so a single miss would suspend the
+-- chunk, `LoadScene` would report success, and nothing would ever have run.
 local function moduleChild(parent: Instance, name: string): ModuleScript
 	local child = parent:FindFirstChild(name)
 	assert(child ~= nil, parent:GetFullName() .. " has no child " .. name)

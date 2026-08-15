@@ -7,7 +7,7 @@
 //
 // `CommandLog` already holds everything this needs: two stacks of `Command`,
 // each carrying the `Description` that was written for the Edit menu's label.
-// This panel is a reader over them — it caches nothing, per `AGENTS.md`'s rule
+// This panel is a reader over them - it caches nothing, per `AGENTS.md`'s rule
 // that a panel must never keep a copy of something the model owns, and walking
 // to a point in the history is repeated `Undo`/`Redo` rather than a second way
 // to move the stack.
@@ -81,7 +81,7 @@ namespace studio {
 				ImGui::PopID();
 			}
 
-			// The undone ones, greyed, still in the order they happened — so an
+			// The undone ones, greyed, still in the order they happened - so an
 			// edit does not jump across the list when it is undone.
 			for (size_t index = redoable.size(); index > 0; index--) {
 				const Command &command = redoable[index - 1];

@@ -38,7 +38,7 @@ TEST_CASE("PointAt walks along the direction in the direction's own units", "[ra
 TEST_CASE("a distance along a unit ray is a distance in world units", "[ray]") {
 	// The whole reason the direction must be unit length. Given a diagonal that
 	// was normalised, ten units along the ray is ten units away from the
-	// origin — which is what every reported hit distance means.
+	// origin - which is what every reported hit distance means.
 	const Ray ray{Vector3::Zero, Vector3{3.0f, -4.0f, 12.0f}.Unit()};
 
 	REQUIRE(ray.PointAt(10.0f).Magnitude() == Approx(10.0f));
@@ -63,7 +63,7 @@ TEST_CASE("two rays are equal only when both origin and direction match", "[ray]
 
 TEST_CASE("a default hit names nothing and is not a hit that says so", "[ray]") {
 	// There is no validity flag on purpose: a query that found nothing returns
-	// no hit at all. This case exists to keep that true — a `bool Valid` added
+	// no hit at all. This case exists to keep that true - a `bool Valid` added
 	// here would make reading the position out of a miss compile.
 	const RayHit hit;
 

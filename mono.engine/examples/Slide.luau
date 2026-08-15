@@ -3,7 +3,7 @@
 --
 -- **The physics module was complete and connected to nothing.** `DEFERRED.md`
 -- D00039: integrate, broad phase, narrow phase and solver had suites and
--- benchmarks and no consumer — `RegisterPhysicsSystems` was called from
+-- benchmarks and no consumer - `RegisterPhysicsSystems` was called from
 -- `physics/tests/` and nowhere else. Every world this engine shipped was
 -- anchored throughout, which is why nobody noticed: an anchored part carries no
 -- rigid body at all, so a scene of anchored geometry integrates nothing and
@@ -17,13 +17,13 @@
 -- A stack tests the solver and nothing else. A slide asks for all four steps at
 -- once and each one fails visibly:
 --
---   * **integrate** — a block that does not accelerate down the curve is not
+--   * **integrate** - a block that does not accelerate down the curve is not
 --     being stepped at all;
---   * **narrow phase** — a contact normal that is subtly wrong shows here before
+--   * **narrow phase** - a contact normal that is subtly wrong shows here before
 --     anywhere else, as a block that sinks into the ramp or skates across it;
---   * **broad phase** — blocks bunch up on the curve and spread out after the
+--   * **broad phase** - blocks bunch up on the curve and spread out after the
 --     launch, so the grid is asked for a burst and then for almost nothing;
---   * **solver** — blocks arriving behind one another have to queue rather than
+--   * **solver** - blocks arriving behind one another have to queue rather than
 --     tunnel through each other.
 --
 -- And the failure is legible without instrumentation. A slide that works looks
@@ -31,8 +31,8 @@
 --
 -- ## The curve is segments, not a curve
 --
--- There is no mesh collider and no heightfield — `physics::ShapeKind` is boxes
--- and spheres — so the ramp is a run of overlapping boxes each rotated to the
+-- There is no mesh collider and no heightfield - `physics::ShapeKind` is boxes
+-- and spheres - so the ramp is a run of overlapping boxes each rotated to the
 -- local tangent. Overlapping rather than abutting, because a seam between two
 -- boxes is a lip a block catches on, and a block that stops halfway down reads
 -- as the solver being wrong when it is the geometry.
@@ -52,7 +52,7 @@ local TOP = Vector3.new(-26, 30, 0)
 local RADIUS = 26
 
 -- How many boxes the ramp is made of. Enough that the facets are shorter than a
--- block is wide — below that a block bridges two segments and rocks between
+-- block is wide - below that a block bridges two segments and rocks between
 -- them, which looks like jitter and is geometry.
 local SEGMENTS = 24
 
@@ -73,7 +73,7 @@ floor.Color = Color3.fromRGB(118, 120, 126)
 floor.Parent = workspace
 
 -- **The curve, as a run of overlapping boxes.** The angle sweeps a quarter turn,
--- so the ramp leaves the top vertical and arrives at the bottom horizontal — the
+-- so the ramp leaves the top vertical and arrives at the bottom horizontal - the
 -- shape in the sketch this was built from.
 -- Parented straight to the workspace, like every other example here: a `Folder`
 -- would only be tidier in the explorer and this scene names its parts clearly
@@ -101,7 +101,7 @@ for index = 0, SEGMENTS - 1 do
 	-- **Long enough to overlap its neighbour**, which is what removes the seams.
 	-- One segment spans `RADIUS * (pi/2) / SEGMENTS` of arc; a third again
 	-- covers the gap the rotation opens on the outside of the curve, and a seam
-	-- is a lip a block catches on — which reads as the solver being wrong when
+	-- is a lip a block catches on - which reads as the solver being wrong when
 	-- it is the geometry.
 	local span = (RADIUS * (math.pi / 2) / SEGMENTS) * 1.35
 
@@ -144,7 +144,7 @@ end
 -- falling a little and then meets the curve.
 local SPAWN_AT = Vector3.new(TOP.X + 2.5, TOP.Y + 2, 0)
 
--- Deterministic jitter, so two runs of this world are the same world — the rule
+-- Deterministic jitter, so two runs of this world are the same world - the rule
 -- `Rings.luau` states and the reason nothing here calls `math.random`.
 local function hashed(index: number, salt: number): number
 	local value = bit32.bxor(index * 0x9E3779B1, salt * 0x85EBCA77)
@@ -203,14 +203,14 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	-- **Said once, because "does the slide work" is otherwise a judgement about
 	-- pixels.** A block that has left the ramp has been integrated, has been in
 	-- contact with the curve, and has been solved against whatever was ahead of
-	-- it — so one line naming where it got to is the whole simulation reporting
+	-- it - so one line naming where it got to is the whole simulation reporting
 	-- itself. Once rather than per block: this is a demo, not a telemetry feed.
 	if not launched then
 		for _, rider in riders do
 			if rider.Part.Position.X > LAUNCH_X and rider.Part.Position.Y < TOP.Y - RADIUS then
 				launched = true
 				print(
-					`slide: a block launched — x {string.format("%.1f", rider.Part.Position.X)}, `
+					`slide: a block launched - x {string.format("%.1f", rider.Part.Position.X)}, `
 						.. `y {string.format("%.1f", rider.Part.Position.Y)}, `
 						.. `after {string.format("%.1f", rider.Age)}s`
 				)
@@ -233,4 +233,4 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	end
 end)
 
-print(`slide: {SEGMENTS} segments, a block every {SPAWN_EVERY}s living {BLOCK_LIFETIME}s — all unanchored`)
+print(`slide: {SEGMENTS} segments, a block every {SPAWN_EVERY}s living {BLOCK_LIFETIME}s - all unanchored`)

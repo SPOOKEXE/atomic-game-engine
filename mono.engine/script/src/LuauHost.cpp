@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 
@@ -14,16 +14,16 @@ namespace engine::script {
 		// clock.** A script branching on real time produces a run that does not
 		// replay, and `just replay-check` would fail somewhere a long way from
 		// the script that caused it. `os` is refused outright for the same
-		// reason — see `LuauRuntime.cpp` — so these are what a script gets
+		// reason - see `LuauRuntime.cpp` - so these are what a script gets
 		// instead, under names Roblox already uses for the same idea.
 
-		// `time()` — simulated seconds since the world started.
+		// `time()` - simulated seconds since the world started.
 		int Time(lua_State *state) {
 			lua_pushnumber(state, UpvalueContext(state).World->Time().Elapsed);
 			return 1;
 		}
 
-		// `elapsedTime()` — the same number.
+		// `elapsedTime()` - the same number.
 		//
 		// Roblox distinguishes `time()` (since the game started) from
 		// `elapsedTime()` (since the client started), and here there is one
@@ -36,13 +36,13 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `tick()` — the tick count, not a Unix timestamp.
+		// `tick()` - the tick count, not a Unix timestamp.
 		//
 		// **Roblox's `tick()` returns wall-clock seconds since the epoch and
 		// this one does not**, which is a deliberate break rather than an
 		// oversight. The name is exactly right for what this engine counts, and
 		// a `tick()` that returned a real timestamp would be the single most
-		// effective way to make a recording stop replaying — an author would
+		// effective way to make a recording stop replaying - an author would
 		// use it for seeding, for elapsed measurement and for save timestamps
 		// without ever suspecting it.
 		int Tick(lua_State *state) {
@@ -73,13 +73,13 @@ namespace engine::script {
 			lua_setfield(state, -2, "UnixTimestampMillis");
 		}
 
-		// `DateTime.fromSimulated()` — this world's clock, named honestly.
+		// `DateTime.fromSimulated()` - this world's clock, named honestly.
 		int DateTimeFromSimulated(lua_State *state) {
 			PushDateTime(state, UpvalueContext(state).World->Time().Elapsed);
 			return 1;
 		}
 
-		// `DateTime.fromUnixTimestamp(n)` — a timestamp something else supplied.
+		// `DateTime.fromUnixTimestamp(n)` - a timestamp something else supplied.
 		//
 		// A value type over a number and nothing more. A script that received a
 		// real timestamp over a bus is holding data, not reading a clock, and
@@ -95,7 +95,7 @@ namespace engine::script {
 		// omission.** It was bound as a global first, and the global was never
 		// called: Luau's `typeof` is a *fastcall builtin*, so the compiler emits
 		// an opcode that reaches `luaB_typeof` directly and never looks a global
-		// up — and freezing the globals with `luaL_sandbox` is exactly what
+		// up - and freezing the globals with `luaL_sandbox` is exactly what
 		// licenses that optimisation.
 		//
 		// The mechanism Luau actually offers is the **`__type` metafield**,
@@ -104,7 +104,7 @@ namespace engine::script {
 		// table of tags in a third file that has to be kept in step with them.
 		// Every value type this module installs sets it.
 
-		// `warn(...)` — `print`, at a level that stands out.
+		// `warn(...)` - `print`, at a level that stands out.
 		int Warn(lua_State *state) {
 			std::string line;
 			const int count = lua_gettop(state);
@@ -136,7 +136,7 @@ namespace engine::script {
 		// - `getfenv`/`setfenv` rewrite the environment a function sees, which
 		//   is how a sandboxed script reaches the one that sandboxed it.
 		// - `require` reaches another module by path. Module scripts are a real
-		//   feature and they arrive through the instance tree — see v0.7 — not
+		//   feature and they arrive through the instance tree - see v0.7 - not
 		//   through a file system a game can name.
 		int RefuseLoadstring(lua_State *state) {
 			luaL_errorL(

@@ -41,7 +41,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local MagicCore = ReplicatedStorage:FindFirstChild("MagicCore")
-assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted — is assets/lib staged?")
+assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted - is assets/lib staged?")
 
 local Compiler = require((MagicCore :: any):FindFirstChild("Compiler") :: any)
 local Presets = require((MagicCore :: any):FindFirstChild("Presets") :: any)
@@ -184,7 +184,7 @@ for index, entry in LANES do
 	local graph, diagnostics = Compiler.compileGraph(documents.root, documents.recipes)
 
 	if graph == nil then
-		warn(`magic: lane {entry.preset} skipped — {diagnostics[1].message} at {diagnostics[1].path}`)
+		warn(`magic: lane {entry.preset} skipped - {diagnostics[1].message} at {diagnostics[1].path}`)
 		continue
 	end
 

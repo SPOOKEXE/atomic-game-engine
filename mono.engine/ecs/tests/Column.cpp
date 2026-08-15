@@ -171,7 +171,7 @@ TEST_CASE("rows stay contiguous inside a chunk and the directory reaches every o
 TEST_CASE("a chunk keeps its address while later chunks come and go", "[ecs]") {
 	// What a batch body holding a pointer depends on. Growth links a new chunk
 	// rather than copying everything into a bigger allocation, so the rows
-	// already there never move — which is what took the copy out of the growth
+	// already there never move - which is what took the copy out of the growth
 	// curve the column already had.
 	Column column(Components::Of<Point>());
 	for (size_t index = 0; index < Column::FIRST_CHUNK_ROWS; index++) {
@@ -191,7 +191,7 @@ TEST_CASE("a chunk keeps its address while later chunks come and go", "[ecs]") {
 TEST_CASE("capacity is never more than twice the rows", "[ecs]") {
 	// The property doubling chunks buy, and the one a fixed chunk size cannot
 	// have: a column of a million rows is a handful of chunks with almost every
-	// row in the largest two, and a column of one row costs eight — which is
+	// row in the largest two, and a column of one row costs eight - which is
 	// exactly what the old first capacity charged, so nothing got worse for a
 	// world that never grows.
 	Column column(Components::Of<Point>());
@@ -209,7 +209,7 @@ TEST_CASE("capacity is never more than twice the rows", "[ecs]") {
 TEST_CASE("capacity follows the population back down", "[ecs]") {
 	// **The item.** A column used to keep its high-water mark forever, so a
 	// world that peaked at ten thousand entities and settled at a hundred held
-	// the peak — a thousand of those measured 703 MB against 2.7 MB of live
+	// the peak - a thousand of those measured 703 MB against 2.7 MB of live
 	// rows. A chunk goes back the moment the rows stop reaching into it.
 	Column column(Components::Of<Point>());
 
@@ -373,8 +373,8 @@ TEST_CASE("a tag column counts rows and allocates nothing", "[ecs]") {
 
 TEST_CASE("the pool stops retaining past its cap", "[ecs]") {
 	// **A pool that never trims relocates the leak and reports success.** The
-	// cap is the trim policy that does the work — `Trim` is for a host that
-	// knows it has stopped needing the spares — so it is the one that has to be
+	// cap is the trim policy that does the work - `Trim` is for a host that
+	// knows it has stopped needing the spares - so it is the one that has to be
 	// pinned rather than described.
 	ChunkPool::Trim();
 	REQUIRE(ChunkPool::RetainedBytes() == 0);
@@ -408,7 +408,7 @@ TEST_CASE("an over-aligned type is stored at its alignment in every chunk", "[ec
 	}
 	REQUIRE(column.ChunkCount() > 4);
 
-	// Every row, not only the base — a stride that ignored alignment would put
+	// Every row, not only the base - a stride that ignored alignment would put
 	// the first row right and the rest wrong.
 	size_t misaligned = 0;
 	for (size_t row = 0; row < column.Size(); row++) {
@@ -497,7 +497,7 @@ TEST_CASE("moving a row between columns leaves one live object", "[ecs]") {
 	REQUIRE(destination.Size() == 1);
 	REQUIRE(ReadTracked(destination, 0).Text == "moved");
 
-	// The source row is still constructed — moved-from, but an object — which
+	// The source row is still constructed - moved-from, but an object - which
 	// is why the archetype removes it rather than assuming the move took it.
 	REQUIRE(source.Size() == 1);
 	source.RemoveSwapBack(0);

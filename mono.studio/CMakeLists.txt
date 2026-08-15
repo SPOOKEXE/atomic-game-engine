@@ -1,9 +1,9 @@
-# mono.studio — the editor. A library plus a thin executable.
+# mono.studio - the editor. A library plus a thin executable.
 #
 # **The second declared user of the tier escape D00008 reserved**, and the first
 # one that is a product rather than a diagnostic. A `client`-tier target may not
 # link `Mono::server`; this one must, because "Play" hosts a server and draws its
-# world in one process — which is precisely the arrangement the rule exists to
+# world in one process - which is precisely the arrangement the rule exists to
 # make deliberate rather than accidental.
 #
 # `mono.unified_server_client` took the escape first and its CMakeLists explains
@@ -42,7 +42,7 @@ mono_add_library(studio
 		# rather than something this program owns.
 		Engine::game
 
-		# The example scenes, for `ExamplePath` alone — a new place comes up
+		# The example scenes, for `ExamplePath` alone - a new place comes up
 		# with the mirror script in it, and finding that file is the one thing
 		# this needs. **Not `LoadScene`**: the editor installs the example as a
 		# `Script` instance and lets Play run it, rather than building its
@@ -65,12 +65,12 @@ mono_add_library(studio
 		# The baker, so the asset picker can turn a raw file into something a
 		# runtime reads without republishing a store. **The same composition
 		# `contentimport` makes**, and for the same reason: baking cannot live in
-		# `Mono::cdn` — its short link row is the point of that member and a
-		# baker is exactly the interpretation an origin must not do — so it
+		# `Mono::cdn` - its short link row is the point of that member and a
+		# baker is exactly the interpretation an origin must not do - so it
 		# happens in the programs that can link both.
 		Tool::assetc
 
-		# `shared`. Team create's networking half — this editor announcing
+		# `shared`. Team create's networking half - this editor announcing
 		# itself at `Purpose::Studio` and seeing the others. The same member the
 		# client browses servers with and the origin offers a distribution
 		# stream with, which is the reason discovery is one thing rather than
@@ -84,28 +84,33 @@ mono_add_library(studio
 		# against.** That argument is about a *runtime*: a shipped game must not
 		# carry a Huffman tree to read a PNG, because publishing already turned
 		# it into pixels. This is authoring software showing somebody a picture
-		# of a file they have not published yet — the same reason `assetc` links
-		# it — and the alternative is a store browser whose rows are all blank
+		# of a file they have not published yet - the same reason `assetc` links
+		# it - and the alternative is a store browser whose rows are all blank
 		# until a publish has happened.
 		Engine::bake
 
 		# L7, `shared`. The engine's own widget tree, which the viewport panels
 		# compile and paint over the world image. Named here rather than taken
 		# transitively through `Engine::ui`, because this target includes
-		# `engine/gui/Compile.hpp` in its own header — a dependency a file
+		# `engine/gui/Compile.hpp` in its own header - a dependency a file
 		# includes is one its build file should say out loud.
 		Engine::gui
 
-		# L10. The node canvases' layout, hit-testing and selection — the half
-		# of both editors that has tests. See `Pipelines.cpp` and D00041.
-
 		# The client's presentation seam: `client::InstallPresentation` and
-		# `client::DrawList`. **Reused rather than reimplemented** — a second
+		# `client::DrawList`. **Reused rather than reimplemented** - a second
 		# draw-list collector would be a second answer to what a world hands its
 		# renderer, and the two would diverge the first time one was optimised.
 		Mono::client
 
-		# L12, `shared`. The link team create's edit stream rides — one
+		# L11, `shared`. The HTTP client the assets panel asks an origin's
+		# `/catalogue` with - `src/OriginLister.cpp`. **Named here rather than
+		# taken transitively through `Mono::cdn`**, which is where it was
+		# arriving from: a dependency a file includes is one its build file
+		# should say out loud. It adds nothing to this program's closure, which
+		# already carries `net` under both content clients.
+		Engine::net
+
+		# L12, `shared`. The link team create's edit stream rides - one
 		# waypoint at a time, over `Listener::SendTo` and `Broadcast`. Named
 		# here rather than taken transitively through `Mono::server`, because
 		# `src/EditStream.cpp` includes it directly.
@@ -115,12 +120,24 @@ mono_add_library(studio
 		# below.
 		Mono::server
 
-	# TOML, for the Rojo sync's `*.toml` row alone — `rojo.space` maps it to the
+	# TOML, for the Rojo sync's `*.toml` row alone - `rojo.space` maps it to the
 	# same `ModuleScript` a `*.json` produces, so `RojoSync.cpp` converts the
 	# document and reuses that emitter. **Private, and it stays private**: this
 	# is a parser for one file extension in an editor, and nothing in a public
 	# header here names a `toml::` type.
 	VENDOR Vendor::tomlplusplus
+
+	# The node graph and its canvas, and the node set the Demo Nodes panel runs.
+	# D00113's answer: this design was implemented twice, here and in the
+	# template it came from, and the second copy is now the only one.
+	#
+	# **`VENDOR_PUBLIC` and not `VENDOR`, which is a widening and is meant.** The
+	# `Editor` *holds* the graph, the canvas and the evaluator by value and hands
+	# a `nodegraph::PreviewImage` to its texture sink, so those types are in
+	# `studio/Editor.hpp` and cannot be hidden without a pimpl over the editor's
+	# whole state. What it widens is small: nothing links `Mono::studio` but its
+	# own program and its own tests.
+	VENDOR_PUBLIC Vendor::nodegraph Vendor::nodegraph_nodes
 	ALLOW_TIER_ESCAPE Mono::server
 )
 
@@ -141,14 +158,14 @@ mono_add_program(studio
 #
 # These are not yet the editor's panels. `mono.studio` keeps Dear ImGui until the
 # engine's tree can draw a property grid, because an editor half on each is two
-# widget sets — so what is staged here is the proof that the tree *can*, which is
+# widget sets - so what is staged here is the proof that the tree *can*, which is
 # what has to be true before any of them move.
 file(GLOB studio_panels CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/panels/*.ts")
 
 set(_mono_panel_tsc "${CMAKE_SOURCE_DIR}/node_modules/.bin/tsc")
 if(NOT EXISTS "${_mono_panel_tsc}")
 	set(_mono_panel_tsc "")
-	message(STATUS "studio: no node_modules/.bin/tsc — TypeScript panels will not be staged")
+	message(STATUS "studio: no node_modules/.bin/tsc - TypeScript panels will not be staged")
 endif()
 
 if(studio_panels AND _mono_panel_tsc)

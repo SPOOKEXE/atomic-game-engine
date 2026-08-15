@@ -27,7 +27,7 @@ namespace engine::core {
 	};
 
 	// A frame timer. Owns the "what is the delta" question so that no subsystem
-	// has to keep its own last-frame timestamp — two of those drift apart the
+	// has to keep its own last-frame timestamp - two of those drift apart the
 	// first time one of them is updated in a branch.
 	class FrameClock {
 	  public:

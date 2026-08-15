@@ -35,14 +35,14 @@ namespace engine::scene {
 
 		// A count of zero is stored rather than rejected. It reads back
 		// identically to "not known", which is deliberate: both mean the same
-		// thing to a caller — this world cannot tell you — and a separate
+		// thing to a caller - this world cannot tell you - and a separate
 		// "known to be empty" state would be a distinction nothing can act on.
 		MeshCatalogue &catalogue = MeshesOf(store);
 		catalogue.Triangles[mesh.Id()] = triangles;
 
 		// **Replaced rather than merged**, for the reason the header gives: a
 		// republished mesh may name different sheets, and a merge would leave a
-		// name listed that the geometry no longer wears — which is worse than
+		// name listed that the geometry no longer wears - which is worse than
 		// not knowing, because it is a name somebody would put back.
 		//
 		// An empty list is *stored* as empty rather than skipped. Every built-in
@@ -68,7 +68,7 @@ namespace engine::scene {
 	uint32_t TrianglesOf(const ecs::Store &store, const core::Name &mesh) {
 		// **Never creates the resource**, unlike `MeshesOf`. This is what a
 		// property getter calls, and a getter that mutated the world to answer
-		// a read would put a structural change inside iteration — and would do
+		// a read would put a structural change inside iteration - and would do
 		// it on every part in the scene on the first frame.
 		const MeshCatalogue *catalogue = store.Resource<MeshCatalogue>();
 		return catalogue == nullptr ? 0 : catalogue->Find(mesh);

@@ -41,7 +41,7 @@ namespace engine::delivery {
 		//
 		// A cache entry is addressed by the hash of its contents, so a
 		// half-written file under the right name is a lie the next reader
-		// believes until it hashes it — and two processes writing the same
+		// believes until it hashes it - and two processes writing the same
 		// entry at once is ordinary rather than exotic. A rename is atomic on
 		// every filesystem this targets, so a reader sees the whole file or no
 		// file.
@@ -88,10 +88,10 @@ namespace engine::delivery {
 		fs::create_directories(directory, failure);
 		if (!fs::is_directory(directory, failure)) {
 			// An ordinary outcome on a read-only install. A client runs without
-			// a cache rather than refusing to start — every fetch simply costs
+			// a cache rather than refusing to start - every fetch simply costs
 			// the network.
 			ENGINE_WARN(
-				"delivery: no content cache at {} — every fetch will reach a source", directory.string()
+				"delivery: no content cache at {} - every fetch will reach a source", directory.string()
 			);
 			return std::nullopt;
 		}
@@ -147,7 +147,7 @@ namespace engine::delivery {
 		}
 		if (Ceiling > 0 && static_cast<uint64_t>(bytes.size()) > Ceiling) {
 			// One asset that evicts everything else on every store is worse
-			// than not caching that asset at all — PreparedCache's rule.
+			// than not caching that asset at all - PreparedCache's rule.
 			return false;
 		}
 
@@ -218,7 +218,7 @@ namespace engine::delivery {
 		// Oldest use first. A full scan per store rather than an in-memory
 		// index, because the index would have to be rebuilt at start-up from
 		// this same scan and kept true against a directory other processes may
-		// also write — two sources for one fact, and the filesystem is already
+		// also write - two sources for one fact, and the filesystem is already
 		// holding one of them.
 		std::sort(entries.begin(), entries.end(), [](const Entry &left, const Entry &right) {
 			return left.Used < right.Used;

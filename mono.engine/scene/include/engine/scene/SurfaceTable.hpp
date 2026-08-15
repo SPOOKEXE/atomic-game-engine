@@ -6,7 +6,7 @@
 // the arithmetic: friction and restitution are the same two floats on every
 // wooden crate in the world, so storing them per entity buys a column that is
 // mostly duplicates and a load per body per contact. `ecs/AGENTS.md` calls this
-// exact shape out — a shared fact stored per-entity belongs in a resource, and
+// exact shape out - a shared fact stored per-entity belongs in a resource, and
 // the loop reads it once.
 //
 // **There is deliberately no get-or-default.** `Find` returns `nullptr` for a
@@ -28,7 +28,7 @@ namespace engine::scene {
 	// @since v0.4
 	struct SurfaceProperties {
 		// Coulomb friction coefficient. Combined with the other body's by the
-		// narrow phase, which is where the combining rule belongs — a table
+		// narrow phase, which is where the combining rule belongs - a table
 		// that pre-combined pairs would be a table of every pair.
 		float Friction = 0.5f;
 
@@ -53,7 +53,7 @@ namespace engine::scene {
 	// query. Stored as a flat vector in insertion order and searched linearly,
 	// which is the boring option and the right one twice over: a world has tens
 	// of materials and an integer compare over tens of rows beats a hash, and
-	// insertion order is program order — so two runs of one scene hold an
+	// insertion order is program order - so two runs of one scene hold an
 	// identical table and a snapshot of it is byte-identical. A hash map would
 	// give up the second property to improve a lookup nobody has measured.
 	//

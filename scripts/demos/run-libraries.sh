@@ -3,7 +3,7 @@
 # The shipped Luau libraries, loaded and exercised.
 #
 # `MagicCore` and `TerrainCore` unchanged from the Rojo project they came out of
-# — not one line edited to make them run here.
+# - not one line edited to make them run here.
 #
 #   scripts/demos/run-libraries.sh                  # uncapped, held at 165 fps
 #   scripts/demos/run-libraries.sh --graph          # extra flags reach the client

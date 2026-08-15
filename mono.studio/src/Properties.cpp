@@ -38,13 +38,13 @@ namespace studio {
 		// each one; this engine has no such field and adding one would be a
 		// second declaration of something the class tree already knows. Walking
 		// the ancestry from the root down and asking which class first exposes a
-		// name gives "Instance / PVInstance / BasePart / Part" — which is both
+		// name gives "Instance / PVInstance / BasePart / Part" - which is both
 		// the right grouping and impossible to forget to update.
 		ClassId DeclaringClass(ClassId klass, Name property) {
 			const engine::ecs::ClassInfo &info = Classes::Describe(klass);
 
 			// `Ancestry` is nearest first, so walking it backwards is the class
-			// tree from the root down — and the first class that has the
+			// tree from the root down - and the first class that has the
 			// property is the one that introduced it.
 			for (size_t index = info.Ancestry.size(); index > 0; index--) {
 				const ClassId candidate = info.Ancestry[index - 1];
@@ -93,16 +93,16 @@ namespace studio {
 
 		if (Selection.size() > 1) {
 			// **Edits apply to every selected instance.** Stated rather than
-			// left to be discovered, because the alternative reading — that it
-			// edits the first one — is equally plausible and differs by however
+			// left to be discovered, because the alternative reading - that it
+			// edits the first one - is equally plausible and differs by however
 			// many objects somebody just changed.
-			ImGui::TextDisabled("%zu selected — an edit applies to all of them", Selection.size());
+			ImGui::TextDisabled("%zu selected - an edit applies to all of them", Selection.size());
 			ImGui::Separator();
 		}
 
 		// The first selected instance is the one whose properties are listed.
 		// A multi-selection of different classes shows what the first one has,
-		// and a write to a property another one does not have simply fails —
+		// and a write to a property another one does not have simply fails -
 		// `Store::SetProperty` refuses it, and refusing per instance is more
 		// honest than showing only the intersection and hiding the rest.
 		const Entity primary = Selection.front();
@@ -137,6 +137,29 @@ namespace studio {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text("in %s", Label(Universe->NameOf(SelectionWorld)));
 			ImGui::PopStyleColor();
+
+			// **Where the edit lands, said before it is made rather than
+			// discovered after.** The panel looks the same for a scene and for a
+			// `Play` run's client view, and a write to the second reaches one
+			// client and is undone by the next delta. Warning-coloured for that
+			// case only: an author editing a scene is doing the ordinary thing
+			// and does not need a badge shouting at them for it.
+			const EditAuthority authority = AuthorityOf(SelectionWorld);
+			if (authority == EditAuthority::ClientLocal) {
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				ImGui::Text("[%s]", Describe(authority));
+				ImGui::PopStyleColor();
+
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						"This is a client's view of a run. An edit here changes that one\n"
+						"client, is never sent, and is overwritten the next time the server\n"
+						"replicates this row. Edit the scene itself to change every client."
+					);
+				}
+			}
+
 			ImGui::Separator();
 
 			// Grouped by declaring class, root first, which reads the way the
@@ -213,7 +236,7 @@ namespace studio {
 						// Shown as unavailable rather than hidden, because a
 						// property that vanishes from the list when a part is
 						// anchored reads as the editor losing it.
-						ImGui::TextDisabled("—");
+						ImGui::TextDisabled("-");
 						ImGui::PopID();
 						continue;
 					}
@@ -274,9 +297,9 @@ namespace studio {
 						}
 
 						case PropertyType::CFrame: {
-							// Position only. The rotation has its own property —
+							// Position only. The rotation has its own property -
 							// `Orientation`, in degrees, which is what an author
-							// actually wants — and offering a raw quaternion
+							// actually wants - and offering a raw quaternion
 							// beside it would be four numbers nobody can edit by
 							// hand next to three that are obvious.
 							float parts[3]{
@@ -327,7 +350,7 @@ namespace studio {
 						}
 
 						case PropertyType::UDim2: {
-							// Two rows of the pair above, X then Y — which is
+							// Two rows of the pair above, X then Y - which is
 							// the shape Roblox's own property grid uses, and the
 							// one an author reading `UDim2.new(0.5, -8, 0, 24)`
 							// already has in their head.
@@ -413,7 +436,7 @@ namespace studio {
 							// **A picker for the handful of properties that name
 							// content, and a plain field for every other `Name`.**
 							// `Mesh`, `TextureID`, `Texture`, `SoundId` and `Image`
-							// take a string a publisher wrote — rule 4 — and getting
+							// take a string a publisher wrote - rule 4 - and getting
 							// one wrong has no visible failure: an unknown mesh draws
 							// the missing-mesh marker, which is also what a mesh that
 							// has not streamed in yet looks like. Every other `Name`
@@ -510,7 +533,7 @@ namespace studio {
 						// here.** `game::FormatValue` already writes a sequence as
 						// `0, 1, 0; 1, 0, 0` and `ParseValue` reads it back, so a
 						// text field is a complete, round-tripping editor for
-						// about six lines — and the alternative is a spline widget
+						// about six lines - and the alternative is a spline widget
 						// with keypoint dragging, which is a panel rather than a
 						// row and belongs beside the emitter preview rather than
 						// in the generic property list.
@@ -569,7 +592,7 @@ namespace studio {
 
 		if (DrawAssetPicker(ASSET_PICKER, PickerKind, PickerChoice) && PickerProperty.IsValid()) {
 			// The picker spans frames, so what it confirms feeds the same
-			// `edit` a widget would have — one path applies a property write
+			// `edit` a widget would have - one path applies a property write
 			// and it stays one path, including undo.
 			edit.Property = PickerProperty;
 
@@ -608,7 +631,7 @@ namespace studio {
 						// **One command per instance, because the write is per
 						// instance.** A multi-selection whose members held
 						// different values before cannot be reversed by one
-						// entry carrying one "before" — undo would give every
+						// entry carrying one "before" - undo would give every
 						// one of them whatever the first happened to have.
 						//
 						// `RecordProperty` drops a write that changed nothing,

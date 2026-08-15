@@ -213,7 +213,7 @@ TEST_CASE("closing twice is harmless", "[channel]") {
 }
 
 TEST_CASE("an endpoint outliving its peer does not crash", "[channel]") {
-	// The peer's destructor closes it. The survivor still has to be usable —
+	// The peer's destructor closes it. The survivor still has to be usable -
 	// a supervisor holding a channel to a host that died must be able to notice
 	// rather than fault.
 	auto [left, right] = MakeLocalChannel();

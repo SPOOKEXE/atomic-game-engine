@@ -47,8 +47,8 @@ namespace linecount {
 
 		// Walks a file a line at a time, carrying the state that spans lines.
 		//
-		// Only two things do span a line — an open `/* */` and an unterminated
-		// raw string — and both of them make the *next* line mean something
+		// Only two things do span a line - an open `/* */` and an unterminated
+		// raw string - and both of them make the *next* line mean something
 		// other than what it looks like on its own. That is the whole reason
 		// this is an object rather than a function.
 		class Scanner {
@@ -162,7 +162,7 @@ namespace linecount {
 
 			// Scanned before the blank test rather than instead of it, because
 			// the state a line leaves behind matters even when the line itself
-			// is nothing — and a whitespace-only line cannot hold `*/`, `)"` or
+			// is nothing - and a whitespace-only line cannot hold `*/`, `)"` or
 			// a quote, so scanning one never changes that state anyway.
 			const Content content = scanner.Scan(line);
 

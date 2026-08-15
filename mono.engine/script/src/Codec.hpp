@@ -5,7 +5,7 @@
 // **The one piece of this surface with no prior art anywhere in the tree**, and
 // `docs/retired/SCRIPT_CONCURRENCY.md` §3 states its three requirements in priority
 // order. Each of them decided something about the format rather than about the
-// implementation, which is the point — a property of the *format* is one both
+// implementation, which is the point - a property of the *format* is one both
 // bindings get for free, and a property of an implementation is one each would
 // have to be trusted to add.
 //
@@ -33,7 +33,7 @@
 // there is exactly one encoder and nothing for the two to differ about.
 //
 // Numbers are one case worth naming. Lua and JavaScript both hold a double, so
-// a number crosses as **eight bytes always** — never narrowed to an integer
+// a number crosses as **eight bytes always** - never narrowed to an integer
 // when it happens to be whole. A format that shortened `1.0` to an int and left
 // `1.5` a double would make the bytes depend on the value's history rather than
 // on the value.
@@ -48,9 +48,9 @@
 // ## What crosses, and what does not
 //
 // Booleans, numbers, strings, the three value types, and arrays and maps of
-// those. Not functions, not instances — an `Entity` is *"meaningless outside
+// those. Not functions, not instances - an `Entity` is *"meaningless outside
 // this world"*, so a reference has to cross as whatever the game uses to name
-// things — and nothing holding a pointer. Rule 3, expressed as a type list.
+// things - and nothing holding a pointer. Rule 3, expressed as a type list.
 //
 // @tier L9 · shared
 
@@ -149,7 +149,7 @@ namespace engine::script {
 		// Set for `Number`. A double, always: both languages hold one.
 		double Number = 0.0;
 
-		// Set for `String`. Bytes rather than characters — nothing here decodes
+		// Set for `String`. Bytes rather than characters - nothing here decodes
 		// an encoding.
 		std::string Text;
 

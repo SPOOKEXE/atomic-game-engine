@@ -27,7 +27,7 @@ TEST_CASE("the NIST vectors match", "[sha256]") {
 }
 
 TEST_CASE("a message spanning several blocks matches", "[sha256]") {
-	// One million 'a'. Exercises buffering across block boundaries — the path
+	// One million 'a'. Exercises buffering across block boundaries - the path
 	// Runner::HashFile takes when it reads a file in 64 KiB chunks, and the one
 	// that would break if Update() ever stopped being properly streaming.
 	Sha256 hash;

@@ -1,7 +1,7 @@
 // What measuring the engine costs the engine.
 //
-// Both of the things here are paid by code that is not trying to do anything —
-// a counter bumped in a packet handler, a scope opened around a system — so
+// Both of the things here are paid by code that is not trying to do anything -
+// a counter bumped in a packet handler, a scope opened around a system - so
 // their cost is pure overhead and the only defensible number for them is a
 // small one.
 //
@@ -15,7 +15,7 @@
 // become a bottleneck rather than a decoupling.
 //
 // `FrameGraph` is measured both disabled and enabled. Disabled is the one that
-// ships — collection is off until something asks for it, so the macros are
+// ships - collection is off until something asks for it, so the macros are
 // supposed to cost a predictable branch and nothing else, and that claim is
 // checkable only by measuring the branch. Enabled is what pressing F5 costs.
 
@@ -93,7 +93,7 @@ namespace instrumentation_bench {
 	// Opens `depth` nested spans and closes them on the way back out.
 	//
 	// Recursive rather than an array of `Scope`, because a `Scope` uniquely owns
-	// its stack entry and is deliberately neither copyable nor movable — the
+	// its stack entry and is deliberately neither copyable nor movable - the
 	// destruction order *is* the close order, and a container would break that.
 	// The call itself is a few nanoseconds and lands on both the flat and the
 	// nested rows equally, so it does not distort the comparison between them.
@@ -134,7 +134,7 @@ BENCH("Metrics::Count · 50k, 64 names", COUNTS) {
 
 BENCH("Metrics::Count · 50k, one name", COUNTS) {
 	// The same call count into a single counter. Against the row above, the gap
-	// is what the name lookup costs when the answer is not already in L1 — and
+	// is what the name lookup costs when the answer is not already in L1 - and
 	// if there is no gap at all, the sink is resolving the name every call and
 	// the 64-name row was flattered by nothing.
 	for (size_t index = 0; index < COUNTS; index++) {
@@ -164,7 +164,7 @@ BENCH("ScopedCount · 50k empty scopes", COUNTS) {
 }
 
 BENCH("Metrics::Drain · 64 counters", 1000) {
-	// Once per frame, by exactly one reader — that is the property that makes
+	// Once per frame, by exactly one reader - that is the property that makes
 	// the values a rate rather than a number that only goes up. It allocates a
 	// vector every call, so this row is the per-frame price of that allocation
 	// and the answer to whether a drain wants a caller-supplied buffer.
@@ -182,7 +182,7 @@ BENCH("Metrics::Drain · 64 counters", 1000) {
 //
 // **Same total work, more threads.** `net` counts from a socket thread while
 // `script` counts from a worker and `ecs` counts from every job in the pool, so
-// the sink is genuinely written to from everywhere at once — this ladder is
+// the sink is genuinely written to from everywhere at once - this ladder is
 // what says whether that is free. A flat or rising curve means one lock, and
 // one lock under the metrics sink is a global variable with extra steps and a
 // contention point on top.
@@ -220,7 +220,7 @@ BENCH("Metrics::Count contended · 8 threads", COUNTS) {
 BENCH("Metrics::Count contended · 8 threads, one shared name", COUNTS) {
 	// The worst case the sink can be given: eight threads onto one counter, so
 	// every increment is a write to the same cache line whatever the locking
-	// is. Read against the row above — the difference is false sharing rather
+	// is. Read against the row above - the difference is false sharing rather
 	// than lock design, and the fix for the two is not the same fix.
 	OnThreads(8, [](size_t) {
 		for (size_t index = 0; index < COUNTS / 8; index++) {
@@ -237,7 +237,7 @@ BENCH("Metrics::Count contended · 8 threads, one shared name", COUNTS) {
 // being *present* in a build that is not using it. That number belongs in a
 // benchmark rather than in an argument, because it is the only thing standing
 // between the engine and somebody deciding the macros should be compiled out
-// behind an `#ifdef` — which would mean the shipped build and the profiled
+// behind an `#ifdef` - which would mean the shipped build and the profiled
 // build are no longer the same program.
 
 BENCH("FrameGraph::Scope · disabled, 50k scopes", 50'000) {
@@ -265,7 +265,7 @@ BENCH("FrameGraph frame · disabled, 512 scopes", 1000) {
 // What pressing F5 costs. The span counts bracket `MAXIMUM_SPANS`, which is
 // 4096: a frame under it records everything, and a frame over it is dropping
 // spans and drawing a partial flame graph. The pair says whether the overflow
-// path is cheaper than the recording one — it must be, or an
+// path is cheaper than the recording one - it must be, or an
 // over-instrumented frame gets slower the more it drops, which is the worst
 // possible failure mode for a profiler.
 
@@ -284,7 +284,7 @@ BENCH("FrameGraph frame · enabled, 512 flat scopes", 1000) {
 BENCH("FrameGraph frame · enabled, 512 copied-name scopes", 1000) {
 	// `CopiedScope` is the path a script chunk or a node kind takes: the name
 	// does not outlive the call, so the text is copied into a pool the frame
-	// owns. Against the row above, the difference is that copy — and it is the
+	// owns. Against the row above, the difference is that copy - and it is the
 	// number that decides whether a subsystem naming its spans at runtime is
 	// affordable or has to pre-intern them.
 	const Collecting collecting;
@@ -301,8 +301,8 @@ BENCH("FrameGraph frame · enabled, 512 copied-name scopes", 1000) {
 
 BENCH("FrameGraph frame · enabled, 512 scopes nested 8 deep", 1000) {
 	// Depth is what makes a scope tree a tree. `MAXIMUM_DEPTH` is 12 and the
-	// first few levels are spent before any real work starts — frame, phase,
-	// system — so eight is what a game system's own instrumentation actually
+	// first few levels are spent before any real work starts - frame, phase,
+	// system - so eight is what a game system's own instrumentation actually
 	// sits at. If this row is much dearer than the flat one at the same span
 	// count, the parent link is being found by a search rather than held on a
 	// stack.
@@ -319,7 +319,7 @@ BENCH("FrameGraph frame · enabled, 512 scopes nested 8 deep", 1000) {
 BENCH("FrameGraph frame · enabled, 8k scopes over a 4k buffer", 500) {
 	// Twice `MAXIMUM_SPANS`, so half of this frame is dropped rather than
 	// recorded. The header is explicit that overflow is counted and not
-	// resized — reallocating mid-frame would show up in the measurement — so
+	// resized - reallocating mid-frame would show up in the measurement - so
 	// the drop path should be cheaper per span than the record path and this
 	// row should come in under twice the 512-scope row scaled up. A row that
 	// comes in *over* that means the buffer is still doing work for spans it

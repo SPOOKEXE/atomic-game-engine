@@ -42,7 +42,7 @@ namespace engine::render {
 	// @client
 	// @since v0.9
 	struct MeshEntry {
-		// The whole mesh, for a pass that does not care about materials — the
+		// The whole mesh, for a pass that does not care about materials - the
 		// shadow pass draws this and binds nothing.
 		MeshRange Whole;
 
@@ -69,7 +69,7 @@ namespace engine::render {
 		//
 		// **This is what makes `MeshPart.Size` a box rather than a multiplier.**
 		// The renderer scales by `HalfExtent / Extent`, so the mesh's own box is
-		// mapped exactly onto the part's — which is Roblox's `MeshPart` semantic
+		// mapped exactly onto the part's - which is Roblox's `MeshPart` semantic
 		// and, more usefully here, the thing that makes `scene::Bounds` true.
 		// `graph::CullAndBound` tests that box against the frustum, and before
 		// this the drawn geometry could be any size at all relative to it: a
@@ -77,7 +77,7 @@ namespace engine::render {
 		// box describing it and was culled while still on screen.
 		//
 		// Half of one on every axis for a built-in, whose geometry is a unit
-		// shape about its own origin — so `HalfExtent / 0.5` is `HalfExtent * 2`
+		// shape about its own origin - so `HalfExtent / 0.5` is `HalfExtent * 2`
 		// and every built-in draws exactly as it did before this field existed.
 		core::Vector3 Extent{0.5f, 0.5f, 0.5f};
 	};

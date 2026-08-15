@@ -14,7 +14,7 @@ namespace engine::net {
 		// The 96-bit nonce for one frame: the fixed part, then the counter.
 		//
 		// RFC 8439 §2.8 constructs it exactly this way. Big-endian for the
-		// counter, which is the RFC's own worked example — the packet header is
+		// counter, which is the RFC's own worked example - the packet header is
 		// little-endian and this is not, because this is the AEAD's convention
 		// rather than ours and matching a published vector is worth more than
 		// matching the frame around it.

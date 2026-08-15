@@ -3,7 +3,7 @@
 // SHA-256, from Crypto++.
 //
 // The cache has to be stable across machines so that CI and a laptop can share
-// it, which rules out anything whose result depends on the standard library —
+// it, which rules out anything whose result depends on the standard library -
 // std::hash is explicitly allowed to differ between implementations and between
 // runs of the same one.
 //
@@ -16,12 +16,12 @@
 //
 // Nothing here is security-sensitive. The property wanted is a stable digest
 // with no realistic collisions, which is why the switch is invisible to callers
-// — the digests are identical, and tests/Sha256.cpp still checks them against
+// - the digests are identical, and tests/Sha256.cpp still checks them against
 // the NIST vectors precisely so that stays true.
 //
 // Crypto++ is deliberately absent from this header. It is linked `VENDOR`, so
 // it stays private to this module, and the state lives behind Impl rather than
-// as a CryptoPP::SHA256 member — see mono.vendor/AGENTS.md on preferring to hide
+// as a CryptoPP::SHA256 member - see mono.vendor/AGENTS.md on preferring to hide
 // a vendor rather than widening it to VENDOR_PUBLIC.
 
 #include <cstddef>
@@ -58,7 +58,7 @@ namespace testrunner {
 
 		// Adds bytes to the digest.
 		//
-		// @param data  Start of the block. Not kept — it is hashed and forgotten.
+		// @param data  Start of the block. Not kept - it is hashed and forgotten.
 		// @param bytes How many to read.
 		void Update(const void *data, size_t bytes);
 

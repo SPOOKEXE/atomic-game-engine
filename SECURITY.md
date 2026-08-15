@@ -5,7 +5,7 @@
 Do not open a public issue for anything in the threat model below. Report it
 privately through GitHub's security advisory form on this repository.
 
-Include what you did, what happened, and — if you have one — the smallest input
+Include what you did, what happened, and - if you have one - the smallest input
 that reproduces it. You will get an acknowledgement; if a fix takes a while,
 you will get an explanation of why rather than silence.
 
@@ -31,7 +31,7 @@ Everything reached from those two paths is in scope:
 - the session descriptor and the replication decoder
 - the runtime shader compiler's input
 - the script sandbox and its capability model, on both the client and the
-  server, and per VM — there is no trusted-server shortcut and no
+  server, and per VM - there is no trusted-server shortcut and no
   trusted-language shortcut
 
 Out of scope: bugs that need a hostile local user who already has code
@@ -51,7 +51,7 @@ harness and `cdn` do not register this option. It is a development surface and
 it is deliberately powerful.
 
 It has **no authentication of any kind**. It does not need any, because of the
-three properties below — and it would need a great deal if any of them were
+three properties below - and it would need a great deal if any of them were
 relaxed.
 
 - **It binds `127.0.0.1` and nothing else.** Not `0.0.0.0`, not a configurable
@@ -74,7 +74,7 @@ open is a server whose worlds can be rewritten by any local process. There is no
 configuration that makes it safe to run in front of players; the flag exists so
 that a person building a game can see and steer the engine while they build it.
 
-The ports are conventional rather than enforced — any free port works, and the
+The ports are conventional rather than enforced - any free port works, and the
 defaults only exist so the two supported programs on one machine do not collide:
 
 | Program | Port |
@@ -89,7 +89,7 @@ These are the rules a fix should restore, not just work around:
 **Parsing is separated from building.** A reader validates bytes and produces a
 description with every size, index and reference already checked. Something
 else builds objects from the description, and may assume its input is sound.
-Fusing the two is the standard way this class of parser gets exploited — a
+Fusing the two is the standard way this class of parser gets exploited - a
 half-built object graph holding a length the parser has not finished checking.
 
 **A parser is small enough to read.** It lives behind a module boundary, its

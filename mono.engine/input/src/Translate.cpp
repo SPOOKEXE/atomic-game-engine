@@ -7,8 +7,8 @@ namespace engine::input {
 
 	KeyCode KeyOf(SDL_Keycode code) {
 		// **A switch and not a table indexed by keycode.** SDL's keycodes are not
-		// dense — the letters are their ASCII values and the function keys are up
-		// past 0x40000000 — so an array would be four gigabytes or a hash. A
+		// dense - the letters are their ASCII values and the function keys are up
+		// past 0x40000000 - so an array would be four gigabytes or a hash. A
 		// switch compiles to a jump table over the dense run and compares over the
 		// rest, which is what a compiler is for.
 		switch (code) {
@@ -177,8 +177,26 @@ namespace engine::input {
 		// mouse stopped.
 		Current.Previous = Current.Down;
 		Current.PreviousButtons = Current.Buttons;
+
+		// **Focus is rolled with the other two rather than derived where it is
+		// read**, because `UserInputService.WindowFocused` is an edge and an edge
+		// is the difference between two frames. Nothing else in this module needs
+		// it; `scene::InputState::WasFocusGained` is what does.
+		Current.PreviousFocused = Current.Focused;
+
+		// The same rule once more, for the edge a place watches to swap "press E"
+		// for "click here". **Rolled here and not on the event that changes it**,
+		// so several events in one frame produce at most one change: a player who
+		// moved the mouse and then typed has changed device once as far as a
+		// script is concerned.
+		Current.PreviousLastSource = Current.LastSource;
+
 		Current.MouseDelta = {};
 		Current.WheelDelta = 0.0f;
+
+		// A delta like the two above it: a character was typed once, and there
+		// is no previous value for it to be an edge against.
+		Typed.clear();
 	}
 
 	bool Translator::HandleEvent(const SDL_Event &event) {
@@ -186,7 +204,7 @@ namespace engine::input {
 		case SDL_EVENT_KEY_DOWN:
 		case SDL_EVENT_KEY_UP: {
 			// **A repeat is not an edge.** SDL sends key-down again while a key is
-			// held, and setting the bit again is harmless — but it is worth
+			// held, and setting the bit again is harmless - but it is worth
 			// skipping rather than relying on that, because a future edge derived
 			// from anything other than the two bitsets would fire once per repeat.
 			if (event.key.repeat != 0) {
@@ -198,8 +216,42 @@ namespace engine::input {
 				return false;
 			}
 			Current.Down.Set(key, event.type == SDL_EVENT_KEY_DOWN);
+
+			// **Set on the release as well as the press**, because letting go of
+			// a key is the keyboard speaking too - a place that swapped its
+			// prompts on the press and swapped them back on the release would
+			// flicker every time somebody walked.
+			Current.LastSource = scene::InputSource::Keyboard;
 			return true;
 		}
+
+		case SDL_EVENT_TEXT_INPUT:
+			// **Appended whole, because one byte is not one character.** SDL
+			// hands over the composed UTF-8 a keystroke produced - one byte for
+			// `a`, two for `é`, four for an emoji, and more than one character
+			// at once when an input method commits a word - so anything here
+			// that took a byte at a time, or assumed one event was one letter,
+			// would cut a codepoint in half the first time somebody typed in
+			// their own language.
+			//
+			// **Accumulated rather than assigned**, for `MouseDelta`'s reason:
+			// several of these arrive in a frame and the text is all of them.
+			//
+			// **A key event with this in the same frame is not a duplicate.**
+			// `SDL_EVENT_KEY_DOWN` says which key moved and this says what it
+			// spelled; a game reads the first for movement and a text box reads
+			// the second, and the layout is the whole of the difference between
+			// them.
+			//
+			// **SDL sends none of these until a host calls `SDL_StartTextInput`
+			// on the window**, which is the platform's rule rather than this
+			// module's: text input is what raises an on-screen keyboard and
+			// starts composition, so it is off until something says it is
+			// wanted. `client::Client` asks while a `TextBox` has the keyboard,
+			// so this case runs for exactly as long as somebody is typing.
+			Typed += event.text.text;
+			Current.LastSource = scene::InputSource::Keyboard;
+			return true;
 
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -213,11 +265,19 @@ namespace engine::input {
 			} else {
 				Current.Buttons &= static_cast<uint8_t>(~bit);
 			}
+
+			// **The button and not `MouseButton1` for all three**, because
+			// `InputSource` shares its first three ordinals with `MouseButton` by
+			// construction - see the `static_assert`s in `scene/Input.cpp` - so a
+			// right-click reports as `MouseButton2` and a script asking which
+			// device is live gets the one it saw in `InputBegan`.
+			Current.LastSource = static_cast<scene::InputSource>(button);
 			return true;
 		}
 
 		case SDL_EVENT_MOUSE_MOTION:
 			Current.MousePosition = core::Vector2{event.motion.x, event.motion.y};
+			Current.LastSource = scene::InputSource::MouseMovement;
 
 			// **Accumulated rather than assigned**, because several motion events
 			// arrive per frame and a camera wants all of the movement. Assigning
@@ -229,6 +289,7 @@ namespace engine::input {
 
 		case SDL_EVENT_MOUSE_WHEEL:
 			Current.WheelDelta += event.wheel.y;
+			Current.LastSource = scene::InputSource::MouseWheel;
 			return true;
 
 		case SDL_EVENT_WINDOW_FOCUS_GAINED:
@@ -258,5 +319,6 @@ namespace engine::input {
 		Current.Buttons = 0;
 		Current.MouseDelta = {};
 		Current.WheelDelta = 0.0f;
+		Typed.clear();
 	}
 }

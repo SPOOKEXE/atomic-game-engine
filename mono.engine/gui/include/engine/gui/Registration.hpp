@@ -5,7 +5,7 @@
 // Two calls, in this order, and both idempotent. `scene/Registration.hpp` is
 // the same pair for the same reasons: components before classes, because a
 // class set names component ids; and idempotent because several programs in one
-// process — a studio hosting a play session — each want to be sure the tables
+// process - a studio hosting a play session - each want to be sure the tables
 // are up rather than to know who got there first.
 //
 // @tier L7 · shared
@@ -28,7 +28,7 @@ namespace engine::gui {
 	// Calls `RegisterGuiComponents` first, so a caller that only wants classes
 	// need not know the order.
 	//
-	// @return The `GuiObject` class id, which is the one most callers want —
+	// @return The `GuiObject` class id, which is the one most callers want -
 	//         "is this instance part of a UI" is `store.IsA(x, GuiObjectClass())`.
 	ecs::ClassId RegisterGuiClasses();
 

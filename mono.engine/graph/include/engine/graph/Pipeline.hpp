@@ -4,8 +4,8 @@
 //
 // **The point of a graph is that the order is inspectable.** A renderer that
 // hardcodes "cull, then shadows, then colour, then overlay" works exactly as
-// well until something needs to ask what the passes are — a debug overlay
-// listing them, a second view that skips one, an editor turning shadows off —
+// well until something needs to ask what the passes are - a debug overlay
+// listing them, a second view that skips one, an editor turning shadows off -
 // and then every one of those has to know the function's shape rather than read
 // a list.
 //
@@ -18,7 +18,7 @@
 // deliberate.** The kind that topologically sorts resource reads and writes
 // earns its complexity at twenty passes and costs more than it returns at four.
 // The stage list below is ordered by declaration, and `Validate` checks the one
-// property that actually goes wrong at this size — a stage reading something no
+// property that actually goes wrong at this size - a stage reading something no
 // earlier stage wrote.
 //
 // @tier L9 · shared
@@ -41,7 +41,7 @@ namespace engine::graph {
 	//
 	// @since v0.6
 	struct Attachment {
-		// What the target is called — `colour`, `depth`, `shadow`.
+		// What the target is called - `colour`, `depth`, `shadow`.
 		core::Name Name;
 
 		// Whether the stage clears it before writing.
@@ -117,7 +117,7 @@ namespace engine::graph {
 		//
 		// **Refused on a temporary, and that is not pedantry.** The span points
 		// into this object, so `StandardPipeline().Stages()` hands back a view
-		// of a `Pipeline` that died at the end of the expression — and the
+		// of a `Pipeline` that died at the end of the expression - and the
 		// memory stays readable for a while, so the mistake passes its tests
 		// until it does not. A test wrote exactly that and got three assertions
 		// comparing freed names; the `&&` overload turns it into a compile
@@ -133,7 +133,7 @@ namespace engine::graph {
 		// Checks the one property that goes wrong at this size.
 		//
 		// **A stage reading a target nothing wrote.** That is the mistake a
-		// reordering makes — moving the shadow pass after the colour pass leaves
+		// reordering makes - moving the shadow pass after the colour pass leaves
 		// the colour pass sampling a texture that has not been rendered, and on
 		// a GPU that is not a crash but a frame lit by whatever was in the
 		// memory. Checked here so it is an error at construction rather than a
@@ -158,7 +158,7 @@ namespace engine::graph {
 	// line asks for and no more. What is absent is absent on purpose:
 	//
 	// - **No HDR and no G-buffer.** Both are v0.8's, and both change what every
-	//   later stage reads — adding them now would be writing a pipeline for a
+	//   later stage reads - adding them now would be writing a pipeline for a
 	//   renderer that does not exist.
 	// - **No post-processing chain.** There is nothing to post-process yet.
 	//

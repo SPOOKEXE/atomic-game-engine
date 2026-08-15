@@ -1,4 +1,4 @@
-# parallel — module invariants
+# parallel - module invariants
 
 L2. Below `ecs`, because a world's thread affinity is a concurrency fact and the
 storage at L3 has to be able to record it.
@@ -67,7 +67,7 @@ at all.
 
 Ceilings, while the numbers are here: past the crossover the cheap body tops out
 near 1.3x and the `CFrame` body near 5.6x. The cheap one is bandwidth bound
-rather than thread bound — at 500k rows both paths stream twelve megabytes.
+rather than thread bound - at 500k rows both paths stream twelve megabytes.
 
 ## What a handover costs, and where it goes
 
@@ -82,7 +82,7 @@ rather than thread bound — at 500k rows both paths stream twelve megabytes.
 
 **It is linear in the pool, not in the work.** Every worker wakes, finds
 nothing left to claim, and then queues on `Pool::Guard` to decrement
-`Batch::Outstanding` — so a batch cannot finish until all twenty-three have
+`Batch::Outstanding` - so a batch cannot finish until all twenty-three have
 taken one mutex in turn. That serialised join, not the `notify_all`, is why a
 short span cannot repay a dispatch, and it is what to attack if the crossover
 ever has to come down. Doing so is a rewrite of the join, not a change to a

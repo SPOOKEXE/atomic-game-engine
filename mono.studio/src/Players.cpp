@@ -1,6 +1,6 @@
 // Players in the editor's own process, and the viewport you drive one from.
 //
-// **The studio hosts both halves natively — there is no second program.**
+// **The studio hosts both halves natively - there is no second program.**
 // `PlayLink` has held an `Authority` over the world being played and a `Replica`
 // of it in a second world since v0.7, which is a whole client short of a client:
 // the replica received state and nobody was in it. This file is the missing
@@ -46,7 +46,7 @@ namespace studio {
 		//
 		// **A table rather than a run of `if`s**, because the interesting
 		// property is that this list and `scene::ReadMoveIntent`'s list are the
-		// same list — a key offered here that nothing reads is dead, and one
+		// same list - a key offered here that nothing reads is dead, and one
 		// read there and missing here is a key that works in a real client and
 		// not in the studio. Short enough to compare by eye, which is the point.
 		constexpr struct {
@@ -116,6 +116,12 @@ namespace studio {
 			input->Previous = input->Down;
 			input->PreviousButtons = input->Buttons;
 
+			// Rolled with the two above because it is read the same way - the
+			// device change is an edge, and `input::Translator::BeginFrame` rolls
+			// it there for this reason. This panel is that translator for a played
+			// world.
+			input->PreviousLastSource = input->LastSource;
+
 			input->Down = {};
 			input->Buttons = 0;
 			input->MouseDelta = {};
@@ -124,7 +130,7 @@ namespace studio {
 			// **`Focused` means "this panel has the input", not "the window
 			// does".** A studio with two client views must have at most one of
 			// them walking, and the panel under the pointer is the one somebody
-			// means — `scene::UpdateCharacterControl` reads this flag and stops
+			// means - `scene::UpdateCharacterControl` reads this flag and stops
 			// the character dead when it is false, which is exactly the wanted
 			// behaviour for the other panel.
 			input->Focused = driving;
@@ -136,25 +142,41 @@ namespace studio {
 			for (const auto &key : PLAYED_KEYS) {
 				if (ImGui::IsKeyDown(key.From)) {
 					input->Down.Set(key.To, true);
+					input->LastSource = engine::scene::InputSource::Keyboard;
 				}
 			}
 
 			// Turning needs the right button held, which is `scene::
-			// UpdateCameraControl`'s rule and not this file's — it is repeated
+			// UpdateCameraControl`'s rule and not this file's - it is repeated
 			// here only in the sense that the button state is forwarded.
 			if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
 				input->Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Right));
 				input->MouseDelta = {io.MouseDelta.x, io.MouseDelta.y};
+				input->LastSource = engine::scene::InputSource::MouseButton2;
+			}
+
+			// **The left button as well, as of v0.15**, because a played world
+			// is a game and `scene::ReadAimIntent` reads this to decide whether
+			// the player fired. Forwarding only the right one made a studio Play
+			// a place where aiming worked and shooting silently did not - which
+			// is the class of divergence `just client-smoke` exists to catch, one
+			// input along.
+			if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+				input->Buttons |= static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
+				input->LastSource = engine::scene::InputSource::MouseButton1;
 			}
 
 			input->WheelDelta = io.MouseWheel;
+			if (io.MouseWheel != 0.0f) {
+				input->LastSource = engine::scene::InputSource::MouseWheel;
+			}
 
 			// **The press edges, kept for the tick that will read them.**
 			// `PlayLink::Step` runs once per tick and frames outnumber ticks, so
 			// a space bar tapped between two ticks lands on a frame no tick ever
 			// looks at. This used to be answered here, by reaching past
 			// `InputState` for imgui's own edge and calling `PlayLink::Jump` on
-			// the link that happened to own this world — a second input path
+			// the link that happened to own this world - a second input path
 			// that only jump travelled, wired by hand to one key.
 			//
 			// `InputState::Pressed` is that latch in the one place both hosts
@@ -176,7 +198,7 @@ namespace studio {
 			return direct;
 		}
 
-		// A replica names no run of its own — it *is* part of one. Found by
+		// A replica names no run of its own - it *is* part of one. Found by
 		// asking each run's links rather than by keeping a second map, which
 		// would be a copy of the same fact and would go stale on Stop.
 		for (WorldRun &run : Runs) {
@@ -193,14 +215,14 @@ namespace studio {
 	bool Editor::SpawnPlayer(WorldId world) {
 		WorldRun *run = RunOwning(world);
 		if (run == nullptr) {
-			Say("nothing is running here — press Play or Run first", engine::core::LogLevel::Warning);
+			Say("nothing is running here - press Play or Run first", engine::core::LogLevel::Warning);
 			return false;
 		}
 
 		auto link = std::make_unique<PlayLink>();
 
 		// Numbered by how many there already are, so the world's name stays the
-		// identity it has to be — rule 4. Two clients that took one name would
+		// identity it has to be - rule 4. Two clients that took one name would
 		// be two worlds nothing could tell apart, in a panel or in a recording.
 		const std::string label = "client " + std::to_string(run->Links.size() + 1);
 
@@ -237,7 +259,7 @@ namespace studio {
 
 		// **Said once per run rather than once per client.** `--run play` starts
 		// every world in a game, so with more clients than panels this fired
-		// once a world at startup — five lines about a layout nobody had chosen
+		// once a world at startup - five lines about a layout nobody had chosen
 		// yet. It is worth saying when a run has no client panel at all, because
 		// then the client really is invisible; it is noise when the run already
 		// has one and this is the second.
@@ -254,7 +276,7 @@ namespace studio {
 			);
 
 			if (!anyShown) {
-				Say(label + " has no free viewport — pick it in a panel's scene selector");
+				Say(label + " has no free viewport - pick it in a panel's scene selector");
 			}
 		}
 
@@ -266,7 +288,7 @@ namespace studio {
 		// Play. Saying so beats a mode label that quietly means two things.
 		if (run->Mode == RunMode::Server) {
 			run->Mode = RunMode::Play;
-			Say("this scene was started as a server, so its LocalScripts are not running — "
+			Say("this scene was started as a server, so its LocalScripts are not running - "
 				"Stop and press Play to run them");
 		}
 
@@ -286,7 +308,7 @@ namespace studio {
 		// **The one being looked at, when one is.** Pressing this while looking
 		// at a client view means "not this one"; while looking at the server's
 		// view it means "one fewer", and the last to arrive is the one that
-		// goes — which is the order somebody expects from a button that adds to
+		// goes - which is the order somebody expects from a button that adds to
 		// the end.
 		auto chosen = run->Links.end();
 		for (auto at = run->Links.begin(); at != run->Links.end(); ++at) {
@@ -303,7 +325,7 @@ namespace studio {
 
 		// **Unpinned before the world under it goes.** A pin naming a destroyed
 		// world leaves the panel following the active scene with no way to tell
-		// that it stopped showing what it was opened for — the same order
+		// that it stopped showing what it was opened for - the same order
 		// `EndRun` takes, for the same reason.
 		for (ViewportState &view : Extras) {
 			if (view.World == replica) {
@@ -331,7 +353,7 @@ namespace studio {
 				// teleport.** A `WorldRun` names the scene an author pressed
 				// Play on and keeps that name for its whole life; a `PlayLink`
 				// inside it re-homes every time its client walks through a
-				// portal — `FollowTeleports` stops the old one and starts a new
+				// portal - `FollowTeleports` stops the old one and starts a new
 				// one against the destination, in the same run. So after one
 				// crossing the two disagree, and the run's world is the answer
 				// to a question nobody asked.
@@ -341,7 +363,7 @@ namespace studio {
 				// bug rather than an inefficiency. An `ecs::Entity` is an index
 				// and a generation *within one store*: two worlds allocate
 				// independently, so a player in one and a player in another
-				// routinely have the same number — and two worlds built by the
+				// routinely have the same number - and two worlds built by the
 				// same script in the same order have it near enough always.
 				//
 				// The failure was exactly asymmetric, which is what it looks
@@ -350,7 +372,7 @@ namespace studio {
 				// so the loop skipped everything and the arrival was accepted.
 				// Walking *back* did not: the run did name that world, its link
 				// was tested, and the far world's player id matched the arriving
-				// one — so the arrival read as already claimed, no destination
+				// one - so the arrival read as already claimed, no destination
 				// was found, and the client was dropped as lost after
 				// `LOST_FRAMES`. The character stood there with nobody in it.
 				if (link->AuthorityWorld() != world) {
@@ -376,7 +398,7 @@ namespace studio {
 				// A teleport is rare and this runs every frame per client, so
 				// the fast path has to be a single aliveness check.
 				// **The link's own world, not the run's.** They are the same
-				// until the first teleport is followed and different after it —
+				// until the first teleport is followed and different after it -
 				// asking the run's world would answer "gone" for ever and
 				// follow the same teleport on every frame.
 				const WorldId living = link->AuthorityWorld();
@@ -394,13 +416,13 @@ namespace studio {
 
 				// Where they went. **Searched rather than told**, because the
 				// destination is decided by a script in another world and
-				// nothing may carry a handle out of it — what arrived there is a
+				// nothing may carry a handle out of it - what arrived there is a
 				// `Player` with this name, built from that world's own classes.
 				//
 				// **And a name alone is not enough, which cost a wrong world to
 				// find out.** Every run names its clients the same way, so a
 				// universe with a client in each of seven worlds has seven
-				// players called "client 1" — and the first one this walk met
+				// players called "client 1" - and the first one this walk met
 				// was whichever world was created first, never the one the
 				// teleport named. So a candidate that some *other* link is
 				// already living in is not an arrival; it is somebody else with
@@ -421,7 +443,7 @@ namespace studio {
 						// **Every child of that name, not the first.** The
 						// destination has its own client called the same thing,
 						// and `FindFirstChild` returns whichever was parented
-						// first — which is the resident, never the arrival. The
+						// first - which is the resident, never the arrival. The
 						// one nobody is living in is the one who has just
 						// walked in.
 						Entity unclaimed;
@@ -456,19 +478,19 @@ namespace studio {
 					// **Not yet is the ordinary answer for a frame or two.** A
 					// teleport is routed at one tick's barrier and admitted when
 					// the destination's heartbeat next pumps its inbox, so the
-					// player is in neither world for at least one tick —
+					// player is in neither world for at least one tick -
 					// `PlayLink::Missing` carries the argument. Giving up here
 					// killed every teleport this followed.
 					if (link->Missing() < LOST_FRAMES) {
 						continue;
 					}
 
-					// They left and arrived nowhere this editor can see —
+					// They left and arrived nowhere this editor can see -
 					// a teleport naming a world that does not exist, which the
 					// router answers with `NoSuchWorld`. The client has nobody
 					// to be, so it goes rather than watching a world it is not
 					// in.
-					Say(name + " teleported out of every scene here — that client is gone");
+					Say(name + " teleported out of every scene here - that client is gone");
 					for (ViewportState &view : Extras) {
 						if (view.World == oldReplica) {
 							view.World = WorldId{};
@@ -481,7 +503,7 @@ namespace studio {
 				}
 
 				// **Stopped before the new one starts, and the old player is
-				// already gone** — so `PlayLink::Stop`'s own destroy finds
+				// already gone** - so `PlayLink::Stop`'s own destroy finds
 				// nothing to destroy, which is exactly right: the teleport did
 				// it, in the world that was allowed to.
 				link->Stop(*Universe);

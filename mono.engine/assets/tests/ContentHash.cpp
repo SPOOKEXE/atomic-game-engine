@@ -21,7 +21,7 @@ namespace {
 	}
 }
 
-// The published BLAKE3 test vectors. Not a round-trip against ourselves — a
+// The published BLAKE3 test vectors. Not a round-trip against ourselves - a
 // round-trip proves we are self-consistent, which a broken implementation also
 // is. These are the numbers that say we are computing the same function
 // everybody else calls BLAKE3, which is the only property that matters for an

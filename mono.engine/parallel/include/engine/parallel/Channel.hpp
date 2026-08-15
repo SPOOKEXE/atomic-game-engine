@@ -3,8 +3,8 @@
 // A framed byte queue between two endpoints.
 //
 // This is the seam that keeps thread-per-world and process-per-world the same
-// design. Everything crossing a world boundary is already bytes — that is rule
-// 3, and `world`'s buses were built to it — so the only difference between two
+// design. Everything crossing a world boundary is already bytes - that is rule
+// 3, and `world`'s buses were built to it - so the only difference between two
 // worlds in one process and two worlds in two processes is what carries the
 // bytes. A caller holding a `Channel` cannot tell which it has, and that is the
 // whole point rather than a nicety.
@@ -133,7 +133,7 @@ namespace engine::parallel {
 
 		// Closes this endpoint.
 		//
-		// The other end may still drain what was already queued — a host that
+		// The other end may still drain what was already queued - a host that
 		// exits cleanly should not strip the driver of the last thing it said.
 		// Once drained, the other end reports `Closed`.
 		//

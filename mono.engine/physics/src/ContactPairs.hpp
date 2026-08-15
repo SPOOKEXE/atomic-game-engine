@@ -16,14 +16,14 @@
 // flips a normal. That matters more than it looks: the pipeline names its two
 // bodies by entity id, the pair functions name theirs by shape, and the two
 // orders disagree for half of all pairs. Flipping in six places instead of one
-// is how two of the six end up disagreeing about which way is out — which
+// is how two of the six end up disagreeing about which way is out - which
 // reads as objects occasionally flying apart rather than as a sign error.
 //
 // # What the axis sets are, and where they stop being exact
 //
 // A box is a polytope, so its fifteen face and edge-cross axes are provably the
 // whole set: box-box is exact. A sphere is analytic against everything. A
-// cylinder is neither — it is smooth, so its minimum-penetration direction can
+// cylinder is neither - it is smooth, so its minimum-penetration direction can
 // point anywhere, and no finite list of axes is complete for it.
 //
 // The list here covers every contact the design names: cap on face, barrel on
@@ -31,7 +31,7 @@
 // barrel, box corner on barrel, and box corner on rim. What it does not
 // enumerate is a box *edge* meeting a cap's rim obliquely. `ProjectionRadius`
 // is exact for whatever direction it is handed, so a missing axis never invents
-// depth out of nothing — the failure mode is the opposite one, reporting a
+// depth out of nothing - the failure mode is the opposite one, reporting a
 // shallow contact between two shapes that are in fact a fraction of a
 // millimetre apart in that one configuration. Read `AGENTS.md` in this
 // directory before widening or narrowing the set.
@@ -56,7 +56,7 @@ namespace engine::physics {
 		// A primary axis wins ties, and keeps them by a margin. A cross-product
 		// axis that beats a face by a hair is almost always float noise on a
 		// resting contact, and taking it swaps the manifold from four points to
-		// one for a tick — which is the jitter the whole multi-point design is
+		// one for a tick - which is the jitter the whole multi-point design is
 		// there to remove.
 		bool Primary = false;
 	};
@@ -92,7 +92,7 @@ namespace engine::physics {
 	// **The only function that reorders and the only one that flips.** `first`
 	// is the collider on the smaller entity id, so the normal it returns points
 	// from that body toward the other and its points lie on the other's
-	// surface — which is what `ContactManifold` promises.
+	// surface - which is what `ContactManifold` promises.
 	//
 	// @param first  The collider on the smaller entity id.
 	// @param second The collider on the larger.

@@ -19,13 +19,13 @@
 //
 // **It is not a tag, and that distinction is the whole design.** A tag is part
 // of the `ComponentSet`, so setting one would move the row to a different
-// archetype — a structural change on every property write, and archetype churn
+// archetype - a structural change on every property write, and archetype churn
 // every tick. A bitmask column is a plain write to memory the row already owns.
 // The difference between the two is the difference between free and unusable.
 //
 // **What it cannot see.** `EachBatch` and `EachBatchParallel` hand out raw
-// column pointers, and a write through one sets no bit. That is deliberate —
-// checking per row is exactly the cost those paths exist to avoid — and it is
+// column pointers, and a write through one sets no bit. That is deliberate -
+// checking per row is exactly the cost those paths exist to avoid - and it is
 // the gap `QuickHash` fills at v0.4 for consumers that need row granularity
 // over batch-written data. A batch write does bump the coarse version, so a
 // consumer that only needs "did anything move" is still served.
@@ -41,7 +41,7 @@ namespace engine::ecs {
 	// One row's changed-component bits, one bit per column position.
 	//
 	// The bit index is the component's position in its archetype's sorted set,
-	// which is the same position the column sits at — so marking a change is an
+	// which is the same position the column sits at - so marking a change is an
 	// index the store already has rather than a lookup.
 	//
 	// @since v0.2

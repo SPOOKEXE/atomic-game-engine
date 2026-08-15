@@ -20,7 +20,7 @@ namespace engine::ui {
 		// **A mapping and not a rename.** `gui::FontFace` is a `shared` enum a
 		// game file carries; `ui::Typeface` is what this module vendored. Four
 		// of one onto three of the other, with `Italic` falling back to the
-		// interface face — because the vendored families are variable fonts used
+		// interface face - because the vendored families are variable fonts used
 		// at their default instance, which for all four is upright regular, and
 		// synthesising a slant is a rasteriser feature stb_truetype does not
 		// have. An author asking for italic gets upright text rather than
@@ -83,8 +83,8 @@ namespace engine::ui {
 		// The marker an unresolvable image draws.
 		//
 		// **Visible rather than absent.** An `ImageLabel` whose content name
-		// nothing can resolve is a mistake somebody made — a typo, an asset that
-		// did not stage — and drawing nothing makes it look like the label is
+		// nothing can resolve is a mistake somebody made - a typo, an asset that
+		// did not stage - and drawing nothing makes it look like the label is
 		// broken rather than like the image is missing. A crossed box is the
 		// convention every editor uses and it says which of the two it is.
 		size_t PaintMissingImage(ImDrawList *into, const ImVec2 &min, const ImVec2 &max, ImU32 colour) {
@@ -231,12 +231,12 @@ namespace engine::ui {
 			// **The *cell's* pixel size, not the sheet's.** A nine-slice inset
 			// and a tile size are authored against the picture somebody can see,
 			// and on an 8x8 sheet the sheet is eight times that in each
-			// direction — so measuring against it would put every slice border
+			// direction - so measuring against it would put every slice border
 			// an eighth of the way in.
 			ImVec2 imageSize{resolved.Size.x * span.x, resolved.Size.y * span.y};
 
 			// A non-empty `Sample` narrows the whole thing to a sub-rectangle
-			// of the image before anything else happens — Roblox's
+			// of the image before anything else happens - Roblox's
 			// `ImageRectOffset`/`ImageRectSize`, which composes with every
 			// `ScaleType` rather than replacing one.
 			if (imageSize.x > 0.0f && imageSize.y > 0.0f && command.Sample.Width() > 0.0f &&
@@ -267,7 +267,7 @@ namespace engine::ui {
 
 				// The clip is already pushed by the caller, so a partial tile at
 				// the far edge is cut by the scissor rather than by arithmetic
-				// here — which is what keeps the last row of tiles the same
+				// here - which is what keeps the last row of tiles the same
 				// image as the first rather than a squashed one.
 				size_t drawn = 0;
 				for (float y = min.y; y < max.y; y += tileHeight) {

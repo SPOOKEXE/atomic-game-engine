@@ -1,7 +1,7 @@
 // The challenge, and the property that makes it worth having: nothing is
 // remembered about a peer that has not answered one.
 //
-// Every deadline here is *stated* rather than waited for — the module rule that
+// Every deadline here is *stated* rather than waited for - the module rule that
 // time is passed in is what lets a suite rotate a secret twice in consecutive
 // lines and check that a cookie stopped being answerable.
 
@@ -68,7 +68,7 @@ TEST_CASE("the same question gets the same cookie", "[net][cookie]") {
 
 TEST_CASE("a cookie is bound to the address it was issued to", "[net][cookie]") {
 	// The whole point. A peer that cannot receive at the address it wrote never
-	// sees the cookie, so an answer proves return routability — and an answer
+	// sees the cookie, so an answer proves return routability - and an answer
 	// replayed from somewhere else proves nothing and is refused.
 	Cookie issuer = Begin();
 	const auto evidence = Evidence(3);
@@ -76,7 +76,7 @@ TEST_CASE("a cookie is bound to the address it was issued to", "[net][cookie]") 
 	const auto cookie = issuer.Issue(0.0, At(7777), evidence);
 	CHECK_FALSE(issuer.Answers(0.0, At(7778), evidence, cookie));
 
-	// A different address on the same port, too — the address bytes are in the
+	// A different address on the same port, too - the address bytes are in the
 	// cookie and not only the port.
 	const Endpoint elsewhere = Endpoint::FromIPv4({10, 0, 0, 1}, 7777);
 	CHECK_FALSE(issuer.Answers(0.0, elsewhere, evidence, cookie));
@@ -141,7 +141,7 @@ TEST_CASE("two issuers do not answer each other's cookies", "[net][cookie]") {
 TEST_CASE("a cookie survives one rotation and not two", "[net][cookie]") {
 	// Stated, not waited for. The bound is what stops a cookie captured off the
 	// wire being useful for ever, and "between one and two periods" is the
-	// property rather than an implementation detail — the previous secret is
+	// property rather than an implementation detail - the previous secret is
 	// kept so a peer answering across a rotation is not refused for the
 	// server's timing.
 	Cookie issuer = Begin(10.0);
@@ -160,7 +160,7 @@ TEST_CASE("a cookie survives one rotation and not two", "[net][cookie]") {
 TEST_CASE("a long quiet spell does not keep an old cookie alive", "[net][cookie]") {
 	// The rotation is driven by the calls, so a server that heard nothing for an
 	// hour has not rotated. Shifting current into previous once at that point
-	// would keep an hour-old cookie answerable — the bound has to be two
+	// would keep an hour-old cookie answerable - the bound has to be two
 	// periods of *time*, not two calls.
 	Cookie issuer = Begin(10.0);
 	const auto evidence = Evidence(10);
@@ -172,7 +172,7 @@ TEST_CASE("a long quiet spell does not keep an old cookie alive", "[net][cookie]
 TEST_CASE("nothing is remembered per peer", "[net][cookie]") {
 	// **The property D00006 asks for, as far as this class can state it.** A
 	// thousand peers are challenged and the first one's cookie still answers,
-	// which no bounded table would manage — there is no table. What the number
+	// which no bounded table would manage - there is no table. What the number
 	// of outstanding challenges costs this object is nothing at all.
 	Cookie issuer = Begin();
 	const auto evidence = Evidence(11);

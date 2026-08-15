@@ -49,7 +49,7 @@ namespace engine::assets {
 		// site: `ab` + `c` and `a` + `bc` are the same bytes, so without a
 		// length two different manifests could produce one descriptor and the
 		// binding this exists to provide would not hold. The tag byte is the
-		// same domain separation HashTree.hpp uses, for the same reason — a
+		// same domain separation HashTree.hpp uses, for the same reason - a
 		// descriptor must not be presentable as a chunk hash.
 		ContentHash DescriptorOf(const AssetEntry &asset) {
 			Hasher hasher;
@@ -309,11 +309,11 @@ namespace engine::assets {
 
 		// Every refusal below returns nothing rather than a partly built
 		// manifest. A half-parsed manifest is the shape a caller uses by
-		// accident, and this input arrives from an origin — repo_layout.md §1
+		// accident, and this input arrives from an origin - repo_layout.md §1
 		// says anyone can run one.
 		// Marks the reader failed as well as returning nothing. ByteReader::Fail
-		// exists for exactly this — a caller that has decided the contents are
-		// wrong for a reason the reader cannot see — so that one flag carries
+		// exists for exactly this - a caller that has decided the contents are
+		// wrong for a reason the reader cannot see - so that one flag carries
 		// the verdict and a caller reading further from the same buffer cannot
 		// miss it.
 		const auto refuse = [&reader]() -> std::optional<Manifest> {
@@ -391,7 +391,7 @@ namespace engine::assets {
 
 			// And the root is recomputed rather than believed. Taking the
 			// written root on trust would let a manifest name content whose
-			// chunks are something else entirely — which is the whole property
+			// chunks are something else entirely - which is the whole property
 			// the hash tree exists to provide.
 			if (HashTree::RootOf(ChunkHashes(asset.Chunks)) != asset.Root) {
 				return refuse();
@@ -462,8 +462,8 @@ namespace engine::assets {
 		// Read above answers zero past the end rather than throwing, so a
 		// truncated file would otherwise parse as a manifest of empty things.
 		//
-		// Failed() and not AtEnd(). Trailing bytes are legitimate here — a
-		// signature follows the manifest in the published file — so leftover
+		// Failed() and not AtEnd(). Trailing bytes are legitimate here - a
+		// signature follows the manifest in the published file - so leftover
 		// input is the caller's business rather than evidence of a bad parse.
 		if (reader.Failed()) {
 			return refuse();

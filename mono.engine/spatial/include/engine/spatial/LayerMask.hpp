@@ -3,7 +3,7 @@
 // Which layers a thing is on, and which it is tested against.
 //
 // **A struct wrapping the bits rather than a bare `uint32_t`.** A collider
-// carries two of these — the layer it occupies and the set it collides with —
+// carries two of these - the layer it occupies and the set it collides with -
 // and they are the same width and the same type. Swapping them at a call site
 // compiles, runs, and returns a plausible wrong answer for the rest of the
 // project's life. Naming the type does not stop that on its own, but it stops
@@ -45,7 +45,7 @@ namespace engine::spatial {
 		// Constructs a set from raw bits.
 		//
 		// Explicit, so an integer that happens to be lying around cannot become
-		// a mask by accident — which is the reason this is a type at all.
+		// a mask by accident - which is the reason this is a type at all.
 		//
 		// @param bits One bit per layer.
 		explicit constexpr LayerMask(uint32_t bits) : Bits(bits) {}

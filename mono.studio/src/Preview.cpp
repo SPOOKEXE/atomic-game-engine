@@ -2,7 +2,7 @@
 //
 // **Separated from the panels because the wording is the feature.** One blank
 // square for four different situations is what this replaces, and the phrasing
-// is what turns each of them into something a person can act on — so it lives in
+// is what turns each of them into something a person can act on - so it lives in
 // one place rather than being written out at each of the three call sites, which
 // is how three of them come to disagree.
 
@@ -37,7 +37,7 @@ namespace studio {
 		// a texture that would not decode is a broken file.
 		switch (kind) {
 		case engine::assets::AssetKind::Mesh:
-			return "no preview — bake it with assetc first";
+			return "no preview - bake it with assetc first";
 		case engine::assets::AssetKind::Texture:
 			return "not an image this reads";
 		case engine::assets::AssetKind::Audio:

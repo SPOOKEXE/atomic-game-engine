@@ -6,7 +6,7 @@
 // unified harness and the content origin all answer the same handshake and the
 // same `tools/list`; what differs is which rows are in the table. A server has
 // no selection and a content origin has no worlds, so neither declares tools it
-// cannot honour — a client is told exactly what this program can do rather than
+// cannot honour - a client is told exactly what this program can do rather than
 // discovering it by calling something that fails.
 //
 // **A registry rather than a switch**, which is the whole reason this is a
@@ -42,7 +42,7 @@ namespace engine::control {
 		std::string Name;
 
 		// What it does, written for whoever has never seen this engine. This is
-		// the only documentation a client gets, so it carries the vocabulary —
+		// the only documentation a client gets, so it carries the vocabulary -
 		// that a world is a scene, that stopping restores a snapshot.
 		std::string Description;
 
@@ -50,7 +50,7 @@ namespace engine::control {
 		std::function<nlohmann::json()> Schema;
 
 		// The work. Sets `failure` and returns null to refuse, which arrives at
-		// the client as a tool error rather than a protocol error — the
+		// the client as a tool error rather than a protocol error - the
 		// distinction MCP draws so a model can read the reason and try again.
 		std::function<nlohmann::json(const nlohmann::json &arguments, std::string &failure)> Call;
 	};
@@ -100,7 +100,7 @@ namespace engine::control {
 		//
 		// **So a program can show its own table.** The editor draws one in an
 		// information panel, and building that from a second hand-kept list
-		// would be exactly the duplicate this registry exists to prevent — a
+		// would be exactly the duplicate this registry exists to prevent - a
 		// panel that says a tool exists when it does not is worse than no panel.
 		//
 		// Valid until the next `Add`.
@@ -115,7 +115,7 @@ namespace engine::control {
 		//
 		// **Read by programs that assert the profiler's state every frame.** The
 		// editor decides collection from whether its panel is open, once per
-		// frame, and that assertion is the authority — so a tool switching the
+		// frame, and that assertion is the authority - so a tool switching the
 		// graph on had it switched off again before the next frame. A program
 		// with such a line ORs this into it; one without can ignore it.
 		bool WantsProfiling() const {

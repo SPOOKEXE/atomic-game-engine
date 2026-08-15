@@ -12,8 +12,8 @@ namespace engine::spatial {
 		// walk is given.
 		//
 		// The walk visits cells in a fixed order rather than along the line, so
-		// a raycast asks the same question every other query asks — "what is in
-		// this box" — and then tests the candidates exactly. A digital
+		// a raycast asks the same question every other query asks - "what is in
+		// this box" - and then tests the candidates exactly. A digital
 		// differential walk along the ray would visit fewer cells, and would
 		// also visit them in an order that is not the ascending one the
 		// de-duplication rule is built on. See `AGENTS.md`: it is an
@@ -33,7 +33,7 @@ namespace engine::spatial {
 
 		// Appends one id, or reports that there was nowhere to put it.
 		//
-		// @return False when the span is full, which stops the walk — there is
+		// @return False when the span is full, which stops the walk - there is
 		//         nothing further to learn once the answer cannot be recorded.
 		bool Append(std::span<uint64_t> found, uint64_t id, QueryResult &result) {
 			if (result.Written == found.size()) {
@@ -48,8 +48,8 @@ namespace engine::spatial {
 		// furthest when there is no room.
 		//
 		// Linear in the span's length, which is the right shape here: the spans
-		// a caller passes are small, and the alternative — collect everything
-		// then sort — needs storage the caller did not give us.
+		// a caller passes are small, and the alternative - collect everything
+		// then sort - needs storage the caller did not give us.
 		void InsertNearest(std::span<core::RayHit> hits, const core::RayHit &hit, QueryResult &result) {
 			if (result.Written == hits.size()) {
 				if (hits.empty() || !(hit.Distance < hits.back().Distance)) {
@@ -156,7 +156,7 @@ namespace engine::spatial {
 
 		GridInternals::ForEachCandidate(grid, volume, mask, [&](const Proxy &proxy) {
 			// Squared throughout, so the test costs no square root. The nearest
-			// point of the box, not its centre — a large box beside a small
+			// point of the box, not its centre - a large box beside a small
 			// sphere is in contact long before their centres are close.
 			const core::Vector3 offset = proxy.Bounds.ClosestPoint(centre) - centre;
 			if (offset.MagnitudeSquared() > radiusSquared) {
@@ -193,7 +193,7 @@ namespace engine::spatial {
 
 		GridInternals::ForEachCandidate(grid, swept, mask, [&](const Proxy &proxy) {
 			// A moving box against a still box is a moving *point* against the
-			// still box grown by the moving one's half-extent — so the swept
+			// still box grown by the moving one's half-extent - so the swept
 			// test is the slab test already written, with no second algorithm
 			// to keep correct.
 			const core::AABB expanded =

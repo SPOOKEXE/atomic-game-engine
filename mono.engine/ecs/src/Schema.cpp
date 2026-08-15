@@ -29,7 +29,7 @@ namespace engine::ecs {
 		//
 		// **A cap because the lifetime hooks are function pointers with nowhere
 		// to put a schema.** `TypeDescriptor::DefaultConstruct` is
-		// `void (*)(void *, size_t)` — no context parameter, and a captureless
+		// `void (*)(void *, size_t)` - no context parameter, and a captureless
 		// function cannot look up which schema it belongs to. So one hook set is
 		// generated per slot at compile time, `Thunks<N>` closes over the index
 		// as a template argument, and the table below is what a registration
@@ -38,7 +38,7 @@ namespace engine::ecs {
 		// The alternative was threading a context through the six hooks, which
 		// is a public signature change reaching all hundred-odd
 		// `Components::Register<T>` calls plus every hand-written serialiser in
-		// the engine — a very large edit so that a game could describe one more
+		// the engine - a very large edit so that a game could describe one more
 		// component.
 		//
 		// **The number is measured rather than guessed, and here is the table.**
@@ -46,13 +46,13 @@ namespace engine::ecs {
 		// download:
 		//
 		//     slots    .text        over 256     configure+build
-		//       256    6 056 426           —          —
+		//       256    6 056 426           -          -
 		//      1024    6 203 882    +147 KB       5.0 s
 		//      2048    6 400 490    +344 KB       8.1 s
 		//      4096    6 793 706    +737 KB      14.4 s
 		//
-		// About **192 bytes of code a slot** — six thunks of roughly thirty-two
-		// bytes each — so the curve is flat and the choice is nearly free at any
+		// About **192 bytes of code a slot** - six thunks of roughly thirty-two
+		// bytes each - so the curve is flat and the choice is nearly free at any
 		// of these. 2048 is taken because it is eight times what a game has ever
 		// needed and still costs a third of a megabyte; going to 4096 doubles
 		// the bill to buy headroom above a number nothing is near.
@@ -256,8 +256,8 @@ namespace engine::ecs {
 					*static_cast<core::Name *>(value) = reader.ReadName();
 					break;
 				case PropertyType::String:
-					// The value is already constructed — `Read`'s contract is
-					// that it reads back over live values — so this assigns.
+					// The value is already constructed - `Read`'s contract is
+					// that it reads back over live values - so this assigns.
 					*static_cast<std::string *>(value) = reader.ReadString();
 					break;
 				case PropertyType::Reference:
@@ -276,7 +276,7 @@ namespace engine::ecs {
 			std::mutex Guard;
 
 			// A deque because `Of` hands back a pointer and registration
-			// continues afterwards — `Components`' own descriptor table is a
+			// continues afterwards - `Components`' own descriptor table is a
 			// deque for the same reason, and a vector would turn every schema
 			// anybody was holding into a dangling pointer. It is also what makes
 			// `Schema::Slot` a stable address, which is the identity the
@@ -298,7 +298,7 @@ namespace engine::ecs {
 		//
 		// **A lock in `Destruct` would be a lock per row.** The pointers are
 		// written once under `Registry::Guard` and read from every tick
-		// afterwards, so the array is atomic rather than plain — a plain read
+		// afterwards, so the array is atomic rather than plain - a plain read
 		// racing the registering write is a data race by the letter of the
 		// standard even where it happens to be benign.
 		std::array<std::atomic<const Schema *>, MAX_SCHEMAS> &Live() {
@@ -315,7 +315,7 @@ namespace engine::ecs {
 		// Never inlined, and that is the whole reason the table is affordable.
 		//
 		// **Measured, because the first version was not.** `Thunks<N>` is meant
-		// to be a two-instruction trampoline — load the index, jump — and with
+		// to be a two-instruction trampoline - load the index, jump - and with
 		// these six bodies inlinable the compiler put a copy of each *switch*
 		// into every one of them instead. `Schema.cpp` compiled to **7.9 MB of
 		// object at 256 slots and 113 MB at 4096**, growing at about 28 KB a
@@ -572,7 +572,7 @@ namespace engine::ecs {
 
 		// **Widest first, then by name, and never the caller's order.** A Luau
 		// table iterates in hash order, so a layout that followed the caller
-		// would differ between two runs of one script — and a snapshot written
+		// would differ between two runs of one script - and a snapshot written
 		// by one of them would not be readable by the other. Sorting by
 		// alignment also removes most of the padding a naive order would leave.
 		std::sort(layout.begin(), layout.end(), [](const FieldDescriptor &a, const FieldDescriptor &b) {
@@ -627,6 +627,14 @@ namespace engine::ecs {
 			return {{}, Status::Exhausted, false};
 		}
 
+		// **Read before the move below empties `layout`.** The descriptor's
+		// `Kind` was being decided from `layout.empty()` afterwards, which is
+		// always true once the vector has been moved from - so every component
+		// a script declared was registered as a tag while holding bytes.
+		// Nothing read `Kind` yet, which is the only reason it never showed;
+		// `engine.ecs.invariants` is what says so now.
+		const bool fieldless = layout.empty();
+
 		const size_t index = registry.Entries.size();
 		Schema &schema = registry.Entries.emplace_back();
 		schema.TypeName = key;
@@ -645,7 +653,7 @@ namespace engine::ecs {
 		descriptor.Name = key;
 		descriptor.Size = width;
 		descriptor.Alignment = alignment;
-		descriptor.Kind = layout.empty() ? ComponentKind::Tag : ComponentKind::Data;
+		descriptor.Kind = fieldless ? ComponentKind::Tag : ComponentKind::Data;
 
 		// **Trivial says the caller *may* skip the hooks, not that they do not
 		// exist.** A blob of value types is a memcpy for the storage, which is

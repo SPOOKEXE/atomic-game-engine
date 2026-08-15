@@ -2,7 +2,7 @@
 
 // One world: a store, the systems that run over it, and its own clock.
 //
-// A world is a *subarea to simulate* — one zone, one instanced dungeon, one
+// A world is a *subarea to simulate* - one zone, one instanced dungeon, one
 // lobby. It owns everything its tick reads and writes, and it can reach nothing
 // outside itself: no other world, no shared mutable state, no global. That is
 // what lets a hundred of them tick at once with no locks, and what makes moving
@@ -81,7 +81,7 @@ namespace engine::world {
 	//
 	// @since v0.2
 	struct WorldSettings {
-		// The stable name. Required — everything that crosses a boundary
+		// The stable name. Required - everything that crosses a boundary
 		// addresses a world by name, so a world without one cannot be reached.
 		core::Name Name;
 
@@ -193,7 +193,7 @@ namespace engine::world {
 			return copy;
 		}
 
-		// The world's root instance — its `workspace`.
+		// The world's root instance - its `workspace`.
 		//
 		// Created with the world, so a system never has to check whether the
 		// world has one.
@@ -206,7 +206,7 @@ namespace engine::world {
 		// How far the frame being drawn sits between the last tick and the next.
 		//
 		// The world owns its own accumulator, so this is the world's answer
-		// rather than one the caller kept beside it — which is the same reason
+		// rather than one the caller kept beside it - which is the same reason
 		// the tick count comes from the clock.
 		//
 		// @return The interpolation position, 0..1.
@@ -226,12 +226,12 @@ namespace engine::world {
 		// Runs the owed simulation ticks.
 		//
 		// Called from a job worker, so it binds the store to the calling thread
-		// first — which is the ordinary case rather than a handoff, since
+		// first - which is the ordinary case rather than a handoff, since
 		// whichever worker claims the world runs it.
 		//
 		// A system that throws is caught here and marks the world `Faulted`;
 		// the world stops ticking and its neighbours never notice. A hard fault
-		// is not caught, and cannot be — see AGENTS.md.
+		// is not caught, and cannot be - see AGENTS.md.
 		//
 		// @param ticks The number of ticks to run, from Owed.
 		// @tick
@@ -261,7 +261,7 @@ namespace engine::world {
 		//         being held down deliberately.
 		bool Recover();
 
-		// The storage. **Private to this module on purpose** — see AGENTS.md.
+		// The storage. **Private to this module on purpose** - see AGENTS.md.
 		//
 		// `Universe::Enter` is how anything else reaches a world's store, and
 		// it takes the reference away again when it returns.

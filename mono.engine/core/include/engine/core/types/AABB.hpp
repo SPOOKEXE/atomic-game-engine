@@ -6,8 +6,8 @@
 // a box is a comparison between corners. Overlap, containment, clamping a point
 // onto the surface and the union of two boxes are each one component-wise
 // comparison in this form, and a subtraction followed by the same comparison in
-// the other. `FromCentre` exists because most callers hold the other form —
-// `scene::Bounds` is a local half-extent — and converting once at the boundary
+// the other. `FromCentre` exists because most callers hold the other form -
+// `scene::Bounds` is a local half-extent - and converting once at the boundary
 // is cheaper than converting inside every test.
 //
 // **Touching counts as overlapping.** An exclusive test would separate a
@@ -23,7 +23,7 @@
 // - `Inverted()` and an empty sentinel. Nothing here accumulates a box from
 //   nothing; `Union` is always given two real boxes.
 // - `HalfExtent()`, `Grown()`, `Expanded()`. The one caller that needs a grown
-//   box — the swept-box query in `spatial` — builds it with `FromCentre`.
+//   box - the swept-box query in `spatial` - builds it with `FromCentre`.
 // - `Contains(AABB)`, `Volume()`, `SurfaceArea()`. These are the surface a BVH
 //   wants, and decision 4 chose a uniform grid.
 // - `Transformed()`. `FromOrientedBox` is the operation that actually exists:
@@ -145,7 +145,7 @@ namespace engine::core {
 		// Returns the point of the box nearest to `point`, clamped per axis.
 		//
 		// A point already inside comes back unchanged. A point outside is
-		// clamped onto the face, edge or corner nearest it — never pulled to
+		// clamped onto the face, edge or corner nearest it - never pulled to
 		// the centre, which is the shortcut that makes a sphere overlap test
 		// pass for spheres that are nowhere near the box.
 		constexpr Vector3 ClosestPoint(const Vector3 &point) const {

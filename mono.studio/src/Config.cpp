@@ -43,7 +43,7 @@ namespace studio {
 		// The root, resolved once and overridable.
 		//
 		// A function-local static rather than a namespace one, so it is built on
-		// first use — `HomeDirectory` reads the environment, and doing that
+		// first use - `HomeDirectory` reads the environment, and doing that
 		// during static initialisation is doing it before `main` had a chance to
 		// set anything.
 		std::filesystem::path &Root() {
@@ -58,7 +58,7 @@ namespace studio {
 			if (!std::filesystem::is_regular_file(path, failed)) {
 				// **Not an error.** A fresh install has none of these documents,
 				// and a caller has to be able to tell that from a file it could
-				// not read — which is what an empty `error` says.
+				// not read - which is what an empty `error` says.
 				return false;
 			}
 
@@ -77,7 +77,7 @@ namespace studio {
 		// A number read defensively.
 		//
 		// **`value()` alone is not enough**, because it takes the default only
-		// when the key is *absent* — a key holding a string still comes back as
+		// when the key is *absent* - a key holding a string still comes back as
 		// a throw. These files are hand-editable by design, so every read has to
 		// survive somebody typing the wrong thing.
 		float Number(const json &document, const char *key, float fallback) {
@@ -112,7 +112,7 @@ namespace studio {
 		std::error_code failed;
 
 		// `create_directories` reports "already there" as `false` with no error,
-		// which is why the error code rather than the return value decides —
+		// which is why the error code rather than the return value decides -
 		// the same reading `cdn::EnsureLocalStore` makes.
 		std::filesystem::create_directories(Root(), failed);
 		if (failed) {
@@ -156,7 +156,7 @@ namespace studio {
 		}
 
 		// Indented, because every one of these is a file somebody may open and
-		// fix by hand — which is most of the reason for JSON over a binary form.
+		// fix by hand - which is most of the reason for JSON over a binary form.
 		out << document.dump(2) << "\n";
 		return out.good();
 	}
@@ -197,12 +197,12 @@ namespace studio {
 		}
 
 		// **In file order, which is already newest first**, and deduplicated
-		// keeping the earliest of each — a file somebody edited into holding
+		// keeping the earliest of each - a file somebody edited into holding
 		// seven paths or a repeat comes back obeying the same rules a session
 		// would have produced.
 		//
 		// Not through `Remember`: that one prepends, so replaying the file
-		// through it reverses the list *and* truncates the wrong end — the
+		// through it reverses the list *and* truncates the wrong end - the
 		// oldest five survive instead of the newest five, which is the list
 		// backwards and was worth a failing case to find.
 		Paths.clear();
@@ -301,7 +301,7 @@ namespace studio {
 		// is one a person edits by hand and one an older build wrote, and the
 		// same rule holds for both: read what is understood, leave the rest, and
 		// never refuse the whole file over one line. A panel that no longer
-		// exists keeps its entry rather than being pruned — renaming a panel
+		// exists keeps its entry rather than being pruned - renaming a panel
 		// back would otherwise silently lose the colours somebody chose.
 		if (const auto colours = document.find("panelColours");
 			colours != document.end() && colours->is_object()) {
@@ -337,7 +337,7 @@ namespace studio {
 
 		// **Clamped on the way in, not on the way out.** A scale of zero is a
 		// window nobody can read and a port past 65535 is a bind that fails with
-		// a message about the port rather than about the file — and both are one
+		// a message about the port rather than about the file - and both are one
 		// hand edit away.
 		Scale = std::clamp(Scale, 0.5f, 4.0f);
 		// A step of zero would round every drag onto one point. Snapping is
@@ -406,8 +406,8 @@ namespace studio {
 		// an older build left beside the binary.
 		//
 		// **The fallback is a move, not a second location.** Nothing writes the
-		// old path again — `SaveConfiguration` only ever writes the config
-		// folder — so the first run after this change reads the old file and
+		// old path again - `SaveConfiguration` only ever writes the config
+		// folder - so the first run after this change reads the old file and
 		// every run after it reads the new one.
 		template <class Load>
 		bool LoadWithLegacy(
@@ -449,7 +449,7 @@ namespace studio {
 		ShowFacing = Prefs.ShowFacing;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
-		// has already reconciled a command-line flag against this same file —
+		// has already reconciled a command-line flag against this same file -
 		// see `app/main.cpp`. Assigning here would undo a `--stats` given for
 		// one run.
 		ShowStatistics = ShowStatistics || Prefs.ShowStatistics;
@@ -465,7 +465,7 @@ namespace studio {
 
 		if (!loaded) {
 			// A fresh install gets one origin on this machine, which is what
-			// works with nothing else running — `DeliverySettings::Default`.
+			// works with nothing else running - `DeliverySettings::Default`.
 			Content = ContentSources::Default();
 		}
 

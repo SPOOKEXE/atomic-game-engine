@@ -36,8 +36,8 @@ namespace engine::ecs {
 	}
 
 	void Scheduler::Tick(Store &store, float deltaSeconds) {
-		// The clock moves first, so every system in the tick — including the
-		// ones in PreSimulation — sees the time it is simulating rather than
+		// The clock moves first, so every system in the tick - including the
+		// ones in PreSimulation - sees the time it is simulating rather than
 		// the time it has just left.
 		store.AdvanceTick(deltaSeconds);
 
@@ -47,7 +47,7 @@ namespace engine::ecs {
 
 	void Scheduler::RunPhases(Store &store, Phase first, Phase last) {
 		// `ECS`, not `Simulation`. Every engine and game system runs through
-		// here, so this is where a game's time goes — and a category that only
+		// here, so this is where a game's time goes - and a category that only
 		// said "simulation" could not separate the systems from the driver
 		// around them.
 		ENGINE_PROFILE_CAT("ecs.systems", core::ProfileCategory::ECS);
@@ -62,7 +62,7 @@ namespace engine::ecs {
 			// **This is the level a bottleneck is obvious at.** One bar for the
 			// whole tick says the tick is slow; forty bars, one per system, is
 			// a wall of text nobody reads at sixty frames a second. Four bars
-			// — one per phase — is the shape that answers "which part" in a
+			// - one per phase - is the shape that answers "which part" in a
 			// glance, and the systems under it answer "which one" when you
 			// look closer.
 			//

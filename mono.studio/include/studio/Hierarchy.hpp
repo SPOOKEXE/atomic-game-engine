@@ -18,8 +18,8 @@
 // open all day, and on almost every one of those frames the answer is the same
 // answer as last frame.
 //
-// So the scan computes a **signature** — a rolling hash of every field the
-// flatten reads — and when it matches the last one, the compiled rows are still
+// So the scan computes a **signature** - a rolling hash of every field the
+// flatten reads - and when it matches the last one, the compiled rows are still
 // correct and are kept. This is `scene::QuickHash`'s pattern one layer up, and
 // it is the same fallback for the same reason: `Hierarchy` and `InstanceName`
 // are not observed components, so `Store::ChangeVersion` does not move when
@@ -39,14 +39,14 @@
 //
 // `LastChild` and `PreviousSibling` are absent because nothing here reads them.
 // A field added to the flatten has to be added here, and the failure if it is
-// not is a row that is one edit stale — so the rule is written down rather than
+// not is a row that is one edit stale - so the rule is written down rather than
 // left to be remembered.
 //
 // The direction matters and only one way round is safe. A signature that
 // **collides** would keep rows the world has moved on from, which is the stale
 // panel `mono.studio/AGENTS.md` forbids; a signature that changes when nothing
 // really did costs one rebuild nobody sees. Every choice here leans the second
-// way — an archetype that reshuffles its rows without changing a value still
+// way - an archetype that reshuffles its rows without changing a value still
 // re-compiles.
 //
 // ## Why a flat list rather than a recursion
@@ -56,7 +56,7 @@
 // `TreePop` have to run in order, so a thousand-row scene submitted a thousand
 // nodes to draw the thirty on screen. A flat list in display order can be
 // walked by `ImGuiListClipper`, and it makes two other things fall out for
-// free — a shift-click range is index arithmetic, and scrolling to an instance
+// free - a shift-click range is index arithmetic, and scrolling to an instance
 // is a row number.
 //
 // The cost is that expansion is ours now rather than imgui's. That is still not
@@ -107,7 +107,7 @@ namespace studio {
 		// the interned storage is a deque that never moves and from which
 		// nothing is ever removed, so the view outlives the process. And it is
 		// safe to *cache* because the signature folds in the name and the class
-		// — a rename changes the stamp, which rebuilds the row, which resolves
+		// - a rename changes the stamp, which rebuilds the row, which resolves
 		// the text again.
 		//@{
 		const char *Text = "";
@@ -142,7 +142,7 @@ namespace studio {
 		// Instances the author has opened, by handle. Order is not read.
 		std::span<const engine::ecs::Entity> Open;
 
-		// Instances whose ancestors must be opened whatever else is asked —
+		// Instances whose ancestors must be opened whatever else is asked -
 		// the selection, when something outside this panel chose it.
 		std::span<const engine::ecs::Entity> Reveal;
 	};
@@ -189,7 +189,7 @@ namespace studio {
 		// Whether one instance sits inside another's subtree.
 		//
 		// **Answered from the compiled nodes, not from the store**, so it
-		// covers rows a filter is hiding as well as rows on screen — and so the
+		// covers rows a filter is hiding as well as rows on screen - and so the
 		// panel logic that needs it can be tested without a world open.
 		//
 		// Reflexive, matching `Store::IsDescendantOf`: an instance is inside
@@ -224,7 +224,7 @@ namespace studio {
 		// looking at is folded in as the store's address, so pointing it at a
 		// different live world already re-compiles. What that cannot catch is a
 		// world destroyed and another allocated at the same address holding the
-		// same content — rare enough to be an escape hatch rather than a
+		// same content - rare enough to be an escape hatch rather than a
 		// branch, and real enough to have one.
 		void Forget();
 
@@ -232,9 +232,9 @@ namespace studio {
 		// What the scan records per instance.
 		//
 		// **Keyed by `Entity::Id` and sorted, rather than indexed by an entity
-		// index.** `ecs::Entity` deliberately does not expose its index — the
+		// index.** `ecs::Entity` deliberately does not expose its index - the
 		// layout is the store's, and reading it from outside is how code starts
-		// depending on it — so the dense side table the store uses internally
+		// depending on it - so the dense side table the store uses internally
 		// is not available here. A sorted vector searched with a binary chop is
 		// fourteen integer compares on a ten-thousand-instance world over one
 		// contiguous allocation, which is nearer that table than a hash map is.
@@ -346,9 +346,9 @@ namespace studio {
 	//
 	// **Over the drawn order, not over the tree.** A range in a tree view is
 	// what the eye sees between two rows, which is the flattened order with the
-	// closed subtrees left out — so it is row indices and not an ancestor walk.
+	// closed subtrees left out - so it is row indices and not an ancestor walk.
 	//
-	// Either end being off screen — deleted, collapsed away, filtered out —
+	// Either end being off screen - deleted, collapsed away, filtered out -
 	// yields nothing, and the caller falls back to a plain click. That is what
 	// every list does, and what an author reads the gesture as when the row
 	// they remember shift-clicking from is no longer there.

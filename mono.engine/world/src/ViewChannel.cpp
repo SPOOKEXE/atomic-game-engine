@@ -58,7 +58,7 @@ namespace engine::world {
 		Count.fetch_add(1, std::memory_order_relaxed);
 		if (previous != NONE) {
 			// A frame was sitting published and nobody took it. Dropping is the
-			// design — a slow compositor must not throttle a simulation — but
+			// design - a slow compositor must not throttle a simulation - but
 			// it is counted, because a figure that climbs is worth seeing.
 			Drops.fetch_add(1, std::memory_order_relaxed);
 		}
@@ -92,7 +92,7 @@ namespace engine::world {
 
 			// The producer published again between the load and the exchange,
 			// so the slot we claimed is stale. Release it and take the newer
-			// one — which is the right answer anyway, since the contract is
+			// one - which is the right answer anyway, since the contract is
 			// "the newest frame" rather than "some frame".
 			Holding.store(NONE, std::memory_order_release);
 		}

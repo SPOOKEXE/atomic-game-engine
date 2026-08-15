@@ -7,12 +7,18 @@ provenance beside the file.
 
 All of them are permissive and compatible with MPL-2.0. **Nothing here is
 copyleft beyond MPL-2.0's own file-level scope**, and that is a condition of
-adding a dependency rather than a happy accident — see `mono.vendor/AGENTS.md`.
+adding a dependency rather than a happy accident - see `mono.vendor/AGENTS.md`.
 
 One of them is not a dependency of the build at all. **luau-lsp is a developer
 tool**, cloned only when somebody runs `just luau-lsp`; `just setup` walks past
 it and no target links it. It brings a second copy of Luau with it, which is why
-it is built in a tree of its own — `.gitmodules` carries the reasoning.
+it is built in a tree of its own - `.gitmodules` carries the reasoning.
+
+**It is also the one dependency this repository modifies**, under MIT's grant to
+do so: `just luau-lsp` applies `mono.vendor/patches/luau-lsp/*.patch` to a copy
+of the cloned tree before building. Nothing modified is redistributed - the patch is a
+diff against upstream, the build is local, and no shipped game contains a byte of
+it. `mono.vendor/AGENTS.md` argues the shape.
 
 | Library | Licence | Used for | In a shipped game |
 |---|---|---|---|
@@ -20,17 +26,18 @@ it is built in a tree of its own — `.gitmodules` carries the reasoning.
 | [glm](https://github.com/g-truc/glm) | MIT / Happy Bunny | the maths under `core/types` | yes |
 | [spdlog](https://github.com/gabime/spdlog) | MIT (bundled fmt is MIT) | logging behind `core::Log` | yes |
 | [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
-| [Catch2](https://github.com/catchorg/Catch2) | BSL-1.0 | the test framework | no — tests only |
-| [shaderc](https://github.com/google/shaderc) | Apache-2.0 | `glslc` at build time, `libshaderc` at runtime | yes, once a caller exists — see below |
+| [Catch2](https://github.com/catchorg/Catch2) | BSL-1.0 | the test framework | no - tests only |
+| [shaderc](https://github.com/google/shaderc) | Apache-2.0 | `glslc` at build time, `libshaderc` at runtime | yes, once a caller exists - see below |
+| [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) | Apache-2.0 | SPIR-V to MSL, from v0.15: `mono.tools/shadercross` at build time, `Engine::msl` at runtime | client only, once a caller exists - see below |
 | [Dear ImGui](https://github.com/ocornut/imgui) | MIT | editor and tooling UI | studio only |
 | [asio](https://github.com/chriskohlhoff/asio) | BSL-1.0 | networking, when `net` exists | yes, once linked |
 | [Crypto++](https://github.com/weidai11/cryptopp) | BSL-1.0 (files public domain) | X25519, HKDF-SHA256, ChaCha20-Poly1305 and HMAC-SHA256 in `net`; Ed25519 and HMAC-SHA256 in `assets`; PNG CRC/DEFLATE in `bake`; deterministic hashing and the test runner's cache | yes, where linked |
-| [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake) | BSD-3-Clause | the CMake build for Crypto++ | no — build system only |
-| [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` — chunk, asset, bundle and manifest addressing | yes, once linked |
+| [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake) | BSD-3-Clause | the CMake build for Crypto++ | no - build system only |
+| [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` - chunk, asset, bundle and manifest addressing | yes, once linked |
 | [Zstandard](https://github.com/facebook/zstd) | **BSD-3-Clause** (dual-licensed; we do not take the GPLv2 option) | compression for content-delivery groups | yes, once linked |
-| [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no — `just docs` only |
+| [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no - `just docs` only |
 | [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and compiler; its analysis library behind `mono.tools/scriptcheck` | yes, where the Luau runtime is linked |
-| [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | MIT | the editor's Luau language server, from v0.7 | no — never built by this build; `just luau-lsp` builds it separately |
+| [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | MIT | the editor's Luau language server, from v0.7 | no - never built by this build; `just luau-lsp` builds it separately |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | Model Context Protocol control messages and glTF import | server/studio control and studio tooling |
 | [toml++](https://github.com/marzer/tomlplusplus) | MIT | the Rojo sync's `*.toml` row, from v0.13 | studio only |
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript/TypeScript script VM | yes, where the JavaScript runtime is linked |
@@ -38,7 +45,8 @@ it is built in a tree of its own — `.gitmodules` carries the reasoning.
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 | the monospace typeface the script editor uses, from v0.7 | as above |
 | [Roboto](https://github.com/googlefonts/roboto-classic) | SIL OFL 1.1 | the display typeface, from v0.7 | as above |
 | [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | fallback coverage for editor and game UI | as above; render loads it as a separate face |
-| [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only — nothing else links `audio` |
+| [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only - nothing else links `audio` |
+| [nodegraph](https://github.com/SPOOKEXE/node-graph-template) | MIT | the node graph model and its ImGui canvas, from v0.15 | studio only |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They
@@ -54,38 +62,59 @@ contains the `yes` rows and not the others:
 - **shaderc is both, and only one half ships today.** `glslc` compiles the
   built-in shaders during the build and goes nowhere near a binary.
   `libshaderc` is for the other half: the renderer is a graph, so the shaders
-  it runs are not all known ahead of time — a `ShaderScript` whose revision
+  it runs are not all known ahead of time - a `ShaderScript` whose revision
   changed, a swapped antialias pass, a permutation the demand pass solved for.
   `engine::render::ShaderCompiler` wraps it and `RENDER_PIPELINE.md` §11.9.1 is
   the case for it.
 
   **Right now the client binary contains none of it.** `render` links shaderc
   privately, but nothing in the client calls the compiler yet, so the linker
-  drops every object — measured: 687 shaderc symbols in `test_render`, zero in
+  drops every object - measured: 687 shaderc symbols in `test_render`, zero in
   `client`. It arrives in a shipped binary the day the graph renderer calls it,
   which is why the table says "once a caller exists" rather than "no".
 
   That mechanism, and how to re-check this claim after a version bump, is
   `docs/retired/CPP_LINKER.md`. Two things there bear on this file: dead-stripping
   happens per **object file**, not per function, and a library can have a floor
-  it drags in regardless — a program calling only SHA-256 still links 36 of
+  it drags in regardless - a program calling only SHA-256 still links 36 of
   Crypto++'s 173 members. So "we only use one function from it" is never on its
   own a reason to leave a notice out. Run the `nm` check.
-- **SDL3, shaderc and Dear ImGui are client-side.** A headless server links
-  none of them, and the `server` preset does not even configure them — only the
+- **SPIRV-Cross is shaderc's other end, and it is both build-time and
+  runtime for the same reason.** `glslc` produces SPIR-V and SDL's Metal
+  backend takes MSL or a `metallib` and never SPIR-V, so something has to
+  stand between them. `mono.tools/shadercross` does it for the built-in
+  shaders during the build and produces no object code in any binary;
+  `Engine::msl` does it for a `ShaderScript`, which does not exist until
+  somebody writes one, and that copy is linked into `render`.
+
+  **It reaches a shipped client on the same condition shaderc does**, and by
+  the same mechanism: `Renderer::AddShaderVariant` calls it only when the
+  device asked for MSL, so the objects are on the link line and whether they
+  survive dead-stripping is a question for `nm` against a real release build
+  rather than for this file. Re-run the check in
+  `docs/retired/CPP_LINKER.md` after a bump rather than copying this
+  sentence forward.
+
+  Apache-2.0, the same licence as shaderc and SPIRV-Tools, so it adds a row
+  and no new obligation. Only three of its eight libraries are built - the
+  parser, the GLSL emitter and the MSL emitter. The HLSL, C++, JSON
+  reflection, C API and CLI targets are switched off in
+  `mono.build/MonoVendor.cmake`, so no binary can contain them.
+- **SDL3, shaderc, SPIRV-Cross and Dear ImGui are client-side.** A headless server links
+  none of them, and the `server` preset does not even configure them - only the
   presentation modules own GLSL, so nothing server-tier needs a compiler for
   it.
 - **Tracy is compiled in but on-demand.** It collects nothing until a profiler
   attaches and listens on localhost only.
 - **Crypto++ is two rows for one library, and only one of them can ship.**
   `cryptopp` is the library. `cryptopp-cmake` is its build system, vendored
-  because upstream ships a GNUmakefile and no CMakeLists — it produces no object
+  because upstream ships a GNUmakefile and no CMakeLists - it produces no object
   code, so no binary can contain it and no distribution needs its notice. It is
   listed because the rule here is one entry per submodule, and because a licence
   review that finds an unlisted BSD-3-Clause submodule will stop.
 
   Crypto++ itself **now ships in both the client and the server**, so unlike
-  SDL this produces no tier split — there is no build of this engine that
+  SDL this produces no tier split - there is no build of this engine that
   carries the notice for one and not the other.
 
   **The reason given here used to be `core::Random`, and that is no longer the
@@ -112,7 +141,7 @@ contains the `yes` rows and not the others:
   one entry per submodule and because a licence review that finds an unlisted
   submodule stops regardless of what the licence turns out to say.
 
-  Only `mono.vendor/blake3/c/` is built — the C implementation. The Rust crate
+  Only `mono.vendor/blake3/c/` is built - the C implementation. The Rust crate
   in the same repository is upstream's reference and is not vendored, compiled
   or shipped.
 
@@ -121,7 +150,7 @@ contains the `yes` rows and not the others:
   Crypto++ and unlike SDL, it produces no tier split.
 - **Zstandard is dual-licensed, and which half we take matters.** Upstream ships
   two texts: `LICENSE` is BSD-3-Clause and `COPYING` is GPLv2. **We take the
-  BSD-3-Clause option**, and that is a decision rather than a formality — the
+  BSD-3-Clause option**, and that is a decision rather than a formality - the
   GPLv2 option would be incompatible with shipping this inside a game binary
   under MPL-2.0, so a reader who assumed the wrong half would reach the wrong
   conclusion about the whole engine.
@@ -130,14 +159,14 @@ contains the `yes` rows and not the others:
   condition list and the disclaimer, and do not use the copyright holder's name
   to endorse derived products.
 
-  Only the library is built — `ZSTD_BUILD_PROGRAMS` and `ZSTD_BUILD_TESTS` are
+  Only the library is built - `ZSTD_BUILD_PROGRAMS` and `ZSTD_BUILD_TESTS` are
   forced off, so the `zstd` command-line tool is neither compiled nor shipped.
   Legacy (0.x) frame support is off too, which is a security decision as much as
   a size one: it is decoder surface parsing origin-supplied bytes that nothing
   here could ever have written.
 - **doxygen-awesome-css is a stylesheet.** It is copied beside the generated
   HTML by `just docs` and is never compiled, linked or staged. It is a submodule
-  rather than a copied `.css` for the ordinary reason — a vendored file gets a
+  rather than a copied `.css` for the ordinary reason - a vendored file gets a
   local fix, upstream gets a different one, and nobody finds out.
 
 ## The typefaces are files, not submodules
@@ -149,21 +178,21 @@ build tooling and every static instance, to obtain one variable `.ttf`. A
 submodule of that to take 0.2% of it is a clone everybody pays for.
 
 So `mono.vendor/fonts/` holds the four files and, beside each, the licence text
-that upstream ships — which is the whole obligation OFL 1.1 imposes on a binary
+that upstream ships - which is the whole obligation OFL 1.1 imposes on a binary
 distribution. They are **not modified**, and the OFL's reserved-name clause is
 therefore not engaged.
 
 They are used at their **default variable instance**, which for all four is the
-regular weight. Nothing here drives a weight axis, because stb_truetype — which
-is what Dear ImGui rasterises with — does not.
+regular weight. Nothing here drives a weight axis, because stb_truetype - which
+is what Dear ImGui rasterises with - does not.
 
 ## Art, and the one piece of it that is compiled in
 
 **`mono.engine/render/src/DefaultTexture.inl` is content, not code.** It is one
 channel of ambientCG's *Plastic 013 A* colour map, box-filtered from 1024 to 64
 and lifted so its brightest texel is white, as a C array. It is what every part
-with no material draws as — `render/DefaultTexture.hpp` says why it cannot be
-fetched like everything else — so it is in the binary rather than in a store.
+with no material draws as - `render/DefaultTexture.hpp` says why it cannot be
+fetched like everything else - so it is in the binary rather than in a store.
 
 **CC0-1.0**, a public-domain dedication: no attribution is required and the row
 is here anyway, because "no attribution required" is a licence term and not a
@@ -180,7 +209,7 @@ all three CC0:
 
 **None of that reaches the repository.** The script writes into `.cache/` and
 `assetc` bakes into a content store on the machine that ran it, which is where
-gigabytes of art belong — `mono.cdn/AGENTS.md` says a monorepo carrying them
+gigabytes of art belong - `mono.cdn/AGENTS.md` says a monorepo carrying them
 makes every clone slow forever. The one exception is the four-kilobyte tile
 above, and it is four kilobytes.
 

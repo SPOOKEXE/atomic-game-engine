@@ -122,8 +122,8 @@ namespace engine::parallel {
 		if (endpoint.Valid()) {
 			auto handle = static_cast<int>(endpoint.Raw());
 
-			// `dup2(3, 3)` is defined to do nothing at all — including not
-			// clearing close-on-exec — so a handle that already landed on the
+			// `dup2(3, 3)` is defined to do nothing at all - including not
+			// clearing close-on-exec - so a handle that already landed on the
 			// slot has to move before it can be placed there.
 			if (handle == INHERITED) {
 				spare = ::dup(handle);
@@ -143,8 +143,8 @@ namespace engine::parallel {
 			actionsPointer = &actions;
 
 			// The duplicate lands without close-on-exec, which is what lets it
-			// survive the exec while every other handle this process holds —
-			// including the driver's own end of this very channel — does not.
+			// survive the exec while every other handle this process holds -
+			// including the driver's own end of this very channel - does not.
 			::posix_spawn_file_actions_adddup2(&actions, handle, INHERITED);
 		}
 

@@ -41,7 +41,7 @@ namespace engine::gui {
 		//
 		// **Not `std::hash`.** The standard says nothing about what it
 		// produces, so two builds of this program may disagree. Nothing here
-		// crosses a process — the comparison is this frame against the last —
+		// crosses a process - the comparison is this frame against the last -
 		// but a hash whose value is a property of the compiler is one nobody
 		// can write a test for, and the test is what keeps the field list
 		// honest.
@@ -58,7 +58,7 @@ namespace engine::gui {
 		//
 		// **Order-dependent deliberately.** Two archetypes that swap their rows
 		// hold the same elements and would compile identically, so an
-		// order-independent fold would be the more accurate answer — and would
+		// order-independent fold would be the more accurate answer - and would
 		// also collide far more readily, because commutative folds do. A
 		// reshuffle costs one rebuild nobody sees; a collision is a UI showing
 		// what is no longer there.
@@ -67,7 +67,7 @@ namespace engine::gui {
 		}
 
 		// **Floats fold by their bits, not by their value.** `std::bit_cast`
-		// rather than a cast to an integer, which would round — so a position
+		// rather than a cast to an integer, which would round - so a position
 		// moving by half a pixel would hash the same and the panel would keep
 		// the old rectangle. It also means `-0.0` and `0.0` fold differently
 		// and cost one rebuild, which is the safe direction.
@@ -78,7 +78,7 @@ namespace engine::gui {
 		uint64_t Fold(uint64_t running, bool value) {
 			// **1 and 2, not 1 and 0.** A zero term folds to a value that
 			// depends only on the running total, so a `false` next to a
-			// missing field would be indistinguishable — and the whole job here
+			// missing field would be indistinguishable - and the whole job here
 			// is telling those apart.
 			return Fold(running, static_cast<uint64_t>(value ? 1 : 2));
 		}
@@ -150,7 +150,7 @@ namespace engine::gui {
 		// **Every field of every one, in declaration order.** The table in
 		// `Compile.hpp` states the rule and `gui/tests/Compile.cpp` enforces it
 		// by writing every declared property and asserting the signature moved
-		// — which is what makes this a check rather than a comment.
+		// - which is what makes this a check rather than a comment.
 		//
 		// `Resolved` is deliberately absent: it is what the compile *produces*,
 		// so folding it in would make the signature depend on its own output.
@@ -339,7 +339,7 @@ namespace engine::gui {
 		// **The tree links come along with every component**, so a node with an
 		// `Element` and a `Background` folds them twice. That is one extra
 		// multiply per row against having to remember a separate hierarchy pass
-		// restricted to exactly the right set of rows — and a pass that covered
+		// restricted to exactly the right set of rows - and a pass that covered
 		// *every* instance would rebuild the UI whenever a part moved.
 		template <class T> uint64_t FoldRows(Store &store, uint64_t running) {
 			store.Each<const T, const Hierarchy>(
@@ -402,7 +402,7 @@ namespace engine::gui {
 		// branch rather than a special case per palette.
 		//
 		// Rec. 709 weights, because a shift judged by eye is judged against
-		// perceived brightness — a saturated green reads as light and a
+		// perceived brightness - a saturated green reads as light and a
 		// saturated blue as dark at the same numeric value.
 		float ShiftDirection(const Color3 &colour) {
 			const float luminance = 0.2126f * colour.R + 0.7152f * colour.G + 0.0722f * colour.B;
@@ -412,7 +412,7 @@ namespace engine::gui {
 		// The border rectangle for a `BorderMode`.
 		//
 		// Three answers rather than one because the choice decides whether two
-		// elements sized to touch overlap by a pixel — which is the difference
+		// elements sized to touch overlap by a pixel - which is the difference
 		// between a table with hairlines and a table with double rules.
 		Rect BorderRect(const Rect &bounds, BorderMode mode, float thickness) {
 			const float half = thickness * 0.5f;
@@ -574,7 +574,7 @@ namespace engine::gui {
 					// **Text clips to the element as well as to its
 					// ancestors**, whatever `ClipsDescendants` says. Roblox does
 					// the same, and the reason is that a string is the one thing
-					// routinely bigger than the box it was put in — an
+					// routinely bigger than the box it was put in - an
 					// unclipped overflow reads as a corrupt layout rather than
 					// as text that did not fit.
 					run.Clip = resolved.Clip.Intersection(bounds);
@@ -583,7 +583,7 @@ namespace engine::gui {
 			}
 
 			// Last of this element's commands, so it sits over its own fill and
-			// its own text — which is what an outline is for.
+			// its own text - which is what an outline is for.
 			if (stroke != nullptr && stroke->Transparency < 1.0f && stroke->Thickness > 0.0f) {
 				DrawCommand outline = base;
 				outline.Kind = DrawKind::Outline;
@@ -621,7 +621,7 @@ namespace engine::gui {
 				}
 			});
 
-			// Stable, so siblings sharing a `ZIndex` keep insertion order —
+			// Stable, so siblings sharing a `ZIndex` keep insertion order -
 			// which is Roblox's tiebreak and the only one that does not make
 			// two overlapping panels swap between frames.
 			std::stable_sort(children.begin(), children.end(), [&](Entity left, Entity right) {
@@ -649,7 +649,7 @@ namespace engine::gui {
 
 		// **Which world, before what is in it.** Two worlds built the same way
 		// allocate the same entity ids and hold the same components, so their
-		// contents hash identically — correct arithmetic and the wrong answer
+		// contents hash identically - correct arithmetic and the wrong answer
 		// for a list that has been pointed at the other one.
 		uint64_t stamp = Fold(0, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&store)));
 
@@ -745,7 +745,7 @@ namespace engine::gui {
 			// **`Global` is a re-sort of what `Sibling` produced**, rather than
 			// a second walk. The two behaviours differ only in whether depth
 			// beats `ZIndex`, so sorting the already-flat range by `ZIndex`
-			// alone — stably, so the tree order survives as the tiebreak — is
+			// alone - stably, so the tree order survives as the tiebreak - is
 			// exactly the legacy rule and costs one sort on the collectors that
 			// ask for it.
 			const Layer *layer = store.Get<Layer>(collector);

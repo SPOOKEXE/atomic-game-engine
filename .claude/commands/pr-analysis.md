@@ -9,7 +9,7 @@ in the order below.
 This command **reads and does not run**. No configure, no build, no `ctest`.
 `/run-checklist` owns the mechanical gate and running it twice is how two
 commands grow two copies of the same steps. The consequence is that everything
-here is a claim about the diff, not a verified fact about the binary — say so
+here is a claim about the diff, not a verified fact about the binary - say so
 where it matters, and never describe a build result you did not produce.
 
 The useful half of this command is sections 3 and 4. Anyone can list what a
@@ -30,25 +30,25 @@ With no argument that is the scope: everything on this branch that is not on
 `main`, plus everything uncommitted. Most work here is uncommitted for a while,
 so leaving the working tree out would usually analyse nothing.
 
-- `$1` is all digits — a pull request number. `gh pr diff $1` and
+- `$1` is all digits - a pull request number. `gh pr diff $1` and
   `gh pr view $1`, and ignore the working tree; you are analysing what is on
   GitHub, not what is on this disk. Say which you used.
-- `$1` is anything else — a base ref. `git diff $1...HEAD`.
+- `$1` is anything else - a base ref. `git diff $1...HEAD`.
 
 Read the diff itself, not only `--stat`. If it is too large to hold in your
-head, say so before anything else — `docs/CODE_QUALITY.md` treats that as a
+head, say so before anything else - `docs/CODE_QUALITY.md` treats that as a
 finding in its own right, and it changes how much the rest of this report is
 worth.
 
-## 1 — What it does
+## 1 - What it does
 
 Plain text, no table. Three lists, and any of them may be empty:
 
-- **Adds** — new files, new public headers, new flags, new modules, new
+- **Adds** - new files, new public headers, new flags, new modules, new
   behaviour.
-- **Removes** — deleted files, deleted symbols, behaviour that no longer
+- **Removes** - deleted files, deleted symbols, behaviour that no longer
   happens, flags that no longer exist.
-- **Edits** — changed behaviour in something that already existed.
+- **Edits** - changed behaviour in something that already existed.
 
 One line each, in the vocabulary of the codebase. "Adds
 `ecs::Store::EachParallel`, a blocking parallel iterate with a 4096 grain" is
@@ -58,10 +58,10 @@ reading it.
 Sort by consequence, not by path. A one-line change to a tier declaration
 outranks four hundred lines of new tests.
 
-## 2 — Affected areas
+## 2 - Affected areas
 
 For each `mono.X` folder the diff touches, name it, and say what it is now on
-the hook for. Include areas the diff touches indirectly — a change to
+the hook for. Include areas the diff touches indirectly - a change to
 `mono.engine/core` is a change to everything, because everything links it.
 
 Anchor the blast radius rather than guessing at it:
@@ -71,7 +71,7 @@ dependents.
 
 Then state, explicitly:
 
-- Which **tiers** are involved — `shared`, `client`, `server`. A `shared`
+- Which **tiers** are involved - `shared`, `client`, `server`. A `shared`
   module that grew a dependency on a `client` one is the single most important
   thing this section can find, and the configure-time tier check will catch it,
   but only under a preset somebody remembers to run.
@@ -81,9 +81,9 @@ Then state, explicitly:
   one of them is a file you now have to read, because its invariants are what
   the diff is being judged against.
 
-## 3 — Lower-level, and missing
+## 3 - Lower-level, and missing
 
-Places the change should have reached *downward* — the engine, the build, the
+Places the change should have reached *downward* - the engine, the build, the
 command line. Report only what this specific diff implies; a checklist item
 that does not apply should be left out, not answered "n/a".
 
@@ -92,7 +92,7 @@ Work through these, and name the file and symbol for anything you raise:
 - **The command line.** New behaviour that a user cannot reach, or reaches
   through a flag that is not declared in `core::Arguments`. Flags there are
   declared rather than scanned for, so `--help` is generated from the
-  declaration — a flag missing from `--help` is a flag that was not declared,
+  declaration - a flag missing from `--help` is a flag that was not declared,
   not a documentation gap. A flag accepted and ignored is worse than one that
   errors; if it must exist before the feature does, it warns, like `--script`
   in `docs/DEFERRED.md` D00001.
@@ -108,13 +108,13 @@ Work through these, and name the file and symbol for anything you raise:
   interchangeable, and one shared pointer added because "it is only threads
   today" ends the process option invisibly.
 - **Parallelism.** New use of `Store::EachParallel` or `Jobs::For` with a grain
-  or threshold and no measured number in a comment next to it — below the
+  or threshold and no measured number in a comment next to it - below the
   crossover, parallel is slower, and the crossover is higher than it looks. Any
   result that could land a tick later than it did before; that is a desync, not
   a latency change.
 - **The architecture graph.** A new module, a new link, or a new build option
   that is not reflected in `mono.tools/architecture/expected_graph.json`,
-  including a missing `requires` — without it the check cannot tell "deleted"
+  including a missing `requires` - without it the check cannot tell "deleted"
   from "not built under this preset".
 - **Tests.** Every new or changed public header, against the suite that covers
   it in that module's own `tests/`. A new test file with no `TEST_SUITE_ID` is
@@ -128,9 +128,9 @@ Work through these, and name the file and symbol for anything you raise:
 - **Tracy.** A new per-tick hot path with no zone, when the change is one whose
   cost anybody will later want to see in the flamegraph.
 
-## 4 — Higher-level, and missing
+## 4 - Higher-level, and missing
 
-Places the change should have reached *upward* — toward the person writing a
+Places the change should have reached *upward* - toward the person writing a
 script or a game against this engine, and the developer reading the docs. This
 is the section most likely to be skipped, because none of it fails a build.
 
@@ -144,7 +144,7 @@ rename later, and by then something depends on it.
   it a component (data the ECS owns, visible to script) or a private
   implementation detail, and is the diff clear about which?
 - **Blocking.** A new call that a script would have to wait on. ROADMAP v0.2
-  commits to asynchronous and synchronous methods so scripts are not blocked —
+  commits to asynchronous and synchronous methods so scripts are not blocked -
   a new synchronous-only path is a decision to make now, not to discover when
   the VM lands.
 - **One world assumed.** Anything written as though there is a single world or
@@ -152,7 +152,7 @@ rename later, and by then something depends on it.
   is the expensive kind to unpick.
 - **Demos.** Whether the change is something `demo_1world_scene` or the
   two-world demo should show, or something that breaks them.
-- **Docs a person actually opens.** `RUNNING.md` for any changed command line —
+- **Docs a person actually opens.** `RUNNING.md` for any changed command line -
   it is the reference, and a stale command line there is a contributor's first
   five minutes. `README.md` for anything user-visible. `CONTRIBUTING.md` for
   anything that changes how you build or test. The module's own `AGENTS.md` for
@@ -168,30 +168,30 @@ rename later, and by then something depends on it.
   An error that does not say what to do next is a bug report you will receive
   later.
 
-## 5 — Change or clarify
+## 5 - Change or clarify
 
 A ranked list, worst first. Each entry is one specific thing:
 
 ```
-<file>:<line> — <what is wrong or unclear> — <why it matters> — <what to do>
+<file>:<line> - <what is wrong or unclear> - <why it matters> - <what to do>
 ```
 
 A category is not an entry. "Naming could be better" is not actionable;
-"`mono.engine/ecs/src/Store.cpp:212` — `data` holds the pending despawn set,
+"`mono.engine/ecs/src/Store.cpp:212` - `data` holds the pending despawn set,
 and the name says nothing" is.
 
 Split it in two:
 
-- **Should change** — you are confident, and the reason is stated.
-- **Should clarify** — the diff is ambiguous and the right answer depends on
+- **Should change** - you are confident, and the reason is stated.
+- **Should clarify** - the diff is ambiguous and the right answer depends on
   intent you cannot read from it. Say what the two readings are and what each
   would imply.
 
 ### Asking
 
-Where a clarification would change the analysis itself — a tier choice, whether
+Where a clarification would change the analysis itself - a tier choice, whether
 something is meant to be script-visible, whether an omission is deferred or
-forgotten — ask, rather than reporting both branches at length. Ask once, in a
+forgotten - ask, rather than reporting both branches at length. Ask once, in a
 single batch, after you have read the diff and before you write sections 3 to 5.
 
 Where it would not change the analysis, do not ask. State the assumption in the

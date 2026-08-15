@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
 	std::ifstream file(path, std::ios::binary);
 	if (!file) {
 		// Writing nothing would leave Doxygen documenting an empty file and
-		// saying so nowhere. Fail loudly instead — the exit code is the only
+		// saying so nowhere. Fail loudly instead - the exit code is the only
 		// channel back.
 		std::cerr << "docgen: cannot read " << path << "\n";
 		return 1;

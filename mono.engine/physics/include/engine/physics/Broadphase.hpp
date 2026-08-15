@@ -10,7 +10,7 @@
 //
 // **Both steps are exact about what they are not.** A candidate pair is two
 // boxes that overlap and two layer masks that admit each other. It is not a
-// contact, there is no normal, and there is no depth — those are `NarrowPhase`,
+// contact, there is no normal, and there is no depth - those are `NarrowPhase`,
 // which runs next and throws most of these away.
 //
 // @tier L8 · shared
@@ -26,10 +26,10 @@ namespace engine::physics {
 	// Whether the layer masks allow these two colliders to be paired.
 	//
 	// **Both directions, and the choice is not arbitrary.** A pair is admitted
-	// only when each side's layer is in the other's mask —
+	// only when each side's layer is in the other's mask -
 	// `a.Mask ∩ b.Layer` *and* `b.Mask ∩ a.Layer`. `scene::Collider::Mask`
-	// already states this in its own comment, so the alternative reading —
-	// either direction is enough — would make the component's documentation
+	// already states this in its own comment, so the alternative reading -
+	// either direction is enough - would make the component's documentation
 	// false rather than merely making a different choice.
 	//
 	// The consequence a caller has to hold: **filtering is symmetric even though
@@ -54,15 +54,15 @@ namespace engine::physics {
 	// `Bounds` is the extent a thing is *drawn* at and `Collider::Extent` is the
 	// shape it *collides* as, and an index built from the first can be smaller
 	// than the shape in the second. A broad phase whose bound is too small drops
-	// contacts and reports nothing — the exact failure
+	// contacts and reports nothing - the exact failure
 	// `core::AABB::FromOrientedBox` was written to avoid. `v02v03v04.md` §3.5
 	// says `Bounds`; it was written before `Collider` carried its own extent,
 	// and `AGENTS.md` in this directory records the departure.
 	//
 	// **Dynamic and static are two sets and two rebuilds.** A collider with a
 	// `scene::Motion` can move and is re-measured every tick. One without cannot
-	// — `MakePart` gives an anchored part neither `RigidBody` nor `Motion`, so
-	// static geometry is already its own archetype — and its index is rebuilt
+	// - `MakePart` gives an anchored part neither `RigidBody` nor `Motion`, so
+	// static geometry is already its own archetype - and its index is rebuilt
 	// only when the static set changes. Staleness comes from `ecs::ChangeChannel`
 	// stamps on `scene::Transform` and `scene::Collider`, which
 	// `PreparePhysicsWorld` starts observing when the world is built.

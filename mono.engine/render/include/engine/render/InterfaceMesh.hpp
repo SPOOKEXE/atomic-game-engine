@@ -5,8 +5,8 @@
 // **The half of the interface pass that has logic in it, and the half a device
 // is not needed for.** `gui::DrawList` says what to draw in canvas pixels;
 // `Renderer`'s interface hook needs vertices, indices and the ranges between
-// scissor changes. Everything between those two is arithmetic — quad
-// generation, corner rounding, nine-slice, text layout against a `GlyphAtlas` —
+// scissor changes. Everything between those two is arithmetic - quad
+// generation, corner rounding, nine-slice, text layout against a `GlyphAtlas` -
 // and arithmetic is testable headlessly, which is why it is a type of its own
 // rather than a loop inside a Vulkan recording function.
 //
@@ -14,7 +14,7 @@
 // compile.** That is what makes the client's interface a renderer rather than a
 // feature: `ui::PaintGui` and this build from the same list, so neither can
 // drift from the other about where an element is. What they do differ on is
-// only what they hand the bytes to — an `ImDrawList` there, a vertex buffer
+// only what they hand the bytes to - an `ImDrawList` there, a vertex buffer
 // here.
 //
 // @tier L12 · client
@@ -35,7 +35,7 @@ namespace engine::render {
 	//
 	// **Packed colour rather than four floats**, because a full-screen interface
 	// is tens of thousands of vertices and the colour is the one attribute that
-	// loses nothing to eight bits — it is multiplied into a sampled texel or
+	// loses nothing to eight bits - it is multiplied into a sampled texel or
 	// used flat, and neither wants more precision than a display has.
 	//
 	// @since v0.8
@@ -84,7 +84,7 @@ namespace engine::render {
 		// Which content name to sample, or an invalid name for the atlas.
 		//
 		// **A `core::Name` rather than a texture handle**, because resolving one
-		// is the caller's — `gui::DrawCommand::Image` is a content name for
+		// is the caller's - `gui::DrawCommand::Image` is a content name for
 		// exactly that reason, and this type is no better placed to resolve it
 		// than the list it came from. A backend maps the name to whatever it can
 		// sample and draws the batch.
@@ -105,7 +105,7 @@ namespace engine::render {
 		//
 		// **The atlas is what makes text possible and is optional anyway.** A
 		// mesh built without one draws every rectangle and image and no glyph,
-		// which is what a client whose fonts failed to stage should show — the
+		// which is what a client whose fonts failed to stage should show - the
 		// interface is still usable and the missing text is visible as missing.
 		//
 		// @param list  The compiled list, in paint order.
@@ -139,7 +139,7 @@ namespace engine::render {
 		// One element's rotation, resolved once per command.
 		//
 		// **Sine and cosine computed once rather than per corner**, and the
-		// pivot is the *element's* centre rather than each quad's — a glyph
+		// pivot is the *element's* centre rather than each quad's - a glyph
 		// inside a rotated label turns with the label, and a per-quad pivot
 		// would spin every letter on the spot while leaving the run in a
 		// straight line.

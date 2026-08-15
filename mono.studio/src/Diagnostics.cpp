@@ -2,7 +2,7 @@
 //
 // **imgui windows rather than the client's overlay, and that is the whole
 // difference.** `render::DrawDebugPanels` writes pixels into a
-// `render::OverlayImage`, which is right for a game — there is no other
+// `render::OverlayImage`, which is right for a game - there is no other
 // interface to put them in. In the editor there is: the overlay is drawn under
 // the dockspace, so panels written into it are painted over by imgui every
 // frame, and reusing it here meant two panels that drew correctly and could
@@ -10,7 +10,7 @@
 //
 // So these are ordinary panels. They dock, they close, they are in the View
 // menu, and they read exactly the same `core::FrameGraph` the client's overlay
-// does — the data is shared even though the drawing is not.
+// does - the data is shared even though the drawing is not.
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -61,7 +61,7 @@ namespace studio {
 			//
 			// **Positional, and sized from the enum rather than from a literal
 			// count.** This was indexed with a hand-written `< 6`, so a
-			// seventh category did not overflow — it silently took engine's
+			// seventh category did not overflow - it silently took engine's
 			// hue and drew two subsystems in one colour, which is the one
 			// failure a colour key cannot survive. The array is now short by
 			// construction if a category is added without a turn, and the
@@ -75,7 +75,7 @@ namespace studio {
 				0.30f, // script
 				0.42f, // network
 				0.62f, // assets
-				0.00f, // idle — returned above, and here so the array lines up
+				0.00f, // idle - returned above, and here so the array lines up
 			};
 			static_assert(
 				std::size(TURN) == static_cast<size_t>(ProfileCategory::Count),
@@ -128,7 +128,7 @@ namespace studio {
 			return;
 		}
 
-		// The headline, big enough to read from across a desk — which is what
+		// The headline, big enough to read from across a desk - which is what
 		// somebody watching for a stutter is doing.
 		{
 			const engine::ui::ScopedFont large(
@@ -158,7 +158,7 @@ namespace studio {
 
 			// **Jitter, and it is the number that matters for "laggy".** A
 			// steady 40 fps reads as smooth and a 60 fps average that drops a
-			// frame every second does not — an average alone cannot tell those
+			// frame every second does not - an average alone cannot tell those
 			// apart, which is exactly the complaint this panel exists to
 			// answer.
 			Row("jitter", "%.2f ms", static_cast<double>(Statistics.Jitter()));
@@ -219,12 +219,12 @@ namespace studio {
 		ImGui::PopStyleColor();
 
 		// **The share is of busy, not of the frame.** With vsync on, fifteen of
-		// a sixteen millisecond frame are a sleep — so a span measured against
+		// a sixteen millisecond frame are a sleep - so a span measured against
 		// the whole frame reads as one per cent whatever it costs, and the
 		// panel becomes one on which nothing is ever worth optimising.
 		// **Three causes, and this used to name the rarest one.** `Dropped`
 		// counts buffer overflow, depth past `MAXIMUM_DEPTH`, and scopes opened
-		// off the frame's owning thread — and with `MAXIMUM_SPANS` at 4096
+		// off the frame's owning thread - and with `MAXIMUM_SPANS` at 4096
 		// against a frame of a few dozen, overflow is the one that essentially
 		// never happens. What does happen every frame is the third: two worlds
 		// ticking on workers open a span per phase and per system, and every one
@@ -232,7 +232,7 @@ namespace studio {
 		// investigation at the span budget, which was 1% used.
 		if (const size_t dropped = FrameGraph::Dropped(); dropped > 0) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::Text("%zu spans dropped — off-thread, too deep, or past the buffer", dropped);
+			ImGui::Text("%zu spans dropped - off-thread, too deep, or past the buffer", dropped);
 			ImGui::PopStyleColor();
 		}
 
@@ -240,7 +240,7 @@ namespace studio {
 		// dropped-span line above is the symptom and this is the cure, so
 		// putting them a menu apart would mean reading the warning and having
 		// to know what to go and find. Flipping it here also means the two
-		// flame graphs — parallel and serial — come from one session and one
+		// flame graphs - parallel and serial - come from one session and one
 		// build, which is what makes them comparable at all.
 		bool serial = engine::parallel::ForceSerialCompute();
 		if (ImGui::Checkbox("force serial compute", &serial)) {
@@ -261,13 +261,13 @@ namespace studio {
 		if (serial) {
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::TextUnformatted("— timings are serial, not the shipped cost");
+			ImGui::TextUnformatted("- timings are serial, not the shipped cost");
 			ImGui::PopStyleColor();
 		}
 
 		if (spans.empty()) {
 			ImGui::Separator();
-			ImGui::TextDisabled("nothing recorded yet — the next frame fills this in");
+			ImGui::TextDisabled("nothing recorded yet - the next frame fills this in");
 			ImGui::End();
 			return;
 		}

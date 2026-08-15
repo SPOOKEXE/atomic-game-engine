@@ -24,8 +24,8 @@ namespace studio {
 	//
 	// **`Name::Text()` returns a `string_view` and imgui takes `const char *`.**
 	// The view spans a whole `std::string` held in a deque that never moves and
-	// from which nothing is ever removed — `core/src/Name.cpp` says so in as
-	// many words — so its `data()` is NUL-terminated and valid for the life of
+	// from which nothing is ever removed - `core/src/Name.cpp` says so in as
+	// many words - so its `data()` is NUL-terminated and valid for the life of
 	// the process. Writing that reasoning out once here beats a `.data()` at
 	// forty call sites, each of which is a place somebody later wonders whether
 	// it is safe.
@@ -44,7 +44,7 @@ namespace studio {
 	// @param text   The string to edit, in place.
 	// @param hint   Placeholder text shown while the field is empty.
 	// @param secret Whether to draw the characters as dots. For a shared
-	//        secret somebody pastes into a preferences page — it hides the
+	//        secret somebody pastes into a preferences page - it hides the
 	//        value from a shoulder or a screen recording and does nothing else,
 	//        because the string itself is stored in the clear either way.
 	// @return `true` on a frame the text changed.
@@ -55,7 +55,7 @@ namespace studio {
 	// **The seam a completion popup needs, and it is public imgui.** A popup has
 	// to know where the caret is to draw beside it and has to be able to replace
 	// the word under it to accept. `ScriptEditor.cpp` refuses
-	// `ImGuiInputTextState` for exactly this and the refusal stands — that
+	// `ImGuiInputTextState` for exactly this and the refusal stands - that
 	// struct is a private *layout* whose fields move between releases, which is
 	// why the script editor has Replace All and no Find Next.
 	// `ImGuiInputTextCallbackData` is neither private nor a layout: `CursorPos`,
@@ -131,7 +131,7 @@ namespace studio {
 	// A modal that browses for a file, rather than asking for one to be typed.
 	//
 	// **Beside `PathPrompt` rather than replacing it**, because two of the eight
-	// dialogs ask for a *name* — New World and Rename Scene — and a folder tree
+	// dialogs ask for a *name* - New World and Rename Scene - and a folder tree
 	// is no help at all with those. The six that take a path get this; the two
 	// that take a name keep the field.
 	//
@@ -167,7 +167,7 @@ namespace studio {
 	// the other, from the same widget, which is how a dialog gets a mode nobody
 	// can see.
 	//
-	// Files are listed, greyed, and not selectable — a folder browser that hid
+	// Files are listed, greyed, and not selectable - a folder browser that hid
 	// them would make it impossible to tell an empty folder from the right one.
 	//
 	// @param title  The popup id, which is also its heading.
@@ -180,7 +180,7 @@ namespace studio {
 	// A case-insensitive subsequence match, with exact and prefix hits promoted.
 	//
 	// What the class picker and the property filter both search with. Typing
-	// "bp" should find "BasePart", which a substring match does not — and an
+	// "bp" should find "BasePart", which a substring match does not - and an
 	// editor whose search only matches what you already typed correctly is an
 	// editor you have to know the answer to use.
 	//

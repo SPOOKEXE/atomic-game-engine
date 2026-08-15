@@ -18,7 +18,7 @@ using engine::audio::SampleBuffer;
 
 namespace {
 	// 0.15 s of a 440 Hz sine, 44.1 kHz stereo, 32 kbps, no Xing header and no
-	// ID3 tag — 731 bytes of real MPEG Layer III.
+	// ID3 tag - 731 bytes of real MPEG Layer III.
 	//
 	// **A fixture rather than a generated stream, because there is no encoder in
 	// this repository and there should not be one.** Every refusal below can be
@@ -97,7 +97,7 @@ TEST_CASE("a real MPEG stream decodes to its own shape", "[engine][audio][mp3]")
 	CHECK(decoded->Format().SampleRate == 44100);
 	CHECK(decoded->Format().Channels == 2);
 
-	// 8064 frames — the 6615 that went in, plus the encoder's delay and its
+	// 8064 frames - the 6615 that went in, plus the encoder's delay and its
 	// padding out to a frame boundary. An exact count rather than a range
 	// because it is not this decoder's number: **ffmpeg decodes these same
 	// bytes to the same 8064 frames**, so a change here is a change in
@@ -142,7 +142,7 @@ TEST_CASE("an ID3v2 footer flag adds a second header to the skip", "[engine][aud
 TEST_CASE("a tag length that is not syncsafe is not believed", "[engine][audio][mp3]") {
 	// A high bit set in a length byte means this is not a syncsafe integer, so
 	// it is not a length. Jumping by it would skip up to twice as far as the
-	// tag actually runs — which on a real file lands inside the audio.
+	// tag actually runs - which on a real file lands inside the audio.
 	std::vector<uint8_t> tagged{'I', 'D', '3', 4, 0, 0, 0x80, 0x00, 0x00, 0x00};
 	tagged.insert(tagged.end(), TONE.begin(), TONE.end());
 
@@ -189,7 +189,7 @@ TEST_CASE("a sync word alone is not a stream", "[engine][audio][mp3]") {
 	CHECK_FALSE(IsMp3(Bytes(reservedLayer)));
 
 	// A plausible header and nothing behind it decodes to no samples, which is
-	// a refusal rather than an empty buffer — an empty sound plays silently
+	// a refusal rather than an empty buffer - an empty sound plays silently
 	// and looks like a working one.
 	const std::vector<uint8_t> headerOnly{0xFF, 0xFB, 0x10, 0x64};
 	CHECK(IsMp3(Bytes(headerOnly)));
@@ -199,7 +199,7 @@ TEST_CASE("a sync word alone is not a stream", "[engine][audio][mp3]") {
 TEST_CASE("a truncated stream keeps the frames that arrived whole", "[engine][audio][mp3]") {
 	// Half a file is half a song, not a refusal. Every frame is independently
 	// decodable, so the frames that arrived intact are sound somebody can hear
-	// — which is the opposite of WAV, where a short `data` chunk means the
+	// - which is the opposite of WAV, where a short `data` chunk means the
 	// header lied about the length and nothing can be trusted.
 	std::vector<uint8_t> half(TONE.begin(), TONE.begin() + TONE.size() / 2);
 	const auto decoded = DecodeMp3(Bytes(half));

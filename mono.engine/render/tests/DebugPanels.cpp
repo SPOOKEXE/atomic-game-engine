@@ -65,7 +65,7 @@ TEST_CASE("minimum is the worst frame, not the smallest delta", "[panels]") {
 	FrameStatistics statistics;
 
 	// Ninety-nine good frames and one 100 ms hitch. The average stays high and
-	// the minimum is what tells you the game stuttered — getting these the
+	// the minimum is what tells you the game stuttered - getting these the
 	// wrong way round makes the panel say the opposite of the truth.
 	double now = 0.0;
 	for (int frame = 0; frame < 99; frame++) {
@@ -119,7 +119,7 @@ TEST_CASE("the window survives the ring growing and wrapping", "[panels]") {
 
 	// Far past the initial capacity, so the storage doubles several times and
 	// then the live range wraps the end of it repeatedly. Both are where a ring
-	// goes wrong, and both are silent when they do — the numbers stay plausible
+	// goes wrong, and both are silent when they do - the numbers stay plausible
 	// and stop being right.
 	constexpr int COUNT = 5000;
 	for (int index = 0; index < COUNT; index++) {
@@ -147,7 +147,7 @@ TEST_CASE("a wrapped window reads its samples in order", "[panels]") {
 	FrameStatistics statistics;
 
 	// Enough to wrap, then one distinctly slow frame last. Current() reads the
-	// newest sample, which after a wrap is not the highest index — taking the
+	// newest sample, which after a wrap is not the highest index - taking the
 	// back of the storage instead of the newest sample is the classic ring bug
 	// and it reports a frame from twenty seconds ago as the current one.
 	for (int index = 0; index < 600; index++) {
@@ -167,7 +167,7 @@ TEST_CASE("the extremes recover when the frame that set them ages out", "[panels
 
 	// One catastrophic frame at the start, then a long run of good ones. While
 	// it is in the window it is the worst; the moment it leaves, the answer has
-	// to change — and a cached extreme that nothing invalidates would report a
+	// to change - and a cached extreme that nothing invalidates would report a
 	// 2 FPS floor for the rest of the session.
 	statistics.Record(0.0, 0.500f);
 	for (int index = 1; index < 200; index++) {
@@ -192,13 +192,13 @@ TEST_CASE("the running totals match a walk of the window", "[panels]") {
 	// that forgets to remove its pair leaves the mean drifting away from the
 	// truth without ever looking obviously wrong.
 	// **Long enough that the window actually slides**, which it was not. This
-	// recorded 400 frames of about eleven milliseconds — four and a half
-	// seconds against a twenty second window — so nothing was ever evicted and
+	// recorded 400 frames of about eleven milliseconds - four and a half
+	// seconds against a twenty second window - so nothing was ever evicted and
 	// the eviction arithmetic the comment above describes was never run at all.
 	//
 	// Four thousand is a little under a minute, so roughly two thirds age out.
 	// What that covers is the window sliding, the ring wrapping under it and
-	// `Rescan` rebuilding the totals — not the incremental subtraction on its
+	// `Rescan` rebuilding the totals - not the incremental subtraction on its
 	// own, because these deltas cycle through their extremes and so nearly
 	// every eviction triggers a rebuild that would repair it. The eviction that
 	// rebuilds nothing is a case of its own, below.
@@ -213,7 +213,7 @@ TEST_CASE("the running totals match a walk of the window", "[panels]") {
 	}
 
 	// Drop what the window would have dropped, using the comparison `Record`
-	// uses rather than one rearranged algebraically — the two disagree by a
+	// uses rather than one rearranged algebraically - the two disagree by a
 	// sample when a stamp lands exactly on the boundary.
 	std::vector<float> kept;
 	double stamp = 0.0;
@@ -251,7 +251,7 @@ TEST_CASE("the running totals match a walk of the window", "[panels]") {
 TEST_CASE("an eviction that rebuilds nothing still gives up its pair", "[panels]") {
 	// **The one eviction the walk above cannot see.** `Rescan` recomputes the
 	// sums from scratch, and it runs whenever the sample leaving the window was
-	// the best or the worst frame in it — so in a long varied run almost every
+	// the best or the worst frame in it - so in a long varied run almost every
 	// eviction is followed by a rebuild that hides whatever the incremental
 	// bookkeeping got wrong. The case that is left is an ordinary sample ageing
 	// out while the extremes stay: nothing rebuilds, and `ChangeSum` is only as
@@ -367,7 +367,7 @@ TEST_CASE("every profiler tab draws without a frame to show", "[panels]") {
 TEST_CASE("the flamegraph draws a frame's spans", "[panels]") {
 	// Designated rather than positional. These used to be positional and every
 	// one of them shifted a value into the wrong field the day FrameSpan grew
-	// a Parent — silently, because the types line up.
+	// a Parent - silently, because the types line up.
 	const std::vector<FrameSpan> spans{
 		{.Name = "outer",
 		 .Depth = 0,
@@ -413,7 +413,7 @@ TEST_CASE("a deeper frame makes a taller panel", "[panels]") {
 		// The panel is top-anchored, so its height is the last row with
 		// anything in it. This used to scan for the *first* such row and
 		// subtract, which was right only while the panel grew upwards from the
-		// bottom — and which passes trivially once it does not, because the
+		// bottom - and which passes trivially once it does not, because the
 		// first non-empty row is 0 for a top-anchored panel of any size.
 		for (int y = image.GetHeight() - 1; y >= 0; y--) {
 			for (int x = 0; x < image.GetWidth(); x++) {
@@ -456,7 +456,7 @@ TEST_CASE("a deeper frame makes a taller panel", "[panels]") {
 TEST_CASE("the panel keeps room for every span alongside the unmarked row", "[panels]") {
 	// The unmarked row and the column header are pinned above the scrollable
 	// body. Neither scrolls, so leaving them out of the height budget does not
-	// move the panel — it silently clips the last span off the bottom of it,
+	// move the panel - it silently clips the last span off the bottom of it,
 	// which is the same class of bug as not reporting unmarked time at all.
 	auto heightOf = [](size_t count) {
 		std::vector<FrameSpan> spans;
@@ -570,7 +570,7 @@ TEST_CASE("every tab is named on the strip, whichever is open", "[panels]") {
 		return widest;
 	};
 
-	// The strip is the same width whichever tab is lit — the names are all
+	// The strip is the same width whichever tab is lit - the names are all
 	// drawn, and only the chip moves.
 	const int frame = widthOf(ProfilerTab::Frame);
 	REQUIRE(frame > 0);
@@ -604,7 +604,7 @@ TEST_CASE("a counter written more than once says so", "[panels]") {
 TEST_CASE("a share is a share of the work, not of the waiting", "[panels]") {
 	// A frame of 16.7 ms that spent 15 waiting for the display did 1.7 ms of
 	// work. A span costing 0.85 of that is half the work and five per cent of
-	// the frame, and only one of those numbers is worth putting on a panel —
+	// the frame, and only one of those numbers is worth putting on a panel -
 	// otherwise nothing is ever worth optimising on a vsynced build.
 	DebugPanelData data;
 	data.FrameMilliseconds = 16.7f;
@@ -614,8 +614,8 @@ TEST_CASE("a share is a share of the work, not of the waiting", "[panels]") {
 }
 
 TEST_CASE("idle larger than the frame does not invert the busy time", "[panels]") {
-	// The two come from different places — the frame from one clock reading,
-	// the idle total from summing span self time — and a negative busy figure
+	// The two come from different places - the frame from one clock reading,
+	// the idle total from summing span self time - and a negative busy figure
 	// would divide every share the wrong way round.
 	DebugPanelData data;
 	data.FrameMilliseconds = 4.0f;
@@ -652,7 +652,7 @@ TEST_CASE("the categories tab draws without running off the panel", "[panels]") 
 	data.FrameMilliseconds = 16.7f;
 	data.IdleMilliseconds = 15.0f;
 
-	// The bars are drawn against busy time, and idle is not part of it — a bar
+	// The bars are drawn against busy time, and idle is not part of it - a bar
 	// for it would be nine times the panel width.
 	DrawDebugPanels(image, data);
 	REQUIRE(image.IsDirty());
@@ -734,7 +734,7 @@ TEST_CASE("every tab has a name", "[panels]") {
 TEST_CASE("the network panel is off when there is no network", "[panels][network]") {
 	// **The claim the panel is built on, stated as a test.** A client run
 	// without `--connect` has no link, and a panel of zeroes reads as a link
-	// that is up and idle — which is a different and much more alarming thing
+	// that is up and idle - which is a different and much more alarming thing
 	// than a client that was never asked to connect. So asking for the panel is
 	// not enough; `NetworkStatistics::Connected` is what draws it, and that is
 	// enforced here rather than left to the caller.
@@ -745,7 +745,7 @@ TEST_CASE("the network panel is off when there is no network", "[panels][network
 	data.ShowNetwork = true;
 	data.Network.Connected = false;
 
-	// Not merely absent — asked for, with numbers in it, and still refused. A
+	// Not merely absent - asked for, with numbers in it, and still refused. A
 	// panel that only checked `Connected` when every counter was zero would
 	// pass this with the check removed.
 	data.Network.ReceivedBytesPerSecond = 4096.0;
@@ -789,7 +789,7 @@ TEST_CASE("a connected link with the panel closed draws nothing", "[panels][netw
 TEST_CASE("the network panel does not overlap the statistics panel", "[panels][network]") {
 	// F3 is top-left and F4 is top-right, so a person can read both at once.
 	// They are drawn into one image, and the only thing keeping them apart is
-	// the width of the one on the right — which changes whenever a line in it
+	// the width of the one on the right - which changes whenever a line in it
 	// gets longer. So: draw each alone, and require that the columns one
 	// touches are columns the other does not.
 	DebugPanelData statisticsOnly;

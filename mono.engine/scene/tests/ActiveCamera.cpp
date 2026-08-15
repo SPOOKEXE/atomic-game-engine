@@ -28,7 +28,7 @@ using engine::scene::Transform;
 namespace activecamera_test {
 	// Every case that touches a store calls this first. `Store::SetResource`
 	// resolves a type to a component id, and a type first seen through the
-	// automatic path takes the compiler's spelling of its name — after which
+	// automatic path takes the compiler's spelling of its name - after which
 	// the explicit registration aborts rather than leaving two names for one
 	// thing. Registering is idempotent, so calling it per case costs a hash
 	// lookup and removes the ordering question entirely.

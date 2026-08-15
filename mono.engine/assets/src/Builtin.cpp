@@ -1,4 +1,5 @@
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/Resample.hpp>
 
 #include <array>
 #include <cmath>
@@ -9,7 +10,7 @@ namespace engine::assets {
 
 	namespace {
 		// The names, indexed by the enum. A table rather than a switch so that
-		// the name and the parse cannot disagree — the parse walks this.
+		// the name and the parse cannot disagree - the parse walks this.
 		constexpr std::array<std::string_view, BUILTIN_MESH_COUNT> NAMES{
 			"engine.Cube",
 			"engine.Plane",
@@ -55,6 +56,16 @@ namespace engine::assets {
 					}
 				}
 			}
+
+			// **The chain is built here rather than left to whoever uploads it.**
+			// A built-in is the one texture that reaches a sampler without passing
+			// through `bake`, so there is no pipeline stage to put a `Mipmap` node
+			// in - and the checker is exactly the sheet an author tiles across a
+			// floor and then looks at from across the map, which is where a single
+			// level shimmers worst. Cannot fail on an image this function just
+			// built, and a failure would leave the sheet without levels rather
+			// than invalid, so the answer is ignored deliberately.
+			BuildMipChain(image);
 			return image;
 		}
 
@@ -106,7 +117,7 @@ namespace engine::assets {
 			const uint32_t base = static_cast<uint32_t>(data.Vertices.size());
 
 			// Each face owns its four vertices so its normal stays flat rather
-			// than being averaged across a shared corner — the reason the cube
+			// than being averaged across a shared corner - the reason the cube
 			// has always been twenty-four vertices and not eight.
 			data.Vertices.push_back(Made(a[0], a[1], a[2], normal[0], normal[1], normal[2], 0.0f, 1.0f));
 			data.Vertices.push_back(Made(b[0], b[1], b[2], normal[0], normal[1], normal[2], 0.0f, 0.0f));
@@ -290,7 +301,7 @@ namespace engine::assets {
 
 					// **The pole rows emit one triangle rather than two.** At a
 					// pole every vertex of the row is the same point, so one of
-					// the two triangles has zero area — and a zero-area triangle
+					// the two triangles has zero area - and a zero-area triangle
 					// has no cross product, which means no winding, which means
 					// the check that every face points outwards cannot be made
 					// to cover the mesh.
@@ -332,7 +343,7 @@ namespace engine::assets {
 
 			// The caps. Their own vertices, because a rim vertex's normal points
 			// sideways on the wall and up on the cap, and one vertex cannot
-			// carry both — sharing them rounds the edge of the lid off into a
+			// carry both - sharing them rounds the edge of the lid off into a
 			// smear.
 			for (int end = 0; end < 2; end++) {
 				const float y = end == 0 ? 0.5f : -0.5f;

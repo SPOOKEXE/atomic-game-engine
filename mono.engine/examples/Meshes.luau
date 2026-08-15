@@ -22,13 +22,13 @@ local SURFACE_SIZE = Vector3.new(1024, 1024, 0)
 
 -- **The imported half is discovered, not named.** This file used to hold two
 -- string literals for meshes that only existed if somebody had baked that exact
--- tree — and on any other store both parts drew a cube, which is also what a
+-- tree - and on any other store both parts drew a cube, which is also what a
 -- mesh still streaming in looks like. `ContentService:GetMeshes()` reports what
 -- this world actually holds, so what stands on the plate is proof rather than a
 -- hope. `MeshGrid.luau` carries the argument in full.
 --
--- Two of them, because this scene is the *narrow* check — one mesh in front of
--- a mirror — and `MeshGrid.luau` is the wide one.
+-- Two of them, because this scene is the *narrow* check - one mesh in front of
+-- a mirror - and `MeshGrid.luau` is the wide one.
 local IMPORT_SLOTS = 2
 
 -- Generated meshes that need no published asset.
@@ -63,7 +63,7 @@ end
 
 -- Imported meshes use textures named by their baked submeshes.
 --
--- **Built as they arrive**, because delivery spans frames — the catalogue is
+-- **Built as they arrive**, because delivery spans frames - the catalogue is
 -- empty when this chunk runs. See the loop at the bottom of the file.
 local imported: { [string]: MeshPart } = {}
 local importedCount = 0
@@ -81,7 +81,7 @@ local function addImport(mesh: string, slot: number)
 	-- each of its own submeshes recorded at bake time, which is how a character
 	-- with six sheets works without this file knowing any of them.
 
-	-- Four metres, and metres only because the bake was `--model-size 1` — see
+	-- Four metres, and metres only because the bake was `--model-size 1` - see
 	-- the header. `assetc` fitted every import's longest axis to one and
 	-- centred it, so this scales a unit mesh exactly as it would scale a
 	-- built-in cube, which is what makes a PMX character and a glTF fox the
@@ -109,7 +109,7 @@ end
 -- imports wore that same checkerboard for the frames their sheets took to land,
 -- so a load looked like a scene full of mistakes. The marker means *nothing is
 -- coming* now, so this part is purple from the first frame and the imports never
--- are — and the difference is visible without reading a log.
+-- are - and the difference is visible without reading a log.
 --
 -- It reuses a built-in mesh rather than importing one, because the point is the
 -- texture and a mesh that also had to arrive would confuse which half is being
@@ -127,7 +127,7 @@ absent.Parent = workspace
 -- words to "put in front mirrors to see if it works with texture rendering",
 -- and this is that check: the pane samples a surface texture and the meshes
 -- behind it sample their own, so a frame where the reflection is right and the
--- meshes are not — or the other way round — says which of the two paths broke.
+-- meshes are not - or the other way round - says which of the two paths broke.
 local pane = Instance.new("Part")
 pane.Name = "Mirror"
 pane.Anchored = true
@@ -141,7 +141,7 @@ reflection.Name = "MirrorCamera"
 reflection.SurfaceSize = SURFACE_SIZE
 
 -- `Front` is -Z, so a pane at +Z looks back at the origin. Parenting is what
--- makes it a mirror at all — `scene::AimSurfaceCameras` places it, fits its
+-- makes it a mirror at all - `scene::AimSurfaceCameras` places it, fits its
 -- lens to the pane and hands out the surface slot.
 reflection.Face = Enum.NormalId.Front
 reflection.Parent = pane
@@ -175,12 +175,12 @@ view.Parent = workspace
 
 -- **Parenting a camera is not aiming with it.** `ActiveCamera` names the live
 -- one, so a camera that is only parented is a row nothing reads and the client
--- keeps orbiting its own placeholder — which is what was happening here, and it
+-- keeps orbiting its own placeholder - which is what was happening here, and it
 -- looks like bad framing rather than a missing line.
 workspace.CurrentCamera = view
 
 -- **The imported meshes appear as they arrive.** Content is fetched over
--- frames, so nothing published is in this world when the chunk above runs —
+-- frames, so nothing published is in this world when the chunk above runs -
 -- polling is the honest shape, because there is no callback a fetch could fire
 -- without becoming visible mid-tick and rule 5 forbids exactly that.
 local RunService = game:GetService("RunService")
@@ -201,7 +201,7 @@ RunService.Heartbeat:Connect(function()
 		if not imported[mesh] then
 			importedCount += 1
 			addImport(mesh, importedCount)
-			print(`meshes: {mesh} — {ContentService:GetTriangleCount(mesh)} triangle(s)`)
+			print(`meshes: {mesh} - {ContentService:GetTriangleCount(mesh)} triangle(s)`)
 		end
 		-- `index` is unused beyond the ordering `GetMeshes` already applied;
 		-- naming it keeps the loop reading as "in sorted order".
@@ -209,6 +209,6 @@ RunService.Heartbeat:Connect(function()
 	end
 
 	if importedCount == 0 then
-		print("meshes: nothing published in this world — run with --cdn to see imports")
+		print("meshes: nothing published in this world - run with --cdn to see imports")
 	end
 end)

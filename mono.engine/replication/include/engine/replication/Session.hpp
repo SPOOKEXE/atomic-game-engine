@@ -27,7 +27,7 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct SessionSettings {
-		// The link's own settings — budgets, timeouts, keep-alive.
+		// The link's own settings - budgets, timeouts, keep-alive.
 		net::LinkSettings Link;
 
 		// How much unacknowledged reliable traffic is held.
@@ -81,7 +81,7 @@ namespace engine::replication {
 		//
 		// Until this is called the session carries nothing in either direction.
 		// The `Sealer` is held for the life of the connection, which is what
-		// makes its counter monotone across every packet it will ever send —
+		// makes its counter monotone across every packet it will ever send -
 		// **holding it is the nonce discipline, not a convenience.** It is
 		// move-only and has no constructor from raw key material, so there is no
 		// way for a second object to count from the same place under this key.
@@ -108,7 +108,7 @@ namespace engine::replication {
 
 		// Queues a message for the peer.
 		//
-		// The channel is chosen from the message's kind — see the note at the
+		// The channel is chosen from the message's kind - see the note at the
 		// top of this file on why that is not the caller's decision.
 		//
 		// @param message    The encoded message.
@@ -161,7 +161,7 @@ namespace engine::replication {
 			// Datagrams handed to the transport.
 			uint64_t Sent = 0;
 
-			// Datagrams the transport refused — full, closed or unreachable.
+			// Datagrams the transport refused - full, closed or unreachable.
 			uint64_t Undeliverable = 0;
 
 			// Datagrams refused as not being a packet for this session.
@@ -187,7 +187,7 @@ namespace engine::replication {
 			// Packets sent carrying nothing but an acknowledgement.
 			//
 			// **The number that says a quiet link is still a link.** A session
-			// that carries occasional messages — the studio's edit stream —
+			// that carries occasional messages - the studio's edit stream -
 			// spends most of its life here, and a zero on a session that has
 			// been idle means acknowledgements are not flowing.
 			//
@@ -216,13 +216,13 @@ namespace engine::replication {
 		// acknowledged. See `Flush`.
 		//
 		// **A flag rather than a count**, because one packet acknowledges
-		// everything received up to it — the header carries a sequence and a
+		// everything received up to it - the header carries a sequence and a
 		// bitfield, not a list.
 		bool Owed = false;
 
 		// The two halves of this connection's encryption, for its whole life.
 		//
-		// Empty until `AdoptKeys`, and everything refuses while they are — a
+		// Empty until `AdoptKeys`, and everything refuses while they are - a
 		// session that cannot seal must not send, and one that cannot open must
 		// not accept. `std::optional` rather than a pointer because the ciphers
 		// are move-only and this is the only thing that owns them; a copy of a
@@ -242,8 +242,8 @@ namespace engine::replication {
 
 	// Which channel a message kind travels on.
 	//
-	// Reliable for the things whose loss is visible as an absence — a snapshot
-	// chunk, an input, a structural change — and unreliable for the one whose
+	// Reliable for the things whose loss is visible as an absence - a snapshot
+	// chunk, an input, a structural change - and unreliable for the one whose
 	// loss is covered by the next one arriving.
 	//
 	// @param kind The message kind.

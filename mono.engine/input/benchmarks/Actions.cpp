@@ -4,7 +4,7 @@
 // perceives directly.** Everything else here is measured against a frame or a
 // tick; this is measured against the moment somebody presses a key and the
 // moment the world reacts. The engine's share of that is small by construction
-// — `Actions` is two fixed-size arrays and a switch — but "small by
+// - `Actions` is two fixed-size arrays and a switch - but "small by
 // construction" is a claim, and a claim about the input path is the one worth
 // having a number for, because a regression in it reads to a player as the game
 // feeling worse without anything being visibly wrong.
@@ -20,7 +20,7 @@
 // exactly when the player was moving.
 //
 // Nothing here initialises SDL. `SDL_Event` is a plain tagged union and
-// `HandleEvent` reads it and nothing else, so the events are built as structs —
+// `HandleEvent` reads it and nothing else, so the events are built as structs -
 // which is also the only way this module can be measured at all on a machine
 // with no display.
 
@@ -105,7 +105,7 @@ BENCH("HandleEvent · 200 unbound motion events", EVENTS) {
 	// **The row that runs most often.** An event pump hands `Actions` everything
 	// SDL produced, and while a player is moving, nearly all of it is motion.
 	// Rejecting an event `Actions` does not care about must be the cheapest thing
-	// in the module — if it is not, the input layer is slowest precisely when the
+	// in the module - if it is not, the input layer is slowest precisely when the
 	// player is most active.
 	static Actions actions;
 	static const SDL_Event motion = MotionEvent(100.0f, 100.0f);
@@ -135,7 +135,7 @@ BENCH("HandleEvent · 200 bound key transitions", EVENTS) {
 BENCH("HandleEvent · 200 key repeats", EVENTS) {
 	// A held key at the OS repeat rate. **A repeated key-down for a bound action
 	// is consumed without firing the action again**, which is the behaviour that
-	// stops a held key firing sixty times a second — and the check that
+	// stops a held key firing sixty times a second - and the check that
 	// implements it runs on every repeat, so it belongs in the measurement.
 	static Actions actions;
 	const std::vector<SDL_Scancode> &keys = BoundKeys();
@@ -148,7 +148,7 @@ BENCH("HandleEvent · 200 key repeats", EVENTS) {
 }
 
 BENCH("HandleEvent · 200 unbound key events", EVENTS) {
-	// Keys nothing is bound to — the whole of the keyboard a game does not use,
+	// Keys nothing is bound to - the whole of the keyboard a game does not use,
 	// plus anything the player has rebound away. Read against the bound row: the
 	// gap is what looking a binding up costs, and a *large* gap would mean the
 	// lookup is a search rather than a table.
@@ -167,7 +167,7 @@ BENCH("HandleEvent · 200 unbound key events", EVENTS) {
 
 BENCH("Fired and Held · 100k queries", 100'000) {
 	// Read by whatever consumes input, once per action per frame at least, and
-	// often more than once — a camera controller and a character controller both
+	// often more than once - a camera controller and a character controller both
 	// ask about the same movement actions. It is an array index and must stay
 	// one.
 	static Actions actions;
@@ -183,7 +183,7 @@ BENCH("Fired and Held · 100k queries", 100'000) {
 BENCH("BeginFrame · 100k frames", 100'000) {
 	// **Clears fired edges while preserving held states**, once per frame. It
 	// touches one array of `Action::Count` bytes, so it should be a single
-	// memset-sized operation — this row exists so that an `Actions` that grew a
+	// memset-sized operation - this row exists so that an `Actions` that grew a
 	// per-action structure would show the growth here rather than in a frame
 	// time nobody could attribute.
 	static Actions actions;
@@ -197,7 +197,7 @@ BENCH("BeginFrame · 100k frames", 100'000) {
 
 BENCH("frame · BeginFrame then 64 mixed events", 1000) {
 	// **One input frame, the way a client runs it**: clear the edges, then pump
-	// whatever arrived — mostly motion, a few key transitions. One iteration is
+	// whatever arrived - mostly motion, a few key transitions. One iteration is
 	// one frame, so this is the input layer's whole per-frame share and it should
 	// be a rounding error against a 16.7 ms budget.
 	//

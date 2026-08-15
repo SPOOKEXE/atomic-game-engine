@@ -4,7 +4,7 @@
 #   cmake -DDOXYGEN=... -DOUTPUT=... -DCHECK=YES  -P RunDoxygen.cmake
 #
 # Run by the `docs` and `docs-check` targets. The header is a separate step
-# because it has to be produced by the Doxygen that is installed — `doxygen -w`
+# because it has to be produced by the Doxygen that is installed - `doxygen -w`
 # stamps its own version into it, and a header from another version warns on
 # every run and eventually renders against markup that has moved.
 #
@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.24)
 
 file(MAKE_DIRECTORY "${OUTPUT}")
 
-# Lines in a log, counted without building a CMake list — a warning quoting C++
+# Lines in a log, counted without building a CMake list - a warning quoting C++
 # can contain a semicolon, and `foreach(IN LISTS)` would split one line into two.
 function(_mono_count_lines path out_count)
 	set(${out_count} 0 PARENT_SCOPE)
@@ -71,7 +71,7 @@ endif()
 # ---------------------------------------------------------------------------
 
 # Doxygen writes over what it generates and removes nothing, so a renamed or
-# deleted header leaves its page on the site indefinitely — reachable, stale,
+# deleted header leaves its page on the site indefinitely - reachable, stale,
 # and worse than a 404 because it still looks current. The generated tree is
 # derived, so clearing it is free.
 file(REMOVE_RECURSE "${OUTPUT}/html")
@@ -105,13 +105,13 @@ set(SCRIPTS
 <script type=\"text/javascript\">
     // **Dark on a first visit, whatever the reader's operating system says.**
     // doxygen-awesome follows `prefers-color-scheme`, so a machine configured
-    // light served a light site — the one surface of this project that did not
+    // light served a light site - the one surface of this project that did not
     // match the rest of it, since `ui::Palette` has no light theme at all.
     //
     // Seeded once and never again, which is the whole reason for the extra key.
     // The toggle records a *disagreement* with the system rather than a choice:
     // on a light system, \"I want dark\" is a stored key and \"I want light\" is
-    // its absence — indistinguishable from never having visited. Without a
+    // its absence - indistinguishable from never having visited. Without a
     // marker of our own, writing the preference on every load would overwrite
     // the reader's choice each time they picked light and the toggle would
     // appear not to work.
@@ -151,12 +151,12 @@ if(NOT documented EQUAL 0)
 	message(FATAL_ERROR "doxygen failed (${documented}).")
 endif()
 
-# This pass reports malformed documentation — a `@param` naming an argument that
+# This pass reports malformed documentation - a `@param` naming an argument that
 # is not there, a link that does not resolve. It cannot report a *missing*
 # comment; that is what `just docs-check` is for.
 _mono_count_lines("${OUTPUT}/warnings.txt" count)
 
 message(STATUS "docs   ${OUTPUT}/html/index.html")
 if(count GREATER 0)
-	message(STATUS "errors ${count} — see ${OUTPUT}/warnings.txt")
+	message(STATUS "errors ${count} - see ${OUTPUT}/warnings.txt")
 endif()

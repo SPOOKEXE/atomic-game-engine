@@ -6,7 +6,7 @@
 // camera framing its own scene against one inside a large world.
 //
 // Six planes, six dot products, and an early reject on the first plane that
-// excludes — so the cost of a *rejected* instance is lower than an accepted one
+// excludes - so the cost of a *rejected* instance is lower than an accepted one
 // and the ratio moves with the scene rather than being flat.
 //
 // What it measured, in the `bench` preset, on a 24-thread machine. Minimum
@@ -21,15 +21,15 @@
 // | Bound a rotated instance | 9 ns ± 1 | |
 //
 // **Bounding costs more than testing, which was not the expected shape.** Nine
-// of the seventeen nanoseconds an instance is `AABB::FromOrientedBox` — three
-// quaternion rotations to find what a turned box actually reaches — and only
+// of the seventeen nanoseconds an instance is `AABB::FromOrientedBox` - three
+// quaternion rotations to find what a turned box actually reaches - and only
 // the remaining eight are the six planes. The plane test was the part that
 // looked expensive and is not.
 //
 // That points somewhere specific if this ever becomes the frame's cost: the
 // bound is a function of `Frame` and `HalfExtent`, both of which a world
 // already has, so it is *cacheable* per instance and recomputable only when the
-// transform changes — which `ecs::ChangeChannel` already knows. Nothing does
+// transform changes - which `ecs::ChangeChannel` already knows. Nothing does
 // that today because 17 ns times a few thousand instances is 30 microseconds
 // against a 16 millisecond frame.
 //

@@ -2,9 +2,9 @@
 
 // The named states a connection talks in.
 //
-// Every one of these crosses a boundary — a client reads why it was dropped, a
+// Every one of these crosses a boundary - a client reads why it was dropped, a
 // log records a lifecycle change, a script asks a `ConnectionStats` what channel
-// something went on — so each is a type rather than a bool or an int that loses
+// something went on - so each is a type rather than a bool or an int that loses
 // its meaning at the first hop.
 //
 // **Names are the format, numbers are not.** Anything written to a log carries
@@ -22,7 +22,7 @@ namespace engine::net {
 	//
 	// A strict progression: nothing goes backwards, and a connection that has
 	// reached Disconnected stays there. Reconnecting is a *new* connection with
-	// a new id, not a revived one — a handle that can come back to life is a
+	// a new id, not a revived one - a handle that can come back to life is a
 	// handle every caller has to re-check after every await, and that check is
 	// the one nobody writes.
 	//
@@ -36,7 +36,7 @@ namespace engine::net {
 		Connected,
 
 		// A disconnect has been decided and the reason has yet to reach the far
-		// side. Payload is refused, but the connection is still polled — this
+		// side. Payload is refused, but the connection is still polled - this
 		// state exists so a goodbye arrives rather than the far side waiting out
 		// a timeout for a peer that left politely.
 		Disconnecting,
@@ -76,7 +76,7 @@ namespace engine::net {
 		// attempt as an accident, and retrying is exactly what an attacker wants.
 		ProtocolError,
 
-		// The far side exceeded a budget — bytes per tick, packets per tick, or
+		// The far side exceeded a budget - bytes per tick, packets per tick, or
 		// a payload larger than a channel allows.
 		BudgetExceeded,
 
@@ -87,7 +87,7 @@ namespace engine::net {
 	// How much the transport promises about a payload.
 	//
 	// **Unreliable is the default and that is a design commitment**, not an
-	// omission — DATATYPES_LIBRARIES.md §15.1. A late position update is worse
+	// omission - DATATYPES_LIBRARIES.md §15.1. A late position update is worse
 	// than a dropped one, because the next one is already on its way and is more
 	// correct than the one being waited for. Making everything reliable is the
 	// mistake that turns one lost packet into a visible stall for every player.
@@ -110,8 +110,8 @@ namespace engine::net {
 		//
 		// **Neither of the two above, and that is why it is a channel rather
 		// than a payload byte.** A handshake datagram is answered without a
-		// `Link` — the whole point is that a stranger's first datagram allocates
-		// nothing — so there is no sequence for it to be newer than and no
+		// `Link` - the whole point is that a stranger's first datagram allocates
+		// nothing - so there is no sequence for it to be newer than and no
 		// reliable window for it to be ordered in. Marking it here means it is
 		// still a `Packet`: one magic, one version, one framing, and a router
 		// can tell "this is somebody trying to connect" from "this belongs to a

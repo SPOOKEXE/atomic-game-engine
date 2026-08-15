@@ -15,7 +15,7 @@ local Lighting = game:GetService("Lighting")
 local MAP_BLOCKS = 16384
 
 -- One metre, and every voxel in the file is this. It is a constant rather than
--- a literal `1` because half of it is needed constantly — a box of odd size
+-- a literal `1` because half of it is needed constantly - a box of odd size
 -- sits on a half-integer centre, and getting that wrong shifts the whole world
 -- by half a block in a way that only shows at chunk seams.
 local BLOCK = 1
@@ -36,14 +36,14 @@ local MAX_EXPOSED = 24
 --
 -- The textbook implementation hashes a lattice corner by indexing a shuffled
 -- 256-entry table, which makes the field repeat every 256 units. On a map 64
--- times wider than that the repeat is not subtle — it is a visible grid of
+-- times wider than that the repeat is not subtle - it is a visible grid of
 -- identical mountains, and it is the first thing that goes wrong when a
 -- tutorial's noise meets a real world size. Hashing the coordinates
 -- arithmetically instead gives a field whose period is 2^32 in each axis, which
 -- is 262144 times the map.
 --
 -- `bit32` is exact here, and that is worth stating rather than assuming.
--- Luau converts a double to an unsigned with `(unsigned)(long long)` — so every
+-- Luau converts a double to an unsigned with `(unsigned)(long long)` - so every
 -- intermediate below 2^53 survives with no rounding, and every one of these
 -- stays below 2^48. That is the whole reason the multipliers are 16-bit: a
 -- 32x32 multiply reaches 2^64 and would silently start losing low bits, which
@@ -136,7 +136,7 @@ end
 --
 -- **A file-level function rather than a closure inside `noise3`.** It captures
 -- nothing, and a closure that captures nothing is still allocated on every call
--- to the function containing it — which here was once per column, per chunk,
+-- to the function containing it - which here was once per column, per chunk,
 -- for a value that could have been made once.
 local function corner3(x: number, y: number, z: number, seed: number): number
 	return hash3(x, y, z, seed) / 2147483648.0 - 1.0
@@ -185,7 +185,7 @@ local FBM_GAIN = 1.85
 -- normalised so the result spans very nearly [-1, 1] whatever the octave count.
 --
 -- The seed is offset per octave. Without that, every octave samples the *same*
--- field at a different zoom, and a feature at one scale reappears at the next —
+-- field at a different zoom, and a feature at one scale reappears at the next -
 -- which reads as a hillside made of copies of itself.
 local function fbm2(x: number, z: number, seed: number, octaves: number, lacunarity: number): number
 	local total = 0
@@ -207,7 +207,7 @@ end
 
 -- Ridged multifractal: `1 - |noise|`, squared, octave-weighted.
 --
--- The absolute value folds the field at zero, and a fold is a crease — which is
+-- The absolute value folds the field at zero, and a fold is a crease - which is
 -- what a mountain ridge is. Squaring sharpens the peaks and flattens the
 -- valleys, so the result is ranges with saddles between them rather than the
 -- rolling dunes plain fBm gives.
@@ -327,20 +327,20 @@ local RIDGE_FLOOR = 0.45
 -- its own period. It is the single most expensive mistake available in this
 -- file: measured over 96 chunks, **16.5 ms to build one against 4.0 ms**.
 --
--- And it is invisible in the result — the same measurement puts the part count
+-- And it is invisible in the result - the same measurement puts the part count
 -- at 91.0 per chunk sampled per column against 89.7 interpolated, a difference
 -- of 1.4% in a number that is directly sensitive to the terrain's shape. Four
 -- times the cost for nothing anyone could see.
 --
 -- 8 divides the chunk size, so the lattice is global and chunk-aligned. Two
 -- chunks meeting at an edge interpolate between the *same* two lattice samples
--- and agree exactly — which is what keeps this an optimisation rather than a
+-- and agree exactly - which is what keeps this an optimisation rather than a
 -- source of seams.
 --
 -- The interpolation is linear rather than faded. A smoothstep would flatten the
 -- slope at every lattice line and terrace the hillsides at an 8-block pitch;
--- linear gives a constant slope inside each cell, and the detail layer below —
--- which *is* sampled per block — hides the corners between them.
+-- linear gives a constant slope inside each cell, and the detail layer below -
+-- which *is* sampled per block - hides the corners between them.
 local BASE_LATTICE = 8
 
 -- The low-frequency height at a lattice point, in blocks.
@@ -384,7 +384,7 @@ local function BaseSample(x: number, z: number): number
 	-- Mountains only above water, ramping in over the first fifth of the
 	-- continentalness range. Without the gate the same ranges appear on the sea
 	-- floor and the shallows fill with islands one block across; with it set too
-	-- steeply — `shaped * 2.5` was the first attempt — the ramp never reaches 1
+	-- steeply - `shaped * 2.5` was the first attempt - the ramp never reaches 1
 	-- and the ranges never rise, because `shaped` is a cube and spends most of
 	-- its life near zero.
 	local land = math.clamp(shaped * 6, 0, 1)
@@ -411,12 +411,12 @@ local function BaseAt(x: number, z: number): number
 end
 
 -- The high-frequency half, in blocks. Sampled per column, because at a 55-metre
--- wavelength it genuinely changes from one block to the next — and it is
+-- wavelength it genuinely changes from one block to the next - and it is
 -- therefore the single hottest call in the file, run 1156 times per chunk.
 --
 -- **Two octaves, not three.** The third has a 12-metre wavelength, which at
 -- one-metre voxels is fine enough to change the integer height every few
--- columns — so it breaks the run merge as well as costing a sample. Measured
+-- columns - so it breaks the run merge as well as costing a sample. Measured
 -- over 96 chunks: two octaves 89.7 parts and 4.03 ms, three 92.8 and 4.60, four
 -- 99.6 and 5.30. What the extra octaves add is below the voxel size anyway.
 local function DetailAt(x: number, z: number): number
@@ -426,7 +426,7 @@ end
 -- How much of the detail layer applies, given the low-frequency height under it.
 --
 -- **Damped to a third at the waterline.** A continental shelf is nearly flat, so
--- at full amplitude the detail layer crosses sea level over and over across it —
+-- at full amplitude the detail layer crosses sea level over and over across it -
 -- and every crossing is a sandbar one or two blocks wide standing out of the
 -- water. Hundreds of them, none merging with anything, and each one a part. The
 -- ramp is nine blocks deep, which is wide enough that no terrace appears at the
@@ -439,7 +439,7 @@ end
 --
 -- Used by the camera and by nothing in the chunk builder, which reaches the two
 -- halves separately so it can cache the expensive one. The two paths must stay
--- the same sum — a camera flying at a height the terrain does not have is the
+-- the same sum - a camera flying at a height the terrain does not have is the
 -- symptom when they drift.
 local function HeightAt(x: number, z: number): number
 	local base = BaseAt(x, z)
@@ -465,7 +465,7 @@ end
 -- The height of the topmost solid voxel, caves included.
 --
 -- Steps down at most `CAVE_CEILING` times. A column whose whole ceiling is
--- hollow keeps the last height rather than falling to bedrock — an honest floor
+-- hollow keeps the last height rather than falling to bedrock - an honest floor
 -- under an overhang, rather than a shaft the streaming would have to draw.
 --
 -- **The height is passed in rather than sampled.** The caller has it already:
@@ -555,19 +555,19 @@ end
 -- **Parts are recycled, never destroyed.** A chunk leaving the view radius
 -- hands its parts back; the next chunk to be built takes them. The alternative
 -- churns thousands of instances a second through `CreateInstance` and
--- `Destroy`, and every one of those is a structural change to the store — the
+-- `Destroy`, and every one of those is a structural change to the store - the
 -- archetype move `ecs/Store.hpp` defers, multiplied by the streaming rate.
 --
 -- `Visible = false` is what makes a pooled part free: `scene::Visual::Visible`
 -- decides whether an entity is submitted at all, so an idle part costs a row
 -- and no draw. Setting `Parent` to nothing would have been the Roblox habit and
--- is not available here — `Instance.Parent` is not optional in the bindings.
+-- is not available here - `Instance.Parent` is not optional in the bindings.
 
 -- How many idle parts the pool may hold before the rest are destroyed.
 --
 -- **A high-water-mark pool is not free**, which is the half of this that is easy
--- to miss. How many parts a chunk needs depends on the terrain in it — measured
--- 29 over water and 260 in mountains, a factor of nine — so a camera that
+-- to miss. How many parts a chunk needs depends on the terrain in it - measured
+-- 29 over water and 260 in mountains, a factor of nine - so a camera that
 -- crosses a range and then flies out over an ocean leaves the pool holding the
 -- difference forever. Measured over a minute of the path below: 15500 instances
 -- alive of which 9200 were idle, and an idle part is still an ECS row the
@@ -575,7 +575,7 @@ end
 --
 -- The cap trades that for some churn, and only while the working set is
 -- shrinking. Same minute with it: **7951 instances alive of which 1647 were
--- idle**, for 8811 destroys — 147 a second, against a streaming rate that is
+-- idle**, for 8811 destroys - 147 a second, against a streaming rate that is
 -- already creating about that many.
 local POOL_LIMIT = 2048
 
@@ -627,7 +627,7 @@ local CHUNK = 32
 -- How far the built region reaches, in chunks.
 --
 -- **A circle, not a square, and it is worth a third of the world.** A square
--- region reaches 1.41 times further at its corners than along its axes — so
+-- region reaches 1.41 times further at its corners than along its axes - so
 -- with the fog below set from the axis distance, every corner chunk is built,
 -- meshed, and then hidden by fog. The 11x11 square is 121 chunks and the
 -- inscribed circle is 81, for a view distance that is the same everywhere the
@@ -643,7 +643,7 @@ local VIEW_CHUNKS = 5
 
 -- One chunk further than the load radius, so a camera hovering exactly on a
 -- boundary does not build and release the same ring every beat. Hysteresis, and
--- the cheapest kind there is — at the cost of the steady-state working set
+-- the cheapest kind there is - at the cost of the steady-state working set
 -- sitting between the two circles rather than on the inner one.
 local RELEASE_CHUNKS = VIEW_CHUNKS + 1
 
@@ -663,7 +663,7 @@ local RELEASE_CHUNKS_SQUARED = RELEASE_CHUNKS * RELEASE_CHUNKS
 --
 -- The prefill is a separate, larger number because it is spent once, at load,
 -- against the top-level script's own step budget rather than a beat's. Nine
--- chunks is the ring immediately around the camera — enough that the first
+-- chunks is the ring immediately around the camera - enough that the first
 -- frame has ground under it and `LoadScene` measures a world rather than a
 -- camera.
 local CHUNKS_PER_BEAT = 1
@@ -735,7 +735,7 @@ local function BuildChunk(cx: number, cz: number): Chunk
 
 	-- The lattice cell range the padded chunk falls in, plus one so the far side
 	-- of the last cell has a corner to interpolate towards. Seven by seven for a
-	-- 32-block chunk on an 8-block lattice — 49 samples of the expensive layers
+	-- 32-block chunk on an 8-block lattice - 49 samples of the expensive layers
 	-- where a per-column evaluation would have taken 1156.
 	local latticeX0 = (originX - 1) // BASE_LATTICE
 	local latticeZ0 = (originZ - 1) // BASE_LATTICE
@@ -777,7 +777,7 @@ local function BuildChunk(cx: number, cz: number): Chunk
 	-- **A one-column border, sampled but never drawn.** A column's exposed
 	-- height depends on its four neighbours, and the neighbours of the edge
 	-- columns are in the next chunk. Sampling them here rather than asking the
-	-- neighbouring chunk is what keeps chunks independent — they can be built in
+	-- neighbouring chunk is what keeps chunks independent - they can be built in
 	-- any order, and a chunk at the edge of the loaded region is not missing
 	-- anything. It costs a 34x34 grid instead of 32x32, which is 13% more work
 	-- for a seam that never appears.
@@ -824,7 +824,7 @@ local function BuildChunk(cx: number, cz: number): Chunk
 	--
 	-- Held in one table keyed by the four fields that have to match, so the
 	-- lookup is a hash rather than a scan of the previous row. `Z1` is the last
-	-- row the box reaches, and `Row` is which row it was last extended on —
+	-- row the box reaches, and `Row` is which row it was last extended on -
 	-- without the second, a run that skipped a row would rejoin the box below it
 	-- and swallow the gap.
 	type Box = {
@@ -929,7 +929,7 @@ local function BuildChunk(cx: number, cz: number): Chunk
 			--
 			-- A filled box is what the voxel field literally says is there, and
 			-- it is the wrong thing to draw. Every water run would then have a
-			-- different bottom — the sea floor under it — so none would merge in
+			-- different bottom - the sea floor under it - so none would merge in
 			-- either axis, and half the map would cost a part per column. A
 			-- surface has the same top and bottom everywhere, so a whole bay
 			-- becomes one box. Nothing is lost as long as the camera stays above
@@ -983,7 +983,7 @@ local MAX_CHUNK = HALF_MAP // CHUNK - 1
 --
 -- **Nearest first.** The candidate list is walked in rings out from the camera,
 -- so a budget that only covers part of the work covers the part in front of the
--- viewer — which is the difference between terrain that appears at the horizon
+-- viewer - which is the difference between terrain that appears at the horizon
 -- and terrain that appears under you.
 local function Stream(cx: number, cz: number, budget: number): number
 	local built = 0
@@ -1071,7 +1071,7 @@ end
 
 -- A slow circuit over the map, so the streaming is exercised rather than
 -- described. The radius is large enough that the path leaves the region it
--- started in — a camera orbiting inside one loaded square proves nothing.
+-- started in - a camera orbiting inside one loaded square proves nothing.
 local PATH_RADIUS = 900
 local PATH_PERIOD = 240
 local EYE_CLEARANCE = 34
@@ -1102,7 +1102,7 @@ eye.Name = "Surveyor"
 eye.FieldOfView = 75
 
 -- The far plane has to clear the loaded region or the far chunks are built and
--- then clipped — which looks exactly like a streaming bug and is not one.
+-- then clipped - which looks exactly like a streaming bug and is not one.
 eye.FarPlaneZ = VIEW_CHUNKS * CHUNK * BLOCK * 2.2
 
 local startPosition, startTarget = EyeAt(0)
@@ -1128,7 +1128,7 @@ Lighting.OutdoorAmbient = Color3.fromRGB(112, 120, 132)
 -- score.
 --
 -- `SoundId` is the manifest's name, extension included, exactly as `MeshId`
--- names a mesh — so this plays when the client is pointed at a store that has
+-- names a mesh - so this plays when the client is pointed at a store that has
 -- it published and is silent when it is not. The row keeps asking, so setting
 -- `Playing` before the content has streamed is fine and it starts on the frame
 -- the asset lands.
@@ -1144,7 +1144,7 @@ music.Playing = true
 
 -- The ring around the camera, before the first frame. Everything else streams,
 -- but a scene that presented a frame of empty sky before anything appeared
--- would also hand `LoadScene` a world one unit across — the bounds are measured
+-- would also hand `LoadScene` a world one unit across - the bounds are measured
 -- from what the script built, and at this point that is a camera.
 Stream(ChunkOf(startPosition.X), ChunkOf(startPosition.Z), PREFILL_CHUNKS)
 
@@ -1153,7 +1153,7 @@ local reported = 0
 RunService.Heartbeat:Connect(function(_deltaTime: number)
 	-- `time()` rather than an accumulator over the delta. Both are simulated
 	-- here, but the accumulator drifts by a float epsilon per beat and the
-	-- clock does not — and a camera path that differs in the last bit is a
+	-- clock does not - and a camera path that differs in the last bit is a
 	-- recording that stops replaying.
 	local seconds = time()
 

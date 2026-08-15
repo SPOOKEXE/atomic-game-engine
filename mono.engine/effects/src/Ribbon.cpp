@@ -26,7 +26,7 @@ namespace engine::effects {
 		// A cubic Bezier between two points with two tangents.
 		//
 		// **De Casteljau's form rather than the expanded polynomial**, which is
-		// two more multiplies and is numerically better behaved at the endpoints —
+		// two more multiplies and is numerically better behaved at the endpoints -
 		// and, more to the point here, is the form where the four control points
 		// are visible in the code. A beam's shape is the thing an author is
 		// looking at when they read this.
@@ -46,7 +46,7 @@ namespace engine::effects {
 		// camera: the strip stays in the plane containing its length and turns
 		// about that axis until its face is towards the viewer.
 		//
-		// A degenerate cross — the ribbon pointing straight at the eye — falls back
+		// A degenerate cross - the ribbon pointing straight at the eye - falls back
 		// to world up rather than to zero, because a zero side vector collapses the
 		// strip to a line and the segment disappears. A beam seen exactly end-on is
 		// meant to be thin, not absent.
@@ -76,7 +76,7 @@ namespace engine::effects {
 			}
 
 			// Retire from the tail, which is where the oldest is. One per step is
-			// enough at any frame rate that matters — sixteen points over a
+			// enough at any frame rate that matters - sixteen points over a
 			// lifetime means a point expires every lifetime/16 seconds, and a step
 			// long enough to expire two is a step in which the trail has already
 			// stopped being continuous.
@@ -115,7 +115,7 @@ namespace engine::effects {
 	// --- building -------------------------------------------------------------
 
 	namespace {
-		// Appends one pair of vertices — one segment's worth of strip.
+		// Appends one pair of vertices - one segment's worth of strip.
 		void Emit(
 			std::vector<RibbonVertex> &out,
 			const Vector3 &top,
@@ -139,7 +139,7 @@ namespace engine::effects {
 
 			// The control points are pushed along each attachment's own axis,
 			// which is what an attachment carries an orientation for. A beam with
-			// no curve size is a straight line and still runs through the Bezier —
+			// no curve size is a straight line and still runs through the Bezier -
 			// with the controls on the segment, the curve is the segment.
 			const Vector3 control0 =
 				start.Position + start.VectorToWorldSpace(Vector3{0.0f, 0.0f, -1.0f}) * beam.CurveSize0;
@@ -152,7 +152,7 @@ namespace engine::effects {
 			const float scroll = std::fmod(elapsed * beam.TextureSpeed, 1.0f);
 
 			// The whole length, so the texture repeats by metres rather than by
-			// segment — a beam stretched to twice its length should show twice as
+			// segment - a beam stretched to twice its length should show twice as
 			// much texture, not the same texture twice as wide.
 			const float span = (finish.Position - start.Position).Magnitude();
 			const float repeats = beam.TextureLength > 0.0f ? span / beam.TextureLength : 1.0f;
@@ -216,7 +216,7 @@ namespace engine::effects {
 
 					// **The doubling-back test.** Two consecutive segments turning
 					// through more than `MinimumAngle` from a straight line
-					// produce a bow tie of crossed quads — the thing that makes a
+					// produce a bow tie of crossed quads - the thing that makes a
 					// fast sword swipe look like a folded ribbon. Dropping the
 					// point breaks the trail there, which is what it should look
 					// like.
@@ -259,7 +259,7 @@ namespace engine::effects {
 		// Cleared rather than resized, because the vertex count is a function of
 		// how many ribbons doubled back this frame and no count is known ahead of
 		// the walk. The capacity stays, so a steady scene stops allocating after
-		// its first frame — the same argument `client::CollectInstances` makes for
+		// its first frame - the same argument `client::CollectInstances` makes for
 		// its own buffer.
 		buffer->Vertices.clear();
 		buffer->Runs.clear();
@@ -321,7 +321,7 @@ namespace engine::effects {
 	// --- serialisation --------------------------------------------------------
 	//
 	// Both hold a `core::Name` and both hold sequences whose unused tail is most
-	// of their bytes, so both are written field by field — `Registration.cpp`
+	// of their bytes, so both are written field by field - `Registration.cpp`
 	// carries the whole argument for the emitter and it is the same one here.
 	//
 	// **A trail's recorded history is not written.** It is where something has
@@ -382,7 +382,7 @@ namespace engine::effects {
 			writer.WriteName(beam.Texture);
 
 			// **The attachments do not cross and are cleared on the way in.** An
-			// `ecs::Entity` is a handle within one world — rule 4 again — and a
+			// `ecs::Entity` is a handle within one world - rule 4 again - and a
 			// document resolves references through its own local ids. A beam that
 			// carried a raw handle across would point at whichever row took that
 			// number.

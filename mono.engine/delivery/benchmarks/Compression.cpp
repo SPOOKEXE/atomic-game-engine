@@ -2,7 +2,7 @@
 //
 // **This suite exists to answer two questions the headers admit are open.**
 // `GroupCodec::DEFAULT_LEVEL` says of its value of 9: "Chosen rather than
-// derived, and CDN.md §9 carries it as an open question — there is no
+// derived, and CDN.md §9 carries it as an open question - there is no
 // measurement behind it yet and saying so is better than implying there is."
 // `Dictionary::DEFAULT_TRAINED_BYTES` says the same of 110 KiB. Neither number
 // can be argued about without a ratio-against-time curve, and this is where
@@ -13,13 +13,13 @@
 // output of this suite is the pair: level 9 is only the right default if the
 // bytes it saves over level 3 are worth the seconds it costs, and "worth" here
 // means bytes served to every client for the life of a build against CPU spent
-// once at publish. The trade is enormously in favour of the slow side — which
-// is the reasoning the header already gives — but a *bounded* enormously, and
+// once at publish. The trade is enormously in favour of the slow side - which
+// is the reasoning the header already gives - but a *bounded* enormously, and
 // this says where the bound is.
 //
 // The dictionary rows are the second question. A trained dictionary ships to
 // every client once and then improves every group forever, so it is the
-// cheapest large thing in the format — provided it actually improves the ratio.
+// cheapest large thing in the format - provided it actually improves the ratio.
 // A dictionary that buys two percent is a dictionary that costs bytes on every
 // fetch and buys nothing, which is exactly what `Dictionary::Load`'s comment
 // warns about; these rows are what tell the two cases apart.
@@ -27,7 +27,7 @@
 // **Decompression is the row that runs on a player's machine**, once per group
 // fetched, while they wait at a loading screen. It is the only figure here a
 // user experiences directly, and it should be very nearly independent of the
-// level the origin chose — if it is not, a slow origin is also a slow client
+// level the origin chose - if it is not, a slow origin is also a slow client
 // and the trade above stops being one-sided.
 
 #include <engine/assets/ContentHash.hpp>
@@ -68,7 +68,7 @@ namespace compression_bench {
 	// **Random bytes would be the wrong test in the most misleading direction.**
 	// Incompressible input makes every level produce the same size in about the
 	// same time, so the level ladder would come out flat and the honest
-	// conclusion — "level 9 buys nothing" — would be an artefact of the data
+	// conclusion - "level 9 buys nothing" - would be an artefact of the data
 	// rather than a fact about the codec. Real content is structured and
 	// repetitive: this is a synthetic stand-in with a repeating vocabulary and
 	// scattered noise, which is what a folder of models, shaders and scene
@@ -103,7 +103,7 @@ namespace compression_bench {
 			state ^= state << 5;
 
 			// Mostly vocabulary, which is what gives a compressor something to
-			// find, plus a run of digits that differs every time — the numeric
+			// find, plus a run of digits that differs every time - the numeric
 			// fields a real scene file is full of and which no dictionary can
 			// predict.
 			const std::string &token = vocabulary[state % vocabulary.size()];
@@ -129,7 +129,7 @@ namespace compression_bench {
 	//
 	// Four kibibytes, which is a handful of small assets concatenated. Distinct
 	// per index so two hundred of them are two hundred different payloads rather
-	// than one payload compressed two hundred times — the second would let the
+	// than one payload compressed two hundred times - the second would let the
 	// allocator and the cache flatter every level equally.
 	const std::vector<std::byte> &SmallGroup(size_t index) {
 		static std::vector<std::vector<std::byte>> built;
@@ -159,7 +159,7 @@ namespace compression_bench {
 	}
 
 	// One dictionary, trained once. Training is substantial CPU over the whole
-	// sample and an origin does it per published build, never per request — so
+	// sample and an origin does it per published build, never per request - so
 	// training inside a row that is measuring compression would be measuring the
 	// wrong thing entirely.
 	const std::optional<Dictionary> &Trained() {
@@ -191,7 +191,7 @@ namespace compression_bench {
 	// Prints the ratio each level achieves, once, to **stderr**.
 	//
 	// **A time without a ratio answers half of a two-sided question**, and the
-	// harness prints exactly one number per row — by design, because its output
+	// harness prints exactly one number per row - by design, because its output
 	// is a tab-separated record the runner parses and diffs against a baseline.
 	// Adding a column for this one suite would mean every consumer of that
 	// format learns about compression.
@@ -277,7 +277,7 @@ using namespace compression_bench;
 //
 // **One iteration is one kibibyte of input**, so the figure converts to
 // throughput and the rows are comparable to `engine.assets.bench.content`'s
-// hashing and chunking numbers — which is the comparison that matters, because
+// hashing and chunking numbers - which is the comparison that matters, because
 // a publish pipeline does all three to the same bytes.
 //
 // The size each level produces is consumed rather than reported, because the
@@ -329,7 +329,7 @@ BENCH("Compress · 4 MiB at level 19", GROUP_BYTES / 1024) {
 
 BENCH("Compress · 4 MiB at level 9 against a dictionary", GROUP_BYTES / 1024) {
 	// The common case, per the header. Against the plain level-9 row, this is
-	// what a trained dictionary costs in time — and the size it consumes is what
+	// what a trained dictionary costs in time - and the size it consumes is what
 	// it buys in bytes. Both halves are needed: a dictionary that improves the
 	// ratio while doubling the publish time is still worth it; one that improves
 	// neither is the failure `Dictionary::Load`'s comment describes.
@@ -349,7 +349,7 @@ BENCH("Compress · 200 small groups at level 9, no dictionary", 200) {
 	// this pair is the right one.** Zstd builds its own history as it goes, so
 	// on a megabytes-long payload it has learned the content's vocabulary within
 	// the first few kilobytes and a supplied dictionary adds almost nothing. A
-	// dictionary earns its keep on payloads too *short* to build that history —
+	// dictionary earns its keep on payloads too *short* to build that history -
 	// which is precisely what a group of small assets is, and what the format
 	// ships them as.
 	//
@@ -377,7 +377,7 @@ BENCH("Compress · 200 small groups at level 9, dictionary", 200) {
 BENCH("Dictionary::Train · 100 samples of 8 KiB", 1) {
 	// **Once per published build, and it is allowed to be slow.** The row exists
 	// so that "substantial CPU over the whole sample" is a figure rather than an
-	// adjective — a publish step measured in seconds is fine and one measured in
+	// adjective - a publish step measured in seconds is fine and one measured in
 	// minutes changes how a build pipeline is arranged.
 	const std::optional<Dictionary> dictionary =
 		Dictionary::Train(Samples(), Dictionary::DEFAULT_TRAINED_BYTES);
@@ -386,8 +386,8 @@ BENCH("Dictionary::Train · 100 samples of 8 KiB", 1) {
 
 BENCH("Dictionary::Load · 10k refusals of non-dictionary bytes", 10'000) {
 	// **The mistake `Load` exists to catch**, timed. Zstd would happily accept
-	// arbitrary bytes as a "raw content" dictionary — legal, and nearly useless
-	// — so a manifest shipped where a dictionary was expected would cost ratio
+	// arbitrary bytes as a "raw content" dictionary - legal, and nearly useless
+	// - so a manifest shipped where a dictionary was expected would cost ratio
 	// on every group for the life of the deployment, silently. `Load` refuses
 	// anything without a trained dictionary's magic instead.
 	//
@@ -406,7 +406,7 @@ BENCH("Dictionary::Load · 10k refusals of non-dictionary bytes", 10'000) {
 // --- decompression ------------------------------------------------------------------
 //
 // **The only figure in this file a player experiences.** It runs on their
-// machine, once per group, while they wait — and it should be nearly
+// machine, once per group, while they wait - and it should be nearly
 // independent of the level the origin chose, because Zstd's decoder does the
 // same work whatever produced the frame. Two levels are measured precisely to
 // check that.
@@ -446,7 +446,7 @@ BENCH("Decompress · 10k frames refused on the expected size", 10'000) {
 	// decompressed size and sizing a buffer from it turns a few kilobytes on the
 	// wire into a multi-gigabyte allocation. A frame that decompresses to
 	// anything other than exactly `expectedBytes` is refused rather than
-	// truncated or padded — so this row asks for a size the frame does not have,
+	// truncated or padded - so this row asks for a size the frame does not have,
 	// ten thousand times, and must stay flat and cheap.
 	//
 	// A row that grew with the *claimed* size, or that allocated the difference

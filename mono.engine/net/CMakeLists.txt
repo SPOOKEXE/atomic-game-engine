@@ -7,13 +7,13 @@
 # networking plus the server's own asset serving.
 #
 # **This is the transport underneath all four.** Connection lifecycle, framing
-# and channels — what v0.3's first roadmap item asks for. Nothing here knows
+# and channels - what v0.3's first roadmap item asks for. Nothing here knows
 # what a component is, and it must not: replication is a *reader* of this, one
 # layer up, and a transport that knows about entities cannot also carry a
 # script's remote call or a group of content bytes.
 #
 # `shared` tier, because both halves run the same code. The server encodes and
-# the client decodes and then they swap — repo_layout.md §16.6 goes further and
+# the client decodes and then they swap - repo_layout.md §16.6 goes further and
 # has single-player ride a loopback with **real encoding**, so there is no
 # configuration in which this path is skipped.
 #

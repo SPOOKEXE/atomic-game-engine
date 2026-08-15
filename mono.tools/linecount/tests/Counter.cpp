@@ -150,7 +150,7 @@ TEST_CASE("an escaped quote does not end the string", "[linecount]") {
 
 TEST_CASE("a marked comment is still a comment", "[linecount]") {
 	// docgen promotes `//` to `///` on the way into Doxygen. Both spellings
-	// exist in the tree — the second one where somebody meant a marker — and
+	// exist in the tree - the second one where somebody meant a marker - and
 	// this counts prose, not markers.
 	const std::string source = "/// A documented thing.\n"
 							   "//! Another.\n"

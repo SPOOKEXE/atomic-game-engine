@@ -1,6 +1,6 @@
-# net — module invariants
+# net - module invariants
 
-L11 transport, `shared` tier. Connection lifecycle, framing and channels — the
+L11 transport, `shared` tier. Connection lifecycle, framing and channels - the
 layer `upstream/`, `downstream/`, `predict/` and `http/` all sit on.
 
 `http/` exists as of v0.9 and has its own rules, below.
@@ -11,7 +11,7 @@ Nor an entity, a world or a store. Replication is a **reader** of this, one laye
 up. A transport that knows about entities cannot also carry a script's remote
 call or a group of content bytes, and all three go down the same wire.
 
-The link to `ecs` would not fail the tier check — both are `shared` — so this is
+The link to `ecs` would not fail the tier check - both are `shared` - so this is
 a convention the build cannot catch, which by rule 6 means it is written down.
 It is written down here.
 
@@ -21,7 +21,7 @@ Every call that could care about "now" takes it as an argument. There is no
 `Clock` member and there must not be.
 
 Two reasons and both matter. A wall clock read inside puts a non-deterministic
-input in the middle of the subsystem whose failures are hardest to reproduce —
+input in the middle of the subsystem whose failures are hardest to reproduce -
 `ecs/AGENTS.md` bans exactly that inside a system. And it makes a timeout
 something a suite *states* rather than waits for: the whole lifecycle suite runs
 in microseconds because it never sleeps.
@@ -61,14 +61,14 @@ late is a resend that still has to be delivered in order; discarding it would
 silently drop an event the sender believes was acknowledged.
 
 **Each channel has its own sequence counter, in both directions.** One shared
-counter would let a reliable resend make an unreliable packet look stale — and
+counter would let a reliable resend make an unreliable packet look stale - and
 so would one shared *high-water mark* on the receiving side, which is the half
 that was actually wrong until v0.4. `Link` keeps a window per channel and every
 one wraps on its own: `Packet::IsNewer` is a half-range comparison and answers
 nonsense when the two numbers come from different counters.
 
 **A channel's first packet is accepted, whatever its sequence.** Zero is a
-legitimate sequence — it is the first one `NextHeader` stamps — so no value can
+legitimate sequence - it is the first one `NextHeader` stamps - so no value can
 stand for "nothing yet" and the window carries a flag instead. Treating zero as
 "already seen sequence 0" reads a channel's opening packet as a repeat of one
 that never existed, and counts every sequence below the one it opened at as
@@ -81,12 +81,12 @@ peer is alive.
 Because the acknowledgement fields report one sequence and there is now one
 space per channel, `Link::NextHeader` acknowledges the channel it stamps.
 Retiring a reliable payload needs an acknowledgement on *every* packet, and
-that is `ReliableReceiver::Acknowledging`'s job — the two are the same root
+that is `ReliableReceiver::Acknowledging`'s job - the two are the same root
 cause, one window over two counters, seen from either end.
 
 ## Sequence comparison is wrap-aware, and this is not optional
 
-A 16-bit counter wraps every 65536 packets — about eighteen minutes at sixty a
+A 16-bit counter wraps every 65536 packets - about eighteen minutes at sixty a
 second, well inside one match. A plain `>` discards every packet for the
 eighteen minutes after the first wrap, so a build that is fine in testing breaks
 in a long game. `Packet::IsNewer` does the half-range comparison and every
@@ -102,14 +102,14 @@ per-packet overhead at both ends.
 `Reserve` asks and books in one call. A separate "may I" and "I did" is two calls
 a caller can get out of step, and the one that gets forgotten is the second.
 
-**Overflow is visible in `ConnectionStats::SendsOverBudget`** — §15.1 asks for
+**Overflow is visible in `ConnectionStats::SendsOverBudget`** - §15.1 asks for
 exactly that. A budget that silently drops traffic is indistinguishable from a
 network that silently drops traffic, and the two want completely different fixes.
 
 **A refusal is an answer, not a discard, and the caller has to read it.**
 `Reserve` returning false means the payload did not go; whether that costs a
 tick or costs a client is the caller's to know. `replication::Authority::Unsent`
-is the one that knows — see `replication/AGENTS.md`. This module deliberately
+is the one that knows - see `replication/AGENTS.md`. This module deliberately
 keeps no outbox to retry from, because an outbox here would hold payloads whose
 meaning it is not allowed to understand.
 
@@ -120,7 +120,7 @@ else lets a connection spend two ticks' worth inside one.
 
 `Cookie` derives its answer from a secret this end already holds plus the bytes
 the peer already sent, and verifies it by deriving it again. **Never by looking
-it up.** A table of pending challenges — even a bounded one, even an LRU — has
+it up.** A table of pending challenges - even a bounded one, even an LRU - has
 moved the exhaustion target rather than removed it: one datagram from a stranger
 would buy an entry, and the whole reason the challenge exists is that a stranger
 gets nothing.
@@ -137,7 +137,7 @@ worth doing.
 
 What a returned cookie proves is exactly one thing: somebody at that address
 received a datagram this end sent there, recently. Not identity, not
-authorisation. Deciding who may connect belongs above this module —
+authorisation. Deciding who may connect belongs above this module -
 `replication::Listener::SetAdmission`.
 
 ## The stream is sealed, and the nonce discipline is structural
@@ -145,7 +145,7 @@ authorisation. Deciding who may connect belongs above this module —
 Every payload above the handshake is ChaCha20-Poly1305 with **the packet header
 as associated data**, so a rewritten channel, sequence or acknowledgement fails
 the tag rather than being acted on. The keys come out of `Handshake` and are
-held for the life of the connection by `replication::Session` — one `Sealer` and
+held for the life of the connection by `replication::Session` - one `Sealer` and
 one `Opener` per direction, and holding them *is* the guarantee rather than a
 convenience.
 
@@ -165,8 +165,8 @@ eighteen minutes at sixty packets a second. A nonce derived from a wrapping
 counter is a nonce that repeats. Eight bytes a packet is what that costs.
 
 **A resend is sealed again under a fresh counter, never replayed verbatim.**
-Both are safe against a repeat — a verbatim replay is the same frame rather than
-a second one — and they fail differently. The header is the associated data and
+Both are safe against a repeat - a verbatim replay is the same frame rather than
+a second one - and they fail differently. The header is the associated data and
 it carries a live acknowledgement, so a verbatim replay would have to freeze the
 acknowledgement on the one packet a stalled stream most needs current, or stop
 covering the mutable header fields with the tag. `ReliableSender` therefore
@@ -175,7 +175,7 @@ holds **plaintext**, and `Session::Flush` seals it again.
 **`Cipher` refuses a forgery and not a replay**, deliberately. A captured frame
 sent again is authentic by construction; discarding it is the sequence window's
 and `ReliableReceiver`'s job, because they are the layers that can tell an
-attack from an ordinary resend. Nothing in `Opener` remembers a counter — a
+attack from an ordinary resend. Nothing in `Opener` remembers a counter - a
 dropped packet leaves a gap, a duplicate repeats one and a reorder lowers one,
 and an opener with a window would refuse genuine traffic on all three.
 
@@ -186,7 +186,7 @@ refused. A `Session` with no keys sends nothing and accepts nothing.
 **The tag comes out of the payload budget and the number to size against is
 `Packet::MAXIMUM_MESSAGE_BYTES`, not `MAXIMUM_PAYLOAD_BYTES`.** `Link::Reserve`
 measures against the first. A budget left on the second produces a message that
-can never be sent and is indistinguishable at the call site from a busy link —
+can never be sent and is indistinguishable at the call site from a busy link -
 which is the failure this module has already been bitten by three times.
 
 ## Every field of an inbound packet is hostile
@@ -196,7 +196,7 @@ so a client's packets and a server's are both attacker-controlled from the other
 side.
 
 `Packet::Read` refuses a wrong magic, an unknown version, a channel byte outside
-the enum, a length over the maximum and a length running past the buffer — and
+the enum, a length over the maximum and a length running past the buffer - and
 marks the reader failed. **A channel byte is range-checked before the cast**:
 casting it anyway produces a `ChannelKind` no switch handles, and every
 `Describe` and dispatch downstream then reads a value the type says cannot exist.
@@ -224,7 +224,7 @@ is skipped and no second lifecycle that only a socket exercises.
 `LossyTransport` wraps another `Transport` and discards some of what arrives at
 it. It is here rather than in a suite because `net`, `replication` and
 `mono.server` all need it, and this repository has no mechanism for a test-only
-library shared between modules — a module's `tests/` may reach its own `src/`
+library shared between modules - a module's `tests/` may reach its own `src/`
 and nothing else, so the alternatives were three copies or a fourth way to share
 code.
 
@@ -240,14 +240,14 @@ invent one of those statuses or hide one the transport underneath would have
 given. So `Send` is pure delegation. Wrap the end that receives.
 
 **No clock and no `std::random_device`, which is not negotiable here.** Whether
-arrival *n* is lost is a pure function of *n* and a seed the caller states —
+arrival *n* is lost is a pure function of *n* and a seed the caller states -
 `core::Random` is indexed rather than streamed for exactly this reason. A
 timeout in this module is something a suite states rather than waits for, and
 loss is the same: a failing case is reproducible from its seed alone, and
 nothing here can reach a recorded run.
 
 **Nominating one datagram is worth more than a percentage**, and `DropNext` is
-worth more than either — a test knows it has just made the server publish a
+worth more than either - a test knows it has just made the server publish a
 creation and does not know which arrival that will be.
 
 ## No vendor type in a public header
@@ -269,8 +269,8 @@ what stops asio reaching every module that links this.
   everything. `Handshake.hpp` carries the `TODO(D00006)`. A static server key and
   a signature over the transcript is the shape; where the key comes from and who
   trusts it is a deployment question.
-- `upstream/`, `downstream/`, `predict/` — replication, v0.3's remaining items.
-- `http/`, `websocket/` — userland networking and the origin's asset serving,
+- `upstream/`, `downstream/`, `predict/` - replication, v0.3's remaining items.
+- `http/`, `websocket/` - userland networking and the origin's asset serving,
   which is what `mono.cdn`'s streaming waits on.
 - **NAT traversal and relay**, a known gap: the transport encrypts, orders and
   rate-limits and has no answer for two peers that cannot see each other.
@@ -307,7 +307,7 @@ exercised by a suite that opens no port and waits for nothing. `Server` and
 `Client` are the thin halves that own file descriptors.
 
 **A response to `HEAD` carries a length and no body, and the reader has to be
-told.** It is the one place the response format is not self-describing —
+told.** It is the one place the response format is not self-describing -
 `ParseResponse` takes `bodyOmitted` for that reason, and a reader that believed
 the length would wait for bytes nobody is sending.
 
@@ -318,7 +318,7 @@ and report content corruption for what was a dropped socket.
 
 ### Polled, and completions land on the caller's thread
 
-`Pump` drives everything — accepting, reading, dispatching, writing — on the
+`Pump` drives everything - accepting, reading, dispatching, writing - on the
 thread that called it. Nothing here calls `run()` or `poll()` on an
 `io_context`, exactly as `UdpTransport` does not.
 
@@ -339,7 +339,7 @@ is the one thing to preserve if they are ever moved: a count taken from parsed
 requests reports zero for a peer that is filling a connection buffer and never
 finishing a message, which is precisely the traffic an operator is looking for.
 
-A partial write counts what actually left rather than what was queued — the
+A partial write counts what actually left rather than what was queued - the
 remainder is counted on the poll it goes out on, and bytes still in an outbox
 when a connection drops were never sent and are never counted.
 
@@ -361,18 +361,18 @@ in, so a suite states a timeout instead of sleeping for one.
 `ReliableSender` samples the gap between a reliable packet going out and its
 acknowledgement retiring it, smoothed at RFC 6298's one eighth.
 `ConnectionStats::RoundTripMilliseconds` had been declared since v0.3 and
-assigned by nothing, so it read zero on every connection there has ever been —
+assigned by nothing, so it read zero on every connection there has ever been -
 while `replication::Rewind` read it and compensated for interpolation alone.
 
 **Only packets that were never resent are measured.** An acknowledgement of a
 resent packet does not say *which* transmission it answers, so a sample from one
 is either the true trip or the trip plus a retransmit timeout, with no way to
-tell — and measuring them makes the estimate worst on exactly the links that
+tell - and measuring them makes the estimate worst on exactly the links that
 need it most.
 
 **`Held::Attempts` counts resends and starts at zero.** The first version of the
 check read `Attempts != 1` and therefore skipped every clean sample and measured
-every ambiguous one — the exact inversion of the rule it was written for. The
+every ambiguous one - the exact inversion of the rule it was written for. The
 suite catches it; the comment beside the check says which number means what.
 
 **A `Link` cannot measure this itself**, which is why `RecordRoundTrip` is a
@@ -382,3 +382,90 @@ and carries the number across.
 
 **Zero means unknown, not instant.** A connection that has sent nothing reliable
 has nothing to measure, and a loopback honestly measures nothing at all.
+
+## The send rate is a function of the path, and `BytesPerTick` is a ceiling over it
+
+`net::CongestionControl` is **Copa** - Arun and Balakrishnan, NSDI 2018 - a
+delay-based window that steers toward a standing queue of `TargetQueuePackets`
+at the bottleneck. The reason it is not a loss-based AIMD window in the NewReno
+lineage is that a loss-based controller *finds the bottleneck by filling its
+buffer*, which is the mechanism rather than a side effect: on a home router with
+a hundred milliseconds of buffer that is a hundred milliseconds added to every
+input a player sends. **For a game the latency argument is the whole point.**
+
+**`LinkSettings::BytesPerTick` survives as a hard ceiling and stopped being the
+only limit.** It was kept rather than removed because the two answer different
+questions: a game may legitimately refuse to spend more than N on one player on
+a path that would carry ten times that, and a hundred players on one host is a
+hundred of these. What it stopped being is a *rate* - it never opened up and it
+never backed off. `PacketsPerTick` is left a fixed cap for a different reason:
+per-packet cost is a property of the two endpoints and not of the path between
+them, so there is nothing on the wire to measure it against.
+
+**Two refusals and two counters.** `ConnectionStats::SendsOverBudget` is a number
+somebody configured being enforced, which a caller answers by changing the
+number; `SendsOverAllowance` is the path refusing, which raising anything does
+not fix. A caller that must not lose a send reads both. Folding them together
+would make "raise the cap" look like a fix for congestion, and `render`'s debug
+panel and `D00007`'s reopen trigger are both phrased against the first meaning.
+
+**No second acknowledgement path, and none may be added.** Both signals come out
+of what already crosses. The delay is `ReliableSender`'s estimate arriving at
+`Link::RecordRoundTrip`, which `replication::Session` has called on every inbound
+packet since v0.9. The loss is holes in `PacketHeader::Acknowledge` and
+`AcknowledgeBits` - the fields `ReliableReceiver::Acknowledging` already stamps on
+every outgoing packet whatever its channel. `ReliableSender` reads them to retire
+payloads and `Link::ObserveAcknowledgement` reads them to find out whether the
+path dropped something. One acknowledgement, two questions.
+
+**Both signals are therefore about the reliable channel only, and that bounds
+what this can see.** Unreliable loss on the way out is reported by nothing and is
+not measured; a direction whose reliable stream is quiet offers no samples at
+all, which on a server publishing a still world is a real gap. It is why the
+controller must never *require* a sample to make progress - the slow-start ramp
+falls back on `AssumedRoundTripSeconds`, and the queueing delay reads as zero
+rather than as unknown when nothing has been measured.
+
+**The controller is clocked by acknowledgements, not by a timer.** Everything
+periodic in it - the slow-start doubling, Copa's velocity parameter, the mode
+switch - waits for the effect of the last decision to come back, and an
+acknowledgement *is* that effect arriving. `Link::Advance` closes the period when
+the far side has acknowledged everything outstanding when it opened, which is one
+round trip measured rather than assumed, and is what makes the same code behave
+on a loopback and on a satellite.
+
+**The whole law runs in exactly one place, and that is rule 5.** Observations
+land whenever a packet does, several times in a tick, and they accumulate into
+windowed minima that do not care about order. The decision that turns them into a
+window happens once, in `Link::Advance`, which every caller already runs
+immediately before `ResetBudget`. **A tick's length is measured between two
+advances and nothing else** - `LastAdvanceAt` is separate from `LastKnownSeconds`
+for that reason, because the packets that arrived earlier in the tick named the
+same instant and measuring against them reads every tick as a stall.
+
+**A cold start is RFC 6928's initial window, once.** Ten datagrams on the opening
+tick, because that is what an initial *window* is and there is no feedback yet to
+pace against; every tick after it is paced at the window over the round trip.
+Ten datagrams *every* tick until the first acknowledgement is what spreading the
+window over a guessed round trip and repeating it comes to, and it is sixty times
+what was opened with.
+
+**The competitive mode is Copa's and the predicate is restated rather than
+copied.** The paper asks whether the queue is ever nearly empty, which works
+because its per-acknowledgement window oscillates hard enough to empty it; a
+window steered once a tick settles at its target instead and never empties
+anything, so that form of the test reads every ordinary path as contested - it
+was measured doing exactly that before this was changed. The question underneath
+survives: **if this end reduces its window round trip after round trip and the
+queueing delay does not follow it down, the queue is not this flow's.**
+
+**Loss restarts the velocity, and without it the cut does not stick.** A path
+that loses packets with no queueing delay to show for it - a policer, a shallow
+buffer, a permanently full one whose round trip never varies - gives the delay
+signal nothing to read, so the window law keeps saying "faster" while the loss
+keeps cutting. Measured on a 20 kB/s path with a 50 ms buffer: at a velocity of
+64 the increase beats the reduction and the window rides the cap for ever.
+
+**Nothing here is random and nothing here reads a clock**, so a recorded run is
+unaffected in the way this module's whole discipline is unaffected. The
+controller's entire state is a function of the sequence of calls it was handed.

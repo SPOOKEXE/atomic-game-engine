@@ -22,7 +22,7 @@ layout(set = 1, binding = 0) uniform Light {
 // **A depth-only pass that still has to know where a body was cut.** A half
 // drawn whole into the shadow map casts a whole body's shadow, so somebody
 // standing in a doorway would darken the near floor as if none of them had gone
-// through — and the far half would darken the far floor twice over.
+// through - and the far half would darken the far floor twice over.
 layout(location = 0) out vec3 outWorldPosition;
 
 void main() {

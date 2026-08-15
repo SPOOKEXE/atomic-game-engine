@@ -6,7 +6,7 @@
 // what a sound *is* and is `shared`, because a server decides what is audible
 // and replicates that. `engine::audio` says how a graph mixes and is `client`,
 // because a server has no output. Neither knows the other exists, and this file
-// is the seam — it walks rows on one side and posts commands on the other.
+// is the seam - it walks rows on one side and posts commands on the other.
 //
 // Two halves, and they are separate for a reason:
 //
@@ -26,8 +26,8 @@
 // is none to read.
 //
 // **Every change is a command with a deadline**, never a reach into the graph.
-// The mixer owns the graph and only the device callback touches it —
-// `audio/AGENTS.md`'s first rule — so this posts and never writes.
+// The mixer owns the graph and only the device callback touches it -
+// `audio/AGENTS.md`'s first rule - so this posts and never writes.
 //
 // @client
 
@@ -74,7 +74,7 @@ namespace client {
 		// **Shared ownership, never a copy per voice.** Two hundred parts
 		// playing one footstep hold one buffer, and a `SoundRef` copied on the
 		// tick side is what keeps the device callback from ever dropping the
-		// last reference to one — `audio/AGENTS.md` requires exactly that.
+		// last reference to one - `audio/AGENTS.md` requires exactly that.
 		//
 		// @param name The manifest's name, extension included.
 		// @param samples The decoded audio, already in the device's format.
@@ -85,7 +85,7 @@ namespace client {
 		//
 		// @param name The name a script wrote.
 		// @return The samples, or nullptr when nothing by that name has
-		//         arrived — which is the ordinary state while content is still
+		//         arrived - which is the ordinary state while content is still
 		//         streaming, not an error.
 		std::shared_ptr<const engine::audio::SampleBuffer> Find(engine::core::Name name) const;
 
@@ -113,7 +113,7 @@ namespace client {
 		engine::audio::NodeId Placement;
 
 		// What it was built for. A `SoundId` write while a voice exists is a
-		// different sound, and the chain is rebuilt rather than repointed —
+		// different sound, and the chain is rebuilt rather than repointed -
 		// `SetSound` rewinds, which is right, and the name here is how that is
 		// noticed at all.
 		engine::core::Name Sound;
@@ -126,7 +126,7 @@ namespace client {
 		// start dropping the commands that were real changes. These are the
 		// values the mixer was last told, not the values the world holds.
 
-		// The gain last sent, or a negative number before the first one — which
+		// The gain last sent, or a negative number before the first one - which
 		// no legal volume is, so the first pass always posts.
 		float Level = -1.0f;
 
@@ -151,14 +151,25 @@ namespace client {
 		//
 		// Idempotent and cheap when nothing changed: a row that is already
 		// sounding the right thing at the right level posts nothing. That
-		// matters because this runs every frame and the queue is bounded —
+		// matters because this runs every frame and the queue is bounded -
 		// a pass that reposted its whole state would fill it and start dropping
 		// the commands that were real changes.
+		//
+		// **`scene::AudioState` is what a script decides here**, and it is read
+		// rather than pushed for the tier reason the whole file exists for: the
+		// script layer is `shared` and cannot name a mixer, so it writes a
+		// resource and this is what acts on it. Its master gain multiplies each
+		// voice's own `Volume` rather than the output node's, because a client
+		// hosts several worlds and has one output - a number applied there would
+		// have N worlds writing it and the last one of the frame winning.
 		//
 		// @param store     The world to read. Not modified.
 		// @param mixer     Where the commands go.
 		// @param catalogue What a `SoundId` resolves to.
-		// @param listener  Where the ear is, for positional sounds.
+		// @param listener  Where the ear is by default, for positional sounds.
+		//        A world naming a listener instance under
+		//        `scene::ListenerMode::ObjectPosition` overrides this for its own
+		//        pass.
 		// @param sampleRate The device's rate, for scheduling a start.
 		void Sync(
 			engine::ecs::Store &store,

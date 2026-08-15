@@ -3,7 +3,7 @@
 // How big each mesh a world knows about is, by name.
 //
 // **This exists because a part does not know what it is made of.** `Visual::
-// Mesh` is a name — rule 4, so it survives a save file and a wire — and the
+// Mesh` is a name - rule 4, so it survives a save file and a wire - and the
 // geometry behind that name lives wherever the bytes were read: the renderer's
 // `MeshTable` on a client, and nowhere at all on a headless server. A script
 // asking `MeshPart.TrianglesCount` is asking a question about the *mesh*, and
@@ -16,13 +16,13 @@
 // read, and a part holds only the name it already held.
 //
 // **A triangle count is not device data**, which is what makes it legal here at
-// all — apply this module's own test: a server with no graphics stack could
+// all - apply this module's own test: a server with no graphics stack could
 // produce this number and mean it, because it is `Indices.size() / 3` of a file
 // on disk. What it could not produce is a GPU buffer offset, and that is why
 // `render::MeshRange` stays where it is.
 //
 // **Nothing here reads a mesh.** `scene` depends on `core`, `ecs` and `spatial`
-// and that list is not growing — see AGENTS.md — so this takes an integer from
+// and that list is not growing - see AGENTS.md - so this takes an integer from
 // whoever *did* read the mesh rather than taking `assets::MeshData` and pulling
 // the number out itself. The client's content pump is that caller today.
 //
@@ -64,8 +64,8 @@ namespace engine::scene {
 		// told.
 		//
 		// **Zero means "not known here", not "empty".** A mesh with no
-		// triangles is not a thing a publisher produces — `assets::Mesh::Read`
-		// refuses one — so the two cases cannot be confused, and the honest
+		// triangles is not a thing a publisher produces - `assets::Mesh::Read`
+		// refuses one - so the two cases cannot be confused, and the honest
 		// answer on a headless server is the same as the honest answer before
 		// the content pump has run.
 		//
@@ -77,14 +77,14 @@ namespace engine::scene {
 		//
 		// **What a script cannot otherwise find out.** A `MeshPart` naming no
 		// `TextureID` wears whatever each submesh recorded at bake time, and
-		// those names live *inside* the mesh file — so an author who wants to
+		// those names live *inside* the mesh file - so an author who wants to
 		// swap a model's sheet has no way to learn what it is wearing, and no
 		// name to put back. Recorded here at intake, where the file is open and
 		// the names are readable, exactly as the triangle count is.
 		//
 		// **In submesh order and duplicates kept.** A character with twenty
 		// submeshes sharing four sheets is four names repeated, and collapsing
-		// them would lose which run wears which — a fact the day something wants
+		// them would lose which run wears which - a fact the day something wants
 		// per-submesh overrides.
 		//
 		// @since v0.13
@@ -93,7 +93,7 @@ namespace engine::scene {
 		// The sheets a mesh names, or an empty span.
 		//
 		// **Empty means "not known here", like `Find`'s zero.** A mesh whose
-		// submeshes name nothing is a real thing — every built-in is one — so
+		// submeshes name nothing is a real thing - every built-in is one - so
 		// this cannot distinguish that from a mesh nothing has recorded, and
 		// says so rather than implying otherwise.
 		//
@@ -108,7 +108,7 @@ namespace engine::scene {
 	// **`RegisterSceneComponents` must have run first**, as it must before any
 	// resource here is set. `SetResource` keys on a component id, and one
 	// minted before the explicit registration lands takes the compiler's
-	// spelling of the type — which aborts the whole process when the
+	// spelling of the type - which aborts the whole process when the
 	// registration finally arrives, at a call site with nothing to do with this
 	// one. It is order-dependent, so it passes most runs.
 	//
